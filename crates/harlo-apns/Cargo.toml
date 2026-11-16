@@ -4,14 +4,19 @@ description = "Sends harlo's notifications to the iOS app through Apple's push s
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-serde_json.workspace = true
-base64 = "0.22"
+serde_json = { workspace = true, features = ["preserve_order"] }
+base64.workspace = true
 # APNs: its ES256 token (ring), HTTP/2 (reqwest on rustls).
-ring = "0.17"
-reqwest = { version = "0.12", default-features = false, features = ["http2", "rustls-tls", "json"] }
+ring.workspace = true
+reqwest = { workspace = true, features = ["http2", "rustls-tls", "json"] }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }
+
+[lints]
+workspace = true

@@ -1,6 +1,10 @@
-//! Dictation: speech to text on this computer with whisper.cpp, built into
-//! harlo (`whisper-rs`). The app records the microphone (Qt Multimedia) and
-//! hands the samples here; the model downloads on first use.
+//! Dictation: speech to text on this computer with whisper.cpp.
+//!
+//! whisper.cpp is built into harlo (`whisper-rs`). The app records the
+//! microphone (Qt Multimedia) and hands the samples here; the model downloads
+//! on first use.
+
+// Rust guideline compliant 2026-10-09
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -21,7 +25,7 @@ pub const MODELS: [(&str, &str, u64, &str); 2] = [
 
 /// Where downloaded models live.
 pub fn models_dir() -> PathBuf {
-    crate::db::default_path().parent().map(|p| p.join("whisper")).unwrap_or_else(|| PathBuf::from("whisper"))
+    crate::db::default_path().parent().map_or_else(|| PathBuf::from("whisper"), |p| p.join("whisper"))
 }
 
 fn model(name: &str) -> Option<(&'static str, &'static str, u64, &'static str)> {
@@ -49,6 +53,10 @@ pub fn model_ready(name: &str) -> bool {
 }
 
 /// Downloads a model, reporting progress (0–1); `cancel` stops it.
+///
+/// # Errors
+///
+/// When the download fails or is cancelled, or the model can't be saved.
 pub fn download(name: &str, cancel: &AtomicBool, mut progress: impl FnMut(f64)) -> Result<()> {
     let (Some(url), Some(path)) = (model_url(name), model_path(name)) else { bail!("unknown model {name}") };
     let dir = path.parent().context("model folder")?;
@@ -77,7 +85,7 @@ pub fn download(name: &str, cancel: &AtomicBool, mut progress: impl FnMut(f64)) 
                 progress(fraction.min(1.0));
             }
         }
-        file.sync_all().ok();
+        let _ = file.sync_all();
         if got < total {
             bail!("the download stopped early ({got} of {total} bytes)");
         }
@@ -91,13 +99,14 @@ pub fn download(name: &str, cancel: &AtomicBool, mut progress: impl FnMut(f64)) 
 
 /// Interleaved samples at any rate → 16 kHz mono (averaged channels,
 /// linear interpolation; fine for speech).
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn to_whisper_input(samples: &[f32], rate: u32, channels: u16) -> Vec<f32> {
     let channels = channels.max(1) as usize;
     let mono: Vec<f32> = samples.chunks(channels).map(|c| c.iter().sum::<f32>() / c.len() as f32).collect();
     if rate == SAMPLE_RATE || rate == 0 || mono.is_empty() {
         return mono;
     }
-    let step = rate as f64 / SAMPLE_RATE as f64;
+    let step = f64::from(rate) / f64::from(SAMPLE_RATE);
     let len = (mono.len() as f64 / step).floor() as usize;
     (0..len)
         .map(|i| {
@@ -115,25 +124,33 @@ static CONTEXT: Mutex<Option<(PathBuf, WhisperContext)>> = Mutex::new(None);
 
 /// Transcribes 16 kHz mono samples with the named model; `language` is a
 /// code like "en", or "auto".
+///
+/// # Errors
+///
+/// When the model isn't downloaded or can't be loaded, nothing was recorded, or
+/// the transcription fails.
 pub fn transcribe(model_name: &str, samples: &[f32], language: &str) -> Result<String> {
     let path = model_path(model_name).filter(|_| model_ready(model_name)).context("The speech model isn't downloaded yet.")?;
     if samples.len() < SAMPLE_RATE as usize / 4 {
         bail!("Nothing was recorded. Check the microphone.");
     }
     whisper_rs::install_logging_hooks();
-    let mut guard = CONTEXT.lock().unwrap_or_else(|e| e.into_inner());
-    if guard.as_ref().is_none_or(|(p, _)| *p != path) {
-        *guard = None;
-        let ctx = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
-            .map_err(|e| anyhow::anyhow!("Could not load the speech model: {e}"))?;
-        *guard = Some((path, ctx));
-    }
-    let (_, ctx) = guard.as_ref().expect("loaded above");
+    let mut guard = CONTEXT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let ctx = match &mut *guard {
+        Some((p, ctx)) if *p == path => ctx,
+        held => {
+            // (The old model goes before the new one loads.)
+            *held = None;
+            let ctx = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
+                .map_err(|e| anyhow::anyhow!("Could not load the speech model: {e}"))?;
+            &mut held.insert((path, ctx)).1
+        }
+    };
     let mut state = ctx.create_state().map_err(|e| anyhow::anyhow!("speech model: {e}"))?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     let language = if language.trim().is_empty() { "auto" } else { language.trim() };
     params.set_language(Some(language));
-    params.set_n_threads(std::thread::available_parallelism().map_or(4, |n| n.get().min(8)) as i32);
+    params.set_n_threads(i32::try_from(std::thread::available_parallelism().map_or(4, |n| n.get().min(8))).unwrap_or(i32::MAX));
     params.set_no_timestamps(true);
     params.set_print_progress(false);
     params.set_print_realtime(false);
@@ -141,7 +158,7 @@ pub fn transcribe(model_name: &str, samples: &[f32], language: &str) -> Result<S
     params.set_print_timestamps(false);
     params.set_suppress_blank(true);
     state.full(params, samples).map_err(|e| anyhow::anyhow!("transcription failed: {e}"))?;
-    let text: Vec<String> = state.as_iter().filter_map(|s| s.to_str_lossy().ok().map(|t| t.into_owned())).collect();
+    let text: Vec<String> = state.as_iter().filter_map(|s| s.to_str_lossy().ok().map(std::borrow::Cow::into_owned)).collect();
     Ok(transcript_text(&text.join("\n")))
 }
 
@@ -209,14 +226,14 @@ mod tests {
 
     #[test]
     fn needs_a_model_and_audio() {
-        assert!(transcribe("huge", &[0.0; 16_000], "auto").is_err());
+        transcribe("huge", &vec![0.0; 16_000], "auto").unwrap_err();
     }
 
     /// End to end with the real model (not run by default):
     /// `HARLO_E2E_WAV=speech.wav XDG_DATA_HOME=<folder with harlo/whisper/ggml-base.bin>
     /// cargo test -p harlo-core --release -- --ignored transcribes_speech --nocapture`
     #[test]
-    #[ignore]
+    #[ignore = "needs a speech recording and a Whisper model"]
     fn transcribes_speech() {
         let wav = std::fs::read(std::env::var("HARLO_E2E_WAV").expect("HARLO_E2E_WAV")).unwrap();
         // A 16-bit PCM WAV: its rate, channels and data chunk.
@@ -230,7 +247,7 @@ mod tests {
                 rate = u32_at(i + 12);
             } else if id == b"data" {
                 let end = (i + 8 + len).min(wav.len());
-                samples = wav[i + 8..end].as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b) as f32 / 32768.0).collect();
+                samples = wav[i + 8..end].as_chunks::<2>().0.iter().map(|b| f32::from(i16::from_le_bytes(*b)) / 32768.0).collect();
             }
             i += 8 + len + (len & 1);
         }

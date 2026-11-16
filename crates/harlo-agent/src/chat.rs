@@ -3,6 +3,9 @@
 //! pi's stream events and is kept as pi's assistant message, like the
 //! Responses API's.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use anyhow::Result;
 use serde_json::{Value, json};
 
@@ -54,7 +57,7 @@ pub fn messages(history: &[Value], model: &str, images: bool) -> Vec<Value> {
         }
         match m["role"].as_str() {
             Some("compactionSummary") => out.push(json!({ "role": "user", "content": crate::compact::replayed(m) })),
-            Some("user") | Some("custom") if crate::images::has_image(m) => {
+            Some("user" | "custom") if crate::images::has_image(m) => {
                 let parts: Vec<Value> = m["content"]
                     .as_array()
                     .into_iter()
@@ -66,7 +69,7 @@ pub fn messages(history: &[Value], model: &str, images: bool) -> Vec<Value> {
                     .collect();
                 out.push(json!({ "role": "user", "content": parts }));
             }
-            Some("user") | Some("custom") => {
+            Some("user" | "custom") => {
                 let text = text_of(&m["content"]);
                 if !text.is_empty() {
                     out.push(json!({ "role": "user", "content": text }));
@@ -100,11 +103,11 @@ pub fn messages(history: &[Value], model: &str, images: bool) -> Vec<Value> {
                 if !pictures.is_empty() {
                     if images {
                         let n = pictures.len();
-                        content.push_str(&format!("\n[{} shown after this round's results.]", if n == 1 { "Its image is".to_owned() } else { format!("Its {n} images are") }));
+                        let _ = write!(content, "\n[{} shown after this round's results.]", if n == 1 { "Its image is".to_owned() } else { format!("Its {n} images are") });
                         shown.push(json!({ "type": "text", "text": format!("Images from {} (call {call_id}):", m["toolName"].as_str().unwrap_or("a tool")) }));
                         shown.extend(pictures.into_iter().map(image));
                     } else {
-                        content.push_str(&format!("\n{}", crate::images::not_sent(model)));
+                        let _ = write!(content, "\n{}", crate::images::not_sent(model));
                     }
                 }
                 out.push(json!({ "role": "tool", "tool_call_id": call_id, "content": content }));
@@ -174,7 +177,7 @@ impl Reply {
                 if name.is_empty()
                     && let Some(n) = c["function"]["name"].as_str()
                 {
-                    *name = n.to_owned();
+                    n.clone_into(name);
                 }
                 if let Some(a) = c["function"]["arguments"].as_str().filter(|a| !a.is_empty()) {
                     args.push_str(a);
@@ -296,9 +299,9 @@ pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &st
     if !status.is_success() {
         let text = refusal_text(resp).await;
         let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        let said = body["error"]["message"].as_str().or_else(|| body["error"].as_str()).or_else(|| body["message"].as_str()).map(str::to_owned).unwrap_or_else(|| text.chars().take(300).collect());
+        let said = body["error"]["message"].as_str().or_else(|| body["error"].as_str()).or_else(|| body["message"].as_str()).map_or_else(|| text.chars().take(300).collect(), str::to_owned);
         let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
         let resets_at = body["error"]["resets_at"].as_i64().or_else(|| body["error"]["resets_in_seconds"].as_i64().map(|s| now + s));
         return Err(ApiError { status: status.as_u16(), message: format!("{provider} refused the request ({status}): {said}"), code, retry_after, resets_at }.into());
     }
@@ -448,8 +451,8 @@ mod tests {
     }
 
     async fn ask(how: &'static str) -> (Result<(Value, Value)>, std::time::Duration) {
-        // SAFETY: every test here sets the same value.
-        unsafe { std::env::set_var("HARLO_AGENT_IDLE_SECS", "1") };
+        // (These tests run on one thread each, where the limit applies.)
+        crate::responses::TEST_IDLE.set(Some(std::time::Duration::from_secs(1)));
         let base = stand_in(how).await;
         let started = std::time::Instant::now();
         let r = stream(&base, None, &json!({}), "stand-in", "m", |_| {}, &mut Value::Null).await;

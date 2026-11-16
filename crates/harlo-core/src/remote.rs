@@ -10,6 +10,8 @@
 //! (listing folders, git status, reading session files) don't each pay for
 //! a new login. Authentication is non-interactive: keys or an agent.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,9 +27,11 @@ const SCHEME: &str = "ssh://";
 /// non-interactive SSH command gets a minimal one).
 pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.bun/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
 
-/// A shell's PATH with the folders of [`PATH_PREFIX`] that are there and
-/// not on it yet, in front (for a terminal: the agents harlo starts there
-/// are found there too, without folders that don't exist cluttering it).
+/// A shell's PATH with the folders of [`PATH_PREFIX`] in front.
+///
+/// Those that are there and not on it yet: for a terminal, so the agents harlo
+/// starts there are found there too, without folders that don't exist
+/// cluttering it.
 pub fn terminal_path() -> String {
     let dirs: Vec<&str> = PATH_PREFIX.split(':').rev().collect();
     format!(r#"for d in {}; do [ -d "$d" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac; done; export PATH;"#, dirs.iter().map(|d| format!("\"{d}\"")).collect::<Vec<_>>().join(" "))
@@ -49,15 +53,15 @@ static HOMES: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 /// The configured hosts (the app sets them from its settings).
 pub fn set_hosts(hosts: Vec<Host>) {
-    *HOSTS.write().unwrap_or_else(|e| e.into_inner()) = hosts;
+    *HOSTS.write().unwrap_or_else(std::sync::PoisonError::into_inner) = hosts;
 }
 
 pub fn hosts() -> Vec<Host> {
-    HOSTS.read().unwrap_or_else(|e| e.into_inner()).clone()
+    HOSTS.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 pub fn host(name: &str) -> Option<Host> {
-    HOSTS.read().unwrap_or_else(|e| e.into_inner()).iter().find(|h| h.name == name).cloned()
+    HOSTS.read().unwrap_or_else(std::sync::PoisonError::into_inner).iter().find(|h| h.name == name).cloned()
 }
 
 /// A valid host name: letters, digits, `-`, `_`, `.`.
@@ -98,7 +102,7 @@ pub fn join(host: &str, remote_path: &str) -> PathBuf {
 pub fn display(path: &Path) -> String {
     match split(path) {
         Some((host, remote)) => {
-            let home = HOMES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&host).cloned());
+            let home = HOMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|m| m.get(&host).cloned());
             let shown = match home {
                 Some(h) if remote == h => "~".to_owned(),
                 Some(h) if remote.starts_with(&format!("{h}/")) => format!("~{}", &remote[h.len()..]),
@@ -177,7 +181,7 @@ fn parse_ssh_config(file: &Path, home: &Path, seen: &mut std::collections::HashS
                     };
                     // The first value wins, as in ssh.
                     if slot.is_empty() {
-                        *slot = value.to_owned();
+                        value.clone_into(slot);
                     }
                 }
             }
@@ -224,6 +228,11 @@ fn glob_files(path: &Path) -> Vec<PathBuf> {
 /// Splits what the user typed (`ssh -p 2222 me@nas`, or just `me@nas`)
 /// into ssh's arguments, without the leading `ssh`. Options that would
 /// break harlo's shared connection or run commands are refused.
+///
+/// # Errors
+///
+/// When the text doesn't parse as a command line, or names an option harlo
+/// refuses.
 pub fn parse_ssh_command(text: &str) -> Result<Vec<String>> {
     let mut words = shell_words(text.trim())?;
     if words.first().map(String::as_str) == Some("ssh") {
@@ -394,11 +403,19 @@ pub fn command(host: &Host, script: &str) -> Command {
 }
 
 /// Runs a script on the host and waits (at most `timeout`).
+///
+/// # Errors
+///
+/// When ssh can't be started or the script doesn't end within `timeout`.
 pub fn run(host: &Host, script: &str, timeout: Duration) -> Result<Output> {
     run_with_input(host, script, None, timeout)
 }
 
 /// Like [`run`], feeding `input` on stdin.
+///
+/// # Errors
+///
+/// When ssh can't be started or the script doesn't end within `timeout`.
 pub fn run_with_input(host: &Host, script: &str, input: Option<&[u8]>, timeout: Duration) -> Result<Output> {
     let mut cmd = command(host, script);
     cmd.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -437,7 +454,14 @@ pub fn run_with_input(host: &Host, script: &str, input: Option<&[u8]>, timeout: 
     Ok(Output { status, stdout: out_reader.join().unwrap_or_default(), stderr: err_reader.join().unwrap_or_default() })
 }
 
+/// Runs a script on the host with `input` on its stdin, and checks it
+/// succeeded.
+///
 /// The script's stdout, or an error with its last stderr line.
+///
+/// # Errors
+///
+/// When the host can't be reached, or the command fails (its last stderr line).
 pub fn run_ok_with_input(host: &Host, script: &str, input: &[u8], timeout: Duration) -> Result<()> {
     let out = run_with_input(host, script, Some(input), timeout)?;
     if !out.status.success() {
@@ -446,6 +470,11 @@ pub fn run_ok_with_input(host: &Host, script: &str, input: &[u8], timeout: Durat
     Ok(())
 }
 
+/// The script's stdout, or an error with its last stderr line.
+///
+/// # Errors
+///
+/// When the host can't be reached, or the command fails (its last stderr line).
 pub fn run_ok(host: &Host, script: &str, timeout: Duration) -> Result<String> {
     let out = run(host, script, timeout)?;
     if !out.status.success() {
@@ -532,13 +561,17 @@ case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":bwrap:"*) echo bwrap=no;;
 esac"#;
 
 /// Connects (or reuses the connection) and looks around.
+///
+/// # Errors
+///
+/// When the host can't be reached or refuses the connection.
 pub fn check(host: &Host) -> Result<HostInfo> {
     let text = run_ok(host, CHECK_SCRIPT, Duration::from_secs(60))?;
     let info = parse_check(&text);
     if !info.home.is_empty() {
-        HOMES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.home.clone());
+        HOMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.home.clone());
     }
-    INFOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.clone());
+    INFOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(host.name.clone(), info.clone());
     Ok(info)
 }
 
@@ -548,12 +581,12 @@ fn parse_check(text: &str) -> HostInfo {
     for line in text.lines() {
         if let Some((k, v)) = line.split_once('=') {
             match k {
-                "os" => info.os = v.to_owned(),
+                "os" => v.clone_into(&mut info.os),
                 "arch" => info.arch = crate::remote_helper::normal_arch(v),
-                "home" => info.home = v.to_owned(),
-                "claude" => info.claude = v.to_owned(),
-                "claude_auth" => info.claude_auth = v.to_owned(),
-                "bwrap" => info.bwrap = v.to_owned(),
+                "home" => v.clone_into(&mut info.home),
+                "claude" => v.clone_into(&mut info.claude),
+                "claude_auth" => v.clone_into(&mut info.claude_auth),
+                "bwrap" => v.clone_into(&mut info.bwrap),
                 k if k.ends_with("_version") => {
                     let number = crate::providers::version_number(v);
                     if !number.is_empty() {
@@ -576,7 +609,7 @@ pub fn found_on(host_name: &str, program: &str) -> bool {
 
 /// What the last check of the host found (None: not checked yet).
 pub fn info_of(host_name: &str) -> Option<HostInfo> {
-    INFOS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(host_name)).cloned()
+    INFOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|m| m.get(host_name)).cloned()
 }
 
 impl HostInfo {
@@ -592,8 +625,12 @@ impl HostInfo {
 }
 
 /// The host's home folder (asked once).
+///
+/// # Errors
+///
+/// When the host can't be reached.
 pub fn home(host: &Host) -> Result<String> {
-    if let Some(h) = HOMES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&host.name).cloned()) {
+    if let Some(h) = HOMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|m| m.get(&host.name).cloned()) {
         return Ok(h);
     }
     Ok(check(host)?.home)
@@ -601,6 +638,11 @@ pub fn home(host: &Host) -> Result<String> {
 
 /// Forwards (or stops forwarding) this computer's `localhost` port to the
 /// host's, over the shared connection, which has to be up.
+///
+/// # Errors
+///
+/// When the shared connection isn't up or ssh refuses the forward (the port is
+/// taken).
 pub fn forward_port(host: &Host, port: u16, on: bool) -> Result<()> {
     let out = Command::new("ssh")
         .args(["-O", if on { "forward" } else { "cancel" }, "-L", &format!("{port}:localhost:{port}")])
@@ -626,7 +668,7 @@ pub fn connected(host: &Host) -> bool {
 static DISCONNECTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 pub fn set_disconnected(name: &str, on: bool) {
-    let mut list = DISCONNECTED.lock().unwrap_or_else(|e| e.into_inner());
+    let mut list = DISCONNECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     list.retain(|n| n != name);
     if on {
         list.push(name.to_owned());
@@ -634,7 +676,7 @@ pub fn set_disconnected(name: &str, on: bool) {
 }
 
 pub fn is_disconnected(name: &str) -> bool {
-    DISCONNECTED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|n| n == name)
+    DISCONNECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|n| n == name)
 }
 
 /// Closes the shared connection (sessions using it end).
@@ -668,7 +710,7 @@ pub fn disconnect_all() {
 /// Blocks while reading: call it off the UI thread.
 pub fn home_file_cached(host_name: &str, rel: &str, max_age: Duration) -> String {
     let key = (host_name.to_owned(), rel.to_owned());
-    if let Some((at, text)) = HOME_FILES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key).cloned())
+    if let Some((at, text)) = HOME_FILES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|m| m.get(&key).cloned())
         && at.elapsed() < max_age {
             return text;
         }
@@ -678,7 +720,7 @@ pub fn home_file_cached(host_name: &str, rel: &str, max_age: Duration) -> String
         .and_then(|h| run(&h, &format!("cat {file} 2>/dev/null"), FILE_TIMEOUT).ok())
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
-    HOME_FILES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(key, (Instant::now(), text.clone()));
+    HOME_FILES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(key, (Instant::now(), text.clone()));
     text
 }
 
@@ -689,7 +731,7 @@ pub fn home_file_soon(host_name: &str, rel: &str, max_age: Duration) -> Option<S
     static ASKED: Mutex<Option<HashMap<(String, String), Instant>>> = Mutex::new(None);
     let key = (host_name.to_owned(), rel.to_owned());
     let due = {
-        let mut asked = ASKED.lock().unwrap_or_else(|e| e.into_inner());
+        let mut asked = ASKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let map = asked.get_or_insert_with(HashMap::new);
         let due = map.get(&key).is_none_or(|t| t.elapsed() > max_age);
         if due {
@@ -708,7 +750,7 @@ pub fn home_file_soon(host_name: &str, rel: &str, max_age: Duration) -> Option<S
 /// The copy [`home_file_cached`] last read, without blocking.
 pub fn home_file_peek(host_name: &str, rel: &str) -> Option<String> {
     let key = (host_name.to_owned(), rel.to_owned());
-    HOME_FILES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key).map(|(_, t)| t.clone()))
+    HOME_FILES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|m| m.get(&key).map(|(_, t)| t.clone()))
 }
 
 fn host_and_path(path: &Path) -> Result<(Host, String)> {
@@ -722,6 +764,11 @@ const FILE_TIMEOUT: Duration = Duration::from_secs(30);
 /// A remote session file's copy here, brought up to date with what was added
 /// to it (see `harlo_harness::mirror`), to read as a local one; with the
 /// host unreachable, the copy as last made.
+///
+/// # Errors
+///
+/// When there's no copy yet and the host can't be reached, or the copy can't be
+/// written.
 pub fn local_copy(path: &Path) -> Result<PathBuf> {
     let (host, remote) = host_and_path(path)?;
     Ok(harlo_harness::mirror::refresh(&host.name, &remote, |script| command(&host, script))?)
@@ -735,6 +782,10 @@ pub fn copy_of(path: &Path) -> Option<PathBuf> {
 }
 
 /// A remote file's bytes.
+///
+/// # Errors
+///
+/// When the host can't be reached, or the command fails (its last stderr line).
 pub fn read(path: &Path) -> Result<Vec<u8>> {
     let (host, remote) = host_and_path(path)?;
     let out = run(&host, &format!("cat -- {}", quote_path(&remote)), FILE_TIMEOUT)?;
@@ -745,6 +796,10 @@ pub fn read(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// Writes a remote file (its folder must exist).
+///
+/// # Errors
+///
+/// When the host can't be reached, or the command fails (its last stderr line).
 pub fn write(path: &Path, bytes: &[u8]) -> Result<()> {
     let (host, remote) = host_and_path(path)?;
     let out = run_with_input(&host, &format!("cat > {}", quote_path(&remote)), Some(bytes), FILE_TIMEOUT)?;
@@ -765,6 +820,10 @@ pub struct Entry {
 }
 
 /// Makes the folder `name` inside a remote folder; its path.
+///
+/// # Errors
+///
+/// When the host can't be reached, or the command fails (its last stderr line).
 pub fn make_folder(parent: &Path, name: &str) -> Result<PathBuf> {
     let name = name.trim();
     if name.is_empty() || name == "." || name == ".." || name.contains('/') {
@@ -781,6 +840,10 @@ pub fn make_folder(parent: &Path, name: &str) -> Result<PathBuf> {
 }
 
 /// A remote folder's entries (hidden ones too), unsorted.
+///
+/// # Errors
+///
+/// When the host can't be reached, or the command fails (its last stderr line).
 pub fn list_dir(path: &Path) -> Result<Vec<Entry>> {
     let (host, remote) = host_and_path(path)?;
     // One line per entry: type, size, mtime, name (GNU find, else ls).
@@ -813,6 +876,11 @@ fn parse_entries(text: &str) -> Vec<Entry> {
 
 /// Moves a file to the trash: here with `gio trash`; on a remote host with
 /// its `gio`, else into ~/.local/share/Trash/files.
+///
+/// # Errors
+///
+/// When the file can't be moved to the trash (here or there), or the host can't
+/// be reached.
 pub fn trash(path: &Path) -> Result<()> {
     let Some((name, f)) = split(path) else {
         match Command::new("gio").arg("trash").arg("--").arg(path).output() {
@@ -842,8 +910,34 @@ pub fn exists(path: &Path, dir: bool) -> bool {
     run(&host, &format!("test {test} {}", quote_path(&remote)), FILE_TIMEOUT).is_ok_and(|o| o.status.success())
 }
 
+/// Remote project folders, grouped by host name.
+pub type HostRoots = Vec<(String, Vec<PathBuf>)>;
+
+/// Groups the remote folders among `paths` by host, in the order first seen.
+///
+/// Local folders are left out.
+pub fn roots_by_host<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> HostRoots {
+    let mut roots = HostRoots::new();
+    for path in paths {
+        if let Some(host) = host_of(path) {
+            match roots.iter_mut().find(|(h, _)| *h == host) {
+                Some((_, list)) => list.push(path.clone()),
+                None => roots.push((host, vec![path.clone()])),
+            }
+        }
+    }
+    roots
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_hosts_projects_are_looked_in_from_the_start() {
+        let paths = ["ssh://nas/a", "/local/b", "ssh://pi/c", "ssh://nas/d"].map(std::path::PathBuf::from);
+        let roots = super::roots_by_host(paths.iter());
+        assert_eq!(roots.iter().map(|(h, l)| (h.as_str(), l.len())).collect::<Vec<_>>(), [("nas", 2), ("pi", 1)]);
+    }
+
     use super::*;
 
     #[test]
@@ -924,12 +1018,12 @@ mod tests {
         assert_eq!(parse_ssh_command("ssh me@nas").unwrap(), ["me@nas"]);
         assert_eq!(parse_ssh_command("  homenas ").unwrap(), ["homenas"]);
         assert_eq!(parse_ssh_command("ssh -p 2222 -i '~/my key' me@10.0.0.5").unwrap(), ["-p", "2222", "-i", "~/my key", "me@10.0.0.5"]);
-        assert!(parse_ssh_command("").is_err());
-        assert!(parse_ssh_command("ssh -o ControlPath=/x me@nas").is_err());
-        assert!(parse_ssh_command("ssh -oControlMaster=no me@nas").is_err());
-        assert!(parse_ssh_command("ssh -N me@nas").is_err());
-        assert!(parse_ssh_command("ssh me@nas -p").is_err());
-        assert!(parse_ssh_command("ssh 'me@nas").is_err());
+        parse_ssh_command("").unwrap_err();
+        parse_ssh_command("ssh -o ControlPath=/x me@nas").unwrap_err();
+        parse_ssh_command("ssh -oControlMaster=no me@nas").unwrap_err();
+        parse_ssh_command("ssh -N me@nas").unwrap_err();
+        parse_ssh_command("ssh me@nas -p").unwrap_err();
+        parse_ssh_command("ssh 'me@nas").unwrap_err();
     }
 
     #[test]
@@ -960,7 +1054,7 @@ mod tests {
     /// Against a real SSH server (not run by default):
     /// `HARLO_TEST_SSH="$(scripts/test-sshd.sh start /tmp/x)" cargo test -p harlo-core -- --ignored over_ssh`
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH server"]
     fn over_ssh() {
         let args = parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
         set_hosts(vec![Host { name: "t".into(), ssh: args }]);
@@ -986,7 +1080,7 @@ mod tests {
         assert_eq!(entries.iter().map(|e| (e.name.as_str(), e.is_dir)).collect::<Vec<_>>(), [("it's a file.txt", false), ("sub dir", true)]);
         assert_eq!(entries[0].size, 11);
         assert!(exists(&remote_dir.join("sub dir"), true) && !exists(&remote_dir.join("nope"), false));
-        assert!(read(&remote_dir.join("nope")).is_err());
+        read(&remote_dir.join("nope")).unwrap_err();
         // The editor's save and load, and the Files panel's listing.
         let note = remote_dir.join("sub dir/note.md");
         crate::files::write_text(&note, "remote edit\n").unwrap();
@@ -1024,7 +1118,7 @@ mod tests {
 mod real_ssh_config {
     /// This machine's SSH config hosts, read-only (not run by default).
     #[test]
-    #[ignore]
+    #[ignore = "reads this machine's own SSH config"]
     fn list() {
         for h in super::ssh_config_hosts() {
             println!("host {} (hostname set: {}, user set: {}, port set: {})", h.name, !h.hostname.is_empty(), !h.user.is_empty(), !h.port.is_empty());

@@ -13,6 +13,11 @@
 //!   `$XDG_CACHE_HOME/harlo/thumbnails`, made on every core, the newest
 //!   asked for (the ones coming into view) first.
 
+// Rust guideline compliant 2026-10-09
+
+#![expect(clippy::needless_pass_by_value, reason = "the code cxx-qt generates for this file's bridge passes property values by value")]
+#![expect(clippy::semicolon_outside_block, reason = "clippy misreads a function the cxx bridge declares as a block")]
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -279,25 +284,59 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::{Instant, UNIX_EPOCH};
 
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::{QImage, QString};
+use cxx_qt_lib::QString;
 
 // ---- pixels that cross threads -----------------------------------------------
 
-/// A decoded image. (QImage shares its pixels with an atomic count, and none
-/// is changed after decoding, so it can move between threads.)
-#[derive(Clone)]
-struct Pixels(QImage);
-unsafe impl Send for Pixels {}
-unsafe impl Sync for Pixels {}
+mod pixels {
+    //! A decoded image that the decoding threads and the views share.
+    //!
+    //! Only `&QImage` leaves this module, never `&mut`: that is what makes
+    //! sharing the image between threads sound (see the impls below).
 
-impl Pixels {
-    fn bytes(&self) -> usize {
-        self.0.width().max(0) as usize * self.0.height().max(0) as usize * 4
-    }
-    fn ok(&self) -> bool {
-        self.0.width() > 0 && self.0.height() > 0
+    use cxx_qt_lib::QImage;
+
+    /// A decoded image, never changed after it is wrapped.
+    #[derive(Clone)]
+    pub(super) struct Pixels(QImage);
+
+    // SAFETY: QImage keeps its pixels in shared data with an atomic reference
+    // count, and Qt documents its implicitly shared classes as safe to copy
+    // across threads; an image belongs to no thread, so this one may be
+    // moved, copied and dropped on any.
+    unsafe impl Send for Pixels {}
+
+    // SAFETY: through `&Pixels` only QImage's const member functions are
+    // reached (its size, copy construction, reading its pixels to save or
+    // encode them), because this module hands out `&QImage` and never
+    // `&mut`. The image therefore never detaches or changes once wrapped,
+    // and concurrent const calls only read it.
+    unsafe impl Sync for Pixels {}
+
+    impl Pixels {
+        /// Wraps a decoded image.
+        pub(super) fn new(image: QImage) -> Self {
+            Self(image)
+        }
+
+        /// The image, to read or copy.
+        pub(super) fn image(&self) -> &QImage {
+            &self.0
+        }
+
+        /// What its pixels take in memory (RGBA).
+        pub(super) fn bytes(&self) -> usize {
+            usize::try_from(self.0.width().max(0)).unwrap_or(0) * usize::try_from(self.0.height().max(0)).unwrap_or(0) * 4
+        }
+
+        /// Whether it decoded to an image with pixels.
+        pub(super) fn ok(&self) -> bool {
+            self.0.width() > 0 && self.0.height() > 0
+        }
     }
 }
+
+use pixels::Pixels;
 
 /// A decoded image: a still, an animation's frames and how long each
 /// shows, or (a still much bigger than the screen) a copy at the screen's
@@ -328,7 +367,7 @@ impl Decoded {
     fn size(&self) -> (i32, i32) {
         match self {
             Decoded::Copy { width, height, .. } => (*width, *height),
-            _ => (self.first().0.width(), self.first().0.height()),
+            _ => (self.first().image().width(), self.first().image().height()),
         }
     }
 }
@@ -341,7 +380,7 @@ static COPY_SIDE: AtomicI32 = AtomicI32::new(2048);
 /// Kept as a copy: a still at least half as big again as the copy's side
 /// (a little bigger isn't worth the second decode when zoomed in).
 fn kept_as_copy(width: i32, height: i32) -> bool {
-    width.max(height) as i64 * 2 > COPY_SIDE.load(Ordering::Relaxed) as i64 * 3
+    i64::from(width.max(height)) * 2 > i64::from(COPY_SIDE.load(Ordering::Relaxed)) * 3
 }
 
 fn qs(s: &str) -> QString {
@@ -390,14 +429,14 @@ struct Pool {
 static POOL: LazyLock<Pool> = LazyLock::new(|| Pool { queues: Mutex::default(), ready: Condvar::new() });
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn submit(lane: Lane, job: Job) {
     let mut q = lock(&POOL.queues);
     if !q.started {
         q.started = true;
-        let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).saturating_sub(1).clamp(2, 8);
+        let n = std::thread::available_parallelism().map_or(4, std::num::NonZero::get).saturating_sub(1).clamp(2, 8);
         for i in 0..n {
             let _ = std::thread::Builder::new().name(format!("harlo-images-{i}")).spawn(worker);
         }
@@ -428,7 +467,7 @@ fn worker() {
                 if let Some(j) = q.now.pop_front().or_else(|| q.thumbs.pop()).or_else(|| q.ahead.pop_front()) {
                     break j;
                 }
-                q = POOL.ready.wait(q).unwrap_or_else(|e| e.into_inner());
+                q = POOL.ready.wait(q).unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
         if job.cancel.as_ref().is_some_and(|c| c.load(Ordering::Acquire)) {
@@ -460,7 +499,7 @@ struct FullEntry {
     used: u64,
 }
 
-type Waiter = Box<dyn FnOnce(Result<Arc<Decoded>, String>) + Send>;
+type Waiter = Box<dyn FnOnce(anyhow::Result<Arc<Decoded>>) + Send>;
 
 #[derive(Default)]
 struct Full {
@@ -525,8 +564,8 @@ fn fetch_full(path: &str, lane: Lane, deliver: Option<Waiter>) {
             }
             return;
         }
-        full.decoding.insert(path.to_owned(), deliver.into_iter().collect());
-    }
+        full.decoding.insert(path.to_owned(), deliver.into_iter().collect())
+    };
     let owned = path.to_owned();
     submit(
         lane,
@@ -557,19 +596,19 @@ fn fetch_full(path: &str, lane: Lane, deliver: Option<Waiter>) {
                     full.decoding.remove(&owned).unwrap_or_default()
                 };
                 for w in waiters {
-                    w(result.as_ref().map(Arc::clone).map_err(Clone::clone));
+                    w(result.as_ref().map(Arc::clone).map_err(|e| anyhow::anyhow!("{e:#}")));
                 }
             }),
         },
     );
 }
 
-fn decode_full(path: &str, ahead: bool) -> Result<Arc<Decoded>, String> {
+fn decode_full(path: &str, ahead: bool) -> anyhow::Result<Arc<Decoded>> {
     let q = qs(path);
     let (mut w, mut h) = (0, 0);
     qobject::image_size(&q, &mut w, &mut h);
-    if ahead && w as usize * h.max(0) as usize * 4 > AHEAD_LIMIT {
-        return Err("too big to decode ahead".into());
+    if ahead && usize::try_from(w).unwrap_or(0) * usize::try_from(h).unwrap_or(0) * 4 > AHEAD_LIMIT {
+        return Err(anyhow::Error::msg("too big to decode ahead"));
     }
     DECODED.fetch_add(1, Ordering::Relaxed);
     let mut reader = qobject::open_frames(&q);
@@ -579,7 +618,7 @@ fn decode_full(path: &str, ahead: bool) -> Result<Arc<Decoded>, String> {
         let (mut bytes, mut count, mut streamed) = (0, 0, false);
         loop {
             let mut delay = 0;
-            let img = Pixels(r.as_mut().next_frame(&mut delay));
+            let img = Pixels::new(r.as_mut().next_frame(&mut delay));
             if !img.ok() {
                 break;
             }
@@ -587,7 +626,7 @@ fn decode_full(path: &str, ahead: bool) -> Result<Arc<Decoded>, String> {
             bytes += img.bytes();
             // Too long to keep (said so, or found so): only its first
             // frame stays, the rest counted.
-            if !streamed && (bytes > FRAMES_BUDGET || (count == 1 && said > 1 && img.bytes() * said as usize > FRAMES_BUDGET)) {
+            if !streamed && (bytes > FRAMES_BUDGET || (count == 1 && said > 1 && img.bytes() * usize::try_from(said).unwrap_or(0) > FRAMES_BUDGET)) {
                 streamed = true;
                 frames.truncate(1);
                 if count > 1 && said > 1 {
@@ -614,11 +653,11 @@ fn decode_full(path: &str, ahead: bool) -> Result<Arc<Decoded>, String> {
     }
     drop(reader);
     if kept_as_copy(w, h) {
-        let img = Pixels(qobject::decode_image(&q, COPY_SIDE.load(Ordering::Relaxed)));
-        return if img.ok() { Ok(Arc::new(Decoded::Copy { pixels: img, width: w, height: h })) } else { Err("Could not read this image.".into()) };
+        let img = Pixels::new(qobject::decode_image(&q, COPY_SIDE.load(Ordering::Relaxed)));
+        return if img.ok() { Ok(Arc::new(Decoded::Copy { pixels: img, width: w, height: h })) } else { Err(anyhow::Error::msg("Could not read this image.")) };
     }
-    let img = Pixels(qobject::decode_image(&q, 0));
-    if img.ok() { Ok(Arc::new(Decoded::Still(img))) } else { Err("Could not read this image.".into()) }
+    let img = Pixels::new(qobject::decode_image(&q, 0));
+    if img.ok() { Ok(Arc::new(Decoded::Still(img))) } else { Err(anyhow::Error::msg("Could not read this image.")) }
 }
 
 /// How long a frame shows: browsers show frames asking for 10 ms or less for 100 ms.
@@ -662,7 +701,7 @@ fn play_from(path: String, from: i32) -> Player {
             }
             let Some(mut r) = reader.as_mut() else { return };
             let mut delay = 0;
-            let img = Pixels(r.as_mut().next_frame(&mut delay));
+            let img = Pixels::new(r.as_mut().next_frame(&mut delay));
             if !img.ok() {
                 if i == 0 {
                     return;
@@ -690,9 +729,12 @@ const THUMB_SIDES: [i32; 3] = [128, 256, 512];
 /// Thumbnails kept in memory (more are on disk: reading one back is quick).
 const THUMB_BUDGET: usize = 64 << 20;
 
+/// A thumbnail, the file stamp it was made from, and when it was last used.
+type Thumb = (Pixels, Option<(u128, u64)>, u64);
+
 #[derive(Default)]
 struct Thumbs {
-    map: HashMap<(String, i32), (Pixels, Option<(u128, u64)>, u64)>,
+    map: HashMap<(String, i32), Thumb>,
     bytes: usize,
     clock: u64,
 }
@@ -700,7 +742,7 @@ struct Thumbs {
 static THUMBS: LazyLock<Mutex<Thumbs>> = LazyLock::new(Mutex::default);
 
 fn thumb_side(device_px: f64) -> i32 {
-    THUMB_SIDES.into_iter().find(|&s| s as f64 >= device_px).unwrap_or(512)
+    THUMB_SIDES.into_iter().find(|&s| f64::from(s) >= device_px).unwrap_or(512)
 }
 
 /// A thumbnail kept in memory, of `side` (or, `any_side`, whichever is biggest).
@@ -710,12 +752,11 @@ fn cached_thumb(path: &str, side: i32, any_side: bool, stamp_now: Option<(u128, 
     let clock = t.clock;
     let sides: Vec<i32> = if any_side { THUMB_SIDES.into_iter().rev().collect() } else { vec![side] };
     for s in sides {
-        if let Some(e) = t.map.get_mut(&(path.to_owned(), s)) {
-            if e.1 == stamp_now {
+        if let Some(e) = t.map.get_mut(&(path.to_owned(), s))
+            && e.1 == stamp_now {
                 e.2 = clock;
                 return Some(e.0.clone());
             }
-        }
     }
     None
 }
@@ -769,7 +810,7 @@ fn make_thumb(path: &str, side: i32) -> Option<Pixels> {
     for suffix in ["jpg", "png"] {
         let file = base.with_extension(suffix);
         if file.exists() {
-            let p = Pixels(qobject::load_cached(&qs(&file.to_string_lossy())));
+            let p = Pixels::new(qobject::load_cached(&qs(&file.to_string_lossy())));
             if p.ok() {
                 THUMBS_FROM_DISK.fetch_add(1, Ordering::Relaxed);
                 keep_thumb(path, side, &p, Some(stamp));
@@ -777,14 +818,14 @@ fn make_thumb(path: &str, side: i32) -> Option<Pixels> {
             }
         }
     }
-    let p = Pixels(qobject::decode_thumbnail(&qs(path), side));
+    let p = Pixels::new(qobject::decode_thumbnail(&qs(path), side));
     if !p.ok() {
         return None;
     }
     THUMBS_MADE.fetch_add(1, Ordering::Relaxed);
     keep_thumb(path, side, &p, Some(stamp));
     let _ = std::fs::create_dir_all(cache_dir());
-    qobject::save_thumbnail(&p.0, &qs(&base.to_string_lossy()));
+    qobject::save_thumbnail(p.image(), &qs(&base.to_string_lossy()));
     Some(p)
 }
 
@@ -807,21 +848,21 @@ const PHONE_BYTES: usize = 2_500_000;
 /// transparency, or on screen when it was lossless and fits), type and
 /// size. (Blocking: a decoding thread.)
 pub fn for_phone(path: &str, thumb: bool) -> Option<(Vec<u8>, &'static str, i32, i32)> {
-    let img = if thumb { make_thumb(path, PHONE_THUMB)? } else { Pixels(qobject::decode_image(&qs(path), PHONE_SIDE)) };
+    let img = if thumb { make_thumb(path, PHONE_THUMB)? } else { Pixels::new(qobject::decode_image(&qs(path), PHONE_SIDE)) };
     if !img.ok() {
         return None;
     }
-    let (w, h) = (img.0.width(), img.0.height());
+    let (w, h) = (img.image().width(), img.image().height());
     let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     let mut png = !thumb && LOSSLESS.contains(&ext.as_str());
-    let mut bytes: Vec<u8> = (&qobject::encode_for_phone(&img.0, 82, &mut png)).into();
+    let mut bytes: Vec<u8> = (&qobject::encode_for_phone(img.image(), 82, &mut png)).into();
     // (Too big as a PNG: a JPEG after all; big photos: a lower quality.)
     if png && bytes.len() > PHONE_BYTES {
         png = false;
-        bytes = (&qobject::encode_for_phone(&img.0, 82, &mut png)).into();
+        bytes = (&qobject::encode_for_phone(img.image(), 82, &mut png)).into();
     }
     if !png && bytes.len() > PHONE_BYTES {
-        bytes = (&qobject::encode_for_phone(&img.0, 65, &mut png)).into();
+        bytes = (&qobject::encode_for_phone(img.image(), 65, &mut png)).into();
     }
     (!bytes.is_empty()).then_some((bytes, if png { "image/png" } else { "image/jpeg" }, w, h))
 }
@@ -848,7 +889,7 @@ fn is_image_path(path: &str) -> bool {
     match name.rsplit_once('.') {
         Some((stem, ext)) if !stem.is_empty() => {
             let ext = ext.to_ascii_lowercase();
-            SUFFIXES.iter().any(|s| *s == ext)
+            SUFFIXES.contains(&ext)
         }
         _ => false,
     }
@@ -916,6 +957,7 @@ fn list_images(folder: &Path) -> Vec<String> {
 #[derive(Default)]
 pub struct ImagesRust;
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl qobject::Images {
     pub fn list(&self, folder: &QString) -> QString {
         let folder = folder.to_string();
@@ -938,7 +980,7 @@ impl qobject::Images {
             .filter_map(|p| {
                 let (mut w, mut h) = (0, 0);
                 qobject::image_size(&qs(p), &mut w, &mut h);
-                (w > 0 && h > 0).then(|| h as f64 / w as f64)
+                (w > 0 && h > 0).then(|| f64::from(h) / f64::from(w))
             })
             .collect();
         median_shape(shapes)
@@ -950,7 +992,7 @@ impl qobject::Images {
             (f.entries.len(), f.entries.iter().map(|e| e.pixels.bytes()).sum::<usize>())
         };
         let thumbs = lock(&THUMBS).map.len();
-        let disk = std::fs::read_dir(cache_dir()).map(|rd| rd.count()).unwrap_or(0);
+        let disk = std::fs::read_dir(cache_dir()).map_or(0, std::iter::Iterator::count);
         qs(&serde_json::json!({
             "decoded": DECODED.load(Ordering::Relaxed),
             "thumbsMade": THUMBS_MADE.load(Ordering::Relaxed),
@@ -1102,7 +1144,9 @@ fn parse_rgb(s: &str) -> Option<u32> {
     (h.len() == 6).then(|| u32::from_str_radix(h, 16).ok()).flatten()
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl qobject::ImageView {
+    #[expect(clippy::needless_pass_by_value, reason = "a property's WRITE setter takes its value, as cxx-qt calls it")]
     pub fn set_path(mut self: Pin<&mut Self>, path: QString) {
         if path == self.path {
             return;
@@ -1135,6 +1179,7 @@ impl qobject::ImageView {
         self.as_mut().set_status(qs(status));
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn load(mut self: Pin<&mut Self>) {
         let path = self.path.to_string();
         let keep = self.keep_view;
@@ -1150,7 +1195,7 @@ impl qobject::ImageView {
             r.copy_k = 1.0;
             r.own = None;
             r.own_asked = false;
-        }
+        };
         // (The biggest screen a viewer is on: pictures are kept at its size.)
         let side = self.screen_side().max((self.width().max(self.height()) * self.pixel_ratio()).ceil() as i32);
         COPY_SIDE.fetch_max(side, Ordering::Relaxed);
@@ -1208,7 +1253,7 @@ impl qobject::ImageView {
     }
 
     /// The whole image arrived (or failed).
-    fn take_full(mut self: Pin<&mut Self>, generation: u64, result: Result<Arc<Decoded>, String>) {
+    fn take_full(mut self: Pin<&mut Self>, generation: u64, result: anyhow::Result<Arc<Decoded>>) {
         if generation != self.generation {
             return;
         }
@@ -1219,11 +1264,11 @@ impl qobject::ImageView {
                 let size_changed = w != self.image_width || h != self.image_height;
                 self.as_mut().set_image_width(w);
                 self.as_mut().set_image_height(h);
-                if size_changed && !(self.keep_view && !self.fit) {
+                if size_changed && !self.keep_view || self.fit {
                     self.as_mut().set_fit(true);
                 }
                 let frames = match &*d {
-                    Decoded::Frames(f) => f.len() as i32,
+                    Decoded::Frames(f) => i32::try_from(f.len()).unwrap_or(i32::MAX),
                     Decoded::Stream { count, .. } => *count,
                     _ => 1,
                 };
@@ -1235,8 +1280,8 @@ impl qobject::ImageView {
                         (r.player, r.frame_ms) = (Some(play_from(path, 1)), *delay);
                     }
                     r.decoded = Some(Arc::clone(&d));
-                    r.copy_k = if copy { w.max(1) as f64 / first.0.width().max(1) as f64 } else { 1.0 };
-                }
+                    r.copy_k = if copy { f64::from(w.max(1)) / f64::from(first.image().width().max(1)) } else { 1.0 }
+                };
                 self.as_mut().set_frame_count(frames);
                 self.as_mut().set_frame(0);
                 let ms = self.asked.elapsed().as_secs_f64() * 1000.0;
@@ -1249,7 +1294,7 @@ impl qobject::ImageView {
                 }
             }
             Err(e) => {
-                self.as_mut().set_error(qs(&e));
+                self.as_mut().set_error(qs(&format!("{e:#}")));
                 self.as_mut().clear_image();
                 self.set_status_text("error");
             }
@@ -1257,7 +1302,7 @@ impl qobject::ImageView {
     }
 
     /// Its own pixels arrived, for a view zoomed in past its copy.
-    fn take_own(mut self: Pin<&mut Self>, generation: u64, ask: u64, pixels: Pixels) {
+    fn take_own(mut self: Pin<&mut Self>, generation: u64, ask: u64, pixels: &Pixels) {
         if generation != self.generation || ask != self.own_ask || !self.own_asked {
             return;
         }
@@ -1267,7 +1312,7 @@ impl qobject::ImageView {
             return;
         }
         self.as_mut().rust_mut().own = Some(pixels.clone());
-        self.show_pixels(&pixels, true, true);
+        self.show_pixels(pixels, true, true);
     }
 
     /// A picture kept as a copy: zoomed in past what the copy shows, its own
@@ -1293,8 +1338,8 @@ impl qobject::ImageView {
                     key: format!("own:{path}"),
                     cancel: None,
                     work: Box::new(move || {
-                        let pixels = Pixels(qobject::decode_image(&qs(&path), 0));
-                        let _ = thread.queue(move |this| this.take_own(g, ask, pixels));
+                        let pixels = Pixels::new(qobject::decode_image(&qs(&path), 0));
+                        let _ = thread.queue(move |this| this.take_own(g, ask, &pixels));
                     }),
                 },
             );
@@ -1304,7 +1349,7 @@ impl qobject::ImageView {
                 let mut r = self.as_mut().rust_mut();
                 r.own = None;
                 r.own_asked = false;
-            }
+            };
             self.show_pixels(&copy, false, true);
         }
     }
@@ -1312,24 +1357,24 @@ impl qobject::ImageView {
     /// Puts pixels on screen: the whole image (`full`) or a smaller copy,
     /// `enough` for the picture as it's zoomed ("ready") or not yet ("preview").
     fn show_pixels(mut self: Pin<&mut Self>, p: &Pixels, full: bool, enough: bool) {
-        let w = self.image_width.max(1) as f64;
-        let k = if full || self.image_width <= 0 { 1.0 } else { w / p.0.width().max(1) as f64 };
+        let w = f64::from(self.image_width.max(1));
+        let k = if full || self.image_width <= 0 { 1.0 } else { w / f64::from(p.image().width().max(1)) };
         {
             let mut r = self.as_mut().rust_mut();
             r.shown_k = k;
             r.shown_full = full;
-        }
+        };
         if self.first_ms == 0.0 {
             let ms = self.asked.elapsed().as_secs_f64() * 1000.0;
             self.as_mut().set_first_ms(ms.max(0.001));
         }
         if self.image_width <= 0 {
-            self.as_mut().set_image_width(p.0.width());
-            self.as_mut().set_image_height(p.0.height());
+            self.as_mut().set_image_width(p.image().width());
+            self.as_mut().set_image_height(p.image().height());
         }
         self.as_mut().set_whole(full);
         self.as_mut().set_status_text(if enough { "ready" } else { "preview" });
-        self.as_mut().show_image(&p.0);
+        self.as_mut().show_image(p.image());
         self.relayout();
     }
 
@@ -1341,7 +1386,7 @@ impl qobject::ImageView {
 
     /// The image's size as turned (image pixels).
     fn turned(&self) -> (f64, f64) {
-        let (w, h) = (self.image_width.max(1) as f64, self.image_height.max(1) as f64);
+        let (w, h) = (f64::from(self.image_width.max(1)), f64::from(self.image_height.max(1)));
         if self.turn % 180 == 90 { (h, w) } else { (w, h) }
     }
 
@@ -1395,7 +1440,7 @@ impl qobject::ImageView {
     /// and scale, then the shift.
     fn matrix(&self) -> (f64, f64, f64, f64, f64, f64) {
         let s = self.zoom / self.dpr();
-        let (w, h) = (self.image_width.max(1) as f64, self.image_height.max(1) as f64);
+        let (w, h) = (f64::from(self.image_width.max(1)), f64::from(self.image_height.max(1)));
         // x' = a·x + b·y, y' = c·x + d·y (clockwise on screen).
         let (a, b, c, d) = match self.turn {
             90 => (0.0, -1.0, 1.0, 0.0),
@@ -1439,7 +1484,7 @@ impl qobject::ImageView {
             let mut r = self.as_mut().rust_mut();
             r.cx = ax - (ax - r.cx) * ratio;
             r.cy = ay - (ay - r.cy) * ratio;
-        }
+        };
         self.as_mut().set_zoom(zoom);
         self.as_mut().clamp();
         self.as_mut().push_view();
@@ -1538,7 +1583,7 @@ impl qobject::ImageView {
             let mut r = self.as_mut().rust_mut();
             r.cx = x;
             r.cy = y;
-        }
+        };
         self.as_mut().animate_to(target, x, y);
         self.as_mut().set_fit(true);
     }
@@ -1557,7 +1602,7 @@ impl qobject::ImageView {
             let mut r = self.as_mut().rust_mut();
             r.cx += dx;
             r.cy += dy;
-        }
+        };
         self.as_mut().clamp();
         self.push_view();
     }
@@ -1579,7 +1624,7 @@ impl qobject::ImageView {
             let mut r = self.as_mut().rust_mut();
             r.light = l;
             r.dark = d;
-        }
+        };
         self.set_checker(true, l, d);
     }
 
@@ -1610,7 +1655,7 @@ impl qobject::ImageView {
     fn schedule_frame(mut self: Pin<&mut Self>) {
         self.as_mut().stop_frames();
         let delay = match self.decoded.as_deref() {
-            Some(Decoded::Frames(f)) => f.get(self.frame as usize).map_or(100, |x| x.1),
+            Some(Decoded::Frames(f)) => f.get(usize::try_from(self.frame).unwrap_or(0)).map_or(100, |x| x.1),
             Some(Decoded::Stream { .. }) => self.frame_ms,
             _ => return,
         };
@@ -1620,18 +1665,18 @@ impl qobject::ImageView {
 
     fn show_frame(mut self: Pin<&mut Self>, i: i32) {
         let Some(Decoded::Frames(f)) = self.decoded.as_deref() else { return };
-        let n = f.len() as i32;
+        let n = i32::try_from(f.len()).unwrap_or(i32::MAX);
         let i = i.rem_euclid(n.max(1));
-        let p = f[i as usize].0.clone();
+        let p = f[usize::try_from(i).unwrap_or(0)].0.clone();
         self.as_mut().set_frame(i);
-        self.as_mut().show_image(&p.0);
+        self.as_mut().show_image(p.image());
     }
 
     /// The next frame of one decoded as it plays, when it's ready.
     fn show_played(mut self: Pin<&mut Self>, (i, p, ms): Played) {
         self.as_mut().rust_mut().frame_ms = ms;
         self.as_mut().set_frame(i);
-        self.as_mut().show_image(&p.0);
+        self.as_mut().show_image(p.image());
     }
 
     /// A frame its player sent, taken (its next one counted on).
@@ -1814,7 +1859,7 @@ fn median_shape(mut shapes: Vec<f64>) -> f64 {
     if shapes.is_empty() {
         return 1.0;
     }
-    shapes.sort_by(|a, b| a.total_cmp(b));
+    shapes.sort_by(f64::total_cmp);
     shapes[shapes.len() / 2].clamp(0.5, 1.4)
 }
 
@@ -1880,7 +1925,7 @@ impl qobject::ImageThumb {
             r.generation += 1;
             r.size = (0.0, 0.0);
             r.side = 0;
-        }
+        };
         self.as_mut().clear_image();
         let path = self.path.to_string();
         if path.is_empty() || self.width() <= 0.0 {
@@ -1919,8 +1964,8 @@ impl qobject::ImageThumb {
     }
 
     fn take(mut self: Pin<&mut Self>, p: &Pixels) {
-        self.as_mut().rust_mut().size = (p.0.width() as f64, p.0.height() as f64);
-        self.as_mut().show_image(&p.0);
+        self.as_mut().rust_mut().size = (f64::from(p.image().width()), f64::from(p.image().height()));
+        self.as_mut().show_image(p.image());
         self.as_mut().set_status(qs("ready"));
         self.layout();
     }

@@ -2,6 +2,8 @@
 //! sign-in only): `GET chatgpt.com/backend-api/wham/usage`, each window's
 //! percent used, length and reset.
 
+// Rust guideline compliant 2026-10-09
+
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 
@@ -29,7 +31,7 @@ pub async fn fetch() -> Result<Value> {
 }
 
 fn now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// The usage endpoint's answer in harlo's shape. A window's reset is its

@@ -1,9 +1,12 @@
-//! Setting up a model server (Settings → Model servers → Set up a model
-//! server), on the machine this runs on: installing the engine (or using
-//! the one installed), getting the model, starting the server, a test
+//! Setting up a model server, on the machine this runs on.
+//!
+//! Settings → Model servers → Set up a model server: installing the engine (or
+//! using the one installed), getting the model, starting the server, a test
 //! message; and updating an engine. The app runs it for this computer;
-//! `harlo-engines` runs it on another machine, its reports going back to
-//! the app as lines of JSON.
+//! `harlo-engines` runs it on another machine, its reports going back to the
+//! app as lines of JSON.
+
+// Rust guideline compliant 2026-10-09
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,6 +19,7 @@ use crate::engines::{self, Engine};
 
 /// What a setup says as it goes: its state (`job`: `{ state, step,
 /// progress, detail, result }`) and its whole output so far.
+#[derive(Debug)]
 pub enum Event {
     Job(String),
     Output(String),
@@ -32,9 +36,15 @@ pub struct Report {
     every: Duration,
 }
 
+impl std::fmt::Debug for Report {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Report").field("state", &self.state).field("every", &self.every).finish_non_exhaustive()
+    }
+}
+
 /// The setup's full output, for its "Show output" panel: what it ran and
 /// said, then the server's own log while it starts.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Output {
     lines: Vec<String>,
     /// How far a download is: its own line, rewritten as it moves.
@@ -48,12 +58,12 @@ struct Output {
 impl Report {
     /// One starting from `first` (its state), telling `sink`.
     pub fn new(first: Value, every: Duration, sink: impl Fn(Event) + Send + Sync + 'static) -> Report {
-        Report { sink: Arc::new(sink), state: Arc::new(std::sync::Mutex::new(first)), output: Default::default(), every }
+        Report { sink: Arc::new(sink), state: Arc::new(std::sync::Mutex::new(first)), output: Arc::default(), every }
     }
 
     /// A line of output (kept: the last few thousand).
     pub fn line(&self, text: &str) {
-        let mut o = self.output.lock().unwrap();
+        let mut o = self.output.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let live = std::mem::take(&mut o.live);
         if !live.is_empty() {
             o.lines.push(live);
@@ -68,9 +78,9 @@ impl Report {
     /// The server's log as it is now (its last lines).
     pub fn server_log(&self, path: &Path) {
         let text = std::fs::read_to_string(path).unwrap_or_default();
-        let lines: Vec<&str> = text.lines().flat_map(|l| l.rsplit('\r').next()).collect();
+        let lines: Vec<&str> = text.lines().filter_map(|l| l.rsplit('\r').next()).collect();
         let tail = lines[lines.len().saturating_sub(400)..].join("\n");
-        let mut o = self.output.lock().unwrap();
+        let mut o = self.output.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if o.server == tail {
             return;
         }
@@ -82,7 +92,7 @@ impl Report {
     /// To the dialog, a few times a second at most (or now, at the end).
     pub fn show_output(&self, now: bool) {
         let text = {
-            let mut o = self.output.lock().unwrap();
+            let mut o = self.output.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if !now && o.shown.is_some_and(|t| t.elapsed() < self.every) {
                 // (Shown a moment later: nothing may wait for a next line.)
                 if !o.pending {
@@ -113,7 +123,7 @@ impl Report {
 
     pub fn update(&self, f: impl FnOnce(&mut Value)) {
         let text = {
-            let mut v = self.state.lock().unwrap();
+            let mut v = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             f(&mut v);
             v.to_string()
         };
@@ -133,7 +143,7 @@ impl Report {
     pub fn progress(&self, done: u64, total: u64) {
         let p = if total > 0 { done as f64 / total as f64 } else { -1.0 };
         let detail = if total > 0 { format!("{:.1} of {:.1} GB", done as f64 / 1e9, total as f64 / 1e9) } else { format!("{:.1} GB", done as f64 / 1e9) };
-        self.output.lock().unwrap().live = if total > 0 { format!("{detail} ({:.0}%)", p * 100.0) } else { detail.clone() };
+        self.output.lock().unwrap_or_else(std::sync::PoisonError::into_inner).live = if total > 0 { format!("{detail} ({:.0}%)", p * 100.0) } else { detail.clone() };
         self.show_output(false);
         self.update(|v| {
             v["progress"] = json!(p);
@@ -194,7 +204,7 @@ fn basalt_pack_format(repo: &str, model: &str) -> Option<u32> {
 }
 
 /// Installs an engine from its release (blocking): its program.
-fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
+fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &AtomicBool) -> anyhow::Result<PathBuf> {
     report.step(&format!("Finding {}'s latest release", engine.name()));
     let (tag, assets) = engines::plan(engine, hw)?;
     let dir = engines::engines_dir().join(engine.id()).join(&tag);
@@ -226,30 +236,36 @@ fn install(engine: Engine, hw: &engines::Hardware, report: &Report, stop: &Atomi
         Engine::Strata => {
             // Its own installer (checked above): ~/.local/share/strata, ~/.local/bin/strata.
             report.step("Running Strata's installer");
-            let out = std::process::Command::new("sh").arg(dir.join("install.sh")).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
+            let out = std::process::Command::new("sh").arg(dir.join("install.sh")).stdin(std::process::Stdio::null()).output()?;
             let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             for l in said.lines() {
                 report.line(&crate::signin::plain(l));
             }
             if !out.status.success() {
-                return Err(said.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("Strata's installer failed.").trim().to_owned());
+                return Err(anyhow::Error::msg(said.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("Strata's installer failed.").trim().to_owned()));
             }
-            engines::installed(Engine::Strata).map(|i| i.program).ok_or_else(|| "Strata's installer finished, but there's no strata program.".into())
+            engines::installed(Engine::Strata).map(|i| i.program).ok_or_else(|| anyhow::Error::msg("Strata's installer finished, but there's no strata program."))
         }
-        _ => engines::installed(engine).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| format!("{} unpacked, but harlo can't find its program.", engine.name())),
+        _ => engines::installed(engine).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| anyhow::anyhow!("{} unpacked, but harlo can't find its program.", engine.name())),
     }
 }
 
-/// Updates an engine to its latest version (blocking). A new version goes in
-/// a folder of its own and its servers move to it: those running stop only
-/// when it's ready, and start again on it; if one doesn't, they all stay on
-/// the version they had. Strata and vLLM update in place: their servers stop
-/// first.
-pub fn update(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, String> {
-    let engine = engines::ENGINES.iter().copied().find(|e| req["update"] == e.id()).ok_or("harlo doesn't know that engine.")?;
+/// Updates an engine to its latest version (blocking).
+///
+/// A new version goes in a folder of its own and its servers move to it: those
+/// running stop only when it's ready, and start again on it; if one doesn't,
+/// they all stay on the version they had. Strata and vLLM update in place:
+/// their servers stop first.
+///
+/// # Errors
+///
+/// When the request isn't valid, the new version can't be downloaded or
+/// installed, a server doesn't start on it, or it was cancelled.
+pub fn update(req: &Value, report: &Report, stop: &AtomicBool) -> anyhow::Result<Value> {
+    let engine = engines::ENGINES.iter().copied().find(|e| req["update"] == e.id()).ok_or_else(|| anyhow::Error::msg("harlo doesn't know that engine."))?;
     let name = engine.name();
     let hw = engines::detect();
-    let before = engines::installed(engine).ok_or_else(|| format!("{name} isn't installed."))?;
+    let before = engines::installed(engine).ok_or_else(|| anyhow::anyhow!("{name} isn't installed."))?;
     let servers = crate::servers::servers_of(name);
     let running: Vec<String> = servers.iter().filter(|u| crate::model_servers::answers(u)).cloned().collect();
     let in_place = matches!(engine, Engine::Strata | Engine::Vllm);
@@ -259,7 +275,7 @@ pub fn update(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, 
             crate::servers::stop_any(url);
         }
     };
-    let start_them = |report: &Report| -> Result<(), String> {
+    let start_them = |report: &Report| -> anyhow::Result<()> {
         for url in &running {
             report.step(&format!("Starting the server at {url} again"));
             crate::servers::ensure_running(url)?;
@@ -296,7 +312,7 @@ pub fn update(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, 
     };
 
     if in_place {
-        start_them(report).map_err(|e| format!("{name} is updated to {now}, but its server didn't start: {e}"))?;
+        start_them(report).map_err(|e| anyhow::anyhow!("{name} is updated to {now}, but its server didn't start: {e}"))?;
     } else {
         // Basalt reads one format of pack: the models it serves must suit.
         if engine == Engine::Basalt
@@ -306,7 +322,7 @@ pub fn update(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, 
                 let pack = crate::servers::model_files(url).first().and_then(|f| engines::basalt_format(f));
                 if pack.is_some_and(|p| p != reads) {
                     drop_new();
-                    return Err(format!("Basalt {now} reads format {reads}, and the model at {url} is in format {}: it stays on {}.", pack.unwrap_or_default(), before.version));
+                    return Err(anyhow::anyhow!("Basalt {now} reads format {reads}, and the model at {url} is in format {}: it stays on {}.", pack.unwrap_or_default(), before.version));
                 }
             }
         }
@@ -333,7 +349,7 @@ pub fn update(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, 
             }
             drop_new();
             let _ = start_them(report);
-            return Err(format!("{name} {now} didn't start, so its servers stay on {}: {e}", before.version));
+            return Err(anyhow::anyhow!("{name} {now} didn't start, so its servers stay on {}: {e}", before.version));
         }
         // (The old version: nothing uses it now.)
         if let Some(old) = old_folder.as_ref().filter(|f| Some(*f) != new_folder.as_ref()) {
@@ -348,14 +364,14 @@ pub fn update(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, 
 /// vLLM with uv (blocking): a Python of its own and vLLM with PyTorch for
 /// this computer's CUDA, in harlo's engines folder (several GB). Its
 /// program, `vllm`.
-fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
-    let uv = walk_for(dir, "uv", 3).ok_or("uv unpacked, but harlo can't find it.")?;
+fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> anyhow::Result<PathBuf> {
+    let uv = walk_for(dir, "uv", 3).ok_or_else(|| anyhow::Error::msg("uv unpacked, but harlo can't find it."))?;
     let home = engines::engines_dir().join("vllm");
     let env = engines::vllm_env();
     let cache = home.join("cache");
     // (harlo's uv first: vLLM's kernel step runs `uv` itself.)
     let path = format!("{}:{}", uv.parent().unwrap_or(Path::new("/")).display(), std::env::var("PATH").unwrap_or_default());
-    let run = |program: &Path, args: &[&str], step: &str| -> Result<(), String> {
+    let run = |program: &Path, args: &[&str], step: &str| -> anyhow::Result<()> {
         report.step(step);
         let mut child = std::process::Command::new(program)
             .args(args)
@@ -368,7 +384,7 @@ fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBu
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| e.to_string())?;
+            ?;
         // Its lines (uv's on stderr, vLLM's on stdout) as they come.
         let (tx, rx) = std::sync::mpsc::channel::<String>();
         for pipe in [child.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>)].into_iter().flatten() {
@@ -404,7 +420,7 @@ fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBu
             }
             if stop.load(Ordering::Relaxed) {
                 let _ = child.kill();
-                return Err("Cancelled.".into());
+                return Err(anyhow::Error::msg("Cancelled."));
             }
             let got = received_bytes().saturating_sub(started);
             let shown: String = last.chars().take(90).collect();
@@ -417,8 +433,8 @@ fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBu
                 }
             });
         }
-        let status = child.wait().map_err(|e| e.to_string())?;
-        if status.success() { Ok(()) } else { Err(if last.is_empty() { format!("{} failed.", program.display()) } else { last }) }
+        let status = child.wait()?;
+        if status.success() { Ok(()) } else { Err(if last.is_empty() { anyhow::Error::msg(format!("{} failed.", program.display())) } else { anyhow::Error::msg(last) }) }
     };
     let env_s = env.to_string_lossy().into_owned();
     run(&uv, &["venv", "--python", "3.12", "--managed-python", "--allow-existing", &env_s], "Setting up Python for vLLM")?;
@@ -427,18 +443,18 @@ fn install_vllm(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBu
     // Its prebuilt GPU kernels, where this vLLM has the command (else it
     // fetches them when it starts: not worth failing the setup for).
     if let Err(e) = run(&env.join("bin/vllm"), &["download-kernels"], "Fetching vLLM's GPU kernels") {
-        tracing::warn!("vllm download-kernels: {e}");
+        tracing::event!(name: "engine.setup.kernels.failed", tracing::Level::WARN, error.message = %e, "vllm download-kernels: {{error.message}}");
     }
     // (The downloaded wheels: not needed now.)
     let _ = std::fs::remove_dir_all(&cache);
-    engines::installed(Engine::Vllm).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "vLLM installed, but harlo can't find its program.".into())
+    engines::installed(Engine::Vllm).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| anyhow::Error::msg("vLLM installed, but harlo can't find its program."))
 }
 
 /// Builds Basalt from its source (blocking): CMake with this computer's
 /// CUDA toolkit, then a Python of its own for its server (`.venv` in the
 /// source folder, where `basalt serve` looks). Its program, `bin/basalt`.
-fn install_basalt(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
-    let src = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).find(|p| p.join("CMakeLists.txt").is_file()).ok_or("Basalt's source unpacked, but harlo can't find it.")?;
+fn install_basalt(dir: &Path, report: &Report, stop: &AtomicBool) -> anyhow::Result<PathBuf> {
+    let src = std::fs::read_dir(dir)?.flatten().map(|e| e.path()).find(|p| p.join("CMakeLists.txt").is_file()).ok_or_else(|| anyhow::Error::msg("Basalt's source unpacked, but harlo can't find it."))?;
     // (The CUDA toolkit where distributions put it, if it isn't on PATH.)
     let path = format!("{}:/opt/cuda/bin:/usr/local/cuda/bin", std::env::var("PATH").unwrap_or_default());
     let build = src.join("build");
@@ -453,23 +469,23 @@ fn install_basalt(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<Path
     run_streamed(Path::new("python3"), &["-m".to_owned(), "venv".to_owned(), venv_s], &path, "Setting up Python for Basalt", report, stop, |_| None)?;
     let requirements = src.join("requirements.txt").to_string_lossy().into_owned();
     run_streamed(&venv.join("bin/python"), &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--disable-pip-version-check".to_owned(), "-r".to_owned(), requirements], &path, "Installing Basalt's server", report, stop, |_| None)?;
-    engines::installed(Engine::Basalt).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "Basalt built, but harlo can't find bin/basalt.".into())
+    engines::installed(Engine::Basalt).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| anyhow::Error::msg("Basalt built, but harlo can't find bin/basalt."))
 }
 
 /// NInfer from its source (blocking): its RTX 5090 preset, built here with
 /// CMake, Ninja and the CUDA toolkit. Its program, `ninfer-serve`.
-fn install_ninfer(dir: &Path, report: &Report, stop: &AtomicBool) -> Result<PathBuf, String> {
-    let src = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).find(|p| p.join("CMakePresets.json").is_file()).ok_or("NInfer's source unpacked, but harlo can't find it.")?;
+fn install_ninfer(dir: &Path, report: &Report, stop: &AtomicBool) -> anyhow::Result<PathBuf> {
+    let src = std::fs::read_dir(dir)?.flatten().map(|e| e.path()).find(|p| p.join("CMakePresets.json").is_file()).ok_or_else(|| anyhow::Error::msg("NInfer's source unpacked, but harlo can't find it."))?;
     let path = format!("{}:/opt/cuda/bin:/usr/local/cuda/bin", std::env::var("PATH").unwrap_or_default());
     let configure = ["-S".to_owned(), src.to_string_lossy().into_owned(), "--preset".to_owned(), "rtx5090-release".to_owned()];
     run_streamed(Path::new("cmake"), &configure, &path, "Preparing NInfer's build", report, stop, |_| None)?;
     let build = src.join("build/rtx5090-release");
     run_streamed(Path::new("cmake"), &["--build".to_owned(), build.to_string_lossy().into_owned(), "-j".to_owned(), build_jobs()], &path, "Building NInfer (several minutes)", report, stop, build_progress)?;
-    engines::installed(Engine::Ninfer).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| "NInfer built, but harlo can't find ninfer-serve.".into())
+    engines::installed(Engine::Ninfer).filter(|i| i.harlo).map(|i| i.program).ok_or_else(|| anyhow::Error::msg("NInfer built, but harlo can't find ninfer-serve."))
 }
 
 fn build_jobs() -> String {
-    std::thread::available_parallelism().map_or(4, |n| n.get()).to_string()
+    std::thread::available_parallelism().map_or(4, std::num::NonZero::get).to_string()
 }
 
 /// How far a build is, by its own count: "[ 42%] Building …" (make) or
@@ -484,7 +500,7 @@ fn build_progress(line: &str) -> Option<f64> {
 
 /// A repository's files into `folder`, on one bar: big ones over 8 connections,
 /// each checked against Hugging Face's SHA-256 (those already there kept).
-fn download_files(repo: &str, folder: &Path, files: &[(String, u64)], report: &Report, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
+fn download_files(repo: &str, folder: &Path, files: &[(String, u64)], report: &Report, cancelled: &dyn Fn() -> bool) -> anyhow::Result<()> {
     let total: u64 = files.iter().map(|(_, s)| *s).sum();
     report.step("Downloading the model");
     let mut before = 0;
@@ -523,7 +539,7 @@ fn engines_on_path(prog: &str) -> bool {
 /// Runs a program (blocking), its output a line at a time under the bar;
 /// `progress` reads how far a line says it is (0–1). What it said last when
 /// it fails.
-fn run_streamed(program: &Path, args: &[String], path: &str, step: &str, report: &Report, stop: &AtomicBool, progress: impl Fn(&str) -> Option<f64>) -> Result<(), String> {
+fn run_streamed(program: &Path, args: &[String], path: &str, step: &str, report: &Report, stop: &AtomicBool, progress: impl Fn(&str) -> Option<f64>) -> anyhow::Result<()> {
     report.step(step);
     let mut child = std::process::Command::new(program)
         .args(args)
@@ -534,7 +550,7 @@ fn run_streamed(program: &Path, args: &[String], path: &str, step: &str, report:
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Couldn't run {}: {e}", program.display()))?;
+        .map_err(|e| anyhow::anyhow!("Couldn't run {}: {e}", program.display()))?;
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     for pipe in [child.stdout.take().map(|o| Box::new(o) as Box<dyn std::io::Read + Send>), child.stderr.take().map(|e| Box::new(e) as Box<dyn std::io::Read + Send>)].into_iter().flatten() {
         let tx = tx.clone();
@@ -582,15 +598,15 @@ fn run_streamed(program: &Path, args: &[String], path: &str, step: &str, report:
         }
         if stop.load(Ordering::Relaxed) {
             let _ = child.kill();
-            return Err("Cancelled.".into());
+            return Err(anyhow::Error::msg("Cancelled."));
         }
     }
-    let status = child.wait().map_err(|e| e.to_string())?;
+    let status = child.wait()?;
     if status.success() {
         return Ok(());
     }
     // (A build's first error says more than its last line.)
-    Err(errors.first().cloned().unwrap_or(if last.is_empty() { format!("{step} failed.") } else { last }))
+    Err(anyhow::Error::msg(errors.first().cloned().unwrap_or(if last.is_empty() { format!("{step} failed.") } else { last })))
 }
 
 /// The bytes this computer has received (all its network but loopback),
@@ -614,6 +630,7 @@ fn gpu_memory_used_mb() -> Option<u64> {
 }
 
 /// The size a log line announces, "(about 5 GB; …)", in bytes.
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn about_size(line: &str) -> Option<u64> {
     let rest = line.split("about ").nth(1)?;
     let mut words = rest.split_whitespace();
@@ -628,6 +645,7 @@ pub fn about_size(line: &str) -> Option<u64> {
 
 /// The amount a log line says it's at: "10.1 of 84.5 GB" (or MB, GiB, MiB;
 /// the same unit on both sides), in bytes: (done, total).
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn amount_in(line: &str) -> Option<(u64, u64)> {
     let (head, tail) = line.split_once(" of ")?;
     let done: f64 = head.rsplit(|c: char| !(c.is_ascii_digit() || c == '.')).next()?.parse().ok()?;
@@ -646,6 +664,7 @@ pub fn amount_in(line: &str) -> Option<(u64, u64)> {
 }
 
 /// The size uv announces for a download ("Downloading torch (846.1MiB)").
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn announced_size(line: &str) -> u64 {
     let Some(inner) = line.rsplit_once('(').and_then(|(_, r)| r.strip_suffix(')')) else { return 0 };
     let split = inner.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(inner.len());
@@ -676,9 +695,15 @@ fn walk_for(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
 }
 
 /// One setup (blocking): the server's address, name, models and test.
-/// A setup that didn't finish (failed, cancelled) leaves nothing behind:
-/// the server's record as it was before (none, for a new one).
-pub fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, String> {
+///
+/// A setup that didn't finish (failed, cancelled) leaves nothing behind: the
+/// server's record as it was before (none, for a new one).
+///
+/// # Errors
+///
+/// When the request isn't valid, a download or install fails, the server
+/// doesn't start or answer the test, or it was cancelled.
+pub fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> anyhow::Result<Value> {
     let port = req["port"].as_u64().filter(|p| *p > 0 && *p < 65536).unwrap_or(8080);
     let base = format!("http://127.0.0.1:{port}/v1");
     let before = crate::servers::server_record(&base);
@@ -689,13 +714,13 @@ pub fn setup(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, S
     outcome
 }
 
-fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value, String> {
-    let engine = Engine::parse(req["engine"].as_str().unwrap_or_default()).ok_or("Pick an engine.")?;
+fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> anyhow::Result<Value> {
+    let engine = Engine::parse(req["engine"].as_str().unwrap_or_default()).ok_or_else(|| anyhow::Error::msg("Pick an engine."))?;
     let model = req["model"].as_str().unwrap_or_default().trim().to_owned();
     if model.is_empty() {
-        return Err("Pick a model.".into());
+        return Err(anyhow::Error::msg("Pick a model."));
     }
-    let port = req["port"].as_u64().filter(|p| *p > 0 && *p < 65536).unwrap_or(8080) as u16;
+    let port = u16::try_from(req["port"].as_u64().filter(|p| *p > 0 && *p < 65536).unwrap_or(8080)).unwrap_or(u16::MAX);
     let base = format!("http://127.0.0.1:{port}/v1");
     let name = req["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).unwrap_or(engine.id()).to_owned();
     let cancelled = || stop.load(Ordering::Relaxed);
@@ -706,189 +731,21 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
     report.step("Checking the hardware");
     let hw = engines::detect();
     if engine.fit(&hw).0 == "no" {
-        return Err(engine.fit(&hw).1);
+        return Err(anyhow::Error::msg(engine.fit(&hw).1));
     }
     if !adding && engines::free_port(port) != port {
-        return Err(format!("Port {port} is in use: pick another."));
+        return Err(anyhow::anyhow!("Port {port} is in use: pick another."));
     }
     // (Another server's port, stopped or not: it would take its place.)
     if !adding && let Some((_, other)) = crate::servers::ports_in_use().into_iter().find(|(p, n)| *p == port && *n != name) {
-        return Err(format!("Port {port} belongs to {other}: pick another port."));
+        return Err(anyhow::anyhow!("Port {port} belongs to {other}: pick another port."));
     }
-    // Basalt reads one format of pack: the model's, known before anything's
-    // downloaded (a build too old for it: the latest release, built here).
-    let pack = (engine == Engine::Basalt).then(|| basalt_pack_format(req["repo"].as_str().unwrap_or_default().trim(), &model)).flatten();
-    let mut use_installed = engines::installed(engine).filter(|_| req["useInstalled"] == true);
-    if let (Some(i), Some(pack)) = (&use_installed, pack)
-        && let Some(reads) = engines::basalt_build_format(&i.program).filter(|reads| *reads < pack)
-    {
-        report.line(&format!("This model is in Basalt's format {pack}; Basalt {} reads {reads}: building the latest release.", i.version));
-        use_installed = None;
-    }
-    let program = match use_installed {
-        Some(i) => i.program,
-        None => install(engine, &hw, report, stop)?,
-    };
-    if let Some(pack) = pack
-        && let Some(reads) = engines::basalt_build_format(&program).filter(|reads| *reads != pack)
-    {
-        return Err(format!("This model is in Basalt's format {pack} and this Basalt reads {reads}: pick another model."));
-    }
+    let program = engine_program(engine, req, &model, &hw, report, stop)?;
     let prog = quote(&program.to_string_lossy());
 
     // The start (and stop) command, as Start on the page runs it.
-    let (start, stop_cmd, model_id) = match engine {
-        // A context picked: Ollama's for every model (else its own choice
-        // by graphics memory).
-        Engine::Ollama => {
-            let context = req["context"].as_u64().filter(|c| *c >= 2048).map(|c| format!("OLLAMA_CONTEXT_LENGTH={c} ")).unwrap_or_default();
-            (format!("OLLAMA_HOST=127.0.0.1:{port} {context}exec {prog} serve"), String::new(), model.clone())
-        }
-        Engine::LlamaCpp => {
-            let repo = req["repo"].as_str().unwrap_or_default().trim().to_owned();
-            let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
-            let need = req["size"].as_u64().unwrap_or(0) / (1024 * 1024);
-            if need > hw.disk_free_mb {
-                return Err(format!("It's {} GB and only {} GB are free.", need / 1024, hw.disk_free_mb / 1024));
-            }
-            let parts = engines::gguf_parts(&model);
-            for (i, part) in parts.iter().enumerate() {
-                let of = if parts.len() > 1 { format!(" ({}/{})", i + 1, parts.len()) } else { String::new() };
-                report.step(&format!("Downloading the model{of}"));
-                let dest = folder.join(part);
-                if !dest.exists() {
-                    // (8 connections at once; checked against Hugging Face's SHA-256.)
-                    let mut checking = false;
-                    let mut progress = |phase: &str, d: u64, t: u64| {
-                        if phase == "check" && !checking {
-                            checking = true;
-                            report.step(&format!("Checking the model{of} against Hugging Face's checksum"));
-                        }
-                        report.progress(d, t);
-                    };
-                    report.line(&format!("{} → {}", engines::hf_url(&repo, part), dest.display()));
-                    engines::download_parallel(&engines::hf_url(&repo, part), &dest, None, 8, &mut progress, &cancelled)?;
-                    report.line("Downloaded; it matches Hugging Face's SHA-256.");
-                }
-            }
-            let alias = Path::new(&model).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(model.clone());
-            let alias = alias.split("-0000").next().unwrap_or(&alias).to_owned();
-            let libs = llamacpp_libs(&program);
-            // Its models in a preset (llama.cpp's router mode: one server,
-            // several models, one loaded at a time, switched as asked for);
-            // adding one: those it serves, and this. A context per model
-            // (none: llama.cpp takes the model's own and lowers it to fit,
-            // not below 16k).
-            let preset = engines::preset_path(port);
-            let mut models = if adding { llamacpp_models(&base, &preset) } else { Vec::new() };
-            models.retain(|m| m.name != alias);
-            models.push(engines::PresetModel { name: alias.clone(), path: folder.join(&model), context: req["context"].as_u64().filter(|c| *c >= 2048) });
-            engines::write_preset(&preset, &models).map_err(|e| format!("Couldn't write {}: {e}", preset.display()))?;
-            let start = format!(
-                "LD_LIBRARY_PATH={}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}} exec {prog} --models-preset {} --models-max 1 --host 127.0.0.1 --port {port}",
-                quote(&libs),
-                quote(&preset.to_string_lossy())
-            );
-            (start, String::new(), alias)
-        }
-        // (DeepSeek's own context is 8k, too little for an agent: 64k unless
-        // picked. Qwen's is Strata's choice for the card.)
-        Engine::Strata => {
-            let family = engines::strata_family(&model);
-            let context = if family == "deepseek41" { format!(" --context {}", req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536)) } else { String::new() };
-            (
-                format!("{prog} launch --family {family} --model {}{context} --port {port} --access local --no-api-key --yes --no-tui", quote(&model)),
-                format!("{prog} launch --stop"),
-                String::new(),
-            )
-        }
-        // Basalt: its pack (one file: weights, tokenizer, drafter, vision),
-        // and its settings file: the model, where it listens, its name and
-        // context (it has no "as much as fits": 64k unless picked).
-        Engine::Basalt => {
-            let repo = req["repo"].as_str().unwrap_or_default().trim().to_owned();
-            let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
-            let need = req["size"].as_u64().unwrap_or(0) / (1024 * 1024);
-            if need > hw.disk_free_mb {
-                return Err(format!("It's {} GB and only {} GB are free.", need / 1024, hw.disk_free_mb / 1024));
-            }
-            let dest = folder.join(&model);
-            if !dest.exists() {
-                report.step("Downloading the model");
-                let mut checking = false;
-                let mut progress = |phase: &str, d: u64, t: u64| {
-                    if phase == "check" && !checking {
-                        checking = true;
-                        report.step("Checking the model against Hugging Face's checksum");
-                    }
-                    report.progress(d, t);
-                };
-                report.line(&format!("{} → {}", engines::hf_url(&repo, &model), dest.display()));
-                engines::download_parallel(&engines::hf_url(&repo, &model), &dest, None, 8, &mut progress, &cancelled)?;
-                report.line("Downloaded; it matches Hugging Face's SHA-256.");
-            }
-            let alias = Path::new(&model).file_stem().map(|s| s.to_string_lossy().trim_end_matches("_v2").to_owned()).unwrap_or(model.clone());
-            let context = req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536);
-            let config = engines::engines_dir().join("basalt").join("servers").join(format!("basalt-{port}.json"));
-            let settings = json!({
-                "server": { "model": dest.to_string_lossy(), "host": "127.0.0.1", "port": port, "alias": alias },
-                "engine": { "max-context": context, "kv": "int8" },
-            });
-            std::fs::create_dir_all(config.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
-            std::fs::write(&config, serde_json::to_string_pretty(&settings).unwrap_or_default()).map_err(|e| format!("Couldn't write {}: {e}", config.display()))?;
-            (format!("exec {prog} serve --config {}", quote(&config.to_string_lossy())), String::new(), alias)
-        }
-        // NInfer: the model's files in harlo's models folder, and its settings
-        // file: the deployment its model cards give for an RTX 5090 (every
-        // official model has Vision, MTP and the optimized head).
-        Engine::Ninfer => {
-            let repo = model.clone();
-            let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
-            report.step("Listing the model's files");
-            let files = engines::hf_ninfer_files(&repo)?;
-            let total: u64 = files.iter().map(|(_, s)| *s).sum();
-            if total / (1024 * 1024) > hw.disk_free_mb {
-                return Err(format!("It's {} GB and only {} GB are free.", total / (1 << 30), hw.disk_free_mb / 1024));
-            }
-            download_files(&repo, &folder, &files, report, &cancelled)?;
-            let alias = engines::ninfer_name(&repo);
-            let context = req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536);
-            let config = engines::engines_dir().join("ninfer").join("servers").join(format!("ninfer-{port}.toml"));
-            let word = |s: &str| serde_json::to_string(s).unwrap_or_default();
-            let settings = format!(
-                "[model]\npath = {}\nvision = true\n\n[engine]\nmax_context = {context}\nmax_concurrency = 2\nkv_dtype = \"fp8\"\ncontext_capacity = \"auto\"\nmemory_headroom = \"256MiB\"\ncuda_graph = true\n\n[speculative]\nbackend = \"mtp\"\ndraft_tokens = 3\nproposal_head = \"optimized\"\n\n[vision]\nmemory_budget = \"1GiB\"\n\n[server]\nhost = \"127.0.0.1\"\nport = {port}\nmodel_id = {}\n",
-                word(&folder.join(&files[0].0).to_string_lossy()),
-                word(&alias)
-            );
-            std::fs::create_dir_all(config.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
-            std::fs::write(&config, settings).map_err(|e| format!("Couldn't write {}: {e}", config.display()))?;
-            (format!("exec {prog} --config {}", quote(&config.to_string_lossy())), String::new(), alias)
-        }
-        // vLLM: the repository's files in harlo's models folder, served with
-        // its family's parsers (agents need its tool calls read).
-        Engine::Vllm => {
-            let repo = model.clone();
-            let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
-            report.step("Listing the model's files");
-            let files = engines::hf_vllm_files(&repo)?;
-            let total: u64 = files.iter().map(|(_, s)| *s).sum();
-            if total / (1024 * 1024) > hw.disk_free_mb {
-                return Err(format!("It's {} GB and only {} GB are free.", total / (1 << 30), hw.disk_free_mb / 1024));
-            }
-            download_files(&repo, &folder, &files, report, &cancelled)?;
-            let config: Value = std::fs::read_to_string(folder.join("config.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-            let (tools, thinking) = engines::vllm_parsers(config["model_type"].as_str().unwrap_or_default(), &repo);
-            let alias = repo.rsplit('/').next().unwrap_or(&repo).to_owned();
-            let context = req["context"].as_u64().filter(|c| *c >= 2048).map_or("auto".to_owned(), |c| c.to_string());
-            let start = format!(
-                "HF_HUB_OFFLINE=1 VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 exec {prog} serve {} --served-model-name {} --host 127.0.0.1 --port {port} --max-model-len {context} --gpu-memory-utilization 0.90 --enable-auto-tool-choice --tool-call-parser {tools}{}",
-                quote(&folder.to_string_lossy()),
-                quote(&alias),
-                thinking.map(|t| format!(" --reasoning-parser {t}")).unwrap_or_default()
-            );
-            (start, String::new(), alias)
-        }
-    };
+    let launch = Launch { req, model: &model, port, prog: &prog, program: &program, hw: &hw, report, stop, adding, base: &base };
+    let (start, stop_cmd, model_id) = start_commands(engine, &launch)?;
     // (Adding to a llama.cpp server: its command now names its preset.)
     let before = crate::servers::start_command(&base);
     if !adding || engine == Engine::LlamaCpp {
@@ -915,87 +772,8 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
     } else {
         crate::servers::launch(&base, &start)?;
         let limit = Duration::from_secs(if engine == Engine::Strata { 12 * 3600 } else { 20 * 60 });
-        // (Progress in its log, as vLLM's "Capturing CUDA graphs: 17%|…" or
-        // Strata's "Downloading the model files: 10.1 of 84.5 GB": the bar
-        // follows it.)
-        // An amount it says now and then ("10.1 of 84.5 GB", Strata's every
-        // few GB): between its lines, what this computer received since, so
-        // it moves as it downloads; its next line puts it right.
-        // (A line announcing a size, "Downloading the draft layer (about 5 GB…)":
-        // what's received since it, of that. Nothing received for a few
-        // seconds: it's working on something else, the line as it is.)
-        let mut said: Option<(String, u64, u64, u64)> = None; // (line, done, total, received then)
-        let mut moving = (received_bytes(), std::time::Instant::now());
-        // (A quiet phase, "Starting the engine and loading the model": how
-        // long so far, and the card's memory filling as the model loads.)
-        let since = std::time::Instant::now();
-        let mut card: (Option<u64>, std::time::Instant) = (gpu_memory_used_mb(), std::time::Instant::now());
-        let waited = crate::servers::wait_up(
-            &base,
-            limit,
-            &mut |line| {
-                report.server_log(&crate::servers::log_path(&base));
-                let pct = line.split('%').next().and_then(|head| head.rsplit(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<f64>().ok()).filter(|p| line.contains("%|") && *p <= 100.0).map(|p| p / 100.0);
-                if let Some(p) = pct {
-                    report.update(|v| v["progress"] = json!(p));
-                    return report.detail(line);
-                }
-                let received = received_bytes();
-                // (A megabyte: a computer's usual chatter isn't a download.)
-                if received > moving.0 + 1_000_000 {
-                    moving = (received, std::time::Instant::now());
-                }
-                let quiet = moving.1.elapsed() > Duration::from_secs(5);
-                // Strata checks each file of a big model when it arrives, and
-                // says little more until the next line: the bar keeps the
-                // download's place instead of running back to one file's check,
-                // and bytes arriving under a finished check are the next file's.
-                let checking = line.contains("nothing is downloaded");
-                if checking && (quiet || said.is_none()) {
-                    let place = said.as_ref().map(|(_, d, t, then)| ((d + received.saturating_sub(*then)).min(t * 999 / 1000)) as f64 / (*t).max(1) as f64);
-                    let place = place.or_else(|| amount_in(line).map(|(d, t)| d as f64 / t as f64)).unwrap_or(-1.0);
-                    report.update(|v| {
-                        v["progress"] = json!(place);
-                        v["detail"] = json!(line);
-                    });
-                    return;
-                }
-                let downloading = if checking { said.as_ref().map(|s| s.0.clone()) } else { None };
-                let line = downloading.as_deref().unwrap_or(line);
-                let amount = amount_in(line).map(|(d, t)| (d, t, true)).or_else(|| about_size(line).map(|t| (0, t, false)));
-                let Some((done, total, exact)) = amount.filter(|_| !quiet) else {
-                    said = None;
-                    if card.1.elapsed() > Duration::from_secs(3) {
-                        card = (gpu_memory_used_mb(), std::time::Instant::now());
-                    }
-                    let secs = since.elapsed().as_secs();
-                    let text = format!(
-                        "{line} · {}:{:02}{}",
-                        secs / 60,
-                        secs % 60,
-                        card.0.map(|mb| format!(" · {:.1} GB on the card", mb as f64 / 1024.0)).unwrap_or_default()
-                    );
-                    report.update(|v| {
-                        v["progress"] = json!(-1.0);
-                        v["detail"] = json!(text);
-                    });
-                    return;
-                };
-                if said.as_ref().is_none_or(|(l, d, t, _)| l != line || *d != done || *t != total) {
-                    said = Some((line.to_owned(), done, total, received));
-                }
-                let (_, d, t, then) = said.clone().unwrap_or_default();
-                let now = (d + received.saturating_sub(then)).min(t * 999 / 1000);
-                let estimate = now > d || !exact;
-                let head = if exact { line.split(" of ").next().unwrap_or(line).trim_end_matches(|c: char| c.is_ascii_digit() || c == '.').trim_end() } else { line.split(" (").next().unwrap_or(line) };
-                let text = format!("{head}{} {}{:.1} of {:.1} GB", if exact { "" } else { ":" }, if estimate { "≈ " } else { "" }, now as f64 / 1e9, t as f64 / 1e9);
-                report.update(|v| {
-                    v["progress"] = json!(now as f64 / t.max(1) as f64);
-                    v["detail"] = json!(text);
-                });
-            },
-            &cancelled,
-        );
+        // (Progress in its log: the bar follows it.)
+        let waited = crate::servers::wait_up(&base, limit, &mut follow_launch(&base, report), &cancelled);
         if let Err(e) = waited {
             report.server_log(&crate::servers::log_path(&base));
             crate::servers::stop_launched(&base);
@@ -1003,21 +781,8 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
         }
     }
 
-    // Ollama: its model, pulled (its API: bytes of each part as they come).
     if engine == Engine::Ollama {
-        let shown = model.strip_prefix("hf.co/").unwrap_or(&model).to_owned();
-        report.step(&format!("Downloading {shown}"));
-        let mut phase = String::new();
-        engines::ollama_pull(&base, &model, &mut |status, done, total| {
-            // (Its steps between the downloads: "verifying sha256 digest"…)
-            if total == 0 && status != phase {
-                phase = status.to_owned();
-                report.line(status);
-                report.detail(status);
-            } else if total > 0 {
-                report.progress(done, total);
-            }
-        }, &cancelled)?;
+        pull_ollama(&base, &model, report, &cancelled)?;
     }
 
     report.step("Sending a test message");
@@ -1060,6 +825,331 @@ fn setup_server(req: &Value, report: &Report, stop: &AtomicBool) -> Result<Value
     Ok(json!({ "baseUrl": base, "name": name, "models": models, "answer": answer, "speed": speed, "context": served }))
 }
 
+/// The engine's program: the one installed when asked to use it, else installed now.
+///
+/// Basalt reads one format of pack: a build too old for the model's is
+/// replaced by the latest release, built here.
+///
+/// # Errors
+///
+/// When installing fails, or the Basalt there can't read the model's pack.
+fn engine_program(engine: Engine, req: &Value, model: &str, hw: &engines::Hardware, report: &Report, stop: &AtomicBool) -> anyhow::Result<PathBuf> {
+    // Basalt reads one format of pack: the model's, known before anything's
+    // downloaded (a build too old for it: the latest release, built here).
+    let pack = (engine == Engine::Basalt).then(|| basalt_pack_format(req["repo"].as_str().unwrap_or_default().trim(), model)).flatten();
+    let mut use_installed = engines::installed(engine).filter(|_| req["useInstalled"] == true);
+    if let (Some(i), Some(pack)) = (&use_installed, pack)
+        && let Some(reads) = engines::basalt_build_format(&i.program).filter(|reads| *reads < pack)
+    {
+        report.line(&format!("This model is in Basalt's format {pack}; Basalt {} reads {reads}: building the latest release.", i.version));
+        use_installed = None;
+    }
+    let program = match use_installed {
+        Some(i) => i.program,
+        None => install(engine, hw, report, stop)?,
+    };
+    if let Some(pack) = pack
+        && let Some(reads) = engines::basalt_build_format(&program).filter(|reads| *reads != pack)
+    {
+        return Err(anyhow::anyhow!("This model is in Basalt's format {pack} and this Basalt reads {reads}: pick another model."));
+    }
+    Ok(program)
+}
+
+/// Ollama: its model, pulled (its API: bytes of each part as they come).
+///
+/// # Errors
+///
+/// When the pull fails or is cancelled.
+fn pull_ollama(base: &str, model: &str, report: &Report, cancelled: &dyn Fn() -> bool) -> anyhow::Result<()> {
+    let shown = model.strip_prefix("hf.co/").unwrap_or(model).to_owned();
+    report.step(&format!("Downloading {shown}"));
+    let mut phase = String::new();
+    engines::ollama_pull(base, model, &mut |status, done, total| {
+        // (Its steps between the downloads: "verifying sha256 digest"…)
+        if total == 0 && status != phase {
+            status.clone_into(&mut phase);
+            report.line(status);
+            report.detail(status);
+        } else if total > 0 {
+            report.progress(done, total);
+        }
+    }, cancelled)
+}
+
+/// What a server's start command is made from.
+struct Launch<'a> {
+    req: &'a Value,
+    model: &'a str,
+    port: u16,
+    /// The engine's program, quoted for the shell.
+    prog: &'a str,
+    program: &'a Path,
+    hw: &'a engines::Hardware,
+    report: &'a Report,
+    stop: &'a AtomicBool,
+    /// A model for a server set up before.
+    adding: bool,
+    base: &'a str,
+}
+
+/// The engine's start and stop commands, and the model's id on its server.
+///
+/// # Errors
+///
+/// When the model can't be downloaded or set up for the engine.
+fn start_commands(engine: Engine, launch: &Launch<'_>) -> anyhow::Result<(String, String, String)> {
+    let Launch { req, model, port, prog, .. } = *launch;
+    Ok(match engine {
+    // A context picked: Ollama's for every model (else its own choice
+    // by graphics memory).
+    Engine::Ollama => {
+        let context = req["context"].as_u64().filter(|c| *c >= 2048).map(|c| format!("OLLAMA_CONTEXT_LENGTH={c} ")).unwrap_or_default();
+        (format!("OLLAMA_HOST=127.0.0.1:{port} {context}exec {prog} serve"), String::new(), model.to_owned())
+    }
+    Engine::LlamaCpp => llamacpp_commands(launch)?,
+    // (DeepSeek's own context is 8k, too little for an agent: 64k unless
+    // picked. Qwen's is Strata's choice for the card.)
+    Engine::Strata => {
+        let family = engines::strata_family(model);
+        let context = if family == "deepseek41" { format!(" --context {}", req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536)) } else { String::new() };
+        (
+            format!("{prog} launch --family {family} --model {}{context} --port {port} --access local --no-api-key --yes --no-tui", quote(model)),
+            format!("{prog} launch --stop"),
+            String::new(),
+        )
+    }
+    // Basalt: its pack (one file: weights, tokenizer, drafter, vision),
+    // and its settings file: the model, where it listens, its name and
+    // context (it has no "as much as fits": 64k unless picked).
+    Engine::Basalt => basalt_commands(launch)?,
+    // NInfer: the model's files in harlo's models folder, and its settings
+    // file: the deployment its model cards give for an RTX 5090 (every
+    // official model has Vision, MTP and the optimized head).
+    Engine::Ninfer => ninfer_commands(launch)?,
+    // vLLM: the repository's files in harlo's models folder, served with
+    // its family's parsers (agents need its tool calls read).
+    Engine::Vllm => vllm_commands(launch)?,
+    })
+}
+
+/// llama.cpp's start and stop commands, with the model downloaded first.
+fn llamacpp_commands(launch: &Launch<'_>) -> anyhow::Result<(String, String, String)> {
+    let Launch { req, model, port, prog, program, hw, report, adding, base, stop } = *launch;
+    let cancelled = || stop.load(Ordering::Relaxed);
+    let repo = req["repo"].as_str().unwrap_or_default().trim().to_owned();
+    let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
+    let need = req["size"].as_u64().unwrap_or(0) / (1024 * 1024);
+    if need > hw.disk_free_mb {
+        return Err(anyhow::anyhow!("It's {} GB and only {} GB are free.", need / 1024, hw.disk_free_mb / 1024));
+    }
+    let parts = engines::gguf_parts(model);
+    for (i, part) in parts.iter().enumerate() {
+        let of = if parts.len() > 1 { format!(" ({}/{})", i + 1, parts.len()) } else { String::new() };
+        report.step(&format!("Downloading the model{of}"));
+        let dest = folder.join(part);
+        if !dest.exists() {
+            // (8 connections at once; checked against Hugging Face's SHA-256.)
+            let mut checking = false;
+            let mut progress = |phase: &str, d: u64, t: u64| {
+                if phase == "check" && !checking {
+                    checking = true;
+                    report.step(&format!("Checking the model{of} against Hugging Face's checksum"));
+                }
+                report.progress(d, t);
+            };
+            report.line(&format!("{} → {}", engines::hf_url(&repo, part), dest.display()));
+            engines::download_parallel(&engines::hf_url(&repo, part), &dest, None, 8, &mut progress, &cancelled)?;
+            report.line("Downloaded; it matches Hugging Face's SHA-256.");
+        }
+    }
+    let alias = Path::new(&model).file_stem().map_or_else(|| model.to_owned(), |s| s.to_string_lossy().into_owned());
+    let alias = alias.split("-0000").next().unwrap_or(&alias).to_owned();
+    let libs = llamacpp_libs(program);
+    // Its models in a preset (llama.cpp's router mode: one server,
+    // several models, one loaded at a time, switched as asked for);
+    // adding one: those it serves, and this. A context per model
+    // (none: llama.cpp takes the model's own and lowers it to fit,
+    // not below 16k).
+    let preset = engines::preset_path(port);
+    let mut models = if adding { llamacpp_models(base, &preset) } else { Vec::new() };
+    models.retain(|m| m.name != alias);
+    models.push(engines::PresetModel { name: alias.clone(), path: folder.join(model), context: req["context"].as_u64().filter(|c| *c >= 2048) });
+    engines::write_preset(&preset, &models).map_err(|e| anyhow::anyhow!("Couldn't write {}: {e}", preset.display()))?;
+    let start = format!(
+        "LD_LIBRARY_PATH={}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}} exec {prog} --models-preset {} --models-max 1 --host 127.0.0.1 --port {port}",
+        quote(&libs),
+        quote(&preset.to_string_lossy())
+    );
+    Ok((start, String::new(), alias))
+}
+
+/// Basalt's start and stop commands, with its pack downloaded first.
+fn basalt_commands(launch: &Launch<'_>) -> anyhow::Result<(String, String, String)> {
+    let Launch { req, model, port, prog, hw, report, stop, .. } = *launch;
+    let cancelled = || stop.load(Ordering::Relaxed);
+    let repo = req["repo"].as_str().unwrap_or_default().trim().to_owned();
+    let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
+    let need = req["size"].as_u64().unwrap_or(0) / (1024 * 1024);
+    if need > hw.disk_free_mb {
+        return Err(anyhow::anyhow!("It's {} GB and only {} GB are free.", need / 1024, hw.disk_free_mb / 1024));
+    }
+    let dest = folder.join(model);
+    if !dest.exists() {
+        report.step("Downloading the model");
+        let mut checking = false;
+        let mut progress = |phase: &str, d: u64, t: u64| {
+            if phase == "check" && !checking {
+                checking = true;
+                report.step("Checking the model against Hugging Face's checksum");
+            }
+            report.progress(d, t);
+        };
+        report.line(&format!("{} → {}", engines::hf_url(&repo, model), dest.display()));
+        engines::download_parallel(&engines::hf_url(&repo, model), &dest, None, 8, &mut progress, &cancelled)?;
+        report.line("Downloaded; it matches Hugging Face's SHA-256.");
+    }
+    let alias = Path::new(&model).file_stem().map_or_else(|| model.to_owned(), |s| s.to_string_lossy().trim_end_matches("_v2").to_owned());
+    let context = req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536);
+    let config = engines::engines_dir().join("basalt").join("servers").join(format!("basalt-{port}.json"));
+    let settings = json!({
+        "server": { "model": dest.to_string_lossy(), "host": "127.0.0.1", "port": port, "alias": alias },
+        "engine": { "max-context": context, "kv": "int8" },
+    });
+    std::fs::create_dir_all(config.parent().unwrap_or(Path::new("/")))?;
+    std::fs::write(&config, serde_json::to_string_pretty(&settings).unwrap_or_default()).map_err(|e| anyhow::anyhow!("Couldn't write {}: {e}", config.display()))?;
+    Ok((format!("exec {prog} serve --config {}", quote(&config.to_string_lossy())), String::new(), alias))
+}
+
+/// Ninfer's start and stop commands.
+fn ninfer_commands(launch: &Launch<'_>) -> anyhow::Result<(String, String, String)> {
+    let Launch { req, model, port, prog, hw, report, stop, .. } = *launch;
+    let cancelled = || stop.load(Ordering::Relaxed);
+    let repo = model;
+    let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
+    report.step("Listing the model's files");
+    let files = engines::hf_ninfer_files(repo)?;
+    let total: u64 = files.iter().map(|(_, s)| *s).sum();
+    if total / (1024 * 1024) > hw.disk_free_mb {
+        return Err(anyhow::anyhow!("It's {} GB and only {} GB are free.", total / (1 << 30), hw.disk_free_mb / 1024));
+    }
+    download_files(repo, &folder, &files, report, &cancelled)?;
+    let alias = engines::ninfer_name(repo);
+    let context = req["context"].as_u64().filter(|c| *c >= 2048).unwrap_or(65536);
+    let config = engines::engines_dir().join("ninfer").join("servers").join(format!("ninfer-{port}.toml"));
+    let word = |s: &str| serde_json::to_string(s).unwrap_or_default();
+    let settings = format!(
+        "[model]\npath = {}\nvision = true\n\n[engine]\nmax_context = {context}\nmax_concurrency = 2\nkv_dtype = \"fp8\"\ncontext_capacity = \"auto\"\nmemory_headroom = \"256MiB\"\ncuda_graph = true\n\n[speculative]\nbackend = \"mtp\"\ndraft_tokens = 3\nproposal_head = \"optimized\"\n\n[vision]\nmemory_budget = \"1GiB\"\n\n[server]\nhost = \"127.0.0.1\"\nport = {port}\nmodel_id = {}\n",
+        word(&folder.join(&files[0].0).to_string_lossy()),
+        word(&alias)
+    );
+    std::fs::create_dir_all(config.parent().unwrap_or(Path::new("/")))?;
+    std::fs::write(&config, settings).map_err(|e| anyhow::anyhow!("Couldn't write {}: {e}", config.display()))?;
+    Ok((format!("exec {prog} --config {}", quote(&config.to_string_lossy())), String::new(), alias))
+}
+
+/// vLLM's start and stop commands.
+fn vllm_commands(launch: &Launch<'_>) -> anyhow::Result<(String, String, String)> {
+    let Launch { req, model, port, prog, hw, report, stop, .. } = *launch;
+    let cancelled = || stop.load(Ordering::Relaxed);
+    let repo = model;
+    let folder = engines::engines_dir().parent().unwrap_or(Path::new(".")).join("models").join(repo.replace('/', "__"));
+    report.step("Listing the model's files");
+    let files = engines::hf_vllm_files(repo)?;
+    let total: u64 = files.iter().map(|(_, s)| *s).sum();
+    if total / (1024 * 1024) > hw.disk_free_mb {
+        return Err(anyhow::anyhow!("It's {} GB and only {} GB are free.", total / (1 << 30), hw.disk_free_mb / 1024));
+    }
+    download_files(repo, &folder, &files, report, &cancelled)?;
+    let config: Value = std::fs::read_to_string(folder.join("config.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let (tools, thinking) = engines::vllm_parsers(config["model_type"].as_str().unwrap_or_default(), repo);
+    let alias = repo.rsplit('/').next().unwrap_or(repo).to_owned();
+    let context = req["context"].as_u64().filter(|c| *c >= 2048).map_or("auto".to_owned(), |c| c.to_string());
+    let start = format!(
+        "HF_HUB_OFFLINE=1 VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 exec {prog} serve {} --served-model-name {} --host 127.0.0.1 --port {port} --max-model-len {context} --gpu-memory-utilization 0.90 --enable-auto-tool-choice --tool-call-parser {tools}{}",
+        quote(&folder.to_string_lossy()),
+        quote(&alias),
+        thinking.map(|t| format!(" --reasoning-parser {t}")).unwrap_or_default()
+    );
+    Ok((start, String::new(), alias))
+}
+
+/// Follows a launching server's log lines on the setup's progress bar.
+///
+/// A percentage in a line ("Capturing CUDA graphs: 17%|…") is the bar. An
+/// amount it says now and then ("10.1 of 84.5 GB") moves on between its lines
+/// with what this computer received since. A quiet phase shows how long it's
+/// taken and the card's memory filling.
+fn follow_launch<'a>(base: &'a str, report: &'a Report) -> impl FnMut(&str) + 'a {
+    let mut said: Option<(String, u64, u64, u64)> = None; // (line, done, total, received then)
+    let mut moving = (received_bytes(), std::time::Instant::now());
+    // (A quiet phase, "Starting the engine and loading the model": how
+    // long so far, and the card's memory filling as the model loads.)
+    let since = std::time::Instant::now();
+    let mut card: (Option<u64>, std::time::Instant) = (gpu_memory_used_mb(), std::time::Instant::now());
+    move |line| {
+        report.server_log(&crate::servers::log_path(base));
+        let pct = line.split('%').next().and_then(|head| head.rsplit(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<f64>().ok()).filter(|p| line.contains("%|") && *p <= 100.0).map(|p| p / 100.0);
+        if let Some(p) = pct {
+            report.update(|v| v["progress"] = json!(p));
+            return report.detail(line);
+        }
+        let received = received_bytes();
+        // (A megabyte: a computer's usual chatter isn't a download.)
+        if received > moving.0 + 1_000_000 {
+            moving = (received, std::time::Instant::now());
+        }
+        let quiet = moving.1.elapsed() > Duration::from_secs(5);
+        // Strata checks each file of a big model when it arrives, and
+        // says little more until the next line: the bar keeps the
+        // download's place instead of running back to one file's check,
+        // and bytes arriving under a finished check are the next file's.
+        let checking = line.contains("nothing is downloaded");
+        if checking && (quiet || said.is_none()) {
+            let place = said.as_ref().map(|(_, d, t, then)| ((d + received.saturating_sub(*then)).min(t * 999 / 1000)) as f64 / (*t).max(1) as f64);
+            let place = place.or_else(|| amount_in(line).map(|(d, t)| d as f64 / t as f64)).unwrap_or(-1.0);
+            report.update(|v| {
+                v["progress"] = json!(place);
+                v["detail"] = json!(line);
+            });
+            return;
+        }
+        let downloading = if checking { said.as_ref().map(|s| s.0.clone()) } else { None };
+        let line = downloading.as_deref().unwrap_or(line);
+        let amount = amount_in(line).map(|(d, t)| (d, t, true)).or_else(|| about_size(line).map(|t| (0, t, false)));
+        let Some((done, total, exact)) = amount.filter(|_| !quiet) else {
+            said = None;
+            if card.1.elapsed() > Duration::from_secs(3) {
+                card = (gpu_memory_used_mb(), std::time::Instant::now());
+            }
+            let secs = since.elapsed().as_secs();
+            let text = format!(
+                "{line} · {}:{:02}{}",
+                secs / 60,
+                secs % 60,
+                card.0.map(|mb| format!(" · {:.1} GB on the card", mb as f64 / 1024.0)).unwrap_or_default()
+            );
+            report.update(|v| {
+                v["progress"] = json!(-1.0);
+                v["detail"] = json!(text);
+            });
+            return;
+        };
+        if said.as_ref().is_none_or(|(l, d, t, _)| l != line || *d != done || *t != total) {
+            said = Some((line.to_owned(), done, total, received));
+        }
+        let (_, d, t, then) = said.clone().unwrap_or_default();
+        let now = (d + received.saturating_sub(then)).min(t * 999 / 1000);
+        let estimate = now > d || !exact;
+        let head = if exact { line.split(" of ").next().unwrap_or(line).trim_end_matches(|c: char| c.is_ascii_digit() || c == '.').trim_end() } else { line.split(" (").next().unwrap_or(line) };
+        let text = format!("{head}{} {}{:.1} of {:.1} GB", if exact { "" } else { ":" }, if estimate { "≈ " } else { "" }, now as f64 / 1e9, t as f64 / 1e9);
+        report.update(|v| {
+            v["progress"] = json!(now as f64 / t.max(1) as f64);
+            v["detail"] = json!(text);
+        });
+    }
+}
+
 /// A setup (or with `update`, an engine's update) from start to end, its
 /// end said through `report` too (blocking).
 pub fn run(req: &Value, report: &Report, stop: &AtomicBool) {
@@ -1078,11 +1168,11 @@ pub fn run(req: &Value, report: &Report, stop: &AtomicBool) {
             }
             Err(e) if stop.load(Ordering::Relaxed) => {
                 v["state"] = json!("cancelled");
-                v["detail"] = json!(e);
+                v["detail"] = json!(format!("{e:#}"));
             }
             Err(e) => {
                 v["state"] = json!("failed");
-                v["detail"] = json!(e);
+                v["detail"] = json!(format!("{e:#}"));
             }
         }
         v["progress"] = json!(-1);
@@ -1134,7 +1224,7 @@ pub fn updates() -> Value {
                 let available = engines::update_available(e, &i.version, &latest);
                 updates.insert(e.id().to_owned(), json!({ "latest": latest.trim_start_matches('v'), "available": available }));
             }
-            Err(err) => tracing::info!("{} update check: {err}", e.name()),
+            Err(err) => tracing::event!(name: "engine.update.check.failed", tracing::Level::INFO, engine.name = e.name(), error.message = %err, "{{engine.name}} update check: {{error.message}}"),
         }
     }
     Value::Object(updates)
@@ -1153,6 +1243,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn reads_the_sizes_uv_announces() {
         assert_eq!(super::announced_size("Downloading torch (846.1MiB)"), (846.1 * (1u64 << 20) as f64) as u64);
         assert_eq!(super::announced_size("Downloading flashinfer-jit-cache (1.4GiB)"), (1.4 * (1u64 << 30) as f64) as u64);

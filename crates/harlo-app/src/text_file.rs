@@ -1,5 +1,7 @@
 //! `TextFile`: one file loaded for the editor tab.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -76,7 +78,9 @@ pub struct TextFileRust {
     /// The file's stamp (modification time and size) as last loaded or saved.
     disk: Option<String>,
     /// A remote file's stamp now: the last one asked for, and whether a
-    /// fresh one is being asked for.
+    /// fresh one is being asked for (None: none asked yet; Some(None): the
+    /// file isn't there).
+    #[expect(clippy::option_option, reason = "not asked yet differs from asked and missing")]
     remote_now: Arc<Mutex<(Option<Option<String>>, bool)>>,
 }
 

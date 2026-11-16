@@ -1,6 +1,8 @@
 //! What a file's name says about editing it: its comment markers, whether
 //! a colon opens a block, and the indentation it uses.
 
+// Rust guideline compliant 2026-10-09
+
 fn name_of(path: &str) -> String {
     path.rsplit('/').next().unwrap_or("").to_lowercase()
 }

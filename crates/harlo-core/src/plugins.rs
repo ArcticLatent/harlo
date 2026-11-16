@@ -1,10 +1,13 @@
-//! `/plugin …` in either agent's session: Claude Code's plugins (and their
-//! marketplaces) installed and managed by its own `claude plugin …`
-//! command, which harlo runs in the session's folder, on the session's
-//! machine, instead of sending the words to the agent. Both agents use what
-//! it installs: Claude Code loads its plugins, and Harlo reads their skills
-//! (harlo-agent's `skills::plugin_folders`). The result shows in the
+//! `/plugin …` in either agent's session: Claude Code's plugins.
+//!
+//! Its plugins (and their marketplaces) are installed and managed by its own
+//! `claude plugin …` command, which harlo runs in the session's folder, on the
+//! session's machine, instead of sending the words to the agent. Both agents
+//! use what it installs: Claude Code loads its plugins, and Harlo reads their
+//! skills (harlo-agent's `skills::plugin_folders`). The result shows in the
 //! conversation as a notice ([`notice`], drawn from [`parse_notice`]).
+
+// Rust guideline compliant 2026-10-09
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -16,10 +19,11 @@ const TIMEOUT: Duration = Duration::from_secs(300);
 const SHOWN_LINES: usize = 80;
 const SHOWN_BYTES: usize = 16 * 1024;
 
-/// The words after `/plugin` (or `/plugins`, or `/marketplace …`, which is
-/// `/plugin marketplace …`), when `text` is one; `/plugin` alone lists
-/// what's installed. None: not one (or its quotes don't close: then it's
-/// for the agent, as typed).
+/// The words after `/plugin`, when `text` is one.
+///
+/// `/plugins` and `/marketplace …` (which is `/plugin marketplace …`) count
+/// too; `/plugin` alone lists what's installed. None: not one (or its quotes
+/// don't close: then it's for the agent, as typed).
 pub fn parse(text: &str) -> Option<Vec<String>> {
     let t = text.trim();
     let (name, rest) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
@@ -67,7 +71,8 @@ fn words(args: &[String]) -> (&'static str, &'static str, &'static str) {
 /// agent should start again to load it).
 pub fn changes(args: &[String]) -> bool {
     let a: Vec<&str> = args.iter().map(String::as_str).filter(|a| !a.starts_with('-')).collect();
-    !matches!(a.as_slice(), ["list", ..] | ["marketplace", "list", ..] | ["details" | "configure" | "eval" | "help" | "validate", ..] | ["marketplace", "help", ..]) && !args.iter().any(|a| a == "--help" || a == "-h")
+    !matches!(a.as_slice(), ["list" | "details" | "configure" | "eval" | "help" | "validate", ..] |
+["marketplace", "list" | "help", ..]) && !args.iter().any(|a| a == "--help" || a == "-h")
 }
 
 /// The command as shown.
@@ -258,7 +263,7 @@ mod tests {
     use super::*;
 
     fn v(a: &[&str]) -> Vec<String> {
-        a.iter().map(|s| s.to_string()).collect()
+        a.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

@@ -1,0 +1,6 @@
+# harlo's code is written with long lines: one call chain, struct literal or
+# signature per line while it fits in 160 columns. "Max" lets every kind of
+# expression use the whole width instead of rustfmt's smaller per-kind limits.
+style_edition = "2024"
+max_width = 160
+use_small_heuristics = "Max"

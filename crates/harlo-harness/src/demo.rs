@@ -26,6 +26,8 @@
 //! - Each prompt costs $0.25 (`get_session_stats`), for spending limits.
 //! - `get_messages` gives the messages it ended, as an agent does.
 
+// Rust guideline compliant 2026-10-09
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -36,6 +38,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::event::{BlockKind, HarnessEvent, HarnessKind};
 use crate::process::{Harness, Outgoing};
 
+#[expect(clippy::too_many_lines, reason = "the demo agent's whole script, read top to bottom")]
 pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Outgoing>();
     let (out, events_rx) = mpsc::unbounded_channel();
@@ -106,7 +109,13 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                     let n = seq.fetch_add(1, Ordering::Relaxed);
                     let _ = events.send(HarnessEvent::MessageEnd { id: format!("u{n}"), message: user_message(text) });
                     // "choose" first: the "Ask first" note mentions the ask tool.
-                    let request = if !text.contains("choose") {
+                    let request = if text.contains("choose") {
+                        json!({
+                            "type": "extension_ui_request", "id": format!("ui_{n}"), "method": "select", "title": "Pick a branch strategy",
+                            "options": ["Rebase", "Merge"],
+                            "optionDetails": [{ "description": "Linear history." }, { "description": "Keeps the merge commit." }]
+                        })
+                    } else {
                         json!({
                             "type": "extension_ui_request", "id": format!("ui_{n}"), "method": "ask", "timeout": 120000,
                             "questions": [
@@ -119,12 +128,6 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                                 { "id": "features", "header": "Scope", "question": "Which features go in the first release?", "multi": true,
                                   "options": [{ "label": "Search" }, { "label": "Sync" }, { "label": "Export" }] }
                             ]
-                        })
-                    } else {
-                        json!({
-                            "type": "extension_ui_request", "id": format!("ui_{n}"), "method": "select", "title": "Pick a branch strategy",
-                            "options": ["Rebase", "Merge"],
-                            "optionDetails": [{ "description": "Linear history." }, { "description": "Keeps the merge commit." }]
                         })
                     };
                     let _ = events.send(HarnessEvent::UiRequest(request));
@@ -184,7 +187,7 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                     if !name.is_empty() {
                         state["sessionName"] = json!(name);
                     }
-                    respond(state)
+                    respond(state);
                 }
                 "get_available_models" => respond(json!({ "models": DEMO_MODELS.iter().map(|(p, id, n, r)| json!({ "provider": p, "id": id, "name": n, "reasoning": r })).collect::<Vec<_>>() })),
                 "set_model" => match DEMO_MODELS.iter().find(|(p, id, _, _)| cmd["provider"] == *p && cmd["modelId"] == *id) {
@@ -196,11 +199,11 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                 },
                 "get_available_thinking_levels" => respond(json!({ "levels": ["off", "low", "medium", "high"] })),
                 "set_thinking_level" => {
-                    thinking = cmd["level"].as_str().unwrap_or("medium").to_owned();
+                    cmd["level"].as_str().unwrap_or("medium").clone_into(&mut thinking);
                     respond(Value::Null);
                 }
                 "set_session_name" => {
-                    name = cmd["name"].as_str().unwrap_or_default().to_owned();
+                    cmd["name"].as_str().unwrap_or_default().clone_into(&mut name);
                     respond(Value::Null);
                 }
                 // The list leaves out detached (background) subagents;
@@ -248,10 +251,10 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                     // "later": it starts after a while (a phone hangs up first, as
                     // the app does in the background).
                     let wait = Duration::from_secs(if text.contains("later") { 2 } else { 0 });
-                    let (events, seq, abort) = (events.clone(), seq.clone(), abort.clone());
+                    let (events, seq, abort) = (events.clone(), Arc::clone(&seq), Arc::clone(&abort));
                     tokio::spawn(async move {
                         tokio::time::sleep(wait).await;
-                        stream_answer(events, seq, abort, text, images, rate, ask).await
+                        stream_answer(events, seq, abort, text, images, rate, ask).await;
                     });
                 }
                 "abort" => {
@@ -360,7 +363,7 @@ async fn stream_answer(
     send(HarnessEvent::BlockStart { id: aid.clone(), index: 0, kind: BlockKind::Thinking, tool: None });
     for piece in pieces(thinking) {
         if abort.load(Ordering::Relaxed) {
-            return finish_aborted(&events, aid).await;
+            return finish_aborted(&events);
         }
         send(HarnessEvent::BlockDelta { id: aid.clone(), index: 0, kind: BlockKind::Thinking, delta: piece.to_owned() });
         tokio::time::sleep(tick).await;
@@ -406,7 +409,7 @@ async fn stream_answer(
     send(HarnessEvent::BlockStart { id: aid.clone(), index: 2, kind: BlockKind::Text, tool: None });
     for piece in pieces(&answer) {
         if abort.load(Ordering::Relaxed) {
-            return finish_aborted(&events, aid).await;
+            return finish_aborted(&events);
         }
         send(HarnessEvent::BlockDelta { id: aid.clone(), index: 2, kind: BlockKind::Text, delta: piece.to_owned() });
         tokio::time::sleep(tick).await;
@@ -423,7 +426,7 @@ async fn stream_answer(
     send(HarnessEvent::Settled);
 }
 
-async fn finish_aborted(events: &mpsc::UnboundedSender<HarnessEvent>, _aid: String) {
+fn finish_aborted(events: &mpsc::UnboundedSender<HarnessEvent>) {
     let _ = events.send(HarnessEvent::Notice { level: crate::event::NoticeLevel::Warning, text: "Aborted".into(), system: false });
     let _ = events.send(HarnessEvent::RunEnded);
     let _ = events.send(HarnessEvent::Settled);
@@ -496,7 +499,7 @@ async fn run_subagents(events: mpsc::UnboundedSender<HarnessEvent>, list: Arc<st
     };
     let scout = transcript("ScoutLark", "Find where the build flags are set.", "They are set in `build.rs` and `Cargo.toml` (`[profile.release]`).");
     let worker = transcript("BuildOtter", "Run the test suite and report failures.", "Running `cargo test`…");
-    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
     *list.lock().unwrap() = vec![
         json!({"id":"ScoutLark","index":0,"agent":"scout","agentSource":"bundled","detached":true,"description":"Locate the build flags","status":"running","task":"Find where the build flags are set.","sessionFile":scout,"lastUpdate":now(),"parentToolCallId":"demo-task","progress":{"currentTool":"grep","currentToolArgs":{"pattern":"opt-level"},"resolvedModel":"demo-small","toolCount":3}}),
         json!({"id":"BuildOtter","index":1,"agent":"task","agentSource":"bundled","description":"Run the tests","status":"running","task":"Run the test suite and report failures.","sessionFile":worker,"lastUpdate":now(),"parentToolCallId":"demo-task","progress":{"currentTool":"bash","currentToolArgs":{"command":"cargo test"},"resolvedModel":"demo-large","toolCount":1}}),
@@ -525,5 +528,5 @@ async fn run_subagents(events: mpsc::UnboundedSender<HarnessEvent>, list: Arc<st
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }

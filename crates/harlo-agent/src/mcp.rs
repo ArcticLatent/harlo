@@ -24,6 +24,9 @@
 //!   <name>` (`mcp_auth`); its token is sent from then on.
 //! - A command's server runs in its own process group, which goes with it.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -64,18 +67,18 @@ pub const CALL: &str = "mcp_call";
 /// A [`CALL`]'s `arguments`: an object, or one as a JSON string (some
 /// models send them so); none, `null` or an empty string are none. Any
 /// other value isn't sent: Err says what it was.
-fn call_arguments(v: &Value) -> Result<Value, String> {
+fn call_arguments(v: &Value) -> anyhow::Result<Value> {
     match v {
         Value::Null => Ok(json!({})),
         Value::Object(_) => Ok(v.clone()),
         Value::String(t) if t.trim().is_empty() => Ok(json!({})),
         Value::String(t) => match serde_json::from_str::<Value>(t) {
             Ok(o) if o.is_object() => Ok(o),
-            Ok(_) => Err("were a string holding JSON that isn't an object".into()),
-            Err(e) => Err(format!("were a string that isn't valid JSON ({e})")),
+            Ok(_) => Err(anyhow::Error::msg("were a string holding JSON that isn't an object")),
+            Err(e) => Err(anyhow::anyhow!("were a string that isn't valid JSON ({e})")),
         },
-        Value::Array(_) => Err("were a list".into()),
-        _ => Err(format!("were {v}, not an object")),
+        Value::Array(_) => Err(anyhow::Error::msg("were a list")),
+        _ => Err(anyhow::anyhow!("were {v}, not an object")),
     }
 }
 /// Past this many bytes of tool schemas (about 3k tokens: 20 tools of a
@@ -159,7 +162,7 @@ pub fn load(project: &Path) -> (Vec<Config>, Vec<String>) {
     let mut notes = Vec::new();
     // (`HARLO_AGENT_MCP_CONFIG`: another file instead, to try servers
     // without changing the settings.)
-    let global = std::env::var_os("HARLO_AGENT_MCP_CONFIG").map(PathBuf::from).unwrap_or_else(|| dir.join("mcp.json"));
+    let global = std::env::var_os("HARLO_AGENT_MCP_CONFIG").map_or_else(|| dir.join("mcp.json"), PathBuf::from);
     let mut entries: Vec<(String, Value)> = read_servers(&global, &mut notes);
     let project_file = project.join(".harlo/mcp.json");
     let approved = approved_for(&read_json(&dir.join("mcp-approved.json")).unwrap_or(Value::Null), project);
@@ -196,8 +199,7 @@ fn approved_for(all: &Value, project: &Path) -> Value {
         .into_iter()
         .flatten()
         .find(|(k, _)| Path::new(k) == project || (real.is_some() && std::fs::canonicalize(k).ok() == real))
-        .map(|(_, v)| v.clone())
-        .unwrap_or(Value::Null)
+        .map_or(Value::Null, |(_, v)| v.clone())
 }
 
 fn read_json(path: &Path) -> Option<Value> {
@@ -240,14 +242,20 @@ pub fn entry_hash(entry: &Value) -> String {
 }
 
 fn pairs(v: &Value) -> Vec<(String, String)> {
-    v.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))).collect()).unwrap_or_default()
+    v.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().map_or_else(|| v.to_string(), str::to_owned))).collect()).unwrap_or_default()
 }
 
 /// An entry as a server to start (its values expanded).
-fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
+fn parse(name: &str, v: &Value, project: &Path) -> anyhow::Result<Config> {
+    parse_with(name, v, project, &|name| std::env::var(name).ok())
+}
+
+/// Parses an entry as [`parse`] does, looking variables up with `var`.
+fn parse_with(name: &str, v: &Value, project: &Path, var: &dyn Fn(&str) -> Option<String>) -> anyhow::Result<Config> {
+    let expand = |value: &str| expand_with(value, var);
     let ty = v["type"].as_str().unwrap_or_default();
     let url = v["url"].as_str().unwrap_or_default();
-    let timeout = v["timeout"].as_f64().filter(|t| *t > 0.0).map(Duration::from_secs_f64).unwrap_or(START_TIMEOUT);
+    let timeout = v["timeout"].as_f64().filter(|t| *t > 0.0).map_or(START_TIMEOUT, Duration::from_secs_f64);
     let env = pairs(&v["env"]).into_iter().map(|(k, val)| (k, expand(&val))).collect();
     let cwd = v["cwd"].as_str().filter(|c| !c.trim().is_empty()).map(|c| {
         let c = expand(c.trim());
@@ -257,7 +265,7 @@ fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
     let kind = if matches!(ty, "http" | "streamable-http" | "sse") || (ty.is_empty() && !url.is_empty() && v.get("command").is_none()) {
         let url = expand(url.trim());
         if !(url.starts_with("http://") || url.starts_with("https://")) {
-            return Err("its url isn't an http:// or https:// address.".into());
+            return Err(anyhow::Error::msg("its url isn't an http:// or https:// address."));
         }
         let headers = pairs(&v["headers"]).into_iter().map(|(k, val)| (k, expand(&val))).collect();
         if ty == "sse" { Kind::Sse { url, headers } } else { Kind::Http { url, headers } }
@@ -270,7 +278,7 @@ fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
         words.extend(v["args"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_owned)));
         let mut words = words.into_iter().map(|w| expand(&w));
         let Some(program) = words.next().filter(|p| !p.trim().is_empty()) else {
-            return Err("it has no command (or url).".into());
+            return Err(anyhow::Error::msg("it has no command (or url)."));
         };
         Kind::Stdio { program, args: words.collect() }
     };
@@ -280,6 +288,11 @@ fn parse(name: &str, v: &Value, project: &Path) -> Result<Config, String> {
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
 /// `!command` is that command's output.
 pub fn expand(value: &str) -> String {
+    expand_with(value, &|name| std::env::var(name).ok())
+}
+
+/// Expands `value` as [`expand`] does, looking variables up with `var`.
+fn expand_with(value: &str, var: &dyn Fn(&str) -> Option<String>) -> String {
     if let Some(cmd) = value.strip_prefix('!') {
         let out = std::process::Command::new("sh").arg("-c").arg(cmd).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output();
         return out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
@@ -294,7 +307,7 @@ pub fn expand(value: &str) -> String {
         };
         let inner = &rest[start + 2..start + end];
         let (name, default) = inner.split_once(":-").unwrap_or((inner, ""));
-        out.push_str(&std::env::var(name).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| default.to_owned()));
+        out.push_str(&var(name).filter(|v| !v.is_empty()).unwrap_or_else(|| default.to_owned()));
         rest = &rest[start + end + 1..];
     }
     out.push_str(rest);
@@ -367,18 +380,16 @@ pub fn stop_all() {
         return;
     }
     for g in &groups {
-        // SAFETY: signalling process groups this process started.
-        unsafe { libc::killpg(*g, libc::SIGTERM) };
+        crate::sys::signal_group(*g, libc::SIGTERM);
     }
-    let alive = |g: i32| unsafe { libc::killpg(g, 0) } == 0;
     for _ in 0..20 {
-        if !groups.iter().any(|g| alive(*g)) {
+        if !groups.iter().any(|g| crate::sys::group_alive(*g)) {
             return;
         }
         std::thread::sleep(Duration::from_millis(25));
     }
     for g in groups {
-        unsafe { libc::killpg(g, libc::SIGKILL) };
+        crate::sys::signal_group(g, libc::SIGKILL);
     }
 }
 
@@ -399,8 +410,7 @@ struct Stdio {
 impl Drop for Stdio {
     fn drop(&mut self) {
         GROUPS.lock().unwrap().retain(|g| *g != self.group);
-        // SAFETY: its own process group.
-        unsafe { libc::killpg(self.group, libc::SIGTERM) };
+        crate::sys::signal_group(self.group, libc::SIGTERM);
     }
 }
 
@@ -423,18 +433,18 @@ fn answer(msg: &Value, project: &Path) -> Value {
 }
 
 impl Stdio {
-    fn start(c: &Config, program: &str, args: &[String], project: &Path, changed: Arc<AtomicBool>) -> Result<Self, String> {
+    fn start(c: &Config, program: &str, args: &[String], project: &Path, changed: Arc<AtomicBool>) -> anyhow::Result<Self> {
         let mut cmd = Command::new(program);
         cmd.args(args)
             .envs(c.env.iter().map(|(k, v)| (k, v)))
-            .current_dir(c.cwd.as_deref().map(PathBuf::from).unwrap_or_else(|| project.to_owned()))
+            .current_dir(c.cwd.as_deref().map_or_else(|| project.to_owned(), PathBuf::from))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .process_group(0)
             .kill_on_drop(true);
-        let mut child = cmd.spawn().map_err(|e| format!("couldn't start {program}: {e}"))?;
-        let group = child.id().map_or(0, |p| p as i32);
+        let mut child = cmd.spawn().map_err(|e| anyhow::anyhow!("couldn't start {program}: {e}"))?;
+        let group = child.id().map_or(0, |p| i32::try_from(p).unwrap_or(i32::MAX));
         GROUPS.lock().unwrap().push(group);
         let stdin = Arc::new(tokio::sync::Mutex::new(child.stdin.take().unwrap()));
         let stdout = child.stdout.take().unwrap();
@@ -443,7 +453,7 @@ impl Stdio {
         let stderr: Arc<Mutex<VecDeque<String>>> = Arc::default();
         let gone = Arc::new(AtomicBool::new(false));
         {
-            let stderr = stderr.clone();
+            let stderr = Arc::clone(&stderr);
             tokio::spawn(async move {
                 let mut buf = Vec::new();
                 let _ = err.read_to_end(&mut buf).await.ok();
@@ -455,10 +465,10 @@ impl Stdio {
                     }
                     s.push_back(l.chars().take(300).collect());
                 }
-            });
-        }
+            })
+        };
         {
-            let (pending, stdin, gone, project) = (pending.clone(), stdin.clone(), gone.clone(), project.to_owned());
+            let (pending, stdin, gone, project) = (Arc::clone(&pending), Arc::clone(&stdin), Arc::clone(&gone), project.to_owned());
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -482,8 +492,8 @@ impl Stdio {
                 gone.store(true, Ordering::Relaxed);
                 // (Those waiting hear it's gone.)
                 pending.lock().unwrap().clear();
-            });
-        }
+            })
+        };
         Ok(Stdio { stdin, pending, next: AtomicU64::new(1), group, stderr, gone, _child: child })
     }
 
@@ -492,28 +502,28 @@ impl Stdio {
         if tail.is_empty() { "it stopped".into() } else { format!("it stopped: {}", tail.join(" / ")) }
     }
 
-    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> anyhow::Result<Value> {
         if self.gone.load(Ordering::Relaxed) {
-            return Err(self.why_gone());
+            return Err(anyhow::Error::msg(self.why_gone()));
         }
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
         // Dropped before its answer (Stop): the server is told.
-        let mut guard = CancelOnDrop { stdin: Some(self.stdin.clone()), pending: self.pending.clone(), id };
-        write_line(&self.stdin, &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })).await.map_err(|_| self.why_gone())?;
+        let mut guard = CancelOnDrop { stdin: Some(Arc::clone(&self.stdin)), pending: Arc::clone(&self.pending), id };
+        write_line(&self.stdin, &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })).await.ok().ok_or_else(|| anyhow::Error::msg(self.why_gone()))?;
         let answer = tokio::time::timeout(timeout, rx).await;
         guard.stdin = None;
         self.pending.lock().unwrap().remove(&id);
         match answer {
-            Err(_) => Err(format!("no answer to {method} in {} s", timeout.as_secs())),
+            Err(_) => Err(anyhow::anyhow!("no answer to {method} in {} s", timeout.as_secs())),
             Ok(Err(_)) => {
                 // (Its last words may still be coming.)
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                Err(self.why_gone())
+                Err(anyhow::Error::msg(self.why_gone()))
             }
             Ok(Ok(msg)) => match msg.get("error") {
-                Some(e) => Err(e["message"].as_str().unwrap_or("an error").to_owned()),
+                Some(e) => Err(anyhow::Error::msg(e["message"].as_str().unwrap_or("an error").to_owned())),
                 None => Ok(msg["result"].clone()),
             },
         }
@@ -556,21 +566,21 @@ struct Http {
 }
 
 impl Http {
-    fn new(name: &str, url: &str, headers: &[(String, String)], changed: Arc<AtomicBool>) -> Result<Self, String> {
-        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+    fn new(name: &str, url: &str, headers: &[(String, String)], changed: Arc<AtomicBool>) -> anyhow::Result<Self> {
+        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).build()?;
         Ok(Http { client, name: name.to_owned(), url: url.to_owned(), headers: headers.to_vec(), session: Mutex::new(None), protocol: Mutex::new(PROTOCOL.into()), next: AtomicU64::new(1), changed })
     }
 
     /// Sends a message; the answer to it (None for a notification). With a
     /// sign-in, its token goes along (refreshed once if it's refused).
-    async fn post(&self, body: &Value, timeout: Duration) -> Result<Option<Value>, String> {
+    async fn post(&self, body: &Value, timeout: Duration) -> anyhow::Result<Option<Value>> {
         let mut force = false;
         loop {
             let token = signed_in(&self.url, &self.headers, force).await;
             match self.post_with(body, timeout, token.as_deref()).await {
                 Err(Fail::Refused(_)) if token.is_some() && !force => force = true,
-                Err(Fail::Refused(status)) => return Err(signin_needed(&self.name, &self.url, status, token.is_some())),
-                Err(Fail::Other(e)) => return Err(e),
+                Err(Fail::Refused(status)) => return Err(anyhow::Error::msg(signin_needed(&self.name, &self.url, status, token.is_some()))),
+                Err(Fail::Other(e)) => return Err(anyhow::Error::msg(e)),
                 Ok(r) => return Ok(r),
             }
         }
@@ -593,7 +603,7 @@ impl Http {
         if let Some(t) = token {
             req = req.bearer_auth(t);
         }
-        let resp = req.body(body.to_string()).send().await.map_err(|e| format!("couldn't reach {}: {}", self.url, root_cause(&e)))?;
+        let resp = req.body(body.to_string()).send().await.map_err(|e| anyhow::anyhow!("couldn't reach {}: {}", self.url, root_cause(&e)))?;
         let status = resp.status().as_u16();
         if status == 401 || status == 403 {
             return Err(Fail::Refused(status));
@@ -608,18 +618,18 @@ impl Http {
         if !(200..300).contains(&status) {
             let text = resp.text().await.unwrap_or_default();
             let detail: String = text.trim().chars().take(200).collect();
-            return Err(format!("HTTP {status} from {}{}", self.url, if detail.is_empty() { String::new() } else { format!(": {detail}") }).into());
+            return Err(anyhow::anyhow!("HTTP {status} from {}{}", self.url, if detail.is_empty() { String::new() } else { format!(": {detail}") }).into());
         }
         let mine = |v: &Value| v["id"] == body["id"] && v.get("method").is_none();
         if !stream {
-            let v: Value = resp.json().await.map_err(|e| format!("its answer wasn't JSON: {e}"))?;
+            let v: Value = resp.json().await.map_err(|e| anyhow::anyhow!("its answer wasn't JSON: {e}"))?;
             return Ok(Some(v));
         }
         // An event stream: read until the answer comes (it may stay open).
         let mut bytes = resp.bytes_stream();
         let mut buf = String::new();
         while let Some(chunk) = bytes.next().await {
-            let chunk = chunk.map_err(|e| format!("reading its answer: {}", root_cause(&e)))?;
+            let chunk = chunk.map_err(|e| anyhow::anyhow!("reading its answer: {}", root_cause(&e)))?;
             buf.push_str(&String::from_utf8_lossy(&chunk));
             buf = buf.replace("\r\n", "\n");
             while let Some(end) = buf.find("\n\n") {
@@ -638,11 +648,11 @@ impl Http {
         Err(Fail::Other("its answer ended before it said anything".into()))
     }
 
-    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> anyhow::Result<Value> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let msg = self.post(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }), timeout).await?.unwrap_or_default();
         match msg.get("error") {
-            Some(e) => Err(e["message"].as_str().unwrap_or("an error").to_owned()),
+            Some(e) => Err(anyhow::Error::msg(e["message"].as_str().unwrap_or("an error").to_owned())),
             None => Ok(msg["result"].clone()),
         }
     }
@@ -686,7 +696,7 @@ fn sse_events(buf: &mut String) -> Vec<(String, String)> {
         let mut data = Vec::new();
         for l in block.lines() {
             if let Some(e) = l.strip_prefix("event:") {
-                event = e.trim().to_owned();
+                e.trim().clone_into(&mut event);
             } else if let Some(d) = l.strip_prefix("data:") {
                 data.push(d.strip_prefix(' ').unwrap_or(d).to_owned());
             }
@@ -699,8 +709,8 @@ fn sse_events(buf: &mut String) -> Vec<(String, String)> {
 }
 
 impl Sse {
-    async fn start(name: &str, url: &str, headers: &[(String, String)], project: &Path, changed: Arc<AtomicBool>) -> Result<Self, String> {
-        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+    async fn start(name: &str, url: &str, headers: &[(String, String)], project: &Path, changed: Arc<AtomicBool>) -> anyhow::Result<Self> {
+        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).build()?;
         let mut force = false;
         let (resp, token) = loop {
             let token = signed_in(url, headers, force).await;
@@ -711,27 +721,27 @@ impl Sse {
             if let Some(t) = &token {
                 req = req.bearer_auth(t);
             }
-            let resp = req.send().await.map_err(|e| format!("couldn't reach {url}: {}", root_cause(&e)))?;
+            let resp = req.send().await.map_err(|e| anyhow::anyhow!("couldn't reach {url}: {}", root_cause(&e)))?;
             let status = resp.status().as_u16();
             if status == 401 || status == 403 {
                 if token.is_some() && !force {
                     force = true;
                     continue;
                 }
-                return Err(signin_needed(name, url, status, token.is_some()));
+                return Err(anyhow::Error::msg(signin_needed(name, url, status, token.is_some())));
             }
             break (resp, token);
         };
         let status = resp.status().as_u16();
         if !(200..300).contains(&status) {
-            return Err(format!("HTTP {status} from {url}"));
+            return Err(anyhow::anyhow!("HTTP {status} from {url}"));
         }
         let base = resp.url().clone();
         let (tx, endpoint) = tokio::sync::watch::channel(None);
         let pending: Pending = Arc::default();
         let gone: Arc<Mutex<Option<String>>> = Arc::default();
         let reader = {
-            let (pending, gone, client, headers, project, bearer) = (pending.clone(), gone.clone(), client.clone(), headers.to_vec(), project.to_owned(), token.clone());
+            let (pending, gone, client, headers, project, bearer) = (Arc::clone(&pending), Arc::clone(&gone), client.clone(), headers.to_vec(), project.to_owned(), token.clone());
             tokio::spawn(async move {
                 let mut bytes = resp.bytes_stream();
                 let mut buf = String::new();
@@ -788,17 +798,17 @@ impl Sse {
     }
 
     /// Where to POST: once the stream has said (within `timeout`).
-    async fn endpoint(&self, timeout: Duration) -> Result<String, String> {
+    async fn endpoint(&self, timeout: Duration) -> anyhow::Result<String> {
         let mut rx = self.endpoint.clone();
         let got = tokio::time::timeout(timeout, rx.wait_for(Option::is_some)).await;
         match got {
             Ok(Ok(v)) => Ok(v.clone().unwrap_or_default()),
-            Ok(Err(_)) => Err(self.why_gone().unwrap_or_else(|| "its stream ended".into())),
-            Err(_) => Err(format!("{} didn't say where to send messages within {} s", self.url, timeout.as_secs())),
+            Ok(Err(_)) => Err(anyhow::Error::msg(self.why_gone().unwrap_or_else(|| "its stream ended".into()))),
+            Err(_) => Err(anyhow::anyhow!("{} didn't say where to send messages within {} s", self.url, timeout.as_secs())),
         }
     }
 
-    async fn post(&self, body: &Value, timeout: Duration) -> Result<(), String> {
+    async fn post(&self, body: &Value, timeout: Duration) -> anyhow::Result<()> {
         let to = self.endpoint(timeout).await?;
         let mut req = self.client.post(&to).timeout(timeout.min(Duration::from_secs(60))).header("Content-Type", "application/json");
         for (k, v) in &self.headers {
@@ -808,26 +818,26 @@ impl Sse {
         if let Some(t) = &token {
             req = req.bearer_auth(t);
         }
-        let resp = req.body(body.to_string()).send().await.map_err(|e| format!("couldn't reach {to}: {}", root_cause(&e)))?;
+        let resp = req.body(body.to_string()).send().await.map_err(|e| anyhow::anyhow!("couldn't reach {to}: {}", root_cause(&e)))?;
         let status = resp.status().as_u16();
         if status == 401 || status == 403 {
             // (A token refreshed meanwhile, for the next message.)
             if token.is_some() {
                 *self.token.lock().unwrap() = signed_in(&self.url, &self.headers, true).await;
             }
-            return Err(signin_needed(&self.name, &self.url, status, token.is_some()));
+            return Err(anyhow::Error::msg(signin_needed(&self.name, &self.url, status, token.is_some())));
         }
         if !(200..300).contains(&status) {
             let text = resp.text().await.unwrap_or_default();
             let detail: String = text.trim().chars().take(200).collect();
-            return Err(format!("HTTP {status} from {to}{}", if detail.is_empty() { String::new() } else { format!(": {detail}") }));
+            return Err(anyhow::anyhow!("HTTP {status} from {to}{}", if detail.is_empty() { String::new() } else { format!(": {detail}") }));
         }
         Ok(())
     }
 
-    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> anyhow::Result<Value> {
         if let Some(why) = self.why_gone() {
-            return Err(why);
+            return Err(anyhow::Error::msg(why));
         }
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
@@ -839,13 +849,13 @@ impl Sse {
                 self.0.lock().unwrap().remove(&self.1);
             }
         }
-        let _forget = Forget(self.pending.clone(), id);
+        let _forget = Forget(Arc::clone(&self.pending), id);
         self.post(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }), timeout).await?;
         match tokio::time::timeout(timeout, rx).await {
-            Err(_) => Err(format!("no answer to {method} in {} s", timeout.as_secs())),
-            Ok(Err(_)) => Err(self.why_gone().unwrap_or_else(|| "its stream ended".into())),
+            Err(_) => Err(anyhow::anyhow!("no answer to {method} in {} s", timeout.as_secs())),
+            Ok(Err(_)) => Err(anyhow::Error::msg(self.why_gone().unwrap_or_else(|| "its stream ended".into()))),
             Ok(Ok(msg)) => match msg.get("error") {
-                Some(e) => Err(e["message"].as_str().unwrap_or("an error").to_owned()),
+                Some(e) => Err(anyhow::Error::msg(e["message"].as_str().unwrap_or("an error").to_owned())),
                 None => Ok(msg["result"].clone()),
             },
         }
@@ -866,6 +876,12 @@ enum Fail {
 impl From<String> for Fail {
     fn from(s: String) -> Self {
         Fail::Other(s)
+    }
+}
+
+impl From<anyhow::Error> for Fail {
+    fn from(e: anyhow::Error) -> Self {
+        Fail::Other(format!("{e:#}"))
     }
 }
 
@@ -899,7 +915,7 @@ enum Conn {
 }
 
 impl Conn {
-    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> anyhow::Result<Value> {
         match self {
             Conn::Stdio(s) => s.request(method, params, timeout).await,
             Conn::Http(h) => h.request(method, params, timeout).await,
@@ -931,7 +947,7 @@ struct Server {
     note: String,
 }
 
-async fn list_tools(conn: &Conn, timeout: Duration) -> Result<Vec<Value>, String> {
+async fn list_tools(conn: &Conn, timeout: Duration) -> anyhow::Result<Vec<Value>> {
     let mut tools = Vec::new();
     let mut cursor: Option<String> = None;
     for _ in 0..50 {
@@ -949,19 +965,19 @@ async fn list_tools(conn: &Conn, timeout: Duration) -> Result<Vec<Value>, String
     Ok(tools)
 }
 
-async fn start(c: Config, project: PathBuf) -> Result<Server, String> {
+async fn start(c: Config, project: PathBuf) -> anyhow::Result<Server> {
     let changed = Arc::new(AtomicBool::new(false));
     let conn = match &c.kind {
-        Kind::Stdio { program, args } => Conn::Stdio(Stdio::start(&c, program, args, &project, changed.clone())?),
-        Kind::Http { url, headers } => Conn::Http(Http::new(&c.name, url, headers, changed.clone())?),
-        Kind::Sse { url, headers } => Conn::Sse(tokio::time::timeout(c.timeout, Sse::start(&c.name, url, headers, &project, changed.clone())).await.map_err(|_| format!("it didn't answer within {} s", c.timeout.as_secs()))??),
+        Kind::Stdio { program, args } => Conn::Stdio(Stdio::start(&c, program, args, &project, Arc::clone(&changed))?),
+        Kind::Http { url, headers } => Conn::Http(Http::new(&c.name, url, headers, Arc::clone(&changed))?),
+        Kind::Sse { url, headers } => Conn::Sse(tokio::time::timeout(c.timeout, Sse::start(&c.name, url, headers, &project, Arc::clone(&changed))).await.ok().ok_or_else(|| anyhow::anyhow!("it didn't answer within {} s", c.timeout.as_secs()))??),
     };
     let init = json!({ "protocolVersion": PROTOCOL, "capabilities": { "roots": {} }, "clientInfo": { "name": "harlo-agent", "version": env!("CARGO_PKG_VERSION") } });
     // (The whole start within its timeout, said as that.)
     let ready = async {
         let r = conn.request("initialize", init, CALL_TIMEOUT).await?;
         if let (Conn::Http(h), Some(v)) = (&conn, r["protocolVersion"].as_str()) {
-            *h.protocol.lock().unwrap() = v.to_owned();
+            v.clone_into(&mut h.protocol.lock().unwrap());
         }
         conn.notify("notifications/initialized").await;
         let caps = &r["capabilities"];
@@ -970,9 +986,9 @@ async fn start(c: Config, project: PathBuf) -> Result<Server, String> {
         let tools = if resources && !caps["tools"].is_object() { Vec::new() } else { list_tools(&conn, CALL_TIMEOUT).await? };
         let note = r["instructions"].as_str().unwrap_or_default().trim();
         let note = if note.len() > NOTE_MAX { format!("{}…", &note[..note.floor_char_boundary(NOTE_MAX)]) } else { note.to_owned() };
-        Ok::<_, String>((tools, resources, note))
+        Ok::<_, anyhow::Error>((tools, resources, note))
     };
-    let (tools, resources, note) = tokio::time::timeout(c.timeout, ready).await.map_err(|_| format!("it didn't answer within {} s", c.timeout.as_secs()))??;
+    let (tools, resources, note) = tokio::time::timeout(c.timeout, ready).await.ok().ok_or_else(|| anyhow::anyhow!("it didn't answer within {} s", c.timeout.as_secs()))??;
     Ok(Server { name: c.name, conn, tools, changed, timeout: c.timeout, read_only: c.read_only, resources, hidden: c.hidden, note })
 }
 
@@ -1149,7 +1165,7 @@ impl Mcp {
                 if words.is_empty() {
                     return Some((0, t));
                 }
-                let score: usize = words.iter().map(|w| if name.contains(w) { 3 } else if about.contains(w) { 1 } else { 0 }).sum();
+                let score: usize = words.iter().map(|w| if name.contains(w) { 3 } else { usize::from(about.contains(w)) }).sum();
                 let exact = name == query.trim() || name.ends_with(&format!("__{}", query.trim()));
                 (score > 0 || exact).then_some((score + if exact { 100 } else { 0 }, t))
             })
@@ -1173,7 +1189,7 @@ impl Mcp {
     pub fn notes(&self) -> String {
         let mut out = String::new();
         for s in self.servers.iter().filter(|s| !s.note.is_empty()) {
-            out.push_str(&format!("\n<mcp_server name=\"{}\">\n{}\n</mcp_server>\n", s.name, s.note));
+            let _ = write!(out, "\n<mcp_server name=\"{}\">\n{}\n</mcp_server>\n", s.name, s.note);
         }
         if self.listed {
             // (Their names only, by server: what each does comes with a search.)
@@ -1193,7 +1209,7 @@ impl Mcp {
                 let shown = list.len().min(left);
                 left -= shown;
                 let more = if shown < list.len() { format!(" (and {} more)", list.len() - shown) } else { String::new() };
-                out.push_str(&format!("\n- {server}: {}{more}", list[..shown].join(", ")));
+                let _ = write!(out, "\n- {server}: {}{more}", list[..shown].join(", "));
             }
             out.push_str("\n</mcp_tools>\n");
         }
@@ -1236,7 +1252,7 @@ impl Mcp {
         if due.is_empty() {
             return notes;
         }
-        let mut still = Due(due.iter().map(|&i| self.servers[i].changed.clone()).collect());
+        let mut still = Due(due.iter().map(|&i| Arc::clone(&self.servers[i].changed)).collect());
         let mut listed = Vec::new();
         let mut failed = Vec::new();
         for &i in &due {
@@ -1245,7 +1261,7 @@ impl Mcp {
                 Ok(t) => listed.push((i, t)),
                 Err(e) => {
                     notes.push(format!("MCP server {}: couldn't list its tools again: {e}", s.name));
-                    failed.push(s.changed.clone());
+                    failed.push(Arc::clone(&s.changed));
                 }
             }
         }
@@ -1387,15 +1403,15 @@ fn resource_row(x: &Value, key: &str) -> String {
     let mut row = s(key).to_owned();
     let name = if s("title").is_empty() { s("name") } else { s("title") };
     if !name.is_empty() && name != s(key) {
-        row.push_str(&format!("  {name}"));
+        let _ = write!(row, "  {name}");
     }
     if !s("mimeType").is_empty() {
-        row.push_str(&format!(" ({})", s("mimeType")));
+        let _ = write!(row, " ({})", s("mimeType"));
     }
     let about = s("description").lines().next().unwrap_or_default();
     if !about.is_empty() {
         let about: String = if about.chars().count() > 120 { format!("{}…", about.chars().take(120).collect::<String>()) } else { about.to_owned() };
-        row.push_str(&format!(": {about}"));
+        let _ = write!(row, ": {about}");
     }
     row
 }
@@ -1408,10 +1424,10 @@ mod tests {
     /// none; anything else isn't sent.
     #[test]
     fn call_arguments_are_an_object_or_not_sent() {
-        assert_eq!(call_arguments(&json!({"a": 1})), Ok(json!({"a": 1})));
-        assert_eq!(call_arguments(&json!("{\"a\": 1}")), Ok(json!({"a": 1})));
+        assert_eq!(call_arguments(&json!({"a": 1})).unwrap(), json!({"a": 1}));
+        assert_eq!(call_arguments(&json!("{\"a\": 1}")).unwrap(), json!({"a": 1}));
         for none in [Value::Null, json!(""), json!("  ")] {
-            assert_eq!(call_arguments(&none), Ok(json!({})), "{none}");
+            assert_eq!(call_arguments(&none).unwrap(), json!({}), "{none}");
         }
         for bad in [json!("{\"text\":"), json!("[1]"), json!([1]), json!(3), json!(true)] {
             assert!(call_arguments(&bad).is_err(), "{bad}");
@@ -1442,9 +1458,8 @@ mod tests {
     #[test]
     fn parses_entries() {
         let p = Path::new("/proj");
-        // SAFETY: a variable no other test reads.
-        unsafe { std::env::set_var("HARLO_MCP_TEST_TOKEN", "t0k") };
-        let c = parse("gh", &json!({ "type": "http", "url": "https://x.test/mcp", "headers": { "Authorization": "Bearer ${HARLO_MCP_TEST_TOKEN}" } }), p).unwrap();
+        let var = |name: &str| (name == "HARLO_MCP_TEST_TOKEN").then(|| "t0k".to_owned());
+        let c = parse_with("gh", &json!({ "type": "http", "url": "https://x.test/mcp", "headers": { "Authorization": "Bearer ${HARLO_MCP_TEST_TOKEN}" } }), p, &var).unwrap();
         assert_eq!(c.kind, Kind::Http { url: "https://x.test/mcp".into(), headers: vec![("Authorization".into(), "Bearer t0k".into())] });
         let c = parse("fs", &json!({ "command": "npx", "args": ["-y", "srv", "${HARLO_NOPE:-.}"], "cwd": "tools", "timeout": 5 }), p).unwrap();
         assert_eq!(c.kind, Kind::Stdio { program: "npx".into(), args: vec!["-y".into(), "srv".into(), ".".into()] });
@@ -1453,8 +1468,8 @@ mod tests {
         assert!(matches!(parse("u", &json!({ "url": "http://h/mcp" }), p).unwrap().kind, Kind::Http { .. }));
         assert_eq!(parse("o", &json!({ "command": ["srv", "--x"] }), p).unwrap().kind, Kind::Stdio { program: "srv".into(), args: vec!["--x".into()] });
         assert_eq!(parse("s", &json!({ "type": "sse", "url": "http://h/sse" }), p).unwrap().kind, Kind::Sse { url: "http://h/sse".into(), headers: vec![] });
-        assert!(parse("n", &json!({}), p).unwrap_err().contains("no command"));
-        assert!(parse("b", &json!({ "type": "http", "url": "ftp://h" }), p).is_err());
+        assert!(parse("n", &json!({}), p).unwrap_err().to_string().contains("no command"));
+        parse("b", &json!({ "type": "http", "url": "ftp://h" }), p).unwrap_err();
         // Tools said to only look: all, some, or none.
         assert_eq!(parse("a", &json!({ "command": "srv", "readOnly": true }), p).unwrap().read_only, ReadOnly::All);
         let some = parse("t", &json!({ "command": "srv", "readOnly": ["get_scene", "render_preview"] }), p).unwrap().read_only;
@@ -1495,7 +1510,7 @@ mod tests {
         assert_eq!(images.len(), 2);
         assert_eq!((images[0]["type"].as_str(), images[0]["mimeType"].as_str(), images[0]["data"].as_str()), (Some("image"), Some("image/png"), Some(dot)));
         assert_eq!(result_text(&json!({ "content": [], "structuredContent": { "n": 1 } })), ("{\"n\":1}".into(), false, vec![]));
-        assert_eq!(result_text(&json!({ "content": [], "isError": true })).1, true);
+        assert!(result_text(&json!({ "content": [], "isError": true })).1);
         assert_eq!(result_text(&json!({ "content": [] })).0, "(no output)");
     }
 

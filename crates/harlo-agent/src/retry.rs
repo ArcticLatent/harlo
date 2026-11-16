@@ -6,6 +6,8 @@
 //! again). A refusal that won't change (a bad request, the sign-in, the
 //! context too long, the plan used up) isn't retried.
 
+// Rust guideline compliant 2026-10-09
+
 use std::time::Duration;
 
 use crate::responses::{ApiError, Dropped, Failed};
@@ -34,6 +36,7 @@ const PASSING: &[&str] = &[
 
 /// The wait a server asked for, in seconds: `retry-after-ms`, or
 /// `Retry-After` as seconds or as a date.
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     let text = |k| headers.get(k).and_then(|v| v.to_str().ok()).map(str::trim);
     if let Some(ms) = text("retry-after-ms").and_then(|v| v.parse::<f64>().ok()).filter(|ms| ms.is_finite() && *ms >= 0.0) {
@@ -50,7 +53,7 @@ pub fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 /// [`MAX_WAIT`]: the request isn't sent again, and when to try.
 pub fn not_waiting(secs: u64, now: i64) -> String {
     let wait = crate::responses::span(Duration::from_secs(secs));
-    let at = crate::clock::local(now + secs as i64);
+    let at = crate::clock::local(now + i64::try_from(secs).unwrap_or(i64::MAX));
     let day = if secs >= 20 * 3600 { format!("{:04}-{:02}-{:02} ", at.year, at.month, at.day) } else { String::new() };
     format!("Not retried: the server asked to wait {wait}; try again after {day}{:02}:{:02}", at.hour, at.minute)
 }
@@ -88,6 +91,7 @@ pub fn transient(e: &anyhow::Error) -> Option<(&'static str, Option<u64>)> {
 
 /// Whether `e` says the plan (or the account's quota) is used up, and
 /// when it resets (unix seconds), if it said.
+#[expect(clippy::option_option, reason = "None: not used up; Some(None): used up, no reset time given")]
 pub fn used_up(e: &anyhow::Error) -> Option<Option<i64>> {
     if let Some(a) = e.downcast_ref::<ApiError>() {
         return USED_UP.contains(&a.code.as_str()).then_some(a.resets_at);

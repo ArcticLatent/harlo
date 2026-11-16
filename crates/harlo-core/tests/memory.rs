@@ -3,6 +3,8 @@
 //! These count what's allocated, so they fail the moment a reader goes back to
 //! holding a whole file or every line of one.
 
+// Rust guideline compliant 2026-10-09
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,10 +24,14 @@ unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
         PEAK.fetch_max(live, Ordering::Relaxed);
+        // SAFETY: the caller's contract for `alloc` (a non-zero-size layout)
+        // is passed on unchanged to the system allocator.
         unsafe { System.alloc(layout) }
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        // SAFETY: `ptr` came from `alloc`/`realloc` above with `layout`, so it
+        // was the system allocator's, as `dealloc` requires.
         unsafe { System.dealloc(ptr, layout) }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
@@ -35,6 +41,8 @@ unsafe impl GlobalAlloc for Counting {
         } else {
             LIVE.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
         }
+        // SAFETY: `ptr` and `layout` are the system allocator's (see above),
+        // and the caller's contract for `new_size` is passed on unchanged.
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }

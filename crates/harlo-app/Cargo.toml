@@ -1,8 +1,12 @@
 [package]
 name = "harlo-app"
+description = "harlo's desktop app: the Qt window, its panels, and the phone server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "harlo"
@@ -15,31 +19,38 @@ harlo-harness.workspace = true
 harlo-code.workspace = true
 cxx.workspace = true
 cxx-qt.workspace = true
-cxx-qt-lib.workspace = true
+cxx-qt-lib = { workspace = true, features = ["qt_full"] }
 anyhow.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }
 tracing.workspace = true
-tracing-subscriber.workspace = true
+tracing-subscriber = { workspace = true, features = ["ansi", "env-filter", "fmt", "smallvec", "std", "tracing-log"] }
 # Phone access: its web app and encrypted WebSocket, and the pairing QR code.
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
-base64 = "0.22"
+axum = { workspace = true, features = ["http1", "tokio", "ws"] }
+qrcode = { workspace = true, features = ["svg"] }
+base64.workspace = true
 # Mermaid diagrams in the chat, drawn without a browser (diagrams.rs).
-merman = { version = "0.9.3", features = ["png", "native-fonts"] }
-futures-util = "0.3"
+merman = { workspace = true, features = ["png", "native-fonts"] }
+futures-util.workspace = true
 # To a harlo relay (wss); its relay ids.
 harlo-relay.workspace = true
 # The iOS app's notifications, handed to harlo's relay.
 harlo-apns.workspace = true
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+chrono = { workspace = true, features = ["clock", "std"] }
 # Tailscale Funnel dies with harlo (PR_SET_PDEATHSIG).
-libc = "0.2"
+libc.workspace = true
 
 [build-dependencies]
-cxx-qt-build.workspace = true
+cxx-qt-build = { workspace = true, features = ["link_qt_object_files"] }
 
 [dev-dependencies]
-ttf-parser = "0.25"
-crypto_box = { version = "0.9", features = ["std"] }
+ttf-parser.workspace = true
+crypto_box = { workspace = true, features = ["std"] }
+
+# cxx-qt's generated bridge code calls cxx, which no source file names.
+[package.metadata.cargo-machete]
+ignored = ["cxx"]
+
+[lints]
+workspace = true

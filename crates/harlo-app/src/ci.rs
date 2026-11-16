@@ -2,6 +2,9 @@
 //! The Changes panel shows them; harlo watches a pull request's checks
 //! while they run and notifies when they pass or fail (Workspace).
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::process::Stdio;
 
 use harlo_core::git_hosting::{self as hosting, Checks};
@@ -44,7 +47,7 @@ pub fn failure_report(service: &str, full: &str, word: &str, number: i64, url: &
     let mut out = format!("The CI checks on {word} #{number} ({url}) failed: {}.\n", names.join(", "));
     let mut runs: Vec<String> = Vec::new();
     for (name, link) in &checks.failing {
-        out.push_str(&format!("\n{name}: {link}\n"));
+        let _ = write!(out, "\n{name}: {link}\n");
         let Some(run) = (service == "github").then(|| hosting::actions_run_id(link)).flatten() else { continue };
         if runs.contains(&run) || runs.len() >= 3 {
             continue;
@@ -53,7 +56,7 @@ pub fn failure_report(service: &str, full: &str, word: &str, number: i64, url: &
         let Some(mut c) = crate::setup::tool(service) else { continue };
         c.args(["run", "view", &run, "--log-failed", "-R", full]);
         if let Some(log) = output(c).filter(|l| !l.trim().is_empty()) {
-            out.push_str(&format!("```\n{}\n```\n", hosting::log_tail(&log, 80)));
+            let _ = write!(out, "```\n{}\n```\n", hosting::log_tail(&log, 80));
         }
     }
     out.push_str("\nFind out why they fail and fix it.");

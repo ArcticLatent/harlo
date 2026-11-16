@@ -6,6 +6,8 @@
 //! server's search in it (the session's model, low reasoning), and its
 //! findings, with their links, come back as the call's result.
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::{Value, json};
 
 pub const NAME: &str = "web_search";

@@ -1,12 +1,15 @@
-//! The Markdown lexer OpenWiki reads pages with (marked 18.2, GFM), ported
-//! so that sections, their raw text and their heading anchors come out the
-//! same. Only what the wiki needs: the top-level blocks with their raw text,
-//! and each heading's inline text. Its patterns are marked's own, run by
+//! The Markdown lexer OpenWiki reads pages with (marked 18.2, GFM).
+//!
+//! It's ported so that sections, their raw text and their heading anchors come
+//! out the same. Only what the wiki needs: the top-level blocks with their raw
+//! text, and each heading's inline text. Its patterns are marked's own, run by
 //! [`crate::jsre`]; offsets are bytes throughout (marked's are UTF-16 units,
 //! but every length here comes from the same string it's used on).
 
+// Rust guideline compliant 2026-10-09
+
 use crate::jsre::{self, Re};
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 macro_rules! re {
@@ -202,7 +205,7 @@ fn inline_text_at(tokens: &[Inline]) -> String {
 }
 
 struct Lexer {
-    links: HashMap<String, ()>,
+    links: HashSet<String>,
     in_link: bool,
     in_raw_block: bool,
     link_emitted: bool,
@@ -219,22 +222,26 @@ struct Lexer {
     scans: usize,
 }
 
-/// More nested blocks or inline tokens than this and the text isn't lexed:
-/// OpenWiki's parser runs out of stack at about 3,000 nested blockquotes
-/// and fails the call. The stack grows as needed up to it, so any thread
-/// gets there (a page past it fails its call, never the process).
+/// Nesting deeper than this, of blocks or inline tokens, isn't lexed.
+///
+/// OpenWiki's parser runs out of stack at about 3,000 nested blockquotes and
+/// fails the call. The stack grows as needed up to it, so any thread gets there
+/// (a page past it fails its call, never the process).
 pub const MAX_NESTING: usize = 3000;
-/// Nor more work than this (bytes gone through, counted at each level, and
-/// for a heading's inline text, what follows each place a rule is tried): a
-/// real page takes a few times its size; a 100 KB page of `>` would take
-/// seconds before it reached the depth limit (OpenWiki's parser fails it
-/// in a fraction of one), and a heading of thousands of `_a` 16 s.
+/// Nor more work than this, in bytes gone through.
+///
+/// Bytes are counted at each level, and for a heading's inline text, what
+/// follows each place a rule is tried. A real page takes a few times its size;
+/// a 100 KB page of `>` would take seconds before it reached the depth limit
+/// (OpenWiki's parser fails it in a fraction of one), and a heading of
+/// thousands of `_a` 16 s.
 pub const MAX_WORK: usize = 16 << 20;
-/// Nor more closing delimiters looked at than this: each `*`, `_` or `~`
-/// that could open looks along the rest of its text for its closer, so a
-/// heading of thousands of them costs their number squared (a 60 KB one
-/// took 14 s here and 2 s in OpenWiki's parser). Real pages look at a few;
-/// this many takes about a quarter of a second.
+/// Nor more closing delimiters looked at than this.
+///
+/// Each `*`, `_` or `~` that could open looks along the rest of its text for
+/// its closer, so a heading of thousands of them costs their number squared (a
+/// 60 KB one took 14 s here and 2 s in OpenWiki's parser). Real pages look at a
+/// few; this many takes about a quarter of a second.
 pub const MAX_SCANS: usize = 1 << 20;
 const RED_ZONE: usize = 128 * 1024;
 const GROW_BY: usize = 4 << 20;
@@ -246,12 +253,17 @@ pub struct TooDeep;
 
 /// `marked.lexer(src)`: the top-level blocks, headings with their inline
 /// tokens.
+///
+/// # Errors
+///
+/// [`TooDeep`] when the text nests deeper than [`MAX_NESTING`] or costs more
+/// than [`MAX_WORK`] or [`MAX_SCANS`]; OpenWiki's parser fails such a page too.
 pub fn lex(src: &str) -> Result<Vec<Block>, TooDeep> {
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
-    let mut lx = Lexer { links: HashMap::new(), in_link: false, in_raw_block: false, link_emitted: false, link_paren_possible: true, depth: 0, too_deep: false, work: 0, scans: 0 };
+    let mut lx = Lexer { links: HashSet::new(), in_link: false, in_raw_block: false, link_emitted: false, link_paren_possible: true, depth: 0, too_deep: false, work: 0, scans: 0 };
     let mut tokens = Vec::new();
     lx.block_tokens(&src, &mut tokens, false);
-    for t in tokens.iter_mut() {
+    for t in &mut tokens {
         if lx.too_deep {
             break;
         }
@@ -268,20 +280,20 @@ pub fn lex(src: &str) -> Result<Vec<Block>, TooDeep> {
     Ok(tokens)
 }
 
-fn rtrim<'a>(s: &'a str, c: char) -> &'a str {
+fn rtrim(s: &str, c: char) -> &str {
     s.trim_end_matches(c)
 }
 
 fn trim_trailing_blank_lines(s: &str) -> String {
     let lines: Vec<&str> = s.split('\n').collect();
-    let mut end = lines.len() as isize - 1;
-    while end >= 0 && BLANK_LINE.test(lines[end as usize]) {
+    let mut end = isize::try_from(lines.len()).unwrap_or(isize::MAX) - 1;
+    while end >= 0 && BLANK_LINE.test(lines[usize::try_from(end).unwrap_or(0)]) {
         end -= 1;
     }
-    if lines.len() as isize - end <= 2 {
+    if isize::try_from(lines.len()).unwrap_or(isize::MAX) - end <= 2 {
         return s.to_owned();
     }
-    lines[..(end + 1) as usize].join("\n")
+    lines[..usize::try_from(end + 1).unwrap_or(0)].join("\n")
 }
 
 fn expand_tabs(line: &str, indent: usize) -> String {
@@ -316,7 +328,9 @@ static LABEL_SPACES: LazyLock<Re> = LazyLock::new(|| Re::new(r"\s+", ""));
 /// A list item's pattern for its bullet ("*", "+", "-") or, ordered, its
 /// delimiter ("." or ")"), made once each.
 fn item_pattern(mark: &str, ordered: bool) -> &'static Re {
-    static ITEMS: LazyLock<std::sync::Mutex<Vec<(String, bool, &'static Re)>>> = LazyLock::new(Default::default);
+    /// Each mark, whether ordered, and its pattern.
+    type Made = Vec<(String, bool, &'static Re)>;
+    static ITEMS: LazyLock<std::sync::Mutex<Made>> = LazyLock::new(Default::default);
     let mut all = ITEMS.lock().unwrap();
     if let Some((_, _, re)) = all.iter().find(|(m, o, _)| m == mark && *o == ordered) {
         return re;
@@ -349,7 +363,7 @@ fn find_closing_bracket(s: &str, open: u8, close: u8) -> isize {
         } else if b[i] == close {
             level -= 1;
             if level < 0 {
-                return i as isize;
+                return isize::try_from(i).unwrap_or(isize::MAX);
             }
         }
         i += 1;
@@ -402,7 +416,7 @@ fn decode_numeric_refs(text: &str) -> String {
         if code == 38 {
             return "&amp;".into();
         }
-        char::from_u32(code).map(String::from).unwrap_or_else(|| "\u{fffd}".into())
+        char::from_u32(code).map_or_else(|| "\u{fffd}".into(), String::from)
     })
 }
 
@@ -410,12 +424,108 @@ fn first_char(s: &str) -> Option<char> {
     s.chars().next()
 }
 
+/// A list's raw text (its items' contents aren't needed).
+fn list(src: &str, last_kind: Option<Kind>) -> Option<String> {
+    let cap = LIST.exec(src)?;
+    if last_kind == Some(Kind::Text) && !LIST_INTERRUPTS_PARAGRAPH.test(src) {
+        return None;
+    }
+    let list_src = src;
+    let mut src = src;
+    let bull = jsre::trim(cap.str(1)).to_owned();
+    let ordered = bull.len() > 1;
+    let item_re = item_pattern(if ordered { &bull[bull.len() - 1..] } else { &bull }, ordered);
+    let mut items = 0;
+    while !src.is_empty() {
+        let Some(cap) = item_re.exec(src) else { break };
+        if HR.test(src) {
+            break;
+        }
+        let item_start = list_src.len() - src.len();
+        let cap0_len = cap.whole().len();
+        let first_line = cap.str(2).split('\n').next().unwrap_or("").to_owned();
+        let bullet_indent = cap.str(1).chars().count();
+        src = &src[cap0_len..];
+        let mut line = LEADING_SPACE_TAB.replace(&first_line, false, |m| expand_tabs(m.whole(), bullet_indent));
+        let mut next_line = src.split('\n').next().unwrap_or("").to_owned();
+        let mut blank_line = jsre::trim(&line).is_empty();
+        let mut indent;
+        let mut end_early = false;
+        if blank_line {
+            indent = bullet_indent + 1;
+        } else {
+            indent = usize::try_from(NON_SPACE_CHAR.search(&line).max(0)).unwrap_or(0);
+            indent = if indent > 4 { 1 } else { indent };
+            indent += bullet_indent;
+        }
+        if blank_line && BLANK_LINE.test(&next_line) {
+            src = src.get(next_line.len() + 1..).unwrap_or("");
+            end_early = true;
+        }
+        if !end_early {
+            let next_bullet = indent_regex(&NEXT_BULLET, indent);
+            let hr_re = indent_regex(&HR_AT, indent);
+            let fences_begin = indent_regex(&FENCES_BEGIN, indent);
+            let heading_begin = indent_regex(&HEADING_BEGIN, indent);
+            let html_begin = indent_regex(&HTML_BEGIN, indent);
+            let bq_begin = indent_regex(&BLOCKQUOTE_BEGIN, indent);
+            let mut line_is_lazy = false;
+            while !src.is_empty() {
+                let raw_line = src.split('\n').next().unwrap_or("").to_owned();
+                next_line.clone_from(&raw_line);
+                let without_tabs = LEADING_SPACE_TAB.replace(&next_line, false, |m| expand_tabs(m.whole(), 0));
+                if fences_begin.test(&next_line)
+                    || heading_begin.test(&next_line)
+                    || html_begin.test(&next_line)
+                    || bq_begin.test(&next_line)
+                    || next_bullet.test(&next_line)
+                    || hr_re.test(&next_line)
+                {
+                    break;
+                }
+                let ns = NON_SPACE_CHAR.search(&without_tabs);
+                if ns >= isize::try_from(indent).unwrap_or(isize::MAX) || jsre::trim(&next_line).is_empty() {
+                    line_is_lazy = false;
+                } else {
+                    if blank_line {
+                        break;
+                    }
+                    let tabbed = TAB_CHAR.replace(&line, true, |_| "    ".into());
+                    if NON_SPACE_CHAR.search(&tabbed) >= 4 {
+                        break;
+                    }
+                    if fences_begin.test(&line) || heading_begin.test(&line) || html_begin.test(&line) || hr_re.test(&line) {
+                        break;
+                    }
+                    if !line_is_lazy {
+                        let last_block_line = NESTED_CONTAINER_MARKERS.replace(&line, false, |_| String::new());
+                        if FENCES.test(&last_block_line) || HEADING.test(&last_block_line) || HR.test(&last_block_line) {
+                            break;
+                        }
+                    }
+                    line_is_lazy = true;
+                }
+                blank_line = jsre::trim(&next_line).is_empty();
+                src = src.get(raw_line.len() + 1..).unwrap_or("");
+                line = slice_from(&without_tabs, indent);
+            }
+        }
+        let _ = item_start;
+        items += 1;
+    }
+    if items == 0 {
+        return None;
+    }
+    let taken = list_src.len() - src.len();
+    Some(jsre::trim_end(&list_src[..taken]).to_owned())
+}
+
 impl Lexer {
     /// Counts a level of nesting while `f` runs (none past the limit), on a
     /// stack grown as needed.
     fn nested<T: Default>(&mut self, len: usize, f: impl FnOnce(&mut Self) -> T) -> T {
         self.work += len;
-        if self.too_deep || self.depth >= MAX_NESTING + 1 || self.work > MAX_WORK {
+        if self.too_deep || self.depth > MAX_NESTING || self.work > MAX_WORK {
             self.too_deep = true;
             return T::default();
         }
@@ -435,9 +545,10 @@ impl Lexer {
     }
 
     fn block_tokens(&mut self, src: &str, tokens: &mut Vec<Block>, last_paragraph_clipped: bool) {
-        self.nested(src.len(), |lx| lx.block_tokens_at(src, tokens, last_paragraph_clipped))
+        self.nested(src.len(), |lx| lx.block_tokens_at(src, tokens, last_paragraph_clipped));
     }
 
+    #[expect(clippy::too_many_lines, reason = "marked's block rules, tried in its order; the parity bench checks them against it")]
     fn block_tokens_at(&mut self, src: &str, tokens: &mut Vec<Block>, mut last_paragraph_clipped: bool) {
         let mut src = src;
         while !src.is_empty() && !self.too_deep {
@@ -481,7 +592,9 @@ impl Lexer {
                 if text.ends_with('#') {
                     let trimmed = rtrim(&text, '#');
                     if trimmed.is_empty() || trimmed.ends_with([' ', '\t']) {
-                        text = jsre::trim(trimmed).to_owned();
+                        // (Made before `text` changes: it borrows from it.)
+                        let trimmed = jsre::trim(trimmed).to_owned();
+                        text = trimmed;
                     }
                 }
                 let raw = rtrim(m.whole(), '\n');
@@ -506,7 +619,7 @@ impl Lexer {
                 continue;
             }
             // list
-            if let Some(raw) = self.list(src, last_kind) {
+            if let Some(raw) = list(src, last_kind) {
                 src = &src[raw.len()..];
                 tokens.push(Block::new(Kind::List, raw));
                 continue;
@@ -529,7 +642,7 @@ impl Lexer {
                     }
                     last.raw.push_str(&raw);
                 } else {
-                    self.links.entry(normalize_label(m.str(1))).or_insert(());
+                    self.links.insert(normalize_label(m.str(1)));
                     tokens.push(Block::new(Kind::Def, raw));
                 }
                 continue;
@@ -550,7 +663,7 @@ impl Lexer {
             if let Some(m) = LHEADING.exec(src) {
                 let raw = rtrim(m.whole(), '\n');
                 let mut b = Block::new(Kind::Heading, raw);
-                b.text = jsre::trim(m.str(1)).to_owned();
+                jsre::trim(m.str(1)).clone_into(&mut b.text);
                 b.depth = if m.str(2).starts_with('=') { 1 } else { 2 };
                 src = &src[raw.len()..];
                 tokens.push(b);
@@ -654,7 +767,7 @@ impl Lexer {
                 Some(Kind::List) => {
                     let old_raw = tokens.last().unwrap().raw.clone();
                     let new_text = format!("{old_raw}\n{}", lines.join("\n"));
-                    let new_raw = self.list(&new_text, None)?;
+                    let new_raw = list(&new_text, None)?;
                     let consumed_count = if new_raw.len() > old_raw.len() {
                         new_text[old_raw.len() + 1..new_raw.len()].split('\n').count()
                     } else {
@@ -668,7 +781,6 @@ impl Lexer {
                         text = format!("{text}\n{consumed}");
                     }
                     lines.drain(..consumed_count.min(lines.len()));
-                    continue;
                 }
                 _ => {}
             }
@@ -676,102 +788,6 @@ impl Lexer {
         let mut b = Block::new(Kind::Blockquote, raw);
         b.bq_text = text;
         Some(b)
-    }
-
-    /// A list's raw text (its items' contents aren't needed).
-    fn list(&mut self, src: &str, last_kind: Option<Kind>) -> Option<String> {
-        let cap = LIST.exec(src)?;
-        if last_kind == Some(Kind::Text) && !LIST_INTERRUPTS_PARAGRAPH.test(src) {
-            return None;
-        }
-        let list_src = src;
-        let mut src = src;
-        let bull = jsre::trim(cap.str(1)).to_owned();
-        let ordered = bull.len() > 1;
-        let item_re = item_pattern(if ordered { &bull[bull.len() - 1..] } else { &bull }, ordered);
-        let mut items = 0;
-        while !src.is_empty() {
-            let Some(cap) = item_re.exec(src) else { break };
-            if HR.test(src) {
-                break;
-            }
-            let item_start = list_src.len() - src.len();
-            let cap0_len = cap.whole().len();
-            let first_line = cap.str(2).split('\n').next().unwrap_or("").to_owned();
-            let bullet_indent = cap.str(1).chars().count();
-            src = &src[cap0_len..];
-            let mut line = LEADING_SPACE_TAB.replace(&first_line, false, |m| expand_tabs(m.whole(), bullet_indent));
-            let mut next_line = src.split('\n').next().unwrap_or("").to_owned();
-            let mut blank_line = jsre::trim(&line).is_empty();
-            let mut indent;
-            let mut end_early = false;
-            if blank_line {
-                indent = bullet_indent + 1;
-            } else {
-                indent = NON_SPACE_CHAR.search(&line).max(0) as usize;
-                indent = if indent > 4 { 1 } else { indent };
-                indent += bullet_indent;
-            }
-            if blank_line && BLANK_LINE.test(&next_line) {
-                src = src.get(next_line.len() + 1..).unwrap_or("");
-                end_early = true;
-            }
-            if !end_early {
-                let next_bullet = indent_regex(&NEXT_BULLET, indent);
-                let hr_re = indent_regex(&HR_AT, indent);
-                let fences_begin = indent_regex(&FENCES_BEGIN, indent);
-                let heading_begin = indent_regex(&HEADING_BEGIN, indent);
-                let html_begin = indent_regex(&HTML_BEGIN, indent);
-                let bq_begin = indent_regex(&BLOCKQUOTE_BEGIN, indent);
-                let mut line_is_lazy = false;
-                while !src.is_empty() {
-                    let raw_line = src.split('\n').next().unwrap_or("").to_owned();
-                    next_line = raw_line.clone();
-                    let without_tabs = LEADING_SPACE_TAB.replace(&next_line, false, |m| expand_tabs(m.whole(), 0));
-                    if fences_begin.test(&next_line)
-                        || heading_begin.test(&next_line)
-                        || html_begin.test(&next_line)
-                        || bq_begin.test(&next_line)
-                        || next_bullet.test(&next_line)
-                        || hr_re.test(&next_line)
-                    {
-                        break;
-                    }
-                    let ns = NON_SPACE_CHAR.search(&without_tabs);
-                    if ns >= indent as isize || jsre::trim(&next_line).is_empty() {
-                        line_is_lazy = false;
-                    } else {
-                        if blank_line {
-                            break;
-                        }
-                        let tabbed = TAB_CHAR.replace(&line, true, |_| "    ".into());
-                        if NON_SPACE_CHAR.search(&tabbed) >= 4 {
-                            break;
-                        }
-                        if fences_begin.test(&line) || heading_begin.test(&line) || html_begin.test(&line) || hr_re.test(&line) {
-                            break;
-                        }
-                        if !line_is_lazy {
-                            let last_block_line = NESTED_CONTAINER_MARKERS.replace(&line, false, |_| String::new());
-                            if FENCES.test(&last_block_line) || HEADING.test(&last_block_line) || HR.test(&last_block_line) {
-                                break;
-                            }
-                        }
-                        line_is_lazy = true;
-                    }
-                    blank_line = jsre::trim(&next_line).is_empty();
-                    src = src.get(raw_line.len() + 1..).unwrap_or("");
-                    line = slice_from(&without_tabs, indent);
-                }
-            }
-            let _ = item_start;
-            items += 1;
-        }
-        if items == 0 {
-            return None;
-        }
-        let taken = list_src.len() - src.len();
-        Some(jsre::trim_end(&list_src[..taken]).to_owned())
     }
 
     // ---- Inline ----
@@ -789,6 +805,7 @@ impl Lexer {
         out
     }
 
+    #[expect(clippy::too_many_lines, reason = "marked's inline rules, tried in its order; the parity bench checks them against it")]
     fn tokenize_inlines(&mut self, src0: &str, masked: &str) -> Vec<Inline> {
         let mut tokens: Vec<Inline> = Vec::new();
         let mut src = src0;
@@ -856,7 +873,9 @@ impl Lexer {
             if let Some(m) = INLINE_CODE.exec(src) {
                 let mut text = NEW_LINE_CHAR.replace(m.str(2), true, |_| " ".into());
                 if NON_SPACE_CHAR.test(&text) && STARTING_SPACE.test(&text) && ENDING_SPACE.test(&text) {
-                    text = text[1..text.len() - 1].to_owned();
+                    // (Both ends are the one-byte space just matched.)
+                    text.pop();
+                    text.remove(0);
                 }
                 src = &src[m.whole().len()..];
                 tokens.push(Inline::Codespan(text));
@@ -881,8 +900,8 @@ impl Lexer {
                 continue;
             }
             // url
-            if !self.in_link {
-                if let Some(m) = URL.exec(src) {
+            if !self.in_link
+                && let Some(m) = URL.exec(src) {
                     let mut raw = m.whole().to_owned();
                     if m.get(2) != Some("@") {
                         loop {
@@ -899,7 +918,6 @@ impl Lexer {
                         continue;
                     }
                 }
-            }
             // text
             if let Some(m) = INLINE_TEXT.exec(src) {
                 let raw = m.whole();
@@ -960,7 +978,7 @@ impl Lexer {
                 return None;
             }
             let rtrim_slash = rtrim(&trimmed_url[..trimmed_url.len() - 1], '\\');
-            if (trimmed_url.len() - rtrim_slash.len()) % 2 == 0 {
+            if (trimmed_url.len() - rtrim_slash.len()).is_multiple_of(2) {
                 return None;
             }
         } else {
@@ -970,14 +988,14 @@ impl Lexer {
             }
             if last_paren > -1 {
                 let start = if cap0.starts_with('!') { 5 } else { 4 };
-                let link_len = start + cap.str(1).len() + last_paren as usize;
-                cap2.truncate(last_paren as usize);
+                let link_len = start + cap.str(1).len() + usize::try_from(last_paren).unwrap_or(0);
+                cap2.truncate(usize::try_from(last_paren).unwrap_or(0));
                 let cut = cap0.get(..link_len.min(cap0.len())).unwrap_or(&cap0);
                 cap0 = jsre::trim(cut).to_owned();
             }
         }
         let unescaped = rtrim(&cap0[..cap0.len() - 1], '\\');
-        if (cap0.len() - unescaped.len()) % 2 == 0 {
+        if (cap0.len() - unescaped.len()).is_multiple_of(2) {
             return None;
         }
         let is_image = cap0.starts_with('!');
@@ -992,7 +1010,7 @@ impl Lexer {
             return None;
         }
         let label = if cap.has(2) { cap.str(2) } else { cap.str(1) };
-        if !self.links.contains_key(&normalize_label(label)) {
+        if !self.links.contains(&normalize_label(label)) {
             let c = first_char(cap.whole()).unwrap().to_string();
             return Some((c.len(), Inline::Text(c)));
         }
@@ -1022,7 +1040,7 @@ impl Lexer {
         let run_prev_punct = is_punct(&run_prev_char);
         let mut prev = prev_char.to_owned();
         if run_start < src_start {
-            prev = run_prev_char.clone();
+            prev.clone_from(&run_prev_char);
         }
         let prev_punct = if run_start < src_start { run_prev_punct } else { is_punct(&prev) };
         if m.has(4) && UNICODE_ALNUM.test(&prev) {
@@ -1033,31 +1051,31 @@ impl Lexer {
             return None;
         }
         let l_length = m.whole().chars().count() - 1;
-        let mut delim_total = l_length as isize;
+        let mut delim_total = isize::try_from(l_length).unwrap_or(isize::MAX);
         let mut mid_delim_total = 0isize;
         let run_length = src_start - run_start + l_length;
         let opener_can_close = !jsre::trim(&run_prev_char).is_empty() && (!next_char.is_empty() || (delim == b'*' && !run_prev_punct));
         let end_re: &Re = if delim == b'*' { &EM_STRONG_RDELIM_AST } else { &EM_STRONG_RDELIM_UND };
         let last_possible = if delim == b'*' { closers.ast } else { closers.und };
         let window_start = masked_full.len() - src.len() + l_length;
-        if last_possible < window_start as isize {
+        if last_possible < isize::try_from(window_start).unwrap_or(isize::MAX) {
             return None;
         }
         let masked = &masked_full[window_start..];
-        let last_in_window = last_possible - window_start as isize;
+        let last_in_window = last_possible - isize::try_from(window_start).unwrap_or(isize::MAX);
         let mut pos = 0;
         while let Some(mm) = end_re.exec_at(masked, pos) {
             if !self.scanned() {
                 return None;
             }
             pos = mm.end().max(mm.start() + 1);
-            if mm.start() as isize > last_in_window {
+            if isize::try_from(mm.start()).unwrap_or(isize::MAX) > last_in_window {
                 break;
             }
             let r = (1..=6).find(|&i| mm.has(i));
             let Some(ri) = r else { continue };
             let r_delim = mm.str(ri);
-            let mut r_length = r_delim.chars().count() as isize;
+            let mut r_length = isize::try_from(r_delim.chars().count()).unwrap_or(isize::MAX);
             if ri == 3 || ri == 4 {
                 delim_total += r_length;
                 continue;
@@ -1065,7 +1083,7 @@ impl Lexer {
                 if mid_run && (ri == 5 || ri == 6) {
                     break;
                 }
-                if run_length % 3 != 0 && (run_length as isize + r_length) % 3 == 0 {
+                if !run_length.is_multiple_of(3) && (isize::try_from(run_length).unwrap_or(isize::MAX) + r_length) % 3 == 0 {
                     mid_delim_total += r_length;
                     continue;
                 }
@@ -1075,10 +1093,10 @@ impl Lexer {
                 continue;
             }
             r_length = r_length.min(r_length + delim_total + mid_delim_total);
-            let last_char_len = mm.whole().chars().next().map(char::len_utf8).unwrap_or(0);
-            let end = l_length + mm.start() + last_char_len + r_length as usize;
+            let last_char_len = mm.whole().chars().next().map_or(0, char::len_utf8);
+            let end = l_length + mm.start() + last_char_len + usize::try_from(r_length).unwrap_or(0);
             let raw = src.get(..end.min(src.len()))?;
-            if (l_length as isize).min(r_length) % 2 == 1 {
+            if isize::try_from(l_length).unwrap_or(isize::MAX).min(r_length) % 2 == 1 {
                 let text = &raw[1..raw.len() - 1];
                 let t = self.inline_tokens(text);
                 return Some((raw.len(), Inline::Em(t)));
@@ -1100,25 +1118,25 @@ impl Lexer {
             return None;
         }
         let l_length = m.whole().chars().count() - 1;
-        let mut delim_total = l_length as isize;
+        let mut delim_total = isize::try_from(l_length).unwrap_or(isize::MAX);
         let window_start = masked_full.len() - src.len() + l_length;
-        if closers.del < window_start as isize {
+        if closers.del < isize::try_from(window_start).unwrap_or(isize::MAX) {
             return None;
         }
         let masked = &masked_full[window_start..];
-        let last_in_window = closers.del - window_start as isize;
+        let last_in_window = closers.del - isize::try_from(window_start).unwrap_or(isize::MAX);
         let mut pos = 0;
         while let Some(mm) = DEL_RDELIM.exec_at(masked, pos) {
             if !self.scanned() {
                 return None;
             }
             pos = mm.end().max(mm.start() + 1);
-            if mm.start() as isize > last_in_window {
+            if isize::try_from(mm.start()).unwrap_or(isize::MAX) > last_in_window {
                 break;
             }
             let Some(ri) = (1..=6).find(|&i| mm.has(i)) else { continue };
-            let mut r_length = mm.str(ri).chars().count() as isize;
-            if r_length != l_length as isize {
+            let mut r_length = isize::try_from(mm.str(ri).chars().count()).unwrap_or(isize::MAX);
+            if r_length != isize::try_from(l_length).unwrap_or(isize::MAX) {
                 continue;
             }
             if ri == 3 || ri == 4 {
@@ -1130,8 +1148,8 @@ impl Lexer {
                 continue;
             }
             r_length = r_length.min(r_length + delim_total);
-            let last_char_len = mm.whole().chars().next().map(char::len_utf8).unwrap_or(0);
-            let end = l_length + mm.start() + last_char_len + r_length as usize;
+            let last_char_len = mm.whole().chars().next().map_or(0, char::len_utf8);
+            let end = l_length + mm.start() + last_char_len + usize::try_from(r_length).unwrap_or(0);
             let raw = src.get(..end.min(src.len()))?;
             let text = raw.get(l_length..raw.len().saturating_sub(l_length)).unwrap_or("");
             let t = self.inline_tokens(text);
@@ -1154,7 +1172,7 @@ impl Lexer {
             let m0 = m.whole();
             let ref_start = m0.rfind('[').unwrap();
             let label = &m0[ref_start + 1..m0.len() - 1];
-            if m0.starts_with('!') || !self.links.contains_key(&normalize_label(label)) {
+            if m0.starts_with('!') || !self.links.contains(&normalize_label(label)) {
                 continue;
             }
             if ref_start > 1 && self.link_in_text(&m0[1..ref_start - 1]) {
@@ -1167,7 +1185,7 @@ impl Lexer {
 
     fn mask_reflink(&self, m0: &str) -> String {
         let ref_start = m0.rfind('[').unwrap();
-        if !self.links.contains_key(&normalize_label(&m0[ref_start + 1..m0.len() - 1])) {
+        if !self.links.contains(&normalize_label(&m0[ref_start + 1..m0.len() - 1])) {
             return m0.to_owned();
         }
         if ref_start > 1 && !m0.starts_with('!') {
@@ -1200,7 +1218,7 @@ impl Lexer {
 }
 
 fn slice_from(s: &str, n: usize) -> String {
-    jsre::slice16(s, n as isize, None).to_owned()
+    jsre::slice16(s, isize::try_from(n).unwrap_or(isize::MAX), None).to_owned()
 }
 
 fn mask_blocks(src: &str) -> String {
@@ -1208,7 +1226,7 @@ fn mask_blocks(src: &str) -> String {
     let mut last = 0;
     let mut pos = 0;
     while let Some(m) = BLOCK_SKIP.exec_at(src, pos) {
-        let start = m.start() + m.get(2).map(str::len).unwrap_or(0);
+        let start = m.start() + m.get(2).map_or(0, str::len);
         let mut end = m.end();
         if src[start..].starts_with('<') {
             let rest = &src[start..];
@@ -1243,12 +1261,11 @@ fn label_end_inside_token(src: &str, label: &str, label_start: usize) -> bool {
             i += 2;
             continue;
         }
-        if b[i] == b'`' {
-            if let Some(code) = INLINE_CODE.exec(&label[i..]) {
+        if b[i] == b'`'
+            && let Some(code) = INLINE_CODE.exec(&label[i..]) {
                 i += code.whole().len();
                 continue;
             }
-        }
         if b[i] != b'<' {
             i += 1;
             continue;
@@ -1291,9 +1308,9 @@ fn last_closers(src: &str) -> Closers {
         }
         if !matches!(prev, b' ' | b'\t' | b'\n' | b'\r' | 0x0c) {
             match ch {
-                b'~' => c.del = i as isize,
-                b'*' => c.ast = i as isize,
-                _ => c.und = i as isize,
+                b'~' => c.del = isize::try_from(i).unwrap_or(isize::MAX),
+                b'*' => c.ast = isize::try_from(i).unwrap_or(isize::MAX),
+                _ => c.und = isize::try_from(i).unwrap_or(isize::MAX),
             }
         }
         i = j;
@@ -1337,24 +1354,24 @@ mod tests {
         assert_eq!(on_small_stack(format!("{} x\n", ">".repeat(MAX_NESTING + 1))), Err(TooDeep));
         assert_eq!(on_small_stack(format!("# a\n\n{} x\n", ">".repeat(100_000))), Err(TooDeep));
         let list: String = (0..1500).map(|i| format!("{}- a\n", "  ".repeat(i))).collect();
-        assert!(on_small_stack(list).is_ok());
+        on_small_stack(list).unwrap();
         let inline = |n: usize| format!("# {}x{}\n", "[".repeat(n), "]".repeat(n));
-        assert!(on_small_stack(inline(2000)).is_ok());
+        on_small_stack(inline(2000)).unwrap();
         assert_eq!(on_small_stack(inline(20_000)), Err(TooDeep));
         // (Emphasis nests a level per two marks: OpenWiki's fails past
         // about 3,000 marks, so the deep one fails here too.)
         let emph = |n: usize| format!("# {}x{}\n", "*".repeat(n), "*".repeat(n));
-        assert!(on_small_stack(emph(1000)).is_ok());
+        on_small_stack(emph(1000)).unwrap();
         assert_eq!(on_small_stack(emph(20_000)), Err(TooDeep));
     }
 
     /// Thousands of `*_~` that could each open look along the rest of the
-    /// heading for a closer: a few hundred lex as before; more stop at
+    /// heading for a closer: a few hundred lex in full; more stop at
     /// `MAX_SCANS`, at once, not after their number squared.
     #[test]
     fn delimiter_runs_stop_at_their_budget() {
         let runs = |n: usize| format!("# {}x{}\n", "*_~".repeat(n), "~_*".repeat(n));
-        assert!(lex(&runs(300)).is_ok());
+        lex(&runs(300)).unwrap();
         let started = std::time::Instant::now();
         assert_eq!(lex(&runs(10_000)).err(), Some(TooDeep));
         assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
@@ -1363,9 +1380,9 @@ mod tests {
         let started = std::time::Instant::now();
         assert_eq!(lex(&format!("# {}\n", "_a".repeat(30_000))).err(), Some(TooDeep));
         assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
-        assert!(lex(&format!("# {}\n", "_a".repeat(500))).is_ok());
+        lex(&format!("# {}\n", "_a".repeat(500))).unwrap();
         let lone = |c: &str, n: usize| format!("# {}\n", format!("a{c} ").repeat(n));
-        assert!(lex(&lone("*", 2000)).is_ok());
-        assert!(lex(&lone("~", 2000)).is_ok());
+        lex(&lone("*", 2000)).unwrap();
+        lex(&lone("~", 2000)).unwrap();
     }
 }

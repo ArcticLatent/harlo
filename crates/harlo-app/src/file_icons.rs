@@ -2,6 +2,8 @@
 //! from Nerd Fonts by fonts/file-icons.py) in the type's colour.
 //! `icon_text` picks the icon for a file name.
 
+// Rust guideline compliant 2026-10-09
+
 // `GLYPHS`: the file types, sorted, with their glyphs and colours.
 include!("file_icon_glyphs.rs");
 
@@ -75,6 +77,7 @@ fn by_file_name(name: &str) -> Option<&'static str> {
 }
 
 /// Extensions (lowercase, without the dot).
+#[expect(clippy::too_many_lines, reason = "a lookup table: one line per file type")]
 fn by_extension(ext: &str) -> Option<&'static str> {
     Some(match ext {
         "js" | "mjs" | "cjs" => "javascript",
@@ -159,9 +162,8 @@ fn by_extension(ext: &str) -> Option<&'static str> {
         "jar" | "war" => "jar",
         "class" => "javaclass",
         "blend" | "blend1" => "blender",
-        "obj" | "fbx" | "gltf" | "glb" | "stl" | "usd" | "usda" | "usdc" | "usdz" | "abc" | "ply" | "3ds" | "dae" => "3d",
-        "hip" | "hipnc" | "hiplc" | "hda" | "otl" => "3d",
-        "ma" | "mb" => "3d",
+        "obj" | "fbx" | "gltf" | "glb" | "stl" | "usd" | "usda" | "usdc" | "usdz" | "abc" | "ply" | "3ds" | "dae" | "hip" | "hipnc" | "hiplc" | "hda"
+        | "otl" | "ma" | "mb" => "3d",
         "http" | "rest" => "http",
         "url" => "url",
         "eml" | "msg" => "email",

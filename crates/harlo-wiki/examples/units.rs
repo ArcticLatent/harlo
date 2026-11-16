@@ -1,5 +1,8 @@
 //! Dev check: the native answers for repositories named as arguments, one
 //! JSON line each, shaped as scripts/wiki-bench/units.mjs prints OpenWiki's.
+
+// Rust guideline compliant 2026-10-09
+
 use harlo_wiki::ignore::Ignore;
 use harlo_wiki::repo::{self, Noop};
 use serde_json::{Value, json};
@@ -38,13 +41,13 @@ fn main() {
         let out = json!({
             "root": root,
             "source": source,
-            "content": repo::content_snapshot(p).map(Value::from).unwrap_or_else(|e| format!("ERR {e}").into()),
+            "content": repo::content_snapshot(p).map_or_else(|e| format!("ERR {e}").into(), Value::from),
             "changed": repo::changed_paths(p, &ig, None),
             "changedSince": repo::changed_paths(p, &ig, base.as_deref()),
             "commits": repo::commit_context(p, &ig, base.as_deref()),
             "noop": noop(repo::update_noop(p, &ig, None)),
             "noopKo": noop(repo::update_noop(p, &ig, Some("ko"))),
-            "last": last.map(|l| l.to_json()).unwrap_or(Value::Null),
+            "last": last.map_or(Value::Null, |l| l.to_json()),
         });
         println!("{out}");
     }

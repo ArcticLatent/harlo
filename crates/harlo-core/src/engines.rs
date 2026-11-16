@@ -1,6 +1,7 @@
-//! Setting up a model server (Settings → Model servers → Set up a model
-//! server): this computer's hardware, the inference engines that suit it,
-//! the ones already installed, and installing one with its first model.
+//! Setting up a model server (Settings → Model servers → Set up a model server).
+//!
+//! This computer's hardware, the inference engines that suit it, the ones
+//! already installed, and installing one with its first model.
 //!
 //! | engine | installed from | serves with |
 //! |---|---|---|
@@ -12,6 +13,9 @@
 //! Strata's installer keeps to its usual `~/.local/share/strata` and
 //! `~/.local/bin/strata`. Nothing runs as root.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -105,7 +109,7 @@ fn nvidia_gpus(csv: &str) -> (Vec<Gpu>, String) {
             if f.len() < 4 {
                 return None;
             }
-            driver = f[3].to_owned();
+            f[3].clone_into(&mut driver);
             Some(Gpu { vendor: "nvidia".into(), name: f[0].to_owned(), vram_mb: f[1].parse().unwrap_or(0), arch: f[2].to_owned() })
         })
         .collect();
@@ -283,7 +287,7 @@ pub struct Installed {
 }
 
 pub fn engines_dir() -> PathBuf {
-    crate::db::default_path().parent().map(|d| d.join("engines")).unwrap_or_else(|| PathBuf::from("engines"))
+    crate::db::default_path().parent().map_or_else(|| PathBuf::from("engines"), |d| d.join("engines"))
 }
 
 fn on_path(prog: &str) -> Option<PathBuf> {
@@ -331,20 +335,24 @@ pub fn update_available(engine: Engine, installed: &str, latest: &str) -> bool {
 
 /// An engine's latest version, as `plan` would install it (uv only delivers
 /// vLLM: its version is PyPI's).
-pub fn latest_version(engine: Engine) -> Result<String, String> {
+///
+/// # Errors
+///
+/// When the engine's releases (or PyPI, for vLLM) can't be reached or read.
+pub fn latest_version(engine: Engine) -> anyhow::Result<String> {
     match engine {
         Engine::Ninfer => Ok(ninfer_latest()?.0),
-        Engine::Vllm => get_json("https://pypi.org/pypi/vllm/json")?["info"]["version"].as_str().map(str::to_owned).ok_or_else(|| "PyPI doesn't say vLLM's version.".to_owned()),
-        _ => release(engine)?["tag_name"].as_str().filter(|t| !t.is_empty()).map(str::to_owned).ok_or_else(|| format!("{} has no release.", engine.name())),
+        Engine::Vllm => get_json("https://pypi.org/pypi/vllm/json")?["info"]["version"].as_str().map(str::to_owned).ok_or_else(|| anyhow::Error::msg("PyPI doesn't say vLLM's version.")),
+        _ => release(engine)?["tag_name"].as_str().filter(|t| !t.is_empty()).map(str::to_owned).ok_or_else(|| anyhow::anyhow!("{} has no release.", engine.name())),
     }
 }
 
 /// NInfer's latest commit: its version (the date first, so the newest build
 /// is last among harlo's) and its full id.
-fn ninfer_latest() -> Result<(String, String), String> {
+fn ninfer_latest() -> anyhow::Result<(String, String)> {
     let commits = get_json(&format!("https://api.github.com/repos/{}/commits?per_page=1", Engine::Ninfer.repo()))?;
     let latest = &commits[0];
-    let sha = latest["sha"].as_str().filter(|s| s.len() >= 8).ok_or("NInfer's repository has no commits to build.")?;
+    let sha = latest["sha"].as_str().filter(|s| s.len() >= 8).ok_or_else(|| anyhow::Error::msg("NInfer's repository has no commits to build."))?;
     let date = latest["commit"]["committer"]["date"].as_str().unwrap_or_default().split('T').next().unwrap_or_default().replace('-', "");
     Ok((format!("{date}-{}", &sha[..8]), sha.to_owned()))
 }
@@ -470,37 +478,37 @@ fn http(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder().timeout_global(Some(timeout)).http_status_as_error(false).tls_config(tls).build().into()
 }
 
-pub(crate) fn get_json(url: &str) -> Result<Value, String> {
+pub(crate) fn get_json(url: &str) -> anyhow::Result<Value> {
     get_json_as(url, "application/vnd.github+json")
 }
 
 /// (npm refuses GitHub's kind of `Accept`.)
-pub(crate) fn get_json_as(url: &str, accept: &str) -> Result<Value, String> {
-    let mut resp = http(Duration::from_secs(30)).get(url).header("User-Agent", "harlo").header("Accept", accept).call().map_err(|e| format!("{url}: {e}"))?;
+pub(crate) fn get_json_as(url: &str, accept: &str) -> anyhow::Result<Value> {
+    let mut resp = http(Duration::from_secs(30)).get(url).header("User-Agent", "harlo").header("Accept", accept).call().map_err(|e| anyhow::anyhow!("{url}: {e}"))?;
     if resp.status().as_u16() != 200 {
-        return Err(format!("{url}: HTTP {}", resp.status().as_u16()));
+        return Err(anyhow::anyhow!("{url}: HTTP {}", resp.status().as_u16()));
     }
-    let text = resp.body_mut().with_config().limit(64 * 1024 * 1024).read_to_string().map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| e.to_string())
+    let text = resp.body_mut().with_config().limit(64 * 1024 * 1024).read_to_string()?;
+    serde_json::from_str(&text).map_err(anyhow::Error::from)
 }
 
-fn get_text(url: &str) -> Result<String, String> {
-    let mut resp = http(Duration::from_secs(30)).get(url).header("User-Agent", "harlo").call().map_err(|e| format!("{url}: {e}"))?;
+fn get_text(url: &str) -> anyhow::Result<String> {
+    let mut resp = http(Duration::from_secs(30)).get(url).header("User-Agent", "harlo").call().map_err(|e| anyhow::anyhow!("{url}: {e}"))?;
     if resp.status().as_u16() != 200 {
-        return Err(format!("{url}: HTTP {}", resp.status().as_u16()));
+        return Err(anyhow::anyhow!("{url}: HTTP {}", resp.status().as_u16()));
     }
-    resp.body_mut().read_to_string().map_err(|e| e.to_string())
+    resp.body_mut().read_to_string().map_err(anyhow::Error::from)
 }
 
 /// The release a version comes from: the newest (llama.cpp's builds are
 /// releases of their own; its "latest" is a tag without files).
-fn release(engine: Engine) -> Result<Value, String> {
+fn release(engine: Engine) -> anyhow::Result<Value> {
     let repo = engine.repo();
     match engine {
         Engine::LlamaCpp => get_json(&format!("https://api.github.com/repos/{repo}/releases?per_page=5"))?
             .as_array()
             .and_then(|a| a.iter().find(|r| r["assets"].as_array().is_some_and(|x| x.len() > 5)).cloned())
-            .ok_or_else(|| "llama.cpp has no build release right now.".into()),
+            .ok_or_else(|| anyhow::Error::msg("llama.cpp has no build release right now.")),
         _ => get_json(&format!("https://api.github.com/repos/{repo}/releases/latest")),
     }
 }
@@ -542,7 +550,11 @@ fn llamacpp_build_for(hw: &Hardware, tag: &str, arm: bool) -> (String, Option<St
 
 /// What installing an engine downloads (its release's files for here), and
 /// the version.
-pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), String> {
+///
+/// # Errors
+///
+/// When the release can't be read, or has no build for this hardware.
+pub fn plan(engine: Engine, hw: &Hardware) -> anyhow::Result<(String, Vec<Asset>)> {
     // NInfer has no releases: its source at its latest commit, built here.
     if engine == Engine::Ninfer {
         let (tag, sha) = ninfer_latest()?;
@@ -554,19 +566,19 @@ pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), Strin
         Engine::Ollama => {
             let sums = rel["assets"].as_array().into_iter().flatten().find(|a| a["name"] == "sha256sum.txt").and_then(|a| a["browser_download_url"].as_str()).map(get_text).transpose()?;
             let name = if ARM { "ollama-linux-arm64.tar.zst" } else if hw.vendor() == "amd" { "ollama-linux-amd64-rocm.tar.zst" } else { "ollama-linux-amd64.tar.zst" };
-            vec![asset_named(&rel, name, sums.as_deref()).ok_or_else(|| format!("Ollama {tag} has no {name} with a checksum."))?]
+            vec![asset_named(&rel, name, sums.as_deref()).ok_or_else(|| anyhow::anyhow!("Ollama {tag} has no {name} with a checksum."))?]
         }
         Engine::LlamaCpp => {
             let (main, runtime) = llamacpp_build(hw, &tag);
-            let mut list = vec![asset_named(&rel, &main, None).ok_or_else(|| format!("llama.cpp {tag} has no {main} with a checksum."))?];
+            let mut list = vec![asset_named(&rel, &main, None).ok_or_else(|| anyhow::anyhow!("llama.cpp {tag} has no {main} with a checksum."))?];
             if let Some(rt) = runtime {
-                list.push(asset_named(&rel, &rt, None).ok_or_else(|| format!("llama.cpp {tag} has no {rt} with a checksum."))?);
+                list.push(asset_named(&rel, &rt, None).ok_or_else(|| anyhow::anyhow!("llama.cpp {tag} has no {rt} with a checksum."))?);
             }
             list
         }
         Engine::Strata => {
             let sums = rel["assets"].as_array().into_iter().flatten().find(|a| a["name"] == "SHA256SUMS.txt").and_then(|a| a["browser_download_url"].as_str()).map(get_text).transpose()?;
-            vec![asset_named(&rel, "install.sh", sums.as_deref()).ok_or_else(|| format!("Strata {tag} has no install.sh with a checksum."))?]
+            vec![asset_named(&rel, "install.sh", sums.as_deref()).ok_or_else(|| anyhow::anyhow!("Strata {tag} has no install.sh with a checksum."))?]
         }
         // Its source at the release (GitHub publishes no checksum for it: it
         // comes over HTTPS from GitHub), built here.
@@ -581,49 +593,54 @@ pub fn plan(engine: Engine, hw: &Hardware) -> Result<(String, Vec<Asset>), Strin
         // uv, which then installs vLLM (and its Python) from PyPI.
         Engine::Vllm => {
             let name = if ARM { "uv-aarch64-unknown-linux-gnu.tar.gz" } else { "uv-x86_64-unknown-linux-gnu.tar.gz" };
-            vec![asset_named(&rel, name, None).ok_or_else(|| format!("uv {tag} has no {name} with a checksum."))?]
+            vec![asset_named(&rel, name, None).ok_or_else(|| anyhow::anyhow!("uv {tag} has no {name} with a checksum."))?]
         }
     };
     Ok((tag, assets))
 }
 
-/// Downloads to `dest` (resuming a part already there), checking the
-/// SHA-256 when given. `progress(done, total)`; `stop()` cancels.
-/// Downloads `url` to `dest` (resuming a `.part` left before), checked
-/// against `sha256` when given. `progress` gets what it's doing
-/// ("download", then "check"), bytes done and the total.
-pub fn download(url: &str, dest: &Path, sha256: Option<&str>, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> Result<(), String> {
+/// Downloads `url` to `dest`, resuming a `.part` left before.
+///
+/// It's checked against `sha256` when given. `progress` gets what it's doing
+/// ("download", then "check"), bytes done and the total; `stop()` cancels.
+///
+/// # Errors
+///
+/// When the server can't be reached or answers with an error, the file can't be
+/// written, the SHA-256 doesn't match (the part is removed), or it was
+/// cancelled.
+pub fn download(url: &str, dest: &Path, sha256: Option<&str>, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> anyhow::Result<()> {
     let part = dest.with_extension("part");
     if let Some(dir) = dest.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir)?;
     }
-    let have = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
-    let mut req = http(Duration::from_secs(24 * 3600)).get(url).header("User-Agent", "harlo");
+    let have = std::fs::metadata(&part).map_or(0, |m| m.len());
+    let mut req = http(Duration::from_hours(24)).get(url).header("User-Agent", "harlo");
     if have > 0 {
         req = req.header("Range", &format!("bytes={have}-"));
     }
-    let mut resp = req.call().map_err(|e| format!("Couldn't download {url}: {e}"))?;
+    let mut resp = req.call().map_err(|e| anyhow::anyhow!("Couldn't download {url}: {e}"))?;
     let status = resp.status().as_u16();
     let resumed = status == 206;
     if status != 200 && !resumed {
-        return Err(format!("Couldn't download {url}: HTTP {status}"));
+        return Err(anyhow::anyhow!("Couldn't download {url}: HTTP {status}"));
     }
     let left: u64 = resp.headers().get("content-length").and_then(|v| v.to_str().ok()?.parse().ok()).unwrap_or(0);
     let start = if resumed { have } else { 0 };
     let total = start + left;
-    let mut file = std::fs::OpenOptions::new().create(true).write(true).append(resumed).truncate(!resumed).open(&part).map_err(|e| e.to_string())?;
+    let mut file = std::fs::OpenOptions::new().create(true).write(true).append(resumed).truncate(!resumed).open(&part)?;
     let mut reader = resp.body_mut().with_config().limit(u64::MAX).reader();
     let mut buf = vec![0u8; 1 << 20];
     let mut done = start;
     loop {
         if stop() {
-            return Err("Cancelled.".into());
+            return Err(anyhow::Error::msg("Cancelled."));
         }
-        let n = reader.read(&mut buf).map_err(|e| format!("The download broke off: {e} (it resumes when you try again)"))?;
+        let n = reader.read(&mut buf).map_err(|e| anyhow::anyhow!("The download broke off: {e} (it resumes when you try again)"))?;
         if n == 0 {
             break;
         }
-        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        file.write_all(&buf[..n])?;
         done += n as u64;
         progress("download", done, total);
     }
@@ -631,22 +648,22 @@ pub fn download(url: &str, dest: &Path, sha256: Option<&str>, progress: &mut dyn
     if let Some(want) = sha256 {
         check(&part, dest, want, progress, stop)?;
     }
-    std::fs::rename(&part, dest).map_err(|e| e.to_string())
+    std::fs::rename(&part, dest).map_err(anyhow::Error::from)
 }
 
 /// A downloaded `part` against its SHA-256 (gone if it doesn't match).
-fn check(part: &Path, dest: &Path, want: &str, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> Result<(), String> {
+fn check(part: &Path, dest: &Path, want: &str, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> anyhow::Result<()> {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
-    let mut f = std::fs::File::open(part).map_err(|e| e.to_string())?;
-    let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut f = std::fs::File::open(part)?;
+    let size = f.metadata().map_or(0, |m| m.len());
     let mut buf = vec![0u8; 1 << 20];
     let mut read = 0;
     loop {
         if stop() {
-            return Err("Cancelled.".into());
+            return Err(anyhow::Error::msg("Cancelled."));
         }
-        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
+        let n = f.read(&mut buf)?;
         if n == 0 {
             break;
         }
@@ -657,7 +674,7 @@ fn check(part: &Path, dest: &Path, want: &str, progress: &mut dyn FnMut(&str, u6
     let got = format!("{:x}", h.finalize());
     if !got.eq_ignore_ascii_case(want) {
         let _ = std::fs::remove_file(part);
-        return Err(format!("{} didn't match its published checksum, so it wasn't used.", dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+        return Err(anyhow::anyhow!("{} didn't match its published checksum, so it wasn't used.", dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
     }
     Ok(())
 }
@@ -665,29 +682,109 @@ fn check(part: &Path, dest: &Path, want: &str, progress: &mut dyn FnMut(&str, u6
 /// Where a file's bytes are (the address Hugging Face sends you to, or the
 /// URL itself), its size and the SHA-256 it publishes (`X-Linked-Etag`),
 /// without downloading it.
-fn locate(url: &str) -> Result<(String, u64, Option<String>), String> {
+fn locate(url: &str) -> anyhow::Result<(String, u64, Option<String>)> {
     let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).max_redirects(0).tls_config(tls).build().into();
-    let resp = agent.head(url).header("User-Agent", "harlo").call().map_err(|e| format!("Couldn't reach {url}: {e}"))?;
+    let resp = agent.head(url).header("User-Agent", "harlo").call().map_err(|e| anyhow::anyhow!("Couldn't reach {url}: {e}"))?;
     let header = |k: &str| resp.headers().get(k).and_then(|v| v.to_str().ok()).map(|v| v.trim().to_owned());
     let status = resp.status().as_u16();
     let at = match status {
-        301 | 302 | 303 | 307 | 308 => header("location").ok_or("No address to download it from.")?,
+        301 | 302 | 303 | 307 | 308 => header("location").ok_or_else(|| anyhow::Error::msg("No address to download it from."))?,
         200 => url.to_owned(),
-        _ => return Err(format!("Couldn't download {url}: HTTP {status}")),
+        _ => return Err(anyhow::anyhow!("Couldn't download {url}: HTTP {status}")),
     };
     let size = header("x-linked-size").or_else(|| header("content-length")).and_then(|s| s.parse().ok()).unwrap_or(0);
     let sha = header("x-linked-etag").map(|e| e.trim_matches('"').to_lowercase()).filter(|e| e.len() == 64 && e.chars().all(|c| c.is_ascii_hexdigit()));
     Ok((at, size, sha))
 }
 
-/// Downloads a large file in parts at once (`parts` connections, each to
-/// its own place in the file), as fast as a single one isn't: a model from
-/// Hugging Face. Each part resumes where it was; the whole is checked
-/// against `sha256` (or the SHA-256 the server publishes). A server that
-/// doesn't give parts: one connection ([`download`]).
-pub fn download_parallel(url: &str, dest: &Path, sha256: Option<&str>, parts: usize, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> Result<(), String> {
+/// What a download's parts share.
+struct Part<'a> {
+    url: &'a str,
+    file: &'a std::fs::File,
+    cancel: &'a std::sync::atomic::AtomicBool,
+    failed: &'a std::sync::Mutex<Option<String>>,
+    /// Where the server sends it (asked again when that expires).
+    address: &'a std::sync::Mutex<String>,
+}
+
+/// Fetches bytes `start..end` into the file, from where `done` says it got,
+/// trying again when the connection breaks off.
+fn fetch_part(p: &Part<'_>, start: u64, end: u64, done: &std::sync::atomic::AtomicU64) {
     use std::os::unix::fs::FileExt;
+    use std::sync::atomic::Ordering;
+    let mut tries = 0;
+    let mut buf = vec![0u8; 1 << 20];
+    'part: loop {
+        let from = start + done.load(Ordering::Relaxed);
+        if from >= end || p.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let at = p.address.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let resp = http(Duration::from_hours(24)).get(&at).header("User-Agent", "harlo").header("Range", &format!("bytes={from}-{}", end - 1)).call();
+        let mut resp = match resp {
+            Ok(r) if r.status().as_u16() == 206 => r,
+            other => {
+                tries += 1;
+                if other.as_ref().is_ok_and(|r| matches!(r.status().as_u16(), 403 | 410))
+                    && let Ok((fresh, _, _)) = locate(p.url)
+                {
+                    *p.address.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = fresh;
+                }
+                if tries > 4 {
+                    let why = match other {
+                        Ok(r) => format!("HTTP {}", r.status().as_u16()),
+                        Err(e) => e.to_string(),
+                    };
+                    *p.failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("The download broke off: {why} (it resumes when you try again)"));
+                    p.cancel.store(true, Ordering::Relaxed);
+                    break;
+                }
+                std::thread::sleep(Duration::from_secs(tries));
+                continue;
+            }
+        };
+        let mut reader = resp.body_mut().with_config().limit(u64::MAX).reader();
+        let mut at_byte = from;
+        loop {
+            if p.cancel.load(Ordering::Relaxed) {
+                break 'part;
+            }
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(got) => {
+                    let got = got.min(usize::try_from(end - at_byte).unwrap_or(usize::MAX));
+                    if p.file.write_all_at(&buf[..got], at_byte).is_err() {
+                        *p.failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some("Couldn't write the download (is the disk full?)".into());
+                        p.cancel.store(true, Ordering::Relaxed);
+                        break 'part;
+                    }
+                    at_byte += got as u64;
+                    done.fetch_add(got as u64, Ordering::Relaxed);
+                    tries = 0;
+                }
+                // (Broke off: this part again from where it got.)
+                Err(_) => {
+                    tries += 1;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Downloads a large file in parts at once, for a model from Hugging Face.
+///
+/// `parts` connections, each to its own place in the file, as fast as a single
+/// one isn't. Each part resumes where it was; the whole is checked against
+/// `sha256` (or the SHA-256 the server publishes). A server that doesn't give
+/// parts: one connection ([`download`]).
+///
+/// # Errors
+///
+/// As [`download`]: a part that fails ends the download, and what came is kept
+/// for the next try.
+pub fn download_parallel(url: &str, dest: &Path, sha256: Option<&str>, parts: usize, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> anyhow::Result<()> {
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     let Ok((at, size, published)) = locate(url) else { return download(url, dest, sha256, progress, stop) };
@@ -699,10 +796,10 @@ pub fn download_parallel(url: &str, dest: &Path, sha256: Option<&str>, parts: us
         return download(url, dest, want.as_deref(), progress, stop);
     }
     if let Some(dir) = dest.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(dir)?;
     }
     // (Small files: fewer parts; none smaller than 32 MB.)
-    let n = (size / (32 << 20)).clamp(1, parts.max(1) as u64) as usize;
+    let n = usize::try_from((size / (32 << 20)).clamp(1, parts.max(1) as u64)).unwrap_or(usize::MAX);
     let span = size.div_ceil(n as u64);
     let part = dest.with_extension("part");
     let state = dest.with_extension("parts");
@@ -712,9 +809,9 @@ pub fn download_parallel(url: &str, dest: &Path, sha256: Option<&str>, parts: us
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .filter(|v| v["size"] == size && v["done"].as_array().is_some_and(|d| d.len() == n))
         .filter(|_| std::fs::metadata(&part).is_ok_and(|m| m.len() == size))
-        .map(|v| v["done"].as_array().unwrap().iter().map(|d| d.as_u64().unwrap_or(0)).collect());
-    let file = std::fs::OpenOptions::new().create(true).write(true).truncate(saved.is_none()).open(&part).map_err(|e| e.to_string())?;
-    file.set_len(size).map_err(|e| e.to_string())?;
+        .and_then(|v| v["done"].as_array().map(|d| d.iter().map(|d| d.as_u64().unwrap_or(0)).collect()));
+    let file = std::fs::OpenOptions::new().create(true).write(true).truncate(saved.is_none()).open(&part)?;
+    file.set_len(size)?;
     let done: Arc<Vec<AtomicU64>> = Arc::new((0..n).map(|i| AtomicU64::new(saved.as_ref().map_or(0, |d| d[i]))).collect());
     let save = |done: &[AtomicU64]| {
         let list: Vec<u64> = done.iter().map(|d| d.load(Ordering::Relaxed)).collect();
@@ -725,69 +822,13 @@ pub fn download_parallel(url: &str, dest: &Path, sha256: Option<&str>, parts: us
     let failed: Mutex<Option<String>> = Mutex::new(None);
     // (The address it sends you to expires: asked again if it does.)
     let address = Mutex::new(at);
+    let part_of = Part { url, file: &file, cancel: &cancel, failed: &failed, address: &address };
     std::thread::scope(|scope| {
         for i in 0..n {
-            let (done, file, cancel, finished, failed, address) = (&done, &file, &cancel, &finished, &failed, &address);
+            let (done, finished, part_of) = (&done, &finished, &part_of);
             scope.spawn(move || {
                 let (start, end) = (i as u64 * span, ((i as u64 + 1) * span).min(size));
-                let mut tries = 0;
-                let mut buf = vec![0u8; 1 << 20];
-                'part: loop {
-                    let from = start + done[i].load(Ordering::Relaxed);
-                    if from >= end || cancel.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let at = address.lock().unwrap().clone();
-                    let resp = http(Duration::from_secs(24 * 3600)).get(&at).header("User-Agent", "harlo").header("Range", &format!("bytes={from}-{}", end - 1)).call();
-                    let mut resp = match resp {
-                        Ok(r) if r.status().as_u16() == 206 => r,
-                        other => {
-                            tries += 1;
-                            if other.as_ref().is_ok_and(|r| matches!(r.status().as_u16(), 403 | 410))
-                                && let Ok((fresh, _, _)) = locate(url)
-                            {
-                                *address.lock().unwrap() = fresh;
-                            }
-                            if tries > 4 {
-                                let why = match other {
-                                    Ok(r) => format!("HTTP {}", r.status().as_u16()),
-                                    Err(e) => e.to_string(),
-                                };
-                                *failed.lock().unwrap() = Some(format!("The download broke off: {why} (it resumes when you try again)"));
-                                cancel.store(true, Ordering::Relaxed);
-                                break;
-                            }
-                            std::thread::sleep(Duration::from_secs(tries));
-                            continue;
-                        }
-                    };
-                    let mut reader = resp.body_mut().with_config().limit(u64::MAX).reader();
-                    let mut at_byte = from;
-                    loop {
-                        if cancel.load(Ordering::Relaxed) {
-                            break 'part;
-                        }
-                        match reader.read(&mut buf) {
-                            Ok(0) => break,
-                            Ok(got) => {
-                                let got = got.min((end - at_byte) as usize);
-                                if file.write_all_at(&buf[..got], at_byte).is_err() {
-                                    *failed.lock().unwrap() = Some("Couldn't write the download (is the disk full?)".into());
-                                    cancel.store(true, Ordering::Relaxed);
-                                    break 'part;
-                                }
-                                at_byte += got as u64;
-                                done[i].fetch_add(got as u64, Ordering::Relaxed);
-                                tries = 0;
-                            }
-                            // (Broke off: this part again from where it got.)
-                            Err(_) => {
-                                tries += 1;
-                                break;
-                            }
-                        }
-                    }
-                }
+                fetch_part(part_of, start, end, &done[i]);
                 finished.fetch_add(1, Ordering::Relaxed);
             });
         }
@@ -807,11 +848,11 @@ pub fn download_parallel(url: &str, dest: &Path, sha256: Option<&str>, parts: us
     });
     save(&done);
     drop(file);
-    if let Some(e) = failed.into_inner().unwrap() {
-        return Err(e);
+    if let Some(e) = failed.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner) {
+        return Err(anyhow::Error::msg(e));
     }
     if stop() {
-        return Err("Cancelled.".into());
+        return Err(anyhow::Error::msg("Cancelled."));
     }
     progress("download", size, size);
     if let Some(want) = &want {
@@ -819,27 +860,31 @@ pub fn download_parallel(url: &str, dest: &Path, sha256: Option<&str>, parts: us
             let _ = std::fs::remove_file(&state);
         })?;
     }
-    std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
+    std::fs::rename(&part, dest)?;
     let _ = std::fs::remove_file(&state);
     Ok(())
 }
 
 /// Unpacks a `.tar.gz` or `.tar.zst` into `dir` (with the system's tar).
-pub fn unpack(archive: &Path, dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+///
+/// # Errors
+///
+/// When tar can't be run or fails (a damaged archive, no room).
+pub fn unpack(archive: &Path, dir: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
     let name = archive.to_string_lossy();
     let mut cmd = Command::new("tar");
     if name.ends_with(".zst") {
         if on_path("zstd").is_none() {
-            return Err("Unpacking it needs zstd: install the zstd package and try again.".into());
+            return Err(anyhow::Error::msg("Unpacking it needs zstd: install the zstd package and try again."));
         }
         cmd.args(["--use-compress-program=zstd -d"]);
         cmd.arg("-xf");
     } else {
         cmd.arg("-xzf");
     }
-    let out = cmd.arg(archive).arg("-C").arg(dir).output().map_err(|e| e.to_string())?;
-    if out.status.success() { Ok(()) } else { Err(format!("Couldn't unpack it: {}", String::from_utf8_lossy(&out.stderr).trim())) }
+    let out = cmd.arg(archive).arg("-C").arg(dir).output()?;
+    if out.status.success() { Ok(()) } else { Err(anyhow::anyhow!("Couldn't unpack it: {}", String::from_utf8_lossy(&out.stderr).trim())) }
 }
 
 // ---- models ----
@@ -854,9 +899,11 @@ pub const STRATA_MODELS: [(&str, &str, u64); 5] = [
     ("coder", "Tuned for code", 30),
 ];
 
-/// Strata's DeepSeek-V4.1-Flash sets: `--model`, the name to show, what it's
-/// like, the RAM + VRAM it needs (GB: its own least RAM and a 12 GB card; the
-/// rest is read from the SSD) and its download (GB, on disk).
+/// Strata's DeepSeek-V4.1-Flash sets.
+///
+/// Each: `--model`, the name to show, what it's like, the RAM + VRAM it needs
+/// (GB: its own least RAM and a 12 GB card; the rest is read from the SSD) and
+/// its download (GB, on disk).
 pub const STRATA_DEEPSEEK: [(&str, &str, &str, u64, u64); 6] = [
     ("ist-das-1.75bpw", "1.75 BPW", "Smallest: fine for code, weaker on prose", 46, 239),
     ("ist-das-2.00bpw", "2.00 BPW", "Good for code and agent work", 52, 257),
@@ -894,7 +941,11 @@ pub struct HfModel {
 
 /// NInfer's official models for one card, most downloaded first, with what
 /// they download (GLM-5.3-Flash needs two DGX Sparks).
-pub fn hf_ninfer_models(search: &str) -> Result<Vec<HfModel>, String> {
+///
+/// # Errors
+///
+/// When Hugging Face can't be reached or answers with an error.
+pub fn hf_ninfer_models(search: &str) -> anyhow::Result<Vec<HfModel>> {
     let list = get_json("https://huggingface.co/api/models?author=neroued&search=NInfer&sort=downloads&direction=-1&limit=30")?;
     let search = search.to_lowercase();
     let repos: Vec<(String, u64)> = list
@@ -905,14 +956,18 @@ pub fn hf_ninfer_models(search: &str) -> Result<Vec<HfModel>, String> {
         .filter(|(repo, _)| repo.ends_with("-NInfer") && !repo.contains("GLM") && repo.to_lowercase().contains(&search))
         .collect();
     Ok(std::thread::scope(|s| {
-        let sizes: Vec<_> = repos.iter().map(|(repo, _)| s.spawn(move || hf_ninfer_files(repo).map(|f| f.iter().map(|(_, size)| size).sum::<u64>()).unwrap_or(0))).collect();
+        let sizes: Vec<_> = repos.iter().map(|(repo, _)| s.spawn(move || hf_ninfer_files(repo).map_or(0, |f| f.iter().map(|(_, size)| size).sum::<u64>()))).collect();
         repos.iter().zip(sizes).map(|((repo, downloads), size)| HfModel { repo: repo.clone(), downloads: *downloads, bytes: size.join().unwrap_or(0), ..Default::default() }).collect()
     }))
 }
 
 /// The files of a NInfer model: the entry file first, then its parts (kept
 /// beside it; the engine is given only the entry).
-pub fn hf_ninfer_files(repo: &str) -> Result<Vec<(String, u64)>, String> {
+///
+/// # Errors
+///
+/// When Hugging Face can't be reached or answers with an error.
+pub fn hf_ninfer_files(repo: &str) -> anyhow::Result<Vec<(String, u64)>> {
     let repo = repo.trim().trim_matches('/');
     let tree = get_json(&format!("https://huggingface.co/api/models/{repo}/tree/main"))?;
     let mut files: Vec<(String, u64)> = tree
@@ -926,7 +981,7 @@ pub fn hf_ninfer_files(repo: &str) -> Result<Vec<(String, u64)>, String> {
         .collect();
     files.sort_by_key(|(path, _)| !path.ends_with(".ninfer"));
     if files.first().is_none_or(|(path, _)| !path.ends_with(".ninfer")) {
-        return Err(format!("{repo} has no .ninfer file."));
+        return Err(anyhow::anyhow!("{repo} has no .ninfer file."));
     }
     Ok(files)
 }
@@ -939,13 +994,17 @@ pub fn ninfer_name(repo: &str) -> String {
 
 /// The most downloaded GGUF chat models on Hugging Face (Unsloth's, a
 /// reliable set of sizes), or those matching `search` (anyone's).
-pub fn hf_models(search: &str) -> Result<Vec<HfModel>, String> {
+///
+/// # Errors
+///
+/// When Hugging Face can't be reached or answers with an error.
+pub fn hf_models(search: &str) -> anyhow::Result<Vec<HfModel>> {
     let q = search.trim();
     let mut url = "https://huggingface.co/api/models?filter=gguf&pipeline_tag=text-generation&sort=downloads&direction=-1&limit=40&expand[]=downloads&expand[]=gguf&expand[]=lastModified".to_owned();
     if q.is_empty() {
         url.push_str("&author=unsloth");
     } else {
-        url.push_str(&format!("&search={}", q.split_whitespace().collect::<Vec<_>>().join("%20").replace('&', "%26").replace('#', "%23")));
+        let _ = write!(url, "&search={}", q.split_whitespace().collect::<Vec<_>>().join("%20").replace('&', "%26").replace('#', "%23"));
     }
     let list = get_json(&url)?;
     Ok(list
@@ -965,11 +1024,16 @@ pub fn hf_models(search: &str) -> Result<Vec<HfModel>, String> {
         .collect())
 }
 
-/// Models for vLLM: repositories in Hugging Face's own format (safetensors),
-/// full or quantized (AWQ, GPTQ, FP8), not gated (no account needed). The
-/// most downloaded of the families vLLM serves well, or those matching
-/// `search`. Their weights' size from their parameters by type.
-pub fn hf_vllm_models(search: &str) -> Result<Vec<HfModel>, String> {
+/// Models for vLLM, in Hugging Face's own format (safetensors).
+///
+/// Full or quantized (AWQ, GPTQ, FP8), not gated (no account needed). The most
+/// downloaded of the families vLLM serves well, or those matching `search`.
+/// Their weights' size from their parameters by type.
+///
+/// # Errors
+///
+/// When Hugging Face can't be reached or answers with an error.
+pub fn hf_vllm_models(search: &str) -> anyhow::Result<Vec<HfModel>> {
     let base = "https://huggingface.co/api/models?pipeline_tag=text-generation&library=safetensors&sort=downloads&direction=-1&expand[]=downloads&expand[]=safetensors&expand[]=gated&expand[]=config&expand[]=lastModified";
     let q = search.trim();
     let urls: Vec<String> = if q.is_empty() {
@@ -1017,7 +1081,11 @@ pub fn hf_vllm_models(search: &str) -> Result<Vec<HfModel>, String> {
 
 /// The files vLLM needs from a repository: its weights (safetensors),
 /// config and tokenizer, not other formats or extras. `(path, size)`.
-pub fn hf_vllm_files(repo: &str) -> Result<Vec<(String, u64)>, String> {
+///
+/// # Errors
+///
+/// When Hugging Face can't be reached or answers with an error.
+pub fn hf_vllm_files(repo: &str) -> anyhow::Result<Vec<(String, u64)>> {
     let repo = repo.trim().trim_matches('/');
     let tree = get_json(&format!("https://huggingface.co/api/models/{repo}/tree/main?recursive=true"))?;
     let wanted = |p: &str| {
@@ -1036,14 +1104,16 @@ pub fn hf_vllm_files(repo: &str) -> Result<Vec<(String, u64)>, String> {
         })
         .collect();
     if !files.iter().any(|(p, _)| p.ends_with(".safetensors")) {
-        return Err(format!("{repo} has no safetensors weights for vLLM."));
+        return Err(anyhow::anyhow!("{repo} has no safetensors weights for vLLM."));
     }
     Ok(files)
 }
 
-/// vLLM's parsers for a model family (config.json's `model_type`, and the
-/// repository's name): how its tool calls are read (agents need them), and
-/// its thinking (None: it doesn't think, or vLLM reads it on its own).
+/// vLLM's parsers for a model family: tool calls, then thinking.
+///
+/// The family is config.json's `model_type`, and the repository's name. The
+/// first is how its tool calls are read (agents need them), the second its
+/// thinking (None: it doesn't think, or vLLM reads it on its own).
 pub fn vllm_parsers(model_type: &str, repo: &str) -> (&'static str, Option<&'static str>) {
     let name = repo.to_lowercase();
     match model_type {
@@ -1120,10 +1190,14 @@ pub fn pick_file(files: &[(String, u64)], vram_mb: u64, ram_mb: u64) -> Option<S
 
 /// A Hugging Face repository's GGUF files: `(file, size in bytes)`, a split
 /// model's parts as one entry (its first part, their total size).
-pub fn hf_ggufs(repo: &str) -> Result<Vec<(String, u64)>, String> {
+///
+/// # Errors
+///
+/// When Hugging Face can't be reached or answers with an error.
+pub fn hf_ggufs(repo: &str) -> anyhow::Result<Vec<(String, u64)>> {
     let repo = repo.trim().trim_start_matches("https://huggingface.co/").trim_matches('/');
     if repo.split('/').count() != 2 {
-        return Err(format!("{repo} isn't a Hugging Face repository (owner/name)."));
+        return Err(anyhow::anyhow!("{repo} isn't a Hugging Face repository (owner/name)."));
     }
     let tree = get_json(&format!("https://huggingface.co/api/models/{repo}/tree/main?recursive=true"))?;
     let mut files: Vec<(String, u64)> = Vec::new();
@@ -1227,22 +1301,28 @@ pub fn served_context(base_url: &str) -> Option<u64> {
     v["models"].as_array()?.iter().filter_map(|m| m["context_length"].as_u64()).max().filter(|n| *n > 0)
 }
 
-/// A test message to a server: its answer and speed (tokens/s).
-/// Pulls a model into Ollama with its API (blocking): `progress` gets its
-/// status and the bytes done of all the model's parts (0 of 0 between
-/// downloads: "verifying sha256 digest", "writing manifest").
-pub fn ollama_pull(base_url: &str, model: &str, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> Result<(), String> {
+/// Pulls a model into Ollama with its API (blocking).
+///
+/// `progress` gets its status and the bytes done of all the model's parts (0 of
+/// 0 between downloads: "verifying sha256 digest", "writing manifest");
+/// `stop()` cancels.
+///
+/// # Errors
+///
+/// When Ollama can't be reached, the pull fails (no such model, no room), or it
+/// was cancelled.
+pub fn ollama_pull(base_url: &str, model: &str, progress: &mut dyn FnMut(&str, u64, u64), stop: &dyn Fn() -> bool) -> anyhow::Result<()> {
     use std::io::BufRead;
     let root = base_url.trim_end_matches('/').trim_end_matches("/v1");
-    let mut resp = http(Duration::from_secs(24 * 3600))
+    let mut resp = http(Duration::from_hours(24))
         .post(&format!("{root}/api/pull"))
         .header("Content-Type", "application/json")
         .send(json!({ "model": model, "stream": true }).to_string())
-        .map_err(|e| format!("Ollama didn't take the download: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Ollama didn't take the download: {e}"))?;
     if resp.status().as_u16() != 200 {
         let text = resp.body_mut().read_to_string().unwrap_or_default();
         let said: Value = serde_json::from_str(&text).unwrap_or_default();
-        return Err(said["error"].as_str().map(str::to_owned).unwrap_or(text));
+        return Err(anyhow::Error::msg(said["error"].as_str().map(str::to_owned).unwrap_or(text)));
     }
     let reader = std::io::BufReader::new(resp.body_mut().with_config().limit(u64::MAX).reader());
     // Each part (layer) by its digest: (done, size).
@@ -1250,12 +1330,12 @@ pub fn ollama_pull(base_url: &str, model: &str, progress: &mut dyn FnMut(&str, u
     let mut ok = false;
     for line in reader.lines() {
         if stop() {
-            return Err("Cancelled.".into());
+            return Err(anyhow::Error::msg("Cancelled."));
         }
-        let line = line.map_err(|e| format!("The download broke off: {e}"))?;
+        let line = line.map_err(|e| anyhow::anyhow!("The download broke off: {e}"))?;
         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
         if let Some(e) = v["error"].as_str() {
-            return Err(e.to_owned());
+            return Err(anyhow::Error::msg(e.to_owned()));
         }
         let status = v["status"].as_str().unwrap_or_default();
         if status == "success" {
@@ -1273,7 +1353,7 @@ pub fn ollama_pull(base_url: &str, model: &str, progress: &mut dyn FnMut(&str, u
             _ => progress(status, 0, 0),
         }
     }
-    if ok { Ok(()) } else { Err(format!("Ollama didn't finish downloading {model}.")) }
+    if ok { Ok(()) } else { Err(anyhow::anyhow!("Ollama didn't finish downloading {model}.")) }
 }
 
 /// The context a server gives one model: llama.cpp's router (several
@@ -1336,12 +1416,16 @@ pub fn read_preset(file: &Path) -> Vec<PresetModel> {
 }
 
 /// Writes a llama.cpp server's preset: its models, each with its context.
+///
+/// # Errors
+///
+/// An I/O error when the file can't be written.
 pub fn write_preset(file: &Path, models: &[PresetModel]) -> std::io::Result<()> {
     let mut t = String::from("; harlo's llama.cpp server: its models (router mode), one loaded at a time.\n[*]\njinja = true\n");
     for m in models {
-        t.push_str(&format!("\n[{}]\nmodel = {}\n", m.name, m.path.display()));
+        let _ = write!(t, "\n[{}]\nmodel = {}\n", m.name, m.path.display());
         match m.context {
-            Some(c) => t.push_str(&format!("c = {c}\n")),
+            Some(c) => _ = writeln!(t, "c = {c}"),
             None => t.push_str("fit-ctx = 16384\n"),
         }
     }
@@ -1364,23 +1448,28 @@ pub fn ollama_sizes(base_url: &str) -> Vec<(String, u64)> {
 }
 
 /// Deletes a model from Ollama's store (`/api/delete`; it must be running).
-pub fn ollama_delete(base_url: &str, model: &str) -> Result<(), String> {
+///
+/// # Errors
+///
+/// When Ollama can't be reached or refuses (the model isn't there).
+pub fn ollama_delete(base_url: &str, model: &str) -> anyhow::Result<()> {
     let root = base_url.trim_end_matches('/').trim_end_matches("/v1");
     let resp = http(Duration::from_secs(60))
         .delete(&format!("{root}/api/delete"))
         .header("Content-Type", "application/json")
         .force_send_body()
         .send(json!({ "model": model }).to_string())
-        .map_err(|e| format!("{model}: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("{model}: {e}"))?;
     match resp.status().as_u16() {
         200 | 404 => Ok(()),
-        s => Err(format!("Ollama didn't delete {model} (HTTP {s})")),
+        s => Err(anyhow::anyhow!("Ollama didn't delete {model} (HTTP {s})")),
     }
 }
 
-/// A model's context on a server that doesn't list it: what the server
-/// serves now (`served_context`), else, for Ollama with nothing loaded, the
-/// model's own most (`/api/show`; it serves no more than that).
+/// A model's context on a server that doesn't list it.
+///
+/// What the server serves now (`served_context`), else, for Ollama with nothing
+/// loaded, the model's own most (`/api/show`; it serves no more than that).
 pub fn model_context(base_url: &str, model: &str) -> Option<u64> {
     served_context(base_url).or_else(|| {
         let root = base_url.trim_end_matches('/').trim_end_matches("/v1");
@@ -1390,25 +1479,31 @@ pub fn model_context(base_url: &str, model: &str) -> Option<u64> {
     })
 }
 
+/// A test message to a server: its answer and speed (tokens/s).
+///
 /// The speed is the second answer's: the first one loads the model (Ollama
 /// does it then), which isn't how fast it writes. Room for a model that
 /// thinks first; its thinking when that's all it said. Also whether it
 /// thought (its thinking apart from its answer, or in `<think>` tags).
-pub fn test_chat(base_url: &str, model: &str) -> Result<(String, f64, bool), String> {
-    let ask = |max_tokens: u64| -> Result<(Value, f64), String> {
+///
+/// # Errors
+///
+/// When the server can't be reached or answers with an error.
+pub fn test_chat(base_url: &str, model: &str) -> anyhow::Result<(String, f64, bool)> {
+    let ask = |max_tokens: u64| -> anyhow::Result<(Value, f64)> {
         let started = std::time::Instant::now();
         let body = json!({ "model": model, "messages": [{ "role": "user", "content": "Say hello in five words." }], "max_tokens": max_tokens, "stream": false });
         let mut resp = http(Duration::from_secs(600))
             .post(&format!("{}/chat/completions", base_url.trim_end_matches('/')))
             .header("Content-Type", "application/json")
             .send(body.to_string())
-            .map_err(|e| format!("No answer: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("No answer: {e}"))?;
         let status = resp.status().as_u16();
         let text = resp.body_mut().read_to_string().unwrap_or_default();
         if status != 200 {
-            return Err(format!("It answered HTTP {status}: {}", text.chars().take(200).collect::<String>()));
+            return Err(anyhow::anyhow!("It answered HTTP {status}: {}", text.chars().take(200).collect::<String>()));
         }
-        Ok((serde_json::from_str(&text).map_err(|e| e.to_string())?, started.elapsed().as_secs_f64().max(0.001)))
+        Ok((serde_json::from_str(&text)?, started.elapsed().as_secs_f64().max(0.001)))
     };
     ask(1)?;
     let (v, secs) = ask(1024)?;
@@ -1543,7 +1638,7 @@ mod tests {
         assert_eq!(split_first("model-Q4_K_M.gguf"), None);
         assert_eq!(gguf_parts("Q4/m-00001-of-00003.gguf"), ["Q4/m-00001-of-00003.gguf", "Q4/m-00002-of-00003.gguf", "Q4/m-00003-of-00003.gguf"]);
         assert_eq!(gguf_parts("m.gguf"), ["m.gguf"]);
-        assert!(hf_ggufs("not-a-repo").is_err());
+        hf_ggufs("not-a-repo").unwrap_err();
         let p = free_port(41000);
         assert!((41000..41200).contains(&p));
     }
@@ -1582,7 +1677,7 @@ mod tests {
         assert_eq!(last, (300_000, 300_000));
         // A wrong checksum: not kept.
         std::fs::remove_file(&dest).unwrap();
-        assert!(download(&format!("http://{addr}/file.bin"), &dest, Some("00"), &mut |_, _, _| {}, &|| false).unwrap_err().contains("checksum"));
+        assert!(download(&format!("http://{addr}/file.bin"), &dest, Some("00"), &mut |_, _, _| {}, &|| false).unwrap_err().to_string().contains("checksum"));
         assert!(!dest.exists() && !dest.with_extension("part").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1653,7 +1748,7 @@ mod tests {
         let fit = Engine::Basalt.fit(&hw);
         assert!(fit.0 == "ok" || fit.1.contains("installed first"), "{fit:?}");
         let small = { let mut h = hw.clone(); h.ram_mb = 16 * 1024; h };
-        assert!(Engine::Basalt.fit(&small).0 == "no");
+        assert_eq!(Engine::Basalt.fit(&small).0, "no");
     }
 
     #[test]
@@ -1682,14 +1777,13 @@ mod tests {
     /// A server like Hugging Face's: HEAD gives the size and SHA-256, GET
     /// gives byte ranges (or, `ranges` false, only the whole file).
     fn ranged_server(body: Vec<u8>, sha: String, ranges: bool) -> String {
-        use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let body = std::sync::Arc::new(body);
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut s) = stream else { continue };
-                let (body, sha) = (body.clone(), sha.clone());
+                let (body, sha) = (std::sync::Arc::clone(&body), sha.clone());
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 4096];
                     let n = s.read(&mut buf).unwrap_or(0);
@@ -1738,7 +1832,7 @@ mod tests {
         let span = (body.len() as u64).div_ceil(3);
         let mut half = vec![0u8; body.len()];
         for i in 0..3u64 {
-            let (a, b) = ((i * span) as usize, ((i * span) as usize + 1_000_000).min(body.len()));
+            let (a, b) = (usize::try_from(i * span).unwrap_or(usize::MAX), (usize::try_from(i * span).unwrap_or(usize::MAX) + 1_000_000).min(body.len()));
             half[a..b].copy_from_slice(&body[a..b]);
         }
         std::fs::write(dest.with_extension("part"), &half).unwrap();
@@ -1748,7 +1842,7 @@ mod tests {
 
         // A wrong checksum: not kept.
         std::fs::remove_file(&dest).unwrap();
-        assert!(download_parallel(&url, &dest, Some("00"), 8, &mut |_, _, _| {}, &|| false).unwrap_err().contains("checksum"));
+        assert!(download_parallel(&url, &dest, Some("00"), 8, &mut |_, _, _| {}, &|| false).unwrap_err().to_string().contains("checksum"));
         assert!(!dest.exists() && !dest.with_extension("part").exists());
 
         // A server without ranges: one connection, still checked.

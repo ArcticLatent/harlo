@@ -4,6 +4,8 @@
 //! harlo-agent speaks. Everything downstream (reducer, UI) consumes
 //! [`HarnessEvent`].
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -161,6 +163,7 @@ pub enum HarnessEvent {
 }
 
 /// Stateful translator from one harness's wire frames to [`HarnessEvent`]s.
+#[derive(Debug)]
 pub struct Translator {
     kind: HarnessKind,
     msg_seq: u64,
@@ -279,7 +282,7 @@ impl Translator {
 fn translate_block_event(id: String, ev: &Value) -> Option<HarnessEvent> {
     use HarnessEvent as E;
     let ty = ev["type"].as_str()?;
-    let index = ev["contentIndex"].as_u64().unwrap_or(0) as usize;
+    let index = usize::try_from(ev["contentIndex"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
     let (kind, phase) = match ty {
         "text_start" => (BlockKind::Text, 0),
         "text_delta" => (BlockKind::Text, 1),
@@ -330,7 +333,7 @@ fn translate_ui_request(frame: Value) -> HarnessEvent {
 }
 
 fn take(mut frame: Value, key: &str) -> Value {
-    frame.get_mut(key).map(Value::take).unwrap_or(Value::Null)
+    frame.get_mut(key).map_or(Value::Null, Value::take)
 }
 
 fn str_of(v: &Value, key: &str) -> String {
@@ -383,7 +386,7 @@ mod tests {
     fn harlo_agent_calls_harlos_tools() {
         let mut t = Translator::new(HarnessKind::Harlo);
         let ev = t.translate(json!({"type":"harlo_aside","question":"why?","text":"Because.","done":true}));
-        assert!(matches!(&ev[..], [HarnessEvent::Aside(a)] if a["question"] == "why?" && a["text"] == "Because." && a["done"] == true && a["error"].is_null()), "{ev:?}");
+        assert!(matches!(&*ev, [HarnessEvent::Aside(a)] if a["question"] == "why?" && a["text"] == "Because." && a["done"] == true && a["error"].is_null()), "{ev:?}");
         let ev = t.translate(json!({"type":"harlo_call","id":"hc-3","tool":"list_sessions","args":{"all":true}}));
         let HarnessEvent::HarloCall { id, tool, args } = &ev[0] else { panic!("{ev:?}") };
         assert_eq!((id.as_str(), tool.as_str(), args), ("hc-3", "list_sessions", &json!({"all":true})));

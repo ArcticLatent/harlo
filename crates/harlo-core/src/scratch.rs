@@ -1,6 +1,8 @@
 //! Tests' scratch folders, removed when the test ends (passed or failed),
 //! so /tmp (in memory here) doesn't fill up run by run.
 
+// Rust guideline compliant 2026-10-09
+
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 

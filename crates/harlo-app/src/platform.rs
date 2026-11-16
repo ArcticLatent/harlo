@@ -1,5 +1,7 @@
 //! App-level platform settings (window icon, desktop app id).
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod ffi {
     unsafe extern "C++" {

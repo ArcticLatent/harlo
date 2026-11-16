@@ -7,6 +7,8 @@
 //! the Model servers page work afterwards; adding it to the agents is the
 //! page's (Accounts.addServer).
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -218,11 +220,11 @@ impl ServerSetup {
                         .collect();
                     json!({ "state": "ready", "search": search, "models": list, "error": "" })
                 }
-                Err(e) => json!({ "state": "failed", "search": search, "models": [], "error": e }),
+                Err(e) => json!({ "state": "failed", "search": search, "models": [], "error": format!("{e:#}") }),
             };
             let _ = thread.queue(move |mut this| {
                 // (Only the latest search.)
-                if serde_json::from_str::<Value>(&this.hf_models.to_string()).ok().is_some_and(|c| c["search"] == v["search"]) {
+                if serde_json::from_str::<Value>(&this.hf_models.to_string()).is_ok_and(|c| c["search"] == v["search"]) {
                     this.as_mut().set_hf_models(QString::from(&v.to_string()));
                 }
             });
@@ -255,11 +257,11 @@ impl ServerSetup {
                     let pick_whole = engines::pick_file(&whole, hw.vram_mb(), hw.ram_mb);
                     json!({ "state": "ready", "repo": repo, "files": list, "pick": pick, "pickWhole": pick_whole, "error": "" })
                 }
-                Err(e) => json!({ "state": "failed", "repo": repo, "files": [], "error": e }),
+                Err(e) => json!({ "state": "failed", "repo": repo, "files": [], "error": format!("{e:#}") }),
             };
             let _ = thread.queue(move |mut this| {
                 // (Only the latest listing.)
-                if serde_json::from_str::<Value>(&this.ggufs.to_string()).ok().is_some_and(|c| c["repo"] == v["repo"]) {
+                if serde_json::from_str::<Value>(&this.ggufs.to_string()).is_ok_and(|c| c["repo"] == v["repo"]) {
                     this.as_mut().set_ggufs(QString::from(&v.to_string()));
                 }
             });
@@ -269,15 +271,15 @@ impl ServerSetup {
     pub fn free_port(&self, from: i32) -> i32 {
         // (There: asked there.)
         if let Some(h) = self.on() {
-            return harlo_core::engine_host::json(&h, &["free-port", &from.to_string()], Duration::from_secs(30)).ok().and_then(|v| v.as_i64()).map_or(from, |p| p as i32);
+            return harlo_core::engine_host::json(&h, &["free-port", &from.to_string()], Duration::from_secs(30)).ok().and_then(|v| v.as_i64()).map_or(from, |p| i32::try_from(p).unwrap_or(i32::MAX));
         }
         // (Free now, and not a port of a server harlo knows, stopped or not.)
         let taken: Vec<u16> = harlo_core::servers::ports_in_use().into_iter().map(|(p, _)| p).collect();
-        let mut port = from.clamp(1024, 65000) as u16;
+        let mut port = u16::try_from(from.clamp(1024, 65000)).unwrap_or(0);
         loop {
             port = engines::free_port(port);
             if !taken.contains(&port) || port >= 65000 {
-                return port as i32;
+                return i32::from(port);
             }
             port += 1;
         }
@@ -289,7 +291,7 @@ impl ServerSetup {
         }
         let req: Value = serde_json::from_str(&request.to_string()).unwrap_or_default();
         let stop = Arc::new(AtomicBool::new(false));
-        self.as_mut().rust_mut().stop = stop.clone();
+        self.as_mut().rust_mut().stop = Arc::clone(&stop);
         let first = json!({ "state": "running", "step": "Starting", "progress": -1, "detail": "", "result": null, "update": req["update"].is_string() });
         self.as_mut().set_job(QString::from(&first.to_string()));
         self.as_mut().set_output(QString::default());
@@ -334,7 +336,7 @@ impl ServerSetup {
         if let Some((host, job)) = self.remote_job.clone() {
             crate::runtime().spawn_blocking(move || {
                 if let Err(e) = harlo_core::engine_host::cancel(&host, &job) {
-                    tracing::warn!("cancelling the setup on {host}: {e:#}");
+                    tracing::event!(name: "server.setup.cancel.failed", tracing::Level::WARN, server.address = %host, error.message = %format_args!("{e:#}"), "cancelling the setup on {{server.address}}: {{error.message}}");
                 }
             });
         }
@@ -351,7 +353,7 @@ impl ServerSetup {
         crate::runtime().spawn_blocking(move || {
             let text = match &host {
                 None => harlo_core::engine_setup::updates().to_string(),
-                Some(h) => harlo_core::engine_host::json(h, &["updates"], Duration::from_secs(120)).map(|v| v.to_string()).unwrap_or_else(|_| "{}".into()),
+                Some(h) => harlo_core::engine_host::json(h, &["updates"], Duration::from_secs(120)).map_or_else(|_| "{}".into(), |v| v.to_string()),
             };
             let _ = thread.queue(move |mut this| this.as_mut().set_updates(QString::from(&text)));
         });

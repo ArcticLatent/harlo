@@ -8,6 +8,8 @@
 //! with a price (`providers.json`, or its server's list) is priced, and
 //! any other is unknown: never a made-up 0.
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::{Value, json};
 
 /// Dollars per million tokens.
@@ -223,12 +225,12 @@ impl Used {
     pub fn cost_kind(&self) -> &'static str {
         let k = self.kinds;
         match () {
-            _ if k & UNKNOWN != 0 && k & PRICED != 0 => "partly",
-            _ if k & UNKNOWN != 0 => "unknown",
-            _ if k & PRICED != 0 => "priced",
-            _ if k & PLAN != 0 => "plan",
-            _ if k & LOCAL != 0 => "local",
-            _ => "",
+            () if k & UNKNOWN != 0 && k & PRICED != 0 => "partly",
+            () if k & UNKNOWN != 0 => "unknown",
+            () if k & PRICED != 0 => "priced",
+            () if k & PLAN != 0 => "plan",
+            () if k & LOCAL != 0 => "local",
+            () => "",
         }
     }
 

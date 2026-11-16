@@ -1,8 +1,11 @@
-//! Where a long session's old text waits: the replies far above what's
-//! shown keep their rows' short parts in memory (what a list, a run's line
-//! or a search of your messages needs) and their long text, and the blocks
-//! it was made from, in a file of this process's in the cache, read back
-//! when a row is shown or anything comes for its reply.
+//! Where a long session's old text waits, in a file, until a row needs it.
+//!
+//! The replies far above what's shown keep their rows' short parts in memory
+//! (what a list, a run's line or a search of your messages needs) and their
+//! long text, and the blocks it was made from, in a file of this process's in
+//! the cache, read back when a row is shown or anything comes for its reply.
+
+// Rust guideline compliant 2026-10-09
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -11,6 +14,7 @@ use std::sync::Arc;
 
 /// The file; gone when nothing points into it any more (a row the window
 /// still has keeps it, after its transcript was loaded again).
+#[derive(Debug)]
 pub struct PageFile {
     path: PathBuf,
     file: File,
@@ -44,6 +48,11 @@ impl std::fmt::Debug for Paged {
 }
 
 impl Paged {
+    /// The bytes kept in the page file.
+    ///
+    /// # Errors
+    ///
+    /// An I/O error when the file can't be read.
     pub fn read(&self) -> std::io::Result<Vec<u8>> {
         let mut buf = vec![0; self.len as usize];
         self.page.file.read_exact_at(&mut buf, self.at)?;
@@ -52,7 +61,7 @@ impl Paged {
 }
 
 /// A transcript's page file, made when the first record is written.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Pages {
     page: Option<Arc<PageFile>>,
     end: u64,
@@ -78,7 +87,7 @@ impl Pages {
             match dir.ok_or_else(|| std::io::Error::other("no cache folder")).and_then(|d| harlo_harness::store::own_file(&d, "pages")) {
                 Ok((path, file)) => self.page = Some(Arc::new(PageFile { path, file })),
                 Err(e) => {
-                    tracing::warn!("long sessions stay whole in memory: no page file ({e})");
+                    tracing::event!(name: "transcript.pages.open.failed", tracing::Level::WARN, error.message = %e, "long sessions stay whole in memory: no page file ({{error.message}})");
                     self.failed = true;
                     return None;
                 }
@@ -86,13 +95,13 @@ impl Pages {
         }
         let page = self.page.clone()?;
         if let Err(e) = page.file.write_all_at(bytes, self.end) {
-            tracing::warn!("long sessions stay whole in memory: the page file can't be written ({e})");
+            tracing::event!(name: "transcript.pages.write.failed", tracing::Level::WARN, error.message = %e, "long sessions stay whole in memory: the page file can't be written ({{error.message}})");
             self.failed = true;
             return None;
         }
         let at = self.end;
         self.end += bytes.len() as u64;
-        Some(Paged { page, at, len: bytes.len() as u32 })
+        Some(Paged { page, at, len: u32::try_from(bytes.len()).unwrap_or(u32::MAX) })
     }
 
     /// It couldn't be made or written: nothing more goes to it.

@@ -6,6 +6,8 @@
 //! It uses HTTPS port 8443 (`https://<computer>.<tailnet>.ts.net:8443`), so
 //! it leaves alone anything the user shares on 443 themselves.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -80,7 +82,7 @@ pub fn start(program: PathBuf, port: u16, status: impl Fn(Status) + Send + Sync 
             }
             status(Status::Failed(why));
             tokio::select! {
-                _ = tokio::time::sleep(backoff) => {}
+                () = tokio::time::sleep(backoff) => {}
                 _ = &mut stopped => return,
             }
             backoff = (backoff * 2).min(Duration::from_secs(60));
@@ -105,8 +107,8 @@ async fn run_once(program: &Path, port: u16, status: &(impl Fn(Status) + Sync)) 
         command.pre_exec(|| {
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
             Ok(())
-        });
-    }
+        })
+    };
     let child = command.spawn();
     let mut child = match child {
         Ok(c) => c,

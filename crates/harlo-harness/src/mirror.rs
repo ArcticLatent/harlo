@@ -1,9 +1,12 @@
-//! Copies of session files on other machines, kept here so they're read as
-//! local ones are (a line at a time, from the open cache) and still open
-//! with the host offline. A session file only grows: bringing its copy up to
+//! Copies of session files on other machines, kept here.
+//!
+//! They're read as local ones are (a line at a time, from the open cache)
+//! and still open with the host offline. A session file only grows: bringing its copy up to
 //! date fetches only what was added, once the copy's last bytes are checked
 //! against the host's (a file that changed otherwise comes again, whole).
 //! What comes over SSH goes straight to the copy, never all into memory.
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -22,7 +25,7 @@ const FRESH: Duration = Duration::from_secs(2);
 /// copy stays as it is).
 const STALL: Duration = Duration::from_secs(20);
 /// A copy not used for this long goes.
-const KEPT: Duration = Duration::from_secs(30 * 86400);
+const KEPT: Duration = Duration::from_hours(720);
 
 /// Where the copies are kept.
 pub fn dir() -> Option<PathBuf> {
@@ -35,7 +38,7 @@ pub fn dir() -> Option<PathBuf> {
 
 /// The folder for `remote`'s copy on `host` (FNV-1a of both: a stable name).
 fn slot(dir: &Path, host: &str, remote: &str) -> PathBuf {
-    let hash = host.bytes().chain([0]).chain(remote.bytes()).fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    let hash = host.bytes().chain([0]).chain(remote.bytes()).fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
     dir.join(format!("{hash:016x}"))
 }
 
@@ -59,8 +62,14 @@ enum Fetched {
 }
 
 /// Brings the copy of `remote` on `host` up to date and returns where it is.
+///
 /// `command` makes the ssh command that runs a script on the host. With the
 /// host unreachable, the copy as it was, if there is one.
+///
+/// # Errors
+///
+/// An I/O error when there's no cache folder, the copy can't be written, or the
+/// host can't be reached and there's no copy yet.
 pub fn refresh(host: &str, remote: &str, command: impl Fn(&str) -> Command) -> std::io::Result<PathBuf> {
     let dir = dir().ok_or_else(|| std::io::Error::other("no cache folder"))?;
     refresh_in(&dir, host, remote, command)
@@ -72,8 +81,10 @@ fn refresh_in(dir: &Path, host: &str, remote: &str, command: impl Fn(&str) -> Co
     let copy = slot.join(name);
     // One refresh of a copy at a time; one just done stands.
     let lock = {
-        static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<Option<Instant>>>>>> = OnceLock::new();
-        LOCKS.get_or_init(Default::default).lock().unwrap().entry(copy.clone()).or_default().clone()
+        /// When a copy was last refreshed, held while it is refreshed.
+        type Refresh = Arc<Mutex<Option<Instant>>>;
+        static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Refresh>>> = OnceLock::new();
+        Arc::clone(LOCKS.get_or_init(Default::default).lock().unwrap().entry(copy.clone()).or_default())
     };
     let mut last = lock.lock().unwrap();
     if last.is_some_and(|t| t.elapsed() < FRESH) && copy.is_file() {
@@ -86,7 +97,7 @@ fn refresh_in(dir: &Path, host: &str, remote: &str, command: impl Fn(&str) -> Co
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
-    }
+    };
     let mut size = None;
     let mut fetched = fetch(&command, remote, &copy, false, STALL, &mut size);
     if matches!(fetched, Fetched::Changed) {
@@ -106,19 +117,26 @@ fn refresh_in(dir: &Path, host: &str, remote: &str, command: impl Fn(&str) -> Co
             Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{remote} is gone from {host}")))
         }
         Fetched::Unreachable | Fetched::Changed if copy.is_file() => {
-            tracing::debug!("{host}: {remote} as last copied");
+            tracing::event!(name: "remote.mirror.unchanged", tracing::Level::DEBUG, server.address = %host, file.path = %remote, "{{server.address}}: {{file.path}} as last copied");
             note(read_source(&source)["used"].as_u64().unwrap_or(0));
             Ok(copy)
         }
         Fetched::Unreachable | Fetched::Changed => Err(std::io::Error::other(format!("couldn't read {remote} on {host}"))),
         Fetched::Done(added) => {
-            tracing::debug!("{host}: {remote} +{added} bytes");
+            tracing::event!(name: "remote.mirror.grown", tracing::Level::DEBUG, server.address = %host, file.path = %remote, file.added = added, "{{server.address}}: {{file.path}} +{{file.added}} bytes");
             note(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()));
             // (Cut short: the rest is asked for again next time, not in a moment.)
             if short_by(&copy, size) == 0 {
                 *last = Some(Instant::now());
             } else {
-                tracing::warn!("{host}: {remote} came over only in part ({} of {size} bytes)", size - short_by(&copy, size));
+                tracing::event!(
+                    name: "remote.mirror.partial", tracing::Level::WARN,
+                    server.address = %host,
+                    file.path = %remote,
+                    file.received = size - short_by(&copy, size),
+                    file.size = size,
+                    "{{server.address}}: {{file.path}} came over only in part ({{file.received}} of {{file.size}} bytes)",
+                );
             }
             Ok(copy)
         }
@@ -133,9 +151,11 @@ fn short_by(copy: &Path, size: u64) -> u64 {
     size.saturating_sub(std::fs::metadata(copy).map_or(0, |m| m.len()))
 }
 
-/// How many bytes of the host's file its copy lacks, as far as harlo knows
-/// (the size the host last said, less what came over): 0 when it all came.
-/// A copy is the start of the host's file, so what's missing is its end.
+/// How many bytes of the host's file its copy lacks.
+///
+/// As far as harlo knows: the size the host last said, less what came over; 0
+/// when it all came. A copy is the start of the host's file, so what's missing
+/// is its end.
 pub fn missing(copy: &Path) -> u64 {
     copy.parent().map_or(0, |slot| short_by(copy, read_source(&slot.join("source.json"))["size"].as_u64().unwrap_or(0)))
 }
@@ -181,8 +201,8 @@ fn fetch(command: &impl Fn(&str) -> Command, remote: &str, copy: &Path, whole: b
                     break;
                 }
             }
-        });
-    }
+        })
+    };
     let mut out = BufReader::new(Heard { inner: stdout, start, heard });
     let result = (|| {
         let mut header = String::new();
@@ -243,7 +263,7 @@ struct Heard<R> {
 impl<R: Read> Read for Heard<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.inner.read(buf)?;
-        self.heard.store(self.start.elapsed().as_millis() as u64, Ordering::Relaxed);
+        self.heard.store(u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX), Ordering::Relaxed);
         Ok(n)
     }
 }

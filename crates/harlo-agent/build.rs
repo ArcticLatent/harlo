@@ -2,6 +2,8 @@
 //! benchmark's records): `+changes` when its sources had uncommitted
 //! changes then.
 
+// Rust guideline compliant 2026-10-09
+
 use std::process::Command;
 
 fn main() {

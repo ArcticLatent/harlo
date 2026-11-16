@@ -1,6 +1,10 @@
-//! Harlo's subagents as the UI shows them, built from both sources it offers:
-//! `subagent_lifecycle` / `subagent_progress` events (which also cover
-//! detached background jobs) and the `get_subagents` list (which does not).
+//! Harlo's subagents as the UI shows them.
+//!
+//! They're built from both sources it offers: `subagent_lifecycle` /
+//! `subagent_progress` events (which also cover detached background jobs) and
+//! the `get_subagents` list (which does not).
+
+// Rust guideline compliant 2026-10-09
 
 use serde_json::{Value, json};
 
@@ -35,7 +39,7 @@ pub fn apply_event(list: &mut Vec<Value>, frame: &Value) {
     if entry["status"] == "started" {
         entry["status"] = json!("running");
     }
-    // A one-line description: omp's, else the assignment's first line.
+    // A one-line description: the agent's, else the assignment's first line.
     if entry["description"].as_str().is_none_or(str::is_empty)
         && let Some(first) = entry["assignment"].as_str().and_then(|a| a.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#')))
     {
@@ -74,12 +78,13 @@ pub fn merged(from_events: &[Value], listed: &[Value]) -> Vec<Value> {
     out
 }
 
-/// The subagents a saved omp session started, from its file: each `task`
-/// result lists its subagents (`details.progress`); their transcripts sit
-/// in a folder named after the session file. Nothing is running in a saved
-/// session, so the outcome comes from omp's job notice (`<task-result
-/// status="…">`), else a `yield` in the transcript (delivered), else
-/// "ended".
+/// The subagents a saved Harlo session started, from its file.
+///
+/// Each `task` result lists its subagents (`details.progress`); their
+/// transcripts sit in a folder named after the session file. Nothing is running
+/// in a saved session, so the outcome is how its entry ended, else a job notice
+/// (`<task-result status="…">`), else a `yield` in the transcript (delivered),
+/// else "ended".
 pub fn from_session_file(path: &std::path::Path) -> Vec<Value> {
     // On a remote host: the file, which transcripts exist and which yielded,
     // each in one SSH command.
@@ -90,26 +95,26 @@ pub fn from_session_file(path: &std::path::Path) -> Vec<Value> {
     let remote_files: std::collections::HashSet<String> = if remote {
         crate::remote::list_dir(&dir).map(|l| l.into_iter().map(|e| e.name).collect()).unwrap_or_default()
     } else {
-        Default::default()
+        std::collections::HashSet::default()
     };
     let remote_yielded: std::collections::HashSet<String> = match (remote, crate::remote::split(&dir).and_then(|(h, d)| Some((crate::remote::host(&h)?, d)))) {
         (true, Some((host, d))) => crate::remote::run(&host, &format!("cd {} 2>/dev/null && grep -l -F '\"name\":\"yield\"' -- *.jsonl 2>/dev/null", crate::remote::quote(&d)), std::time::Duration::from_secs(30))
             .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::to_owned).collect())
             .unwrap_or_default(),
-        _ => Default::default(),
+        _ => std::collections::HashSet::default(),
     };
     let exists = |file: &std::path::Path| if remote { file.file_name().is_some_and(|n| remote_files.contains(&*n.to_string_lossy())) } else { file.exists() };
     let mut list = Vec::new();
-    let mut outcome: std::collections::HashMap<String, String> = Default::default();
+    let mut outcome: std::collections::HashMap<String, String> = std::collections::HashMap::default();
     // (harlo-agent's say how each ended.)
-    let mut own: std::collections::HashMap<String, String> = Default::default();
+    let mut own: std::collections::HashMap<String, String> = std::collections::HashMap::default();
     for line in text.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
         let m = &entry["message"];
         if entry["type"] == "message" && m["role"] == "toolResult" && m["toolName"] == "task" {
             for p in m["details"]["progress"].as_array().into_iter().flatten() {
                 let Some(id) = p["id"].as_str() else { continue };
-                // (Only how it ended: omp's say "pending" here.)
+                // (Only how it ended: a saved entry may say "pending".)
                 if let Some(status) = p["status"].as_str().filter(|s| matches!(*s, "completed" | "failed" | "aborted")) {
                     own.insert(id.to_owned(), status.to_owned());
                 }

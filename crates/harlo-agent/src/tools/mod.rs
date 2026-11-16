@@ -6,9 +6,12 @@
 //! is refused until it's read again. A file a tool makes (generated code, a
 //! lockfile) is refused the first time it's changed (see `generated`).
 
+// Rust guideline compliant 2026-10-09
+
 pub mod bash;
 pub mod edit;
 
+use std::fmt::Write as _;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -102,7 +105,7 @@ impl Matches {
         if let Some((f, _)) = &mut self.spill
             && !self.broke
         {
-            self.broke = f.write_all(l.as_bytes()).and_then(|_| f.write_all(b"\n")).is_err();
+            self.broke = f.write_all(l.as_bytes()).and_then(|()| f.write_all(b"\n")).is_err();
         }
         if self.first.len() < GREP_MAX {
             self.first.push(l.to_owned());
@@ -152,8 +155,8 @@ fn grep_capped() -> bool {
 
 /// How long a grep or find may run: a minute (`HARLO_AGENT_SEARCH_SECS`
 /// sets another).
-fn search_secs() -> u64 {
-    std::env::var("HARLO_AGENT_SEARCH_SECS").ok().and_then(|v| v.trim().parse().ok()).filter(|s| *s > 0).unwrap_or(60)
+fn search_limit() -> std::time::Duration {
+    std::time::Duration::from_secs(std::env::var("HARLO_AGENT_SEARCH_SECS").ok().and_then(|v| v.trim().parse().ok()).filter(|s| *s > 0).unwrap_or(60))
 }
 
 pub struct Tools {
@@ -181,6 +184,9 @@ pub struct Tools {
     /// the model hasn't read them yet, so a change there waits for its next
     /// reply.
     rules_new: Mutex<HashSet<PathBuf>>,
+    /// How long a grep or find may run: a minute, unless
+    /// `HARLO_AGENT_SEARCH_SECS` sets another.
+    pub search_limit: std::time::Duration,
 }
 
 /// Of a folder's own rules file, what goes with a tool result.
@@ -251,7 +257,7 @@ fn stream_lines(path: &Path, start: usize, max: usize, max_bytes: usize) -> std:
     let size = f.metadata()?.len();
     let mut h = std::collections::hash_map::DefaultHasher::new();
     // (A slice hashes its length first.)
-    h.write_usize(size as usize);
+    h.write_usize(usize::try_from(size).unwrap_or(usize::MAX));
     let mut buf = vec![0u8; 1 << 16];
     let (mut lines, mut bytes, mut binary) = (0usize, 0u64, false);
     let (mut kept, mut kept_bytes, mut cur, mut open) = (Vec::new(), 0usize, Vec::new(), false);
@@ -264,7 +270,7 @@ fn stream_lines(path: &Path, start: usize, max: usize, max_bytes: usize) -> std:
         }
         let part = &buf[..n];
         h.write(part);
-        if bytes < 8192 && part[..n.min(8192 - bytes as usize)].contains(&0) {
+        if bytes < 8192 && part[..n.min(8192 - usize::try_from(bytes).unwrap_or(usize::MAX))].contains(&0) {
             binary = true;
         }
         bytes += n as u64;
@@ -381,7 +387,7 @@ pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>
         all.retain(|t| t["name"].as_str().is_some_and(|n| only.contains(&n)));
     }
     if patch {
-        for t in all.iter_mut() {
+        for t in &mut all {
             if t["name"] == "edit" {
                 *t = crate::patch::spec();
             } else if let Some(d) = t["description"].as_str() {
@@ -446,10 +452,37 @@ pub fn specs() -> Value {
     ])
 }
 
+/// Whether `path` is still as the session last saw it: by its size and
+/// time, or by what's in it when those can't tell (`now`: its contents,
+/// when already read).
+fn unchanged(path: &Path, seen: &Seen, now: Option<&[u8]>) -> bool {
+    let Ok(m) = std::fs::metadata(path) else { return false };
+    if m.len() != seen.size {
+        return false;
+    }
+    let racy = seen.at.duration_since(seen.modified).map_or(true, |d| d < RACY);
+    if m.modified().ok() == Some(seen.modified) && !racy {
+        return true;
+    }
+    // (Touched, or rewritten as it was: still what was read.)
+    match now {
+        Some(bytes) => hash_of(bytes) == seen.hash,
+        None => std::fs::read(path).is_ok_and(|b| hash_of(&b) == seen.hash),
+    }
+}
+
+/// Whether `path` starts as a picture does.
+fn picture(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 64];
+    let n = std::fs::File::open(path).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+    crate::images::mime_of(&head[..n]).is_some()
+}
+
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
         let jobs = Arc::new(crate::jobs::Jobs::new(&spill_dir));
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default(), rules_given: Mutex::default(), rules_new: Mutex::default() }
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default(), rules_given: Mutex::default(), rules_new: Mutex::default(), search_limit: search_limit() }
     }
 
     /// Outputs set aside, kept for `recall` (`replace`: the session's
@@ -494,18 +527,18 @@ impl Tools {
                 if std::io::Read::read_to_end(&mut std::io::Read::take(f, NESTED_RULES_KEPT as u64 + 4), &mut raw).is_err() {
                     continue;
                 }
-                let whole = std::fs::metadata(&rules).map_or(0, |m| m.len()) as usize;
+                let whole = usize::try_from(std::fs::metadata(&rules).map_or(0, |m| m.len())).unwrap_or(usize::MAX);
                 let text = String::from_utf8_lossy(&raw);
                 let text = text.trim();
                 if text.is_empty() {
                     continue;
                 }
                 let shown = rules.strip_prefix(&self.cwd).unwrap_or(&rules).display();
-                out.push_str(&format!("\n\n{RULES_FROM}{shown}{RULES_FOR}{}/:]\n", rel.display()));
+                let _ = write!(out, "\n\n{RULES_FROM}{shown}{RULES_FOR}{}/:]\n", rel.display());
                 new.insert(rel.clone());
                 if whole > NESTED_RULES_KEPT {
                     let cut = text.floor_char_boundary(NESTED_RULES_KEPT);
-                    out.push_str(&format!("{}\n[… cut at {} KB: read {shown} for the rest.]", &text[..cut], NESTED_RULES_KEPT / 1000));
+                    let _ = write!(out, "{}\n[… cut at {} KB: read {shown} for the rest.]", &text[..cut], NESTED_RULES_KEPT / 1000);
                 } else {
                     out.push_str(text);
                 }
@@ -585,7 +618,7 @@ impl Tools {
         let mut out = Outcome::new(text, o.result["isError"] == true);
         out.images = o.result["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "image").cloned().collect();
         if let Some(p) = changed {
-            out.text.push_str(&format!("\n\n[{} has changed since this was read: read it again for what it is now.]", p.display()));
+            let _ = write!(out.text, "\n\n[{} has changed since this was read: read it again for what it is now.]", p.display());
         }
         out
     }
@@ -612,12 +645,12 @@ impl Tools {
 
     /// Why the sandbox keeps the file tools from looking at `path`.
     fn hidden(&self, path: &Path) -> Option<Outcome> {
-        self.sandbox.as_ref().and_then(|sb| sb.may_read(path).err()).map(fail)
+        self.sandbox.as_ref().and_then(|sb| sb.may_read(path).err()).map(|e| fail(format!("{e:#}")))
     }
 
     /// Why the sandbox keeps the file tools from changing `path`.
     fn fenced(&self, path: &Path) -> Option<Outcome> {
-        self.sandbox.as_ref().and_then(|sb| sb.may_write(path).err()).map(fail)
+        self.sandbox.as_ref().and_then(|sb| sb.may_write(path).err()).map(|e| fail(format!("{e:#}")))
     }
 
     /// The hidden paths under `root`, as a search names them (whole, and
@@ -655,25 +688,6 @@ impl Tools {
         self.told_generated.lock().unwrap().insert(path.to_path_buf()).then(|| fail(why))
     }
 
-    /// Whether `path` is still as the session last saw it: by its size and
-    /// time, or by what's in it when those can't tell (`now`: its contents,
-    /// when already read).
-    fn unchanged(&self, path: &Path, seen: &Seen, now: Option<&[u8]>) -> bool {
-        let Ok(m) = std::fs::metadata(path) else { return false };
-        if m.len() != seen.size {
-            return false;
-        }
-        let racy = seen.at.duration_since(seen.modified).map_or(true, |d| d < RACY);
-        if m.modified().ok() == Some(seen.modified) && !racy {
-            return true;
-        }
-        // (Touched, or rewritten as it was: still what was read.)
-        match now {
-            Some(bytes) => hash_of(bytes) == seen.hash,
-            None => std::fs::read(path).is_ok_and(|b| hash_of(&b) == seen.hash),
-        }
-    }
-
     /// Why an edit or overwrite of `path` must wait, if it must (`now`:
     /// what's in it, when already read).
     fn stale(&self, path: &Path, must_have_read: bool, now: Option<&[u8]>) -> Option<String> {
@@ -682,7 +696,7 @@ impl Tools {
         }
         let seen = self.seen.lock().unwrap().get(path).copied();
         match seen {
-            Some(seen) if self.unchanged(path, &seen, now) => None,
+            Some(seen) if unchanged(path, &seen, now) => None,
             Some(_) => Some(format!("{} changed since you last read it (someone else edited it). Read it again, then make your change.", path.display())),
             None if must_have_read => Some(format!("{} exists and you haven't read it in this session: read it first, then replace it (or change part of it with edit).", path.display())),
             None => None,
@@ -754,9 +768,8 @@ impl Tools {
                         .unwrap_or_default()
                         .iter()
                         .filter_map(|op| match op {
-                            crate::patch::Op::Add { path, .. } => Some(path),
                             crate::patch::Op::Update { move_to: Some(to), .. } => Some(to),
-                            crate::patch::Op::Update { path, .. } => Some(path),
+                            crate::patch::Op::Add { path, .. } | crate::patch::Op::Update { path, .. } => Some(path),
                             crate::patch::Op::Delete { .. } => None,
                         })
                         .map(|p| self.path(p))
@@ -802,7 +815,7 @@ impl Tools {
             return no;
         }
         // A big one (not a picture): read as it comes, not whole.
-        if std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() > BIG_READ) && !self.picture(&path) {
+        if std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() > BIG_READ) && !picture(&path) {
             return self.read_big(path, offset, limit).await;
         }
         // (Off the async threads: a large file, or a slow disk, doesn't
@@ -833,7 +846,7 @@ impl Tools {
         if lines.is_empty() {
             return ok("(empty file)");
         }
-        let start = offset.unwrap_or(1).max(1) as usize - 1;
+        let start = usize::try_from(offset.unwrap_or(1).max(1)).unwrap_or(usize::MAX) - 1;
         if start >= lines.len() {
             return fail(format!("The file has {} lines; offset {} is past its end.", lines.len(), start + 1));
         }
@@ -849,7 +862,7 @@ impl Tools {
                 text.len().div_ceil(1024),
             ));
         }
-        let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| (l as usize).clamp(1, READ_LINES)), READ_BYTES) };
+        let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| usize::try_from(l).unwrap_or(usize::MAX).clamp(1, READ_LINES)), READ_BYTES) };
         let mut out = String::new();
         let mut n = 0;
         let anchored = crate::hashline::on();
@@ -881,26 +894,18 @@ impl Tools {
             ));
         }
         if end < lines.len() {
-            out.push_str(&format!("\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, lines.len(), end + 1));
+            let _ = write!(out, "\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, lines.len(), end + 1);
         }
         ok(out.trim_end_matches('\n').to_owned())
-    }
-
-    /// Whether `path` starts as a picture does.
-    fn picture(&self, path: &Path) -> bool {
-        use std::io::Read;
-        let mut head = [0u8; 64];
-        let n = std::fs::File::open(path).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
-        crate::images::mime_of(&head[..n]).is_some()
     }
 
     /// `read` of a file past [`BIG_READ`]: its lines counted and the ones
     /// asked for kept as it's read, the rest not held (no outline: it would
     /// need the whole text).
     async fn read_big(&self, path: PathBuf, offset: Option<u64>, limit: Option<u64>) -> Outcome {
-        let start = offset.unwrap_or(1).max(1) as usize - 1;
+        let start = usize::try_from(offset.unwrap_or(1).max(1)).unwrap_or(usize::MAX) - 1;
         let preview = offset.is_none() && limit.is_none();
-        let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| (l as usize).clamp(1, READ_LINES)), READ_BYTES) };
+        let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| usize::try_from(l).unwrap_or(usize::MAX).clamp(1, READ_LINES)), READ_BYTES) };
         let reading = path.clone();
         let read = tokio::task::spawn_blocking(move || stream_lines(&reading, start, max, max_bytes)).await.unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
         let got = match read {
@@ -948,7 +953,7 @@ impl Tools {
             ));
         }
         if end < got.lines {
-            out.push_str(&format!("\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, got.lines, end + 1));
+            let _ = write!(out, "\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, got.lines, end + 1);
         }
         ok(out.trim_end_matches('\n').to_owned())
     }
@@ -1015,7 +1020,7 @@ impl Tools {
                 self.remember(&path, new.as_bytes());
                 ok(format!("Edited {} ({} change{}, from line {first}).", path.display(), list.len(), if list.len() == 1 { "" } else { "s" }))
             }
-            Err(why) => fail(why),
+            Err(why) => fail(format!("{why:#}")),
         }
     }
 
@@ -1042,7 +1047,7 @@ impl Tools {
                 self.remember(&path, new.as_bytes());
                 ok(format!("Edited {}. Now:\n{view}", path.display()))
             }
-            Err(why) => fail(why),
+            Err(why) => fail(format!("{why:#}")),
         }
     }
 
@@ -1052,7 +1057,7 @@ impl Tools {
         use crate::patch::Op;
         let ops = match crate::patch::parse(input) {
             Ok(ops) => ops,
-            Err(why) => return fail(why),
+            Err(why) => return fail(format!("{why:#}")),
         };
         // What each file becomes (None: removed), and what's said of it.
         let mut plan: Vec<(PathBuf, Option<String>)> = Vec::new();
@@ -1101,7 +1106,7 @@ impl Tools {
                     let (new, first) = if hunks.is_empty() { (content, 1) } else {
                         match crate::patch::apply(&content, hunks, op.path()) {
                             Ok(r) => r,
-                            Err(why) => return fail(why),
+                            Err(why) => return fail(format!("{why:#}")),
                         }
                     };
                     let n = hunks.len();
@@ -1129,7 +1134,7 @@ impl Tools {
         }
         for (path, content) in &plan {
             let done = match content {
-                Some(c) => path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(path, c)),
+                Some(c) => path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(path, c)),
                 None => std::fs::remove_file(path),
             };
             if let Err(e) = done {
@@ -1167,14 +1172,14 @@ impl Tools {
         names.truncate(LIST_MAX);
         let mut out = names.join("\n");
         if total > LIST_MAX {
-            out.push_str(&format!("\n[{} more not shown]", total - LIST_MAX));
+            let _ = write!(out, "\n[{} more not shown]", total - LIST_MAX);
         }
         ok(if out.is_empty() { "(empty folder)".into() } else { out })
     }
 
     /// A search whose output is taken a line at a time as it comes (`each`;
     /// each line cut at [`LINE_CAP`]), not all of it kept: stopped with the
-    /// call, or after [`search_secs`]. Its exit and what it said on stderr
+    /// call, or after [`Tools::search_limit`]. Its exit and what it said on stderr
     /// (the start).
     async fn search_lines(&self, program: &str, args: &[String], each: &mut (dyn FnMut(&[u8]) + Send)) -> std::io::Result<(std::process::ExitStatus, String)> {
         use tokio::io::AsyncReadExt;
@@ -1213,10 +1218,9 @@ impl Tools {
             let status = child.wait().await?;
             Ok::<_, std::io::Error>((status, String::from_utf8_lossy(&said).into_owned()))
         };
-        let secs = search_secs();
-        match tokio::time::timeout(std::time::Duration::from_secs(secs), work).await {
+        match tokio::time::timeout(self.search_limit, work).await {
             Ok(r) => r,
-            Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("The search ran past {secs} s and was stopped: narrow the path, pattern or glob."))),
+            Err(_) => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("The search ran past {} s and was stopped: narrow the path, pattern or glob.", self.search_limit.as_secs()))),
         }
     }
 
@@ -1269,7 +1273,7 @@ impl Tools {
         let total = got.total;
         let mut shown = got.first.into_iter().take(GREP_MAX).collect::<Vec<_>>().join("\n");
         if total > GREP_MAX {
-            shown.push_str(&format!("\n[{} matches; first {GREP_MAX} shown. Narrow the pattern, path or glob.]", total));
+            let _ = write!(shown, "\n[{total} matches; first {GREP_MAX} shown. Narrow the pattern, path or glob.]");
         }
         ok(shown)
     }
@@ -1319,7 +1323,7 @@ impl Tools {
         }
         let mut shown = first.into_sorted_vec().join("\n");
         if total > LIST_MAX {
-            shown.push_str(&format!("\n[{total} files; first {LIST_MAX} shown]"));
+            let _ = write!(shown, "\n[{total} files; first {LIST_MAX} shown]");
         }
         ok(if shown.is_empty() { "No files match.".into() } else { shown })
     }

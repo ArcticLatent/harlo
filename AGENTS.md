@@ -14,3 +14,11 @@ This repository has a generated `openwiki/` evidence index. It is optional just-
 Use the repository's documented maintenance process to refresh generated pages after source changes. Check its configuration and completed runs before relying on automatic updates. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
 
 <!-- OPENWIKI:END -->
+
+## Language skills
+
+Use these skills for all development in this repository: writing, changing, reviewing or refactoring code. Load the skill before touching the code, and follow the guidelines it loads.
+
+- **Rust** (`.rs` files, `Cargo.toml`): `ms-rust`. Mark a file that fully complies with the comment the skill specifies.
+- **QML** (`crates/harlo-app/qml`): the Qt development skills. Use `qt-qml` for any QML change and `qt-qml-review` for reviews. Use `qt-qml-profiler` for performance work and `qt-ui-design` for layout and UX. Check Qt APIs with the Qt documentation tools rather than from memory.
+- **Swift** (the iPhone app and HarloKit): `swiftui-pro`.

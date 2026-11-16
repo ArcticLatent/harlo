@@ -1,6 +1,8 @@
 //! Live sessions shared between the `Workspace` (which creates and closes
 //! them) and any `ChatSession` view attached to one.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};

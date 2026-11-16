@@ -1,8 +1,10 @@
-//! Tests an MCP server the way the agents would reach it: starts a local
-//! (stdio) one, or calls a remote (streamable HTTP, or HTTP+SSE) one,
-//! initializes, and
-//! lists its tools. harlo shows the result as the server's status. (The
-//! harnesses don't report MCP status over RPC.)
+//! Tests an MCP server the way the agents would reach it.
+//!
+//! It starts a local (stdio) one, or calls a remote (streamable HTTP, or
+//! HTTP+SSE) one, initializes, and lists its tools. harlo shows the result as
+//! the server's status. (The harnesses don't report MCP status over RPC.)
+
+// Rust guideline compliant 2026-10-09
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -62,6 +64,11 @@ fn looks_of(result: &Value) -> Vec<String> {
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
 /// `!command` is that command's output (as Harlo does).
 pub fn expand(value: &str) -> String {
+    expand_with(value, &|name| std::env::var(name).ok())
+}
+
+/// Expands `value` as [`expand`] does, looking variables up with `var`.
+fn expand_with(value: &str, var: &dyn Fn(&str) -> Option<String>) -> String {
     if let Some(cmd) = value.strip_prefix('!') {
         let out = Command::new("sh").arg("-c").arg(cmd).stdin(Stdio::null()).stderr(Stdio::null()).output();
         return out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
@@ -76,7 +83,7 @@ pub fn expand(value: &str) -> String {
         };
         let inner = &rest[start + 2..start + end];
         let (name, default) = inner.split_once(":-").unwrap_or((inner, ""));
-        out.push_str(&std::env::var(name).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| default.to_owned()));
+        out.push_str(&var(name).filter(|v| !v.is_empty()).unwrap_or_else(|| default.to_owned()));
         rest = &rest[start + end + 1..];
     }
     out.push_str(rest);
@@ -126,7 +133,7 @@ pub fn harlo_token(url: &str) -> Option<String> {
         use std::os::unix::fs::OpenOptionsExt;
         let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).ok()?;
         f.write_all(serde_json::to_string_pretty(&all).ok()?.as_bytes()).ok()?;
-    }
+    };
     std::fs::rename(&tmp, &file).ok()?;
     Some(access)
 }
@@ -161,7 +168,7 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
             for (k, v) in &form.env {
                 c.env(k, expand(v));
             }
-            let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| "/".into());
+            let home = std::env::var_os("HOME").map_or_else(|| "/".into(), std::path::PathBuf::from);
             let base = project.map(Path::to_path_buf).unwrap_or(home.clone());
             let cwd = if form.cwd.is_empty() { base } else if let Some(r) = form.cwd.strip_prefix("~/") { home.join(r) } else { base.join(&form.cwd) };
             if cwd.is_dir() {
@@ -187,12 +194,12 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
     });
     let err = child.stderr.take().expect("piped");
     let stderr = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let tail = stderr.clone();
+    let tail = std::sync::Arc::clone(&stderr);
     // Said when the server's error output ends (it exited).
     let (err_done, err_ended) = mpsc::channel::<()>();
     std::thread::spawn(move || {
         for line in BufReader::new(err).lines().map_while(Result::ok) {
-            let mut t = tail.lock().unwrap();
+            let mut t = tail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             t.push(line);
             if t.len() > 20 {
                 t.remove(0);
@@ -202,7 +209,7 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
     });
     let mut conn = Stdio_ { stdin, rx, deadline: Instant::now() + timeout, timeout };
     let result = (|| {
-        let init = conn.request(1, initialize(1))?;
+        let init = conn.request(1, &initialize(1))?;
         let mut probe = Probe { state: "connected".into(), server: server_info(&init), ..Default::default() };
         conn.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))?;
         let mut cursor: Option<String> = None;
@@ -212,7 +219,7 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
                 params["cursor"] = json!(c);
             }
             let id = 2 + page;
-            let result = conn.request(id, json!({ "jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params }))?;
+            let result = conn.request(id, &json!({ "jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params }))?;
             probe.tools.extend(tools_of(&result));
             probe.looks.extend(looks_of(&result));
             cursor = result["nextCursor"].as_str().map(str::to_owned);
@@ -220,7 +227,7 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
                 break;
             }
         }
-        Ok::<Probe, String>(probe)
+        Ok::<Probe, anyhow::Error>(probe)
     })();
     let _ = child.kill();
     let _ = child.wait();
@@ -230,8 +237,8 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
         let _ = err_ended.recv_timeout(Duration::from_millis(500));
     }
     result.unwrap_or_else(|e| {
-        let last = stderr.lock().unwrap().iter().rev().find(|l| !l.trim().is_empty()).cloned().unwrap_or_default();
-        Probe::failed(if last.is_empty() { e } else { format!("{e} {last}") })
+        let last = stderr.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().rev().find(|l| !l.trim().is_empty()).cloned().unwrap_or_default();
+        Probe::failed(if last.is_empty() { format!("{e:#}") } else { format!("{e:#} {last}") })
     })
 }
 
@@ -244,14 +251,14 @@ struct Stdio_ {
 }
 
 impl Stdio_ {
-    fn send(&mut self, msg: &Value) -> Result<(), String> {
-        writeln!(self.stdin, "{msg}").and_then(|_| self.stdin.flush()).map_err(|e| format!("The server closed its input: {e}"))
+    fn send(&mut self, msg: &Value) -> anyhow::Result<()> {
+        writeln!(self.stdin, "{msg}").and_then(|()| self.stdin.flush()).map_err(|e| anyhow::anyhow!("The server closed its input: {e}"))
     }
 
     /// Sends a request and waits for its answer (skipping logs,
     /// notifications and the server's own requests).
-    fn request(&mut self, id: u64, msg: Value) -> Result<Value, String> {
-        self.send(&msg)?;
+    fn request(&mut self, id: u64, msg: &Value) -> anyhow::Result<Value> {
+        self.send(msg)?;
         loop {
             match self.rx.recv_timeout(self.deadline.saturating_duration_since(Instant::now())) {
                 Ok(line) => {
@@ -260,12 +267,12 @@ impl Stdio_ {
                         continue;
                     }
                     if let Some(e) = v.get("error") {
-                        return Err(e["message"].as_str().unwrap_or("error").to_owned());
+                        return Err(anyhow::Error::msg(e["message"].as_str().unwrap_or("error").to_owned()));
                     }
                     return Ok(v["result"].clone());
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => return Err(format!("No answer in {} s.", self.timeout.as_secs())),
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Err("The server exited.".into()),
+                Err(mpsc::RecvTimeoutError::Timeout) => return Err(anyhow::anyhow!("No answer in {} s.", self.timeout.as_secs())),
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(anyhow::Error::msg("The server exited.")),
             }
         }
     }
@@ -392,7 +399,7 @@ fn probe_sse(form: &Form, timeout: Duration) -> Probe {
                 data.clear();
                 event = "message".into();
             } else if let Some(e) = line.strip_prefix("event:") {
-                event = e.trim().to_owned();
+                e.trim().clone_into(&mut event);
             } else if let Some(d) = line.strip_prefix("data:") {
                 data.push(d.strip_prefix(' ').unwrap_or(d).to_owned());
             }
@@ -469,9 +476,8 @@ mod tests {
 
     #[test]
     fn expands_values() {
-        // SAFETY: tests set a variable no other test reads.
-        unsafe { std::env::set_var("HARLO_PROBE_TEST", "v") };
-        assert_eq!(expand("a ${HARLO_PROBE_TEST} ${HARLO_NOPE:-d} ${HARLO_NOPE}"), "a v d ");
+        let var = |name: &str| (name == "HARLO_PROBE_TEST").then(|| "v".to_owned());
+        assert_eq!(expand_with("a ${HARLO_PROBE_TEST} ${HARLO_NOPE:-d} ${HARLO_NOPE}", &var), "a v d ");
         assert_eq!(expand("!printf hi"), "hi");
         assert_eq!(expand("plain"), "plain");
     }
@@ -509,7 +515,7 @@ done"#;
 
     /// A tiny streamable-HTTP MCP server (or one that wants a sign-in).
     fn http_server(auth: bool) -> String {
-        use std::io::{Read, Write};
+        use std::io::Read;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
@@ -550,7 +556,7 @@ done"#;
 
     #[test]
     fn uses_harlos_sign_in() {
-        let _one = crate::mcp::tests::HARLO_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        let _one = crate::mcp::tests::HARLO_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = crate::mcp::harlo_dir();
         std::fs::create_dir_all(&dir).unwrap();
         let later = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3600;
@@ -571,7 +577,7 @@ done"#;
 
     /// A tiny HTTP+SSE MCP server: GET /sse streams, POST /m answers there.
     fn sse_server() -> String {
-        use std::io::{Read, Write};
+        use std::io::Read;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let (tx, rx) = mpsc::channel::<String>();
@@ -579,7 +585,7 @@ done"#;
         std::thread::spawn(move || {
             for stream in listener.incoming().take(8) {
                 let Ok(mut stream) = stream else { continue };
-                let (tx, rx) = (tx.clone(), rx.clone());
+                let (tx, rx) = (tx.clone(), std::sync::Arc::clone(&rx));
                 std::thread::spawn(move || {
                     let mut data = Vec::new();
                     let mut buf = [0u8; 4096];
@@ -601,7 +607,7 @@ done"#;
                         let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nevent: endpoint\ndata: /m?s=1\n\n");
                         let _ = stream.flush();
                         while let Ok(msg) = rx.lock().unwrap().recv() {
-                            if write!(stream, "event: message\ndata: {msg}\n\n").and_then(|_| stream.flush()).is_err() {
+                            if write!(stream, "event: message\ndata: {msg}\n\n").and_then(|()| stream.flush()).is_err() {
                                 break;
                             }
                         }

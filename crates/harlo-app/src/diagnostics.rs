@@ -5,6 +5,8 @@
 //! - `protocol/*.jsonl`: harness traffic, when `--debug-protocol` or
 //!   Settings → Providers → "Log harness traffic" is on.
 
+// Rust guideline compliant 2026-10-09
+
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -17,7 +19,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
 pub fn logs_dir() -> PathBuf {
-    harlo_core::db::default_path().parent().map(|p| p.join("logs")).unwrap_or_else(|| PathBuf::from("logs"))
+    harlo_core::db::default_path().parent().map_or_else(|| PathBuf::from("logs"), |p| p.join("logs"))
 }
 
 fn forced_on() -> bool {
@@ -57,7 +59,7 @@ pub fn set_protocol_logging(on: bool) {
 pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let path = logs_dir().join(format!("crash-{secs}.log"));
         let thread = std::thread::current();
         let report = format!(
@@ -72,7 +74,7 @@ pub fn install_panic_hook() {
             let _ = f.write_all(report.as_bytes());
             eprintln!("harlo: crash report written to {}", path.display());
         }
-        tracing::error!("panic: {info}");
+        tracing::event!(name: "app.panic", tracing::Level::ERROR, panic.message = %info, "panic: {{panic.message}}");
         previous(info);
     }));
 }

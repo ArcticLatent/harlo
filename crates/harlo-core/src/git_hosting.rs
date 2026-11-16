@@ -1,6 +1,8 @@
 //! Git hosting services (GitHub, GitLab, Forgejo): who is signed in, read
 //! from their command-line tools' words, and Forgejo's API for a token.
 
+// Rust guideline compliant 2026-10-09
+
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -93,13 +95,21 @@ pub fn forgejo_base(typed: &str) -> String {
     if typed.trim().to_lowercase().starts_with("http://") { format!("http://{host}") } else { format!("https://{host}") }
 }
 
-/// A Forgejo (or Gitea) server's API with a token: `base` is
-/// `https://host[:port]` (or `http://`). TLS is checked against the system's
-/// certificates, so a company's own certificate authority, once installed
-/// on the computer, is trusted.
+/// A Forgejo (or Gitea) server's API with a token.
+///
+/// `base` is `https://host[:port]` (or `http://`). TLS is checked against the
+/// system's certificates, so a company's own certificate authority, once
+/// installed on the computer, is trusted.
 pub struct Forgejo {
     pub base: String,
     token: String,
+}
+
+impl std::fmt::Debug for Forgejo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The token is a credential: only whether there is one.
+        f.debug_struct("Forgejo").field("base", &self.base).field("token", &if self.token.is_empty() { "none" } else { "<hidden>" }).finish()
+    }
 }
 
 impl Forgejo {
@@ -132,6 +142,11 @@ impl Forgejo {
     }
 
     /// The account the token belongs to (it checks the token too).
+    ///
+    /// # Errors
+    ///
+    /// When the server can't be reached, refuses the token, or answers with an
+    /// error.
     pub fn user(&self) -> Result<String> {
         let (status, v) = self.call("GET", "/user", None)?;
         match status {
@@ -145,6 +160,11 @@ impl Forgejo {
 
     /// The open pull request from branch `head` of `repo` ("owner/name"):
     /// its page and number.
+    ///
+    /// # Errors
+    ///
+    /// When the server can't be reached, refuses the token, or answers with an
+    /// error.
     pub fn open_pull(&self, repo: &str, head: &str) -> Result<Option<(String, i64)>> {
         let (status, v) = self.call("GET", &format!("/repos/{repo}/pulls?state=open&limit=50"), None)?;
         if status != 200 {
@@ -156,6 +176,11 @@ impl Forgejo {
     }
 
     /// A pull request's latest commit.
+    ///
+    /// # Errors
+    ///
+    /// When the server can't be reached, refuses the token, or answers with an
+    /// error.
     pub fn pull_head(&self, repo: &str, number: i64) -> Result<String> {
         let (status, v) = self.call("GET", &format!("/repos/{repo}/pulls/{number}"), None)?;
         if status != 200 {
@@ -166,6 +191,11 @@ impl Forgejo {
 
     /// Opens a pull request (a draft: "WIP:" before its title, as Forgejo
     /// marks drafts): its page.
+    ///
+    /// # Errors
+    ///
+    /// When the server can't be reached, refuses the token, or answers with an
+    /// error.
     pub fn create_pull(&self, repo: &str, head: &str, base: &str, title: &str, body: &str, draft: bool) -> Result<String> {
         let title = if draft { format!("WIP: {title}") } else { title.to_owned() };
         let (status, v) = self.call("POST", &format!("/repos/{repo}/pulls"), Some(&serde_json::json!({ "head": head, "base": base, "title": title, "body": body })))?;
@@ -179,6 +209,11 @@ impl Forgejo {
 
     /// The checks on a branch or commit: its commit statuses (Forgejo
     /// Actions, Woodpecker, Drone…, as each reports its result).
+    ///
+    /// # Errors
+    ///
+    /// When the server can't be reached, refuses the token, or answers with an
+    /// error.
     pub fn checks(&self, repo: &str, reference: &str) -> Result<Checks> {
         let (status, v) = self.call("GET", &format!("/repos/{repo}/commits/{reference}/status"), None)?;
         if status != 200 {
@@ -206,6 +241,11 @@ pub fn forgejo_checks(v: &Value) -> Checks {
 }
 
 /// The Forgejo account a token belongs to on `base` (see `Forgejo::user`).
+///
+/// # Errors
+///
+/// When the server can't be reached, refuses the token, or answers with an
+/// error.
 pub fn forgejo_user(base: &str, token: &str) -> Result<String> {
     Forgejo::new(base, token).user()
 }
@@ -385,6 +425,12 @@ pub fn log_tail(log: &str, max_lines: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_never_shows_the_token() {
+        let shown = format!("{:?}", Forgejo::new("https://git.example/", "s3cret-token"));
+        assert_eq!(shown, r#"Forgejo { base: "https://git.example", token: "<hidden>" }"#);
+    }
 
     #[test]
     fn checks() {

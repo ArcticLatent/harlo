@@ -19,6 +19,8 @@
 //!
 //! A server it starts goes on when it exits (a session of its own).
 
+// Rust guideline compliant 2026-10-09
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -70,7 +72,7 @@ fn main() {
         }
         "start" => print(&match servers::ensure_running(&arg(1)) {
             Ok(()) => json!({}),
-            Err(e) => json!({ "error": e }),
+            Err(e) => json!({ "error": format!("{e:#}") }),
         }),
         "stop" => {
             servers::stop_any(&arg(1));
@@ -78,7 +80,7 @@ fn main() {
         }
         "log" => {
             let text = std::fs::read_to_string(servers::log_path(&arg(1))).unwrap_or_default();
-            let lines: Vec<&str> = text.lines().flat_map(|l| l.rsplit('\r').next()).collect();
+            let lines: Vec<&str> = text.lines().filter_map(|l| l.rsplit('\r').next()).collect();
             println!("{}", lines[lines.len().saturating_sub(400)..].join("\n"));
             0
         }
@@ -99,7 +101,7 @@ fn main() {
 }
 
 fn print(v: &Value) -> i32 {
-    if say(v) { 0 } else { 1 }
+    i32::from(!say(v))
 }
 
 /// A setup or update (its request on stdin), told as it goes. It stops when
@@ -113,7 +115,7 @@ fn setup(job: &str) -> i32 {
     let _ = std::fs::remove_file(&mark);
     let stop = Arc::new(AtomicBool::new(false));
     {
-        let (stop, mark) = (stop.clone(), mark.clone());
+        let (stop, mark) = (Arc::clone(&stop), mark.clone());
         std::thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 if mark.exists() {
@@ -121,21 +123,21 @@ fn setup(job: &str) -> i32 {
                 }
                 std::thread::sleep(Duration::from_millis(500));
             }
-        });
-    }
+        })
+    };
     let first = json!({ "state": "running", "step": "Starting", "progress": -1, "detail": "", "result": null, "update": req["update"].is_string() });
-    let gone = stop.clone();
+    let gone = Arc::clone(&stop);
     // Over SSH: the output a second apart at most, how far it is four times a
     // second (a new step or the end at once; the latest always goes).
     let held: Arc<Mutex<Held>> = Arc::default();
     let report = {
-        let held = held.clone();
+        let held = Arc::clone(&held);
         Report::new(first, Duration::from_secs(1), move |event| {
             let sent = match event {
                 // (Said with the lock held: nothing held back goes after it.)
                 Event::Job(text) => {
                     let job = serde_json::from_str::<Value>(&text).unwrap_or_default();
-                    let mut h = held.lock().unwrap();
+                    let mut h = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     let new_step = job["state"] != "running" || job["step"] != h.step;
                     if !new_step && h.sent.is_some_and(|t| t.elapsed() < JOB_EVERY) {
                         h.pending = Some(job);
@@ -154,11 +156,11 @@ fn setup(job: &str) -> i32 {
         })
     };
     let flush = {
-        let (held, stop) = (held.clone(), stop.clone());
+        let (held, stop) = (Arc::clone(&held), Arc::clone(&stop));
         std::thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(JOB_EVERY);
-                let mut h = held.lock().unwrap();
+                let mut h = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(job) = h.pending.take() {
                     h.sent = Some(Instant::now());
                     if !say(&json!({ "job": job })) {

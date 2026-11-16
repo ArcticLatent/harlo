@@ -2,6 +2,8 @@
 //! the phone server while phone access is on, makes pairing links and QR
 //! codes, and lists and removes paired devices.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -255,10 +257,11 @@ fn qr_data_url(text: &str) -> String {
     format!("data:image/svg+xml;base64,{}", phone::b64(image.as_bytes()))
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Phone {
     fn shared(mut self: Pin<&mut Self>) -> Option<Arc<Shared>> {
         if let Some(s) = &self.shared {
-            return Some(s.clone());
+            return Some(Arc::clone(s));
         }
         let dir = phone::dir();
         let identity = match Identity::load_or_create(&dir.join("identity.json")) {
@@ -274,14 +277,14 @@ impl Phone {
             codes: Mutex::new(HashMap::new()),
             devices_changed: watch::channel(0).0,
             name: hostname(),
-            port: Default::default(),
-            remote_endpoints: Default::default(),
-            online: Default::default(),
+            port: std::sync::atomic::AtomicU16::default(),
+            remote_endpoints: Mutex::default(),
+            online: Mutex::default(),
         });
         crate::phone_push::attach(&shared);
         // Lock-screen cards a harlo before this one left (it quit without
         // ending them): ended now.
-        let left = shared.clone();
+        let left = Arc::clone(&shared);
         crate::runtime().spawn(async move { crate::phone_activity::end_left(&left.identity).await });
         // Devices paired or removed: the settings list follows.
         let mut changed = shared.devices_changed.subscribe();
@@ -293,7 +296,7 @@ impl Phone {
                 }
             }
         });
-        self.as_mut().rust_mut().shared = Some(shared.clone());
+        self.as_mut().rust_mut().shared = Some(Arc::clone(&shared));
         Some(shared)
     }
 
@@ -391,7 +394,7 @@ impl Phone {
             });
         };
         let _guard = crate::runtime().enter();
-        let funnel = phone_funnel::start(program, self.port as u16, status);
+        let funnel = phone_funnel::start(program, u16::try_from(self.port).unwrap_or(0), status);
         self.as_mut().rust_mut().funnel = Some(funnel);
         self.as_mut().set_funnel_state(QString::from("starting"));
     }
@@ -465,7 +468,7 @@ impl Phone {
         self.as_mut().rust_mut().server = None;
         self.as_mut().set_running(false);
         let Some(shared) = self.as_mut().shared() else { return };
-        let addr: std::net::SocketAddr = ([0, 0, 0, 0], self.port as u16).into();
+        let addr: std::net::SocketAddr = ([0, 0, 0, 0], u16::try_from(self.port).unwrap_or(0)).into();
         let thread = self.qt_thread();
         crate::runtime().spawn(async move {
             let result = phone_server::start(addr, shared).await;
@@ -528,7 +531,7 @@ impl Phone {
     pub fn firewall_json(&self, address: &QString) -> QString {
         let none = || QString::from(&json!({ "firewall": "" }).to_string());
         let (Some(kind), Some(network)) = (firewall::detect(), network_of(&address.to_string())) else { return none() };
-        let port = self.port as u16;
+        let port = u16::try_from(self.port).unwrap_or(0);
         let key = format!("{}:{port}", network.cidr());
         let hidden = setting("phone_firewall_hidden").split(' ').any(|k| k == key);
         QString::from(
@@ -551,14 +554,14 @@ impl Phone {
         }
         self.as_mut().set_firewall_busy(true);
         self.as_mut().set_firewall_error(QString::default());
-        let port = self.port as u16;
+        let port = u16::try_from(self.port).unwrap_or(0);
         let thread = self.qt_thread();
         std::thread::spawn(move || {
             let result = firewall::allow(kind, &network, port);
             let _ = thread.queue(move |mut this| {
                 this.as_mut().set_firewall_busy(false);
                 if let Err(e) = result {
-                    this.as_mut().set_firewall_error(QString::from(&e));
+                    this.as_mut().set_firewall_error(QString::from(&format!("{e:#}")));
                 }
                 let n = this.firewall_revision + 1;
                 this.as_mut().set_firewall_revision(n);
@@ -582,7 +585,7 @@ impl Phone {
         let empty = || QString::from("[]");
         let paired = self.shared.as_ref().is_some_and(|s| !s.devices.lock().unwrap().list.is_empty());
         let Some(kind) = firewall::detect().filter(|_| self.enabled && self.running && paired) else { return empty() };
-        let port = self.port as u16;
+        let port = u16::try_from(self.port).unwrap_or(0);
         let hidden = setting("phone_firewall_hidden");
         let list: Vec<Value> = addresses()
             .into_iter()
@@ -654,7 +657,7 @@ impl Phone {
                 Ok(0) => "No phone takes notifications yet: open the harlo app on your iPhone and allow them.".to_owned(),
                 Ok(1) => "Sent to 1 phone.".to_owned(),
                 Ok(n) => format!("Sent to {n} phones."),
-                Err(e) => e,
+                Err(e) => format!("{e:#}"),
             };
             let _ = thread.queue(move |mut this| this.as_mut().set_push_note(QString::from(&note)));
         });

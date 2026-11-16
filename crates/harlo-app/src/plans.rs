@@ -3,6 +3,8 @@
 //! the agents' plan tools (the orchestration threads) both go through
 //! here, one at a time.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -13,7 +15,7 @@ use serde_json::{Value, json};
 static PLANS: Mutex<Option<HashMap<String, Plan>>> = Mutex::new(None);
 
 fn dir() -> PathBuf {
-    harlo_core::db::default_path().parent().map(|d| d.join("plans")).unwrap_or_else(|| PathBuf::from("plans"))
+    harlo_core::db::default_path().parent().map_or_else(|| PathBuf::from("plans"), |d| d.join("plans"))
 }
 
 fn file_of(id: &str) -> PathBuf {
@@ -25,7 +27,7 @@ fn file_of(id: &str) -> PathBuf {
 
 /// A session's plan's id: its file once known, else its live key.
 pub fn id_for(file: Option<&Path>, key: &str) -> String {
-    file.map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| key.to_owned())
+    file.map_or_else(|| key.to_owned(), |f| f.to_string_lossy().into_owned())
 }
 
 fn load(map: &mut HashMap<String, Plan>, id: &str) {
@@ -44,7 +46,7 @@ fn save(id: &str, plan: &Plan) {
     let _ = std::fs::create_dir_all(dir());
     let text = json!({ "session": id, "plan": serde_json::from_str::<Value>(&plan.to_text()).unwrap_or_default() }).to_string();
     if let Err(e) = std::fs::write(&file, text) {
-        tracing::warn!("saving the plan of {id}: {e}");
+        tracing::event!(name: "plan.save.failed", tracing::Level::WARN, session.key = %id, error.message = %e, "saving the plan of {{session.key}}: {{error.message}}");
     }
 }
 
@@ -81,14 +83,14 @@ pub fn update<R>(file: Option<&Path>, key: &str, f: impl FnOnce(&mut Plan) -> R)
 /// (`key`, `file`), its folder (`cwd`), whether steps are committed
 /// (`commits`), and the other sessions' last work (`others: [{ cwd, last
 /// }]`).
-pub fn tool(tool: &str, args: &Value, ctx: &Value) -> Result<Value, String> {
+pub fn tool(tool: &str, args: &Value, ctx: &Value) -> anyhow::Result<Value> {
     use harlo_core::plan;
     let key = ctx["key"].as_str().unwrap_or_default();
     let file = ctx["file"].as_str().map(PathBuf::from);
     let file = file.as_deref();
     let cwd = PathBuf::from(ctx["cwd"].as_str().unwrap_or_default());
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-    let id = args["id"].as_u64().unwrap_or(0) as u32;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    let id = u32::try_from(args["id"].as_u64().unwrap_or(0)).unwrap_or(u32::MAX);
     match tool {
         "plan_read" => Ok(get(file, key).json()),
         "plan_set" => {
@@ -116,19 +118,19 @@ pub fn tool(tool: &str, args: &Value, ctx: &Value) -> Result<Value, String> {
                 return Ok(json!({ "step": id, "status": step.status }));
             }
             // Its own commit, when its changes are provably its own.
-            let outcome: Result<Option<String>, String> = match &step.start {
-                None => Err("plan_start wasn't called for it, so harlo doesn't know what it changed.".into()),
+            let outcome: anyhow::Result<Option<String>> = match &step.start {
+                None => Err(anyhow::Error::msg("plan_start wasn't called for it, so harlo doesn't know what it changed.")),
                 Some(start) => {
                     let root = harlo_core::git::repo_root(&cwd).unwrap_or_else(|| cwd.clone());
                     let busy_elsewhere = ctx["others"].as_array().into_iter().flatten().any(|o| {
                         Path::new(o["cwd"].as_str().unwrap_or_default()).starts_with(&root) && o["last"].as_i64().unwrap_or(0) >= start.at
                     });
                     if busy_elsewhere {
-                        Err("Another session worked in this repository during the step, so harlo can't tell the changes apart.".into())
+                        Err(anyhow::Error::msg("Another session worked in this repository during the step, so harlo can't tell the changes apart."))
                     } else {
                         match plan::changed_since(&cwd, start) {
                             Ok(files) if files.is_empty() => Ok(None),
-                            Ok(files) => plan::commit(&cwd, &files, &step.title, &step.summary).map(Some).map_err(|e| format!("git couldn't commit it: {e}")),
+                            Ok(files) => plan::commit(&cwd, &files, &step.title, &step.summary).map(Some).map_err(|e| anyhow::anyhow!("git couldn't commit it: {e}")),
                             Err(why) => Err(why),
                         }
                     }
@@ -138,7 +140,7 @@ pub fn tool(tool: &str, args: &Value, ctx: &Value) -> Result<Value, String> {
                 if let Some(s) = p.steps.iter_mut().find(|s| s.id == id) {
                     s.start = None;
                     match &outcome {
-                        Ok(Some(sha)) => s.commit = sha.clone(),
+                        Ok(Some(sha)) => s.commit.clone_from(sha),
                         Ok(None) => s.commit_note = "Nothing changed in it.".into(),
                         Err(why) => s.commit_note = format!("Not committed: {why} The changes are left for you."),
                     }
@@ -150,6 +152,6 @@ pub fn tool(tool: &str, args: &Value, ctx: &Value) -> Result<Value, String> {
                 Err(why) => json!({ "step": id, "status": "done", "note": format!("harlo didn't commit it: {why} Leave those changes as they are.") }),
             })
         }
-        _ => Err(format!("harlo has no tool {tool}.")),
+        _ => Err(anyhow::anyhow!("harlo has no tool {tool}.")),
     }
 }

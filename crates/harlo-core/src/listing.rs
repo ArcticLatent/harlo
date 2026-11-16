@@ -9,13 +9,16 @@
 //!   `grep -n` in one file, a read tool's `N→text`): those numbers, the text
 //!   after them highlighted (for grep, a context line is marked).
 
+// Rust guideline compliant 2026-10-09
+
 use crate::markdown::highlight_lines;
 use crate::mcp::split_command;
 
-/// One line: its number ("" when not known), whether it's grep context
-/// (not a match), and its text as highlighted rich text. A file's header
-/// (grep in several files: its lines come under it) has `file` set and no
-/// number.
+/// One line of a listing, its number and text as rich text.
+///
+/// Its number ("" when not known), whether it's grep context (not a match), and
+/// its text as highlighted rich text. A file's header (grep in several files:
+/// its lines come under it) has `file` set and no number.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeLine {
     pub num: String,
@@ -75,14 +78,13 @@ fn rows<'a>(tool: &str, command: &str, path: &str, output: &'a str) -> Option<(S
             let fallback = printed.as_ref().map(|p| p.path.clone()).or_else(|| command_file(command)).unwrap_or_else(|| path.to_owned());
             let mut files: Vec<&str> = Vec::new();
             for r in rows.iter().flatten() {
-                if let Some(p) = r.path.as_deref() {
-                    if !files.contains(&p) {
+                if let Some(p) = r.path.as_deref()
+                    && !files.contains(&p) {
                         files.push(p);
                     }
-                }
             }
             let several = files.len() > 1;
-            let file = if several { String::new() } else { files.first().map(|p| p.to_string()).unwrap_or(fallback.clone()) };
+            let file = if several { String::new() } else { files.first().map(std::string::ToString::to_string).unwrap_or(fallback.clone()) };
             let mut out = Vec::with_capacity(rows.len() + files.len());
             let mut current: Option<String> = None;
             for (row, line) in rows.into_iter().zip(&lines) {
@@ -90,7 +92,7 @@ fn rows<'a>(tool: &str, command: &str, path: &str, output: &'a str) -> Option<(S
                     Some(r) => {
                         // (Several files: each one's lines under its name.)
                         if several && r.path.is_some() && r.path != current {
-                            current = r.path.clone();
+                            current.clone_from(&r.path);
                             out.push(Pending { file: current.clone().unwrap_or_default(), num: String::new(), body: "", context: false, header: true });
                         }
                         let f = r.path.or_else(|| current.clone()).unwrap_or_else(|| file.clone());
@@ -123,10 +125,11 @@ pub fn text(tool: &str, command: &str, path: &str, output: &str) -> Option<Strin
     Some(rows.iter().map(|r| if r.header { r.file.as_str() } else { r.body }).collect::<Vec<_>>().join("\n"))
 }
 
-/// The output of a call (`tool`, its shell `command` if it's one, the
-/// `path` it's about if it names one) as code, or None when it isn't a
-/// file's lines (or there'd be nothing to add: no numbers, no language).
-/// `limit`: the most lines returned (from the top).
+/// The output of a call as code, or None when it isn't a file's lines.
+///
+/// From `tool`, its shell `command` if it's one, and the `path` it's about if
+/// it names one. None too when there'd be nothing to add: no numbers, no
+/// language. `limit`: the most lines returned (from the top).
 pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -> Option<CodeView> {
     let (file, rows) = rows(tool, command, path, output)?;
     let total = rows.len();
@@ -157,10 +160,12 @@ pub fn view(tool: &str, command: &str, path: &str, output: &str, limit: usize) -
     Some(CodeView { path: file, lines: out, total, more: output.ends_with("\n…"), earlier })
 }
 
-/// An edit's diff (`+`, `-` and ` ` lines; ` …` between edits), numbered
-/// as its file is now: each edit's new side (its ` ` and `+` lines) found
-/// once in `file`, its lines numbered from there. A removed line, or an
-/// edit whose new side isn't there exactly once, has none.
+/// An edit's diff numbered as its file is now.
+///
+/// The diff is `+`, `-` and ` ` lines, with ` …` between edits. Each edit's new
+/// side (its ` ` and `+` lines) is found once in `file`, its lines numbered
+/// from there. A removed line, or an edit whose new side isn't there exactly
+/// once, has none.
 pub fn diff_numbers(diff: &[&str], file: &str) -> Vec<Option<usize>> {
     let mut out = vec![None; diff.len()];
     let mut start = 0;
@@ -171,14 +176,13 @@ pub fn diff_numbers(diff: &[&str], file: &str) -> Vec<Option<usize>> {
         if !text.trim().is_empty() {
             // (At a line's start, and only once: else it could be anywhere.)
             let mut at = file.match_indices(text.as_str()).map(|(k, _)| k).filter(|&k| k == 0 || file.as_bytes()[k - 1] == b'\n');
-            if let Some(first) = at.next() {
-                if at.next().is_none() {
+            if let Some(first) = at.next()
+                && at.next().is_none() {
                     let line = file[..first].matches('\n').count() + 1;
                     for (k, &i) in new.iter().enumerate() {
                         out[i] = Some(line + k);
                     }
                 }
-            }
         }
         start = end + 1;
     }
@@ -212,20 +216,22 @@ fn numbered_search(words: &[String]) -> bool {
         .any(|a| a == "--line-number" || (a.starts_with('-') && !a.starts_with("--") && a[1..].chars().all(|c| c.is_ascii_alphanumeric()) && a.contains('n')))
 }
 
-/// A read tool's plain lines (Harlo's: no numbers, to save tokens),
-/// numbered as a numbered read's are ("     7→text"): from `offset` (1
-/// without one), or from the range its note gives. Its notes (a big file's
-/// "[… These are lines 1-N …]" before them, "[Lines a-b of N …]" after)
-/// are left out; hash-anchored lines ("7#AB:text") keep their own numbers,
-/// and so do a big file's outline rows ("7: text", after "[… Its outline
-/// follows …]"). None when it isn't a file's lines or is numbered already.
+/// A read tool's plain lines, numbered as a numbered read's are.
+///
+/// Harlo's reads have no numbers, to save tokens. They're numbered "
+/// 7→text": from `offset` (1 without one), or from the range its note gives.
+/// Its notes (a big file's "[… These are lines 1-N …]" before them, "[Lines a-b
+/// of N …]" after) are left out; hash-anchored lines ("7#AB:text") keep their
+/// own numbers, and so do a big file's outline rows ("7: text", after "[… Its
+/// outline follows …]"). None when it isn't a file's lines or is numbered
+/// already.
 pub fn number_read(offset: Option<u64>, output: &str) -> Option<String> {
     let mut lines: Vec<&str> = output.lines().collect();
     let first = *lines.first()?;
     if numbered(&lines, 1).is_some() || first == "(empty file)" || first.starts_with("[Image: ") || (lines.len() == 1 && first.contains(" is a binary file (")) {
         return None;
     }
-    let mut start = offset.unwrap_or(1).max(1) as usize;
+    let mut start = usize::try_from(offset.unwrap_or(1).max(1)).unwrap_or(usize::MAX);
     if first.starts_with('[') && first.ends_with(']') && first.contains("Its outline follows") {
         // Each row its own line's number; the notes after them left out.
         let rows: Vec<String> = lines[1..]

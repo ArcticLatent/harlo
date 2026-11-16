@@ -5,6 +5,8 @@
 //! a full snapshot, then the same batched deltas as everyone else, so the
 //! process keeps running whether or not anything is showing it.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -75,6 +77,16 @@ pub struct UiRequest {
     pub is_approval: bool,
     /// Raw request, for methods that need more (`ask` questions).
     pub raw: Value,
+}
+
+impl UiRequest {
+    /// What it asks, for its notification.
+    ///
+    /// An ask's first question, else the dialog's message or title.
+    pub fn question(&self) -> &str {
+        let asked = self.raw["questions"][0]["question"].as_str().unwrap_or_default();
+        [asked, self.message.as_str(), self.title.as_str()].into_iter().map(str::trim).find(|t| !t.is_empty()).unwrap_or_default()
+    }
 }
 
 /// Facts about the session that the sidebar and header show.
@@ -239,7 +251,7 @@ enum Control {
     /// A raw command for the harness (starts it if needed).
     Raw(Value),
     /// A command whose response data the caller awaits.
-    Request(Value, oneshot::Sender<Result<Value, String>>),
+    Request(Value, oneshot::Sender<anyhow::Result<Value>>),
     /// Re-read the transcript and state from the harness (after a branch or fork).
     Reload,
     /// Stop the harness if it's idle; the next command starts it again on
@@ -251,11 +263,12 @@ enum Control {
     /// The session as Markdown (crate::export).
     /// The session as Markdown: written to the file when there's one (and
     /// "" answered), else answered.
-    Export(Option<PathBuf>, oneshot::Sender<Result<String, String>>),
+    Export(Option<PathBuf>, oneshot::Sender<anyhow::Result<String>>),
 }
 
 /// Handle to a session driver. Commands are queued to the driver, which
 /// starts the harness on demand. Dropping the last handle stops the harness.
+#[derive(Debug)]
 pub struct SessionHandle {
     control: mpsc::UnboundedSender<Control>,
     next_sub: AtomicU64,
@@ -268,7 +281,7 @@ static DAY_HOLD: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// Holds every session's messages (`Some(why)`), or lets them go again.
 pub fn set_day_hold(why: Option<String>) {
-    *DAY_HOLD.lock().unwrap() = why;
+    *DAY_HOLD.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = why;
 }
 
 impl SessionHandle {
@@ -286,8 +299,19 @@ impl SessionHandle {
 
     fn launch(cfg: HarnessConfig, spawn_now: bool) -> Self {
         let (control, control_rx) = mpsc::unbounded_channel();
+        let (kind, cwd) = (cfg.kind.as_str(), cfg.cwd.clone());
+        let resumed = matches!(cfg.session, SessionTarget::Resume(_));
+        tracing::event!(
+            name: "session.start", tracing::Level::INFO,
+            harness.kind = kind,
+            process.working_directory = %cwd.display(),
+            session.resumed = resumed,
+            session.running = spawn_now,
+            "{{harness.kind}} session in {{process.working_directory}} opened",
+        );
         tokio::spawn(async move {
             let long = drive(cfg, spawn_now, control_rx).await;
+            tracing::event!(name: "session.stop", tracing::Level::INFO, harness.kind = kind, process.working_directory = %cwd.display(), "{{harness.kind}} session in {{process.working_directory}} closed");
             // A long session's memory back, once the window has let go of its
             // rows too.
             if long {
@@ -295,7 +319,7 @@ impl SessionHandle {
                 let _ = tokio::task::spawn_blocking(harlo_harness::store::give_back).await;
             }
         });
-        Self { control, next_sub: AtomicU64::new(1), hold: Default::default() }
+        Self { control, next_sub: AtomicU64::new(1), hold: std::sync::Mutex::default() }
     }
 
     /// Registers a view. It receives a snapshot first, then deltas.
@@ -327,11 +351,11 @@ impl SessionHandle {
 
     /// Why it takes no messages now (its own or the day's spending limit).
     pub fn held(&self) -> Option<String> {
-        self.hold.lock().unwrap().clone().or_else(|| DAY_HOLD.lock().unwrap().clone())
+        self.hold.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().or_else(|| DAY_HOLD.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
     }
 
     pub fn set_hold(&self, why: Option<String>) {
-        *self.hold.lock().unwrap() = why;
+        *self.hold.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = why;
     }
 
     pub fn abort(&self) {
@@ -345,7 +369,7 @@ impl SessionHandle {
     /// Asks the user to decide `question` (one of `options`), as the
     /// agent's own questions are asked; the answer comes as
     /// [`SessionUpdate::GateAnswered`]. `title`: "" for [`GATE_TITLE`]. Its id.
-    pub fn open_gate(&self, title: &str, question: &str, options: Vec<String>) -> String {
+    pub fn open_gate(&self, title: &str, question: &str, options: &[String]) -> String {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = format!("{GATE_PREFIX}{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let raw = json!({ "id": id, "method": "select", "title": if title.is_empty() { GATE_TITLE } else { title }, "message": question, "options": options, "gate": true });
@@ -384,29 +408,41 @@ impl SessionHandle {
 
     /// The session as Markdown (see [`crate::export`]). Never starts the
     /// harness. An error says why there's none (never a partial one).
-    pub async fn export_markdown(&self) -> Result<String, String> {
+    ///
+    /// # Errors
+    ///
+    /// Why there's none: the session can't be read (never a partial one).
+    pub async fn export_markdown(&self) -> anyhow::Result<String> {
         self.export(None).await
     }
 
     /// [`Self::export_markdown`] written to `path` as it's made (a long
     /// session's never held whole).
-    pub async fn export_markdown_to(&self, path: PathBuf) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When the session can't be read or `path` can't be written.
+    pub async fn export_markdown_to(&self, path: PathBuf) -> anyhow::Result<()> {
         self.export(Some(path)).await.map(drop)
     }
 
-    async fn export(&self, to: Option<PathBuf>) -> Result<String, String> {
+    async fn export(&self, to: Option<PathBuf>) -> anyhow::Result<String> {
         let closed = || "the session closed".to_owned();
         let (tx, rx) = oneshot::channel();
-        self.control.send(Control::Export(to, tx)).map_err(|_| closed())?;
-        rx.await.map_err(|_| closed())?
+        self.control.send(Control::Export(to, tx)).ok().ok_or_else(|| anyhow::Error::msg(closed()))?;
+        rx.await.ok().ok_or_else(|| anyhow::Error::msg(closed()))?
     }
 
     /// Sends a command (starting the harness if needed) and returns the
     /// response `data`.
-    pub async fn request(&self, command: Value) -> Result<Value, String> {
+    ///
+    /// # Errors
+    ///
+    /// When the harness can't be started, has ended, or answers with an error.
+    pub async fn request(&self, command: Value) -> anyhow::Result<Value> {
         let (tx, rx) = oneshot::channel();
-        self.control.send(Control::Request(command, tx)).map_err(|_| "session closed".to_owned())?;
-        rx.await.map_err(|_| "session closed".to_owned())?
+        self.control.send(Control::Request(command, tx)).ok().ok_or_else(|| anyhow::Error::msg("session closed"))?;
+        rx.await.ok().ok_or_else(|| anyhow::Error::msg("session closed"))?
     }
 }
 
@@ -474,7 +510,7 @@ const MANY: usize = 2000;
 /// cache. (Tests: a folder a test sets, else none.)
 fn reports_dir() -> Option<PathBuf> {
     #[cfg(test)]
-    return REPORTS_IN.lock().unwrap().clone();
+    return REPORTS_IN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     #[cfg(not(test))]
     harlo_harness::claude::cache_dir()
 }
@@ -505,9 +541,9 @@ fn save_report(path: PathBuf, report: Value) {
 fn keep_file(dir: &std::path::Path, file: &std::path::Path, data: &[u8]) {
     static N: AtomicU64 = AtomicU64::new(0);
     let tmp = file.with_extension(format!("{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-    let wrote = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&tmp, data)).and_then(|_| std::fs::rename(&tmp, file));
+    let wrote = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&tmp, data)).and_then(|()| std::fs::rename(&tmp, file));
     if let Err(e) = wrote {
-        tracing::debug!("{} wasn't kept: {e}", file.display());
+        tracing::event!(name: "session.file.keep.failed", tracing::Level::DEBUG, file.path = %file.display(), error.message = %e, "{{file.path}} wasn't kept: {{error.message}}");
         let _ = std::fs::remove_file(&tmp);
     }
 }
@@ -595,17 +631,17 @@ impl Opened {
     /// The next message, into its transcript (its tally is added up beside it).
     fn add(&mut self, m: &Value) {
         if self.first_message.is_none() {
-            self.first_message = user_text(&m);
+            self.first_message = user_text(m);
         }
-        if let Some(text) = reply_text(&m) {
+        if let Some(text) = reply_text(m) {
             self.last_reply = text;
         }
-        if let Some(n) = harlo_harness::claude::context_of(&m) {
+        if let Some(n) = harlo_harness::claude::context_of(m) {
             self.context = n;
         }
         self.transcript.load_one(self.count, m);
         self.count += 1;
-        if self.count % PAGE_EVERY == 0 {
+        if self.count.is_multiple_of(PAGE_EVERY) {
             self.transcript.rows();
             self.transcript.page_out(KEPT_ROWS);
         }
@@ -645,7 +681,7 @@ fn open_session_file(kind: HarnessKind, path: &std::path::Path) -> Opened {
         }
         // (Shown as nothing, as before a read that fails partway.)
         Err(e) => {
-            tracing::warn!("reading {}: {e:#}", path.display());
+            tracing::event!(name: "session.file.read.failed", tracing::Level::WARN, file.path = %path.display(), error.message = %format_args!("{e:#}"), "reading {{file.path}}: {{error.message}}");
             opened = Opened { missing: opened.missing, ..Default::default() };
         }
     }
@@ -659,13 +695,13 @@ fn open_session_file(kind: HarnessKind, path: &std::path::Path) -> Opened {
 /// message that ended, and when nothing runs; else from the running
 /// agent, which knows the branch it's on. A file that can't be read is an
 /// error, never part of an export.
-async fn export_markdown(harness: Option<Arc<Harness>>, kind: HarnessKind, file: Option<PathBuf>, info: crate::export::Info, to: Option<PathBuf>) -> Result<String, String> {
+async fn export_markdown(harness: Option<Arc<Harness>>, kind: HarnessKind, file: Option<PathBuf>, info: crate::export::Info, to: Option<PathBuf>) -> anyhow::Result<String> {
     let file_first = kind == HarnessKind::Claude || harness.is_none();
     let from_file = |file: PathBuf| {
         let (info, to) = (info.clone(), to.clone());
         async move {
-            let wrote = tokio::task::spawn_blocking(move || {
-                let unread = |e: String| format!("its conversation couldn't be read ({e})");
+            tokio::task::spawn_blocking(move || {
+                let unread = |e: String| anyhow::anyhow!("its conversation couldn't be read ({e})");
                 let local = if crate::remote::is_remote(&file) {
                     let copy = crate::remote::local_copy(&file).map_err(|e| unread(format!("{e:#}")))?;
                     whole_copy(&copy, &crate::remote::split(&file).map(|(host, _)| host).unwrap_or_default())?;
@@ -684,21 +720,20 @@ async fn export_markdown(harness: Option<Arc<Harness>>, kind: HarnessKind, file:
                     to.as_deref(),
                 );
                 harlo_harness::store::after_reading(size);
-                wrote.map_err(|e| if read_failed { unread(e.to_string()) } else { format!("couldn't write it ({e})") })
+                wrote.map_err(|e| if read_failed { unread(e.to_string()) } else { anyhow::anyhow!("couldn't write it ({e})") })
             })
             .await
-            .unwrap_or_else(|e| Err(e.to_string()));
-            wrote
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")))
         }
     };
     let mut failed = None;
     if file_first && let Some(file) = file.clone() {
         match from_file(file).await {
             Err(e) if harness.is_some() => {
-                tracing::warn!("export from the session file: {e}");
+                tracing::event!(name: "session.export.file.failed", tracing::Level::WARN, error.message = %e, "export from the session file: {{error.message}}");
                 failed = Some(e);
             }
-            done => return done,
+            done => return (done).map_err(anyhow::Error::msg),
         }
     }
     if let Some(h) = harness {
@@ -716,31 +751,31 @@ async fn export_markdown(harness: Option<Arc<Harness>>, kind: HarnessKind, file:
                             to.as_deref(),
                         );
                         done_with(messages);
-                        wrote.map_err(|e| format!("couldn't write it ({e})"))
+                        wrote.map_err(|e| anyhow::anyhow!("couldn't write it ({e})"))
                     })
                     .await
-                    .unwrap_or_else(|e| Err(e.to_string()));
+                    .unwrap_or_else(|e| Err(anyhow::Error::msg(e.to_string())));
                 }
-                Err(e) => tracing::warn!("get_messages answered oddly: {e}"),
+                Err(e) => tracing::event!(name: "session.messages.invalid", tracing::Level::WARN, error.message = %e, "get_messages answered oddly: {{error.message}}"),
             },
-            Err(e) => tracing::warn!("get_messages failed: {e}"),
+            Err(e) => tracing::event!(name: "session.messages.failed", tracing::Level::WARN, error.message = %e, "get_messages failed: {{error.message}}"),
         }
         if !file_first && let Some(file) = file {
             return from_file(file).await;
         }
-        return Err(failed.unwrap_or_else(|| "its conversation couldn't be read".to_owned()));
+        return Err(failed.unwrap_or_else(|| anyhow::Error::msg("its conversation couldn't be read")));
     }
     // (Nothing running and no file: a session with nothing in it yet.)
-    write_export(&mut |_| Ok(()), &info, to.as_deref()).map_err(|e| e.to_string())
+    write_export(&mut |_| Ok(()), &info, to.as_deref()).map_err(anyhow::Error::from)
 }
 
 /// A remote session's copy here, if it all came over: an export of part
 /// of it (its end missing, the host out of reach) is an error, never a
 /// shorter Markdown passed off as the whole.
-fn whole_copy(copy: &std::path::Path, host: &str) -> Result<(), String> {
+fn whole_copy(copy: &std::path::Path, host: &str) -> anyhow::Result<()> {
     match harlo_harness::mirror::missing(copy) {
         0 => Ok(()),
-        n => Err(format!(
+        n => Err(anyhow::anyhow!(
             "not all of it came over from {host}: its last {} (the latest messages) are missing. Try again once {host} can be reached",
             crate::attach::human_size(n)
         )),
@@ -750,7 +785,7 @@ fn whole_copy(copy: &std::path::Path, host: &str) -> Result<(), String> {
 /// The Markdown of the messages `read` passes on, written to `to` (through a
 /// file beside it, put in its place once whole) or answered (whole in
 /// memory anyway, so nothing spills).
-fn write_export(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> std::io::Result<()>, info: &crate::export::Info, to: Option<&std::path::Path>) -> std::io::Result<String> {
+fn write_export(read: &mut crate::export::ReadMessages<'_>, info: &crate::export::Info, to: Option<&std::path::Path>) -> std::io::Result<String> {
     let Some(to) = to else {
         let mut out = Vec::new();
         crate::export::write_markdown(read, info, &mut out)?;
@@ -790,6 +825,37 @@ fn done_with(messages: Vec<Value>) {
 const RECENT: usize = 32;
 
 impl DriverState {
+    /// A session's state before anything has happened: starting its agent
+    /// (`spawn_now`), or loading its saved file.
+    fn new(spawn_now: bool, session_file: Option<PathBuf>, commands: Vec<SlashCommand>) -> Self {
+        Self {
+            transcript: Transcript::new(),
+            since_open: (!spawn_now && session_file.is_some()).then(Vec::new),
+            shown: Vec::new(),
+            status: if spawn_now { SessionStatus::Starting } else { SessionStatus::Loading },
+            meta: SessionMetaInfo { session_file, ..Default::default() },
+            queue: Default::default(),
+            // (Those its agent listed last time in this folder: it may not
+            // start until something is sent.)
+            commands,
+            requests: Vec::new(),
+            status_entries: Vec::new(),
+            todos: Value::Null,
+            todo_calls: std::collections::HashSet::default(),
+            background: 0,
+            file_asked: false,
+            sinks: Vec::new(),
+            unsent: Vec::new(),
+            last_reply: String::new(),
+            message_count: 0,
+            tally: crate::context::Tally::default(),
+            recent: Vec::new(),
+            run_error: None,
+            subagents_done: std::collections::HashSet::default(),
+            aborted: false,
+        }
+    }
+
     /// An event into the transcript (kept for the loaded one, while it loads).
     fn apply(&mut self, ev: &HarnessEvent) -> bool {
         if let Some(since) = &mut self.since_open {
@@ -889,7 +955,7 @@ impl Driver {
     fn ensure_harness(&mut self, st: &mut DriverState, pending: &mut Vec<SessionUpdate>) -> Option<Arc<Harness>> {
         if st.status.has_process()
             && let Some(h) = &self.harness {
-                return Some(h.clone());
+                return Some(Arc::clone(h));
             }
         let mut cfg = self.cfg.clone();
         if let Some(file) = &st.meta.session_file {
@@ -902,7 +968,7 @@ impl Driver {
         match Harness::spawn(cfg) {
             Ok((harness, events)) => {
                 let harness = Arc::new(harness);
-                self.harness = Some(harness.clone());
+                self.harness = Some(Arc::clone(&harness));
                 self.events = Some(events);
                 set_status(st, SessionStatus::Starting, pending);
                 // The modes it's on, before anything it's sent.
@@ -952,6 +1018,9 @@ fn set_status(st: &mut DriverState, s: SessionStatus, pending: &mut Vec<SessionU
     }
 }
 
+/// Where a Markdown export's path, or why it failed, is sent.
+type ExportReply = oneshot::Sender<anyhow::Result<String>>;
+
 /// Runs a session until it's dropped; true if it was a long one.
 async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::UnboundedReceiver<Control>) -> bool {
     let kind = cfg.kind;
@@ -960,40 +1029,7 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         _ => None,
     };
     let (aux_tx, mut aux_rx) = mpsc::unbounded_channel::<Aux>();
-    // Markdown exports asked for while the saved messages load.
-    let mut exports: Vec<(Option<PathBuf>, oneshot::Sender<Result<String, String>>)> = Vec::new();
-    // While the file loads: the report kept from last time, or the reports
-    // asked for until there's one.
-    let mut early: Option<Value> = None;
-    let mut early_asked: Vec<oneshot::Sender<Value>> = Vec::new();
-    // A run was going (its end keeps a long session's report).
-    let mut was_busy = false;
-    let mut st = DriverState {
-        transcript: Transcript::new(),
-        since_open: (!spawn_now && session_file.is_some()).then(Vec::new),
-        shown: Vec::new(),
-        status: if spawn_now { SessionStatus::Starting } else { SessionStatus::Loading },
-        meta: SessionMetaInfo { session_file: session_file.clone(), ..Default::default() },
-        queue: Default::default(),
-        // (Those its agent listed last time in this folder: it may not
-        // start until something is sent.)
-        commands: saved_commands(&cfg),
-        requests: Vec::new(),
-        status_entries: Vec::new(),
-        todos: Value::Null,
-        todo_calls: Default::default(),
-        background: 0,
-        file_asked: false,
-        sinks: Vec::new(),
-        unsent: Vec::new(),
-        last_reply: String::new(),
-        message_count: 0,
-        tally: Default::default(),
-        recent: Vec::new(),
-        run_error: None,
-        subagents_done: Default::default(),
-        aborted: false,
-    };
+    let mut st = DriverState::new(spawn_now, session_file.clone(), saved_commands(&cfg));
     let mut driver = Driver {
         fetch_history: spawn_now && session_file.is_some(),
         cfg,
@@ -1004,25 +1040,26 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
         thinking: None,
         restart_settled: false,
     };
-    let mut pending: Vec<SessionUpdate> = Vec::new();
-    let mut dirty = false;
-    let mut last_flush = Instant::now() - STREAM_FLUSH;
-    // A turn waiting for its snapshot: its prompt (and any sent meanwhile),
-    // and the snapshot's number.
-    let mut held: Vec<Unsent> = Vec::new();
-    let mut snap_turn: u64 = 0;
-    // `/plugin …` runs so far (their notices' ids).
-    let mut plugin_runs: u64 = 0;
-    // A conversation was just loaded: once its rows are built and sent,
-    // what building them used goes back to the system.
-    let mut loaded = false;
-    // Rows kept from the last time are shown, until it has loaded (with
-    // what comes meanwhile under them).
-    let mut early_rows = false;
-    let mut early_list: Vec<Arc<Row>> = Vec::new();
+    let mut lp = DriveLoop {
+        kind,
+        session_file: session_file.clone(),
+        exports: Vec::new(),
+        early: None,
+        early_asked: Vec::new(),
+        was_busy: false,
+        pending: Vec::new(),
+        dirty: false,
+        last_flush: Instant::now().checked_sub(STREAM_FLUSH).unwrap(),
+        held: Vec::new(),
+        snap_turn: 0,
+        plugin_runs: 0,
+        loaded: false,
+        early_rows: false,
+        early_list: Vec::new(),
+    };
 
     if spawn_now {
-        driver.ensure_harness(&mut st, &mut pending);
+        driver.ensure_harness(&mut st, &mut lp.pending);
     } else if let Some(path) = session_file.clone() {
         let tx = aux_tx.clone();
         tokio::task::spawn_blocking(move || {
@@ -1045,8 +1082,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
     }
 
     loop {
-        let wait = if dirty || !pending.is_empty() {
-            STREAM_FLUSH.saturating_sub(last_flush.elapsed())
+        let wait = if lp.dirty || !lp.pending.is_empty() {
+            STREAM_FLUSH.saturating_sub(lp.last_flush.elapsed())
         } else {
             Duration::from_secs(3600)
         };
@@ -1056,449 +1093,530 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                     driver.events = None;
                     driver.harness = None;
                     driver.restart_settled = false;
-                    set_status(&mut st, SessionStatus::Exited, &mut pending);
+                    set_status(&mut st, SessionStatus::Exited, &mut lp.pending);
                     continue;
                 };
-                handle_event(&ev, &mut st, &mut pending, &mut driver);
-                // Its host disconnected by hand: said as that, not as a failure.
-                let by_hand = matches!(ev, HarnessEvent::Exited { .. }).then(|| driver.cfg.remote.as_ref().map(|r| r.host.clone()).filter(|h| crate::remote::is_disconnected(h))).flatten();
-                dirty |= match by_hand {
-                    Some(host) => st.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: format!("Disconnected from {host}."), system: false }),
-                    None => st.apply(&ev),
-                };
-                let login = match &ev {
-                    HarnessEvent::Response { success: false, error: Some(e), .. } => Some(asks_for_login(e)),
-                    HarnessEvent::Exited { stderr_tail, .. } => Some(asks_for_login(stderr_tail)),
-                    // (How Claude says it.)
-                    HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, .. } => asks_for_login(text).then_some(true),
-                    HarnessEvent::MessageStart { .. } => Some(false),
-                    _ => None,
-                };
-                let refused = match &ev {
-                    HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, .. } => refused_by_limit(text).then_some(true),
-                    HarnessEvent::MessageStart { .. } => Some(false),
-                    _ => None,
-                };
-                if let Some(refused) = refused.filter(|r| *r != st.meta.limit_refused) {
-                    st.meta.limit_refused = refused;
-                    pending.push(SessionUpdate::Meta(st.meta.clone()));
-                }
-                if let Some(login) = login.filter(|l| *l != st.meta.needs_login) {
-                    st.meta.needs_login = login;
-                    pending.push(SessionUpdate::Meta(st.meta.clone()));
-                }
-                if driver.restart_settled && st.status == SessionStatus::Idle {
-                    driver.stop_idle(&mut st, &mut pending);
-                }
+                lp.on_event(&ev, &mut st, &mut driver);
             }
-            Some(aux) = aux_rx.recv() => match aux {
-                Aux::Loaded(opened) => {
-                    let Opened { saved, missing, transcript, tally, count, first_message, last_reply, context } = *opened;
-                    st.transcript = transcript;
-                    // (What came while it loaded, after it.)
-                    for ev in st.since_open.take().unwrap_or_default() {
-                        st.transcript.apply(&ev);
-                    }
-                    early_rows = false;
-                    early_list = Vec::new();
-                    // (A copy is the start of the host's file: what didn't
-                    // come is the end, its latest messages.)
-                    if missing > 0 {
-                        let host = driver.cfg.remote.as_ref().map(|r| r.host.clone()).unwrap_or_default();
-                        let text = format!(
-                            "Not all of this session came over from {host}: its last {} (the latest messages) aren't shown. Close it and open it again to fetch the rest.",
-                            crate::attach::human_size(missing)
-                        );
-                        st.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Warning, text, system: false });
-                    }
-                    st.meta.first_message = first_message.unwrap_or_default();
-                    if !saved.name.is_empty() {
-                        st.meta.name = saved.name;
-                    }
-                    st.meta.model = saved.model;
-                    // (Until the agent runs and says: e.g. to start its server.)
-                    if st.meta.model_id.is_empty() {
-                        st.meta.model_id = saved.model_id;
-                    }
-                    st.meta.thinking = driver.thinking.clone().unwrap_or(saved.thinking);
-                    // Claude's context before it runs: the last reply's, in
-                    // the window Claude said last time for its model.
-                    if kind == HarnessKind::Claude && st.meta.context_window == 0
-                        && let Some((window, at)) = harlo_harness::claude::known_context(&st.meta.model)
-                    {
-                        (st.meta.context_tokens, st.meta.context_window, st.meta.compact_at) = (context, window, at);
-                    }
-                    // None set: what Claude's settings have it on.
-                    if kind == HarnessKind::Claude && st.meta.thinking.is_empty() && driver.cfg.remote.is_none() {
-                        st.meta.thinking = harlo_harness::claude::default_effort();
-                    }
-                    pending.push(SessionUpdate::Meta(st.meta.clone()));
-                    if st.status == SessionStatus::Loading {
-                        set_status(&mut st, SessionStatus::Offline, &mut pending);
-                    }
-                    // A long one: its latest rows at once, the rest above them
-                    // once they're built.
-                    if count >= MANY {
-                        let first = st.transcript.last_rows(SHOWN_FIRST);
-                        let changes = diff_rows(&st.shown, &first);
-                        if let Some(path) = &session_file {
-                            save_rows(path.clone(), &first);
-                        }
-                        st.shown = first;
-                        if !changes.is_empty() {
-                            pending.push(SessionUpdate::Rows(changes));
-                        }
-                        st.broadcast(std::mem::take(&mut pending));
-                        last_flush = Instant::now();
-                    }
-                    st.last_reply = last_reply;
-                    st.message_count = count;
-                    (st.tally, st.recent) = (tally, Vec::new());
-                    early = None;
-                    if !early_asked.is_empty() || count >= MANY {
-                        let report = st.report();
-                        for reply in early_asked.drain(..) {
-                            let _ = reply.send(report.clone());
-                        }
-                        if count >= MANY && let Some(path) = &session_file {
-                            save_report(path.clone(), report);
-                        }
-                    }
-                    loaded = true;
-                    for (to, reply) in exports.drain(..) {
-                        export(&st, &driver, to, reply);
-                    }
-                    dirty = true;
-                }
-                // The rows kept from last time, shown while it loads.
-                // (Kept from last time, or its latest once read: with what
-                // came since under them.)
-                Aux::EarlyRows(rows) => {
-                    if st.since_open.is_some() {
-                        early_list = rows;
-                        early_rows = true;
-                        let mut rows = early_list.clone();
-                        rows.extend(st.transcript.rows());
-                        let changes = diff_rows(&st.shown, &rows);
-                        st.shown = rows;
-                        pending.push(SessionUpdate::Rows(changes));
-                        st.broadcast(std::mem::take(&mut pending));
-                        last_flush = Instant::now();
-                    }
-                }
-                Aux::Early(report) => {
-                    if let (Some(report), SessionStatus::Loading) = (report, st.status) {
-                        for reply in early_asked.drain(..) {
-                            let _ = reply.send((*report).clone());
-                        }
-                        early = Some(*report);
-                    }
-                }
-                Aux::History(messages, tally) => {
-                    st.transcript.load_messages(&messages);
-                    if st.meta.first_message.is_empty() {
-                        st.meta.first_message = first_user_text(&messages);
-                        pending.push(SessionUpdate::Meta(st.meta.clone()));
-                    }
-                    st.last_reply = messages.iter().rev().find_map(reply_text).unwrap_or_default();
-                    st.message_count = messages.len();
-                    (st.tally, st.recent) = (tally, Vec::new());
-                    done_with(messages);
-                    loaded = true;
-                    dirty = true;
-                }
-                Aux::State(state) => {
-                    if let Some(todos) = state.get("todoPhases").filter(|t| t.is_array())
-                        && *todos != st.todos {
-                            st.todos = todos.clone();
-                            pending.push(SessionUpdate::Todos(st.todos.clone()));
-                        }
-                    let mut meta = st.meta.clone();
-                    apply_state(&mut meta, &state);
-                    // A remote harness reports its own paths.
-                    if let (Some(remote), Some(file)) = (&driver.cfg.remote, &meta.session_file)
-                        && !crate::remote::is_remote(file) {
-                            meta.session_file = Some(crate::remote::join(&remote.host, &file.to_string_lossy()));
-                        }
-                    if meta != st.meta {
-                        st.meta = meta;
-                        pending.push(SessionUpdate::Meta(st.meta.clone()));
-                    }
-                }
-                Aux::Stats(stats) => {
-                    let mut meta = st.meta.clone();
-                    apply_stats(&mut meta, &stats);
-                    if meta != st.meta {
-                        st.meta = meta;
-                        pending.push(SessionUpdate::Meta(st.meta.clone()));
-                    }
-                }
-                Aux::Commands(list) => {
-                    save_commands(&driver.cfg, &list);
-                    st.commands = parse_commands(&list);
-                    pending.push(SessionUpdate::Commands(st.commands.clone()));
-                }
-                Aux::Plugin(id, args, ran) => {
-                    st.apply(&HarnessEvent::MessageEnd { id, message: plugin_message(&crate::plugins::notice(&args, Some(&ran)), !ran.ok) });
-                    dirty = true;
-                    // What's installed changed: the agent starts again to
-                    // load it (its skills, its "/" list), now when it's
-                    // idle, else once its run ends.
-                    if ran.ok && crate::plugins::changes(&args) && driver.harness.is_some() {
-                        if st.status == SessionStatus::Idle {
-                            driver.stop_idle(&mut st, &mut pending);
-                            driver.ensure_harness(&mut st, &mut pending);
-                        } else {
-                            driver.restart_settled = true;
-                        }
-                    }
-                }
-                // The snapshot's done: the turn's prompt goes now (unless
-                // it was stopped meanwhile).
-                Aux::Snapshotted(n) if n == snap_turn && !held.is_empty() => {
-                    pending.push(SessionUpdate::Preparing(false));
-                    let mut rest = std::mem::take(&mut held).into_iter().enumerate();
-                    while let Some((i, u)) = rest.next() {
-                        let Some(h) = driver.ensure_harness(&mut st, &mut pending) else {
-                            // (It didn't start: this one and the rest back.)
-                            let back = std::iter::once(u).chain(rest.map(|(_, u)| u)).collect();
-                            give_back(&mut st, &mut pending, back, "Not sent");
-                            dirty = true;
-                            break;
-                        };
-                        h.prompt(&u.text, u.images, if i == 0 { SendMode::Normal } else { u.mode });
-                    }
-                }
-                Aux::Snapshotted(_) => {}
-            },
-            ctl = control.recv() => match ctl {
-                Some(Control::Subscribe(id, sink)) => {
-                    // Bring the newcomer up to date with what others have seen
-                    // (a turn still being prepared too).
-                    let mut now = st.snapshot();
-                    if !held.is_empty() {
-                        now.push(SessionUpdate::Preparing(true));
-                    }
-                    // (Messages given back while no box was there: this one's.)
-                    if sink.composes() && !st.unsent.is_empty() {
-                        now.push(SessionUpdate::Unsent(std::mem::take(&mut st.unsent)));
-                    }
-                    sink.deliver(now);
-                    st.sinks.push((id, sink));
-                }
-                Some(Control::Unsubscribe(id)) => st.sinks.retain(|(s, _)| *s != id),
-                // `/plugin …`: Claude Code's plugin command, run by harlo
-                // (not sent to the agent), its result a notice.
-                Some(Control::Prompt(text, _, _, typed)) if plugin_args(&text, typed.as_ref()).is_some() => {
-                    let args = plugin_args(&text, typed.as_ref()).unwrap_or_default();
-                    plugin_runs += 1;
-                    let id = format!("harlo-plugin-{plugin_runs}");
-                    st.apply(&HarnessEvent::MessageEnd { id: id.clone(), message: plugin_message(&crate::plugins::notice(&args, None), false) });
-                    dirty = true;
-                    let (tx, cwd, program) = (driver.aux_tx.clone(), driver.cfg.cwd.clone(), claude_program(&driver.cfg));
-                    let host = driver.cfg.remote.as_ref().map(|r| crate::remote::hosts().into_iter().find(|h| h.name == r.host).ok_or(r.host.clone()));
-                    tokio::task::spawn_blocking(move || {
-                        let ran = match &host {
-                            Some(Err(name)) => crate::plugins::Ran { ok: false, detail: String::new(), output: format!("{name} isn't among the remote instances any more.") },
-                            Some(Ok(h)) => crate::plugins::run(&args, &cwd, Some(h), None),
-                            None => crate::plugins::run(&args, &cwd, None, program.as_deref()),
-                        };
-                        let _ = tx.send(Aux::Plugin(id, args, ran));
-                    });
-                }
-                // (One sent while a turn waits for its snapshot: after it.)
-                Some(Control::Prompt(text, images, mode, typed)) if !held.is_empty() => held.push(Unsent { text, images, mode, typed }),
-                Some(Control::Prompt(text, images, mode, typed)) => {
-                    // A new turn (not steering or a queued one): the folder's
-                    // files first, so the turn can be undone (git::snapshot_turn).
-                    // That can take seconds (a big or remote repository), so
-                    // it's taken beside the loop: a Stop meanwhile still gets
-                    // here, and the prompt is never sent.
-                    // (A side question, `/btw`, isn't a turn.)
-                    if st.status != SessionStatus::Busy && turn_snapshots_on() && !text.trim_start().starts_with("/btw") {
-                        let dir = match &driver.cfg.remote {
-                            Some(r) => crate::remote::join(&r.host, &driver.cfg.cwd.to_string_lossy()),
-                            None => driver.cfg.cwd.clone(),
-                        };
-                        held.push(Unsent { text, images, mode, typed });
-                        snap_turn += 1;
-                        pending.push(SessionUpdate::Preparing(true));
-                        let (tx, n) = (driver.aux_tx.clone(), snap_turn);
-                        tokio::spawn(async move {
-                            // (Tests: a slow disk or host.)
-                            if let Some(ms) = std::env::var("HARLO_TEST_SLOW_SNAPSHOT_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
-                                tokio::time::sleep(Duration::from_millis(ms)).await;
-                            }
-                            let _ = tokio::task::spawn_blocking(move || crate::git::snapshot_turn(&dir)).await;
-                            let _ = tx.send(Aux::Snapshotted(n));
-                        });
-                        // The agent starts meanwhile (it touches nothing
-                        // before it's sent something); one that can't start
-                        // gives the message back now.
-                        if driver.ensure_harness(&mut st, &mut pending).is_none() {
-                            snap_turn += 1;
-                            pending.push(SessionUpdate::Preparing(false));
-                            give_back(&mut st, &mut pending, std::mem::take(&mut held), "Not sent");
-                            dirty = true;
-                        }
-                    } else if let Some(h) = driver.ensure_harness(&mut st, &mut pending) {
-                        // A prompt sent while idle must not carry a queue mode.
-                        let mode = if st.status == SessionStatus::Busy { mode } else { SendMode::Normal };
-                        h.prompt(&text, images, mode);
-                    } else {
-                        // (It didn't start: the message back.)
-                        give_back(&mut st, &mut pending, vec![Unsent { text, images, mode, typed }], "Not sent");
-                        dirty = true;
-                    }
-                }
-                // Stopped while its snapshot was taken: never sent.
-                Some(Control::Abort) if !held.is_empty() => {
-                    let unsent = std::mem::take(&mut held);
-                    let why = if unsent.len() == 1 { "Stopped before it was sent" } else { "Stopped before they were sent" };
-                    snap_turn += 1;
-                    pending.push(SessionUpdate::Preparing(false));
-                    give_back(&mut st, &mut pending, unsent, why);
-                    dirty = true;
-                }
-                Some(Control::Abort) => {
-                    // A run you stopped isn't "ready".
-                    st.aborted = st.status == SessionStatus::Busy;
-                    if let (Some(h), true) = (&driver.harness, st.status.has_process()) {
-                        h.abort();
-                    }
-                }
-                Some(Control::Answer(id, answer)) => {
-                    if id.starts_with(GATE_PREFIX) {
-                        // harlo's: what was asked, for the agent's answer.
-                        if let Some(gate) = st.requests.iter().find(|r| r.id == id) {
-                            pending.push(SessionUpdate::GateAnswered { id: id.clone(), question: gate.message.clone(), answer });
-                        }
-                    } else if let Some(h) = &driver.harness {
-                        // (In the agent's words, where they differ.)
-                        let mut answer = answer;
-                        if answer["value"] == "Always allow" {
-                            if let Some(said) = st.requests.iter().find(|r| r.id == id).and_then(|r| r.raw["alwaysValue"].as_str()) {
-                                answer["value"] = json!(said);
-                            }
-                        }
-                        h.answer_ui(&id, answer);
-                    }
-                    st.requests.retain(|r| r.id != id);
-                    pending.push(SessionUpdate::UiCleared(id));
-                }
-                Some(Control::Gate(request)) => {
-                    st.requests.push(request.clone());
-                    pending.push(SessionUpdate::UiRequest(request));
-                }
-                Some(Control::Raw(cmd)) => {
-                    let modes = cmd["type"] == "harlo_set_modes";
-                    if modes {
-                        driver.modes = Some(cmd.clone());
-                    }
-                    let thinking = kind == HarnessKind::Claude && cmd["type"] == "set_thinking_level";
-                    if thinking {
-                        driver.thinking = cmd["level"].as_str().map(str::to_owned);
-                    }
-                    // Not running: for when it starts, nothing starts for this.
-                    if !st.status.has_process() && (modes || thinking) {
-                        if thinking {
-                            st.meta.thinking = driver.thinking.clone().unwrap_or_default();
-                            pending.push(SessionUpdate::Meta(st.meta.clone()));
-                        }
-                    } else if let Some(h) = driver.ensure_harness(&mut st, &mut pending) {
-                        let aux = driver.aux_tx.clone();
-                        tokio::spawn(async move {
-                            let changes_state = matches!(
-                                cmd["type"].as_str(),
-                                Some("set_model" | "set_thinking_level" | "cycle_model" | "cycle_thinking_level" | "set_session_name")
-                            );
-                            match h.request(cmd).await {
-                                Ok(_) if changes_state => fetch_state(h, aux).await,
-                                Ok(_) => {}
-                                Err(e) => tracing::warn!("command failed: {e}"),
-                            }
-                        });
-                    }
-                }
-                // (A saved session still loading: the report kept from
-                // last time, else once it has loaded.)
-                Some(Control::ContextReport(reply)) if st.status == SessionStatus::Loading => match &early {
-                    Some(report) => drop(reply.send(report.clone())),
-                    None => early_asked.push(reply),
-                },
-                Some(Control::ContextReport(reply)) => {
-                    let _ = reply.send(st.report());
-                }
-                // (A saved session still loading: once it has.)
-                Some(Control::Export(to, reply)) if st.status == SessionStatus::Loading => exports.push((to, reply)),
-                Some(Control::Export(to, reply)) => export(&st, &driver, to, reply),
-                Some(Control::Reload) => {
-                    if let Some(h) = driver.harness.clone() {
-                        tokio::spawn(fetch_initial(h, driver.aux_tx.clone(), true));
-                    }
-                }
-                Some(Control::RestartIdle) => {
-                    if st.status == SessionStatus::Idle {
-                        driver.stop_idle(&mut st, &mut pending);
-                    }
-                }
-                Some(Control::RestartWhenIdle) => {
-                    if st.status == SessionStatus::Idle {
-                        driver.stop_idle(&mut st, &mut pending);
-                    } else {
-                        driver.restart_settled = driver.harness.is_some();
-                    }
-                }
-                // Claude's levels go by the model: no need to start it.
-                Some(Control::Request(cmd, reply)) if kind == HarnessKind::Claude && cmd["type"] == "get_available_thinking_levels" && !st.status.has_process() => {
-                    let model = if st.meta.model_id.is_empty() { &st.meta.model } else { &st.meta.model_id };
-                    let _ = reply.send(Ok(json!({ "levels": harlo_harness::claude::thinking_levels(model) })));
-                }
-                Some(Control::Request(cmd, reply)) => match driver.ensure_harness(&mut st, &mut pending) {
-                    Some(h) => {
-                        tokio::spawn(async move {
-                            let _ = reply.send(h.request(cmd).await.map_err(|e| e.to_string()));
-                        });
-                    }
-                    None => {
-                        let _ = reply.send(Err("the harness could not be started".into()));
-                    }
-                },
-                // Every handle is gone: stop the harness and finish.
-                None => {
+            Some(aux) = aux_rx.recv() => lp.on_aux(aux, &mut st, &mut driver),
+            ctl = control.recv() => {
+                let Some(ctl) = ctl else {
+                    // Every handle is gone: stop the harness and finish.
                     if let Some(h) = &driver.harness {
                         h.kill();
                     }
                     break;
-                }
-            },
-            _ = tokio::time::sleep(wait), if dirty || !pending.is_empty() => {}
+                };
+                lp.on_control(ctl, &mut st, &mut driver);
+            }
+            () = tokio::time::sleep(wait), if lp.dirty || !lp.pending.is_empty() => {}
         }
 
-        // A run ended: a long session's report kept for its next opening.
+        lp.after(&mut st);
+    }
+    st.message_count >= MANY
+}
+
+/// What the session's loop keeps between its turns of the loop.
+struct DriveLoop {
+    kind: HarnessKind,
+    /// The saved session it opened, if any.
+    session_file: Option<PathBuf>,
+    /// Markdown exports asked for while the saved messages load.
+    exports: Vec<(Option<PathBuf>, ExportReply)>,
+    /// While the file loads: the report kept from last time.
+    early: Option<Value>,
+    /// The reports asked for until there's one.
+    early_asked: Vec<oneshot::Sender<Value>>,
+    /// A run was going (its end keeps a long session's report).
+    was_busy: bool,
+    pending: Vec<SessionUpdate>,
+    dirty: bool,
+    last_flush: Instant,
+    /// A turn waiting for its snapshot: its prompt (and any sent meanwhile).
+    held: Vec<Unsent>,
+    /// The snapshot's number.
+    snap_turn: u64,
+    /// `/plugin …` runs so far (their notices' ids).
+    plugin_runs: u64,
+    /// A conversation was just loaded: once its rows are built and sent,
+    /// what building them used goes back to the system.
+    loaded: bool,
+    /// Rows kept from the last time are shown, until it has loaded (with
+    /// what comes meanwhile under them).
+    early_rows: bool,
+    early_list: Vec<Arc<Row>>,
+}
+
+impl DriveLoop {
+    /// An event from the agent.
+    fn on_event(&mut self, ev: &HarnessEvent, st: &mut DriverState, driver: &mut Driver) {
+        handle_event(ev, st, &mut self.pending, driver);
+        // Its host disconnected by hand: said as that, not as a failure.
+        let by_hand = matches!(ev, HarnessEvent::Exited { .. }).then(|| driver.cfg.remote.as_ref().map(|r| r.host.clone()).filter(|h| crate::remote::is_disconnected(h))).flatten();
+        self.dirty |= match by_hand {
+            Some(host) => st.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Info, text: format!("Disconnected from {host}."), system: false }),
+            None => st.apply(ev),
+        };
+        let login = match ev {
+            HarnessEvent::Response { success: false, error: Some(e), .. } => Some(asks_for_login(e)),
+            HarnessEvent::Exited { stderr_tail, .. } => Some(asks_for_login(stderr_tail)),
+            // (How Claude says it.)
+            HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, .. } => asks_for_login(text).then_some(true),
+            HarnessEvent::MessageStart { .. } => Some(false),
+            _ => None,
+        };
+        let refused = match ev {
+            HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, .. } => refused_by_limit(text).then_some(true),
+            HarnessEvent::MessageStart { .. } => Some(false),
+            _ => None,
+        };
+        if let Some(refused) = refused.filter(|r| *r != st.meta.limit_refused) {
+            st.meta.limit_refused = refused;
+            self.pending.push(SessionUpdate::Meta(st.meta.clone()));
+        }
+        if let Some(login) = login.filter(|l| *l != st.meta.needs_login) {
+            st.meta.needs_login = login;
+            self.pending.push(SessionUpdate::Meta(st.meta.clone()));
+        }
+        if driver.restart_settled && st.status == SessionStatus::Idle {
+            driver.stop_idle(st, &mut self.pending);
+        }
+    }
+
+    /// A result from work done beside the loop.
+    fn on_aux(&mut self, aux: Aux, st: &mut DriverState, driver: &mut Driver) {
+        match aux {
+            Aux::Loaded(opened) => self.loaded(opened, st, driver),
+            // The rows kept from last time, shown while it loads.
+            // (Kept from last time, or its latest once read: with what
+            // came since under them.)
+            Aux::EarlyRows(rows) => {
+                if st.since_open.is_some() {
+                    self.early_list = rows;
+                    self.early_rows = true;
+                    let mut rows = self.early_list.clone();
+                    rows.extend(st.transcript.rows());
+                    let changes = diff_rows(&st.shown, &rows);
+                    st.shown = rows;
+                    self.pending.push(SessionUpdate::Rows(changes));
+                    st.broadcast(std::mem::take(&mut self.pending));
+                    self.last_flush = Instant::now();
+                }
+            }
+            Aux::Early(report) => {
+                if let (Some(report), SessionStatus::Loading) = (report, st.status) {
+                    for reply in self.early_asked.drain(..) {
+                        let _ = reply.send((*report).clone());
+                    }
+                    self.early = Some(*report);
+                }
+            }
+            Aux::History(messages, tally) => {
+                st.transcript.load_messages(&messages);
+                if st.meta.first_message.is_empty() {
+                    st.meta.first_message = first_user_text(&messages);
+                    self.pending.push(SessionUpdate::Meta(st.meta.clone()));
+                }
+                st.last_reply = messages.iter().rev().find_map(reply_text).unwrap_or_default();
+                st.message_count = messages.len();
+                (st.tally, st.recent) = (*tally, Vec::new());
+                done_with(messages);
+                self.loaded = true;
+                self.dirty = true;
+            }
+            Aux::State(state) => {
+                if let Some(todos) = state.get("todoPhases").filter(|t| t.is_array())
+                    && *todos != st.todos {
+                        st.todos = todos.clone();
+                        self.pending.push(SessionUpdate::Todos(st.todos.clone()));
+                    }
+                let mut meta = st.meta.clone();
+                apply_state(&mut meta, &state);
+                // A remote harness reports its own paths.
+                if let (Some(remote), Some(file)) = (&driver.cfg.remote, &meta.session_file)
+                    && !crate::remote::is_remote(file) {
+                        meta.session_file = Some(crate::remote::join(&remote.host, &file.to_string_lossy()));
+                    }
+                if meta != st.meta {
+                    st.meta = meta;
+                    self.pending.push(SessionUpdate::Meta(st.meta.clone()));
+                }
+            }
+            Aux::Stats(stats) => {
+                let mut meta = st.meta.clone();
+                apply_stats(&mut meta, &stats);
+                if meta != st.meta {
+                    st.meta = meta;
+                    self.pending.push(SessionUpdate::Meta(st.meta.clone()));
+                }
+            }
+            Aux::Commands(list) => {
+                save_commands(&driver.cfg, &list);
+                st.commands = parse_commands(&list);
+                self.pending.push(SessionUpdate::Commands(st.commands.clone()));
+            }
+            Aux::Plugin(id, args, ran) => {
+                st.apply(&HarnessEvent::MessageEnd { id, message: plugin_message(&crate::plugins::notice(&args, Some(&ran)), !ran.ok) });
+                self.dirty = true;
+                // What's installed changed: the agent starts again to
+                // load it (its skills, its "/" list), now when it's
+                // idle, else once its run ends.
+                if ran.ok && crate::plugins::changes(&args) && driver.harness.is_some() {
+                    if st.status == SessionStatus::Idle {
+                        driver.stop_idle(st, &mut self.pending);
+                        driver.ensure_harness(st, &mut self.pending);
+                    } else {
+                        driver.restart_settled = true;
+                    }
+                }
+            }
+            // The snapshot's done: the turn's prompt goes now (unless
+            // it was stopped meanwhile).
+            Aux::Snapshotted(n) if n == self.snap_turn && !self.held.is_empty() => {
+                self.pending.push(SessionUpdate::Preparing(false));
+                let mut rest = std::mem::take(&mut self.held).into_iter().enumerate();
+                while let Some((i, u)) = rest.next() {
+                    let Some(h) = driver.ensure_harness(st, &mut self.pending) else {
+                        // (It didn't start: this one and the rest back.)
+                        let back = std::iter::once(u).chain(rest.map(|(_, u)| u)).collect();
+                        give_back(st, &mut self.pending, back, "Not sent");
+                        self.dirty = true;
+                        break;
+                    };
+                    h.prompt(&u.text, u.images, if i == 0 { SendMode::Normal } else { u.mode });
+                }
+            }
+            Aux::Snapshotted(_) => {}
+        }
+    }
+
+    /// The saved conversation has loaded: shown, with what came meanwhile after it.
+    fn loaded(&mut self, opened: Box<Opened>, st: &mut DriverState, driver: &mut Driver) {
+        let Opened { saved, missing, transcript, tally, count, first_message, last_reply, context } = *opened;
+        st.transcript = transcript;
+        // (What came while it loaded, after it.)
+        for ev in st.since_open.take().unwrap_or_default() {
+            st.transcript.apply(&ev);
+        }
+        self.early_rows = false;
+        self.early_list = Vec::new();
+        // (A copy is the start of the host's file: what didn't
+        // come is the end, its latest messages.)
+        if missing > 0 {
+            let host = driver.cfg.remote.as_ref().map(|r| r.host.clone()).unwrap_or_default();
+            let text = format!(
+                "Not all of this session came over from {host}: its last {} (the latest messages) aren't shown. Close it and open it again to fetch the rest.",
+                crate::attach::human_size(missing)
+            );
+            st.apply(&HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Warning, text, system: false });
+        }
+        st.meta.first_message = first_message.unwrap_or_default();
+        if !saved.name.is_empty() {
+            st.meta.name = saved.name;
+        }
+        st.meta.model = saved.model;
+        // (Until the agent runs and says: e.g. to start its server.)
+        if st.meta.model_id.is_empty() {
+            st.meta.model_id = saved.model_id;
+        }
+        st.meta.thinking = driver.thinking.clone().unwrap_or(saved.thinking);
+        // Claude's context before it runs: the last reply's, in
+        // the window Claude said last time for its model.
+        if self.kind == HarnessKind::Claude && st.meta.context_window == 0
+            && let Some((window, at)) = harlo_harness::claude::known_context(&st.meta.model)
+        {
+            (st.meta.context_tokens, st.meta.context_window, st.meta.compact_at) = (context, window, at);
+        }
+        // None set: what Claude's settings have it on.
+        if self.kind == HarnessKind::Claude && st.meta.thinking.is_empty() && driver.cfg.remote.is_none() {
+            st.meta.thinking = harlo_harness::claude::default_effort();
+        }
+        self.pending.push(SessionUpdate::Meta(st.meta.clone()));
+        if st.status == SessionStatus::Loading {
+            set_status(st, SessionStatus::Offline, &mut self.pending);
+        }
+        // A long one: its latest rows at once, the rest above them
+        // once they're built.
+        if count >= MANY {
+            let first = st.transcript.last_rows(SHOWN_FIRST);
+            let changes = diff_rows(&st.shown, &first);
+            if let Some(path) = &self.session_file {
+                save_rows(path.clone(), &first);
+            }
+            st.shown = first;
+            if !changes.is_empty() {
+                self.pending.push(SessionUpdate::Rows(changes));
+            }
+            st.broadcast(std::mem::take(&mut self.pending));
+            self.last_flush = Instant::now();
+        }
+        st.last_reply = last_reply;
+        st.message_count = count;
+        (st.tally, st.recent) = (tally, Vec::new());
+        self.early = None;
+        if !self.early_asked.is_empty() || count >= MANY {
+            let report = st.report();
+            for reply in self.early_asked.drain(..) {
+                let _ = reply.send(report.clone());
+            }
+            if count >= MANY && let Some(path) = &self.session_file {
+                save_report(path.clone(), report);
+            }
+        }
+        self.loaded = true;
+        for (to, reply) in self.exports.drain(..) {
+            export(st, driver, to, reply);
+        }
+        self.dirty = true;
+    }
+
+    /// A request from one of the session's handles.
+    fn on_control(&mut self, ctl: Control, st: &mut DriverState, driver: &mut Driver) {
+        match ctl {
+            Control::Subscribe(id, sink) => {
+                // Bring the newcomer up to date with what others have seen
+                // (a turn still being prepared too).
+                let mut now = st.snapshot();
+                if !self.held.is_empty() {
+                    now.push(SessionUpdate::Preparing(true));
+                }
+                // (Messages given back while no box was there: this one's.)
+                if sink.composes() && !st.unsent.is_empty() {
+                    now.push(SessionUpdate::Unsent(std::mem::take(&mut st.unsent)));
+                }
+                sink.deliver(now);
+                st.sinks.push((id, sink));
+            }
+            Control::Unsubscribe(id) => st.sinks.retain(|(s, _)| *s != id),
+            // `/plugin …`: Claude Code's plugin command, run by harlo
+            // (not sent to the agent), its result a notice.
+            Control::Prompt(text, _, _, typed) if plugin_args(&text, typed.as_ref()).is_some() => self.run_plugin(&text, typed.as_ref(), st, driver),
+            // (One sent while a turn waits for its snapshot: after it.)
+            Control::Prompt(text, images, mode, typed) if !self.held.is_empty() => self.held.push(Unsent { text, images, mode, typed }),
+            Control::Prompt(text, images, mode, typed) => self.prompt(text, images, mode, typed, st, driver),
+            // Stopped while its snapshot was taken: never sent.
+            Control::Abort if !self.held.is_empty() => {
+                let unsent = std::mem::take(&mut self.held);
+                let why = if unsent.len() == 1 { "Stopped before it was sent" } else { "Stopped before they were sent" };
+                self.snap_turn += 1;
+                self.pending.push(SessionUpdate::Preparing(false));
+                give_back(st, &mut self.pending, unsent, why);
+                self.dirty = true;
+            }
+            Control::Abort => {
+                // A run you stopped isn't "ready".
+                st.aborted = st.status == SessionStatus::Busy;
+                if let (Some(h), true) = (&driver.harness, st.status.has_process()) {
+                    h.abort();
+                }
+            }
+            Control::Answer(id, answer) => {
+                if id.starts_with(GATE_PREFIX) {
+                    // harlo's: what was asked, for the agent's answer.
+                    if let Some(gate) = st.requests.iter().find(|r| r.id == id) {
+                        self.pending.push(SessionUpdate::GateAnswered { id: id.clone(), question: gate.message.clone(), answer });
+                    }
+                } else if let Some(h) = &driver.harness {
+                    // (In the agent's words, where they differ.)
+                    let mut answer = answer;
+                    if answer["value"] == "Always allow"
+                        && let Some(said) = st.requests.iter().find(|r| r.id == id).and_then(|r| r.raw["alwaysValue"].as_str()) {
+                            answer["value"] = json!(said);
+                        }
+                    h.answer_ui(&id, answer);
+                }
+                st.requests.retain(|r| r.id != id);
+                self.pending.push(SessionUpdate::UiCleared(id));
+            }
+            Control::Gate(request) => {
+                st.requests.push(request.clone());
+                self.pending.push(SessionUpdate::UiRequest(request));
+            }
+            Control::Raw(cmd) => self.raw(cmd, st, driver),
+            // (A saved session still loading: the report kept from
+            // last time, else once it has loaded.)
+            Control::ContextReport(reply) if st.status == SessionStatus::Loading => match &self.early {
+                Some(report) => drop(reply.send(report.clone())),
+                None => self.early_asked.push(reply),
+            },
+            Control::ContextReport(reply) => {
+                let _ = reply.send(st.report());
+            }
+            // (A saved session still loading: once it has.)
+            Control::Export(to, reply) if st.status == SessionStatus::Loading => self.exports.push((to, reply)),
+            Control::Export(to, reply) => export(st, driver, to, reply),
+            Control::Reload => {
+                if let Some(h) = driver.harness.clone() {
+                    tokio::spawn(fetch_initial(h, driver.aux_tx.clone(), true));
+                }
+            }
+            Control::RestartIdle => {
+                if st.status == SessionStatus::Idle {
+                    driver.stop_idle(st, &mut self.pending);
+                }
+            }
+            Control::RestartWhenIdle => {
+                if st.status == SessionStatus::Idle {
+                    driver.stop_idle(st, &mut self.pending);
+                } else {
+                    driver.restart_settled = driver.harness.is_some();
+                }
+            }
+            // Claude's levels go by the model: no need to start it.
+            Control::Request(cmd, reply) if self.kind == HarnessKind::Claude && cmd["type"] == "get_available_thinking_levels" && !st.status.has_process() => {
+                let model = if st.meta.model_id.is_empty() { &st.meta.model } else { &st.meta.model_id };
+                let _ = reply.send(Ok(json!({ "levels": harlo_harness::claude::thinking_levels(model) })));
+            }
+            Control::Request(cmd, reply) => match driver.ensure_harness(st, &mut self.pending) {
+                Some(h) => {
+                    // (Sent now, in order with what's sent after it.)
+                    let answer = if h.in_steps(&cmd) { Err(cmd) } else { Ok(h.ask(cmd)) };
+                    tokio::spawn(async move {
+                        let answered = match answer {
+                            Ok(Ok(answer)) => answer.get().await,
+                            Ok(Err(e)) => Err(e),
+                            Err(cmd) => h.request(cmd).await,
+                        };
+                        let _ = reply.send(answered.map_err(anyhow::Error::from));
+                    });
+                }
+                None => {
+                    let _ = reply.send(Err(anyhow::Error::msg("the harness could not be started")));
+                }
+            },
+        }
+    }
+
+    /// A raw command for the agent (starting it, unless it only sets modes).
+    fn raw(&mut self, cmd: Value, st: &mut DriverState, driver: &mut Driver) {
+        let modes = cmd["type"] == "harlo_set_modes";
+        if modes {
+            driver.modes = Some(cmd.clone());
+        }
+        let thinking = self.kind == HarnessKind::Claude && cmd["type"] == "set_thinking_level";
+        if thinking {
+            driver.thinking = cmd["level"].as_str().map(str::to_owned);
+        }
+        // Not running: for when it starts, nothing starts for this.
+        if !st.status.has_process() && (modes || thinking) {
+            if thinking {
+                st.meta.thinking = driver.thinking.clone().unwrap_or_default();
+                self.pending.push(SessionUpdate::Meta(st.meta.clone()));
+            }
+        } else if let Some(h) = driver.ensure_harness(st, &mut self.pending) {
+            let aux = driver.aux_tx.clone();
+            let changes_state =
+                matches!(cmd["type"].as_str(), Some("set_model" | "set_thinking_level" | "cycle_model" | "cycle_thinking_level" | "set_session_name"));
+            // (Sent now, in order with what's sent after it: a
+            // mode changed just before a message applies to it.)
+            let answer = if h.in_steps(&cmd) { Err(cmd) } else { Ok(h.ask(cmd)) };
+            tokio::spawn(async move {
+                let answered = match answer {
+                    Ok(Ok(answer)) => answer.get().await,
+                    Ok(Err(e)) => Err(e),
+                    Err(cmd) => h.request(cmd).await,
+                };
+                match answered {
+                    Ok(_) if changes_state => fetch_state(h, aux).await,
+                    Ok(_) => {}
+                    Err(e) => tracing::event!(name: "session.command.failed", tracing::Level::WARN, error.message = %e, "command failed: {{error.message}}"),
+                }
+            });
+        }
+    }
+
+    /// A message to send: a new turn waits for its undo snapshot first.
+    fn prompt(&mut self, text: String, images: Vec<Value>, mode: SendMode, typed: Option<Typed>, st: &mut DriverState, driver: &mut Driver) {
+        // A new turn (not steering or a queued one): the folder's
+        // files first, so the turn can be undone (git::snapshot_turn).
+        // That can take seconds (a big or remote repository), so
+        // it's taken beside the loop: a Stop meanwhile still gets
+        // here, and the prompt is never sent.
+        // (A side question, `/btw`, isn't a turn.)
+        if st.status != SessionStatus::Busy && turn_snapshots_on() && !text.trim_start().starts_with("/btw") {
+            let dir = match &driver.cfg.remote {
+                Some(r) => crate::remote::join(&r.host, &driver.cfg.cwd.to_string_lossy()),
+                None => driver.cfg.cwd.clone(),
+            };
+            self.held.push(Unsent { text, images, mode, typed });
+            self.snap_turn += 1;
+            self.pending.push(SessionUpdate::Preparing(true));
+            let (tx, n) = (driver.aux_tx.clone(), self.snap_turn);
+            tokio::spawn(async move {
+                // (Tests: a slow disk or host.)
+                if let Some(ms) = std::env::var("HARLO_TEST_SLOW_SNAPSHOT_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+                    tokio::time::sleep(Duration::from_millis(ms)).await;
+                }
+                let _ = tokio::task::spawn_blocking(move || crate::git::snapshot_turn(&dir)).await;
+                let _ = tx.send(Aux::Snapshotted(n));
+            });
+            // The agent starts meanwhile (it touches nothing
+            // before it's sent something); one that can't start
+            // gives the message back now.
+            if driver.ensure_harness(st, &mut self.pending).is_none() {
+                self.snap_turn += 1;
+                self.pending.push(SessionUpdate::Preparing(false));
+                give_back(st, &mut self.pending, std::mem::take(&mut self.held), "Not sent");
+                self.dirty = true;
+            }
+        } else if let Some(h) = driver.ensure_harness(st, &mut self.pending) {
+            // A prompt sent while idle must not carry a queue mode.
+            let mode = if st.status == SessionStatus::Busy { mode } else { SendMode::Normal };
+            h.prompt(&text, images, mode);
+        } else {
+            // (It didn't start: the message back.)
+            give_back(st, &mut self.pending, vec![Unsent { text, images, mode, typed }], "Not sent");
+            self.dirty = true;
+        }
+    }
+
+    /// `/plugin …`: run by harlo, its result a notice.
+    fn run_plugin(&mut self, text: &str, typed: Option<&Typed>, st: &mut DriverState, driver: &Driver) {
+        let args = plugin_args(text, typed).unwrap_or_default();
+        self.plugin_runs += 1;
+        let id = format!("harlo-plugin-{}", self.plugin_runs);
+        st.apply(&HarnessEvent::MessageEnd { id: id.clone(), message: plugin_message(&crate::plugins::notice(&args, None), false) });
+        self.dirty = true;
+        let (tx, cwd, program) = (driver.aux_tx.clone(), driver.cfg.cwd.clone(), claude_program(&driver.cfg));
+        let host = driver.cfg.remote.as_ref().map(|r| crate::remote::hosts().into_iter().find(|h| h.name == r.host).ok_or(r.host.clone()));
+        tokio::task::spawn_blocking(move || {
+            let ran = match &host {
+                Some(Err(name)) => crate::plugins::Ran { ok: false, detail: String::new(), output: format!("{name} isn't among the remote instances any more.") },
+                Some(Ok(h)) => crate::plugins::run(&args, &cwd, Some(h), None),
+                None => crate::plugins::run(&args, &cwd, None, program.as_deref()),
+            };
+            let _ = tx.send(Aux::Plugin(id, args, ran));
+        });
+    }
+
+    /// After each turn of the loop: a long session's report kept when a run
+    /// ends, and what changed sent once it's time.
+    fn after(&mut self, st: &mut DriverState) {
+    // A run ended: a long session's report kept for its next opening.
         let busy = st.status == SessionStatus::Busy;
-        if was_busy && !busy && st.message_count >= MANY
-            && let Some(path) = session_file.clone().or_else(|| st.meta.session_file.clone())
+        if self.was_busy && !busy && st.message_count >= MANY
+            && let Some(path) = self.session_file.clone().or_else(|| st.meta.session_file.clone())
         {
             save_rows(path.clone(), &st.transcript.last_rows(SHOWN_FIRST));
             save_report(path, st.report());
         }
-        was_busy = busy;
-
-        if (dirty || !pending.is_empty()) && last_flush.elapsed() >= STREAM_FLUSH {
+        self.was_busy = busy;
+    
+        if (self.dirty || !self.pending.is_empty()) && self.last_flush.elapsed() >= STREAM_FLUSH {
             // (The rows kept from last time stay until it has loaded, with
             // what came since under them.)
-            if dirty && early_rows {
-                let mut rows = early_list.clone();
+            if self.dirty && self.early_rows {
+                let mut rows = self.early_list.clone();
                 rows.extend(st.transcript.rows());
                 let changes = diff_rows(&st.shown, &rows);
                 st.shown = rows;
                 if !changes.is_empty() {
-                    pending.push(SessionUpdate::Rows(changes));
+                    self.pending.push(SessionUpdate::Rows(changes));
                 }
-                dirty = false;
+                self.dirty = false;
             }
-            if dirty {
+            if self.dirty {
                 let mut rows = st.transcript.rows();
                 // (Replies far back keep their long text on disk: sent so.)
                 if st.transcript.page_out(KEPT_ROWS) {
@@ -1507,16 +1625,16 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
                 let changes = diff_rows(&st.shown, &rows);
                 st.shown = rows;
                 if !changes.is_empty() {
-                    pending.push(SessionUpdate::Rows(changes));
+                    self.pending.push(SessionUpdate::Rows(changes));
                 }
-                dirty = false;
+                self.dirty = false;
             }
-            if !pending.is_empty() {
-                st.broadcast(std::mem::take(&mut pending));
+            if !self.pending.is_empty() {
+                st.broadcast(std::mem::take(&mut self.pending));
             }
-            last_flush = Instant::now();
+            self.last_flush = Instant::now();
             // (A moment later: the window builds its rows from these.)
-            if std::mem::take(&mut loaded) && !dirty {
+            if std::mem::take(&mut self.loaded) && !self.dirty {
                 tokio::spawn(async {
                     tokio::time::sleep(GIVE_BACK_AFTER).await;
                     let _ = tokio::task::spawn_blocking(harlo_harness::store::give_back).await;
@@ -1524,8 +1642,8 @@ async fn drive(cfg: HarnessConfig, spawn_now: bool, mut control: mpsc::Unbounded
             }
         }
     }
-    st.message_count >= MANY
 }
+
 
 fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<SessionUpdate>, driver: &mut Driver) {
     let harness = driver.harness.clone().expect("events imply a harness");
@@ -1534,20 +1652,20 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
     // fetches it too).
     // And after a compaction, the context left.
     if matches!(ev, HarnessEvent::ToolStart { .. } | HarnessEvent::Compaction { started: false, .. }) && st.status == SessionStatus::Busy {
-        tokio::spawn(fetch_stats(harness.clone(), aux.clone()));
+        tokio::spawn(fetch_stats(Arc::clone(&harness), aux.clone()));
     }
     // A new session's file, as soon as its first run is under way (else the
     // sidebar lists the running session and its file apart until it ends).
     if st.status == SessionStatus::Busy && st.meta.session_file.is_none() && !st.file_asked && !matches!(ev, HarnessEvent::RunStarted) {
         st.file_asked = true;
-        tokio::spawn(fetch_state(harness.clone(), aux.clone()));
+        tokio::spawn(fetch_state(Arc::clone(&harness), aux.clone()));
     }
     match ev {
         HarnessEvent::Ready => {
             set_status(st, SessionStatus::Idle, pending);
             let fetch_history = std::mem::take(&mut driver.fetch_history);
-            tokio::spawn(fetch_initial(harness.clone(), aux.clone(), fetch_history));
-            let (h, tx) = (harness.clone(), aux.clone());
+            tokio::spawn(fetch_initial(Arc::clone(&harness), aux.clone(), fetch_history));
+            let (h, tx) = (Arc::clone(&harness), aux.clone());
             tokio::spawn(async move {
                 if let Ok(data) = h.request(json!({ "type": "get_commands" })).await {
                     let _ = tx.send(Aux::Commands(data["commands"].clone()));
@@ -1560,7 +1678,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
         }
         // The plan changed: re-read the todo phases.
         HarnessEvent::ToolEnd { call_id, .. } if st.todo_calls.remove(call_id) => {
-            tokio::spawn(fetch_state(harness.clone(), aux.clone()));
+            tokio::spawn(fetch_state(Arc::clone(&harness), aux.clone()));
         }
         HarnessEvent::BackgroundTasks(n) => st.background = *n,
         HarnessEvent::RunStarted => {
@@ -1584,19 +1702,9 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             }
             set_status(st, SessionStatus::Idle, pending);
             // The session file and title may have appeared during the run.
-            tokio::spawn(fetch_state(harness.clone(), aux.clone()));
+            tokio::spawn(fetch_state(Arc::clone(&harness), aux.clone()));
         }
-        HarnessEvent::MessageEnd { id, message } => {
-            // A reply the model couldn't finish (provider error, …).
-            if message["role"] == "assistant" && message["stopReason"] == "error" {
-                st.run_error = Some(message["errorMessage"].as_str().unwrap_or("The model returned an error.").to_owned());
-            }
-            if let Some(text) = reply_text(message) {
-                st.last_reply = text;
-            }
-            st.message_count += 1;
-            st.ended(id, message);
-        }
+        HarnessEvent::MessageEnd { id, message } => message_ended(st, id, message),
         HarnessEvent::Retry { started: false, error: Some(error), .. } => st.run_error = Some(error.clone()),
         HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, system: false } => {
             pending.push(SessionUpdate::Notable(Notable::Error { message: text.clone() }));
@@ -1606,24 +1714,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
         }
         HarnessEvent::Limits(info) => pending.push(SessionUpdate::Limits(info.clone())),
         HarnessEvent::Aside(a) => pending.push(SessionUpdate::Aside(a.clone())),
-        HarnessEvent::Exited { code, stderr_tail } => {
-            // Mid-run, or with a failure code: worth knowing. (What it said,
-            // not the end of a stack trace. Its host disconnected by hand:
-            // nothing went wrong, and that was asked first if it was working.)
-            let disconnected = driver.cfg.remote.as_ref().is_some_and(|r| crate::remote::is_disconnected(&r.host));
-            if !disconnected && (st.status == SessionStatus::Busy || code.is_some_and(|c| c != 0)) {
-                let last = stderr_tail.lines().rev().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("at ")).unwrap_or("");
-                let message = format!("{} stopped{}{}", driver.cfg.kind.as_str(), code.map_or(String::new(), |c| format!(" (exit {c})")), if last.is_empty() { String::new() } else { format!(": {last}") });
-                pending.push(SessionUpdate::Notable(Notable::Error { message }));
-            }
-            set_status(st, SessionStatus::Exited, pending);
-            // (harlo's own requests outlive the agent's process.)
-            let (gates, gone): (Vec<UiRequest>, Vec<UiRequest>) = st.requests.drain(..).partition(|r| r.id.starts_with(GATE_PREFIX));
-            st.requests = gates;
-            for r in gone {
-                pending.push(SessionUpdate::UiCleared(r.id));
-            }
-        }
+        HarnessEvent::Exited { code, stderr_tail } => exited(st, pending, &driver.cfg, *code, stderr_tail),
         HarnessEvent::UiRequest(raw) => {
             let req = ui_request(raw);
             st.requests.push(req.clone());
@@ -1633,22 +1724,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             st.requests.retain(|r| &r.id != target_id);
             pending.push(SessionUpdate::UiCleared(target_id.clone()));
         }
-        HarnessEvent::SubagentActivity(frame) => {
-            let p = &frame["payload"];
-            let status = p["status"].as_str().or_else(|| p["progress"]["status"].as_str()).unwrap_or_default();
-            if matches!(status, "completed" | "failed" | "aborted" | "cancelled")
-                && let Some(id) = p["id"].as_str()
-                && st.subagents_done.insert(id.to_owned())
-            {
-                pending.push(SessionUpdate::Notable(Notable::SubagentDone {
-                    id: id.to_owned(),
-                    agent: p["agent"].as_str().unwrap_or("subagent").to_owned(),
-                    status: status.to_owned(),
-                    task: p["description"].as_str().or_else(|| p["task"].as_str()).unwrap_or_default().to_owned(),
-                }));
-            }
-            pending.push(SessionUpdate::SubagentActivity(frame.clone()))
-        }
+        HarnessEvent::SubagentActivity(frame) => subagent_frame(st, pending, frame),
         HarnessEvent::HarloCall { id, tool, args } => pending.push(SessionUpdate::HarloCall { id: id.clone(), tool: tool.clone(), args: args.clone() }),
         HarnessEvent::QueueChanged { steering, follow_up } => {
             st.queue = (steering.clone(), follow_up.clone());
@@ -1659,10 +1735,10 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             pending.push(SessionUpdate::Meta(st.meta.clone()));
         }
         HarnessEvent::ModelChanged(_) | HarnessEvent::ThinkingLevel(_) => {
-            tokio::spawn(fetch_state(harness.clone(), aux.clone()));
+            tokio::spawn(fetch_state(Arc::clone(&harness), aux.clone()));
         }
         HarnessEvent::ContextChanged => {
-            tokio::spawn(fetch_stats(harness.clone(), aux.clone()));
+            tokio::spawn(fetch_stats(Arc::clone(&harness), aux.clone()));
         }
         HarnessEvent::MessageStart { message, .. } if st.meta.first_message.is_empty() && message["role"] == "user" => {
             st.meta.first_message = first_user_text(std::slice::from_ref(message));
@@ -1680,6 +1756,57 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
     }
 }
 
+/// A message has ended: kept, with what it says of the run.
+fn message_ended(st: &mut DriverState, id: &str, message: &Value) {
+    // A reply the model couldn't finish (provider error, …).
+    if message["role"] == "assistant" && message["stopReason"] == "error" {
+        st.run_error = Some(message["errorMessage"].as_str().unwrap_or("The model returned an error.").to_owned());
+    }
+    if let Some(text) = reply_text(message) {
+        st.last_reply = text;
+    }
+    st.message_count += 1;
+    st.ended(id, message);
+}
+
+/// A subagent's frame, and a notable when it has finished.
+fn subagent_frame(st: &mut DriverState, pending: &mut Vec<SessionUpdate>, frame: &Value) {
+    let p = &frame["payload"];
+    let status = p["status"].as_str().or_else(|| p["progress"]["status"].as_str()).unwrap_or_default();
+    if matches!(status, "completed" | "failed" | "aborted" | "cancelled")
+        && let Some(id) = p["id"].as_str()
+        && st.subagents_done.insert(id.to_owned())
+    {
+        pending.push(SessionUpdate::Notable(Notable::SubagentDone {
+            id: id.to_owned(),
+            agent: p["agent"].as_str().unwrap_or("subagent").to_owned(),
+            status: status.to_owned(),
+            task: p["description"].as_str().or_else(|| p["task"].as_str()).unwrap_or_default().to_owned(),
+        }));
+    }
+    pending.push(SessionUpdate::SubagentActivity(frame.clone()));
+}
+
+/// The agent's process ended: why, when it's worth saying, and its requests gone.
+fn exited(st: &mut DriverState, pending: &mut Vec<SessionUpdate>, cfg: &HarnessConfig, code: Option<i32>, stderr_tail: &str) {
+    // Mid-run, or with a failure code: worth knowing. (What it said,
+    // not the end of a stack trace. Its host disconnected by hand:
+    // nothing went wrong, and that was asked first if it was working.)
+    let disconnected = cfg.remote.as_ref().is_some_and(|r| crate::remote::is_disconnected(&r.host));
+    if !disconnected && (st.status == SessionStatus::Busy || code.is_some_and(|c| c != 0)) {
+        let last = stderr_tail.lines().rev().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("at ")).unwrap_or("");
+        let message = format!("{} stopped{}{}", cfg.kind.as_str(), code.map_or(String::new(), |c| format!(" (exit {c})")), if last.is_empty() { String::new() } else { format!(": {last}") });
+        pending.push(SessionUpdate::Notable(Notable::Error { message }));
+    }
+    set_status(st, SessionStatus::Exited, pending);
+    // (harlo's own requests outlive the agent's process.)
+    let (gates, gone): (Vec<UiRequest>, Vec<UiRequest>) = st.requests.drain(..).partition(|r| r.id.starts_with(GATE_PREFIX));
+    st.requests = gates;
+    for r in gone {
+        pending.push(SessionUpdate::UiCleared(r.id));
+    }
+}
+
 enum Aux {
     /// The session file's branch, model and thinking level; with a remote
     /// one's, how much of it didn't come over (its end); and its tally (see
@@ -1692,7 +1819,7 @@ enum Aux {
     /// loads.
     EarlyRows(Vec<Arc<Row>>),
     /// Messages from the harness (`get_messages`), and their tally.
-    History(Vec<Value>, crate::context::Tally),
+    History(Vec<Value>, Box<crate::context::Tally>),
     State(Value),
     Stats(Value),
     Commands(Value),
@@ -1714,16 +1841,16 @@ async fn fetch_initial(harness: Arc<Harness>, tx: mpsc::UnboundedSender<Aux>, re
                 })
                 .await
                 .unwrap_or_default();
-                let _ = tx.send(Aux::History(messages, tally));
+                let _ = tx.send(Aux::History(messages, Box::new(tally)));
             }
-            Err(e) => tracing::warn!("get_messages failed: {e}"),
+            Err(e) => tracing::event!(name: "session.messages.failed", tracing::Level::WARN, error.message = %e, "get_messages failed: {{error.message}}"),
         }
     }
     fetch_state(harness, tx).await;
 }
 
 /// The session as Markdown, as it is now, to `reply`.
-fn export(st: &DriverState, driver: &Driver, to: Option<PathBuf>, reply: oneshot::Sender<Result<String, String>>) {
+fn export(st: &DriverState, driver: &Driver, to: Option<PathBuf>, reply: oneshot::Sender<anyhow::Result<String>>) {
     let info = crate::export::Info {
         title: if st.meta.name.is_empty() { st.meta.first_message.clone() } else { st.meta.name.clone() },
         agent: driver.cfg.kind.label().to_owned(),
@@ -1742,7 +1869,7 @@ async fn fetch_state(harness: Arc<Harness>, tx: mpsc::UnboundedSender<Aux>) {
         Ok(state) => {
             let _ = tx.send(Aux::State(state));
         }
-        Err(e) => tracing::debug!("get_state failed: {e}"),
+        Err(e) => tracing::event!(name: "session.state.failed", tracing::Level::DEBUG, error.message = %e, "get_state failed: {{error.message}}"),
     }
     fetch_stats(harness, tx).await;
 }
@@ -1760,7 +1887,7 @@ fn apply_stats(meta: &mut SessionMetaInfo, stats: &Value) {
     meta.context_window = usage["contextWindow"].as_u64().unwrap_or(0);
     meta.compact_at = usage["compactAt"].as_u64().unwrap_or(0);
     meta.cost = stats["cost"].as_f64().unwrap_or(0.0);
-    meta.cost_kind = stats["costKind"].as_str().unwrap_or_default().to_owned();
+    stats["costKind"].as_str().unwrap_or_default().clone_into(&mut meta.cost_kind);
 }
 
 fn parse_commands(list: &Value) -> Vec<SlashCommand> {
@@ -1810,26 +1937,25 @@ fn apply_state(meta: &mut SessionMetaInfo, state: &Value) {
     let model = &state["model"];
     // (Not known yet, as an agent starts: what's shown stays.)
     if !model.is_null() {
-        meta.model = model["name"]
+        model["name"]
             .as_str()
             .or_else(|| model["id"].as_str())
             .or_else(|| model.as_str())
-            .unwrap_or("")
-            .to_owned();
+            .unwrap_or("").clone_into(&mut meta.model);
         meta.model_id = match (model["provider"].as_str(), model["id"].as_str()) {
             (Some(p), Some(id)) => format!("{p}/{id}"),
             _ => String::new(),
         };
     }
-    meta.thinking = state["thinkingLevel"].as_str().unwrap_or("").to_owned();
+    state["thinkingLevel"].as_str().unwrap_or("").clone_into(&mut meta.thinking);
     if let Some(f) = state["sessionFile"].as_str() {
         meta.session_file = Some(PathBuf::from(f));
     }
     if let Some(id) = state["sessionId"].as_str() {
-        meta.session_id = id.to_owned();
+        id.clone_into(&mut meta.session_id);
     }
     if let Some(name) = state["sessionName"].as_str() {
-        meta.name = name.to_owned();
+        name.clone_into(&mut meta.name);
     }
 }
 
@@ -1904,15 +2030,14 @@ fn ui_request(raw: &Value) -> UiRequest {
     let mut raw = raw.clone();
     // omp's session-long answer ("Approve write for this session") is
     // harlo's "Always allow"; the answer goes back in its words.
-    if title.starts_with("Allow tool:") {
-        if let Some(i) = options.iter().position(|o| o.starts_with("Approve ") && o.ends_with(" for this session")) {
+    if title.starts_with("Allow tool:")
+        && let Some(i) = options.iter().position(|o| o.starts_with("Approve ") && o.ends_with(" for this session")) {
             let said = options.remove(i);
             raw["alwaysHint"] = json!(said.trim_start_matches("Approve "));
             raw["alwaysValue"] = json!(said);
             options.push("Always allow".to_owned());
             raw["options"] = json!(options);
         }
-    }
     // An approval: Approve / Deny, and "Always allow" where the agent can
     // remember it (`alwaysHint` says what it would remember).
     let is_approval = title.starts_with("Allow tool:") && options.len() >= 2 && options[..2] == ["Approve", "Deny"] && options[2..].iter().all(|o| o == "Always allow");
@@ -1940,6 +2065,7 @@ fn asks_for_login(error: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     #[test]
     fn a_refusal_for_a_used_up_limit_is_told_apart() {
         assert!(super::refused_by_limit("You've hit your 5-hour limit · resets 4:10pm (America/Toronto)"));
@@ -2005,8 +2131,6 @@ mod tests {
         assert_eq!(reply_text(&json!({ "role": "user", "content": "hi" })), None);
     }
 
-    use harlo_harness::HarnessKind;
-
     struct ChannelSink(mpsc::UnboundedSender<SessionUpdate>);
     impl SessionSink for ChannelSink {
         fn deliver(&self, updates: Vec<SessionUpdate>) {
@@ -2048,7 +2172,7 @@ mod tests {
     /// (`HARLO_TEST_HARLO_AGENT`, scratch `HARLO_TEST_HOME`): a reply on a
     /// `codex/…` model, and the plan's limits with it as harlo takes them.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "spends a real model plan"]
     async fn harlo_agent_codex_limits() {
         let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
         assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
@@ -2116,7 +2240,8 @@ mod tests {
     /// writes, takes the answer, says its model, level and file, a run can be
     /// stopped, and the session opens again with what it said.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "spends a real model plan"]
+    #[expect(clippy::too_many_lines, reason = "one scenario: a real harlo-agent session driven through its steps")]
     async fn harlo_agent_session() {
         let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
         assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
@@ -2339,7 +2464,7 @@ mod tests {
     /// `send_raw` (whose command gets an id of its own), and the model uses
     /// the result. Scratch folder as above.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "spends a real model plan"]
     async fn harlo_agent_calls_harlos_tools() {
         let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
         assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
@@ -2394,7 +2519,7 @@ mod tests {
     /// with the helper's tools, it does the task and reports (reminded
     /// once if it ends without). The report is checked as harlo checks it.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "spends a real model plan"]
     async fn harlo_agent_reports_as_a_helper() {
         let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
         assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
@@ -2417,7 +2542,7 @@ mod tests {
         handle.send_raw(json!({ "type": "set_thinking_level", "level": "low" }));
         let brief = crate::orchestration::helper_brief("main", "Create add.py with a function add(a, b) that returns their sum.", true);
         handle.prompt(&brief, Vec::new(), SendMode::Normal);
-        let mut reports: Vec<Result<crate::orchestration::Report, String>> = Vec::new();
+        let mut reports: Vec<anyhow::Result<crate::orchestration::Report>> = Vec::new();
         let mut file = None;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(240);
         while let Ok(Some(u)) = tokio::time::timeout_at(deadline, rx.recv()).await {
@@ -2430,15 +2555,15 @@ mod tests {
                         "_instructions" => Ok(json!(crate::orchestration::BASE_INSTRUCTIONS)),
                         "report_done" => {
                             let r = crate::orchestration::Report::parse(&args);
-                            reports.push(r.clone());
+                            reports.push(r.as_ref().cloned().map_err(|e| anyhow::anyhow!("{e:#}")));
                             r.map(|_| json!({ "reported": true, "next": "End your turn now: harlo sends your report when it ends." }))
                         }
-                        other => Err(format!("harlo has no tool {other}.")),
+                        other => Err(anyhow::anyhow!("harlo has no tool {other}.")),
                     };
                     let mut a = json!({ "type": "harlo_result", "call": id, "ok": answer.is_ok() });
                     match answer {
                         Ok(v) => a["result"] = v,
-                        Err(e) => a["error"] = json!(e),
+                        Err(e) => a["error"] = json!(format!("{e:#}")),
                     }
                     handle.send_raw(a);
                 }
@@ -2460,7 +2585,7 @@ mod tests {
     /// and end, the reply has what each found, and the saved session lists
     /// them. Scratch folder as above.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "spends a real model plan"]
     async fn harlo_agent_runs_task_subagents() {
         let home = PathBuf::from(std::env::var("HARLO_TEST_HOME").expect("a scratch HARLO_TEST_HOME"));
         assert!(home.starts_with("/tmp/"), "not a scratch folder: {home:?}");
@@ -2577,7 +2702,7 @@ mod tests {
         handle.subscribe(ChannelSink(tx));
         let mut rows = Vec::new();
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
-        let id = handle.open_gate("", "Merge it?", vec!["Approve".into(), "Reject".into()]);
+        let id = handle.open_gate("", "Merge it?", &["Approve".into(), "Reject".into()]);
         assert!(id.starts_with(GATE_PREFIX));
         assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::UiRequest(r) if r.id == id && r.method == "select" && r.message == "Merge it?" && r.options.len() == 2)).await);
         // The agent's process stops: the request stays.
@@ -2683,8 +2808,8 @@ mod tests {
         let mut text = String::from("{\"type\":\"session\",\"id\":\"s\",\"cwd\":\"/w\"}\n");
         let mut parent = "null".to_owned();
         for i in 0..3000 {
-            text += &format!("{{\"type\":\"message\",\"id\":\"u{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}\n");
-            text += &format!("{{\"type\":\"message\",\"id\":\"a{i}\",\"parentId\":\"u{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i}\"}}]}}}}\n");
+            let _ = writeln!(text, "{{\"type\":\"message\",\"id\":\"u{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}");
+            let _ = writeln!(text, "{{\"type\":\"message\",\"id\":\"a{i}\",\"parentId\":\"u{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i}\"}}]}}}}");
             parent = format!("\"a{i}\"");
         }
         let (kept_one, none_kept) = (dir.join("kept.jsonl"), dir.join("none.jsonl"));
@@ -2732,8 +2857,8 @@ mod tests {
         let mut text = String::from("{\"type\":\"session\",\"id\":\"s\",\"cwd\":\"/w\"}\n");
         let mut parent = "null".to_owned();
         for i in 0..3000 {
-            text += &format!("{{\"type\":\"message\",\"id\":\"u{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}\n");
-            text += &format!("{{\"type\":\"message\",\"id\":\"a{i}\",\"parentId\":\"u{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i}\"}}]}}}}\n");
+            let _ = writeln!(text, "{{\"type\":\"message\",\"id\":\"u{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}");
+            let _ = writeln!(text, "{{\"type\":\"message\",\"id\":\"a{i}\",\"parentId\":\"u{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i}\"}}]}}}}");
             parent = format!("\"a{i}\"");
         }
         let file = dir.join("long.jsonl");
@@ -2798,8 +2923,8 @@ mod tests {
         let mut parent = "null".to_owned();
         let pad = "x".repeat(400);
         for i in 0..30000 {
-            text += &format!("{{\"type\":\"message\",\"id\":\"q{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}\n");
-            text += &format!("{{\"type\":\"message\",\"id\":\"r{i}\",\"parentId\":\"q{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i} {pad}\"}}]}}}}\n");
+            let _ = writeln!(text, "{{\"type\":\"message\",\"id\":\"q{i}\",\"parentId\":{parent},\"message\":{{\"role\":\"user\",\"content\":\"request {i}\"}}}}");
+            let _ = writeln!(text, "{{\"type\":\"message\",\"id\":\"r{i}\",\"parentId\":\"q{i}\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"answer {i} {pad}\"}}]}}}}");
             parent = format!("\"r{i}\"");
         }
         let file = dir.join("long.jsonl");
@@ -2854,9 +2979,9 @@ mod tests {
         std::fs::write(&copy, "x".repeat(1000)).unwrap();
         std::fs::write(slot.join("source.json"), r#"{"host":"nas","path":"/s.jsonl","used":0,"size":1107}"#).unwrap();
         let short = whole_copy(&copy, "nas");
-        assert!(short.as_ref().is_err_and(|e| e.contains("not all of it came over from nas") && e.contains("107")), "{short:?}");
+        assert!(short.as_ref().is_err_and(|e| e.to_string().contains("not all of it came over from nas") && e.to_string().contains("107")), "{short:?}");
         std::fs::write(slot.join("source.json"), r#"{"host":"nas","path":"/s.jsonl","used":0,"size":1000}"#).unwrap();
-        assert_eq!(whole_copy(&copy, "nas"), Ok(()));
+        whole_copy(&copy, "nas").unwrap();
         let _ = std::fs::remove_dir_all(&slot);
     }
 
@@ -2933,7 +3058,7 @@ mod tests {
         // Its file gone, an export is an error, not an empty one.
         let _ = std::fs::remove_file(path);
         let gone = handle.export_markdown().await;
-        assert!(gone.as_ref().is_err_and(|e| e.contains("couldn't be read")), "{gone:?}");
+        assert!(gone.as_ref().is_err_and(|e| e.to_string().contains("couldn't be read")), "{gone:?}");
     }
 
     #[test]
@@ -2962,5 +3087,15 @@ mod tests {
         assert_eq!((meta.model.as_str(), meta.thinking.as_str(), meta.name.as_str()), ("GPT", "high", "Fix"));
         apply_state(&mut meta, &json!({"model":null,"thinkingLevel":"high"}));
         assert_eq!(meta.model, "GPT", "a model not known yet leaves what's shown");
+    }
+
+
+    #[test]
+    fn a_question_is_what_the_dialog_asks() {
+        let ask = UiRequest { title: "Ask".into(), raw: serde_json::json!({ "questions": [{ "question": " Which one? " }] }), ..Default::default() };
+        assert_eq!(ask.question(), "Which one?");
+        let confirm = UiRequest { title: "Delete?".into(), message: "  ".into(), ..Default::default() };
+        assert_eq!(confirm.question(), "Delete?");
+        assert_eq!(UiRequest::default().question(), "");
     }
 }

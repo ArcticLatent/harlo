@@ -1,6 +1,8 @@
 //! The wiki's tools as OpenWiki defines them (names, descriptions, input
 //! schemas, answers and errors), for harlo's sessions and its MCP server.
 
+// Rust guideline compliant 2026-10-09
+
 use crate::retrieval::{self, ReadRequest, SearchRequest};
 use crate::store::Error;
 use crate::workspaces;
@@ -59,6 +61,7 @@ fn join_path(path: &str, key: &str) -> String {
 
 /// Checks a value as OpenWiki's schema library does, collecting every
 /// issue (`message at path`), and returns it with its strings trimmed.
+#[expect(clippy::too_many_lines, reason = "the schema checks OpenWiki's tools make, each with its exact message")]
 fn check(schema: &Value, v: Option<&Value>, path: &str, issues: &mut Vec<String>) -> Value {
     let mut issue = |m: String| issues.push(if path.is_empty() { m } else { format!("{m} at {path}") });
     let expected = match schema["type"].as_str() {
@@ -93,7 +96,6 @@ fn check(schema: &Value, v: Option<&Value>, path: &str, issues: &mut Vec<String>
                 }
             }
             let unknown: Vec<String> = o.keys().filter(|k| !props.contains_key(*k)).map(|k| format!("\"{k}\"")).collect();
-            drop(issue);
             issues.extend(inner);
             if !unknown.is_empty() {
                 let m = format!("Unrecognized key{}: {}", if unknown.len() == 1 { "" } else { "s" }, unknown.join(", "));
@@ -114,7 +116,6 @@ fn check(schema: &Value, v: Option<&Value>, path: &str, issues: &mut Vec<String>
             if let Some(m) = schema["maxItems"].as_u64().filter(|m| n > *m) {
                 size = Some(format!("Too big: expected array to have <={m} items"));
             }
-            drop(issue);
             let items: Vec<Value> = a.iter().enumerate().map(|(i, x)| check(&schema["items"], Some(x), &format!("{path}[{i}]"), issues)).collect();
             if let Some(m) = size {
                 issues.push(if path.is_empty() { m } else { format!("{m} at {path}") });
@@ -128,13 +129,13 @@ fn check(schema: &Value, v: Option<&Value>, path: &str, issues: &mut Vec<String>
             };
             if let Some(e) = schema["enum"].as_array() {
                 if !e.iter().any(|x| x == s) {
-                    let opts: Vec<String> = e.iter().map(|x| x.to_string()).collect();
+                    let opts: Vec<String> = e.iter().map(std::string::ToString::to_string).collect();
                     issue(format!("Invalid option: expected one of {}", opts.join("|")));
                 }
                 return Value::String(s.to_owned());
             }
             if let Some(p) = schema["pattern"].as_str() {
-                if !regex::Regex::new(p).map(|r| r.is_match(s)).unwrap_or(false) {
+                if !regex::Regex::new(p).is_ok_and(|r| r.is_match(s)) {
                     issue("Invalid UUID".into());
                 }
                 return Value::String(s.to_owned());
@@ -177,6 +178,11 @@ fn check(schema: &Value, v: Option<&Value>, path: &str, issues: &mut Vec<String>
 }
 
 /// A tool's input, checked against its schema (strings trimmed).
+///
+/// # Errors
+///
+/// The MCP input-validation message listing each issue, or that the tool
+/// doesn't exist.
 pub fn validate(name: &str, args: &Value) -> Result<Value, String> {
     let t = tool(name).ok_or_else(|| format!("Tool {name} not found"))?;
     let args = if args.is_null() { json!({}) } else { args.clone() };
@@ -191,6 +197,11 @@ pub fn validate(name: &str, args: &Value) -> Result<Value, String> {
 // ---- Repository roots ----
 
 /// The canonical Git top level a tool's `root` names (refusing `/` and home).
+///
+/// # Errors
+///
+/// A Host [`Error`] (`invalid_input`) when `candidate` isn't absolute, isn't
+/// inside a Git repository, or names `/` or the home folder.
 pub fn repository_root(candidate: &str) -> Result<PathBuf, Error> {
     let invalid = |m: &str| Error::Host("invalid_input", m.into());
     if !candidate.starts_with('/') {

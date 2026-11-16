@@ -9,6 +9,8 @@
 //! The agents keep their credentials; harlo shows the links and hands what
 //! the user types to the agent, as a terminal would, and never reads them.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -212,7 +214,7 @@ use std::time::{Duration, Instant};
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use harlo_core::remote::Host;
-use harlo_core::servers::*;
+use harlo_core::servers::{saved_models, commands_of, engine_of, ollama_models_of, model_files, remove, set_up_servers, STARTED, log_path, launch, wait_up, leftovers, stop_group, stop_pids};
 use harlo_core::{model_servers, signin};
 use harlo_harness::HarnessKind;
 use serde_json::{Value, json};
@@ -255,14 +257,14 @@ fn program(kind: HarnessKind) -> Option<PathBuf> {
 /// A server's address, key and models: as agent `from` has it, else (no
 /// agent has it: `from` is its address) what harlo saved when it set it
 /// up, else what it serves now.
-fn server_details(from: &str, name: &str) -> Result<(String, String, Vec<model_servers::Found>), String> {
+fn server_details(from: &str, name: &str) -> anyhow::Result<(String, String, Vec<model_servers::Found>)> {
     if let Some(from) = kind(from) {
-        return model_servers::details(from, name).ok_or_else(|| format!("{name} isn't in {}'s file any more.", from.label()));
+        return model_servers::details(from, name).ok_or_else(|| anyhow::anyhow!("{name} isn't in {}'s file any more.", from.label()));
     }
     let url = from.to_owned();
     let mut models = saved_models(&commands_of(&url));
     if models.is_empty() {
-        models = model_servers::find(&url, "").map_err(|e| format!("Start it first: harlo asks it for its models. ({e})"))?.models;
+        models = model_servers::find(&url, "").map_err(|e| anyhow::anyhow!("Start it first: harlo asks it for its models. ({e})"))?.models;
         // (The context it serves: not in its list.)
         for m in models.iter_mut().filter(|m| m.context.is_none()) {
             m.context = harlo_core::engines::model_context(&url, &m.id);
@@ -278,7 +280,7 @@ fn servers_on_host_have(host: &str, kind: HarnessKind, name: &str, url: &str) ->
     model_servers::servers_on(host, kind).is_ok_and(|l| l.iter().any(|s| s.name == name && s.base_url == url))
 }
 
-fn read_host_servers(host: &str) -> Result<Value, String> {
+fn read_host_servers(host: &str) -> anyhow::Result<Value> {
     let mut agents = serde_json::Map::new();
     for k in model_servers::ON_HOST.iter().filter(|k| harlo_core::remote::found_on(host, k.as_str())) {
         let list = model_servers::servers_on(host, *k)?;
@@ -391,7 +393,7 @@ impl Report {
         match harlo_core::remote::forward_port(host, port, true) {
             Ok(()) => forwards.push(port),
             Err(e) => {
-                tracing::warn!("forwarding port {port} to {}: {e:#}", host.name);
+                tracing::event!(name: "account.port_forward.failed", tracing::Level::WARN, network.local.port = port, server.address = %host.name, error.message = %format_args!("{e:#}"), "forwarding port {{network.local.port}} to {{server.address}}: {{error.message}}");
                 drop(forwards);
                 self.text(&format!("This computer's port {port} is taken, so the page can't reach {} by itself. When it finishes, copy the address it ended on into the box here.", host.name));
             }
@@ -445,7 +447,7 @@ impl Accounts {
         crate::runtime().spawn_blocking(move || {
             let v = match accounts_of(k, host.as_ref()) {
                 Ok(list) => json!({ "state": "ready", "accounts": list, "error": "" }),
-                Err(e) => json!({ "state": "ready", "accounts": [], "error": e }),
+                Err(e) => json!({ "state": "ready", "accounts": [], "error": format!("{e:#}") }),
             };
             let _ = thread.queue(move |mut this| {
                 this.as_mut().rust_mut().status.insert(agent, v);
@@ -461,10 +463,7 @@ impl Accounts {
         self.as_mut().bump();
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let v = match providers_of(k) {
-                Ok(list) => json!({ "state": "ready", "list": list, "error": "" }),
-                Err(e) => json!({ "state": "ready", "list": [], "error": e }),
-            };
+            let v = json!({ "state": "ready", "list": providers_of(k), "error": "" });
             let _ = thread.queue(move |mut this| {
                 this.as_mut().rust_mut().providers.insert(agent, v);
                 this.bump();
@@ -490,16 +489,16 @@ impl Accounts {
         let flow = Flow { id, agent: agent.clone(), provider: provider.clone(), title, state: "running".into(), ask: Value::Null, ..Default::default() };
         self.as_mut().set_flow(QString::from(&flow.json()));
         let Some((k, host)) = target(&agent) else {
-            let report = Report { flow: Arc::new(Mutex::new(flow)), thread: self.qt_thread(), host: None, forwards: Default::default() };
+            let report = Report { flow: Arc::new(Mutex::new(flow)), thread: self.qt_thread(), host: None, forwards: Arc::default() };
             report.finish(false, "harlo can't sign this agent in.");
             return;
         };
-        let report = Report { flow: Arc::new(Mutex::new(flow)), thread: self.qt_thread(), host, forwards: Default::default() };
+        let report = Report { flow: Arc::new(Mutex::new(flow)), thread: self.qt_thread(), host, forwards: Arc::default() };
         crate::runtime().spawn(async move {
             let outcome = sign_in(k, &provider, &method, &report, rx).await;
             match outcome {
                 Ok(said) => report.finish(true, &said),
-                Err(e) => report.finish(false, &e),
+                Err(e) => report.finish(false, &format!("{e:#}")),
             }
             // What it's signed in to now.
             let _ = report.thread.queue(move |mut this| {
@@ -552,7 +551,7 @@ impl Accounts {
                 Err(e) => {
                     let mut v = this.rust().status.get(&agent_s).cloned().unwrap_or_default();
                     v["state"] = json!("ready");
-                    v["error"] = json!(e);
+                    v["error"] = json!(format!("{e:#}"));
                     this.as_mut().rust_mut().status.insert(agent_s, v);
                     this.bump();
                 }
@@ -576,17 +575,17 @@ impl Accounts {
         self.as_mut().set_language_servers(QString::from(&now.to_string()));
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let read = || -> Result<Value, String> {
-                let program = program(HarnessKind::Harlo).ok_or("Harlo isn't installed.")?;
-                let out = std::process::Command::new(program).arg("lsp-status").stdin(std::process::Stdio::null()).output().map_err(|e| format!("Harlo didn't start: {e}"))?;
+            let read = || -> anyhow::Result<Value> {
+                let program = program(HarnessKind::Harlo).ok_or_else(|| anyhow::Error::msg("Harlo isn't installed."))?;
+                let out = std::process::Command::new(program).arg("lsp-status").stdin(std::process::Stdio::null()).output().map_err(|e| anyhow::anyhow!("Harlo didn't start: {e}"))?;
                 if !out.status.success() {
-                    return Err("This Harlo can't tell yet: update harlo.".into());
+                    return Err(anyhow::Error::msg("This Harlo can't tell yet: update harlo."));
                 }
-                serde_json::from_slice(&out.stdout).map_err(|e| format!("Harlo's answer wasn't readable: {e}"))
+                serde_json::from_slice(&out.stdout).map_err(|e| anyhow::anyhow!("Harlo's answer wasn't readable: {e}"))
             };
             let v = match read() {
                 Ok(list) => json!({ "state": "ready", "list": list }),
-                Err(e) => json!({ "state": "failed", "list": [], "error": e }),
+                Err(e) => json!({ "state": "failed", "list": [], "error": format!("{e:#}") }),
             };
             let _ = thread.queue(move |this| this.set_language_servers(QString::from(&v.to_string())));
         });
@@ -597,7 +596,7 @@ impl Accounts {
         crate::runtime().spawn_blocking(move || {
             // (Servers from before harlo said which are free: said now.)
             if let Err(e) = model_servers::mark_free(HarnessKind::Harlo) {
-                tracing::warn!("model servers: {e}");
+                tracing::event!(name: "model_server.list.failed", tracing::Level::WARN, error.message = %e, "model servers: {{error.message}}");
             }
             let mut all: Vec<(String, Value)> = model_servers::AGENTS.iter().map(|k| (k.as_str().to_owned(), servers_json(*k))).collect();
             // ("": those harlo set up that no agent has.)
@@ -650,6 +649,7 @@ fn servers_json(k: HarnessKind) -> Value {
     )
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Accounts {
 
     pub fn servers_file(&self, agent: &QString) -> QString {
@@ -671,7 +671,7 @@ impl Accounts {
             let v = match model_servers::find(&url, &key) {
                 Ok(l) => json!({ "id": id, "state": "ready", "baseUrl": l.base_url, "name": model_servers::suggest_name(&l.base_url),
                                  "models": l.models.iter().map(|m| json!({ "id": m.id, "context": m.context })).collect::<Vec<_>>(), "error": "" }),
-                Err(e) => json!({ "id": id, "state": "failed", "models": [], "error": e }),
+                Err(e) => json!({ "id": id, "state": "failed", "models": [], "error": format!("{e:#}") }),
             };
             let _ = thread.queue(move |mut this| {
                 // Only the latest search.
@@ -698,18 +698,19 @@ impl Accounts {
                 reread(k);
                 QString::default()
             }
-            Err(e) => QString::from(&e),
+            Err(e) => QString::from(&format!("{e:#}")),
         }
     }
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Accounts {
     pub fn copy_server(&self, from: &QString, to: &QString, name: &QString, taken: &QString) -> QString {
         let Some(to) = kind(&to.to_string()) else { return QString::from("harlo can't add model servers to this agent.") };
         let name = name.to_string();
         let (url, key, models) = match server_details(&from.to_string(), &name) {
             Ok(d) => d,
-            Err(e) => return QString::from(&e),
+            Err(e) => return QString::from(&format!("{e:#}")),
         };
         let taken: Vec<String> = serde_json::from_str(&taken.to_string()).unwrap_or_default();
         match model_servers::add(to, &name, &url, &key, &models, &taken) {
@@ -717,7 +718,7 @@ impl Accounts {
                 reread(to);
                 QString::default()
             }
-            Err(e) => QString::from(&e),
+            Err(e) => QString::from(&format!("{e:#}")),
         }
     }
 
@@ -725,7 +726,7 @@ impl Accounts {
         let Some(k) = kind(&agent.to_string()) else { return QString::from("harlo can't change this agent's model servers.") };
         match model_servers::set_free(k, &name.to_string(), free) {
             Ok(()) => QString::default(),
-            Err(e) => QString::from(&e),
+            Err(e) => QString::from(&format!("{e:#}")),
         }
     }
 
@@ -736,7 +737,7 @@ impl Accounts {
         // (Read for each request: sessions running take it at once.)
         match model_servers::set_price(k, &name.to_string(), price) {
             Ok(()) => QString::default(),
-            Err(e) => QString::from(&e),
+            Err(e) => QString::from(&format!("{e:#}")),
         }
     }
 
@@ -760,7 +761,7 @@ impl Accounts {
                     }
                     Err(why) => {
                         e["state"] = json!("error");
-                        e["error"] = json!(why);
+                        e["error"] = json!(format!("{why:#}"));
                     }
                 });
             });
@@ -783,7 +784,7 @@ impl Accounts {
 
     /// An add or removal on a host, in the background, then its servers read
     /// again.
-    fn change_server_on(mut self: Pin<&mut Self>, host: &QString, agent: &QString, change: impl FnOnce(&str, HarnessKind) -> Result<(), String> + Send + 'static) {
+    fn change_server_on(mut self: Pin<&mut Self>, host: &QString, agent: &QString, change: impl FnOnce(&str, HarnessKind) -> anyhow::Result<()> + Send + 'static) {
         let host = host.to_string();
         let Some(kind) = kind(&agent.to_string()).filter(|k| model_servers::ON_HOST.contains(k)) else { return };
         if self.on_hosts[&host]["busy"] == true {
@@ -801,7 +802,7 @@ impl Accounts {
             let _ = thread.queue(move |mut this| {
                 this.as_mut().change_host_servers(&host, |e| {
                     e["busy"] = json!(false);
-                    e["note"] = json!(outcome.err().unwrap_or_default());
+                    e["note"] = json!(outcome.err().map(|e| format!("{e:#}")).unwrap_or_default());
                     if let Ok(agents) = read {
                         e["state"] = json!("ready");
                         e["agents"] = agents;
@@ -852,8 +853,8 @@ impl Accounts {
             if host.is_empty() || (!force && m.get(&host).is_some_and(|t| t.elapsed() < Duration::from_secs(3600))) {
                 return;
             }
-            m.insert(host.clone(), Instant::now());
-        }
+            m.insert(host.clone(), Instant::now())
+        };
         if self.engines_on[&host].is_null() {
             self.as_mut().change_host_engines(&host, |_| {});
         }
@@ -904,7 +905,7 @@ impl Accounts {
                     if let Some(b) = e["busy"].as_object_mut() {
                         b.remove(&url);
                     }
-                    e["note"] = json!(outcome.err().unwrap_or_default());
+                    e["note"] = json!(outcome.err().map(|e| format!("{e:#}")).unwrap_or_default());
                 });
                 this.as_mut().take_host_engines(&host, read);
                 this.as_mut().load_servers();
@@ -935,16 +936,16 @@ impl Accounts {
 
     pub fn start_host_engine(self: Pin<&mut Self>, host: &QString, url: &QString) {
         self.host_engine_op(host, url, "starting", |host, url| {
-            let v = harlo_core::engine_host::json(host, &["start", url], Duration::from_secs(20 * 60)).map_err(|e| format!("{e:#}"))?;
+            let v = harlo_core::engine_host::json(host, &["start", url], Duration::from_mins(20)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
             match v["error"].as_str() {
-                Some(e) => Err(e.to_owned()),
+                Some(e) => Err(anyhow::Error::msg(e.to_owned())),
                 None => Ok(()),
             }
         });
     }
 
     pub fn stop_host_engine(self: Pin<&mut Self>, host: &QString, url: &QString) {
-        self.host_engine_op(host, url, "stopping", |host, url| harlo_core::engine_host::run(host, &["stop", url], Duration::from_secs(120)).map(|_| ()).map_err(|e| format!("{e:#}")));
+        self.host_engine_op(host, url, "stopping", |host, url| harlo_core::engine_host::run(host, &["stop", url], Duration::from_secs(120)).map(|_| ()).map_err(|e| anyhow::anyhow!("{e:#}")));
     }
 
     pub fn remove_host_engine(self: Pin<&mut Self>, host: &QString, url: &QString, name: &QString, delete_files: bool) {
@@ -953,11 +954,10 @@ impl Accounts {
             // (Out of the agents there that have it first.)
             let mut errors = Vec::new();
             for kind in model_servers::ON_HOST {
-                if servers_on_host_have(host, kind, &name, url) {
-                    if let Err(e) = model_servers::remove_on(host, kind, &name) {
+                if servers_on_host_have(host, kind, &name, url)
+                    && let Err(e) = model_servers::remove_on(host, kind, &name) {
                         errors.push(format!("{}: {e}", kind.label()));
                     }
-                }
             }
             // (And out of the agents here that reach it through SSH.)
             if let Some(here) = model_servers::used_here(host, url) {
@@ -972,17 +972,17 @@ impl Accounts {
                 model_servers::forget_unused_uses();
             }
             if !errors.is_empty() {
-                return Err(errors.join("\n"));
+                return Err(anyhow::Error::msg(errors.join("\n")));
             }
-            let v = harlo_core::engine_host::json(host, &["remove", url, &name, if delete_files { "1" } else { "0" }], Duration::from_secs(600)).map_err(|e| format!("{e:#}"))?;
+            let v = harlo_core::engine_host::json(host, &["remove", url, &name, if delete_files { "1" } else { "0" }], Duration::from_secs(600)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
             let errors: Vec<String> = v["errors"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(str::to_owned)).collect();
-            if errors.is_empty() { Ok(()) } else { Err(errors.join("\n")) }
+            if errors.is_empty() { Ok(()) } else { Err(anyhow::Error::msg(errors.join("\n"))) }
         });
     }
 
     /// Something done to one of a machine's servers, there, in the
     /// background; its list read again after.
-    fn host_engine_op(mut self: Pin<&mut Self>, host: &QString, url: &QString, doing: &str, op: impl FnOnce(&str, &str) -> Result<(), String> + Send + 'static) {
+    fn host_engine_op(mut self: Pin<&mut Self>, host: &QString, url: &QString, doing: &str, op: impl FnOnce(&str, &str) -> anyhow::Result<()> + Send + 'static) {
         let (host, url) = (host.to_string(), url.to_string());
         if !self.engines_on[&host]["busy"][&url].is_null() {
             return;
@@ -1002,7 +1002,7 @@ impl Accounts {
                     if let Some(b) = e["busy"].as_object_mut() {
                         b.remove(&url);
                     }
-                    e["note"] = json!(outcome.err().unwrap_or_default());
+                    e["note"] = json!(outcome.err().map(|e| format!("{e:#}")).unwrap_or_default());
                 });
                 this.as_mut().take_host_engines(&host, read);
                 // (Agents there may have lost it.)
@@ -1080,7 +1080,7 @@ impl Accounts {
                 reread(k);
                 QString::default()
             }
-            Err(e) => QString::from(&e),
+            Err(e) => QString::from(&format!("{e:#}")),
         };
         // (Another machine's, used here: its forward goes when nothing here has it.)
         model_servers::forget_unused_uses();
@@ -1109,7 +1109,7 @@ impl Accounts {
                     v["step"] = json!(text);
                     v["done"] = json!(done);
                     v["total"] = json!(total);
-                })
+                });
             };
             let (errors, summary) = remove(&name, &url, delete_files, &step, &reread);
             say(&|v| {
@@ -1143,12 +1143,12 @@ fn unused_json() -> Value {
             .map(|(url, v)| {
                 let models: Vec<model_servers::Found> = saved_models(&v);
                 // (One set up before harlo saved names: its engine's.)
-                let name = v["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned).unwrap_or_else(|| {
+                let name = v["name"].as_str().filter(|n| !n.is_empty()).map_or_else(|| {
                     match engine_of(&url) {
                         "" | "Your command" => model_servers::suggest_name(&url),
                         engine => engine.to_lowercase(),
                     }
-                });
+                }, str::to_owned);
                 json!({
                     "name": name, "baseUrl": url, "models": models.iter().map(|m| m.id.clone()).collect::<Vec<_>>(), "contexts": models.iter().map(|m| json!(m.context)).collect::<Vec<_>>(),
                     "place": "here", "managed": true, "engine": engine_of(&url),
@@ -1172,7 +1172,7 @@ pub(crate) fn offer_levels() {
         for k in model_servers::AGENTS {
             for s in model_servers::servers(k).into_iter().filter(|s| s.base_url == url) {
                 if let Err(e) = model_servers::offer_levels(k, &s.name) {
-                    tracing::warn!("thinking levels for {}: {e}", s.name);
+                    tracing::event!(name: "model_server.thinking.failed", tracing::Level::WARN, server.name = %s.name, error.message = %e, "thinking levels for {{server.name}}: {{error.message}}");
                 }
             }
         }
@@ -1209,12 +1209,12 @@ impl ModelServer {
     }
 
     /// Starts it, until it answers (blocking).
-    pub fn start(&self) -> Result<(), String> {
+    pub fn start(&self) -> anyhow::Result<()> {
         match self {
             ModelServer::Here { url, .. } => harlo_core::servers::ensure_running(url),
             ModelServer::There { host, url, .. } => {
-                let v = harlo_core::engine_host::json(host, &["start", url], Duration::from_secs(20 * 60)).map_err(|e| format!("{e:#}"))?;
-                v["error"].as_str().map_or(Ok(()), |e| Err(e.to_owned()))
+                let v = harlo_core::engine_host::json(host, &["start", url], Duration::from_mins(20)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
+                v["error"].as_str().map_or(Ok(()), |e| Err(anyhow::Error::msg(e.to_owned())))
             }
             ModelServer::Through { url, .. } => model_servers::reach(url),
         }
@@ -1336,6 +1336,7 @@ pub(crate) fn sync_context(url: &str) -> Vec<String> {
     problems
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Accounts {
     fn set_state(mut self: Pin<&mut Self>, url: &str, state: Value) {
         let mut all: Value = serde_json::from_str(&self.server_states.to_string()).unwrap_or_else(|_| json!({}));
@@ -1386,15 +1387,15 @@ impl Accounts {
             return self.set_state(&url, json!({ "state": "failed", "harlo": false, "message": "Set its start command first." }));
         }
         if let Err(e) = launch(&url, &command) {
-            return self.set_state(&url, json!({ "state": "failed", "harlo": false, "message": e }));
+            return self.set_state(&url, json!({ "state": "failed", "harlo": false, "message": format!("{e:#}") }));
         }
         self.as_mut().set_state(&url, json!({ "state": "starting", "harlo": true, "message": "" }));
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let state = match wait_up(&url, Duration::from_secs(15 * 60), &mut |_| {}, &|| false) {
+            let state = match wait_up(&url, Duration::from_mins(15), &mut |_| {}, &|| false) {
                 // (The context it serves this time, into the agents.)
                 Ok(held) => json!({ "state": "running", "harlo": held, "message": sync_context(&url).join("\n") }),
-                Err(e) => json!({ "state": "failed", "harlo": false, "message": e }),
+                Err(e) => json!({ "state": "failed", "harlo": false, "message": format!("{e:#}") }),
             };
             // (The agents' files may say another context now.)
             let _ = thread.queue(move |mut this| {
@@ -1425,8 +1426,8 @@ impl Accounts {
                     stop_pids(&left);
                     Ok(())
                 }
-                None => std::process::Command::new("sh").arg("-c").arg(&stop).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string()).and_then(|o| {
-                    if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("It failed.").to_owned()) }
+                None => std::process::Command::new("sh").arg("-c").arg(&stop).stdin(std::process::Stdio::null()).output().map_err(anyhow::Error::from).and_then(|o| {
+                    if o.status.success() { Ok(()) } else { Err(anyhow::Error::msg(String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("It failed.").to_owned())) }
                 }),
             };
             // (Its port may take a moment to close.)
@@ -1450,14 +1451,14 @@ impl Accounts {
 // ---- what each agent is signed in to ------------------------------------------
 
 /// `[{ id, label, detail, signOut }]` (blocking).
-fn accounts_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, String> {
+fn accounts_of(k: HarnessKind, host: Option<&Host>) -> anyhow::Result<Vec<Value>> {
     match k {
         HarnessKind::Claude => {
             let out = match host {
                 Some(h) => run_there(h, "claude", &["auth", "status", "--json"], Duration::from_secs(20))?,
-                None => run(&program(k).ok_or("Claude Code isn't installed.")?, &["auth", "status", "--json"], Duration::from_secs(15))?,
+                None => run(&program(k).ok_or_else(|| anyhow::Error::msg("Claude Code isn't installed."))?, &["auth", "status", "--json"], Duration::from_secs(15))?,
             };
-            let v: Value = serde_json::from_str(&out).map_err(|_| "Claude Code didn't say whether it's signed in.".to_owned())?;
+            let v: Value = serde_json::from_str(&out).ok().ok_or_else(|| anyhow::Error::msg("Claude Code didn't say whether it's signed in."))?;
             if v["loggedIn"].as_bool() != Some(true) {
                 return Ok(Vec::new());
             }
@@ -1475,22 +1476,22 @@ fn accounts_of(k: HarnessKind, host: Option<&Host>) -> Result<Vec<Value>, String
         }
         HarnessKind::Harlo => harlo_accounts(&match host {
             Some(h) => run_there(h, &harlo_there(h)?, &["status", "--json"], Duration::from_secs(30))?,
-            None => run(&program(k).ok_or("harlo-agent isn't installed.")?, &["status", "--json"], Duration::from_secs(15))?,
+            None => run(&program(k).ok_or_else(|| anyhow::Error::msg("harlo-agent isn't installed."))?, &["status", "--json"], Duration::from_secs(15))?,
         }),
         HarnessKind::Demo => Ok(Vec::new()),
     }
 }
 
 /// What an agent can sign in to (blocking).
-fn providers_of(k: HarnessKind) -> Result<Vec<Value>, String> {
+fn providers_of(k: HarnessKind) -> Vec<Value> {
     match k {
-        HarnessKind::Claude => Ok(vec![
+        HarnessKind::Claude => vec![
             json!({ "id": "claudeai", "name": "Claude account", "note": "Pro, Max, Team or Enterprise: sign in on claude.ai in your browser.",
                     "methods": [{ "id": "claudeai", "type": "login", "label": "Sign in" }] }),
             json!({ "id": "console", "name": "Anthropic Console", "note": "Pay as you go with API billing.",
                     "methods": [{ "id": "console", "type": "login", "label": "Sign in" }] }),
-        ]),
-        HarnessKind::Harlo => Ok(vec![
+        ],
+        HarnessKind::Harlo => vec![
             json!({
                 "id": "chatgpt", "name": "ChatGPT",
                 "note": "Harlo's requests use your ChatGPT plan's usage.",
@@ -1501,14 +1502,14 @@ fn providers_of(k: HarnessKind) -> Result<Vec<Value>, String> {
                 "note": "Signs in the way the Codex CLI does, so harlo can show your plan's usage: how much is used and when it resets. Unofficial: OpenAI doesn't document it for other apps. Its models are listed as codex/….",
                 "methods": [{ "id": "codex", "type": "login", "label": "Sign in" }],
             }),
-        ]),
-        HarnessKind::Demo => Ok(Vec::new()),
+        ],
+        HarnessKind::Demo => Vec::new(),
     }
 }
 
 /// harlo-agent's account, from its `status --json`.
-fn harlo_accounts(status: &str) -> Result<Vec<Value>, String> {
-    let v: Value = serde_json::from_str(status.trim()).map_err(|_| "harlo-agent didn't say whether it's signed in.".to_owned())?;
+fn harlo_accounts(status: &str) -> anyhow::Result<Vec<Value>> {
+    let v: Value = serde_json::from_str(status.trim()).ok().ok_or_else(|| anyhow::Error::msg("harlo-agent didn't say whether it's signed in."))?;
     let mut out = Vec::new();
     let label = |s: &Value| s["email"].as_str().filter(|e| !e.is_empty()).unwrap_or("ChatGPT").to_owned();
     if v["signedIn"].as_bool() == Some(true) {
@@ -1521,27 +1522,27 @@ fn harlo_accounts(status: &str) -> Result<Vec<Value>, String> {
 }
 
 /// Signs an account out (blocking).
-fn sign_out(k: HarnessKind, id: &str, host: Option<&Host>) -> Result<(), String> {
+fn sign_out(k: HarnessKind, id: &str, host: Option<&Host>) -> anyhow::Result<()> {
     match k {
         HarnessKind::Claude => match host {
             Some(h) => run_there(h, "claude", &["auth", "logout"], Duration::from_secs(30)).map(|_| ()),
-            None => run(&program(k).ok_or("Claude Code isn't installed.")?, &["auth", "logout"], Duration::from_secs(20)).map(|_| ()),
+            None => run(&program(k).ok_or_else(|| anyhow::Error::msg("Claude Code isn't installed."))?, &["auth", "logout"], Duration::from_secs(20)).map(|_| ()),
         },
         HarnessKind::Harlo => {
             let args: &[&str] = if id == "codex" { &["logout", "--codex"] } else { &["logout"] };
             match host {
                 Some(h) => run_there(h, &harlo_there(h)?, args, Duration::from_secs(30)).map(|_| ()),
-                None => run(&program(k).ok_or("harlo-agent isn't installed.")?, args, Duration::from_secs(15)).map(|_| ()),
+                None => run(&program(k).ok_or_else(|| anyhow::Error::msg("harlo-agent isn't installed."))?, args, Duration::from_secs(15)).map(|_| ()),
             }
         }
-        HarnessKind::Demo => Err("harlo can't sign this agent out.".into()),
+        HarnessKind::Demo => Err(anyhow::Error::msg("harlo can't sign this agent out.")),
     }
 }
 
 /// Harlo's agent on another machine (put there first if this build of it
 /// isn't): its path there (blocking).
-fn harlo_there(host: &Host) -> Result<String, String> {
-    harlo_core::agent_host::program_on(&host.name).map_err(|e| format!("{e:#}"))
+fn harlo_there(host: &Host) -> anyhow::Result<String> {
+    harlo_core::agent_host::program_on(&host.name).map_err(|e| anyhow::anyhow!("{e:#}"))
 }
 
 /// The client id OpenAI gave harlo here, for a machine that has none yet:
@@ -1553,55 +1554,55 @@ fn share_client_id(host: &Host) {
     let Some(id) = std::fs::read_to_string(file).ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()) else { return };
     let script = r#"d="${XDG_CONFIG_HOME:-$HOME/.config}/harlo-agent"; [ -s "$d/client-id" ] || { mkdir -p "$d" && chmod 700 "$d" && umask 077 && cat > "$d/client-id"; }"#;
     if let Err(e) = harlo_core::remote::run_ok_with_input(host, script, id.as_bytes(), Duration::from_secs(20)) {
-        tracing::warn!("harlo's client id to {}: {e:#}", host.name);
+        tracing::event!(name: "account.client_id.failed", tracing::Level::WARN, server.address = %host.name, error.message = %format_args!("{e:#}"), "harlo's client id to {{server.address}}: {{error.message}}");
     }
 }
 
 /// Runs an agent's command on another machine (stdout), at most `limit`.
-fn run_there(host: &Host, program: &str, args: &[&str], limit: Duration) -> Result<String, String> {
+fn run_there(host: &Host, program: &str, args: &[&str], limit: Duration) -> anyhow::Result<String> {
     let words: Vec<String> = std::iter::once(program).chain(args.iter().copied()).map(harlo_core::remote::quote).collect();
-    let out = harlo_core::remote::run(host, &format!("{} </dev/null", words.join(" ")), limit).map_err(|e| format!("{e:#}"))?;
+    let out = harlo_core::remote::run(host, &format!("{} </dev/null", words.join(" ")), limit).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     if out.status.success() {
         return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
     let err = String::from_utf8_lossy(&out.stderr);
-    Err(err.lines().map(str::trim).rfind(|l| !l.is_empty()).map_or_else(|| format!("{program} failed on {}.", host.name), str::to_owned))
+    Err(anyhow::Error::msg(err.lines().map(str::trim).rfind(|l| !l.is_empty()).map_or_else(|| format!("{program} failed on {}.", host.name), str::to_owned)))
 }
 
 /// Runs a command to its end (stdout), at most `limit`.
-fn run(program: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+fn run(program: &Path, args: &[&str], limit: Duration) -> anyhow::Result<String> {
     let mut child = std::process::Command::new(program)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("{}: {e}", program.display()))?;
+        .map_err(|e| anyhow::anyhow!("{}: {e}", program.display()))?;
     let deadline = std::time::Instant::now() + limit;
     while child.try_wait().ok().flatten().is_none() {
         if std::time::Instant::now() > deadline {
             let _ = child.kill();
-            return Err(format!("{} didn't answer in time.", program.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+            return Err(anyhow::anyhow!("{} didn't answer in time.", program.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let out = child.wait_with_output()?;
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() && text.trim().is_empty() {
-        return Err(signin::plain(&String::from_utf8_lossy(&out.stderr)).trim().lines().last().unwrap_or("It failed.").to_owned());
+        return Err(anyhow::Error::msg(signin::plain(&String::from_utf8_lossy(&out.stderr)).trim().lines().last().unwrap_or("It failed.").to_owned()));
     }
     Ok(text)
 }
 
 /// An agent's command, here or on a host.
-fn agent_command(k: HarnessKind, name: &str, host: Option<&Host>, args: &[&str]) -> Result<std::process::Command, String> {
+fn agent_command(k: HarnessKind, name: &str, host: Option<&Host>, args: &[&str]) -> anyhow::Result<std::process::Command> {
     match host {
         Some(h) => {
             let words: Vec<String> = args.iter().map(|a| harlo_core::remote::quote(a)).collect();
             Ok(harlo_core::remote::command(h, &format!("{name} {}", words.join(" "))))
         }
         None => {
-            let mut c = std::process::Command::new(program(k).ok_or_else(|| format!("{name} isn't installed."))?);
+            let mut c = std::process::Command::new(program(k).ok_or_else(|| anyhow::anyhow!("{name} isn't installed."))?);
             c.args(args);
             Ok(c)
         }
@@ -1612,7 +1613,7 @@ fn agent_command(k: HarnessKind, name: &str, host: Option<&Host>, args: &[&str])
 /// [`agent_command`], but on a host it ends when harlo's connection does
 /// (cancelled, say). Without that it would wait there for a sign-in no one
 /// can finish any more, a long while.
-fn sign_in_command(k: HarnessKind, name: &str, host: Option<&Host>, args: &[&str]) -> Result<std::process::Command, String> {
+fn sign_in_command(k: HarnessKind, name: &str, host: Option<&Host>, args: &[&str]) -> anyhow::Result<std::process::Command> {
     match host {
         Some(h) => {
             let words: Vec<String> = args.iter().map(|a| harlo_core::remote::quote(a)).collect();
@@ -1659,7 +1660,7 @@ fn device_code(text: &str) -> Option<String> {
 // ---- signing in ------------------------------------------------------------------
 
 /// Signs in; what to say when it's done.
-async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, rx: mpsc::UnboundedReceiver<String>) -> Result<String, String> {
+async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, rx: mpsc::UnboundedReceiver<String>) -> anyhow::Result<String> {
     match k {
         HarnessKind::Claude => {
             let mut args = vec!["auth", "login"];
@@ -1681,7 +1682,7 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, 
                 // There: harlo's copy of the agent; the page's return to
                 // localhost is forwarded there, or its address pasted.
                 Some(h) => {
-                    let program = tokio::task::spawn_blocking(move || harlo_there(&h)).await.map_err(|e| e.to_string())??;
+                    let program = tokio::task::spawn_blocking(move || harlo_there(&h)).await??;
                     args.push("--paste".into());
                     let words: Vec<&str> = args.iter().map(String::as_str).collect();
                     sign_in_command(k, &harlo_core::remote::quote(&program), report.host.as_ref(), &words)?
@@ -1709,10 +1710,10 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, 
                         if !codex {
                             share_client_id(&h);
                         }
-                        Ok::<_, String>(program)
+                        Ok::<_, anyhow::Error>(program)
                     })
                     .await
-                    .map_err(|e| e.to_string())??;
+                    ??;
                     args.push("--paste");
                     sign_in_command(k, &harlo_core::remote::quote(&program), report.host.as_ref(), &args)?
                 }
@@ -1725,13 +1726,13 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, 
             }
             Ok(format!("Harlo is signed in{place} with ChatGPT."))
         }
-        HarnessKind::Demo => Err("harlo can't sign this agent in.".into()),
+        HarnessKind::Demo => Err(anyhow::Error::msg("harlo can't sign this agent in.")),
     }
 }
 
 /// Runs an agent's sign-in command, showing what it prints (links, what it
 /// asks) and handing it the answers. Ok when it ends well.
-async fn command(program: std::process::Command, report: &Report, mut rx: mpsc::UnboundedReceiver<String>) -> Result<(), String> {
+async fn command(program: std::process::Command, report: &Report, mut rx: mpsc::UnboundedReceiver<String>) -> anyhow::Result<()> {
     let name = program.get_program().to_string_lossy().into_owned();
     let mut child = tokio::process::Command::from(program)
         .stdin(std::process::Stdio::piped())
@@ -1739,10 +1740,10 @@ async fn command(program: std::process::Command, report: &Report, mut rx: mpsc::
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("{name}: {e}"))?;
-    let mut stdin = child.stdin.take().ok_or("no input")?;
+        .map_err(|e| anyhow::anyhow!("{name}: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or_else(|| anyhow::Error::msg("no input"))?;
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-    for mut pipe in [Box::new(child.stdout.take().ok_or("no output")?) as Box<dyn tokio::io::AsyncRead + Unpin + Send>, Box::new(child.stderr.take().ok_or("no output")?)] {
+    for mut pipe in [Box::new(child.stdout.take().ok_or_else(|| anyhow::Error::msg("no output"))?) as Box<dyn tokio::io::AsyncRead + Unpin + Send>, Box::new(child.stderr.take().ok_or_else(|| anyhow::Error::msg("no output"))?)] {
         let tx = out_tx.clone();
         tokio::spawn(async move {
             let mut buf = vec![0u8; 4096];
@@ -1783,7 +1784,7 @@ async fn command(program: std::process::Command, report: &Report, mut rx: mpsc::
                 None => open = false,
             },
             // A prompt (text left without a newline) once output pauses.
-            _ = tokio::time::sleep(Duration::from_millis(300)), if !pending.trim().is_empty() => {
+            () = tokio::time::sleep(Duration::from_millis(300)), if !pending.trim().is_empty() => {
                 let text = signin::plain(&pending);
                 if let Some(mut ask) = signin::prompt(&text) {
                     pending.clear();
@@ -1795,18 +1796,18 @@ async fn command(program: std::process::Command, report: &Report, mut rx: mpsc::
             answer = rx.recv() => match answer {
                 Some(text) => {
                     report.text(if text.trim().is_empty() { "(nothing)" } else { "✓ Sent" });
-                    stdin.write_all(format!("{}\n", text.trim()).as_bytes()).await.map_err(|e| e.to_string())?;
-                    stdin.flush().await.map_err(|e| e.to_string())?;
+                    stdin.write_all(format!("{}\n", text.trim()).as_bytes()).await?;
+                    stdin.flush().await?;
                 }
                 // Cancelled: the command goes (killed when dropped).
-                None => return Err("Cancelled.".into()),
+                None => return Err(anyhow::Error::msg("Cancelled.")),
             },
             status = child.wait(), if !open => break status,
         }
     };
     match status {
         Ok(s) if s.success() => Ok(()),
-        _ => Err(last.iter().rev().find(|l| l.to_lowercase().contains("fail") || l.to_lowercase().contains("error")).or(last.last()).cloned().unwrap_or_else(|| "It didn't finish.".into())),
+        _ => Err(anyhow::Error::msg(last.iter().rev().find(|l| l.to_lowercase().contains("fail") || l.to_lowercase().contains("error")).or(last.last()).cloned().unwrap_or_else(|| "It didn't finish.".into()))),
     }
 }
 
@@ -1814,9 +1815,9 @@ async fn command(program: std::process::Command, report: &Report, mut rx: mpsc::
 mod tests {
     #[test]
     fn says_why_a_server_did_not_start() {
-        let said = super::start_failure("12:05:13 FATAL server failed during startup | Device budget cannot hold model weights and required execution resources");
+        let said = harlo_core::servers::start_failure("12:05:13 FATAL server failed during startup | Device budget cannot hold model weights and required execution resources");
         assert!(said.starts_with("The model and this context don't fit"), "{said}");
-        assert_eq!(super::start_failure("error: no such file"), "error: no such file");
+        assert_eq!(harlo_core::servers::start_failure("error: no such file"), "error: no such file");
     }
 
     /// The server a session's model is on, among an agent's servers.
@@ -1832,7 +1833,7 @@ mod tests {
         let both = harlo_accounts(r#"{"signedIn":true,"email":"a@b","codex":{"signedIn":true,"email":"c@d"}}"#).unwrap();
         assert_eq!(both[1], json!({ "id": "codex", "label": "c@d", "detail": "ChatGPT plan · Codex sign-in", "signOut": true }));
         assert_eq!(harlo_accounts(r#"{"signedIn":false,"codex":{"signedIn":true,"email":""}}"#).unwrap()[0]["id"], "codex");
-        assert!(harlo_accounts("Signed in with ChatGPT").is_err());
+        harlo_accounts("Signed in with ChatGPT").unwrap_err();
     }
 
     #[test]
@@ -1857,8 +1858,8 @@ mod tests {
 
     #[test]
     fn reads_the_model_path_of_a_start_command() {
-        assert_eq!(super::shell_word("'/a/my model'\\''s/x.gguf' --alias q"), "/a/my model's/x.gguf");
-        assert_eq!(super::shell_word(" /plain/x.gguf --port 1"), "/plain/x.gguf");
+        assert_eq!(harlo_core::servers::shell_word("'/a/my model'\\''s/x.gguf' --alias q"), "/a/my model's/x.gguf");
+        assert_eq!(harlo_core::servers::shell_word(" /plain/x.gguf --port 1"), "/plain/x.gguf");
     }
 
     #[test]

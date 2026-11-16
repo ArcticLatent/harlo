@@ -1,8 +1,11 @@
-//! What a wiki run does to its pages when it finishes, and before its
-//! authoring starts, as OpenWiki does it: front matter repaired, broken
+//! What a wiki run does to its pages when it finishes and before it writes.
+//!
+//! As OpenWiki does it: front matter repaired, broken
 //! Mermaid diagrams turned to text, each folder's index.md written, broken
 //! internal links stamped, Claims' evidence listed as sources, and changed
 //! pages stamped as generated.
+
+// Rust guideline compliant 2026-10-09
 
 use crate::claims::{encode_component, decode_component, format_resource, parse_resource, Resource};
 use crate::fsb::{Backend, Entry, ReadError, dirname, ext_lower, join};
@@ -55,12 +58,19 @@ fn markdown_files(b: &Backend, dir: &str) -> Vec<String> {
 
 // ---- Folders and pages ----
 
+/// A folder of the wiki and what's in it.
+#[derive(Debug)]
 pub struct Dir {
     pub path: String,
     pub entries: Vec<Entry>,
 }
 
 /// `collectDirectories`: each folder's descendants first, then itself.
+///
+/// # Errors
+///
+/// OpenWiki's message when a folder can't be listed; a missing `dir` has none
+/// with `allow_missing`.
 pub fn directories(b: &Backend, dir: &str, allow_missing: bool) -> R<Vec<Dir>> {
     let entries = match b.ls(dir) {
         Ok(e) => e,
@@ -76,6 +86,10 @@ pub fn directories(b: &Backend, dir: &str, allow_missing: bool) -> R<Vec<Dir>> {
 }
 
 /// `listWikiConceptPaths`: the wiki's pages, sorted as `localeCompare` sorts.
+///
+/// # Errors
+///
+/// OpenWiki's message when the wiki's folders can't be listed.
 pub fn concept_paths(b: &Backend) -> R<Vec<String>> {
     let mut out: Vec<String> = directories(b, ROOT, true)?
         .iter()
@@ -95,6 +109,10 @@ fn normalize_concept(b: &Backend, p: &str, concept_type: &str) -> R<String> {
 }
 
 /// `migrateWikiToOkf`: every page's front matter repaired.
+///
+/// # Errors
+///
+/// OpenWiki's message when a page can't be read or written.
 pub fn migrate(b: &Backend, concept_type: &str) -> R<()> {
     for p in concept_paths(b)? {
         normalize_concept(b, &p, concept_type)?;
@@ -238,7 +256,12 @@ fn usable(v: Option<&Value>) -> Option<String> {
     v.and_then(Value::as_str).filter(|s| !jsre::trim(s).is_empty()).map(str::to_owned)
 }
 
-/// `synchronizeWikiIndexes`.
+/// `synchronizeWikiIndexes`: each folder's `index.md` written.
+///
+/// # Errors
+///
+/// OpenWiki's message when a folder can't be listed or an index can't be
+/// written.
 pub fn sync_indexes(b: &Backend, labels: (&str, &str), concept_type: &str) -> R<()> {
     for d in directories(b, ROOT, true)? {
         let mut files = Vec::new();
@@ -365,7 +388,11 @@ pub fn degrade_mermaid(md: &str) -> (String, usize) {
     (lines.join("\n"), errors.len())
 }
 
-/// `validateWikiMermaid`.
+/// `validateWikiMermaid`: broken Mermaid diagrams turned to text.
+///
+/// # Errors
+///
+/// OpenWiki's message when a page can't be read or written.
 pub fn validate_mermaid(b: &Backend) -> R<()> {
     for p in markdown_files(b, ROOT) {
         let original = read_text(b, &p)?;
@@ -412,11 +439,10 @@ fn mask_code(content: &str, inline: bool) -> Vec<String> {
         .map(|line| {
             let marker = FENCE.exec(line).map(|m| m.str(1).to_owned());
             if let Some((ch, len)) = fence {
-                if let Some(mk) = &marker {
-                    if mk.starts_with(ch) && mk.len() >= len && jsre::trim(line) == mk {
+                if let Some(mk) = &marker
+                    && mk.starts_with(ch) && mk.len() >= len && jsre::trim(line) == mk {
                         fence = None;
                     }
-                }
                 return String::new();
             }
             if let Some(mk) = marker {
@@ -535,6 +561,10 @@ fn stamp(content: &str, issues: &[LinkIssue]) -> String {
 
 /// `validateWikiInternalLinks`: each page's broken internal links stamped
 /// above their line, old stamps removed.
+///
+/// # Errors
+///
+/// OpenWiki's message when a page can't be read or written.
 pub fn validate_links(b: &Backend) -> R<()> {
     for source in markdown_files(b, ROOT) {
         let original = read_text(b, &source)?;
@@ -575,6 +605,10 @@ fn source_entries(content: &str) -> Vec<Value> {
 
 /// `synchronizeClaimSources`: each page's evidence files as its sources
 /// (OpenWiki's own entries replaced, others kept).
+///
+/// # Errors
+///
+/// OpenWiki's message when a page can't be read or written.
 pub fn sync_sources(b: &Backend, by_page: &[(String, Vec<String>)]) -> R<()> {
     let concepts: HashSet<String> = concept_paths(b)?.into_iter().collect();
     let mut pages: Vec<&(String, Vec<String>)> = by_page.iter().collect();
@@ -642,7 +676,12 @@ fn generated_of(content: &str) -> Option<Generated> {
     Some(Generated { by: by.to_owned(), at })
 }
 
-/// `snapshotGeneratedProvenance`.
+/// `snapshotGeneratedProvenance`: each page's body and generated event, to tell
+/// later what changed.
+///
+/// # Errors
+///
+/// OpenWiki's message when a page can't be read.
 pub fn snapshot_provenance(b: &Backend) -> R<Vec<Snapshot>> {
     let mut out = Vec::new();
     for page in concept_paths(b)? {
@@ -703,6 +742,10 @@ pub fn deserialize_provenance(v: &Value) -> Vec<Snapshot> {
 
 /// `finalizeGeneratedProvenance`: pages whose body changed stamped as
 /// generated now, the others' event put back as it was.
+///
+/// # Errors
+///
+/// OpenWiki's message when a page can't be read or written.
 pub fn finalize_provenance(b: &Backend, initial: &[Snapshot], now: &str, actor: &str, actors: &HashMap<String, String>) -> R<()> {
     if jsre::trim(actor).is_empty() {
         return Err("Generated provenance requires a non-empty producer actor.".into());
@@ -717,7 +760,7 @@ pub fn finalize_provenance(b: &Backend, initial: &[Snapshot], now: &str, actor: 
         let init = initial.iter().rev().find(|s| s.page == page);
         let changed = init.is_none_or(|i| i.body_hash != body_hash(&content));
         let candidate = if changed {
-            let a = actors.get(&page).map(String::as_str).unwrap_or(actor);
+            let a = actors.get(&page).map_or(actor, String::as_str);
             let c = okf::remove_field(&okf::set_generated(&content, a, Some(now)), "timestamp");
             format!("{}\n", c.trim_end_matches(['\r', '\n']))
         } else {
@@ -739,12 +782,21 @@ pub fn finalize_provenance(b: &Backend, initial: &[Snapshot], now: &str, actor: 
 
 /// `prepareWikiForAuthoring`: front matter repaired, then each page's body
 /// and generated event remembered.
+///
+/// # Errors
+///
+/// The name of the step that failed and OpenWiki's message, when a page can't
+/// be read or written.
 pub fn prepare(b: &Backend, concept_type: &str) -> std::result::Result<Vec<Snapshot>, (&'static str, String)> {
     migrate(b, concept_type).map_err(|e| ("migrate", e))?;
     snapshot_provenance(b).map_err(|e| ("provenance_snapshot", e))
 }
 
 /// `finalizeWikiArtifacts`; an error names the step that failed.
+///
+/// # Errors
+///
+/// The name of the step that failed and OpenWiki's message.
 pub fn finalize(b: &Backend, language: Option<&str>, prepared: &[Snapshot], at: &str, actor: &str, actors: &HashMap<String, String>, sources: Option<&[(String, Vec<String>)]>) -> std::result::Result<(), (&'static str, String)> {
     if jsre::trim(actor).is_empty() {
         return Err(("", "Wiki finalization requires a non-empty producer actor.".into()));

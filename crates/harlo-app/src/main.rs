@@ -1,6 +1,10 @@
 //! harlo: native desktop front end for coding agents (its own, Harlo, and
 //! Claude Code).
 
+// Rust guideline compliant 2026-10-09
+
+#![expect(clippy::unnecessary_box_returns, reason = "cxx-qt's generated constructors return a Box")]
+
 mod accounts;
 mod audio;
 mod chat_session;
@@ -50,6 +54,10 @@ use std::sync::OnceLock;
 use cxx_qt_lib::{QQmlApplicationEngine, QString, QStringList, QUrl};
 
 /// Shared tokio runtime for harness processes and session drivers.
+///
+/// # Panics
+///
+/// At first use, when the system can't give tokio its threads or I/O driver.
 pub fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
@@ -73,8 +81,8 @@ fn main() {
         // (Named apart: in a process list it isn't a second harlo.)
         // SAFETY: plain syscall with a NUL-terminated name of at most 16 bytes.
         unsafe {
-            libc::prctl(libc::PR_SET_NAME, c"harlo-bridge".as_ptr());
-        }
+            libc::prctl(libc::PR_SET_NAME, c"harlo-bridge".as_ptr())
+        };
         harlo_core::orchestration::run_bridge();
         return;
     }
@@ -108,54 +116,30 @@ fn main() {
     }
     harlo_harness::store::map_big_allocations();
     let migrated = harlo_core::migrate::from_piqt();
-    // The bridge the agents get (orchestration): this very harlo.
-    if let Ok(exe) = std::env::current_exe() {
-        harlo_harness::set_mcp_bridge(exe, harlo_core::orchestration::socket_path());
-    }
-    harlo_harness::set_remote_bridge(|host| match harlo_core::orchestration::remote_bridge(host) {
-        Ok(command) => Some(command),
-        Err(e) => {
-            tracing::warn!("orchestration on {host}: {e:#}");
-            None
-        }
-    });
-    harlo_harness::set_remote_start(harlo_core::model_servers::forward_to);
-    // (Harlo's agent on other machines: the copy harlo puts there.)
-    harlo_harness::set_remote_program(harlo_core::agent_host::remote_program);
-    // (Other machines' servers this computer's agents reach through SSH.)
-    std::thread::spawn(harlo_core::model_servers::forward_uses);
-    // (Node for the MCP servers harlo installed and turned on, if theirs is gone.)
-    std::thread::spawn(harlo_core::mcp_catalog::on_start);
-    // (Branch previews earlier harlos wrote and left behind.)
-    std::thread::spawn(workspace::sweep_branch_previews);
-    // (Long sessions' page files and live tails earlier harlos left.)
-    std::thread::spawn(|| {
-        if let Some(dir) = harlo_harness::claude::cache_dir() {
-            harlo_harness::store::sweep_own_files(&dir.join("pages"));
-            harlo_harness::store::sweep_own_files(&dir.join("live"));
-        }
-    });
-    harlo_core::servers::set_after_start(accounts::sync_context);
     diagnostics::init_logging();
     diagnostics::install_panic_hook();
+    // The environment Qt reads, set here: from the next line on, threads
+    // start (and read the environment), so setting it later would race them.
+    // OpenGL, Vulkan or software (Settings → General → Graphics).
+    // SAFETY: no thread has started yet (the first is spawned below).
+    unsafe { graphics::apply() };
+    // Our own look comes from QML; keep the platform style out of the way.
+    if std::env::var_os("QT_QUICK_CONTROLS_STYLE").is_none() {
+        // SAFETY: no thread has started yet (the first is spawned below), so
+        // nothing reads the environment while it changes.
+        unsafe { std::env::set_var("QT_QUICK_CONTROLS_STYLE", "Basic") };
+    }
+    connect_agents();
+    start_background_work();
+    harlo_core::servers::set_after_start(accounts::sync_context);
     for note in &migrated {
-        tracing::info!("piqt → harlo: {note}");
+        tracing::event!(name: "app.migrate.piqt", tracing::Level::INFO, note = %note, "piqt → harlo: {{note}}");
     }
     // Remote hosts, before any `ssh://` project or session is opened.
     remotes::load_saved();
     // Checks the crash report end to end.
-    if std::env::args().any(|a| a == "--crash-test") {
-        panic!("crash test requested with --crash-test");
-    }
+    assert!(!std::env::args().any(|a| a == "--crash-test"), "crash test requested with --crash-test");
     instance::listen();
-    // OpenGL, Vulkan or software (Settings → General → Graphics).
-    graphics::apply();
-
-    // Our own look comes from QML; keep the platform style out of the way.
-    if std::env::var_os("QT_QUICK_CONTROLS_STYLE").is_none() {
-        // SAFETY: still single-threaded; no other thread reads the environment yet.
-        unsafe { std::env::set_var("QT_QUICK_CONTROLS_STYLE", "Basic") };
-    }
 
     // Parsing the syntax definitions takes a moment; do it off the UI thread.
     runtime().spawn_blocking(harlo_core::markdown::warm_up);
@@ -220,6 +204,41 @@ fn main() {
     // that order (Qt's own exit order crashed on quit).
     drop(engine);
     platform::shutdown_application();
+}
+
+/// What harlo gives the agents it starts: its tools' bridge, and how to reach other machines.
+fn connect_agents() {
+    // The bridge the agents get (orchestration): this very harlo.
+    if let Ok(exe) = std::env::current_exe() {
+        harlo_harness::set_mcp_bridge(exe, harlo_core::orchestration::socket_path());
+    }
+    harlo_harness::set_remote_bridge(|host| match harlo_core::orchestration::remote_bridge(host) {
+        Ok(command) => Some(command),
+        Err(e) => {
+            tracing::event!(name: "orchestration.remote.failed", tracing::Level::WARN, server.address = %host, error.message = %format_args!("{e:#}"), "orchestration on {{server.address}}: {{error.message}}");
+            None
+        }
+    });
+    harlo_harness::set_remote_start(harlo_core::model_servers::forward_to);
+    // (Harlo's agent on other machines: the copy harlo puts there.)
+    harlo_harness::set_remote_program(harlo_core::agent_host::remote_program);
+}
+
+/// Starts the work done once in the background: forwards, MCP servers, and old files swept.
+fn start_background_work() {
+    // (Other machines' servers this computer's agents reach through SSH.)
+    std::thread::spawn(harlo_core::model_servers::forward_uses);
+    // (Node for the MCP servers harlo installed and turned on, if theirs is gone.)
+    std::thread::spawn(harlo_core::mcp_catalog::on_start);
+    // (Branch previews earlier harlos wrote and left behind.)
+    std::thread::spawn(workspace::sweep_branch_previews);
+    // (Long sessions' page files and live tails earlier harlos left.)
+    std::thread::spawn(|| {
+        if let Some(dir) = harlo_harness::claude::cache_dir() {
+            harlo_harness::store::sweep_own_files(&dir.join("pages"));
+            harlo_harness::store::sweep_own_files(&dir.join("live"));
+        }
+    });
 }
 
 /// Whether harlo.desktop is installed where desktops look for it: the

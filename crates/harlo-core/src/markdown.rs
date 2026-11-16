@@ -6,6 +6,9 @@
 //! source text, so unchanged blocks keep the same `Arc` (cheap equality in
 //! the row diff) and code is highlighted once.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, OnceLock};
@@ -70,7 +73,8 @@ const PIECE_ROWS: usize = 100;
 /// Text held back while streaming before a sentence boundary is revealed.
 const STREAM_HOLD_CHARS: usize = 320;
 
-#[derive(Default)]
+/// Renders Markdown to blocks, keeping each one made by its text.
+#[derive(Debug, Default)]
 pub struct MarkdownRenderer {
     cache: HashMap<u64, Arc<MdBlock>>,
     /// The cached blocks' html and code, in bytes.
@@ -150,12 +154,12 @@ impl MarkdownRenderer {
     /// A block from the cache, else made (and kept, if `keep`).
     fn keep(&mut self, key: u64, keep: bool, make: impl FnOnce() -> MdBlock) -> Arc<MdBlock> {
         if let Some(b) = self.cache.get(&key) {
-            return b.clone();
+            return Arc::clone(b);
         }
         let b = Arc::new(make());
         if keep {
             self.bytes += b.html.len() + b.code.len();
-            self.cache.insert(key, b.clone());
+            self.cache.insert(key, Arc::clone(&b));
         }
         b
     }
@@ -237,7 +241,7 @@ fn table_pieces(html: &str) -> Vec<(String, Part)> {
             let after = &rest[at + open.len()..];
             out.push_str(&rest[..at + open.len()]);
             if after.starts_with('>') || after.starts_with(' ') {
-                out.push_str(&format!(" width=\"{}%\"", pct.get(col).copied().unwrap_or(1)));
+                let _ = write!(out, " width=\"{}%\"", pct.get(col).copied().unwrap_or(1));
                 col += 1;
             }
             rest = after;
@@ -305,8 +309,7 @@ fn render_block(events: Vec<Event<'_>>) -> MdBlock {
         Event::Html(s) | Event::InlineHtml(s) => Event::Text(s),
         Event::TaskListMarker(done) => Event::Text(CowStr::Borrowed(if done { "☑ " } else { "☐ " })),
         Event::InlineMath(s) | Event::DisplayMath(s) => Event::Code(s),
-        Event::End(TagEnd::HtmlBlock) => Event::SoftBreak,
-        Event::Start(Tag::HtmlBlock) => Event::SoftBreak,
+        Event::End(TagEnd::HtmlBlock) | Event::Start(Tag::HtmlBlock) => Event::SoftBreak,
         // An image: its words, in italics (the picture shows under the
         // reply, from its file), marked with the file for the phone, which
         // shows the picture in their place (Qt's rich text ignores the mark).
@@ -382,7 +385,7 @@ fn push_token(html: &mut String, class: u8, piece: &str) {
     if class == 0 || body.is_empty() {
         escape_into(html, body);
     } else {
-        html.push_str(&format!("<span class=\"s{class}\">"));
+        let _ = write!(html, "<span class=\"s{class}\">");
         escape_into(html, body);
         html.push_str("</span>");
     }
@@ -475,8 +478,9 @@ pub fn highlight(code: &str, lang: &str) -> String {
     html
 }
 
-/// Highlights consecutive lines of a file (picked by extension) into one
-/// rich-text span string per line. Highlighter state carries across lines,
+/// Highlights consecutive lines of a file, one rich-text string per line.
+///
+/// The language is picked by extension. Highlighter state carries across lines,
 /// so multi-line strings and comments mostly colour correctly.
 pub fn highlight_lines(path: &str, lines: &[&str]) -> Vec<String> {
     let h = highlighter();
@@ -538,7 +542,7 @@ pub fn inline_html(text: &str) -> String {
 /// to the last sentence boundary instead. (After OpenChamber's
 /// `streamTextCommit.ts`, MIT: see THIRD-PARTY-NOTICES.md.)
 pub fn committed_prefix(text: &str) -> &str {
-    let line_end = text.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = text.rfind('\n').map_or(0, |i| i + 1);
     let held = &text[line_end..];
     if held.chars().count() <= STREAM_HOLD_CHARS {
         return &text[..line_end];
@@ -634,7 +638,7 @@ mod tests {
         let mut r = MarkdownRenderer::default();
         let mut text = String::from("Intro.\n\n```rust\n");
         for i in 0..400 {
-            text.push_str(&format!("let x{i} = {i};\n"));
+            let _ = writeln!(text, "let x{i} = {i};");
             r.render_rows(&text, true);
         }
         // The intro and the finished pieces (the first two), not each version
@@ -647,7 +651,7 @@ mod tests {
     /// How long one huge code block and one huge table take to render
     /// (cargo test -p harlo-core --release -- --ignored --nocapture huge_blocks).
     #[test]
-    #[ignore]
+    #[ignore = "a timing measurement, run by hand in a release build"]
     fn huge_blocks_render_time() {
         let code = format!("```rust\n{}```\n", (0..2000).map(|i| format!("fn step_{i}(rows: &mut Vec<u32>) {{ rows.push({i}); }}\n")).collect::<String>());
         let table = format!("| # | name | rows | state |\n|---|---|---|---|\n{}", (0..1500).map(|i| format!("| {i} | part_{i} | {} | ok |\n", i * 7)).collect::<String>());

@@ -1,10 +1,13 @@
-//! Is this computer's firewall letting phones reach harlo's port? Linux
-//! desktops often run ufw or firewalld, which drop incoming connections
+//! Whether this computer's firewall lets phones reach harlo's port.
+//!
+//! Linux desktops often run ufw or firewalld, which drop incoming connections
 //! unless told otherwise; then a phone on the same network can't open the
-//! pairing link. This finds the firewall, says whether the port is open to
-//! the phone's network (when that can be read without root), and makes the
-//! command that opens it, for harlo to run through pkexec (the system's own
-//! password dialog).
+//! pairing link. This finds the firewall, says whether the port is open to the
+//! phone's network (when that can be read without root), and makes the command
+//! that opens it, for harlo to run through pkexec (the system's own password
+//! dialog).
+
+// Rust guideline compliant 2026-10-09
 
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -56,7 +59,7 @@ pub fn is_tailscale(a: Ipv4Addr) -> bool {
 /// Where the firewall's files are: `/etc`, or a stand-in for tests
 /// (`HARLO_TEST_FIREWALL_ETC`).
 fn etc() -> PathBuf {
-    std::env::var_os("HARLO_TEST_FIREWALL_ETC").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/etc"))
+    std::env::var_os("HARLO_TEST_FIREWALL_ETC").map_or_else(|| PathBuf::from("/etc"), PathBuf::from)
 }
 
 fn testing() -> bool {
@@ -173,19 +176,24 @@ pub fn pkexec() -> Option<PathBuf> {
     program("pkexec")
 }
 
-/// Runs `allow_argv` through pkexec (the system asks for the password).
-/// Blocks until it's done; Err says why it didn't.
-pub fn allow(kind: Kind, network: &Network, port: u16) -> Result<(), String> {
-    let pkexec = pkexec().ok_or("pkexec isn't installed")?;
-    let out = Command::new(pkexec).args(allow_argv(kind, network, port)).output().map_err(|e| format!("couldn't run pkexec: {e}"))?;
+/// Runs `allow_argv` through pkexec (the system asks for the password). Blocks
+/// until it's done.
+///
+/// # Errors
+///
+/// Why it didn't: pkexec isn't installed, the password was refused, or the
+/// command failed (what it said).
+pub fn allow(kind: Kind, network: &Network, port: u16) -> anyhow::Result<()> {
+    let pkexec = pkexec().ok_or_else(|| anyhow::Error::msg("pkexec isn't installed"))?;
+    let out = Command::new(pkexec).args(allow_argv(kind, network, port)).output().map_err(|e| anyhow::anyhow!("couldn't run pkexec: {e}"))?;
     match out.status.code() {
         Some(0) => Ok(()),
         // pkexec: the password dialog was dismissed, or not allowed.
-        Some(126) | Some(127) => Err("Not allowed: the password wasn't given.".to_owned()),
+        Some(126 | 127) => Err(anyhow::Error::msg("Not allowed: the password wasn't given.")),
         _ => {
             let text = String::from_utf8_lossy(&out.stderr);
             let text = text.trim();
-            Err(if text.is_empty() { format!("{} failed.", kind.name()) } else { text.lines().last().unwrap_or(text).to_owned() })
+            Err(if text.is_empty() { anyhow::Error::msg(format!("{} failed.", kind.name())) } else { anyhow::Error::msg(text.lines().last().unwrap_or(text).to_owned()) })
         }
     }
 }

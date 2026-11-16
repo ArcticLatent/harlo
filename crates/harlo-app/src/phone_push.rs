@@ -9,6 +9,8 @@
 //! approval"); the app's notification extension opens it. Phones connected
 //! now get none: the app is open.
 
+// Rust guideline compliant 2026-10-09
+
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use harlo_apns as apns;
@@ -79,20 +81,20 @@ pub fn relay_base() -> String {
 type Kept = Mutex<Option<(String, Arc<apns::Forwarder>)>>;
 
 /// The relay's client, kept while its address stays.
-fn relay() -> Result<Arc<apns::Forwarder>, String> {
+fn relay() -> anyhow::Result<Arc<apns::Forwarder>> {
     static F: OnceLock<Kept> = OnceLock::new();
     let base = relay_base();
     if base.is_empty() {
-        return Err("This harlo was built without a relay to send notifications through.".into());
+        return Err(anyhow::Error::msg("This harlo was built without a relay to send notifications through."));
     }
     let mut kept = F.get_or_init(Default::default).lock().unwrap();
     if let Some((was, f)) = &*kept
         && *was == base
     {
-        return Ok(f.clone());
+        return Ok(Arc::clone(f));
     }
-    let f = Arc::new(apns::Forwarder::new(&base).map_err(|e| format!("{e:#}"))?);
-    *kept = Some((base, f.clone()));
+    let f = Arc::new(apns::Forwarder::new(&base).map_err(|e| anyhow::anyhow!("{e:#}"))?);
+    *kept = Some((base, Arc::clone(&f)));
     Ok(f)
 }
 
@@ -118,11 +120,11 @@ pub fn send(alert: Alert) {
 
 /// Sends `alert` (to connected phones too with `everyone`): how many got it,
 /// or why none did.
-pub async fn deliver(alert: &Alert, everyone: bool) -> Result<usize, String> {
+pub async fn deliver(alert: &Alert, everyone: bool) -> anyhow::Result<usize> {
     if paused() && !matches!(alert.what, What::Test) {
         return Ok(0);
     }
-    let Some(shared) = slot().lock().unwrap().upgrade() else { return Err("Phone access is off.".into()) };
+    let Some(shared) = slot().lock().unwrap().upgrade() else { return Err(anyhow::Error::msg("Phone access is off.")) };
     let devices: Vec<Device> = {
         let online = shared.online.lock().unwrap();
         shared.devices.lock().unwrap().list.iter()
@@ -137,7 +139,7 @@ pub async fn deliver(alert: &Alert, everyone: bool) -> Result<usize, String> {
     if std::env::var("HARLO_TEST_PUSH_FILE").is_err()
         && let Err(e) = relay()
     {
-        *last_error().lock().unwrap() = e.clone();
+        (*last_error().lock().unwrap()).clone_from(&format!("{e:#}"));
         return Err(e);
     }
     let mut sent = 0;
@@ -155,18 +157,18 @@ pub async fn deliver(alert: &Alert, everyone: bool) -> Result<usize, String> {
         match result {
             apns::Sent::Ok => sent += 1,
             apns::Sent::Gone(reason) => {
-                tracing::info!("phone {}: its push token is gone ({reason})", d.name);
+                tracing::event!(name: "phone.push.token_gone", tracing::Level::INFO, phone.name = %d.name, reason = %reason, "phone {{phone.name}}: its push token is gone ({{reason}})");
                 shared.devices.lock().unwrap().drop_push_token(&push.token);
                 failure = format!("{}'s notifications were turned off or it was reinstalled ({reason}). Open the app to turn them on again.", d.name);
             }
             apns::Sent::Failed(e) => {
-                tracing::warn!("phone {}: push: {e}", d.name);
+                tracing::event!(name: "phone.push.failed", tracing::Level::WARN, phone.name = %d.name, error.message = %e, "phone {{phone.name}}: push: {{error.message}}");
                 failure = e;
             }
         }
     }
-    *last_error().lock().unwrap() = failure.clone();
-    if sent == 0 && !failure.is_empty() { Err(failure) } else { Ok(sent) }
+    (*last_error().lock().unwrap()).clone_from(&failure);
+    if sent == 0 && !failure.is_empty() { Err(anyhow::Error::msg(failure)) } else { Ok(sent) }
 }
 
 /// Sends one push through harlo's relay (tests: `HARLO_TEST_PUSH_FILE`,
@@ -181,7 +183,7 @@ pub async fn forward(push: &apns::Push<'_>) -> apns::Sent {
     }
     match relay() {
         Ok(r) => r.send(push).await,
-        Err(e) => apns::Sent::Failed(e),
+        Err(e) => apns::Sent::Failed(format!("{e:#}")),
     }
 }
 
@@ -203,9 +205,6 @@ fn clip(s: &str, n: usize) -> String {
 /// and (`h`) what it really says, sealed for the phone. Small enough for
 /// APNs' 4 KB.
 pub fn payload(alert: &Alert, channel: &phone::Channel) -> Value {
-    if matches!(alert.what, What::Badge) {
-        return json!({ "aps": { "badge": alert.badge } });
-    }
     let (kind, placeholder, category) = match &alert.what {
         What::Ask(r) if r["approval"].as_bool() == Some(true) => ("ask", "A session waits for your approval", "approval"),
         What::Ask(r) if r["method"] == "confirm" => ("ask", "A session waits for your answer", "approval"),
@@ -215,7 +214,7 @@ pub fn payload(alert: &Alert, channel: &phone::Channel) -> Value {
         What::Test => ("test", "harlo can reach this phone", ""),
         What::Limit { reset: false } => ("limit", "A plan limit is used up", ""),
         What::Limit { reset: true } => ("reset", "A plan limit has reset", ""),
-        What::Badge => unreachable!(),
+        What::Badge => return json!({ "aps": { "badge": alert.badge } }),
     };
     let mut content = json!({ "k": kind, "s": alert.key, "t": clip(&alert.title, 80), "b": clip(&alert.body, 300) });
     if let What::Ask(r) = &alert.what {

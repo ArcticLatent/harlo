@@ -1,8 +1,12 @@
-//! Commit messages written by a model: the request and the diff go to
-//! Harlo in one-shot print mode on stdin (`-p - --no-session --no-tools`),
-//! or to Claude Code (`claude -p`, no tools, nothing saved) when Harlo
-//! can't, and the printed answer is the message.
+//! Commit messages written by a model.
+//!
+//! The request and the diff go to Harlo in one-shot print mode on stdin (`-p -
+//! --no-session --no-tools`), or to Claude Code (`claude -p`, no tools, nothing
+//! saved) when Harlo can't, and the printed answer is the message.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -51,9 +55,9 @@ pub fn changes(root: &Path, staged_only: bool) -> String {
         };
         for file in git_out(root, &["ls-files", "--others", "--exclude-standard"]).lines().filter(|l| !l.is_empty()).take(40) {
             if let Some(text) = small_text(&root.join(file)) {
-                d.push_str(&format!("\nNew file {file}:\n{text}\n"));
+                let _ = write!(d, "\nNew file {file}:\n{text}\n");
             } else {
-                d.push_str(&format!("\nNew file {file} (not shown)\n"));
+                let _ = write!(d, "\nNew file {file} (not shown)\n");
             }
         }
         d
@@ -120,11 +124,17 @@ pub fn clean(answer: &str) -> String {
     text.trim().to_owned()
 }
 
-/// Asks a model for a commit message: Harlo's (`harlo`: its program, from
-/// Settings; else the one shipped with harlo), else Claude Code's. `model`
-/// (may be empty) is Harlo's, and Claude's when it names one of Claude's.
-/// A remote repository's are asked on its machine. Blocks for up to a few
-/// minutes; run it off the UI thread.
+/// Asks a model for a commit message: Harlo's, else Claude Code's.
+///
+/// Harlo is `harlo` (its program, from Settings), else the one shipped with
+/// harlo. `model` (may be empty) is Harlo's, and Claude's when it names one of
+/// Claude's. A remote repository's are asked on its machine. Blocks for up to a
+/// few minutes; run it off the UI thread.
+///
+/// # Errors
+///
+/// When there are no changes, or neither agent can write one (each one's
+/// error).
 pub fn generate(harlo: Option<PathBuf>, model: &str, root: &Path, staged_only: bool) -> Result<String> {
     let diff = changes(root, staged_only);
     if diff.trim().is_empty() {
@@ -283,7 +293,7 @@ mod tests {
     /// (HARLO_AGENT_BIN, HARLO_LIVE_MODEL), then by Claude Code when Harlo
     /// fails. Spends a little of both plans.
     #[test]
-    #[ignore]
+    #[ignore = "spends real model plans"]
     fn live_harlo_then_claude() {
         let dir = std::env::temp_dir().join(format!("harlo-commitmsg-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -310,7 +320,7 @@ mod tests {
     /// Harlo's copy there writes it; with a model it doesn't have, Claude
     /// Code there does.
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH host and spends real model plans"]
     fn live_on_a_host() {
         let dir = std::env::temp_dir().join(format!("harlo-commitmsg-host-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

@@ -1,7 +1,10 @@
-//! What harlo adds to a user message, and how to take it off again for
-//! display: `<file name="…">…</file>` blocks (attached files, the way pi's
+//! What harlo adds to a user message, and how to take it off for display.
+//!
+//! These are `<file name="…">…</file>` blocks (attached files, the way pi's
 //! `@file` arguments look; see harlo-core's `attach`) and the "ask first"
 //! note. Titles and transcripts show file names and a tag instead.
+
+// Rust guideline compliant 2026-10-09
 
 /// Splits `<file name="…">…</file>` blocks off a user message: the file
 /// names, and the message with the blocks removed.

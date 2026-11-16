@@ -1,7 +1,11 @@
-//! A terminal's screen drawn in Rust: harlo-core's grid of coloured cells
-//! in the code font, each cell on whole device pixels. Only the rows that
+//! Draws a terminal's screen in the code font.
+//!
+//! The screen is harlo-core's grid of coloured cells, each cell on whole
+//! device pixels. Only the rows that
 //! changed since the last frame are drawn again. Box-drawing and block
 //! characters are drawn as shapes, so lines and boxes join up between cells.
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::HashMap;
 
@@ -32,6 +36,7 @@ struct CursorMark {
 
 /// Glyphs by character and style (bold 1, italic 2), laid out once.
 #[derive(Default)]
+#[expect(clippy::option_option, reason = "None: not laid out yet; Some(None): laid out, no glyph")]
 struct Glyphs {
     ascii: Vec<Option<Option<LayoutGlyph>>>,
     other: HashMap<(char, u8), Option<LayoutGlyph>>,
@@ -91,6 +96,17 @@ pub struct TermPainter {
     drawn_bg: Option<Rgb>,
 }
 
+impl std::fmt::Debug for TermPainter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TermPainter")
+            .field("family", &self.family)
+            .field("font_px", &self.font_px)
+            .field("cell", &(self.cell_w, self.cell_h))
+            .field("size", &(self.width, self.height))
+            .finish_non_exhaustive()
+    }
+}
+
 impl Default for TermPainter {
     fn default() -> Self {
         Self::new()
@@ -122,7 +138,7 @@ impl TermPainter {
 
     pub fn set_font(&mut self, family: &str, font_px: f32) {
         if family != self.family || font_px != self.font_px {
-            self.family = family.to_owned();
+            family.clone_into(&mut self.family);
             self.font_px = font_px.max(1.0);
             self.metrics_key = None;
         }
@@ -140,6 +156,7 @@ impl TermPainter {
     }
 
     /// Measures a cell at `dpr`, dropping glyphs laid out otherwise.
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn ensure_metrics(&mut self, fonts: &mut Fonts, dpr: f32) {
         let key = (self.family.clone(), self.font_px.to_bits(), dpr.to_bits());
         if self.metrics_key.as_ref() == Some(&key) {
@@ -185,7 +202,7 @@ impl TermPainter {
             self.pixels.clear();
             self.pixels.resize(width * height * 4, 0);
             let bg = [background.r, background.g, background.b, 255];
-            for px in self.pixels.chunks_exact_mut(4) {
+            for px in self.pixels.as_chunks_mut::<4>().0 {
                 px.copy_from_slice(&bg);
             }
             self.drawn.clear();
@@ -195,14 +212,14 @@ impl TermPainter {
             self.scroll_drawn(screen);
         }
         let mark = cursor.filter(|_| screen.cursor_visible).map(|c| CursorMark {
-            row: screen.cursor_row.max(0) as usize,
-            col: screen.cursor_col.max(0) as usize,
+            row: usize::try_from(screen.cursor_row).unwrap_or(0),
+            col: usize::try_from(screen.cursor_col).unwrap_or(0),
             shape: screen.cursor_shape,
             focused: c.focused,
             on: c.on || !c.focused,
             color: c.color,
         });
-        let cursor_rows = if mark != self.drawn_cursor { [self.drawn_cursor.map(|m| m.row), mark.map(|m| m.row)] } else { [None, None] };
+        let cursor_rows = if mark == self.drawn_cursor { [None, None] } else { [self.drawn_cursor.map(|m| m.row), mark.map(|m| m.row)] };
         let cols = screen.cols;
         for r in 0..screen.rows {
             let row = screen.row(r);
@@ -222,6 +239,7 @@ impl TermPainter {
 
     /// Output that scrolled the screen up `k` rows: the drawn rows move up
     /// `k` with the pixels, leaving only the new ones at the bottom to draw.
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn scroll_drawn(&mut self, screen: &Screen) {
         let (cols, n) = (screen.cols, screen.rows);
         if n < 2 || self.drawn.len() != n * cols || screen.row(0) == &self.drawn[..cols] {
@@ -251,6 +269,7 @@ impl TermPainter {
         }
     }
 
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn draw_row(&mut self, fonts: &mut Fonts, r: usize, row: &[Cell], background: Rgb, cursor: Option<CursorMark>) {
         let pad = (self.pad * self.dpr).round() as usize;
         let (cw, ch) = (self.cell_w, self.cell_h);
@@ -290,19 +309,19 @@ impl TermPainter {
             let x = pad + col * cw;
             let fg = if ink_at == Some(col) { background } else { cell.fg };
             if cell.c != ' ' && !draw_shape(&mut c, cell.c, x, cw, fg, light) {
-                let style = (cell.flags & Cell::BOLD != 0) as u8 | ((cell.flags & Cell::ITALIC != 0) as u8) << 1;
+                let style = u8::from(cell.flags & Cell::BOLD != 0) | u8::from(cell.flags & Cell::ITALIC != 0) << 1;
                 if let Some(g) = self.glyphs.get(fonts, &self.family, size, cell.c, style) {
-                    let ph = g.physical((x as f32 - g.x, (y0 as i32 + self.baseline) as f32), 1.0);
+                    let ph = g.physical((x as f32 - g.x, (i32::try_from(y0).unwrap_or(i32::MAX) + self.baseline) as f32), 1.0);
                     c.glyph(fonts, ph.cache_key, ph.x, ph.y, fg);
                 }
             }
             let w = cw * if cell.flags & Cell::WIDE != 0 { 2 } else { 1 };
             if cell.flags & Cell::UNDERLINE != 0 {
-                let y = (y0 as i32 + self.baseline + light as i32 + 1).min(y1 as i32 - light as i32).max(y0 as i32) as usize;
+                let y = (i32::try_from(y0).unwrap_or(i32::MAX) + self.baseline + i32::try_from(light).unwrap_or(i32::MAX) + 1).min(i32::try_from(y1).unwrap_or(i32::MAX) - i32::try_from(light).unwrap_or(i32::MAX)).max(i32::try_from(y0).unwrap_or(i32::MAX)) as usize;
                 c.rect(x, x + w, y, y + light, fg, 255);
             }
             if cell.flags & Cell::STRIKE != 0 {
-                let y = (y0 as i32 + self.baseline - (ch as f32 * 0.28).round() as i32).max(y0 as i32) as usize;
+                let y = (i32::try_from(y0).unwrap_or(i32::MAX) + self.baseline - (ch as f32 * 0.28).round() as i32).max(i32::try_from(y0).unwrap_or(i32::MAX)) as usize;
                 c.rect(x, x + w, y, y + light, fg, 255);
             }
         }
@@ -349,9 +368,9 @@ fn blend(d: &mut [u8], c: Rgb, a: u32) {
         return;
     }
     let ia = 255 - a;
-    d[0] = ((c.r as u32 * a + d[0] as u32 * ia + 127) / 255) as u8;
-    d[1] = ((c.g as u32 * a + d[1] as u32 * ia + 127) / 255) as u8;
-    d[2] = ((c.b as u32 * a + d[2] as u32 * ia + 127) / 255) as u8;
+    d[0] = u8::try_from((u32::from(c.r) * a + u32::from(d[0]) * ia + 127) / 255).unwrap_or(u8::MAX);
+    d[1] = u8::try_from((u32::from(c.g) * a + u32::from(d[1]) * ia + 127) / 255).unwrap_or(u8::MAX);
+    d[2] = u8::try_from((u32::from(c.b) * a + u32::from(d[2]) * ia + 127) / 255).unwrap_or(u8::MAX);
 }
 
 impl Canvas<'_> {
@@ -367,7 +386,7 @@ impl Canvas<'_> {
             return;
         }
         for y in y0..y1 {
-            for d in self.data[(y * self.width + x0) * 4..(y * self.width + x1) * 4].chunks_exact_mut(4) {
+            for d in self.data[(y * self.width + x0) * 4..(y * self.width + x1) * 4].as_chunks_mut::<4>().0 {
                 blend(d, c, a);
             }
         }
@@ -385,26 +404,26 @@ impl Canvas<'_> {
         let Some(image) = fonts.glyphs.get_image(&mut fonts.system, key) else { return };
         let left = x + image.placement.left;
         let top = y - image.placement.top;
-        let (w, h) = (image.placement.width as i32, image.placement.height as i32);
+        let (w, h) = (i32::try_from(image.placement.width).unwrap_or(i32::MAX), i32::try_from(image.placement.height).unwrap_or(i32::MAX));
         let col0 = (-left).max(0);
-        let col1 = (self.width as i32 - left).min(w);
-        let row0 = (self.y0 as i32 - top).max(0);
-        let row1 = (self.y1 as i32 - top).min(h);
+        let col1 = (i32::try_from(self.width).unwrap_or(i32::MAX) - left).min(w);
+        let row0 = (i32::try_from(self.y0).unwrap_or(i32::MAX) - top).max(0);
+        let row1 = (i32::try_from(self.y1).unwrap_or(i32::MAX) - top).min(h);
         for row in row0..row1 {
-            let py = (top + row) as usize;
+            let py = usize::try_from(top + row).unwrap_or(0);
             for col in col0..col1 {
-                let o = (py * self.width + (left + col) as usize) * 4;
+                let o = (py * self.width + usize::try_from(left + col).unwrap_or(0)) * 4;
                 let d = &mut self.data[o..o + 4];
                 match image.content {
-                    SwashContent::Mask => blend(d, color, image.data[(row * w + col) as usize] as u32),
+                    SwashContent::Mask => blend(d, color, u32::from(image.data[usize::try_from(row * w + col).unwrap_or(0)])),
                     SwashContent::Color => {
-                        let i = ((row * w + col) * 4) as usize;
+                        let i = usize::try_from((row * w + col) * 4).unwrap_or(0);
                         let s = &image.data[i..i + 4];
-                        blend(d, Rgb { r: s[0], g: s[1], b: s[2] }, s[3] as u32);
+                        blend(d, Rgb { r: s[0], g: s[1], b: s[2] }, u32::from(s[3]));
                     }
                     SwashContent::SubpixelMask => {
-                        let i = ((row * w + col) * 4) as usize;
-                        let cov = image.data[i..i + 3].iter().map(|&v| v as u32).sum::<u32>() / 3;
+                        let i = usize::try_from((row * w + col) * 4).unwrap_or(0);
+                        let cov = image.data[i..i + 3].iter().map(|&v| u32::from(v)).sum::<u32>() / 3;
                         blend(d, color, cov);
                     }
                 }
@@ -428,6 +447,8 @@ const BOX: [&str; 128] = [
 ];
 
 /// Draws `c` as a shape if it's a box-drawing or block character.
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
+#[expect(clippy::too_many_lines, reason = "one match over the box, block and shade ranges, each drawn as its table says")]
 fn draw_shape(cv: &mut Canvas, c: char, x: usize, w: usize, fg: Rgb, light: usize) -> bool {
     let (y0, h) = (cv.y0, cv.y1 - cv.y0);
     let u = c as u32;
@@ -446,8 +467,8 @@ fn draw_shape(cv: &mut Canvas, c: char, x: usize, w: usize, fg: Rgb, light: usiz
             };
             let (cx, cy) = (x + w / 2, y0 + h / 2);
             // How far past the middle an arm runs, to meet the strokes across it.
-            let reach_h = (thick(up).max(thick(dn)) + 1) / 2;
-            let reach_v = (thick(l).max(thick(r)) + 1) / 2;
+            let reach_h = thick(up).max(thick(dn)).div_ceil(2);
+            let reach_v = thick(l).max(thick(r)).div_ceil(2);
             if (0x256d..=0x2570).contains(&u) {
                 // A rounded corner: a quarter circle between its two arms.
                 let (dx, dy): (i32, i32) = match u {
@@ -557,17 +578,18 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn draws_cells_and_only_changed_rows() {
         fonts::for_tests();
         let bg = Rgb { r: 20, g: 20, b: 20 };
         let mut p = TermPainter::new();
         let (cw, ch) = p.cell_size(1.0);
-        assert!(cw >= 6.0 && cw <= 10.0 && ch >= 14.0 && ch <= 20.0, "{cw}×{ch}");
+        assert!((6.0..=10.0).contains(&cw) && (14.0..=20.0).contains(&ch), "{cw}×{ch}");
         let (w, h) = (400, 120);
         let mut s = screen(&["hello", "─┼─ ╭╮", "█▀▄"], 40);
         let t = std::time::Instant::now();
         p.render(&s, bg, None, w, h, 1.0);
-        let lit = |p: &TermPainter, y0: usize, y1: usize| p.pixels()[y0 * w * 4..y1 * w * 4].chunks_exact(4).filter(|px| px[0] > 100).count();
+        let lit = |p: &TermPainter, y0: usize, y1: usize| p.pixels()[y0 * w * 4..y1 * w * 4].as_chunks::<4>().0.iter().filter(|px| px[0] > 100).count();
         let pad = 8;
         let ch = ch as usize;
         assert!(lit(&p, pad, pad + ch) > 40, "text drawn");
@@ -583,7 +605,7 @@ mod tests {
         s.cells[0].c = 'j';
         let before = p.pixels()[(pad + 2 * ch) * w * 4..].to_vec();
         p.render(&s, bg, None, w, h, 1.0);
-        assert_eq!(&p.pixels()[(pad + 2 * ch) * w * 4..], &before[..], "the rows below are as they were");
+        assert_eq!(&p.pixels()[(pad + 2 * ch) * w * 4..], &*before, "the rows below are as they were");
         // The cursor: a block over its cell.
         let look = CursorLook { focused: true, on: true, color: Rgb { r: 0, g: 200, b: 0 } };
         s.cursor_row = 2;
@@ -600,7 +622,7 @@ mod tests {
         let look = CursorLook { focused: true, on: true, color: Rgb { r: 0, g: 200, b: 0 } };
         let lines: Vec<String> = (0..12).map(|i| format!("line {i} ─┼─ gjy")).collect();
         let at = |from: usize| {
-            let rows: Vec<&str> = lines[from..from + 6].iter().map(|s| s.as_str()).collect();
+            let rows: Vec<&str> = lines[from..from + 6].iter().map(std::string::String::as_str).collect();
             let mut s = screen(&rows, 30);
             s.cursor_row = 5;
             s.cursor_col = 3;

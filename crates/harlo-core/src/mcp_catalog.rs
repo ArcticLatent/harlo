@@ -12,6 +12,8 @@
 //! PATH or a version manager's folder); its path goes in the entries, since
 //! an agent started from the desktop may not have that PATH.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -60,7 +62,7 @@ pub fn get(id: &str) -> Option<Offered> {
 
 /// Where harlo keeps its copies: `<data>/mcp`.
 pub fn root() -> PathBuf {
-    crate::db::default_path().parent().map(|d| d.join("mcp")).unwrap_or_else(|| PathBuf::from("mcp"))
+    crate::db::default_path().parent().map_or_else(|| PathBuf::from("mcp"), |d| d.join("mcp"))
 }
 
 /// A bundle's version (its package.json's).
@@ -110,20 +112,20 @@ fn newer(a: &str, b: &str) -> bool {
 /// Makes `<root>/<id>/<version>` (a complete copy in `staged`) the one in
 /// use, and removes the versions older than the one it replaces (that one
 /// stays for the sessions still running it).
-fn switch_to(root: &Path, b: &Offered, staged: &Path, version: &str) -> Result<(), String> {
+fn switch_to(root: &Path, b: &Offered, staged: &Path, version: &str) -> anyhow::Result<()> {
     let dir = root.join(b.id);
     let target = dir.join(version);
     if target.exists() {
-        std::fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+        std::fs::remove_dir_all(&target)?;
     }
-    std::fs::rename(staged, &target).map_err(|e| e.to_string())?;
+    std::fs::rename(staged, &target)?;
     let before = installed_in(root, b);
     // (A new link, then renamed over the old one: never missing.)
     let link = dir.join(".current-new");
     let _ = std::fs::remove_file(&link);
-    std::os::unix::fs::symlink(version, &link).map_err(|e| e.to_string())?;
-    std::fs::rename(&link, current(root, b)).map_err(|e| e.to_string())?;
-    for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+    std::os::unix::fs::symlink(version, &link)?;
+    std::fs::rename(&link, current(root, b))?;
+    for e in std::fs::read_dir(&dir)?.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         if name == version || name == "current" || Some(&name) == before.as_ref() {
             continue;
@@ -178,13 +180,17 @@ fn node_version(path: &Path) -> Option<[u64; 3]> {
 
 /// The Node to run with: the first in PATH when it's new enough, else the
 /// newest that is. Err: what to install (the newest found, if any).
-pub fn find_node(at_least: Option<[u64; 3]>) -> Result<Node, String> {
+///
+/// # Errors
+///
+/// What to install: none is new enough (the newest found, if any).
+pub fn find_node(at_least: Option<[u64; 3]>) -> anyhow::Result<Node> {
     let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     let found: Vec<Node> = node_candidates(&home, std::env::var_os("PATH").as_deref()).into_iter().filter_map(|p| Some(Node { version: node_version(&p)?, path: p })).collect();
-    pick_node(found, at_least)
+    pick_node(&found, at_least)
 }
 
-fn pick_node(found: Vec<Node>, at_least: Option<[u64; 3]>) -> Result<Node, String> {
+fn pick_node(found: &[Node], at_least: Option<[u64; 3]>) -> anyhow::Result<Node> {
     let ok = |n: &Node| at_least.is_none_or(|min| n.version >= min);
     if let Some(first) = found.first().filter(|n| ok(n)) {
         return Ok(first.clone());
@@ -192,10 +198,10 @@ fn pick_node(found: Vec<Node>, at_least: Option<[u64; 3]>) -> Result<Node, Strin
     if let Some(best) = found.iter().filter(|n| ok(n)).max_by_key(|n| n.version) {
         return Ok(best.clone());
     }
-    let want = at_least.map(|v| format!("Node {} or newer", show_version(v))).unwrap_or_else(|| "Node".into());
+    let want = at_least.map_or_else(|| "Node".into(), |v| format!("Node {} or newer", show_version(v)));
     Err(match found.iter().max_by_key(|n| n.version) {
-        Some(n) => format!("It needs {want}; the newest installed is {}. Install a newer Node (nodejs.org, or your package manager), then turn it on again.", show_version(n.version)),
-        None => format!("It needs {want}, which isn't installed. Install it (nodejs.org, or your package manager), then turn it on again."),
+        Some(n) => anyhow::Error::msg(format!("It needs {want}; the newest installed is {}. Install a newer Node (nodejs.org, or your package manager), then turn it on again.", show_version(n.version))),
+        None => anyhow::Error::msg(format!("It needs {want}, which isn't installed. Install it (nodejs.org, or your package manager), then turn it on again.")),
     })
 }
 
@@ -235,10 +241,10 @@ impl Place {
         }
     }
 
-    fn host(&self) -> Result<crate::remote::Host, String> {
+    fn host(&self) -> anyhow::Result<crate::remote::Host> {
         match self {
-            Place::Here => Err("not a host".into()),
-            Place::Host(h) => crate::remote::host(h).ok_or_else(|| format!("There's no host called {h}.")),
+            Place::Here => Err(anyhow::Error::msg("not a host")),
+            Place::Host(h) => crate::remote::host(h).ok_or_else(|| anyhow::anyhow!("There's no host called {h}.")),
         }
     }
 
@@ -251,15 +257,18 @@ impl Place {
     }
 }
 
+/// The Node version a server needs, as major, minor and patch (None: any).
+type NodeNeed = Option<[u64; 3]>;
+
 /// The version in use there and the Node it needs (None: not installed).
-fn installed_at(place: &Place, b: &Offered) -> Result<Option<(String, Option<[u64; 3]>)>, String> {
+fn installed_at(place: &Place, b: &Offered) -> anyhow::Result<Option<(String, NodeNeed)>> {
     if *place == Place::Here {
         let root = root();
         return Ok(installed_in(&root, b).map(|v| (v, needs_node(&current(&root, b)))));
     }
     let cur = place.root().join(b.id).join("current");
     let q = |p: &Path| crate::remote::quote(&p.to_string_lossy());
-    let out = crate::remote::run_ok(&place.host()?, &format!("[ -f {} ] && cat {} || true", q(&cur.join(b.entry)), q(&cur.join("package.json"))), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    let out = crate::remote::run_ok(&place.host()?, &format!("[ -f {} ] && cat {} || true", q(&cur.join(b.entry)), q(&cur.join("package.json"))), Duration::from_secs(30)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     Ok(package_facts(&out))
 }
 
@@ -296,12 +305,12 @@ fn host_nodes(text: &str) -> Vec<Node> {
 }
 
 /// The Node to run it with there (see [`find_node`]).
-fn find_node_at(place: &Place, at_least: Option<[u64; 3]>) -> Result<Node, String> {
+fn find_node_at(place: &Place, at_least: Option<[u64; 3]>) -> anyhow::Result<Node> {
     if *place == Place::Here {
         return find_node(at_least);
     }
-    let out = crate::remote::run_ok(&place.host()?, &in_sh(HOST_NODES), Duration::from_secs(60)).map_err(|e| format!("{e:#}"))?;
-    pick_node(host_nodes(&out), at_least).map_err(|e| e.replace("installed", &format!("installed{}", place.on())))
+    let out = crate::remote::run_ok(&place.host()?, &in_sh(HOST_NODES), Duration::from_secs(60)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
+    (pick_node(&host_nodes(&out), at_least).map_err(|e| e.to_string().replace("installed", &format!("installed{}", place.on())))).map_err(anyhow::Error::msg)
 }
 
 // ---- the agents' entries ----
@@ -363,15 +372,15 @@ pub fn choose(b: &Offered, place: &Place, kinds: &[HarnessKind]) {
 }
 
 /// Its entries there for `kinds` (global; removed from the others' files).
-fn write_entries(b: &Offered, place: &Place, node: &Path, kinds: &[HarnessKind]) -> Result<(), String> {
+fn write_entries(b: &Offered, place: &Place, node: &Path, kinds: &[HarnessKind]) -> anyhow::Result<()> {
     let copy = current(&place.root(), b);
     let mut command = vec![node.to_string_lossy().into_owned(), copy.join(b.entry).to_string_lossy().into_owned()];
-    command.extend(b.args.iter().map(|a| a.to_string()));
+    command.extend(b.args.iter().map(std::string::ToString::to_string));
     let form = Form { name: b.id.into(), enabled: true, transport: "stdio".into(), command, ..Form::default() };
     let scope = place.scope();
-    mcp::save(&scope, b.id, &form, kinds).map_err(|e| format!("{e:#}"))?;
+    mcp::save(&scope, b.id, &form, kinds).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     if kinds.contains(&HarnessKind::Harlo) {
-        mcp::set_field(HarnessKind::Harlo, &scope, b.id, "hiddenTools", Some(json!(b.hidden_for_harlo))).map_err(|e| format!("{e:#}"))?;
+        mcp::set_field(HarnessKind::Harlo, &scope, b.id, "hiddenTools", Some(json!(b.hidden_for_harlo))).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     }
     Ok(())
 }
@@ -387,14 +396,19 @@ fn servers_there(place: &Place) -> String {
 /// Turns it on there for `kinds` (empty: the ones chosen before),
 /// downloading it first if it isn't yet (blocking; `progress`: bytes so far,
 /// of all).
-pub fn enable(b: &Offered, place: &Place, kinds: &[HarnessKind], progress: &mut dyn FnMut(u64, u64)) -> Result<(), String> {
+///
+/// # Errors
+///
+/// When the download or its check fails, Node isn't there, or an agent's config
+/// can't be written.
+pub fn enable(b: &Offered, place: &Place, kinds: &[HarnessKind], progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<()> {
     let kinds = if kinds.is_empty() { chosen(b, place) } else { kinds.to_vec() };
     let (_, taken) = agents_on(b, place);
     if taken {
-        return Err(format!("You already have a server called {} in {}: remove it first, so harlo's doesn't replace it.", b.id, servers_there(place)));
+        return Err(anyhow::anyhow!("You already have a server called {} in {}: remove it first, so harlo's doesn't replace it.", b.id, servers_there(place)));
     }
     if kinds.is_empty() {
-        return Err("Tick at least one agent.".into());
+        return Err(anyhow::Error::msg("Tick at least one agent."));
     }
     let need = match installed_at(place, b)? {
         Some((_, need)) => need,
@@ -408,14 +422,18 @@ pub fn enable(b: &Offered, place: &Place, kinds: &[HarnessKind], progress: &mut 
 
 /// Turns it off there: its entries go (its copy stays), and `kinds` are the
 /// agents chosen for turning it on again.
-pub fn disable(b: &Offered, place: &Place, kinds: &[HarnessKind]) -> Result<(), String> {
+///
+/// # Errors
+///
+/// When an agent's config can't be read or written.
+pub fn disable(b: &Offered, place: &Place, kinds: &[HarnessKind]) -> anyhow::Result<()> {
     choose(b, place, kinds);
     let (on, taken) = agents_on(b, place);
     if on.is_empty() && taken {
-        return Err(format!("The server called {} isn't harlo's: change it in your servers below.", b.id));
+        return Err(anyhow::anyhow!("The server called {} isn't harlo's: change it in your servers below.", b.id));
     }
     for kind in on {
-        mcp::put_entry(kind, &place.scope(), None, b.id).map_err(|e| format!("{e:#}"))?;
+        mcp::put_entry(kind, &place.scope(), None, b.id).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     }
     Ok(())
 }
@@ -438,10 +456,10 @@ pub fn on_start() {
         match find_node(need) {
             Ok(n) => {
                 if let Err(e) = write_entries(&b, &place, &n.path, &on) {
-                    tracing::warn!("{}: {e}", b.name);
+                    tracing::event!(name: "mcp.catalog.node.write.failed", tracing::Level::WARN, mcp.server = %b.name, error.message = %e, "{{mcp.server}}: {{error.message}}");
                 }
             }
-            Err(e) => tracing::warn!("{}: {e}", b.name),
+            Err(e) => tracing::event!(name: "mcp.catalog.node.missing", tracing::Level::WARN, mcp.server = %b.name, error.message = %e, "{{mcp.server}}: {{error.message}}"),
         }
     }
 }
@@ -454,34 +472,42 @@ fn api() -> String {
 }
 
 /// Its newest release: its version and the file with its bundle.
-pub fn latest(b: &Offered) -> Result<(String, crate::engines::Asset), String> {
+///
+/// # Errors
+///
+/// When GitHub can't be reached, or the release has no bundle.
+pub fn latest(b: &Offered) -> anyhow::Result<(String, crate::engines::Asset)> {
     let release = crate::engines::get_json(&format!("{}/repos/{}/releases/latest", api(), b.repo))?;
-    let tag = release["tag_name"].as_str().ok_or("Its latest release has no version.")?.trim_start_matches('v').to_owned();
-    let asset = crate::engines::asset_named(&release, b.asset, None).ok_or_else(|| format!("Its latest release ({tag}) has no {} with a checksum.", b.asset))?;
+    let tag = release["tag_name"].as_str().ok_or_else(|| anyhow::Error::msg("Its latest release has no version."))?.trim_start_matches('v').to_owned();
+    let asset = crate::engines::asset_named(&release, b.asset, None).ok_or_else(|| anyhow::anyhow!("Its latest release ({tag}) has no {} with a checksum.", b.asset))?;
     Ok((tag, asset))
 }
 
 /// How many stars its repository has on GitHub.
-pub fn stars(b: &Offered) -> Result<u64, String> {
+///
+/// # Errors
+///
+/// When GitHub can't be reached or doesn't answer with the repository.
+pub fn stars(b: &Offered) -> anyhow::Result<u64> {
     let repo = crate::engines::get_json(&format!("{}/repos/{}", api(), b.repo))?;
-    repo["stargazers_count"].as_u64().ok_or_else(|| "GitHub didn't say how many stars it has.".into())
+    repo["stargazers_count"].as_u64().ok_or_else(|| anyhow::Error::msg("GitHub didn't say how many stars it has."))
 }
 
 /// Downloads its newest release here (checked against its published
 /// SHA-256) into `file` and unpacks it into `staged`: its version and the
 /// Node it needs.
-fn fetch(b: &Offered, tag: &str, asset: &crate::engines::Asset, file: &Path, staged: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<(String, Option<[u64; 3]>), String> {
+fn fetch(b: &Offered, tag: &str, asset: &crate::engines::Asset, file: &Path, staged: &Path, progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<(String, Option<[u64; 3]>)> {
     crate::engines::download(&asset.url, file, Some(&asset.sha256), &mut |_, d, t| progress(d, t), &|| false)?;
     crate::engines::unpack(file, staged)?;
     if !staged.join(b.entry).is_file() {
-        return Err(format!("{} {tag}'s release has no {}.", b.name, b.entry));
+        return Err(anyhow::anyhow!("{} {tag}'s release has no {}.", b.name, b.entry));
     }
     Ok((version_in(staged).unwrap_or(tag.to_owned()), needs_node(staged)))
 }
 
 /// Puts a release (its archive) on a host as `<root>/<id>/<version>` and
 /// makes it the one in use there, as [`switch_to`] does here.
-fn put_on_host(place: &Place, b: &Offered, archive: &[u8], version: &str) -> Result<(), String> {
+fn put_on_host(place: &Place, b: &Offered, archive: &[u8], version: &str) -> anyhow::Result<()> {
     let dir = place.root().join(b.id);
     let script = format!(
         r#"set -e
@@ -502,14 +528,14 @@ done"#,
         entry = crate::remote::quote(b.entry),
         entry_shown = b.entry,
     );
-    crate::remote::run_ok_with_input(&place.host()?, &in_sh(&script), archive, Duration::from_secs(180)).map_err(|e| format!("Couldn't copy it to {}: {e:#}", place.on().trim_start_matches(" on ")))
+    crate::remote::run_ok_with_input(&place.host()?, &in_sh(&script), archive, Duration::from_secs(180)).map_err(|e| anyhow::anyhow!("Couldn't copy it to {}: {e:#}", place.on().trim_start_matches(" on ")))
 }
 
 /// Downloads its newest release when it's newer than the one in use there
 /// (or there's none) and makes it the one in use. With `node`, a release
 /// whose Node isn't installed there is refused. (The version before, the
 /// version now, the Node it needs.)
-fn install_latest_at(place: &Place, b: &Offered, node: bool, progress: &mut dyn FnMut(u64, u64)) -> Result<(Option<String>, String, Option<[u64; 3]>), String> {
+fn install_latest_at(place: &Place, b: &Offered, node: bool, progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<(Option<String>, String, NodeNeed)> {
     if *place == Place::Here {
         let root = root();
         let (before, now) = install_latest_in(&root, b, node, progress)?;
@@ -524,12 +550,12 @@ fn install_latest_at(place: &Place, b: &Offered, node: bool, progress: &mut dyn 
     let work = std::env::temp_dir().join(format!("harlo-mcp-{}-{}", b.id, std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     let file = work.join(b.asset);
-    let got = (|| -> Result<(String, Option<[u64; 3]>), String> {
+    let got = (|| -> anyhow::Result<(String, Option<[u64; 3]>)> {
         let (version, need) = fetch(b, &tag, &asset, &file, &work.join("staged"), progress)?;
         if node && let Some(need) = need {
-            find_node_at(place, Some(need)).map_err(|e| format!("{} {version} {}", b.name, e.trim_start_matches("It ").replace(", then turn it on again", " and update again")))?;
+            find_node_at(place, Some(need)).map_err(|e| anyhow::anyhow!("{} {version} {}", b.name, e.to_string().trim_start_matches("It ").replace(", then turn it on again", " and update again")))?;
         }
-        let archive = std::fs::read(&file).map_err(|e| e.to_string())?;
+        let archive = std::fs::read(&file)?;
         put_on_host(place, b, &archive, &version)?;
         Ok((version, need))
     })();
@@ -542,7 +568,7 @@ fn install_latest_at(place: &Place, b: &Offered, node: bool, progress: &mut dyn 
 /// (or there's none), checked against its published SHA-256, and makes it
 /// the one in use. With `node`, a release whose Node isn't installed is
 /// refused. (The version before, the version now.)
-fn install_latest_in(root: &Path, b: &Offered, node: bool, progress: &mut dyn FnMut(u64, u64)) -> Result<(Option<String>, String), String> {
+fn install_latest_in(root: &Path, b: &Offered, node: bool, progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<(Option<String>, String)> {
     let before = installed_in(root, b);
     let (tag, asset) = latest(b)?;
     if let Some(now) = before.clone().filter(|now| !newer(&tag, now)) {
@@ -558,7 +584,7 @@ fn install_latest_in(root: &Path, b: &Offered, node: bool, progress: &mut dyn Fn
             && let Some(need) = need
             && let Err(e) = find_node(Some(need))
         {
-            return Err(format!("{} {version} {}", b.name, e.trim_start_matches("It ").replace(", then turn it on again", " and update again")));
+            return Err(anyhow::anyhow!("{} {version} {}", b.name, e.to_string().trim_start_matches("It ").replace(", then turn it on again", " and update again")));
         }
         Ok(version)
     })();
@@ -576,7 +602,12 @@ fn install_latest_in(root: &Path, b: &Offered, node: bool, progress: &mut dyn Fn
 
 /// Updates it there to its newest release (blocking), used when its Node is
 /// there. New sessions use it; running ones keep theirs.
-pub fn update(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) -> Result<String, String> {
+///
+/// # Errors
+///
+/// When the release can't be read or downloaded, or the new copy can't be put
+/// in place.
+pub fn update(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> {
     let (before, version, need) = install_latest_at(place, b, true, progress)?;
     if before.as_deref() == Some(version.as_str()) {
         return Ok(format!("{} {version} is the newest.", b.name));
@@ -603,7 +634,7 @@ pub fn status(b: &Offered, place: &Place) -> Value {
         Ok(i) => i,
         Err(e) => {
             out["version"] = json!("");
-            out["error"] = json!(e);
+            out["error"] = json!(format!("{e:#}"));
             return out;
         }
     };
@@ -617,7 +648,7 @@ pub fn status(b: &Offered, place: &Place) -> Value {
     out["taken"] = json!(taken);
     out["needs"] = json!(need.map(show_version).unwrap_or_default());
     out["node"] = json!(node.as_ref().map(|n| show_version(n.version)).unwrap_or_default());
-    out["nodeError"] = json!(node.err().unwrap_or_default());
+    out["nodeError"] = json!(node.err().map(|e| format!("{e:#}")).unwrap_or_default());
     out
 }
 
@@ -637,7 +668,7 @@ mod tests {
     /// Its real latest release from GitHub, installed in a scratch folder
     /// (online: `--include-ignored`).
     #[test]
-    #[ignore]
+    #[ignore = "downloads a real release from GitHub"]
     fn installs_the_latest_release() {
         let (version, asset) = latest(&B).unwrap();
         assert!(newer(&version, "2.1.6"), "{version}");
@@ -668,10 +699,10 @@ mod tests {
     fn picks_a_node() {
         let n = |p: &str, v: [u64; 3]| Node { path: p.into(), version: v };
         // The one in PATH when it's enough, else the newest that is.
-        assert_eq!(pick_node(vec![n("/a", [24, 16, 0]), n("/b", [26, 0, 0])], Some([24, 15, 0])).unwrap().path, PathBuf::from("/a"));
-        assert_eq!(pick_node(vec![n("/a", [22, 0, 0]), n("/b", [25, 1, 0]), n("/c", [26, 0, 0])], Some([24, 15, 0])).unwrap().path, PathBuf::from("/c"));
-        assert_eq!(pick_node(vec![n("/a", [22, 3, 0])], Some([24, 15, 0])).unwrap_err(), "It needs Node 24.15 or newer; the newest installed is 22.3. Install a newer Node (nodejs.org, or your package manager), then turn it on again.");
-        assert!(pick_node(vec![], Some([24, 15, 0])).unwrap_err().contains("which isn't installed"));
+        assert_eq!(pick_node(&[n("/a", [24, 16, 0]), n("/b", [26, 0, 0])], Some([24, 15, 0])).unwrap().path, PathBuf::from("/a"));
+        assert_eq!(pick_node(&[n("/a", [22, 0, 0]), n("/b", [25, 1, 0]), n("/c", [26, 0, 0])], Some([24, 15, 0])).unwrap().path, PathBuf::from("/c"));
+        assert_eq!(pick_node(&[n("/a", [22, 3, 0])], Some([24, 15, 0])).unwrap_err().to_string(), "It needs Node 24.15 or newer; the newest installed is 22.3. Install a newer Node (nodejs.org, or your package manager), then turn it on again.");
+        assert!(pick_node(&[], Some([24, 15, 0])).unwrap_err().to_string().contains("which isn't installed"));
     }
 
     #[test]
@@ -680,7 +711,7 @@ mod tests {
         let text = "/usr/bin/node\t/usr/bin/node\tv22.3.0\n/home/u/.nvm/versions/node/v26.1.0/bin/node\t/home/u/.nvm/versions/node/v26.1.0/bin/node\tv26.1.0\n/usr/local/bin/node\t/usr/bin/node\tv22.3.0\n/opt/broken/node\t/opt/broken/node\t\n";
         let found = host_nodes(text);
         assert_eq!(found, vec![Node { path: "/usr/bin/node".into(), version: [22, 3, 0] }, Node { path: "/home/u/.nvm/versions/node/v26.1.0/bin/node".into(), version: [26, 1, 0] }]);
-        assert_eq!(pick_node(found, Some([24, 15, 0])).unwrap().version, [26, 1, 0]);
+        assert_eq!(pick_node(&found, Some([24, 15, 0])).unwrap().version, [26, 1, 0]);
         assert_eq!(package_facts(r#"{"version":"2.1.7","engines":{"node":">=24.15.0"}}"#), Some(("2.1.7".into(), Some([24, 15, 0]))));
         assert_eq!(package_facts(""), None);
         // A host's copies, as its agents name them.

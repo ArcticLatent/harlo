@@ -3,6 +3,8 @@
 //! settings ("remote_hosts") and handed to `harlo_core::remote`, which the
 //! rest of the app uses for `ssh://host/…` paths.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -153,6 +155,7 @@ fn ssh_text(h: &Host) -> String {
     h.ssh.iter().map(|w| remote::quote(w)).collect::<Vec<_>>().join(" ")
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Remotes {
     fn bump(mut self: Pin<&mut Self>) {
         let next = self.revision + 1;
@@ -230,7 +233,7 @@ impl Remotes {
 
     pub fn connect_host(mut self: Pin<&mut Self>, name: &QString) {
         let name = name.to_string();
-        tracing::info!("connecting to {name}");
+        tracing::event!(name: "remote.connect.start", tracing::Level::INFO, server.address = %name, "connecting to {{server.address}}");
         remote::set_disconnected(&name, false);
         let Some(host) = remote::host(&name) else { return };
         self.as_mut().rust_mut().states.insert(name.clone(), HostState { state: "connecting".into(), ..Default::default() });
@@ -238,6 +241,10 @@ impl Remotes {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let result = remote::check(&host);
+            match &result {
+                Ok(_) => tracing::event!(name: "remote.connect.success", tracing::Level::INFO, server.address = %name, "connected to {{server.address}}"),
+                Err(e) => tracing::event!(name: "remote.connect.failed", tracing::Level::WARN, server.address = %name, error.message = %format_args!("{e:#}"), "connecting to {{server.address}}: {{error.message}}"),
+            }
             let _ = thread.queue(move |mut this| {
                 let state = match result {
                     Ok(info) => HostState { state: "connected".into(), message: String::new(), info, ping: None },
@@ -286,7 +293,7 @@ impl Remotes {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             // (Installers download a lot; a stuck one is stopped after 20 minutes.)
-            let (state, message) = match crate::jobs::wait(job, std::time::Duration::from_secs(20 * 60)) {
+            let (state, message) = match crate::jobs::wait(job, std::time::Duration::from_mins(20)) {
                 Ok(()) => ("done", format!("{label} is installed on {name}.")),
                 Err(why) => ("failed", format!("Installing {label} on {name} failed: {why}")),
             };
@@ -318,7 +325,7 @@ impl Remotes {
             // A command over the shared connection: what each request costs.
             let started = std::time::Instant::now();
             let ok = remote::run(&host, "true", std::time::Duration::from_secs(10)).is_ok_and(|o| o.status.success());
-            let ms = started.elapsed().as_millis() as u64;
+            let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             let _ = thread.queue(move |mut this| {
                 if let Some(s) = this.as_mut().rust_mut().states.get_mut(&name) {
                     if ok {

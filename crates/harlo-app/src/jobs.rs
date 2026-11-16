@@ -2,6 +2,8 @@
 //! command run in the background, its output going to a log file that
 //! "View output" shows in a terminal.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -25,7 +27,7 @@ pub fn start(mut cmd: Command, name: &str) -> anyhow::Result<Job> {
 
 /// Waits for the job (stopped after `timeout`): Ok when it worked, else why
 /// not (the output's last line).
-pub fn wait(mut job: Job, timeout: Duration) -> Result<(), String> {
+pub fn wait(mut job: Job, timeout: Duration) -> anyhow::Result<()> {
     let deadline = Instant::now() + timeout;
     let status = loop {
         match job.child.try_wait() {
@@ -34,7 +36,7 @@ pub fn wait(mut job: Job, timeout: Duration) -> Result<(), String> {
             _ => {
                 let _ = job.child.kill();
                 let _ = job.child.wait();
-                return Err(format!("it took over {} minutes and was stopped", timeout.as_secs() / 60));
+                return Err(anyhow::anyhow!("it took over {} minutes and was stopped", timeout.as_secs() / 60));
             }
         }
     };
@@ -42,7 +44,7 @@ pub fn wait(mut job: Job, timeout: Duration) -> Result<(), String> {
         return Ok(());
     }
     let last = last_line(&std::fs::read_to_string(&job.log).unwrap_or_default());
-    Err(if last.is_empty() { format!("it stopped (exit {})", status.code().unwrap_or(-1)) } else { last })
+    Err(if last.is_empty() { anyhow::Error::msg(format!("it stopped (exit {})", status.code().unwrap_or(-1))) } else { anyhow::Error::msg(last) })
 }
 
 /// A command showing a job's log in a terminal: followed while it runs.

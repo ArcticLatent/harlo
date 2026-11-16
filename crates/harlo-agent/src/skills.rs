@@ -8,6 +8,9 @@
 //! plugins (not switched off in its settings), named `plugin:skill` as
 //! there, unless one of the others is the same skill.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// Listed in the instructions, at most (the rest by `/skill:`).
@@ -85,7 +88,7 @@ pub fn plugin_folders(cwd: &Path, home: &Path) -> Vec<(PathBuf, String)> {
             }
             let Some(at) = i["installPath"].as_str().map(PathBuf::from) else { continue };
             let meta = json_file(&at.join(".claude-plugin/plugin.json")).unwrap_or_default();
-            let name = meta["name"].as_str().map(str::to_owned).unwrap_or_else(|| id.split('@').next().unwrap_or(id).to_owned());
+            let name = meta["name"].as_str().map_or_else(|| id.split('@').next().unwrap_or(id).to_owned(), str::to_owned);
             // (`skills/`, and the folders its plugin.json adds.)
             let mut dirs = vec![at.join("skills")];
             let extra: Vec<&str> = match &meta["skills"] {
@@ -195,7 +198,7 @@ pub fn listing(skills: &[Skill]) -> String {
     );
     for k in listed {
         let d: String = k.description.chars().take(DESCRIBED).collect();
-        s.push_str(&format!("- {}: {} ({})\n", k.name, d.trim(), k.path.display()));
+        let _ = writeln!(s, "- {}: {} ({})", k.name, d.trim(), k.path.display());
     }
     s.push_str("</skills>\n");
     s
@@ -211,7 +214,7 @@ pub fn expand(text: &str, skills: &[Skill]) -> Option<String> {
     let whole = split(&text).1.trim();
     let mut body: String = whole.chars().take(SENT).collect();
     if body.len() < whole.len() {
-        body.push_str(&format!("\n\n(Cut short: the rest is in {}.)", skill.path.display()));
+        let _ = write!(body, "\n\n(Cut short: the rest is in {}.)", skill.path.display());
     }
     let folder = skill.path.parent().unwrap_or(Path::new("/"));
     let args = args.trim();

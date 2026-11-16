@@ -1,6 +1,8 @@
 //! Minimal change lists between two snapshots of a keyed list, so Qt
 //! models can update rows in place instead of resetting.
 
+// Rust guideline compliant 2026-10-09
+
 /// Apply in the order produced: updates (indices valid before structural
 /// changes), then the remove, then the insert.
 #[derive(Debug, Clone)]

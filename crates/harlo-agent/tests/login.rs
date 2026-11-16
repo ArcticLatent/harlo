@@ -3,6 +3,8 @@
 //! open for a pasted address, and a program waiting on it never returned.
 //! Nothing reaches OpenAI: the sign-in is declined on the callback.
 
+// Rust guideline compliant 2026-10-09
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -41,6 +43,8 @@ fn ends(finish: impl FnOnce(&str, &mut std::process::ChildStdin)) -> Option<bool
         if out.read(&mut byte).unwrap() == 0 {
             let mut err = String::new();
             child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+            let _ = child.kill();
+            let _ = child.wait();
             let _ = std::fs::remove_dir_all(&dir);
             assert!(err.contains("in use"), "{text}{err}");
             return None;

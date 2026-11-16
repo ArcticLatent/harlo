@@ -1,10 +1,15 @@
-//! A wiki's language: a BCP-47 tag, canonical as OpenWiki's runtime makes
-//! it (`Intl.getCanonicalLocales`), and recognized when English has a name
-//! for its language (`Intl.DisplayNames`). The data is that runtime's
-//! (lang_data.rs).
+//! A wiki's language: a BCP-47 tag, as OpenWiki's runtime reads it.
+//!
+//! The tag is canonical as that runtime makes it (`Intl.getCanonicalLocales`),
+//! and recognized when English has a name for its language
+//! (`Intl.DisplayNames`). The data is that runtime's (lang_data.rs).
+
+// Rust guideline compliant 2026-10-09
 
 use crate::lang_data::{GRANDFATHERED, LANGUAGES, Language, REGIONS, SIGN};
 
+/// A requested language, as [`resolve`] reads it.
+#[derive(Debug)]
 pub enum Resolved {
     Absent,
     Language(String),
@@ -17,11 +22,10 @@ pub fn resolve(input: Option<&str>) -> Resolved {
     if trimmed.is_empty() {
         return Resolved::Absent;
     }
-    if let Some(canonical) = canonicalize(trimmed) {
-        if language_of(&canonical).is_some_and(|l| named(&l)) {
+    if let Some(canonical) = canonicalize(trimmed)
+        && language_of(&canonical).is_some_and(|l| named(&l)) {
             return Resolved::Language(canonical);
         }
-    }
     Resolved::Unrecognized(format!("Unrecognized language \"{trimmed}\". Use a BCP-47 code such as ko, zh-CN, or pt-BR rather than a language name."))
 }
 
@@ -47,11 +51,10 @@ fn language_of(canonical: &str) -> Option<String> {
     if lang == "und" {
         return None;
     }
-    if canonical == lang {
-        if let Some(e) = entry(lang) {
+    if canonical == lang
+        && let Some(e) = entry(lang) {
             return Some(e.locale.to_owned()).filter(|l| !l.is_empty());
         }
-    }
     Some(lang.to_owned())
 }
 
@@ -68,6 +71,7 @@ fn alnum(s: &str) -> bool {
 }
 
 /// The canonical form of a Unicode locale identifier, None when it isn't one.
+#[expect(clippy::too_many_lines, reason = "BCP 47 canonicalization, step by step as the standard gives it")]
 pub fn canonicalize(tag: &str) -> Option<String> {
     if tag.is_empty() || !tag.is_ascii() {
         return None;
@@ -76,7 +80,7 @@ pub fn canonicalize(tag: &str) -> Option<String> {
     if let Ok(k) = GRANDFATHERED.binary_search_by(|(c, _)| (*c).cmp(lower.as_str())) {
         return Some(GRANDFATHERED[k].1.to_owned());
     }
-    let parts: Vec<String> = tag.split('-').map(|p| p.to_ascii_lowercase()).collect();
+    let parts: Vec<String> = tag.split('-').map(str::to_ascii_lowercase).collect();
     if parts.iter().any(|p| p.is_empty() || p.len() > 8 || !alnum(p)) {
         return None;
     }
@@ -144,14 +148,14 @@ pub fn canonicalize(tag: &str) -> Option<String> {
     if let Some(e) = entry(&language) {
         if script.is_none() && region.is_none() && variants.is_empty() && extensions.is_empty() && private.is_empty() {
             let mut r = e.alone.split('-');
-            language = r.next().unwrap_or(e.alone).to_owned();
+            r.next().unwrap_or(e.alone).clone_into(&mut language);
             for p in r {
                 if p.len() == 4 { script = Some(p.to_owned()) } else { region = Some(p.to_owned()) }
             }
         } else {
             let hans: Vec<&str> = e.with_script.split('-').collect();
             let us: Vec<&str> = e.with_region.split('-').collect();
-            language = hans[0].to_owned();
+            hans[0].clone_into(&mut language);
             if script.is_none() {
                 script = us.iter().skip(1).find(|p| p.len() == 4).map(|p| (*p).to_owned());
             }
@@ -160,19 +164,17 @@ pub fn canonicalize(tag: &str) -> Option<String> {
             }
         }
     }
-    if language == "sgn" {
-        if let Some(k) = region.as_ref().and_then(|r| SIGN.binary_search_by(|(c, _)| (*c).cmp(r.as_str())).ok()) {
-            language = SIGN[k].1.to_owned();
+    if language == "sgn"
+        && let Some(k) = region.as_ref().and_then(|r| SIGN.binary_search_by(|(c, _)| (*c).cmp(r.as_str())).ok()) {
+            SIGN[k].1.clone_into(&mut language);
             region = None;
         }
-    }
-    if let Some(reg) = &region {
-        if let Ok(k) = REGIONS.binary_search_by(|(c, _)| (*c).cmp(reg.as_str())) {
+    if let Some(reg) = &region
+        && let Ok(k) = REGIONS.binary_search_by(|(c, _)| (*c).cmp(reg.as_str())) {
             region = Some(REGIONS[k].1.to_owned());
         }
-    }
     // (-u-: its attributes, then its keywords by key, a "true" value left out.)
-    for (k, v) in extensions.iter_mut() {
+    for (k, v) in &mut extensions {
         if k != "u" {
             continue;
         }

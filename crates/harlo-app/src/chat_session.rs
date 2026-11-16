@@ -1,5 +1,7 @@
 //! `ChatSession`: QML list model of one live session's transcript rows.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -386,6 +388,9 @@ const ROLE_COMMAND: i32 = 0x111;
 /// A row's pictures to show (files, a line each).
 const ROLE_IMAGES: i32 = 0x112;
 
+/// A remote session's file: when it was asked for, and its text once it came.
+type HostFile = (std::time::Instant, Option<Arc<str>>);
+
 #[derive(Default)]
 pub struct ChatSessionRust {
     key: QString,
@@ -453,7 +458,7 @@ pub struct ChatSessionRust {
     files_read: i32,
     /// Files on a host that edits were numbered from: when each was asked
     /// for, and its text once it came.
-    host_files: std::cell::RefCell<std::collections::HashMap<String, (std::time::Instant, Option<Arc<str>>)>>,
+    host_files: std::cell::RefCell<std::collections::HashMap<String, HostFile>>,
     /// Where each row is (see `RowIndex`), once asked after the rows change.
     row_index: std::cell::RefCell<Option<RowIndex>>,
     /// Rows far back read whole from their page (see `harlo_core::pages`),
@@ -554,18 +559,18 @@ impl ChatSessionRust {
     /// The row with its long text (read back from its page, for a row far
     /// back: kept for the next ask, a view asks for each of its roles).
     fn whole(&self, row: &Arc<Row>) -> Arc<Row> {
-        let Some(paged) = &row.paged else { return row.clone() };
+        let Some(paged) = &row.paged else { return Arc::clone(row) };
         let mut kept = self.wholes.borrow_mut();
         if let Some(at) = kept.iter().position(|w| w.key == row.key && w.paged.as_ref() == Some(paged)) {
             let w = kept.remove(at).expect("found");
-            kept.push_front(w.clone());
+            kept.push_front(Arc::clone(&w));
             return w;
         }
         let mut w = (*harlo_core::transcript::whole(row)).clone();
         // (Kept with where it came from: the same page's record is the same.)
         w.paged = Some(paged.clone());
         let w = Arc::new(w);
-        kept.push_front(w.clone());
+        kept.push_front(Arc::clone(&w));
         // (The one just read stays, however long.)
         let mut text = 0;
         let keep = kept.iter().take(WHOLES).take_while(|r| {
@@ -628,6 +633,7 @@ impl Drop for ChatSessionRust {
     }
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl ChatSession {
     pub fn bind(mut self: Pin<&mut Self>, key: &QString) {
         if &self.key == key && (self.live.is_some() || key.is_empty()) {
@@ -641,12 +647,14 @@ impl ChatSession {
         // (Rows read back are this session's: they and their page go.)
         self.wholes.borrow_mut().clear();
         self.as_mut().set_preparing(false);
+        // SAFETY: begin_reset_model and end_reset_model are paired here, on the
+        // GUI thread that owns the model, and the rows change only between them.
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().rows.clear();
             *self.row_index.borrow_mut() = None;
             self.as_mut().end_reset_model();
-        }
+        };
         self.as_mut().rust_mut().requests.clear();
         self.as_mut().rust_mut().status_entries.clear();
         self.as_mut().show_front_request();
@@ -786,11 +794,11 @@ impl ChatSession {
             .map(|(i, r)| (i, if r.html.is_empty() { r.text.clone() } else { harlo_core::markdown::plain_text(&r.html) }))
             .collect();
         let texts: Vec<&str> = blocks.iter().map(|(_, text)| text.as_str()).collect();
-        blocks.get(harlo_core::search::best_block(&texts, &query.to_string())).map_or(first, |(i, _)| *i) as i32
+        i32::try_from(blocks.get(harlo_core::search::best_block(&texts, &query.to_string())).map_or(first, |(i, _)| *i)).unwrap_or(i32::MAX)
     }
 
     pub fn find_rows(&self, query: &QString) -> QString {
-        let words: Vec<String> = query.to_string().split_whitespace().map(|w| w.to_lowercase()).collect();
+        let words: Vec<String> = query.to_string().split_whitespace().map(str::to_lowercase).collect();
         if words.is_empty() {
             return QString::from("[]");
         }
@@ -812,11 +820,11 @@ impl ChatSession {
 
     pub fn index_of_key(&self, key: &QString) -> i32 {
         let key = key.to_string();
-        self.row_at(&key).map_or(-1, |i| i as i32)
+        self.row_at(&key).map_or(-1, |i| i32::try_from(i).unwrap_or(i32::MAX))
     }
 
     pub fn paged_rows(&self) -> i32 {
-        self.rows.iter().filter(|r| r.paged.is_some()).count() as i32
+        i32::try_from(self.rows.iter().filter(|r| r.paged.is_some()).count()).unwrap_or(i32::MAX)
     }
 
     pub fn transcript_text(&self) -> QString {
@@ -849,12 +857,12 @@ impl ChatSession {
     }
 
     pub fn remove_queued(self: Pin<&mut Self>, index: i32) {
-        let Some((queue, text)) = self.queue_raw.get(index.max(0) as usize).cloned() else { return };
+        let Some((queue, text)) = self.queue_raw.get(usize::try_from(index).unwrap_or(0)).cloned() else { return };
         self.request_then(json!({ "type": "remove_queued_message", "message": text, "queue": queue }), |_, _| {});
     }
 
     pub fn promote_queued(self: Pin<&mut Self>, index: i32) {
-        let Some((queue, text)) = self.queue_raw.get(index.max(0) as usize).cloned() else { return };
+        let Some((queue, text)) = self.queue_raw.get(usize::try_from(index).unwrap_or(0)).cloned() else { return };
         if queue != "followUp" {
             return;
         }
@@ -935,7 +943,7 @@ impl ChatSession {
     pub fn cancel_subagent(self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
         self.request_then(json!({ "type": "cancel_subagent", "subagentId": id }), move |mut this, data| {
-            let done = data.get("cancelled").and_then(|v| v.as_bool()).unwrap_or(false);
+            let done = data.get("cancelled").and_then(serde_json::Value::as_bool).unwrap_or(false);
             this.as_mut().set_subagent_message(QString::from(&if done { format!("Cancelled {id}") } else { format!("{id} was not running") }));
             this.refresh_subagents();
         });
@@ -981,7 +989,7 @@ impl ChatSession {
             text
         };
         // (As typed: what Stop gives back if it comes before it's sent.)
-        let typed = Some(harlo_core::Typed { words: original.clone(), files: self.attachments.iter().map(|p| p.to_string()).collect(), by_you: true });
+        let typed = Some(harlo_core::Typed { words: original.clone(), files: self.attachments.iter().map(std::string::ToString::to_string).collect(), by_you: true });
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
         // Sessions it mentions (picked from the `@` list): read when it's sent.
         let named = harlo_core::session_ref::tokens(&text);
@@ -1003,7 +1011,7 @@ impl ChatSession {
         // the UI thread.
         crate::runtime().spawn_blocking(move || {
             let server = server.or_else(|| host.as_deref().and_then(|h| crate::accounts::host_server(h, &agent, &model)));
-            if let Some(server) = server.filter(|s| s.needs_start()) {
+            if let Some(server) = server.filter(super::accounts::ModelServer::needs_start) {
                 let name = server.name().to_owned();
                 let starting = |name: String| {
                     let _ = thread.queue(move |mut this| this.as_mut().set_starting_server(QString::from(&name)));
@@ -1111,7 +1119,7 @@ impl ChatSession {
                     let next = prompts.get(i + 1).map(|(n, _)| n.clone()).unwrap_or_default();
                     // The latest turn: how many files it changed (the button says so, or isn't there).
                     let files = if next.is_empty() {
-                        harlo_core::git::folder_undo_plan(&dir, &snap).map(|p| (p.restore.len() + p.remove.len()) as i64).unwrap_or(0)
+                        harlo_core::git::folder_undo_plan(&dir, &snap).map_or(0, |p| i64::try_from(p.restore.len() + p.remove.len()).unwrap_or(i64::MAX))
                     } else {
                         -1
                     };
@@ -1147,7 +1155,7 @@ impl ChatSession {
                 Err(e) => json!({ "row": row, "state": "failed", "later": later, "message": format!("{e:#}") }),
             };
             let _ = thread.queue(move |mut this| {
-                let still = serde_json::from_str::<Value>(&this.undo_plan.to_string()).ok().is_some_and(|w| w["row"] == v["row"]);
+                let still = serde_json::from_str::<Value>(&this.undo_plan.to_string()).is_ok_and(|w| w["row"] == v["row"]);
                 if still {
                     this.as_mut().set_undo_plan(QString::from(&v.to_string()));
                 }
@@ -1255,8 +1263,8 @@ impl ChatSession {
         } else {
             std::fs::metadata(&file).ok().filter(|m| m.is_file() && m.len() < 4 << 20).and_then(|_| std::fs::read_to_string(&file).ok()).map(Arc::from)
         };
-        let numbers = text.map(|t| harlo_core::listing::diff_numbers(&all, &t)).unwrap_or_else(|| vec![None; all.len()]);
-        let lines = &all[..all.len().min(limit.max(0) as usize)];
+        let numbers = text.map_or_else(|| vec![None; all.len()], |t| harlo_core::listing::diff_numbers(&all, &t));
+        let lines = &all[..all.len().min(usize::try_from(limit).unwrap_or(0))];
         let texts: Vec<&str> = lines.iter().map(|l| l.get(1..).unwrap_or_default()).collect();
         let html = harlo_core::markdown::highlight_lines(&path.to_string(), &texts);
         let out: Vec<serde_json::Value> = lines
@@ -1300,7 +1308,7 @@ impl ChatSession {
 
     pub fn code_view(&self, tool: &QString, command: &QString, path: &QString, output: &QString, limit: i32) -> QString {
         let output = output.to_string();
-        match harlo_core::listing::view(&tool.to_string(), &command.to_string(), &path.to_string(), &output, limit.max(1) as usize) {
+        match harlo_core::listing::view(&tool.to_string(), &command.to_string(), &path.to_string(), &output, usize::try_from(limit.max(1)).unwrap_or(usize::MAX)) {
             Some(v) => {
                 let lines: Vec<serde_json::Value> = v.lines.iter().map(|l| serde_json::json!({ "n": l.num, "c": l.context, "h": l.html, "f": l.file })).collect();
                 QString::from(&serde_json::json!({ "path": v.path, "total": v.total, "more": v.more, "earlier": v.earlier, "lines": lines }).to_string())
@@ -1312,7 +1320,7 @@ impl ChatSession {
     pub fn call_output(&self, row_key: &QString) -> QString {
         let key = row_key.to_string();
         match self.row_at(&key).map(|i| self.whole(&self.rows[i])) {
-            Some(r) => QString::from(r.full.as_ref().map(|f| &*f.0).unwrap_or(r.text.as_str())),
+            Some(r) => QString::from(r.full.as_ref().map_or(r.text.as_str(), |f| &*f.0)),
             None => QString::default(),
         }
     }
@@ -1324,7 +1332,7 @@ impl ChatSession {
         }
         let run = self.run_rows(&group);
         let Some(at) = run.iter().position(|r| r.key == key) else { return 0 };
-        run[at + 1..].iter().filter(|r| r.kind == RowKind::Tool && harlo_core::listing::is_read(&r.title)).count() as i32
+        i32::try_from(run[at + 1..].iter().filter(|r| r.kind == RowKind::Tool && harlo_core::listing::is_read(&r.title)).count()).unwrap_or(i32::MAX)
     }
 
     pub fn code_text(&self, tool: &QString, command: &QString, path: &QString, output: &QString) -> QString {
@@ -1346,7 +1354,7 @@ impl ChatSession {
     pub fn answer_ask(self: Pin<&mut Self>, answers: &QString) {
         match serde_json::from_str::<Value>(&answers.to_string()) {
             Ok(list @ Value::Array(_)) => self.answer(json!({ "answers": list })),
-            _ => tracing::warn!("ask answers are not a JSON array"),
+            _ => tracing::event!(name: "chat.ask.answers.invalid", tracing::Level::WARN, "ask answers are not a JSON array"),
         }
     }
 
@@ -1402,7 +1410,7 @@ impl ChatSession {
                     });
                 }
                 Err(e) => {
-                    tracing::warn!("request failed: {e}");
+                    tracing::event!(name: "chat.request.failed", tracing::Level::WARN, error.message = %e, "request failed: {{error.message}}");
                     let _ = thread.queue(move |this| {
                         if this.generation == generation {
                             failed(this);
@@ -1532,6 +1540,8 @@ impl ChatSession {
     fn apply_updates(mut self: Pin<&mut Self>, updates: Vec<SessionUpdate>) {
         for update in updates {
             match update {
+                // SAFETY: begin_reset_model and end_reset_model are paired here, on the
+                // GUI thread that owns the model, and the rows change only between them.
                 SessionUpdate::Reset(rows) => unsafe {
                     self.as_mut().begin_reset_model();
                     self.as_mut().rust_mut().rows = rows;
@@ -1561,7 +1571,7 @@ impl ChatSession {
                     let compact = if m.context_window > 0 { m.compact_at as f64 / m.context_window as f64 } else { 0.0 };
                     self.as_mut().set_compact_fraction(compact);
                     self.as_mut().set_compact_note(QString::from(&compact_note(m.context_tokens, m.compact_at)));
-                    let title = if !m.name.is_empty() { m.name } else { m.first_message };
+                    let title = if m.name.is_empty() { m.first_message } else { m.name };
                     self.as_mut().set_title(QString::from(&title));
                 }
                 SessionUpdate::Commands(commands) => {
@@ -1673,7 +1683,7 @@ impl ChatSession {
                     .rows
                     .iter()
                     .filter(|row| matches!(row.kind, RowKind::Tool) && row.title == name && (row.state == "running" || row.state == "pending"))
-                    .map(|row| row.as_ref())
+                    .map(std::convert::AsRef::as_ref)
                     .collect();
                 let summary_matches = |row: &&&Row| {
                     let summary = row.subtitle.trim_end_matches('…');
@@ -1705,23 +1715,37 @@ impl ChatSession {
                     tool_ended |= ended(&row) && !ended(&self.rows[at]);
                     self.as_mut().rust_mut().rows[at] = row;
                     *self.row_index.borrow_mut() = None;
-                    let idx = self.index(at as i32, 0, &root);
+                    let idx = self.index(i32::try_from(at).unwrap_or(i32::MAX), 0, &root);
                     self.as_mut().data_changed(&idx, &idx, &QVector::<i32>::default());
                 }
-                RowChange::Remove { at, count } => unsafe {
-                    self.as_mut().begin_remove_rows(&root, at as i32, (at + count - 1) as i32);
-                    self.as_mut().rust_mut().rows.drain(at..at + count);
-                    *self.row_index.borrow_mut() = None;
-                    self.as_mut().end_remove_rows();
-                },
-                RowChange::Insert { at, rows } => unsafe {
+                RowChange::Remove { at, count } => {
+                    let len = self.rows.len();
+                    assert!(count > 0 && at + count <= len, "the session sent a removal of {count} rows at {at} from {len}");
+                    // SAFETY: begin/end_remove_rows are paired here, on the GUI
+                    // thread; `at..at + count` was just checked to be a non-empty
+                    // range of existing rows, drained exactly between them.
+                    unsafe {
+                        self.as_mut().begin_remove_rows(&root, i32::try_from(at).unwrap_or(i32::MAX), i32::try_from(at + count - 1).unwrap_or(i32::MAX));
+                        self.as_mut().rust_mut().rows.drain(at..at + count);
+                        *self.row_index.borrow_mut() = None;
+                        self.as_mut().end_remove_rows();
+                    }
+                }
+                RowChange::Insert { at, rows } => {
+                    let len = self.rows.len();
+                    assert!(!rows.is_empty() && at <= len, "the session sent an insertion of {} rows at {at} into {len}", rows.len());
                     tool_ended |= rows.iter().any(|r| ended(r));
                     let last = at + rows.len() - 1;
-                    self.as_mut().begin_insert_rows(&root, at as i32, last as i32);
-                    self.as_mut().rust_mut().rows.splice(at..at, rows);
-                    *self.row_index.borrow_mut() = None;
-                    self.as_mut().end_insert_rows();
-                },
+                    // SAFETY: begin/end_insert_rows are paired here, on the GUI
+                    // thread; `at..=last` was just checked to start within the
+                    // rows and holds exactly the rows spliced in between them.
+                    unsafe {
+                        self.as_mut().begin_insert_rows(&root, i32::try_from(at).unwrap_or(i32::MAX), i32::try_from(last).unwrap_or(i32::MAX));
+                        self.as_mut().rust_mut().rows.splice(at..at, rows);
+                        *self.row_index.borrow_mut() = None;
+                        self.as_mut().end_insert_rows();
+                    }
+                }
             }
         }
         // An approval can arrive before its tool row shows up.
@@ -1734,7 +1758,7 @@ impl ChatSession {
     }
 
     pub fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Some(row) = self.rows.get(index.row() as usize) else {
+        let Some(row) = self.rows.get(usize::try_from(index.row()).unwrap_or(0)) else {
             return QVariant::default();
         };
         let whole;
@@ -1798,7 +1822,7 @@ impl ChatSession {
     }
 
     pub fn row_count(&self, _parent: &QModelIndex) -> i32 {
-        self.rows.len() as i32
+        i32::try_from(self.rows.len()).unwrap_or(i32::MAX)
     }
 }
 
@@ -1853,7 +1877,7 @@ mod tests {
             text: text.into(),
             images: Vec::new(),
             mode: SendMode::Normal,
-            typed: Some(Typed { words: words.into(), files: files.iter().map(|f| f.to_string()).collect(), by_you: true }),
+            typed: Some(Typed { words: words.into(), files: files.iter().map(std::string::ToString::to_string).collect(), by_you: true }),
         };
         let png = json!({ "type": "image", "mimeType": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(b"\x89PNG picture") });
         // A (plan mode, a file read in front), then 20 more, two with the

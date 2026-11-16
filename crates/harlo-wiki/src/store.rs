@@ -1,6 +1,10 @@
-//! A repository's wiki files: page paths, discovery, reading pages and
-//! their Claims sidecars (`openwiki/.claims/<page>.json`), with OpenWiki's
-//! containment rules (no symbolic links, nothing outside the repository).
+//! A repository's wiki files, with OpenWiki's containment rules.
+//!
+//! Page paths, discovery, reading pages and their Claims sidecars
+//! (`openwiki/.claims/<page>.json`): no symbolic links, nothing outside the
+//! repository.
+
+// Rust guideline compliant 2026-10-09
 
 use crate::collate;
 use serde_json::Value;
@@ -88,6 +92,10 @@ pub fn is_grounded(page: &str) -> bool {
 }
 
 /// The canonical `/openwiki/...md` path of a page (`normalizeWikiPagePath`).
+///
+/// # Errors
+///
+/// A Retrieval [`Error`] when `page` isn't a page path under `openwiki/`.
 pub fn normalize_page(page: &str) -> Result<String> {
     let slashed = crate::jsre::trim(page).replace('\\', "/");
     if has_traversal(&slashed) {
@@ -105,6 +113,11 @@ pub fn normalize_page(page: &str) -> Result<String> {
 
 /// A generated Markdown page from a tool, with or without `openwiki/`
 /// (`normalizeWikiToolPagePath`): structural pages allowed, Claims files not.
+///
+/// # Errors
+///
+/// A Retrieval [`Error`] when `page` isn't a page path under `openwiki/`.
+/// Claims files aren't pages.
 pub fn normalize_tool_page(page: &str) -> Result<String> {
     let slashed = crate::jsre::trim(page).replace('\\', "/");
     if has_traversal(&slashed) {
@@ -121,6 +134,10 @@ pub fn normalize_tool_page(page: &str) -> Result<String> {
 }
 
 /// `/openwiki/a/b.md` → `a/b.json` (below `.claims`).
+///
+/// # Errors
+///
+/// A Retrieval [`Error`] when `page` isn't a page path under `openwiki/`.
 pub fn sidecar_relative(page: &str) -> Result<String> {
     let p = normalize_page(page)?;
     let rel = &p["/openwiki/".len()..];
@@ -128,6 +145,7 @@ pub fn sidecar_relative(page: &str) -> Result<String> {
 }
 
 /// One repository's wiki files.
+#[derive(Debug)]
 pub struct Store {
     pub root: PathBuf,
     real_root: std::cell::OnceCell<std::result::Result<PathBuf, String>>,
@@ -156,6 +174,8 @@ impl std::fmt::Display for Error {
     }
 }
 
+impl std::error::Error for Error {}
+
 /// `sha256:<hex>` of some bytes.
 pub fn sha256_version(bytes: &[u8]) -> String {
     use sha2::Digest;
@@ -176,7 +196,7 @@ impl Store {
     }
 
     fn display(&self, p: &Path) -> String {
-        p.strip_prefix(&self.root).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string_lossy().into_owned())
+        p.strip_prefix(&self.root).map_or_else(|_| p.to_string_lossy().into_owned(), |r| r.to_string_lossy().into_owned())
     }
 
     fn real_root(&self) -> Result<PathBuf> {
@@ -198,6 +218,11 @@ impl Store {
     }
 
     /// An existing contained regular file (None: absent).
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when the path is refused (a link, an alias, outside
+    /// the repository) or can't be read.
     pub fn existing_file(&self, p: &Path) -> Result<Option<PathBuf>> {
         let meta = match std::fs::symlink_metadata(p) {
             Ok(m) => m,
@@ -214,6 +239,11 @@ impl Store {
     }
 
     /// An existing contained directory (None: absent).
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when the path is refused (a link, an alias, outside
+    /// the repository) or can't be read.
     pub fn existing_dir(&self, p: &Path) -> Result<Option<PathBuf>> {
         let meta = match std::fs::symlink_metadata(p) {
             Ok(m) => m,
@@ -230,6 +260,10 @@ impl Store {
     }
 
     /// Generated pages that own Claims, in OpenWiki's order.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when the wiki's folder is refused or can't be listed.
     pub fn discover_pages(&self) -> Result<Vec<String>> {
         let Some(dir) = self.existing_dir(&self.wiki_dir())? else { return Ok(Vec::new()) };
         let mut files = Vec::new();
@@ -240,26 +274,39 @@ impl Store {
     }
 
     /// Pages that have a sidecar (orphans included), in OpenWiki's order.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when the Claims folder is refused or can't be listed.
     pub fn discover_sidecar_pages(&self) -> Result<Vec<String>> {
         let Some(dir) = self.existing_dir(&self.wiki_dir().join(CLAIMS_DIRECTORY))? else { return Ok(Vec::new()) };
         let mut files = Vec::new();
         collect_files(&dir, "", true, &mut files)?;
         let mut pages: Vec<String> = files
             .into_iter()
-            .filter(|f| f.ends_with(".json"))
-            .map(|f| format!("/openwiki/{}.md", f.strip_suffix(".json").unwrap()))
+            .filter_map(|f| f.strip_suffix(".json").map(|f| format!("/openwiki/{f}.md")))
             .filter(|p| is_grounded(p))
             .collect();
         pages.sort_by(|a, b| collate::compare(a, b));
         Ok(pages)
     }
 
+    /// Where `page` is on disk.
+    ///
+    /// # Errors
+    ///
+    /// A Retrieval [`Error`] when `page` isn't a page path under `openwiki/`.
     pub fn page_path(&self, page: &str) -> Result<PathBuf> {
         let p = normalize_page(page)?;
         Ok(self.root.join(&p[1..]))
     }
 
     /// A page's Markdown.
+    ///
+    /// # Errors
+    ///
+    /// A PageMissing [`Error`] when the page doesn't exist, a Claims one when
+    /// it's refused or can't be read.
     pub fn read_markdown(&self, page: &str) -> Result<String> {
         let normalized = normalize_page(page)?;
         let path = self.root.join(&normalized[1..]);
@@ -271,11 +318,21 @@ impl Store {
             .map_err(|e| Error::Claims(format!("Unable to read {normalized}: {}", io_message(&e))))
     }
 
+    /// Where `page`'s Claims sidecar is on disk.
+    ///
+    /// # Errors
+    ///
+    /// A Retrieval [`Error`] when `page` isn't a page path under `openwiki/`.
     pub fn sidecar_path(&self, page: &str) -> Result<PathBuf> {
         Ok(self.wiki_dir().join(CLAIMS_DIRECTORY).join(sidecar_relative(page)?))
     }
 
     /// A page's validated sidecar (None: none).
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when the sidecar is refused, can't be read or isn't
+    /// valid.
     pub fn load_page(&self, page: &str) -> Result<Option<Value>> {
         let sidecar = self.sidecar_path(page)?;
         let Some(physical) = self.existing_file(&sidecar)? else { return Ok(None) };
@@ -290,6 +347,10 @@ impl Store {
     }
 
     /// A page's `sha256:` version (its bytes).
+    ///
+    /// # Errors
+    ///
+    /// As [`read_markdown`](Self::read_markdown).
     pub fn hash_page(&self, page: &str) -> Result<String> {
         let normalized = normalize_page(page)?;
         let path = self.root.join(&normalized[1..]);
@@ -300,6 +361,11 @@ impl Store {
     }
 
     /// Rewrites an existing page in place.
+    ///
+    /// # Errors
+    ///
+    /// A PageMissing [`Error`] when the page doesn't exist, a Claims one when
+    /// it's refused or can't be written.
     pub fn write_markdown(&self, page: &str, content: &str) -> Result<()> {
         let normalized = normalize_page(page)?;
         let path = self.root.join(&normalized[1..]);
@@ -310,6 +376,11 @@ impl Store {
     }
 
     /// Validates and writes a page's sidecar atomically.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when `claims` isn't a valid sidecar or it can't be
+    /// written.
     pub fn write_page(&self, page: &str, claims: &Value) -> Result<()> {
         let normalized = normalize_page(page)?;
         validate_page_claims(claims, &format!("claims for {normalized}"))?;
@@ -321,6 +392,10 @@ impl Store {
     }
 
     /// Removes a page's sidecar, if any.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when the sidecar is refused or can't be removed.
     pub fn delete_page(&self, page: &str) -> Result<()> {
         let sidecar = self.sidecar_path(page)?;
         let Some(dir) = self.existing_dir(sidecar.parent().unwrap_or(&self.root))? else { return Ok(()) };
@@ -366,7 +441,7 @@ fn collect_files(dir: &Path, rel: &str, include_claims: bool, out: &mut Vec<Stri
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(Error::Claims(format!("Unable to enumerate {}: {}", dir.display(), io_message(&e)))),
     };
-    let mut names: Vec<String> = entries.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    let mut names: Vec<String> = entries.filter_map(std::result::Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     names.sort_by(|a, b| collate::compare(a, b));
     for name in names {
         let child_rel = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
@@ -397,6 +472,11 @@ fn canonical_string(v: &Value) -> bool {
 
 /// A sidecar's shape: schema version 1, a page hash, Claims with evidence,
 /// optional verification; no other keys, ids and resources unique.
+///
+/// # Errors
+///
+/// A Claims [`Error`] naming the first thing that isn't valid, with `what` for
+/// the file.
 pub fn validate_page_claims(v: &Value, what: &str) -> Result<()> {
     let bad = |m: &str| Err(Error::Claims(format!("Invalid {what}: {m}")));
     let Some(o) = v.as_object() else { return bad("root: Expected object") };
@@ -422,22 +502,22 @@ pub fn validate_page_claims(v: &Value, what: &str) -> Result<()> {
         {
             return bad("claims: Invalid claim");
         }
+        let id = c.get("id").and_then(Value::as_str).unwrap_or_default();
         let Some(ev) = c.get("evidence").and_then(Value::as_array).filter(|e| !e.is_empty()) else { return bad("claims: evidence") };
         let mut resources = std::collections::HashSet::new();
         for e in ev {
             let Some(e) = e.as_object() else { return bad("evidence: Expected object") };
-            if e.keys().any(|k| !["resource", "version"].contains(&k.as_str()))
-                || !e.get("resource").is_some_and(canonical_string)
-                || !e.get("version").is_some_and(canonical_string)
-            {
+            let Some(r) = e.get("resource").and_then(Value::as_str).filter(|_| {
+                !e.keys().any(|k| !["resource", "version"].contains(&k.as_str()))
+                    && e.get("resource").is_some_and(canonical_string)
+                    && e.get("version").is_some_and(canonical_string)
+            }) else {
                 return bad("evidence: Invalid");
-            }
-            let r = e["resource"].as_str().unwrap();
+            };
             if !resources.insert(r.to_owned()) {
-                return Err(Error::Claims(format!("Duplicate evidence resource {r} for claim {} in {what}", c["id"].as_str().unwrap())));
+                return Err(Error::Claims(format!("Duplicate evidence resource {r} for claim {id} in {what}")));
             }
         }
-        let id = c["id"].as_str().unwrap();
         if !ids.insert(id.to_owned()) {
             return Err(Error::Claims(format!("Duplicate claim id {id} in {what}")));
         }
@@ -461,10 +541,10 @@ mod tests {
     fn page_paths() {
         assert_eq!(normalize_page("openwiki//a.md").unwrap(), "/openwiki/a.md");
         assert_eq!(normalize_page(" \\openwiki\\a.md ").unwrap(), "/openwiki/a.md");
-        assert!(normalize_page("openwiki/./a.md").is_err());
-        assert!(normalize_page("openwiki/index.md").is_err());
-        assert!(normalize_page("openwiki/.claims/a.md").is_err());
-        assert!(normalize_page("openwiki/A.MD").is_err());
+        normalize_page("openwiki/./a.md").unwrap_err();
+        normalize_page("openwiki/index.md").unwrap_err();
+        normalize_page("openwiki/.claims/a.md").unwrap_err();
+        normalize_page("openwiki/A.MD").unwrap_err();
         assert_eq!(posix_normalize("/a//b/"), "/a/b/");
         assert_eq!(sidecar_relative("/openwiki/x/y.md").unwrap(), "x/y.json");
         assert_eq!(normalize_tool_page("index.md").unwrap(), "/openwiki/index.md");

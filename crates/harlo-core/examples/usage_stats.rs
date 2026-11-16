@@ -1,5 +1,7 @@
 //! Prints usage stats for all sessions: `cargo run -p harlo-core --example usage_stats --release [days]`.
 
+// Rust guideline compliant 2026-10-09
+
 fn main() {
     let days: u32 = std::env::args().nth(1).and_then(|d| d.parse().ok()).unwrap_or(30);
     let t = std::time::Instant::now();
@@ -11,7 +13,7 @@ fn main() {
     let r = harlo_core::stats::report(&again, days, &[]);
     println!("{} files: cold {cold:?}, cached {warm:?}", files.len());
     let mut r2 = r.clone();
-    r2["daily"] = serde_json::json!(format!("{} days", r["daily"].as_array().map_or(0, |d| d.len())));
+    r2["daily"] = serde_json::json!(format!("{} days", r["daily"].as_array().map_or(0, std::vec::Vec::len)));
     r2["models"] = serde_json::json!(r["models"].as_array().map(|m| m.iter().take(4).cloned().collect::<Vec<_>>()));
     r2["tools"] = serde_json::json!(r["tools"].as_array().map(|m| m.iter().take(6).cloned().collect::<Vec<_>>()));
     println!("{}", serde_json::to_string_pretty(&r2).unwrap());

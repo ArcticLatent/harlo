@@ -17,6 +17,9 @@
 //!   callers among same-named ones took 87% fewer tokens with it; Rust
 //!   tasks that didn't use it took about 2% more (its definition).
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -133,7 +136,7 @@ enum Found {
 /// that says it: Pyright's server only talks over its pipe). One still
 /// running after a few seconds started. rustup's stand-in for a component
 /// that isn't installed fails at once.
-fn starts(program: &Path) -> Result<(), String> {
+fn starts(program: &Path) -> anyhow::Result<()> {
     let name = program.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     let (check, args): (&str, &[&str]) = match name {
         "basedpyright-langserver" => ("basedpyright", &["--version"]),
@@ -156,7 +159,7 @@ fn starts(program: &Path) -> Result<(), String> {
                 tries += 1;
                 std::thread::sleep(Duration::from_millis(25));
             }
-            spawned => break spawned.map_err(|e| format!("it can't be run ({e})"))?,
+            spawned => break spawned.map_err(|e| anyhow::anyhow!("it can't be run ({e})"))?,
         }
     };
     let end = Instant::now() + Duration::from_secs(5);
@@ -169,7 +172,7 @@ fn starts(program: &Path) -> Result<(), String> {
                     let _ = std::io::Read::read_to_string(&mut err, &mut said);
                 }
                 let said = said.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().trim_start_matches("error: ").to_owned();
-                return Err(if said.is_empty() { format!("it fails to start ({status})") } else { said });
+                return Err(if said.is_empty() { anyhow::Error::msg(format!("it fails to start ({status})")) } else { anyhow::Error::msg(said) });
             }
             Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(50)),
             _ => {
@@ -198,7 +201,7 @@ fn look_for(li: usize, dirs: &[PathBuf]) -> Found {
             }
         }
     }
-    broken.map_or(Found::Missing, |(p, why)| Found::Broken(p, why))
+    broken.map_or(Found::Missing, |(p, why)| Found::Broken(p, format!("{why:#}")))
 }
 
 /// A language's server command, looked for once (when a project of it
@@ -242,7 +245,7 @@ fn system(dirs: &[PathBuf], home: &Path) -> System {
     let find = |name: &str| dirs.iter().map(|d| d.join(name)).find(|p| p.is_file());
     let tools = TOOLS.into_iter().filter(|t| find(t).is_some()).collect();
     let manager = MANAGERS.into_iter().find(|m| find(m).is_some());
-    let mine = |p: &Path| !home.as_os_str().is_empty() && p.starts_with(&home);
+    let mine = |p: &Path| !home.as_os_str().is_empty() && p.starts_with(home);
     // A prefix set in the environment or ~/.npmrc, in the home.
     let prefix = std::env::var("NPM_CONFIG_PREFIX").or_else(|_| std::env::var("npm_config_prefix")).ok().or_else(|| {
         let rc = std::fs::read_to_string(home.join(".npmrc")).ok()?;
@@ -257,7 +260,7 @@ fn system(dirs: &[PathBuf], home: &Path) -> System {
             .stderr(Stdio::null())
             .output()
             .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim().strip_prefix("Candidate:").is_some_and(|c| c.trim() != "(none)")));
-    System { tools, manager, root: unsafe { libc::geteuid() } == 0, npm_own, apt_rust_analyzer }
+    System { tools, manager, root: crate::sys::euid() == 0, npm_own, apt_rust_analyzer }
 }
 
 /// How to install a language's server here: with the user's own language
@@ -413,10 +416,17 @@ pub fn diagnostics_on() -> bool {
     env("HARLO_AGENT_LSP") != "off" && env("HARLO_AGENT_DIAGNOSTICS") == "on"
 }
 
+/// A language server's identity: which server in the list, and its root.
+type ServerKey = (usize, PathBuf);
+
+/// A server once it has started, or why it couldn't (as text: every
+/// caller gets its own copy, and an error can't be cloned).
+type Starting = OnceCell<Result<Arc<Server>, String>>;
+
 /// The servers this session started, by language and root.
 #[derive(Default)]
 pub struct Servers {
-    running: StdMutex<HashMap<(usize, PathBuf), Arc<OnceCell<Result<Arc<Server>, String>>>>>,
+    running: StdMutex<HashMap<ServerKey, Arc<Starting>>>,
 }
 
 impl Servers {
@@ -442,18 +452,18 @@ impl Servers {
             Ok(b) => String::from_utf8_lossy(&b).into_owned(),
             Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
         };
-        let line = args["line"].as_u64().unwrap_or(0) as usize;
+        let line = usize::try_from(args["line"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
         let Some(line_text) = text.lines().nth(line.wrapping_sub(1)) else {
             return fail(format!("{} has {} lines: give a line from 1.", path.display(), text.lines().count()));
         };
-        let Some(column) = column_of(line_text, s("symbol"), args["occurrence"].as_u64().unwrap_or(1).max(1) as usize) else {
+        let Some(column) = column_of(line_text, s("symbol"), usize::try_from(args["occurrence"].as_u64().unwrap_or(1).max(1)).unwrap_or(usize::MAX)) else {
             return fail(format!("{:?} isn't on line {line} of {}: {}", s("symbol"), path.display(), line_text.trim()));
         };
         let deadline = Instant::now() + TIMEOUT;
         let root = root_of(&path, cwd, LANGS[li].markers);
         let server = match self.server(li, &root, command, sandbox).await {
             Ok(s) => s,
-            Err(e) => return fail(e),
+            Err(e) => return fail(format!("{e:#}")),
         };
         match server.ask(op, &path, language, &text, line - 1, line_text, column, deadline).await {
             Ok(answer) => Outcome::new(answer.render(cwd, op), false),
@@ -461,7 +471,7 @@ impl Servers {
                 if server.exited() {
                     self.running.lock().unwrap().remove(&(li, root));
                 }
-                fail(e)
+                fail(format!("{e:#}"))
             }
         }
     }
@@ -475,7 +485,7 @@ impl Servers {
             return None;
         }
         let deadline = Instant::now() + DIAG_WAIT;
-        let mut groups: Vec<((usize, PathBuf), Vec<(PathBuf, &'static str)>)> = Vec::new();
+        let mut groups: Vec<(ServerKey, Vec<(PathBuf, &'static str)>)> = Vec::new();
         for p in paths {
             let Some((li, language)) = lang_of(p) else { continue };
             if installed(li).is_none() || !p.is_file() {
@@ -498,7 +508,7 @@ impl Servers {
                     let room = DIAG_SHOWN.saturating_sub(shown);
                     let mut text = format!("{} sees {n} error{} now:\n{}", server.name, if n == 1 { "" } else { "s" }, rows[..n.min(room)].join("\n"));
                     if n > room {
-                        text.push_str(&format!("\n[{} more not shown]", n - room));
+                        let _ = write!(text, "\n[{} more not shown]", n - room);
                     }
                     shown += n.min(room);
                     parts.push(text);
@@ -515,16 +525,16 @@ impl Servers {
     }
 
     /// The server for a language and root: running, or started.
-    async fn server(&self, li: usize, root: &Path, command: &[String], sandbox: Option<&Sandbox>) -> Result<Arc<Server>, String> {
+    async fn server(&self, li: usize, root: &Path, command: &[String], sandbox: Option<&Sandbox>) -> anyhow::Result<Arc<Server>> {
         let key = (li, root.to_path_buf());
         let cell = {
             let mut running = self.running.lock().unwrap();
             if running.get(&key).and_then(|c| c.get()).is_some_and(|r| r.as_ref().is_ok_and(|s| s.exited())) {
                 running.remove(&key);
             }
-            running.entry(key).or_default().clone()
+            Arc::clone(running.entry(key).or_default())
         };
-        cell.get_or_init(|| Server::start(li, root, command, sandbox)).await.clone()
+        cell.get_or_init(|| async { Server::start(li, root, command, sandbox).await.map_err(|e| format!("{e:#}")) }).await.clone().map_err(anyhow::Error::msg)
     }
 }
 
@@ -579,7 +589,7 @@ impl Encoding {
         }
     }
 
-    fn from_server(self, line: &str, units: usize) -> usize {
+    fn chars_from_units(self, line: &str, units: usize) -> usize {
         let mut n = 0;
         let mut chars = 0;
         for c in line.chars() {
@@ -603,7 +613,7 @@ struct Busy {
     exited: bool,
 }
 
-type Pending = Arc<StdMutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>;
+type Pending = Arc<StdMutex<HashMap<i64, oneshot::Sender<anyhow::Result<Value>>>>>;
 
 /// What the server last said is wrong in a file.
 struct Published {
@@ -640,18 +650,17 @@ pub struct Server {
 impl Drop for Server {
     fn drop(&mut self) {
         if self.pgid > 0 {
-            // SAFETY: killpg(2) on the process group this server leads.
-            unsafe { libc::killpg(self.pgid, libc::SIGKILL) };
+            crate::sys::signal_group(self.pgid, libc::SIGKILL);
             crate::jobs::forget(self.pgid);
         }
     }
 }
 
-async fn send(stdin: &Mutex<ChildStdin>, message: &Value) -> Result<(), String> {
+async fn send(stdin: &Mutex<ChildStdin>, message: &Value) -> anyhow::Result<()> {
     let body = message.to_string();
     let mut w = stdin.lock().await;
-    w.write_all(format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.map_err(|e| format!("the server stopped ({e})"))?;
-    w.flush().await.map_err(|e| format!("the server stopped ({e})"))
+    w.write_all(format!("Content-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.map_err(|e| anyhow::anyhow!("the server stopped ({e})"))?;
+    w.flush().await.map_err(|e| anyhow::anyhow!("the server stopped ({e})"))
 }
 
 /// The settings a server asks for, by section (rust-analyzer: nothing
@@ -672,19 +681,19 @@ fn settings(section: &str) -> Value {
 }
 
 impl Server {
-    async fn start(li: usize, root: &Path, command: &[String], sandbox: Option<&Sandbox>) -> Result<Arc<Server>, String> {
+    async fn start(li: usize, root: &Path, command: &[String], sandbox: Option<&Sandbox>) -> anyhow::Result<Arc<Server>> {
         // (Its program's name: the command has its whole path.)
         let name = Path::new(&command[0]).file_name().map_or_else(|| command[0].clone(), |n| n.to_string_lossy().into_owned());
         let line = format!("exec {}", command.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" "));
         let mut cmd = crate::tools::bash::command(&line, root, sandbox);
         cmd.stdin(Stdio::piped()).kill_on_drop(true);
-        let mut child = cmd.spawn().map_err(|e| format!("Couldn't start {name}: {e}"))?;
-        let pgid = child.id().map_or(0, |p| p as i32);
+        let mut child = cmd.spawn().map_err(|e| anyhow::anyhow!("Couldn't start {name}: {e}"))?;
+        let pgid = child.id().map_or(0, |p| i32::try_from(p).unwrap_or(i32::MAX));
         if pgid > 0 {
             crate::jobs::end_at_exit(pgid);
         }
         let (Some(stdin), Some(stdout), Some(mut err)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
-            return Err(format!("Couldn't talk to {name}."));
+            return Err(anyhow::anyhow!("Couldn't talk to {name}."));
         };
         let stdin = Arc::new(Mutex::new(stdin));
         let pending: Pending = Arc::default();
@@ -693,7 +702,7 @@ impl Server {
         let (published_tx, published) = watch::channel(0u64);
         let stderr = Arc::new(StdMutex::new(String::new()));
         {
-            let stderr = stderr.clone();
+            let stderr = Arc::clone(&stderr);
             tokio::spawn(async move {
                 let mut buf = vec![0; 8192];
                 while let Ok(n) = err.read(&mut buf).await {
@@ -708,9 +717,9 @@ impl Server {
                         s.drain(..cut);
                     }
                 }
-            });
-        }
-        tokio::spawn(read_loop(stdout, stdin.clone(), pending.clone(), tx, (diags.clone(), published_tx), name.clone(), root.to_path_buf(), child));
+            })
+        };
+        tokio::spawn(read_loop(stdout, Arc::clone(&stdin), Arc::clone(&pending), tx, (Arc::clone(&diags), published_tx), name.clone(), root.to_path_buf(), child));
         let mut server = Server {
             says_when_done: name == "rust-analyzer",
             name,
@@ -755,7 +764,7 @@ impl Server {
             },
         });
         let deadline = Instant::now() + TIMEOUT;
-        let reply = server.request("initialize", init, deadline).await.map_err(|e| format!("{} didn't start: {e}{}", server.name, server.last_words()))?;
+        let reply = server.request("initialize", init, deadline).await.map_err(|e| anyhow::anyhow!("{} didn't start: {e}{}", server.name, server.last_words()))?;
         server.caps = reply["capabilities"].clone();
         if server.caps["positionEncoding"] == "utf-8" {
             server.encoding = Encoding::Utf8;
@@ -777,29 +786,29 @@ impl Server {
         if tail.is_empty() { String::new() } else { format!(" ({})", tail.chars().take(400).collect::<String>()) }
     }
 
-    async fn request(&self, method: &str, params: Value, deadline: Instant) -> Result<Value, String> {
+    async fn request(&self, method: &str, params: Value, deadline: Instant) -> anyhow::Result<Value> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
         send(&self.stdin, &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })).await?;
         match tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), rx).await {
             Ok(Ok(r)) => r,
-            Ok(Err(_)) => Err(format!("{} stopped{}", self.name, self.last_words())),
+            Ok(Err(_)) => Err(anyhow::anyhow!("{} stopped{}", self.name, self.last_words())),
             Err(_) => {
                 self.pending.lock().unwrap().remove(&id);
                 let _ = send(&self.stdin, &json!({ "jsonrpc": "2.0", "method": "$/cancelRequest", "params": { "id": id } })).await;
-                Err(format!("{} didn't answer in {} s.", self.name, TIMEOUT.as_secs()))
+                Err(anyhow::anyhow!("{} didn't answer in {} s.", self.name, TIMEOUT.as_secs()))
             }
         }
     }
 
     /// Waits until the server has finished what it's doing (indexing).
-    async fn settled(&self, deadline: Instant) -> Result<(), String> {
+    async fn settled(&self, deadline: Instant) -> anyhow::Result<()> {
         let mut busy = self.busy.clone();
         loop {
             let b = busy.borrow_and_update().clone();
             if b.exited {
-                return Err(format!("{} stopped{}", self.name, self.last_words()));
+                return Err(anyhow::anyhow!("{} stopped{}", self.name, self.last_words()));
             }
             let quiet_for = b.changed.map_or(self.started.elapsed(), |c| c.elapsed());
             let done = match b.quiescent {
@@ -812,7 +821,7 @@ impl Server {
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return Err(format!("{} is still reading the project ({} s so far): ask again in a while, or use grep and read meanwhile.", self.name, self.started.elapsed().as_secs()));
+                return Err(anyhow::anyhow!("{} is still reading the project ({} s so far): ask again in a while, or use grep and read meanwhile.", self.name, self.started.elapsed().as_secs()));
             }
             let _ = tokio::time::timeout(left.min(Duration::from_millis(200)), busy.changed()).await;
         }
@@ -820,7 +829,7 @@ impl Server {
 
     /// Sends `path` as it is now (and any other document sent before that
     /// changed on disk since).
-    async fn sync(&self, path: &Path, language: &str, text: &str) -> Result<i64, String> {
+    async fn sync(&self, path: &Path, language: &str, text: &str) -> anyhow::Result<i64> {
         let mut docs = self.docs.lock().await;
         let others: Vec<PathBuf> = docs.keys().filter(|p| p.as_path() != path).cloned().collect();
         for p in others {
@@ -844,7 +853,7 @@ impl Server {
             Some((version, old)) if old != text => {
                 *version += 1;
                 send(&self.stdin, &json!({ "jsonrpc": "2.0", "method": "textDocument/didChange", "params": { "textDocument": { "uri": uri(path), "version": *version }, "contentChanges": [{ "text": text }] } })).await?;
-                *old = text.to_owned();
+                text.clone_into(old);
                 Ok(*version)
             }
             Some((version, _)) => Ok(*version),
@@ -856,8 +865,8 @@ impl Server {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn ask(&self, op: &str, path: &Path, language: &str, text: &str, line: usize, line_text: &str, column: usize, deadline: Instant) -> Result<Answer, String> {
+    #[expect(clippy::too_many_arguments, reason = "each is a separate input of one language server request")]
+    async fn ask(&self, op: &str, path: &Path, language: &str, text: &str, line: usize, line_text: &str, column: usize, deadline: Instant) -> anyhow::Result<Answer> {
         let provider = match op {
             "definition" => "definitionProvider",
             "references" => "referencesProvider",
@@ -866,12 +875,13 @@ impl Server {
             _ => "hoverProvider",
         };
         if self.caps[provider].is_null() || self.caps[provider] == false {
-            return Err(format!("{} can't answer {op}.", self.name));
+            return Err(anyhow::anyhow!("{} can't answer {op}.", self.name));
         }
         self.sync(path, language, text).await?;
         let at = json!({ "textDocument": { "uri": uri(path) }, "position": { "line": line, "character": self.encoding.to_server(line_text, column) } });
         // (Asked again once when the server says the code changed under it.)
-        for tries in 0.. {
+        let mut retried = false;
+        loop {
             self.settled(deadline).await?;
             let result = match op {
                 "definition" => self.request("textDocument/definition", at.clone(), deadline).await,
@@ -891,8 +901,8 @@ impl Server {
                 },
             };
             match result {
-                Err(e) if tries == 0 && e.contains("content modified") => continue,
-                Err(e) => return Err(format!("{}: {e}", self.name)),
+                Err(e) if !retried && e.to_string().contains("content modified") => retried = true,
+                Err(e) => return Err(anyhow::anyhow!("{}: {e}", self.name)),
                 Ok(mut v) => {
                     if op == "callers" {
                         self.name_containers(&mut v["calls"], deadline).await;
@@ -901,7 +911,6 @@ impl Server {
                 }
             }
         }
-        unreachable!()
     }
 }
 
@@ -910,7 +919,7 @@ impl Server {
     /// them and the other files sent to it before (waits for them, from a
     /// server that only publishes them); the errors to tell, as
     /// `path:line:column: message [code]`.
-    async fn errors_after(&self, files: &[(PathBuf, &str)], cwd: &Path, deadline: Instant) -> Result<Vec<String>, String> {
+    async fn errors_after(&self, files: &[(PathBuf, &str)], cwd: &Path, deadline: Instant) -> anyhow::Result<Vec<String>> {
         let since = Instant::now();
         // (Changed on disk, first: a server that read a file from disk for
         // another one's sake reads it again; one sent already it ignores.)
@@ -918,7 +927,7 @@ impl Server {
         send(&self.stdin, &json!({ "jsonrpc": "2.0", "method": "workspace/didChangeWatchedFiles", "params": { "changes": changes } })).await?;
         let mut want = Vec::new();
         for (p, language) in files {
-            let text = String::from_utf8_lossy(&std::fs::read(p).map_err(|e| e.to_string())?).into_owned();
+            let text = String::from_utf8_lossy(&std::fs::read(p)?).into_owned();
             want.push((p.clone(), self.sync(p, language, &text).await?));
         }
         self.settled(deadline).await?;
@@ -978,8 +987,8 @@ impl Server {
                 .iter()
                 .filter(|i| i["severity"].as_u64().is_none_or(|s| s == 1))
                 .map(|i| {
-                    let line = i["range"]["start"]["line"].as_u64().unwrap_or(0) as usize;
-                    let col = self.encoding.from_server(lines.get(line).copied().unwrap_or_default(), i["range"]["start"]["character"].as_u64().unwrap_or(0) as usize) + 1;
+                    let line = usize::try_from(i["range"]["start"]["line"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
+                    let col = self.encoding.chars_from_units(lines.get(line).copied().unwrap_or_default(), usize::try_from(i["range"]["start"]["character"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX)) + 1;
                     let msg = i["message"].as_str().unwrap_or_default().lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("error");
                     let msg = if msg.chars().count() > DIAG_CHARS { format!("{}…", msg.chars().take(DIAG_CHARS).collect::<String>()) } else { msg.to_owned() };
                     let code = match &i["code"] {
@@ -1000,12 +1009,12 @@ impl Server {
 
     /// A file's diagnostics, asked for (asked again while the server is
     /// busy with a change).
-    async fn pull(&self, path: &Path, deadline: Instant) -> Result<Vec<Value>, String> {
+    async fn pull(&self, path: &Path, deadline: Instant) -> anyhow::Result<Vec<Value>> {
         let mut tries = 0;
         loop {
             match self.request("textDocument/diagnostic", json!({ "textDocument": { "uri": uri(path) } }), deadline).await {
                 Ok(r) => return Ok(r["items"].as_array().cloned().unwrap_or_default()),
-                Err(e) if tries < 5 && (e.contains("content modified") || e.to_lowercase().contains("cancel")) => {
+                Err(e) if tries < 5 && (e.to_string().contains("content modified") || e.to_string().to_lowercase().contains("cancel")) => {
                     tries += 1;
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     self.settled(deadline).await?;
@@ -1057,24 +1066,22 @@ fn container(outline: &Value, line: u64, col: u64) -> Option<String> {
     };
     // (A flat outline: each symbol names what holds it.)
     if let Some(flat) = outline.as_array().filter(|a| a.first().is_some_and(|s| s.get("location").is_some())) {
-        let sym = flat.iter().filter(|s| inside(&s["location"]["range"])).last()?;
+        let sym = flat.iter().rfind(|s| inside(&s["location"]["range"]))?;
         return sym["containerName"].as_str().and_then(clean);
     }
     let mut held = None;
     let mut level = outline.as_array()?;
-    loop {
-        let Some(sym) = level.iter().find(|s| inside(&s["range"])) else { break };
+    while let Some(sym) = level.iter().find(|s| inside(&s["range"])) {
         let kids = sym["children"].as_array();
         // (The symbol itself: what holds it is the name before.)
         if inside(&sym["selectionRange"]) && kids.is_none_or(|k| !k.iter().any(|c| inside(&c["range"]))) {
             break;
         }
         // Struct, class, interface, enum, namespace, module, object.
-        if matches!(sym["kind"].as_u64(), Some(5 | 11 | 10 | 23 | 3 | 2 | 19)) || sym["name"].as_str().is_some_and(|n| n.starts_with("impl ")) {
-            if let Some(n) = clean(sym["name"].as_str().unwrap_or_default()) {
+        if (matches!(sym["kind"].as_u64(), Some(5 | 11 | 10 | 23 | 3 | 2 | 19)) || sym["name"].as_str().is_some_and(|n| n.starts_with("impl ")))
+            && let Some(n) = clean(sym["name"].as_str().unwrap_or_default()) {
                 held = Some(n);
             }
-        }
         match kids {
             Some(k) => level = k,
             None => break,
@@ -1085,7 +1092,7 @@ fn container(outline: &Value, line: u64, col: u64) -> Option<String> {
 
 /// Reads the server's messages: answers to our requests, its own requests
 /// (answered plainly), and what it says about its work.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the reader takes over the server's process and every channel it reports through")]
 async fn read_loop(out: tokio::process::ChildStdout, stdin: Arc<Mutex<ChildStdin>>, pending: Pending, busy: watch::Sender<Busy>, (diags, published): (Diags, watch::Sender<u64>), name: String, root: PathBuf, mut child: tokio::process::Child) {
     let mut r = BufReader::new(out);
     let mut active: HashSet<String> = HashSet::new();
@@ -1123,7 +1130,7 @@ async fn read_loop(out: tokio::process::ChildStdout, stdin: Arc<Mutex<ChildStdin
                 let Some(id) = id.as_i64() else { continue };
                 if let Some(tx) = pending.lock().unwrap().remove(&id) {
                     let _ = tx.send(match m.get("error") {
-                        Some(e) => Err(e["message"].as_str().unwrap_or("failed").to_owned()),
+                        Some(e) => Err(anyhow::Error::msg(e["message"].as_str().unwrap_or("failed").to_owned())),
                         None => Ok(m["result"].clone()),
                     });
                 }
@@ -1174,7 +1181,7 @@ async fn read_loop(out: tokio::process::ChildStdout, stdin: Arc<Mutex<ChildStdin
         }
     }
     for (_, tx) in pending.lock().unwrap().drain() {
-        let _ = tx.send(Err("it stopped".into()));
+        let _ = tx.send(Err(anyhow::Error::msg("it stopped")));
     }
     busy.send_modify(|b| b.exited = true);
     let _ = child.wait().await;
@@ -1190,7 +1197,7 @@ fn uri(path: &Path) -> String {
         if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
             s.push(b as char);
         } else {
-            s.push_str(&format!("%{b:02X}"));
+            let _ = write!(s, "%{b:02X}");
         }
     }
     s
@@ -1202,13 +1209,12 @@ fn path_of(uri: &str) -> Option<PathBuf> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?, 16) {
+        if bytes[i] == b'%' && i + 2 < bytes.len()
+            && let Ok(b) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?, 16) {
                 out.push(b);
                 i += 3;
                 continue;
             }
-        }
         out.push(bytes[i]);
         i += 1;
     }
@@ -1233,7 +1239,7 @@ fn place(v: &Value) -> Option<Place> {
         Some(u) => (u, v.get("targetSelectionRange").or(v.get("targetRange"))?),
         None => (v.get("uri")?, v.get("range")?),
     };
-    Some(Place { path: path_of(u.as_str()?)?, line: range["start"]["line"].as_u64()? as usize, column: range["start"]["character"].as_u64()? as usize })
+    Some(Place { path: path_of(u.as_str()?)?, line: usize::try_from(range["start"]["line"].as_u64()?).unwrap_or(usize::MAX), column: usize::try_from(range["start"]["character"].as_u64()?).unwrap_or(usize::MAX) })
 }
 
 impl Answer {
@@ -1246,7 +1252,7 @@ impl Answer {
         let show = |p: &Path| p.strip_prefix(cwd).map_or_else(|_| p.display().to_string(), |r| r.display().to_string());
         let mut loc = |pl: &Place| -> String {
             let text = line_of(&pl.path, pl.line);
-            let col = self.encoding.from_server(&text, pl.column) + 1;
+            let col = self.encoding.chars_from_units(&text, pl.column) + 1;
             let t = text.trim();
             let t = if t.chars().count() > LINE_CHARS { format!("{}…", t.chars().take(LINE_CHARS).collect::<String>()) } else { t.to_owned() };
             format!("{}:{}:{}: {t}", show(&pl.path), pl.line + 1, col)
@@ -1257,7 +1263,7 @@ impl Answer {
                 let c = &v["contents"];
                 let text = match c {
                     Value::String(s) => s.clone(),
-                    Value::Array(a) => a.iter().map(|x| x.as_str().map(str::to_owned).unwrap_or_else(|| x["value"].as_str().unwrap_or_default().to_owned())).collect::<Vec<_>>().join("\n\n"),
+                    Value::Array(a) => a.iter().map(|x| x.as_str().map_or_else(|| x["value"].as_str().unwrap_or_default().to_owned(), str::to_owned)).collect::<Vec<_>>().join("\n\n"),
                     _ => c["value"].as_str().unwrap_or_default().to_owned(),
                 };
                 if text.trim().is_empty() { "Nothing to show for that symbol.".to_owned() } else { text.trim().to_owned() }
@@ -1276,17 +1282,17 @@ impl Answer {
                         };
                         let detail = from["detail"].as_str().map(|d| format!(" ({})", d.trim())).unwrap_or_default();
                         let Some(path) = from["uri"].as_str().and_then(path_of) else { continue };
-                        let def_line = from["selectionRange"]["start"]["line"].as_u64().unwrap_or(0) as usize;
+                        let def_line = usize::try_from(from["selectionRange"]["start"]["line"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
                         rows.push(format!("{name}{detail}, {}:{}", show(&path), def_line + 1));
                         for r in c["fromRanges"].as_array().into_iter().flatten() {
-                            let pl = Place { path: path.clone(), line: r["start"]["line"].as_u64().unwrap_or(0) as usize, column: r["start"]["character"].as_u64().unwrap_or(0) as usize };
+                            let pl = Place { path: path.clone(), line: usize::try_from(r["start"]["line"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX), column: usize::try_from(r["start"]["character"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX) };
                             rows.push(format!("  calls it at {}", loc(&pl)));
                         }
                     }
                     let more = calls.len().saturating_sub(MAX_LOCATIONS);
                     let mut s = format!("{} caller{} of {}:\n{}", calls.len(), if calls.len() == 1 { "" } else { "s" }, v["item"]["name"].as_str().unwrap_or("it"), rows.join("\n"));
                     if more > 0 {
-                        s.push_str(&format!("\n[{more} more not shown]"));
+                        let _ = write!(s, "\n[{more} more not shown]");
                     }
                     s
                 }
@@ -1419,8 +1425,8 @@ mod tests {
         let line = "é😀x = 1";
         assert_eq!(Encoding::Utf16.to_server(line, 2), 3);
         assert_eq!(Encoding::Utf8.to_server(line, 2), 6);
-        assert_eq!(Encoding::Utf16.from_server(line, 3), 2);
-        assert_eq!(Encoding::Utf8.from_server(line, 6), 2);
+        assert_eq!(Encoding::Utf16.chars_from_units(line, 3), 2);
+        assert_eq!(Encoding::Utf8.chars_from_units(line, 6), 2);
     }
 
     #[test]

@@ -3,6 +3,8 @@
 //! form alone, followed by a script, followed by a region, what
 //! `Intl.Locale` calls its language, and whether English names it.
 
+// Rust guideline compliant 2026-10-09
+
 pub struct Language {
     pub code: &'static str,
     pub alone: &'static str,

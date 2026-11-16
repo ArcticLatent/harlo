@@ -26,6 +26,8 @@
 //! `~/.local/share/harlo-agent/sessions`; `--resume` continues this
 //! folder's newest one.
 
+// Rust guideline compliant 2026-10-09
+
 mod agent;
 mod auth;
 mod chat;
@@ -55,6 +57,7 @@ mod search;
 mod session;
 mod skills;
 mod stubs;
+mod sys;
 mod task;
 mod todo;
 mod tools;
@@ -87,17 +90,7 @@ async fn run(args: Vec<String>) -> Result<()> {
         Some("mcp") => mcp_sign(&args[1..]).await,
         // The wiki's tools over stdio (how harlo reads a wiki on this machine).
         Some("wiki") => {
-            // (`--quiet-update DIR`: harlo's Update with nothing for a model
-            // to redo, recorded here; prints what it found as JSON.)
-            if let Some(dir) = std::env::args().skip_while(|a| a != "--quiet-update").nth(1) {
-                let found = harlo_wiki::tools::repository_root(&dir).and_then(|root| harlo_wiki::run::quiet_update(&root));
-                let v = found.map(|q| q.to_json()).unwrap_or_else(|e| serde_json::json!({ "recorded": false, "reason": harlo_wiki::run::error_text(e) }));
-                println!("{v}");
-                return Ok(());
-            }
-            // (`--write HOST`: the writing tools too, run as that host.)
-            let host = std::env::args().skip_while(|a| a != "--write").nth(1);
-            harlo_wiki::mcp::serve_as(host.as_deref());
+            wiki_command();
             Ok(())
         }
         Some("logout") => {
@@ -113,23 +106,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
         Some("status") => {
-            // For harlo: `{ "signedIn", "email", "codex": { "signedIn", "email" } }`.
-            let (plan, codex) = (auth::load(auth::Sign::Plan), auth::load(auth::Sign::Codex));
-            if args.iter().any(|a| a == "--json") {
-                let one = |c: Option<auth::Credentials>| serde_json::json!({ "signedIn": c.is_some(), "email": c.map(|c| c.email).unwrap_or_default() });
-                let mut out = one(plan);
-                out["codex"] = one(codex);
-                println!("{out}");
-                return Ok(());
-            }
-            let who = |c: &auth::Credentials| if c.email.is_empty() { String::new() } else { format!(" as {}", c.email) };
-            match &plan {
-                Some(c) => println!("Signed in with ChatGPT{} (your ChatGPT plan pays for harlo-agent's requests).", who(c)),
-                None => println!("Not signed in with ChatGPT: run `harlo-agent login`."),
-            }
-            if let Some(c) = &codex {
-                println!("Signed in with the Codex sign-in{} (models codex/…, with the plan's usage).", who(c));
-            }
+            show_status(&args);
             Ok(())
         }
         Some("usage") => {
@@ -145,24 +122,7 @@ async fn run(args: Vec<String>) -> Result<()> {
             }
             Ok(())
         }
-        Some("models") => {
-            let (models, errors) = providers::every_model().await;
-            for e in &errors {
-                eprintln!("{e}");
-            }
-            if args.get(1).is_some_and(|a| a == "--json") {
-                let list: Vec<_> = models.iter().map(|m| serde_json::json!({ "provider": m.provider, "id": m.id, "name": m.name, "contextWindow": m.context_window, "levels": m.levels, "images": m.images })).collect();
-                println!("{:#}", serde_json::Value::from(list));
-                return Ok(());
-            }
-            for m in &models {
-                println!("{}\t{}", m.key(), m.name);
-            }
-            if models.is_empty() {
-                bail!("No models: sign in (`harlo-agent login`) or set up a provider in {}", auth::config_dir().join("providers.json").display());
-            }
-            Ok(())
-        }
+        Some("models") => list_models(&args).await,
         Some("lsp-status") => {
             // For harlo's settings: each language's server here.
             println!("{}", lsp::status());
@@ -193,51 +153,118 @@ async fn run(args: Vec<String>) -> Result<()> {
             sandbox::configure(sandbox.as_deref())?;
             rpc::serve(keep, model, effort, harlo_tools, launch).await
         }
-        Some("-p") => {
-            let mut model = None;
-            let mut effort = None;
-            let mut from = Resume::New;
-            let mut images = Vec::new();
-            let mut sandbox = None;
-            let mut bare = Bare::default();
-            let mut launch = agent::Launch::default();
-            let mut it = args.into_iter().skip(1);
-            let prompt = it.next();
-            while let Some(a) = it.next() {
-                if launch.take(&a, &mut it)? {
-                    continue;
-                }
-                match a.as_str() {
-                    "-m" | "--model" => model = it.next(),
-                    "--thinking" => effort = it.next(),
-                    "--resume" | "-c" => from = Resume::Latest,
-                    "--session" => from = Resume::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
-                    "--image" => images.push(image_file(&it.next().ok_or_else(|| anyhow::anyhow!("--image needs the file"))?)?),
-                    "--sandbox" => sandbox = it.next(),
-                    "--no-tools" => bare.no_tools = true,
-                    "--no-session" => bare.no_session = true,
-                    other => bail!("unknown option {other}"),
-                }
-            }
-            sandbox::configure(sandbox.as_deref())?;
-            let Some(mut prompt) = prompt else { bail!("-p needs the prompt") };
-            // `-p -`: the prompt on stdin (one too long for an argument).
-            if prompt == "-" {
-                prompt = std::io::read_to_string(std::io::stdin()).map_err(|e| anyhow::anyhow!("Can't read the prompt from stdin: {e}"))?;
-                if prompt.trim().is_empty() {
-                    bail!("The prompt on stdin was empty");
-                }
-            }
-            if bare.no_session && !matches!(from, Resume::New) {
-                bail!("--no-session starts a new conversation: it can't resume one");
-            }
-            ask(&prompt, &images, model, effort, from, bare, launch).await
-        }
+        Some("-p") => print_mode(args).await,
         _ => {
             println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model] [--budget tokens] [--fallback provider/model]");
             Ok(())
         }
     }
+}
+
+/// `harlo-agent -p`: one prompt, its answer printed.
+async fn print_mode(args: Vec<String>) -> Result<()> {
+    let mut model = None;
+    let mut effort = None;
+    let mut from = Resume::New;
+    let mut images = Vec::new();
+    let mut sandbox = None;
+    let mut bare = Bare::default();
+    let mut launch = agent::Launch::default();
+    let mut it = args.into_iter().skip(1);
+    let prompt = it.next();
+    while let Some(a) = it.next() {
+        if launch.take(&a, &mut it)? {
+            continue;
+        }
+        match a.as_str() {
+            "-m" | "--model" => model = it.next(),
+            "--thinking" => effort = it.next(),
+            "--resume" | "-c" => from = Resume::Latest,
+            "--session" => from = Resume::File(it.next().ok_or_else(|| anyhow::anyhow!("--session needs the file"))?.into()),
+            "--image" => images.push(image_file(&it.next().ok_or_else(|| anyhow::anyhow!("--image needs the file"))?)?),
+            "--sandbox" => sandbox = it.next(),
+            "--no-tools" => bare.no_tools = true,
+            "--no-session" => bare.no_session = true,
+            other => bail!("unknown option {other}"),
+        }
+    }
+    sandbox::configure(sandbox.as_deref())?;
+    let Some(mut prompt) = prompt else { bail!("-p needs the prompt") };
+    // `-p -`: the prompt on stdin (one too long for an argument).
+    if prompt == "-" {
+        prompt = std::io::read_to_string(std::io::stdin()).map_err(|e| anyhow::anyhow!("Can't read the prompt from stdin: {e}"))?;
+        if prompt.trim().is_empty() {
+            bail!("The prompt on stdin was empty");
+        }
+    }
+    if bare.no_session && !matches!(from, Resume::New) {
+        bail!("--no-session starts a new conversation: it can't resume one");
+    }
+    ask(&prompt, &images, model, effort, from, bare, launch).await
+}
+
+/// `harlo-agent models`: every model there is (for harlo: `--json`).
+async fn list_models(args: &[String]) -> Result<()> {
+    let (models, errors) = providers::every_model().await;
+    for e in &errors {
+        eprintln!("{e}");
+    }
+    if args.get(1).is_some_and(|a| a == "--json") {
+        let list: Vec<_> = models.iter().map(|m| serde_json::json!({ "provider": m.provider, "id": m.id, "name": m.name, "contextWindow": m.context_window, "levels": m.levels, "images": m.images })).collect();
+        println!("{:#}", serde_json::Value::from(list));
+        return Ok(());
+    }
+    for m in &models {
+        println!("{}\t{}", m.key(), m.name);
+    }
+    if models.is_empty() {
+        bail!("No models: sign in (`harlo-agent login`) or set up a provider in {}", auth::config_dir().join("providers.json").display());
+    }
+    Ok(())
+}
+
+/// `harlo-agent status`: who is signed in (for harlo: `--json`).
+fn show_status(args: &[String]) {
+    // For harlo: `{ "signedIn", "email", "codex": { "signedIn", "email" } }`.
+    let (plan, codex) = (auth::load(auth::Sign::Plan), auth::load(auth::Sign::Codex));
+    if args.iter().any(|a| a == "--json") {
+        let one = |c: Option<auth::Credentials>| serde_json::json!({ "signedIn": c.is_some(), "email": c.map(|c| c.email).unwrap_or_default() });
+        let mut out = one(plan);
+        out["codex"] = one(codex);
+        println!("{out}");
+        return;
+    }
+    let who = |c: &auth::Credentials| if c.email.is_empty() { String::new() } else { format!(" as {}", c.email) };
+    match &plan {
+        Some(c) => println!("Signed in with ChatGPT{} (your ChatGPT plan pays for harlo-agent's requests).", who(c)),
+        None => println!("Not signed in with ChatGPT: run `harlo-agent login`."),
+    }
+    if let Some(c) = &codex {
+        println!("Signed in with the Codex sign-in{} (models codex/…, with the plan's usage).", who(c));
+    }
+}
+
+/// `harlo-agent wiki`: the wiki's tools over stdio, or a quiet update.
+fn wiki_command() {
+    // (`--quiet-update DIR`: harlo's Update with nothing for a model
+    // to redo, recorded here; prints what it found as JSON.)
+    if let Some(dir) = std::env::args().skip_while(|a| a != "--quiet-update").nth(1) {
+        let found = harlo_wiki::tools::repository_root(&dir).and_then(|root| harlo_wiki::run::quiet_update(&root));
+        let v = found.map_or_else(
+            |e| {
+                if let Some(m) = harlo_wiki::run::unexpected(&e) {
+                    eprintln!("OpenWiki MCP operation failed: {m}");
+                }
+                serde_json::json!({ "recorded": false, "reason": harlo_wiki::run::error_text(e) })
+            },
+            |q| q.to_json(),
+        );
+        println!("{v}");
+        return;
+    }
+    // (`--write HOST`: the writing tools too, run as that host.)
+    let host = std::env::args().skip_while(|a| a != "--write").nth(1);
+    harlo_wiki::mcp::serve_as(host.as_deref());
 }
 
 /// An image given with `-p`, as it'll be sent.
@@ -339,6 +366,98 @@ enum Resume {
     File(std::path::PathBuf),
 }
 
+/// How `-p` prints a run: the reply on stdout, the rest (thinking dimmed,
+/// tool calls, usage) on stderr.
+struct Printer {
+    out: std::io::Stdout,
+    /// Thinking is being printed (dimmed).
+    thinking: bool,
+    /// Whether the last thing printed ended a line.
+    fresh: bool,
+}
+
+impl Printer {
+    /// Ends the line printed, if it isn't ended.
+    fn line(&mut self) {
+        if !self.fresh {
+            println!();
+            self.fresh = true;
+        }
+    }
+
+    /// Ends the thinking being printed, if any.
+    fn end_thinking(&mut self) {
+        if self.thinking {
+            eprintln!("\x1b[0m");
+            self.thinking = false;
+        }
+    }
+
+    /// Prints what the run shows.
+    fn show(&mut self, s: &agent::Shown<'_>) {
+    match s {
+        agent::Shown::Stream(e) => match e["type"].as_str() {
+            Some("thinking_delta") => {
+                if !self.thinking {
+                    eprint!("\x1b[2m");
+                    self.thinking = true;
+                }
+                eprint!("{}", e["delta"].as_str().unwrap_or_default());
+            }
+            Some("text_delta") => {
+                self.end_thinking();
+                let t = e["delta"].as_str().unwrap_or_default();
+                print!("{t}");
+                self.fresh = t.ends_with('\n');
+                let _ = self.out.flush();
+            }
+            _ => {}
+        },
+        agent::Shown::ToolStart { name, args, .. } => {
+            self.end_thinking();
+            self.line();
+            eprintln!("\x1b[36m→ {name}\x1b[0m \x1b[2m{}\x1b[0m", summary(name, args));
+        }
+        agent::Shown::ToolEnd { text, failed, .. } => {
+            let first = text.lines().next().unwrap_or_default();
+            let more = text.lines().count().saturating_sub(1);
+            let first: String = first.chars().take(120).collect();
+            eprintln!("  \x1b[{}m{first}{}\x1b[0m", if *failed { "31" } else { "2" }, if more > 0 { format!(" (+{more} lines)") } else { String::new() });
+        }
+        agent::Shown::Usage { model, usage } => {
+            self.end_thinking();
+            self.line();
+            if usage["estimated"] == true {
+                eprintln!("\x1b[2m[{model} · about {} in, not reported by the server]\x1b[0m", usage["input_tokens"]);
+            } else {
+                eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
+            }
+        }
+        agent::Shown::CompactionStart { .. } => {
+            self.end_thinking();
+            self.line();
+            eprintln!("\x1b[2mThe context is nearly full: summarizing the older part…\x1b[0m");
+        }
+        agent::Shown::CompactionEnd { result, error, .. } => match (result, error) {
+            (Some(r), _) => eprintln!("\x1b[2mSummarized: {} tokens → about {}\x1b[0m", r["tokensBefore"], r["estimatedTokensAfter"]),
+            (None, Some(e)) => eprintln!("\x1b[31mCouldn't summarize: {e}\x1b[0m"),
+            (None, None) => {}
+        },
+        agent::Shown::SetAside { count, saved, after } => {
+            self.end_thinking();
+            self.line();
+            eprintln!("\x1b[2mSet {count} old tool output{} aside: about {saved} tokens freed, {after} now\x1b[0m", if *count == 1 { "" } else { "s" });
+        }
+        agent::Shown::Notice { text, .. } => {
+            self.end_thinking();
+            self.line();
+            eprintln!("\x1b[33m{text}\x1b[0m");
+        }
+        agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Withdrawn | agent::Shown::Queue { .. } | agent::Shown::Limits(_) | agent::Shown::ModelChanged(_) => {}
+    }
+    }
+}
+
 async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, effort: Option<String>, from: Resume, bare: Bare, launch: agent::Launch) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = match session::root() {
@@ -368,7 +487,7 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
         Some(m) => providers::full(&m),
         None => {
             let (models, errors) = providers::every_model().await;
-            models.first().map(|m| m.key()).ok_or_else(|| anyhow::anyhow!("No models: {}", if errors.is_empty() { "set up a provider".to_owned() } else { errors.join("; ") }))?
+            models.first().map(providers::ModelInfo::key).ok_or_else(|| anyhow::anyhow!("No models: {}", if errors.is_empty() { "set up a provider".to_owned() } else { errors.join("; ") }))?
         }
     };
     let mut agent = agent::Agent::new(cwd, log, past, model, effort);
@@ -384,85 +503,9 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
             eprintln!("\x1b[35m⇉ {} {}{what}\x1b[0m", p["id"].as_str().unwrap_or_default(), p["status"].as_str().unwrap_or_default());
         }
     }));
-    let mut out = std::io::stdout();
-    let mut thinking = false;
-    // Whether the last thing printed ended a line.
-    let mut fresh = true;
     let started = std::time::Instant::now();
-    let mut show = |s: agent::Shown| {
-        let line = |fresh: &mut bool| {
-            if !*fresh {
-                println!();
-                *fresh = true;
-            }
-        };
-        let end_thinking = |thinking: &mut bool| {
-            if *thinking {
-                eprintln!("\x1b[0m");
-                *thinking = false;
-            }
-        };
-        match s {
-            agent::Shown::Stream(e) => match e["type"].as_str() {
-                Some("thinking_delta") => {
-                    if !thinking {
-                        eprint!("\x1b[2m");
-                        thinking = true;
-                    }
-                    eprint!("{}", e["delta"].as_str().unwrap_or_default());
-                }
-                Some("text_delta") => {
-                    end_thinking(&mut thinking);
-                    let t = e["delta"].as_str().unwrap_or_default();
-                    print!("{t}");
-                    fresh = t.ends_with('\n');
-                    let _ = out.flush();
-                }
-                _ => {}
-            },
-            agent::Shown::ToolStart { name, args, .. } => {
-                end_thinking(&mut thinking);
-                line(&mut fresh);
-                eprintln!("\x1b[36m→ {name}\x1b[0m \x1b[2m{}\x1b[0m", summary(name, args));
-            }
-            agent::Shown::ToolEnd { text, failed, .. } => {
-                let first = text.lines().next().unwrap_or_default();
-                let more = text.lines().count().saturating_sub(1);
-                let first: String = first.chars().take(120).collect();
-                eprintln!("  \x1b[{}m{first}{}\x1b[0m", if failed { "31" } else { "2" }, if more > 0 { format!(" (+{more} lines)") } else { String::new() });
-            }
-            agent::Shown::Usage { model, usage } => {
-                end_thinking(&mut thinking);
-                line(&mut fresh);
-                if usage["estimated"] == true {
-                    eprintln!("\x1b[2m[{model} · about {} in, not reported by the server]\x1b[0m", usage["input_tokens"]);
-                } else {
-                    eprintln!("\x1b[2m[{model} · {} in ({} cached), {} out]\x1b[0m", usage["input_tokens"], usage["input_tokens_details"]["cached_tokens"], usage["output_tokens"]);
-                }
-            }
-            agent::Shown::CompactionStart { .. } => {
-                end_thinking(&mut thinking);
-                line(&mut fresh);
-                eprintln!("\x1b[2mThe context is nearly full: summarizing the older part…\x1b[0m");
-            }
-            agent::Shown::CompactionEnd { result, error, .. } => match (result, error) {
-                (Some(r), _) => eprintln!("\x1b[2mSummarized: {} tokens → about {}\x1b[0m", r["tokensBefore"], r["estimatedTokensAfter"]),
-                (None, Some(e)) => eprintln!("\x1b[31mCouldn't summarize: {e}\x1b[0m"),
-                (None, None) => {}
-            },
-            agent::Shown::SetAside { count, saved, after } => {
-                end_thinking(&mut thinking);
-                line(&mut fresh);
-                eprintln!("\x1b[2mSet {count} old tool output{} aside: about {saved} tokens freed, {after} now\x1b[0m", if count == 1 { "" } else { "s" });
-            }
-            agent::Shown::Notice { text, .. } => {
-                end_thinking(&mut thinking);
-                line(&mut fresh);
-                eprintln!("\x1b[33m{text}\x1b[0m");
-            }
-            agent::Shown::MessageStart(_) | agent::Shown::MessageEnd(_) | agent::Shown::Withdrawn | agent::Shown::Queue { .. } | agent::Shown::Limits(_) | agent::Shown::ModelChanged(_) => {}
-        }
-    };
+    let mut printer = Printer { out: std::io::stdout(), thinking: false, fresh: true };
+    let mut show = |s: agent::Shown| printer.show(&s);
     // Ctrl+C stops the turn; a second one quits at once.
     let stop = tokio_util::sync::CancellationToken::new();
     let s = stop.clone();
@@ -502,7 +545,7 @@ async fn ask(prompt: &str, images: &[serde_json::Value], model: Option<String>, 
         if t.requests == 1 { "" } else { "s" },
         t.input,
         t.cached,
-        if t.input > 0 { t.cached * 100 / t.input } else { 0 },
+        (t.cached * 100).checked_div(t.input).unwrap_or(0),
         t.output,
         started.elapsed().as_secs_f64()
     );
@@ -525,8 +568,7 @@ fn summary(name: &str, args: &serde_json::Value) -> String {
         "read" | "write" | "ls" => s("path"),
         "apply_patch" => crate::patch::parse(&s("input")).map(|ops| ops.iter().map(crate::patch::Op::path).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
         "edit" => format!("{} ({} edit{})", s("path"), args["edits"].as_array().map_or(0, Vec::len), if args["edits"].as_array().map_or(0, Vec::len) == 1 { "" } else { "s" }),
-        "grep" => format!("{} {}", s("pattern"), s("path")),
-        "find" => format!("{} {}", s("pattern"), s("path")),
+        "grep" | "find" => format!("{} {}", s("pattern"), s("path")),
         _ => args.to_string(),
     };
     let one: String = text.replace('\n', " ⏎ ").chars().take(160).collect();

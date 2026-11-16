@@ -19,6 +19,8 @@
 //! `mcp-approved.json` beside Harlo's own `mcp.json` (on the project's
 //! machine), `{ project: { name: hash of the entry } }`.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -67,17 +69,17 @@ pub const HARNESSES: [HarnessKind; 2] = [HarnessKind::Claude, HarnessKind::Harlo
 static CLAUDE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 pub fn use_claude(program: Option<PathBuf>) {
-    *CLAUDE.lock().unwrap() = program;
+    *CLAUDE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = program;
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 /// The harness's MCP file for a scope.
 pub fn config_path(kind: HarnessKind, scope: &Scope) -> PathBuf {
     match (kind, scope) {
-        (HarnessKind::Claude, Scope::Global) => std::env::var_os("CLAUDE_CONFIG_DIR").map(|d| PathBuf::from(d).join(".claude.json")).unwrap_or_else(|| home().join(".claude.json")),
+        (HarnessKind::Claude, Scope::Global) => std::env::var_os("CLAUDE_CONFIG_DIR").map_or_else(|| home().join(".claude.json"), |d| PathBuf::from(d).join(".claude.json")),
         (HarnessKind::Claude, Scope::Project(p)) => p.join(".mcp.json"),
         // A host's own (its defaults: harlo can't see its environment).
         (HarnessKind::Claude, Scope::Host(h)) => host_home(h).join(".claude.json"),
@@ -190,7 +192,7 @@ pub struct Form {
 }
 
 fn pairs(v: &Value) -> Vec<(String, String)> {
-    v.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))).collect()).unwrap_or_default()
+    v.as_object().map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().map_or_else(|| v.to_string(), str::to_owned))).collect()).unwrap_or_default()
 }
 
 fn object(pairs: &[(String, String)]) -> Value {
@@ -233,6 +235,7 @@ impl Form {
 
     /// The harness's entry: `existing` with the form's fields written in
     /// (others kept).
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn to_entry(&self, kind: HarnessKind, existing: Option<&Value>) -> Value {
         let mut m: Map<String, Value> = existing.and_then(|e| e.as_object().cloned()).unwrap_or_default();
         let set = |m: &mut Map<String, Value>, key: &str, value: Option<Value>| match value {
@@ -254,9 +257,9 @@ impl Form {
         };
         set(&mut m, "type", ty);
         set(&mut m, "command", if stdio { self.command.first().map(|c| json!(c)) } else { None });
-        set(&mut m, "args", if stdio && self.command.len() > 1 { Some(json!(self.command[1..])) } else { None });
+        set(&mut m, "args", (stdio && self.command.len() > 1).then(|| json!(self.command[1..])));
         set(&mut m, "url", if stdio { None } else { Some(json!(self.url.trim())) });
-        set(&mut m, "headers", if !stdio && !self.headers.is_empty() { Some(object(&self.headers)) } else { None });
+        set(&mut m, "headers", (!stdio && !self.headers.is_empty()).then(|| object(&self.headers)));
         set(&mut m, "env", if self.env.is_empty() { None } else { Some(object(&self.env)) });
         if kind == HarnessKind::Claude {
             // No folder, timeout, switch or read-only tools in Claude's
@@ -266,7 +269,7 @@ impl Form {
             }
             return Value::Object(m);
         }
-        set(&mut m, "cwd", if stdio && !self.cwd.trim().is_empty() { Some(json!(self.cwd.trim())) } else { None });
+        set(&mut m, "cwd", (stdio && !self.cwd.trim().is_empty()).then(|| json!(self.cwd.trim())));
         let timeout = self.timeout_secs.filter(|t| *t > 0.0).map(|t| if t.fract() == 0.0 { json!(t as u64) } else { json!(t) });
         set(&mut m, "timeout", timeout);
         let mut tools: Vec<&String> = self.read_only.iter().filter(|t| !t.trim().is_empty()).collect();
@@ -368,7 +371,7 @@ fn write_back(kind: HarnessKind, scope: &Scope, path: &Path, config: &Value, bef
 fn claude_sync(before: &Map<String, Value>, after: &Map<String, Value>, host: Option<&crate::remote::Host>) -> Result<()> {
     let program = match host {
         Some(_) => PathBuf::from("claude"),
-        None => CLAUDE.lock().unwrap().clone().or_else(|| harlo_harness::resolve_program(HarnessKind::Claude)).context("Claude Code isn't installed")?,
+        None => CLAUDE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().or_else(|| harlo_harness::resolve_program(HarnessKind::Claude)).context("Claude Code isn't installed")?,
     };
     let run = |args: &[&str]| -> Result<()> {
         let out = match host {
@@ -433,7 +436,7 @@ pub fn load(scope: &Scope) -> Listing {
                     // (Harlo's alone.)
                     if kind == HarnessKind::Harlo {
                         s.form.read_only_all = form.read_only_all;
-                        s.form.read_only = form.read_only.clone();
+                        s.form.read_only.clone_from(&form.read_only);
                     }
                 }
                 None => listing.servers.push(Listed { form, harnesses: vec![kind], differs: false }),
@@ -445,6 +448,11 @@ pub fn load(scope: &Scope) -> Listing {
 
 /// Saves a server for `kinds` in a scope (renamed from `old_name`), and
 /// removes it from the other harness's file.
+///
+/// # Errors
+///
+/// When the form has a problem, no agent is ticked, or a config file can't be
+/// read, isn't a JSON object, or can't be written.
 pub fn save(scope: &Scope, old_name: &str, form: &Form, kinds: &[HarnessKind]) -> Result<()> {
     if let Some(p) = form.problem(kinds) {
         bail!(p);
@@ -456,7 +464,8 @@ pub fn save(scope: &Scope, old_name: &str, form: &Form, kinds: &[HarnessKind]) -
         let path = config_path(kind, scope);
         let mut config = read_config(&path)?;
         let before = config[SERVERS].as_object().cloned().unwrap_or_default();
-        let servers = config.as_object_mut().expect("object").entry(SERVERS).or_insert_with(|| json!({}));
+        let Some(object) = config.as_object_mut() else { bail!("{} isn't a JSON object", crate::sidebar::tilde(&path)) };
+        let servers = object.entry(SERVERS).or_insert_with(|| json!({}));
         let Some(servers) = servers.as_object_mut() else { bail!("{}: mcpServers isn't an object", crate::sidebar::tilde(&path)) };
         let previous = servers.get(old_name).or_else(|| servers.get(&form.name)).cloned();
         let wanted = kinds.contains(&kind);
@@ -497,6 +506,10 @@ pub fn save(scope: &Scope, old_name: &str, form: &Form, kinds: &[HarnessKind]) -
 
 /// Turns a server on or off in every harness's file that has it (only its
 /// `enabled` changes).
+///
+/// # Errors
+///
+/// When a config file can't be read, isn't a JSON object, or can't be written.
 pub fn set_enabled(scope: &Scope, name: &str, on: bool) -> Result<()> {
     let (mut found, mut claude) = (false, false);
     for kind in HARNESSES {
@@ -526,6 +539,10 @@ pub fn set_enabled(scope: &Scope, name: &str, on: bool) -> Result<()> {
 }
 
 /// One harness's entry for a server (None: it hasn't one).
+///
+/// # Errors
+///
+/// When the config file can't be read or isn't a JSON object.
 pub fn entry(kind: HarnessKind, scope: &Scope, name: &str) -> Result<Option<Value>> {
     let config = read_config(&config_path(kind, scope))?;
     Ok(config[SERVERS].get(name).cloned())
@@ -533,6 +550,10 @@ pub fn entry(kind: HarnessKind, scope: &Scope, name: &str) -> Result<Option<Valu
 
 /// Writes one harness's entry for a server (None: removes it), leaving the
 /// other harnesses' files alone.
+///
+/// # Errors
+///
+/// When a config file can't be read, isn't a JSON object, or can't be written.
 pub fn put_entry(kind: HarnessKind, scope: &Scope, form: Option<&Form>, name: &str) -> Result<()> {
     let path = config_path(kind, scope);
     let mut config = read_config(&path)?;
@@ -558,12 +579,17 @@ pub fn put_entry(kind: HarnessKind, scope: &Scope, form: Option<&Form>, name: &s
     if servers == before {
         return Ok(());
     }
-    config.as_object_mut().expect("object").insert(SERVERS.to_owned(), Value::Object(servers));
+    let Some(object) = config.as_object_mut() else { bail!("{} isn't a JSON object", crate::sidebar::tilde(&path)) };
+    object.insert(SERVERS.to_owned(), Value::Object(servers));
     write_back(kind, scope, &path, &config, &before)
 }
 
 /// Sets (Some) or removes (None) one field of a harness's entry for a
 /// server, the rest as it is (nothing when it has no entry).
+///
+/// # Errors
+///
+/// When a config file can't be read, isn't a JSON object, or can't be written.
 pub fn set_field(kind: HarnessKind, scope: &Scope, name: &str, key: &str, value: Option<Value>) -> Result<()> {
     let path = config_path(kind, scope);
     let mut config = read_config(&path)?;
@@ -588,6 +614,10 @@ pub fn set_field(kind: HarnessKind, scope: &Scope, name: &str, key: &str, value:
 }
 
 /// Removes a server from every agent's config in a scope.
+///
+/// # Errors
+///
+/// When a config file can't be read, isn't a JSON object, or can't be written.
 pub fn remove(scope: &Scope, name: &str) -> Result<()> {
     for kind in HARNESSES {
         let path = config_path(kind, scope);
@@ -607,6 +637,10 @@ pub fn remove(scope: &Scope, name: &str) -> Result<()> {
 /// Servers from a pasted snippet: `{"mcpServers": {…}}` (Claude, Harlo and
 /// most other tools), `{"mcp": {"servers": {…}}}` / `{"mcp": {…}}`,
 /// `{name: {…}}`, or one server object (named "imported").
+///
+/// # Errors
+///
+/// When the text isn't JSON, or holds no server in a form harlo knows.
 pub fn parse_import(text: &str) -> Result<Vec<Form>> {
     let text = text.trim();
     if text.is_empty() {
@@ -702,7 +736,7 @@ pub(crate) mod tests {
 
     #[test]
     fn harlos_project_servers_are_approved_as_saved() {
-        let _one = HARLO_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        let _one = HARLO_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = scratch();
         let project = dir.join("proj");
         std::fs::create_dir_all(project.join(".harlo")).unwrap();
@@ -778,7 +812,7 @@ pub(crate) mod tests {
         let remote = f.to_entry(HarnessKind::Harlo, Some(&harlo));
         assert!(remote.get("command").is_none() && remote["url"] == "https://h/mcp" && remote["type"] == "http");
         // Tools that only look: Harlo's alone, a sorted list or every one.
-        f.read_only = vec!["get_scene".into(), "".into(), "find".into(), "find".into()];
+        f.read_only = vec!["get_scene".into(), String::new(), "find".into(), "find".into()];
         assert_eq!(f.to_entry(HarnessKind::Harlo, None)["readOnly"], json!(["find", "get_scene"]));
         assert!(f.to_entry(HarnessKind::Claude, Some(&json!({"readOnly": true}))).get("readOnly").is_none());
         let back = Form::from_entry(HarnessKind::Harlo, "s", &f.to_entry(HarnessKind::Harlo, None));
@@ -793,7 +827,7 @@ pub(crate) mod tests {
 
     #[test]
     fn saves_lists_and_removes_per_harness() {
-        let _one = HARLO_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        let _one = HARLO_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = scratch();
         let scope = Scope::Project(dir.to_path_buf());
         // An existing file with other servers and its own key order.
@@ -872,7 +906,7 @@ pub(crate) mod tests {
 mod real_config {
     /// Lists this machine's global servers, read-only (not run by default).
     #[test]
-    #[ignore]
+    #[ignore = "reads this machine's own settings"]
     fn list_global() {
         let l = super::load(&super::Scope::Global);
         for s in &l.servers {

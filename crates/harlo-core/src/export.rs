@@ -1,10 +1,17 @@
-//! A session as Markdown (Export / Copy as Markdown, the phone's Share):
-//! a title and what it ran on, then each of your messages and each reply,
+//! A session as Markdown (Export / Copy as Markdown, the phone's Share).
+//!
+//! A title and what it ran on, then each of your messages and each reply,
 //! with the agent's tool calls in brief (a command's short output, an
 //! edit's lines added and removed). Thinking is left out. From the
 //! session's messages, so every agent and saved sessions too.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use serde_json::Value;
+
+/// Reads a session's messages, handing each to the function it is given.
+pub type ReadMessages<'a> = dyn FnMut(&mut dyn FnMut(Value)) -> std::io::Result<()> + 'a;
 
 /// About the session, for the head.
 #[derive(Debug, Clone, Default)]
@@ -76,6 +83,11 @@ fn fence(text: &str) -> String {
 }
 
 /// The session as Markdown.
+///
+/// # Panics
+///
+/// Never in practice: it's written to memory, which doesn't fail, and
+/// Markdown is text.
 pub fn markdown(messages: &[Value], info: &Info) -> String {
     let mut out = Vec::new();
     write_markdown(
@@ -98,11 +110,16 @@ struct CallId {
     calls: usize,
 }
 
-/// [`markdown`] written to `out` as it's made, from messages `read` passes
-/// on one at a time (it's read twice: once for where each call's result is,
-/// then to write). What's held at once is a call waiting for its result and
-/// what follows it, never the conversation.
-pub fn write_markdown(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> std::io::Result<()>, info: &Info, out: &mut dyn std::io::Write) -> std::io::Result<()> {
+/// [`markdown`] written to `out` as it's made.
+///
+/// From messages `read` passes on one at a time (it's read twice: once for
+/// where each call's result is, then to write). What's held at once is a call
+/// waiting for its result and what follows it, never the conversation.
+///
+/// # Errors
+///
+/// An I/O error from `out`. An error from `read` too.
+pub fn write_markdown(read: &mut ReadMessages<'_>, info: &Info, out: &mut dyn std::io::Write) -> std::io::Result<()> {
     write_markdown_spilling(read, info, out, None)
 }
 
@@ -123,10 +140,9 @@ fn held_limit() -> usize {
     HELD
 }
 
-/// [`write_markdown`], what waits behind a late result past [`HELD`] kept
-/// in a file in `spill` (made there and unlinked at once) rather than in
-/// memory: a call whose result comes far later holds about nothing.
-pub fn write_markdown_spilling(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> std::io::Result<()>, info: &Info, out: &mut dyn std::io::Write, spill: Option<&std::path::Path>) -> std::io::Result<()> {
+/// Each tool call's id: how many calls name it and which message holds its
+/// last result; and when the session began.
+fn call_ids(read: &mut ReadMessages<'_>) -> std::io::Result<(std::collections::HashMap<String, CallId>, Option<i64>)> {
     let mut ids: std::collections::HashMap<String, CallId> = std::collections::HashMap::new();
     let mut first_time = None;
     let mut i = 0;
@@ -147,9 +163,12 @@ pub fn write_markdown_spilling(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> st
         }
         i += 1;
     })?;
+    Ok((ids, first_time))
+}
 
-    let mut w = Trimmed { out, held: String::new(), failed: None };
-    w.push(&format!("# {}\n\n", if info.title.trim().is_empty() { "Session" } else { info.title.trim() }));
+/// The export's title, and its agent, model, folder and date under it.
+fn heading(info: &Info, first_time: Option<i64>) -> String {
+    let mut out = format!("# {}\n\n", if info.title.trim().is_empty() { "Session" } else { info.title.trim() });
     let date = {
         use chrono::TimeZone;
         first_time.and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single()).map(|t| t.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default()
@@ -159,8 +178,28 @@ pub fn write_markdown_spilling(read: &mut dyn FnMut(&mut dyn FnMut(Value)) -> st
         .filter(|s| !s.is_empty())
         .collect();
     if !head.is_empty() {
-        w.push(&format!("*{}*\n\n", head.join(" · ")));
+        out.push('*');
+        out.push_str(&head.join(" · "));
+        out.push_str("*\n\n");
     }
+    out
+}
+
+/// [`write_markdown`], keeping what waits behind a late result in a file.
+///
+/// What waits past [`HELD`] is kept in a file in `spill` (made there and
+/// unlinked at once) rather than in memory: a call whose result comes far later
+/// holds about nothing.
+///
+/// # Errors
+///
+/// An I/O error from `out`. An error from `read`, or when the file in `spill`
+/// can't be made or used.
+pub fn write_markdown_spilling(read: &mut ReadMessages<'_>, info: &Info, out: &mut dyn std::io::Write, spill: Option<&std::path::Path>) -> std::io::Result<()> {
+    let (mut ids, first_time) = call_ids(read)?;
+
+    let mut w = Trimmed { out, held: String::new(), failed: None };
+    w.push(&heading(info, first_time));
     // Pieces written in order once nothing before them waits: text, and
     // calls still waiting for their (last) result. A call is made into its
     // text as soon as that result is read, so results aren't held for the
@@ -286,7 +325,7 @@ struct Waiting<'a> {
 
 impl<'a> Waiting<'a> {
     fn new(dir: Option<&'a std::path::Path>) -> Self {
-        Waiting { pieces: Default::default(), held: 0, dir, file: None }
+        Waiting { pieces: std::collections::VecDeque::default(), held: 0, dir, file: None }
     }
 
     fn text(&mut self, text: String) {
@@ -341,7 +380,7 @@ impl<'a> Waiting<'a> {
                     self.file = Some((f, 0));
                 }
                 Err(e) => {
-                    tracing::debug!("an export holds what waits in memory: {e}");
+                    tracing::event!(name: "export.spill.unavailable", tracing::Level::DEBUG, error.message = %e, "an export holds what waits in memory: {{error.message}}");
                     self.dir = None;
                     return;
                 }
@@ -349,7 +388,7 @@ impl<'a> Waiting<'a> {
         }
         let Some((file, end)) = self.file.as_mut() else { return };
         use std::os::unix::fs::FileExt;
-        for p in self.pieces.iter_mut() {
+        for p in &mut self.pieces {
             if let Piece::Text(text) = p {
                 if file.write_all_at(text.as_bytes(), *end).is_err() {
                     self.dir = None;
@@ -427,7 +466,7 @@ impl Trimmed<'_> {
         {
             self.failed = Some(e);
         }
-        self.held = text[kept.len()..].to_owned();
+        text[kept.len()..].clone_into(&mut self.held);
     }
 }
 
@@ -446,19 +485,19 @@ fn tool_call(b: &Value, result: Option<&(String, bool)>) -> String {
     let mut line = format!("- **{name}**");
     if !target.is_empty() {
         let f = if target.contains('`') { "``" } else { "`" };
-        line.push_str(&format!(" {f}{target}{f}"));
+        let _ = write!(line, " {f}{target}{f}");
     }
     if error {
         line.push_str(if result.is_empty() || result == "failed" { " → failed".to_owned() } else { format!(" → failed ({result})") }.as_str());
     } else if !result.is_empty() {
-        line.push_str(&format!(" → {result}"));
+        let _ = write!(line, " → {result}");
     }
     line.push('\n');
     // A command's output, when short.
     let output = output.trim_end();
     if kind == "command" && !output.is_empty() && output.lines().count() <= OUTPUT_LINES {
         let f = fence(output);
-        line.push_str(&format!("\n  {f}\n{}\n  {f}\n", output.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")));
+        let _ = write!(line, "\n  {f}\n{}\n  {f}\n", output.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n"));
     }
     line.push('\n');
     line
@@ -483,7 +522,7 @@ mod tests {
                 { "type": "toolCall", "id": "t", "name": "todo", "arguments": {} },
                 { "type": "text", "text": "Fixed: the parser skipped `\\n`." } ] }),
             json!({ "role": "toolResult", "toolCallId": "b", "content": "ok" }),
-            json!({ "role": "user", "content": format!("Thanks<harlo-starter id=\"x\">notes</harlo-starter>") }),
+            json!({ "role": "user", "content": "Thanks<harlo-starter id=\"x\">notes</harlo-starter>".to_string() }),
             json!({ "role": "user", "content": format!("Plan it{}", harlo_harness::file_blocks::PLAN_NOTE) }),
         ];
         let md = markdown(&messages, &Info { title: "Fix it".into(), agent: "Claude".into(), model: "Opus".into(), folder: "~/app".into() });
@@ -519,7 +558,7 @@ mod tests {
             .filter(|s| !s.is_empty())
             .collect();
         if !head.is_empty() {
-            out.push_str(&format!("*{}*\n\n", head.join(" · ")));
+            let _ = write!(out, "*{}*\n\n", head.join(" · "));
         }
         // The agent's turn: one heading, however many messages it takes.
         let mut in_reply = false;
@@ -538,13 +577,13 @@ mod tests {
                         continue;
                     }
                     let t = time_of(m["timestamp"].as_i64());
-                    out.push_str(&format!("---\n\n## You{}\n\n{}\n\n", if t.is_empty() { String::new() } else { format!(" · {t}") }, demote(&text)));
+                    let _ = write!(out, "---\n\n## You{}\n\n{}\n\n", if t.is_empty() { String::new() } else { format!(" · {t}") }, demote(&text));
                     in_reply = false;
                 }
                 Some("assistant") => {
                     if !in_reply {
                         let t = time_of(m["timestamp"].as_i64());
-                        out.push_str(&format!("## {}{}\n\n", if info.agent.is_empty() { "Agent" } else { &info.agent }, if t.is_empty() { String::new() } else { format!(" · {t}") }));
+                        let _ = write!(out, "## {}{}\n\n", if info.agent.is_empty() { "Agent" } else { &info.agent }, if t.is_empty() { String::new() } else { format!(" · {t}") });
                         in_reply = true;
                     }
                     for b in m["content"].as_array().into_iter().flatten() {
@@ -561,7 +600,7 @@ mod tests {
                         }
                     }
                     if let Some(e) = m["errorMessage"].as_str().filter(|e| !e.is_empty()) {
-                        out.push_str(&format!("> **Error:** {e}\n\n"));
+                        let _ = write!(out, "> **Error:** {e}\n\n");
                     }
                 }
                 _ => {}
@@ -583,19 +622,19 @@ mod tests {
         let mut line = format!("- **{name}**");
         if !target.is_empty() {
             let f = if target.contains('`') { "``" } else { "`" };
-            line.push_str(&format!(" {f}{target}{f}"));
+            let _ = write!(line, " {f}{target}{f}");
         }
         if error {
             line.push_str(if result.is_empty() || result == "failed" { " → failed".to_owned() } else { format!(" → failed ({result})") }.as_str());
         } else if !result.is_empty() {
-            line.push_str(&format!(" → {result}"));
+            let _ = write!(line, " → {result}");
         }
         line.push('\n');
         // A command's output, when short.
         let output = output.trim_end();
         if kind == "command" && !output.is_empty() && output.lines().count() <= OUTPUT_LINES {
             let f = fence(output);
-            line.push_str(&format!("\n  {f}\n{}\n  {f}\n", output.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")));
+            let _ = write!(line, "\n  {f}\n{}\n  {f}\n", output.lines().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n"));
         }
         line.push('\n');
         line

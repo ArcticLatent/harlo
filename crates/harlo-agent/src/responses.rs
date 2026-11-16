@@ -3,6 +3,9 @@
 //! `stream: true`, the whole history in `input` each time, the system
 //! prompt as `instructions`.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
@@ -34,6 +37,7 @@ pub enum Event {
 /// The plan's limit windows in a response's headers
 /// (`x-codex-{primary,secondary}-{used-percent,window-minutes,reset-at}`):
 /// none when it sends none (API keys, other servers).
+#[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn limits(headers: &reqwest::header::HeaderMap) -> Vec<Value> {
     let num = |k: String| headers.get(&k).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<f64>().ok()).filter(|n| n.is_finite());
     ["primary", "secondary"]
@@ -58,11 +62,21 @@ pub(crate) fn client() -> &'static reqwest::Client {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The idle limit for tests on this thread, in place of [`idle`]'s.
+    pub(crate) static TEST_IDLE: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
 /// How long a model server may send nothing (the reply's headers, or the
 /// next part of the reply) before the request counts as stalled: 10
 /// minutes, room for a slow local model reading a long prompt.
 /// `HARLO_AGENT_IDLE_SECS` sets another.
 pub(crate) fn idle() -> Duration {
+    #[cfg(test)]
+    if let Some(limit) = TEST_IDLE.get() {
+        return limit;
+    }
     std::env::var("HARLO_AGENT_IDLE_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<f64>().ok())
@@ -77,10 +91,10 @@ pub(crate) const MAX_EVENT: usize = 16 << 20;
 pub(crate) fn span(d: Duration) -> String {
     let s = d.as_secs_f64();
     match () {
-        _ if s >= 2.0 * 3600.0 => format!("{} h", (s / 3600.0).round()),
-        _ if s >= 120.0 => format!("{} min", (s / 60.0).round()),
-        _ if s >= 1.0 => format!("{} s", s.round()),
-        _ => format!("{} ms", d.as_millis()),
+        () if s >= 2.0 * 3600.0 => format!("{} h", (s / 3600.0).round()),
+        () if s >= 120.0 => format!("{} min", (s / 60.0).round()),
+        () if s >= 1.0 => format!("{} s", s.round()),
+        () => format!("{} ms", d.as_millis()),
     }
 }
 
@@ -247,7 +261,7 @@ pub fn assistant_message(items: &[Value], provider: &str, model: &str, usage: &V
         "provider": provider,
         "model": model,
         // (Its cost: the agent's to say, which knows the model's price.)
-        "usage": crate::used::Used::from_api(&usage).log(&usage, &crate::used::Pricing::Unknown),
+        "usage": crate::used::Used::from_api(usage).log(usage, &crate::used::Pricing::Unknown),
         "stopReason": if calls { "toolUse" } else { "stop" },
         "timestamp": crate::session::now_ms(),
     })
@@ -324,7 +338,7 @@ pub fn input(messages: &[Value], provider: &str, model: &str, images: bool) -> V
                         }
                         Some("text") => {
                             let sig = b["textSignature"].as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or(Value::Null);
-                            let id = sig["id"].as_str().filter(|id| id.len() <= 64).map(str::to_owned).unwrap_or_else(|| format!("msg_h_{i}_{texts}"));
+                            let id = sig["id"].as_str().filter(|id| id.len() <= 64).map_or_else(|| format!("msg_h_{i}_{texts}"), str::to_owned);
                             texts += 1;
                             let mut item = json!({ "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": b["text"], "annotations": [] }], "status": "completed", "id": id });
                             if let Some(phase) = sig["phase"].as_str() {
@@ -353,11 +367,11 @@ pub fn input(messages: &[Value], provider: &str, model: &str, images: bool) -> V
                 if !pictures.is_empty() {
                     if images {
                         let n = pictures.len();
-                        output.push_str(&format!("\n[{} shown after this round's results.]", if n == 1 { "Its image is".to_owned() } else { format!("Its {n} images are") }));
+                        let _ = write!(output, "\n[{} shown after this round's results.]", if n == 1 { "Its image is".to_owned() } else { format!("Its {n} images are") });
                         shown.push(json!({ "type": "input_text", "text": format!("Images from {} (call {call_id}):", m["toolName"].as_str().unwrap_or("a tool")) }));
                         shown.extend(pictures.into_iter().map(image));
                     } else {
-                        output.push_str(&format!("\n{}", crate::images::not_sent(model)));
+                        let _ = write!(output, "\n{}", crate::images::not_sent(model));
                     }
                 }
                 out.push(json!({ "type": "function_call_output", "call_id": call_id, "output": output }));
@@ -397,7 +411,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
     if !status.is_success() {
         let body: Value = serde_json::from_str(&refusal_text(resp).await).unwrap_or(Value::Null);
         let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
         let resets_at = body["error"]["resets_at"].as_i64().or_else(|| body["error"]["resets_in_seconds"].as_i64().map(|s| now + s));
         return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body), code, retry_after, resets_at }.into());
     }
@@ -411,7 +425,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
             "response.output_item.added" => on(Event::Added { index: index(&ev), item: ev["item"].clone() }),
             "response.output_text.delta" => on(Event::Text { index: index(&ev), delta: delta(&ev) }),
             "response.reasoning_summary_text.delta" => {
-                on(Event::Reasoning { index: index(&ev), part: ev["summary_index"].as_u64().unwrap_or(0) as usize, delta: delta(&ev) })
+                on(Event::Reasoning { index: index(&ev), part: usize::try_from(ev["summary_index"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX), delta: delta(&ev) });
             }
             "response.function_call_arguments.delta" => on(Event::Args { index: index(&ev), delta: delta(&ev) }),
             "response.output_item.done" => on(Event::Item { index: index(&ev), item: ev["item"].clone() }),
@@ -441,7 +455,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
 }
 
 fn index(ev: &Value) -> usize {
-    ev["output_index"].as_u64().unwrap_or(0) as usize
+    usize::try_from(ev["output_index"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX)
 }
 
 fn delta(ev: &Value) -> String {
@@ -529,7 +543,7 @@ fn refusal(status: u16, body: &Value) -> String {
     // The Codex backend's: the plan used up, and when it resets.
     match err["type"].as_str() {
         Some("usage_limit_reached") => {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
             let when = err["resets_at"].as_i64().map(|at| (at - now).max(0)).or_else(|| err["resets_in_seconds"].as_i64());
             let left = when.map(|s| match s / 60 {
                 m if m < 60 => format!(" It resets in {} min.", m.max(1)),
@@ -573,7 +587,7 @@ mod tests {
 
     #[test]
     fn the_plan_used_up() {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = i64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap_or(i64::MAX);
         let r = refusal(429, &json!({ "error": { "type": "usage_limit_reached", "plan_type": "plus", "resets_at": now + 2 * 3600 + 5 * 60 + 30 } }));
         assert!(r.starts_with("You've used your ChatGPT plan's usage for now. It resets in 2 h 5 min"), "{r}");
         assert!(refusal(429, &json!({ "error": { "type": "usage_not_included" } })).contains("doesn't include Codex"));
@@ -689,7 +703,7 @@ mod tests {
     fn the_servers_compaction_goes_back_only_to_its_model() {
         let item = json!({ "type": "compaction", "id": "cmp_1", "encrypted_content": "opaque" });
         let summary = json!({ "role": "compactionSummary", "summary": "note", "native": { "provider": "codex", "model": "m", "item": item } });
-        assert_eq!(input(std::slice::from_ref(&summary), "codex", "m", true), [item.clone()]);
+        assert_eq!(input(std::slice::from_ref(&summary), "codex", "m", true), std::slice::from_ref(&item));
         let other = input(std::slice::from_ref(&summary), "codex", "n", true);
         assert_eq!(other[0]["role"], "user");
         assert!(other[0]["content"][0]["text"].as_str().unwrap().contains("note"));

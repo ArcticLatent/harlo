@@ -5,6 +5,9 @@
 //! passed as often but took 67% more requests and 68% more tokens (each
 //! update is a round of its own), so it's off by default.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use serde_json::{Value, json};
 
 use crate::tools::Outcome;
@@ -51,8 +54,8 @@ pub fn run(args: &Value) -> Outcome {
     match now.as_slice() {
         [] if done < list.len() => text.push_str(" Nothing is in progress: mark the step you start."),
         [] => {}
-        [one] => text.push_str(&format!(" Now: {one}.")),
-        many => text.push_str(&format!(" {} steps are in progress; one at a time is clearer.", many.len())),
+        [one] => _ = write!(text, " Now: {one}."),
+        many => _ = write!(text, " {} steps are in progress; one at a time is clearer.", many.len()),
     }
     Outcome::new(text, false)
 }

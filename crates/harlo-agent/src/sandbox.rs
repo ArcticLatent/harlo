@@ -8,6 +8,8 @@
 //! variables. A project can't loosen it. A machine that can't sandbox
 //! refuses commands and says how to fix that.
 
+// Rust guideline compliant 2026-10-09
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -60,7 +62,7 @@ pub fn policy() -> Policy {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 fn expand(p: &str, home: &Path) -> PathBuf {
@@ -161,7 +163,7 @@ pub fn resolve(p: &Path) -> PathBuf {
         if let Ok(real) = at.canonicalize() {
             return missing.iter().rev().fold(real, |acc: PathBuf, part: &OsString| acc.join(part));
         }
-        match (at.file_name().map(|f| f.to_os_string()), at.parent()) {
+        match (at.file_name().map(std::ffi::OsStr::to_os_string), at.parent()) {
             (Some(name), Some(parent)) => {
                 missing.push(name);
                 at = parent.to_path_buf();
@@ -223,7 +225,7 @@ impl Sandbox {
         let mut hidden: Vec<PathBuf> = HIDDEN_IN_HOME.iter().map(|h| home.join(h)).collect();
         hidden.extend(HIDDEN_ELSEWHERE.iter().map(PathBuf::from));
         // (Its sockets: keyring, agents, the desktop's.)
-        hidden.push(PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })));
+        hidden.push(PathBuf::from(format!("/run/user/{}", crate::sys::uid())));
         if let Some(cargo) = std::env::var_os("CARGO_HOME").map(PathBuf::from) {
             hidden.extend(["credentials", "credentials.toml"].map(|c| cargo.join(c)));
         }
@@ -314,10 +316,10 @@ impl Sandbox {
     }
 
     /// Whether the file tools may look at `path` (Err: why not).
-    pub fn may_read(&self, path: &Path) -> Result<(), String> {
+    pub fn may_read(&self, path: &Path) -> anyhow::Result<()> {
         let real = resolve(&clean(path));
         match self.hidden_at(&real) {
-            Some(h) => Err(format!("{} is hidden by Harlo's sandbox ({} holds secrets: keys, sign-ins or other sessions). If the task really needs it, ask the user.", path.display(), h.display())),
+            Some(h) => Err(anyhow::anyhow!("{} is hidden by Harlo's sandbox ({} holds secrets: keys, sign-ins or other sessions). If the task really needs it, ask the user.", path.display(), h.display())),
             None => Ok(()),
         }
     }
@@ -343,23 +345,23 @@ impl Sandbox {
     }
 
     /// Whether the file tools may change `path` (Err: why not).
-    pub fn may_write(&self, path: &Path) -> Result<(), String> {
+    pub fn may_write(&self, path: &Path) -> anyhow::Result<()> {
         self.may_read(path)?;
         let real = resolve(&clean(path));
         if self.looking && real.starts_with(&self.project) {
-            return Err(format!("{} can't be changed: this helper only looks, so the project is read-only for it.", path.display()));
+            return Err(anyhow::anyhow!("{} can't be changed: this helper only looks, so the project is read-only for it.", path.display()));
         }
         if self.writable.iter().any(|w| real.starts_with(w)) {
             return Ok(());
         }
         if !self.project_writable {
-            return Err(format!(
+            return Err(anyhow::anyhow!(
                 "{} can't be changed: this session works in {}, the home folder or above it, which Harlo's sandbox keeps read-only (only /tmp and tool caches can be changed). If the task really needs this file, ask the user.",
                 path.display(),
                 self.project.display()
             ));
         }
-        Err(format!("{} is outside the folders Harlo's sandbox lets you change ({}, /tmp and tool caches). Change files in the project; if the task really needs this file, ask the user.", path.display(), self.project.display()))
+        Err(anyhow::anyhow!("{} is outside the folders Harlo's sandbox lets you change ({}, /tmp and tool caches). Change files in the project; if the task really needs this file, ask the user.", path.display(), self.project.display()))
     }
 
     /// What the model's told about it.
@@ -491,7 +493,7 @@ pub mod tests {
         let sb = Sandbox::new(&on(), &data.join("worktrees/p/mine"), &home, &home.join("none"), None);
         assert!(sb.hidden.contains(&data) && sb.project_writable, "{:?}", sb.hidden);
         assert!(sb.may_read(&data.join("worktrees/p/mine/a.rs")).is_ok() && sb.may_write(&data.join("worktrees/p/mine/a.rs")).is_ok());
-        assert!(sb.may_read(&data.join("harlo.db")).unwrap_err().contains("hidden"));
+        assert!(sb.may_read(&data.join("harlo.db")).unwrap_err().to_string().contains("hidden"));
         assert!(sb.may_read(&data.join("worktrees/p/other/x")).is_ok() && sb.may_write(&data.join("worktrees/p/other/x")).is_err());
         assert!(sb.may_write(&data.join("worktrees/p/mine/../other/x")).is_err(), "through ..");
         assert!(sb.may_read(&data.join("worktrees/../harlo.db")).is_err(), "through .. out of the worktrees");
@@ -534,14 +536,14 @@ pub mod tests {
         std::fs::write(home.join(".ssh/id"), "k").unwrap();
         std::os::unix::fs::symlink(home.join(".ssh"), home.join("proj/keys")).unwrap();
         let sb = Sandbox::new(&on(), &home.join("proj"), &home, &home.join("none"), None);
-        assert!(sb.may_read(&home.join("proj/a.rs")).is_ok());
+        sb.may_read(&home.join("proj/a.rs")).unwrap();
         assert!(sb.may_read(&home.join("other/x")).is_ok(), "the rest of home is readable");
-        assert!(sb.may_read(&home.join(".ssh/id")).unwrap_err().contains("hidden by Harlo's sandbox"));
+        assert!(sb.may_read(&home.join(".ssh/id")).unwrap_err().to_string().contains("hidden by Harlo's sandbox"));
         assert!(sb.may_read(&home.join("proj/keys/id")).is_err(), "through a link");
         assert!(sb.may_read(&home.join("proj/../.ssh/id")).is_err(), "through ..");
         assert!(sb.may_write(&home.join("proj/new/dir/f.rs")).is_ok(), "a new file in the project");
-        assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
-        assert!(sb.may_write(&home.join("other/x")).unwrap_err().contains("outside the folders"));
+        sb.may_write(Path::new("/tmp/x")).unwrap();
+        assert!(sb.may_write(&home.join("other/x")).unwrap_err().to_string().contains("outside the folders"));
         assert!(sb.may_write(&home.join("proj/../other/x")).is_err());
     }
 
@@ -552,9 +554,9 @@ pub mod tests {
         let proj = home.join("proj");
         let sb = Sandbox::new(&on(), &proj, &home, &home.join("none"), None).looking_only();
         assert!(!sb.writable.iter().any(|w| w.starts_with(&proj)), "{:?}", sb.writable);
-        assert!(sb.may_write(&proj.join("a.rs")).unwrap_err().contains("only looks"));
-        assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
-        assert!(sb.may_read(&proj.join("a.rs")).is_ok());
+        assert!(sb.may_write(&proj.join("a.rs")).unwrap_err().to_string().contains("only looks"));
+        sb.may_write(Path::new("/tmp/x")).unwrap();
+        sb.may_read(&proj.join("a.rs")).unwrap();
         assert!(sb.describe().contains("read-only: you only look"), "{}", sb.describe());
         if unavailable().is_some() {
             eprintln!("no bubblewrap here: commands not run");
@@ -587,7 +589,7 @@ pub mod tests {
         let cases = [(on(), tmp.join("proj")), (on(), tmp.join("wt")), (mine, home.join("proj"))];
         for (policy, proj) in cases {
             let sb = Sandbox::new(&policy, &proj, &home, &home.join("none"), None).looking_only();
-            assert!(sb.may_write(&proj.join("a.rs")).unwrap_err().contains("only looks"), "{proj:?}");
+            assert!(sb.may_write(&proj.join("a.rs")).unwrap_err().to_string().contains("only looks"), "{proj:?}");
             if unavailable().is_some() {
                 continue;
             }
@@ -616,8 +618,8 @@ pub mod tests {
         for cwd in [home.clone(), s.0.clone(), PathBuf::from("/")] {
             let sb = Sandbox::new(&on(), &cwd, &home, &home.join("none"), None);
             assert!(!sb.project_writable && !sb.writable.iter().any(|w| home.starts_with(w)), "{cwd:?}: {:?}", sb.writable);
-            assert!(sb.may_write(&home.join("x")).unwrap_err().contains("keeps read-only"), "{cwd:?}");
-            assert!(sb.may_write(Path::new("/tmp/x")).is_ok());
+            assert!(sb.may_write(&home.join("x")).unwrap_err().to_string().contains("keeps read-only"), "{cwd:?}");
+            sb.may_write(Path::new("/tmp/x")).unwrap();
             assert!(sb.describe().contains("stays read-only"));
         }
         // A repository of the whole home folder (dotfiles): a folder in it

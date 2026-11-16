@@ -1,7 +1,11 @@
-//! Session transcript: a reducer over [`HarnessEvent`]s that produces flat
-//! display rows, plus a row diff that turns snapshots into minimal model
-//! changes (so the UI updates one row instead of resetting the list).
+//! Session transcript: [`HarnessEvent`]s reduced to flat display rows.
+//!
+//! Plus a row diff that turns snapshots into minimal model changes (so the UI
+//! updates one row instead of resetting the list).
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -157,7 +161,7 @@ fn about_session(text: &str) -> String {
 
 /// Now, in unix ms.
 fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// A message's own time (unix ms; Harlo writes it), else now.
@@ -182,6 +186,7 @@ enum Block {
     Image(Option<String>),
 }
 
+#[derive(Debug)]
 struct Item {
     id: String,
     role: Role,
@@ -306,12 +311,12 @@ fn long_text(row: &Row) -> usize {
 /// The row with its long text: as it is, or read back from its page (as
 /// it is, without it, if the page can't be read).
 pub fn whole(row: &Arc<Row>) -> Arc<Row> {
-    let Some(paged) = &row.paged else { return row.clone() };
+    let Some(paged) = &row.paged else { return Arc::clone(row) };
     match paged.read().map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<OwnedBody>(&b).map_err(|e| e.to_string())) {
         Ok(b) => Arc::new(Row { html: b.html, text: b.text, full: b.full.map(|f| FullOutput(f.into())), diff: b.diff, command: b.command, paged: None, ..light(row) }),
         Err(e) => {
-            tracing::warn!("a paged row couldn't be read back: {e}");
-            row.clone()
+            tracing::event!(name: "transcript.page.row.failed", tracing::Level::WARN, error.message = %e, "a paged row couldn't be read back: {{error.message}}");
+            Arc::clone(row)
         }
     }
 }
@@ -321,7 +326,8 @@ const TOOL_OUTPUT_DISPLAY_CHARS: usize = 6000;
 /// A shell command shown with its call, at most (characters).
 const COMMAND_DISPLAY_CHARS: usize = 4000;
 
-#[derive(Default)]
+/// A session's conversation as rows, built a message at a time.
+#[derive(Debug, Default)]
 pub struct Transcript {
     items: Vec<Item>,
     by_id: HashMap<String, usize>,
@@ -361,57 +367,9 @@ impl Transcript {
         match ev {
             E::MessageStart { id, message } => self.upsert_message(id, message, false),
             E::MessageEnd { id, message } => self.upsert_message(id, message, true),
-            E::BlockStart { id, index, kind, tool } => {
-                self.unsettle(id);
-                let Some(item) = self.item_mut(id) else { return false };
-                ensure_block(item, *index, *kind);
-                if let (Some((call_id, name)), Some(Block::Tool { call_id: c, name: n, .. })) =
-                    (tool, item.blocks.get_mut(*index))
-                {
-                    *c = call_id.clone();
-                    *n = name.clone();
-                }
-                let pos = self.by_id[id];
-                if let Some((call_id, _)) = tool {
-                    self.tool_owner.insert(call_id.clone(), pos);
-                }
-                self.touch(pos);
-                true
-            }
-            E::BlockDelta { id, index, kind, delta } => {
-                self.unsettle(id);
-                let Some(item) = self.item_mut(id) else { return false };
-                ensure_block(item, *index, *kind);
-                match &mut item.blocks[*index] {
-                    Block::Text(t) | Block::Thinking(t) => t.push_str(delta),
-                    // Partial argument JSON: not shown until the call completes.
-                    Block::Tool { .. } | Block::Image(_) => return false,
-                }
-                let pos = self.by_id[id];
-                self.touch(pos);
-                true
-            }
-            E::BlockEnd { id, index, kind, content } => {
-                self.unsettle(id);
-                let Some(item) = self.item_mut(id) else { return false };
-                ensure_block(item, *index, *kind);
-                let block = match kind {
-                    BlockKind::Text => Block::Text(content.as_str().unwrap_or_default().to_owned()),
-                    BlockKind::Thinking => Block::Thinking(content.as_str().unwrap_or_default().to_owned()),
-                    BlockKind::ToolCall => tool_block(content),
-                };
-                if let Block::Tool { call_id, .. } = &block {
-                    let call_id = call_id.clone();
-                    item.blocks[*index] = block;
-                    let pos = self.by_id[id];
-                    self.tool_owner.insert(call_id, pos);
-                } else {
-                    item.blocks[*index] = block;
-                }
-                let pos = self.by_id[id];
-                self.touch(pos);
-                true
-            }
+            E::BlockStart { id, index, kind, tool } => self.block_started(id, *index, *kind, tool.as_ref()),
+            E::BlockDelta { id, index, kind, delta } => self.block_delta(id, *index, *kind, delta),
+            E::BlockEnd { id, index, kind, content } => self.block_ended(id, *index, *kind, content),
             E::ToolStart { call_id, .. } => {
                 let run = self.tools.entry(call_id.clone()).or_default();
                 run.running = true;
@@ -445,7 +403,7 @@ impl Transcript {
             // The harness's own info notices (tool mounts, cache warming…) are
             // noise in a conversation; warnings and errors still show.
             E::Notice { level: NoticeLevel::Info, system: true, text } => {
-                tracing::debug!("harness notice: {text}");
+                tracing::event!(name: "harness.notice", tracing::Level::DEBUG, notice.text = %text, "harness notice: {{notice.text}}");
                 false
             }
             E::Notice { level, text, .. } => self.push_notice(*level, text.clone()),
@@ -509,6 +467,63 @@ impl Transcript {
             ),
             _ => false,
         }
+    }
+
+    /// A block of a message, whole.
+    fn block_ended(&mut self, id: &str, index: usize, kind: BlockKind, content: &Value) -> bool {
+        self.unsettle(id);
+        let Some(item) = self.item_mut(id) else { return false };
+        ensure_block(item, index, kind);
+        let block = match kind {
+            BlockKind::Text => Block::Text(content.as_str().unwrap_or_default().to_owned()),
+            BlockKind::Thinking => Block::Thinking(content.as_str().unwrap_or_default().to_owned()),
+            BlockKind::ToolCall => tool_block(content),
+        };
+        if let Block::Tool { call_id, .. } = &block {
+            let call_id = call_id.clone();
+            item.blocks[index] = block;
+            let pos = self.by_id[id];
+            self.tool_owner.insert(call_id, pos);
+        } else {
+            item.blocks[index] = block;
+        }
+        let pos = self.by_id[id];
+        self.touch(pos);
+        true
+    }
+
+    /// More of a block of a message.
+    fn block_delta(&mut self, id: &str, index: usize, kind: BlockKind, delta: &str) -> bool {
+        self.unsettle(id);
+        let Some(item) = self.item_mut(id) else { return false };
+        ensure_block(item, index, kind);
+        match &mut item.blocks[index] {
+            Block::Text(t) | Block::Thinking(t) => t.push_str(delta),
+            // Partial argument JSON: not shown until the call completes.
+            Block::Tool { .. } | Block::Image(_) => return false,
+        }
+        let pos = self.by_id[id];
+        self.touch(pos);
+        true
+    }
+
+    /// A block of a message has begun (a tool call: whose it is).
+    fn block_started(&mut self, id: &str, index: usize, kind: BlockKind, tool: Option<&(String, String)>) -> bool {
+        self.unsettle(id);
+        let Some(item) = self.item_mut(id) else { return false };
+        ensure_block(item, index, kind);
+        if let (Some((call_id, name)), Some(Block::Tool { call_id: c, name: n, .. })) =
+            (tool, item.blocks.get_mut(index))
+        {
+            c.clone_from(call_id);
+            n.clone_from(name);
+        }
+        let pos = self.by_id[id];
+        if let Some((call_id, _)) = tool {
+            self.tool_owner.insert(call_id.clone(), pos);
+        }
+        self.touch(pos);
+        true
     }
 
     /// Loads a message list (from `get_messages`), replacing the transcript.
@@ -589,14 +604,13 @@ impl Transcript {
         if message["customType"] == "harlo_plugin" && message["failed"] == true {
             level = NoticeLevel::Error;
         }
-        if message["customType"] == "harlo_job" {
-            if let Some((plain, failed)) = job_notice_for_people(&text) {
+        if message["customType"] == "harlo_job"
+            && let Some((plain, failed)) = job_notice_for_people(&text) {
                 text = plain;
                 if failed {
                     level = NoticeLevel::Warning;
                 }
             }
-        }
         if let Some(&pos) = self.by_id.get(id) {
             self.items[pos].blocks = vec![Block::Text(text)];
             self.items[pos].role = Role::Notice(level);
@@ -689,7 +703,7 @@ impl Transcript {
         item.error = error;
         // (Claude's notes of its own say "<synthetic>".)
         if let Some(model) = message["model"].as_str().filter(|m| !m.is_empty() && !m.starts_with('<')) {
-            item.model = model.to_owned();
+            model.clone_into(&mut item.model);
         }
         item.rev += 1;
         true
@@ -871,7 +885,7 @@ impl Transcript {
         if let Some(paged) = item.paged.take() {
             match paged.read().map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string())) {
                 Ok(blocks) => item.blocks = blocks,
-                Err(e) => tracing::warn!("a paged reply couldn't be read back: {e}"),
+                Err(e) => tracing::event!(name: "transcript.page.reply.failed", tracing::Level::WARN, error.message = %e, "a paged reply couldn't be read back: {{error.message}}"),
             }
         }
         for row in item.rows.iter_mut().flat_map(|(_, rows)| rows) {
@@ -906,14 +920,14 @@ impl Transcript {
         let rows: &[Arc<Row>] = rows.as_ref().map(|(_, rows)| rows.as_slice()).unwrap_or_default();
         for r in rows.iter().filter(|r| r.kind == RowKind::Tool) {
             if let Some(run) = tools.get_mut(&r.call_id).filter(|run| run.dropped) {
-                let output = r.full.as_ref().map_or_else(|| Arc::from(r.text.as_str()), |f| f.0.clone());
+                let output = r.full.as_ref().map_or_else(|| Arc::from(r.text.as_str()), |f| Arc::clone(&f.0));
                 (run.output, run.dropped) = (output, false);
             }
         }
         for (bi, b) in blocks.iter_mut().enumerate() {
             let Some(row) = block_row(id, rows, bi) else { continue };
             match b {
-                Block::Thinking(t) if t.is_empty() && row.kind == RowKind::Thinking => *t = row.text.clone(),
+                Block::Thinking(t) if t.is_empty() && row.kind == RowKind::Thinking => t.clone_from(&row.text),
                 Block::Tool { name, args, .. } if crate::tool_facts::is_shell(name) && !row.command.is_empty() => {
                     if let Some(command) = args.get_mut("command").filter(|c| c.is_null()) {
                         *command = Value::String(row.command.clone());
@@ -936,7 +950,7 @@ impl Transcript {
         // that stays in its run isn't copied again.
         let mut shown = out.iter();
         for row in self.items[first..].iter_mut().flat_map(|item| item.rows.iter_mut().flat_map(|(_, rows)| rows)) {
-            *row = shown.next().expect("a row for each kept").clone();
+            *row = Arc::clone(shown.next().expect("a row for each kept"));
         }
         // (All rows built: those far enough back can settle.)
         if first == 0 {
@@ -956,57 +970,7 @@ impl Transcript {
         let row = |key: String, kind: RowKind| Row { key, kind, state: state.to_owned(), time, model: model.clone(), ..Row::default() };
 
         match item.role {
-            Role::User => {
-                let text: Vec<&str> = item
-                    .blocks
-                    .iter()
-                    .filter_map(|b| match b {
-                        Block::Text(t) => Some(t.as_str()),
-                        _ => None,
-                    })
-                    .collect();
-                let pictures: Vec<String> = item.blocks.iter().filter_map(|b| if let Block::Image(p) = b { p.clone() } else { None }).collect();
-                let images = item.blocks.iter().filter(|b| matches!(b, Block::Image(_))).count();
-                // harlo's own (a helper's report, …): a harlo row, the
-                // session it's about to open.
-                let joined = text.join("\n");
-                if let Some(said) = joined.strip_prefix(HARLO_PREFIX) {
-                    let mut r = row(format!("{id}:u"), RowKind::Notice);
-                    r.title = FROM_HARLO.into();
-                    r.text = said.trim().to_owned();
-                    r.label = crate::orchestration::said_plainly(said);
-                    r.subtitle = about_session(said);
-                    rows.push(Arc::new(r));
-                    return rows;
-                }
-                let mut r = row(format!("{id}:u"), RowKind::User);
-                // Attached files (`<file>` blocks) show as names, not contents.
-                let (files, rest) = crate::attach::split_blocks(&text.join("\n"));
-                let (rest, starter) = crate::starters::strip(&rest);
-                let (rest, ask_first) = harlo_harness::file_blocks::strip_ask_first(rest);
-                let (rest, plan) = harlo_harness::file_blocks::strip_plan(rest);
-                r.text = rest.to_owned();
-                // Pictures sent show as pictures (their files' names, as
-                // chips, would say it twice).
-                let files: Vec<String> = if pictures.is_empty() { files } else { files.into_iter().filter(|f| !crate::pictures::is_picture_name(f)).collect() };
-                r.title = files.join("\n");
-                r.images = pictures;
-                let mut tags = Vec::new();
-                if images > 0 && files.is_empty() && r.images.is_empty() {
-                    tags.push(format!("{images} image{}", if images == 1 { "" } else { "s" }));
-                }
-                if let Some(s) = starter {
-                    tags.push(s.label.to_owned());
-                }
-                if plan {
-                    tags.push("Plan".to_owned());
-                }
-                if ask_first {
-                    tags.push("Ask first".to_owned());
-                }
-                r.subtitle = tags.join(" · ");
-                rows.push(Arc::new(r));
-            }
+            Role::User => rows.push(Arc::new(user_row(&id, &item.blocks, &row))),
             Role::Notice(level) => {
                 let mut r = row(format!("{id}:n"), RowKind::Notice);
                 r.title = match level {
@@ -1016,7 +980,7 @@ impl Transcript {
                 }
                 .into();
                 if let Some(Block::Text(t)) = item.blocks.first() {
-                    r.text = t.clone();
+                    r.text.clone_from(t);
                     // A command harlo ran, or a background command that
                     // ended: what it was and how it went, drawn as such
                     // (`text` stays the plain line).
@@ -1069,86 +1033,14 @@ impl Transcript {
                                 continue;
                             }
                             let mut r = row(format!("{id}:{bi}"), RowKind::Thinking);
-                            r.text = text.clone();
+                            r.text.clone_from(text);
                             // Anything after it means the thought is over.
                             if bi + 1 < blocks.len() {
-                                r.state = "done".to_owned();
+                                "done".clone_into(&mut r.state);
                             }
                             rows.push(Arc::new(r));
                         }
-                        Block::Tool { call_id, name, args } => {
-                            let run = self.tools.get(call_id).cloned().unwrap_or_default();
-                            let mut r = row(format!("{id}:{bi}"), RowKind::Tool);
-                            r.title = name.clone();
-                            r.call_id = call_id.clone();
-                            r.subtitle = wiki_step(name, args).unwrap_or_else(|| summarize_args(args));
-                            if let Some(command) = args["command"].as_str().filter(|_| crate::tool_facts::is_shell(name)) {
-                                r.command = command.chars().take(COMMAND_DISPLAY_CHARS).collect();
-                                r.label = args["description"].as_str().map(|d| first_line(d, 200)).unwrap_or_default();
-                            }
-                            // (A file's lines keep their start, the rest a click
-                            // away in the file; other output keeps its end.)
-                            let start = crate::listing::keeps_start(name, &r.command);
-                            // (A plain read, Harlo's, numbered as Claude's are.)
-                            let numbered = (name == "read" && run.ended && !run.is_error)
-                                .then(|| crate::listing::number_read(args["offset"].as_u64(), &run.output))
-                                .flatten()
-                                .map(Arc::<str>::from);
-                            let output = numbered.as_ref().unwrap_or(&run.output);
-                            r.text = if start { head_chars(output, TOOL_OUTPUT_DISPLAY_CHARS) } else { tail_chars(output, TOOL_OUTPUT_DISPLAY_CHARS) };
-                            if r.text.len() != output.len() {
-                                r.full = Some(FullOutput(output.clone()));
-                            }
-                            if run.started > 0 {
-                                r.time = run.started;
-                            }
-                            r.ended = run.ended_at;
-                            if run.ended {
-                                (r.result, r.diff) = crate::tool_facts::facts(name, args, &run.output, run.is_error);
-                                // (The page OpenWiki gave, once it answered.)
-                                if let Some(page) = wiki_next(name, &run.output).filter(|_| !run.is_error) {
-                                    r.subtitle = page;
-                                }
-                            }
-                            // Pictures it returned; else picture files it
-                            // names (in what it was asked; in what it said
-                            // when that's a few, not a listing).
-                            r.images = run.images.clone();
-                            if r.images.is_empty() {
-                                let mut mentions = Vec::new();
-                                collect_strings(args, &mut |t| mentions.extend(crate::pictures::mentioned(t)));
-                                let said = crate::pictures::mentioned(&run.output);
-                                if said.len() <= MENTIONS_FROM_OUTPUT {
-                                    mentions.extend(said);
-                                }
-                                let mut seen = std::collections::HashSet::new();
-                                mentions.retain(|m| seen.insert(m.clone()));
-                                mentions.truncate(MENTIONS_SHOWN);
-                                r.mentions = mentions;
-                            }
-                            r.state = if run.running {
-                                "running"
-                            } else if run.is_error {
-                                "error"
-                            } else if self.tools.contains_key(call_id) || call_id.starts_with(SEARCH) {
-                                "done"
-                            } else {
-                                "pending"
-                            }
-                            .into();
-                            rows.push(Arc::new(r));
-                            // A subagent hands back its result through `yield`:
-                            // show it as text, not as collapsed arguments.
-                            if name == "yield"
-                                && let Some(result) = yield_markdown(args)
-                            {
-                                for m in md_rows(&self.md.render(&result)) {
-                                    let mut r = row(format!("{id}:{bi}:y{}", m.mi), m.kind);
-                                    (r.html, r.text, r.title) = (m.html, m.code, m.lang);
-                                    rows.push(Arc::new(r));
-                                }
-                            }
-                        }
+                        Block::Tool { call_id, name, args } => rows.extend(self.tool_rows(&row, &format!("{id}:{bi}"), call_id, name, args)),
                         // A picture the model made.
                         Block::Image(Some(path)) => {
                             let mut r = row(format!("{id}:{bi}:pic"), RowKind::Images);
@@ -1168,7 +1060,137 @@ impl Transcript {
         }
         rows
     }
+
+    /// A tool call's rows: the call, and a subagent's result after it.
+    fn tool_rows(&mut self, row: &dyn Fn(String, RowKind) -> Row, key: &str, call_id: &str, name: &str, args: &Value) -> Vec<Arc<Row>> {
+        let mut rows = Vec::new();
+            let run = self.tools.get(call_id).cloned().unwrap_or_default();
+            let mut r = row(key.to_owned(), RowKind::Tool);
+            name.clone_into(&mut r.title);
+            call_id.clone_into(&mut r.call_id);
+            r.subtitle = wiki_step(name, args).unwrap_or_else(|| summarize_args(args));
+            if let Some(command) = args["command"].as_str().filter(|_| crate::tool_facts::is_shell(name)) {
+                r.command = command.chars().take(COMMAND_DISPLAY_CHARS).collect();
+                r.label = args["description"].as_str().map(|d| first_line(d, 200)).unwrap_or_default();
+            }
+            // (A file's lines keep their start, the rest a click
+            // away in the file; other output keeps its end.)
+            let start = crate::listing::keeps_start(name, &r.command);
+            // (A plain read, Harlo's, numbered as Claude's are.)
+            let numbered = (name == "read" && run.ended && !run.is_error)
+                .then(|| crate::listing::number_read(args["offset"].as_u64(), &run.output))
+                .flatten()
+                .map(Arc::<str>::from);
+            let output = numbered.as_ref().unwrap_or(&run.output);
+            r.text = if start { head_chars(output, TOOL_OUTPUT_DISPLAY_CHARS) } else { tail_chars(output, TOOL_OUTPUT_DISPLAY_CHARS) };
+            if r.text.len() != output.len() {
+                r.full = Some(FullOutput(Arc::clone(output)));
+            }
+            if run.started > 0 {
+                r.time = run.started;
+            }
+            r.ended = run.ended_at;
+            if run.ended {
+                (r.result, r.diff) = crate::tool_facts::facts(name, args, &run.output, run.is_error);
+                // (The page OpenWiki gave, once it answered.)
+                if let Some(page) = wiki_next(name, &run.output).filter(|_| !run.is_error) {
+                    r.subtitle = page;
+                }
+            }
+            // Pictures it returned; else picture files it
+            // names (in what it was asked; in what it said
+            // when that's a few, not a listing).
+            r.images.clone_from(&run.images);
+            if r.images.is_empty() {
+                let mut mentions = Vec::new();
+                collect_strings(args, &mut |t| mentions.extend(crate::pictures::mentioned(t)));
+                let said = crate::pictures::mentioned(&run.output);
+                if said.len() <= MENTIONS_FROM_OUTPUT {
+                    mentions.extend(said);
+                }
+                let mut seen = std::collections::HashSet::new();
+                mentions.retain(|m| seen.insert(m.clone()));
+                mentions.truncate(MENTIONS_SHOWN);
+                r.mentions = mentions;
+            }
+            r.state = if run.running {
+                "running"
+            } else if run.is_error {
+                "error"
+            } else if self.tools.contains_key(call_id) || call_id.starts_with(SEARCH) {
+                "done"
+            } else {
+                "pending"
+            }
+            .into();
+            rows.push(Arc::new(r));
+            // A subagent hands back its result through `yield`:
+            // show it as text, not as collapsed arguments.
+            if name == "yield"
+                && let Some(result) = yield_markdown(args)
+            {
+                for m in md_rows(&self.md.render(&result)) {
+                    let mut r = row(format!("{key}:y{}", m.mi), m.kind);
+                    (r.html, r.text, r.title) = (m.html, m.code, m.lang);
+                    rows.push(Arc::new(r));
+                }
+            }
+        rows
+    }
 }
+
+/// A message of the user's as its row (harlo's own, a helper's report: a
+/// harlo row).
+fn user_row(id: &str, blocks: &[Block], row: &dyn Fn(String, RowKind) -> Row) -> Row {
+    let text: Vec<&str> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Text(t) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect();
+    let pictures: Vec<String> = blocks.iter().filter_map(|b| if let Block::Image(p) = b { p.clone() } else { None }).collect();
+    let images = blocks.iter().filter(|b| matches!(b, Block::Image(_))).count();
+    // harlo's own (a helper's report, …): a harlo row, the
+    // session it's about to open.
+    let joined = text.join("\n");
+    if let Some(said) = joined.strip_prefix(HARLO_PREFIX) {
+        let mut r = row(format!("{id}:u"), RowKind::Notice);
+        r.title = FROM_HARLO.into();
+        said.trim().clone_into(&mut r.text);
+        r.label = crate::orchestration::said_plainly(said);
+        r.subtitle = about_session(said);
+        return r;
+    }
+    let mut r = row(format!("{id}:u"), RowKind::User);
+    // Attached files (`<file>` blocks) show as names, not contents.
+    let (files, rest) = crate::attach::split_blocks(&text.join("\n"));
+    let (rest, starter) = crate::starters::strip(&rest);
+    let (rest, ask_first) = harlo_harness::file_blocks::strip_ask_first(rest);
+    let (rest, plan) = harlo_harness::file_blocks::strip_plan(rest);
+    rest.clone_into(&mut r.text);
+    // Pictures sent show as pictures (their files' names, as
+    // chips, would say it twice).
+    let files: Vec<String> = if pictures.is_empty() { files } else { files.into_iter().filter(|f| !crate::pictures::is_picture_name(f)).collect() };
+    r.title = files.join("\n");
+    r.images = pictures;
+    let mut tags = Vec::new();
+    if images > 0 && files.is_empty() && r.images.is_empty() {
+        tags.push(format!("{images} image{}", if images == 1 { "" } else { "s" }));
+    }
+    if let Some(s) = starter {
+        tags.push(s.label.to_owned());
+    }
+    if plan {
+        tags.push("Plan".to_owned());
+    }
+    if ask_first {
+        tags.push("Ask first".to_owned());
+    }
+    r.subtitle = tags.join(" · ");
+    r
+}
+
 
 /// The row block `bi` of message `id` made (thinking, a tool call).
 fn block_row<'a>(id: &str, rows: &'a [Arc<Row>], bi: usize) -> Option<&'a Row> {
@@ -1276,10 +1298,6 @@ fn yield_markdown(args: &Value) -> Option<String> {
     Some([format!("**{summary}**"), report.to_owned()].into_iter().filter(|s| s != "****" && !s.is_empty()).collect::<Vec<_>>().join("\n\n"))
 }
 
-/// One-line summary of tool arguments: the obvious field for common tools
-/// (`command`, `path`, …), otherwise compact `key=value` pairs. MCP proxy
-/// calls (`{tool, args}`) show the inner tool name first.
-
 /// How much prose goes in one row before the next starts (a row is laid
 /// out whole; very long replies stay quick to scroll).
 const MD_ROW_BYTES: usize = 40_000;
@@ -1357,7 +1375,7 @@ fn wiki_step(name: &str, args: &Value) -> Option<String> {
             let (pages, gone) = (count("pages"), count("deletePages"));
             let mut s = n(pages, "page planned", "pages planned");
             if gone > 0 {
-                s += &format!(", {} to remove", n(gone, "page", "pages"));
+                let _ = write!(s, ", {} to remove", n(gone, "page", "pages"));
             }
             s
         }
@@ -1470,7 +1488,7 @@ pub(crate) fn head_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_owned();
     }
-    let end = s.char_indices().nth(max).map(|(i, _)| i).unwrap_or(s.len());
+    let end = s.char_indices().nth(max).map_or(s.len(), |(i, _)| i);
     let end = s[..end].rfind('\n').unwrap_or(end);
     format!("{}\n…", &s[..end])
 }
@@ -1481,7 +1499,7 @@ pub(crate) fn tail_chars(s: &str, max: usize) -> String {
         return s.to_owned();
     }
     let skip = count - max;
-    let start = s.char_indices().nth(skip).map(|(i, _)| i).unwrap_or(0);
+    let start = s.char_indices().nth(skip).map_or(0, |(i, _)| i);
     // (From a line's start: half a line would read as a line of its own.)
     let start = s[start..].find('\n').map(|i| start + i + 1).filter(|&i| i < s.len()).unwrap_or(start);
     format!("…\n{}", &s[start..])
@@ -1533,8 +1551,8 @@ fn group_runs(rows: &mut [Arc<Row>]) {
 fn set_run(row: &mut Arc<Row>, group: &str, summary: &str, open: bool, run_ms: i64) {
     if row.group != group || row.summary != summary || row.group_open != open || row.run_ms != run_ms {
         let r = Arc::make_mut(row);
-        r.group = group.to_owned();
-        r.summary = summary.to_owned();
+        group.clone_into(&mut r.group);
+        summary.clone_into(&mut r.summary);
         r.group_open = open;
         r.run_ms = run_ms;
     }
@@ -1598,7 +1616,7 @@ fn run_summary(run: &[Arc<Row>]) -> String {
         out = first.to_uppercase() + &out[1..];
     }
     if failed > 0 {
-        out.push_str(&format!(" · {failed} failed"));
+        let _ = write!(out, " · {failed} failed");
     }
     out
 }
@@ -2070,7 +2088,7 @@ mod tests {
     /// session loop does every 100 ms). Release build, by hand:
     /// `cargo test --release -p harlo-core --lib -- --ignored long_session_flush --nocapture`
     #[test]
-    #[ignore]
+    #[ignore = "a timing measurement, run by hand in a release build"]
     fn long_session_flush() {
         use harlo_harness::{BlockKind, HarnessEvent};
         for turns in [1_700, 8_500] {
@@ -2180,7 +2198,7 @@ mod tests {
             messages.push(json!({"role":"assistant","content":[{"type":"text","text":format!("answer **{i}**")}]}));
         }
         for (n, m) in messages.iter_mut().enumerate() {
-            m["timestamp"] = json!(1_000 + n as i64);
+            m["timestamp"] = json!(1_000 + i64::try_from(n).unwrap_or(i64::MAX));
         }
         let mut whole = Transcript::default();
         whole.load_messages(&messages);

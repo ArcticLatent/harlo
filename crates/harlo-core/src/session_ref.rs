@@ -1,8 +1,12 @@
-//! Another session mentioned in a message (`@session:<id>`, from the
-//! composer's `@` list): its latest messages go with the message, as they
-//! were when it was sent, in a file block (shown as an attachment). The
+//! Another session mentioned in a message (`@session:<id>`).
+//!
+//! From the composer's `@` list: its latest messages go with the message, as
+//! they were when it was sent, in a file block (shown as an attachment). The
 //! agent reads them like a pasted excerpt; nothing is read again later.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::path::Path;
 
 use harlo_harness::{HarnessKind, SessionInfo};
@@ -50,7 +54,7 @@ pub fn candidates<'a>(sessions: impl IntoIterator<Item = &'a SessionInfo>, cwd: 
         .filter(|s| s.cwd == cwd || real(&s.cwd) == here)
         .filter(|s| q.is_empty() || s.display_title().to_lowercase().contains(&q) || short_id(&s.id).to_lowercase().starts_with(&q))
         .collect();
-    found.sort_by(|a, b| b.modified.cmp(&a.modified));
+    found.sort_by_key(|s| std::cmp::Reverse(s.modified));
     found.truncate(limit);
     found
 }
@@ -92,7 +96,7 @@ fn said(m: &Value) -> Option<String> {
                     }
                 }
                 let list: Vec<String> = counted.into_iter().map(|(n, c)| if c > 1 { format!("{n} ×{c}") } else { n }).collect();
-                text.push_str(&format!("{}[used {}]", if text.trim().is_empty() { "" } else { "\n" }, list.join(", ")));
+                let _ = write!(text, "{}[used {}]", if text.trim().is_empty() { "" } else { "\n" }, list.join(", "));
             }
             ("Assistant", text)
         }

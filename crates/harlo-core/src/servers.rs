@@ -1,8 +1,11 @@
-//! Model servers harlo set up (Settings → Model servers), on the machine
-//! this runs on: their start and stop commands and models (harlo's
-//! settings), starting them with their output to a log, waiting until they
-//! answer, and stopping them, however they're running. The app uses it for
+//! Model servers harlo set up (Settings → Model servers), on this machine.
+//!
+//! Their start and stop commands and models (harlo's settings), starting them
+//! with their output to a log, waiting until they answer, and stopping them,
+//! however they're running. The app uses it for
 //! this computer's; `harlo-engines` for another machine's, there.
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -310,7 +313,7 @@ pub fn start_command(url: &str) -> String {
 /// Stops a server harlo set up, however it's running (started by this
 /// harlo or left by an earlier one), until it stops answering.
 pub fn stop_any(url: &str) {
-    match STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(url)) {
+    match STARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut().and_then(|m| m.remove(url)) {
         Some(child) => stop_group(child),
         None => stop_pids(&leftovers(url)),
     }
@@ -354,23 +357,27 @@ fn spawn_from_launcher(cmd: std::process::Command) -> std::io::Result<std::proce
         Mutex::new(tx)
     });
     let (reply, answer) = std::sync::mpsc::channel();
-    tx.lock().unwrap().send((cmd, reply)).map_err(|_| std::io::Error::other("the launcher stopped"))?;
-    answer.recv().map_err(|_| std::io::Error::other("the launcher stopped"))?
+    tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).send((cmd, reply)).ok().ok_or_else(|| std::io::Error::other("the launcher stopped"))?;
+    answer.recv().ok().ok_or_else(|| std::io::Error::other("the launcher stopped"))?
 }
 
 /// Runs a server's start command in a shell from the home folder, its
 /// output to its log, as one of harlo's (stopped when harlo quits).
-pub fn launch(url: &str, command: &str) -> Result<(), String> {
+///
+/// # Errors
+///
+/// When the log can't be made or the shell can't be started.
+pub fn launch(url: &str, command: &str) -> anyhow::Result<()> {
     use std::os::unix::process::CommandExt;
     let log = log_path(url);
     let _ = std::fs::create_dir_all(log.parent().unwrap_or(std::path::Path::new("/")));
-    let out = std::fs::File::create(&log).map_err(|e| format!("Couldn't run it: {e}"))?;
+    let out = std::fs::File::create(&log).map_err(|e| anyhow::anyhow!("Couldn't run it: {e}"))?;
     let mut cmd = std::process::Command::new("sh");
     cmd.arg("-c")
         .arg(command)
-        .current_dir(std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")))
+        .current_dir(std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from))
         .stdin(std::process::Stdio::null())
-        .stdout(out.try_clone().map_err(|e| format!("Couldn't run it: {e}"))?)
+        .stdout(out.try_clone().map_err(|e| anyhow::anyhow!("Couldn't run it: {e}"))?)
         .stderr(out);
     let child = if DETACHED.load(std::sync::atomic::Ordering::Relaxed) {
         // A session of its own: it outlives what started it and the SSH
@@ -380,9 +387,9 @@ pub fn launch(url: &str, command: &str) -> Result<(), String> {
             cmd.pre_exec(|| {
                 libc::setsid();
                 Ok(())
-            });
-        }
-        cmd.spawn().map_err(|e| format!("Couldn't run it: {e}"))?
+            })
+        };
+        cmd.spawn().map_err(|e| anyhow::anyhow!("Couldn't run it: {e}"))?
     } else {
         cmd.process_group(0);
         // It stops when harlo does, however harlo ends (Ctrl+C, a crash):
@@ -392,31 +399,37 @@ pub fn launch(url: &str, command: &str) -> Result<(), String> {
             cmd.pre_exec(|| {
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
                 Ok(())
-            });
-        }
-        spawn_from_launcher(cmd).map_err(|e| format!("Couldn't run it: {e}"))?
+            })
+        };
+        spawn_from_launcher(cmd).map_err(|e| anyhow::anyhow!("Couldn't run it: {e}"))?
     };
-    STARTED.lock().unwrap().get_or_insert_with(HashMap::new).insert(url.to_owned(), child);
+    STARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(url.to_owned(), child);
     Ok(())
 }
 
-/// Waits (blocking) until a launched server answers: whether harlo still
-/// holds its process (a launcher like `strata launch` starts the server and
-/// exits, which is fine), or why it didn't come up. `tick` gets its log's
-/// last line now and then; `stop()` gives up.
-pub fn wait_up(url: &str, limit: Duration, tick: &mut dyn FnMut(&str), stop: &dyn Fn() -> bool) -> Result<bool, String> {
+/// Waits (blocking) until a launched server answers.
+///
+/// Whether harlo still holds its process (a launcher like `strata launch`
+/// starts the server and exits, which is fine), or why it didn't come up.
+/// `tick` gets its log's last line now and then; `stop()` gives up.
+///
+/// # Errors
+///
+/// Why it didn't come up: it ended, or `limit` passed (with its log's last
+/// line), or it was stopped.
+pub fn wait_up(url: &str, limit: Duration, tick: &mut dyn FnMut(&str), stop: &dyn Fn() -> bool) -> anyhow::Result<bool> {
     let deadline = Instant::now() + limit;
     let mut held = true;
     loop {
         if held {
-            let exited = STARTED.lock().unwrap().as_mut().and_then(|m| m.get_mut(url)).map(|c| c.try_wait().ok().flatten());
+            let exited = STARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut().and_then(|m| m.get_mut(url)).map(|c| c.try_wait().ok().flatten());
             match exited {
-                None => return Err("Stopped.".into()),
+                None => return Err(anyhow::Error::msg("Stopped.")),
                 Some(Some(status)) => {
-                    STARTED.lock().unwrap().as_mut().map(|m| m.remove(url));
+                    STARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut().map(|m| m.remove(url));
                     if !status.success() {
                         let tail = log_tail(url);
-                        return Err(if tail.is_empty() { format!("It stopped ({status}).") } else { tail });
+                        return Err(if tail.is_empty() { anyhow::Error::msg(format!("It stopped ({status}).")) } else { anyhow::Error::msg(tail) });
                     }
                     // A launcher: the server goes on without it.
                     held = false;
@@ -428,10 +441,10 @@ pub fn wait_up(url: &str, limit: Duration, tick: &mut dyn FnMut(&str), stop: &dy
             return Ok(held);
         }
         if stop() {
-            return Err("Cancelled.".into());
+            return Err(anyhow::Error::msg("Cancelled."));
         }
         if Instant::now() > deadline {
-            return Err(format!("It hasn't answered in {} minutes.", limit.as_secs() / 60));
+            return Err(anyhow::anyhow!("It hasn't answered in {} minutes.", limit.as_secs() / 60));
         }
         // (Its last line; of a progress bar redrawn in place with carriage
         // returns, as vLLM's, only its latest drawing.)
@@ -448,7 +461,11 @@ pub fn wait_up(url: &str, limit: Duration, tick: &mut dyn FnMut(&str), stop: &dy
 
 /// Starts a server harlo set up unless it answers already (blocking, until
 /// it serves).
-pub fn ensure_running(url: &str) -> Result<(), String> {
+///
+/// # Errors
+///
+/// When it isn't a server harlo set up, or it doesn't start (see [`wait_up`]).
+pub fn ensure_running(url: &str) -> anyhow::Result<()> {
     if !needs_start(url) {
         return Ok(());
     }
@@ -458,9 +475,9 @@ pub fn ensure_running(url: &str) -> Result<(), String> {
     }
     let command = commands_of(url)["start"].as_str().unwrap_or_default().to_owned();
     launch(url, &command)?;
-    wait_up(url, Duration::from_secs(15 * 60), &mut |_| {}, &|| false)?;
+    wait_up(url, Duration::from_mins(15), &mut |_| {}, &|| false)?;
     for problem in AFTER_START.get().map(|f| f(url)).unwrap_or_default() {
-        tracing::warn!("{problem}");
+        tracing::event!(name: "model_server.start.problem", tracing::Level::WARN, server.url = %url, problem = %problem, "{{server.url}}: {{problem}}");
     }
     Ok(())
 }
@@ -494,14 +511,14 @@ fn engine_faulted(url: &str) -> bool {
 }
 
 pub fn stop_launched(url: &str) {
-    if let Some(child) = STARTED.lock().unwrap().as_mut().and_then(|m| m.remove(url)) {
+    if let Some(child) = STARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut().and_then(|m| m.remove(url)) {
         stop_group(child);
     }
 }
 
 /// Stops the servers harlo started (it's quitting).
 pub fn stop_started_servers() {
-    for (_, child) in STARTED.lock().unwrap().take().unwrap_or_default() {
+    for (_, child) in STARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap_or_default() {
         stop_group(child);
     }
     // A server with its own stop command (Strata's launcher starts its
@@ -545,7 +562,7 @@ pub fn leftovers(url: &str) -> Vec<i32> {
     let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
     dir.flatten()
         .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
-        .filter(|pid| *pid != std::process::id() as i32)
+        .filter(|pid| *pid != i32::try_from(std::process::id()).unwrap_or(i32::MAX))
         .filter(|pid| {
             if !std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|exe| exe.starts_with(&engines)) {
                 return false;
@@ -584,7 +601,7 @@ pub fn stop_pids(pids: &[i32]) {
 
 /// Asks the server's process group to stop, then makes it.
 pub fn stop_group(mut child: std::process::Child) {
-    let pid = child.id() as i32;
+    let pid = i32::try_from(child.id()).unwrap_or(i32::MAX);
     // SAFETY: a signal to the group harlo started.
     unsafe { libc::kill(-pid, libc::SIGTERM) };
     for _ in 0..50 {
@@ -598,12 +615,13 @@ pub fn stop_group(mut child: std::process::Child) {
     let _ = child.wait();
 }
 
-/// Takes a server out of every agent here that has it (by its name and
-/// address; `reread`: the agent picks the change up); one harlo set up, no
-/// agent having it now, is stopped and forgotten, and its model files
-/// deleted with `delete_files`. `step(what, done, of)` says how far.
-/// `(errors, what it did)`: "Taken out of Harlo. Deleted 2 models
-/// from Ollama (15.2 GB).".
+/// Takes a server out of every agent here that has it.
+///
+/// By its name and address; `reread`: the agent picks the change up. One harlo
+/// set up, no agent having it now, is stopped and forgotten, and its model
+/// files deleted with `delete_files`. `step(what, done, of)` says how far.
+/// `(errors, what it did)`: "Taken out of Harlo. Deleted 2 models from Ollama
+/// (15.2 GB).".
 pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usize, usize), reread: &dyn Fn(HarnessKind)) -> (Vec<String>, String) {
     let mut errors = Vec::new();
     let mut agents: Vec<&str> = Vec::new();
@@ -631,7 +649,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
     model_servers::forget_unused_uses();
     // Set up by harlo, and no agent has it now: stopped and forgotten.
     let still = model_servers::AGENTS.iter().any(|k| model_servers::servers(*k).iter().any(|s| s.base_url == url));
-    if still || !commands_of(url)["start"].as_str().is_some_and(|c| !c.is_empty()) {
+    if still || commands_of(url)["start"].as_str().is_none_or(str::is_empty) {
         return (errors, summary.join(" "));
     }
     // Ollama's models out of its store first (it must run for that).
@@ -650,7 +668,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
                             count += 1;
                             freed += sizes.iter().find(|(s, _)| s == n).map_or(0, |(_, b)| *b);
                         }
-                        Err(e) => errors.push(e),
+                        Err(e) => errors.push(format!("{e:#}")),
                     }
                 }
                 if count > 0 {
@@ -676,7 +694,7 @@ pub fn remove(name: &str, url: &str, delete_files: bool, step: &dyn Fn(&str, usi
     let (mut count, mut freed) = (0, 0);
     for (i, f) in files.iter().enumerate() {
         step(&format!("Deleting {}", f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), i, files.len());
-        let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+        let size = std::fs::metadata(f).map_or(0, |m| m.len());
         match std::fs::remove_file(f) {
             Ok(()) => {
                 count += 1;
@@ -728,6 +746,12 @@ pub fn list() -> Vec<Value> {
             json!({ "baseUrl": url, "name": name, "engine": engine_of(&url), "models": v["models"].as_array().cloned().unwrap_or_default(), "running": model_servers::answers(&url), "log": log })
         })
         .collect()
+}
+
+/// The folder a server's model files are in, empty ones up to it removed
+/// with them: harlo's models folder, or Strata's data folder.
+pub fn files_root(url: &str) -> PathBuf {
+    strata_model(&start_command(url)).map_or_else(models_dir, |m| m.data)
 }
 
 #[cfg(test)]
@@ -797,10 +821,4 @@ mod tests {
         assert!(super::strata_set_files(&deepseek, &[again]).is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
-}
-
-/// The folder a server's model files are in, empty ones up to it removed
-/// with them: harlo's models folder, or Strata's data folder.
-pub fn files_root(url: &str) -> PathBuf {
-    strata_model(&start_command(url)).map_or_else(models_dir, |m| m.data)
 }

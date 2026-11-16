@@ -17,6 +17,8 @@
 //!   the results themselves stay in the file (harlo shows them, `recall`
 //!   reads them after a restart).
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::{Value, json};
 
 use crate::compact;
@@ -118,7 +120,7 @@ fn source(name: &str, args: &Value) -> String {
 pub fn stub_text(history: &[Value], result: &Value) -> String {
     let id = result["toolCallId"].as_str().unwrap_or_default();
     let name = result["toolName"].as_str().unwrap_or("a tool");
-    let args = call_of(history, id).map(|c| &c["arguments"]).unwrap_or(&Value::Null);
+    let args = call_of(history, id).map_or(&Value::Null, |c| &c["arguments"]);
     let tokens = compact::estimate(result);
     let size = if tokens >= 1000 { format!("{:.1}k tokens", tokens as f64 / 1000.0) } else { format!("{tokens} tokens") };
     let failed = if result["isError"] == true { ", which failed" } else { "" };
@@ -168,7 +170,7 @@ pub fn replay(entry: &Value, messages: &mut [Value]) -> Vec<(String, Original)> 
 mod tests {
     use super::*;
 
-    fn call(id: &str, name: &str, args: Value) -> Value {
+    fn call(id: &str, name: &str, args: &Value) -> Value {
         json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": id, "name": name, "arguments": args }] })
     }
 
@@ -184,14 +186,14 @@ mod tests {
     fn picks_the_old_big_ones() {
         let history = vec![
             user("go"),
-            call("c1", "read", json!({ "path": "src/a.rs" })),
+            call("c1", "read", &json!({ "path": "src/a.rs" })),
             result("c1", "read", 12_000),
-            call("c2", "ls", json!({})),
+            call("c2", "ls", &json!({})),
             result("c2", "ls", 400),
-            call("c3", "bash", json!({ "command": "cargo test" })),
+            call("c3", "bash", &json!({ "command": "cargo test" })),
             result("c3", "bash", 20_000),
             user("and now"),
-            call("c4", "read", json!({ "path": "src/b.rs" })),
+            call("c4", "read", &json!({ "path": "src/b.rs" })),
             result("c4", "read", 12_000),
         ];
         // The newest 3000 tokens kept: c4's read stays; c2's is too small.
@@ -209,12 +211,12 @@ mod tests {
 
     #[test]
     fn a_stub_says_where_it_came_from() {
-        let history = vec![call("c1", "read", json!({ "path": "src/a.rs", "offset": 40, "limit": 51 })), result("c1", "read", 8_000)];
+        let history = vec![call("c1", "read", &json!({ "path": "src/a.rs", "offset": 40, "limit": 51 })), result("c1", "read", 8_000)];
         let text = stub_text(&history, &history[1]);
         assert_eq!(text, "[Output set aside to save context: read src/a.rs (lines 40–90) (2.0k tokens). recall {\"id\": \"c1\"} returns it.]");
         let mut failed = result("c2", "bash", 2_000);
         failed["isError"] = json!(true);
-        let history = vec![call("c2", "bash", json!({ "command": "cargo   test\n --all" })), failed];
+        let history = vec![call("c2", "bash", &json!({ "command": "cargo   test\n --all" })), failed];
         assert!(stub_text(&history, &history[1]).contains("bash: cargo test --all, which failed (504 tokens)"));
         assert!(stub_text(&[], &result("c9", "grep", 2_000)).contains("grep \"\""));
         let s = as_stub(&history[1], "stub");
@@ -223,7 +225,7 @@ mod tests {
 
     #[test]
     fn replays_an_entry() {
-        let mut messages = vec![call("c1", "read", json!({ "path": "a" })), result("c1", "read", 4_000), result("c2", "read", 4_000)];
+        let mut messages = vec![call("c1", "read", &json!({ "path": "a" })), result("c1", "read", 4_000), result("c2", "read", 4_000)];
         let entry = json!({ "type": "harlo_stubs", "stubs": [{ "id": "c1", "text": "[c1 aside]" }, { "id": "gone", "text": "x" }] });
         let originals = replay(&entry, &mut messages);
         assert_eq!(originals.len(), 1);

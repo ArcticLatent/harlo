@@ -1,5 +1,8 @@
 //! Dev check: the YAML writer over a corpus (JSON lines `{value, out}` on
 //! stdin), printing each case that differs.
+
+// Rust guideline compliant 2026-10-09
+
 use std::io::BufRead;
 
 fn main() {

@@ -2,6 +2,8 @@
 //! instructions carry only the date the session started (so they stay the
 //! same all day, and the cache serves them); `current_time` is the clock.
 
+// Rust guideline compliant 2026-10-09
+
 use std::ffi::CStr;
 
 /// A moment, as the local clock shows it.
@@ -21,16 +23,21 @@ pub struct Local {
 
 const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-#[allow(deprecated)] // (libc's time_t on musl: 64-bit there too, as it says it will be.)
+#[expect(trivial_numeric_casts, reason = "time_t and c_long are i64 on the 64-bit targets harlo is built for, but not on every target")]
+#[cfg_attr(target_env = "musl", expect(deprecated, reason = "libc deprecates time_t on musl ahead of its move to 64 bits; it is 64-bit there already"))]
 fn at(unix: i64, utc: bool) -> Local {
     let t: libc::time_t = unix as libc::time_t;
-    // SAFETY: tm is plain data, filled by localtime_r/gmtime_r from t.
+    // SAFETY: libc::tm is integers and one pointer, for which all zeros
+    // (tm_zone null) is a valid value.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: both pointers are to locals alive for the whole call; the _r
+    // forms are thread-safe and write their result only into `tm`. A time
+    // they can't convert leaves `tm` zeroed, which is still valid.
     unsafe {
         if utc {
-            libc::gmtime_r(&t, &mut tm);
+            libc::gmtime_r(&raw const t, &raw mut tm);
         } else {
-            libc::localtime_r(&t, &mut tm);
+            libc::localtime_r(&raw const t, &raw mut tm);
         }
     }
     let zone = if tm.tm_zone.is_null() {
@@ -41,12 +48,12 @@ fn at(unix: i64, utc: bool) -> Local {
     };
     Local {
         year: tm.tm_year + 1900,
-        month: (tm.tm_mon + 1) as u32,
-        day: tm.tm_mday as u32,
-        hour: tm.tm_hour as u32,
-        minute: tm.tm_min as u32,
-        second: tm.tm_sec as u32,
-        weekday: DAYS[(tm.tm_wday.clamp(0, 6)) as usize],
+        month: u32::try_from(tm.tm_mon + 1).unwrap_or(0),
+        day: u32::try_from(tm.tm_mday).unwrap_or(0),
+        hour: u32::try_from(tm.tm_hour).unwrap_or(0),
+        minute: u32::try_from(tm.tm_min).unwrap_or(0),
+        second: u32::try_from(tm.tm_sec).unwrap_or(0),
+        weekday: DAYS[usize::try_from(tm.tm_wday.clamp(0, 6)).unwrap_or(0)],
         offset: tm.tm_gmtoff as i64,
         zone,
         unix,
@@ -54,7 +61,7 @@ fn at(unix: i64, utc: bool) -> Local {
 }
 
 fn unix_now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 pub fn now() -> Local {

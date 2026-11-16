@@ -1,14 +1,18 @@
-//! Your own model servers (Settings → Model servers): any OpenAI-compatible
-//! server, on this computer or elsewhere (Ollama, LM Studio, llama.cpp,
-//! vLLM, SGLang, a company gateway). harlo asks the server what it serves
-//! (`/models`) and adds the models you pick to Harlo's config, so they show
-//! in harlo's model lists: `$XDG_CONFIG_HOME/harlo-agent/providers.json`,
-//! `providers.<name>`: `baseUrl`, `api`, `apiKey`, `models: [{ id,
-//! contextWindow, cost }]` (`cost`: dollars per million tokens, when the
-//! server lists its prices or you give one).
+//! Your own model servers (Settings → Model servers).
+//!
+//! Any OpenAI-compatible server, on this computer or elsewhere (Ollama, LM
+//! Studio, llama.cpp, vLLM, SGLang, a company gateway). harlo asks the server
+//! what it serves (`/models`) and adds the models you pick to Harlo's config,
+//! so they show in harlo's model lists:
+//! `$XDG_CONFIG_HOME/harlo-agent/providers.json`, `providers.<name>`:
+//! `baseUrl`, `api`, `apiKey`, `models: [{ id, contextWindow, cost }]` (`cost`:
+//! dollars per million tokens, when the server lists its prices or you give
+//! one).
 //!
 //! The rest of the file stays as it was (its JSON keeps its order). A name
 //! already there isn't replaced.
+
+// Rust guideline compliant 2026-10-09
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -128,10 +132,15 @@ fn cost_of(price: [f64; 3]) -> Value {
 
 /// Asks the server what it serves (blocking): `<url>/models`, then
 /// `<url>/v1/models` (Ollama and others answer there).
-pub fn find(url: &str, key: &str) -> Result<Listing, String> {
+///
+/// # Errors
+///
+/// When the server can't be reached at either address, refuses the key, or
+/// doesn't answer with a list of models.
+pub fn find(url: &str, key: &str) -> anyhow::Result<Listing> {
     let base = tidy(url);
     if !base.starts_with("http://") && !base.starts_with("https://") {
-        return Err("Type the server's address, like http://localhost:11434.".into());
+        return Err(anyhow::Error::msg("Type the server's address, like http://localhost:11434."));
     }
     let http: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).http_status_as_error(false).build().into();
     let key = expand(key);
@@ -158,7 +167,7 @@ pub fn find(url: &str, key: &str) -> Result<Listing, String> {
             Ok(mut resp) => {
                 let status = resp.status().as_u16();
                 if status == 401 || status == 403 {
-                    return Err(if key.is_empty() { "The server wants a key." } else { "The server didn't accept the key." }.into());
+                    return Err(anyhow::Error::msg(if key.is_empty() { "The server wants a key." } else { "The server didn't accept the key." }));
                 }
                 let body = resp.body_mut().read_to_string().unwrap_or_default();
                 if status == 200
@@ -170,7 +179,7 @@ pub fn find(url: &str, key: &str) -> Result<Listing, String> {
             }
         }
     }
-    Err(why)
+    Err(anyhow::Error::msg(why))
 }
 
 /// Whether something answers at the server's address now (its model
@@ -243,12 +252,16 @@ fn details_in(all: &Value, name: &str) -> Option<(String, String, Vec<Found>)> {
 
 /// Sets the context of a server's models in the agent's file (the server
 /// serves that now): whether it changed anything.
-pub fn set_context(kind: HarnessKind, name: &str, context: u64) -> Result<bool, String> {
-    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+///
+/// # Errors
+///
+/// When the agent's file can't be read, isn't valid, or can't be written.
+pub fn set_context(kind: HarnessKind, name: &str, context: u64) -> anyhow::Result<bool> {
+    let f = file(kind).ok_or_else(|| anyhow::Error::msg("harlo can't change this agent's model servers."))?;
     set_context_in(kind, &f, name, context)
 }
 
-fn set_context_in(kind: HarnessKind, file: &Path, name: &str, context: u64) -> Result<bool, String> {
+fn set_context_in(kind: HarnessKind, file: &Path, name: &str, context: u64) -> anyhow::Result<bool> {
     let all = providers_in(kind, file);
     let Some((_, _, models)) = details_in(&all, name) else { return Ok(false) };
     if models.iter().all(|m| m.context == Some(context)) {
@@ -256,28 +269,32 @@ fn set_context_in(kind: HarnessKind, file: &Path, name: &str, context: u64) -> R
     }
     let shown = file.display();
     let text = std::fs::read_to_string(file).unwrap_or_default();
-    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{shown} isn't valid JSON ({e})"))?;
     for m in v["providers"][name]["models"].as_array_mut().into_iter().flatten() {
         m["contextWindow"] = json!(context);
     }
     let out = serde_json::to_string_pretty(&v).unwrap_or_default() + "\n";
-    write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))?;
+    write(file, &out).map_err(|e| anyhow::anyhow!("Couldn't write {shown}: {e}"))?;
     Ok(true)
 }
 
 /// Sets the price of a server's models in the agent's file, dollars per
 /// million tokens in and out (None: no price, so its cost is unknown).
-pub fn set_price(kind: HarnessKind, name: &str, price: Option<(f64, f64)>) -> Result<(), String> {
-    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+///
+/// # Errors
+///
+/// When the agent's file can't be read, isn't valid, or can't be written.
+pub fn set_price(kind: HarnessKind, name: &str, price: Option<(f64, f64)>) -> anyhow::Result<()> {
+    let f = file(kind).ok_or_else(|| anyhow::Error::msg("harlo can't change this agent's model servers."))?;
     set_price_in(&f, name, price)
 }
 
-fn set_price_in(file: &Path, name: &str, price: Option<(f64, f64)>) -> Result<(), String> {
+fn set_price_in(file: &Path, name: &str, price: Option<(f64, f64)>) -> anyhow::Result<()> {
     let shown = file.display();
-    let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
-    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    let text = std::fs::read_to_string(file).map_err(|e| anyhow::anyhow!("Couldn't read {shown}: {e}"))?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{shown} isn't valid JSON ({e})"))?;
     let Some(models) = v["providers"].get_mut(name).and_then(|p| p.get_mut("models")).and_then(Value::as_array_mut) else {
-        return Err(format!("There's no server called {name}"));
+        return Err(anyhow::anyhow!("There's no server called {name}"));
     };
     for m in models.iter_mut() {
         // (A bare id becomes an entry, to carry its price.)
@@ -294,7 +311,7 @@ fn set_price_in(file: &Path, name: &str, price: Option<(f64, f64)>) -> Result<()
             _ => {}
         }
     }
-    write(file, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| format!("Couldn't write {shown}: {e}"))
+    write(file, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| anyhow::anyhow!("Couldn't write {shown}: {e}"))
 }
 
 /// What a server's models cost as the agent's file has it, in its
@@ -315,15 +332,19 @@ fn thinking_levels(levels: bool) -> Value {
 
 /// Offers thinking levels for a server's thinking models in the agent's file,
 /// where it was added without them: whether it changed anything.
-pub fn offer_levels(kind: HarnessKind, name: &str) -> Result<bool, String> {
-    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+///
+/// # Errors
+///
+/// When the agent's file can't be read, isn't valid, or can't be written.
+pub fn offer_levels(kind: HarnessKind, name: &str) -> anyhow::Result<bool> {
+    let f = file(kind).ok_or_else(|| anyhow::Error::msg("harlo can't change this agent's model servers."))?;
     offer_levels_in(kind, &f, name)
 }
 
-fn offer_levels_in(kind: HarnessKind, file: &Path, name: &str) -> Result<bool, String> {
+fn offer_levels_in(kind: HarnessKind, file: &Path, name: &str) -> anyhow::Result<bool> {
     let shown = file.display();
-    let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
-    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+    let text = std::fs::read_to_string(file).map_err(|e| anyhow::anyhow!("Couldn't read {shown}: {e}"))?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{shown} isn't valid JSON ({e})"))?;
     let (top, field, wanted) = match kind {
         HarnessKind::Harlo => ("providers", "thinkingLevelMap", thinking_levels(true)),
         _ => return Ok(false),
@@ -342,27 +363,31 @@ fn offer_levels_in(kind: HarnessKind, file: &Path, name: &str) -> Result<bool, S
         }
     }
     if changed {
-        write(file, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| format!("Couldn't write {shown}: {e}"))?;
+        write(file, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| anyhow::anyhow!("Couldn't write {shown}: {e}"))?;
     }
     Ok(changed)
 }
 
 /// Takes a server out of the agent's file (its other settings as they are).
-pub fn remove(kind: HarnessKind, name: &str) -> Result<(), String> {
-    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+///
+/// # Errors
+///
+/// When the agent's file can't be read, isn't valid, or can't be written.
+pub fn remove(kind: HarnessKind, name: &str) -> anyhow::Result<()> {
+    let f = file(kind).ok_or_else(|| anyhow::Error::msg("harlo can't change this agent's model servers."))?;
     remove_from(kind, &f, name)
 }
 
-fn remove_from(_kind: HarnessKind, file: &Path, name: &str) -> Result<(), String> {
+fn remove_from(_kind: HarnessKind, file: &Path, name: &str) -> anyhow::Result<()> {
     let shown = file.display();
-    let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+    let text = std::fs::read_to_string(file).map_err(|e| anyhow::anyhow!("Couldn't read {shown}: {e}"))?;
     let Some(out) = without_server(&text, &shown.to_string(), name)? else { return Ok(()) };
-    write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))
+    write(file, &out).map_err(|e| anyhow::anyhow!("Couldn't write {shown}: {e}"))
 }
 
 /// The file (`text`) without the provider: None when it isn't there.
-fn without_server(text: &str, shown: &str, name: &str) -> Result<Option<String>, String> {
-    let mut v: Value = serde_json::from_str(text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+fn without_server(text: &str, shown: &str, name: &str) -> anyhow::Result<Option<String>> {
+    let mut v: Value = serde_json::from_str(text).map_err(|e| anyhow::anyhow!("{shown} isn't valid JSON ({e})"))?;
     if v["providers"].as_object_mut().and_then(|m| m.remove(name)).is_none() {
         return Ok(None);
     }
@@ -382,52 +407,57 @@ fn listed(providers: &Value) -> Vec<Server> {
         .collect()
 }
 
-/// Adds a server and the models picked to the agent's file. `key`: what
-/// the agent sends (`$NAME` reads it from the environment); empty, a
-/// placeholder (servers that want none still need one for the agent to
+/// Adds a server and the models picked to the agent's file.
+///
+/// `key` is what the agent sends (`$NAME` reads it from the environment);
+/// empty, a placeholder (servers that want none still need one for the agent to
 /// offer their models). `taken`: provider names the agent has already.
-pub fn add(kind: HarnessKind, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<(), String> {
-    let f = file(kind).ok_or("harlo can't add model servers to this agent.")?;
+///
+/// # Errors
+///
+/// When the agent's file can't be read, isn't valid, or can't be written.
+pub fn add(kind: HarnessKind, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> anyhow::Result<()> {
+    let f = file(kind).ok_or_else(|| anyhow::Error::msg("harlo can't add model servers to this agent."))?;
     add_to(kind, &f, name, base_url, key, models, taken)
 }
 
 /// A name the agent takes, and some models.
-fn check_new(name: &str, models: &[Found]) -> Result<(), String> {
+fn check_new(name: &str, models: &[Found]) -> anyhow::Result<()> {
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
-        return Err("Name it with letters, digits, - or _.".into());
+        return Err(anyhow::Error::msg("Name it with letters, digits, - or _."));
     }
     if models.is_empty() {
-        return Err("Pick at least one model.".into());
+        return Err(anyhow::Error::msg("Pick at least one model."));
     }
     Ok(())
 }
 
-fn add_to(_kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<(), String> {
+fn add_to(_kind: HarnessKind, file: &Path, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> anyhow::Result<()> {
     let name = name.trim();
     check_new(name, models)?;
     let shown = file.display().to_string();
     let text = std::fs::read_to_string(file).unwrap_or_default();
     let out = with_server(&text, &shown, name, base_url, key, models, taken)?;
-    write(file, &out).map_err(|e| format!("Couldn't write {shown}: {e}"))
+    write(file, &out).map_err(|e| anyhow::anyhow!("Couldn't write {shown}: {e}"))
 }
 
 /// The file (`text`; `shown` in errors) with the server in: a name
 /// already there isn't replaced, unless it's the same server again.
-fn with_server(text: &str, shown: &str, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> Result<String, String> {
+fn with_server(text: &str, shown: &str, name: &str, base_url: &str, key: &str, models: &[Found], taken: &[String]) -> anyhow::Result<String> {
     let existing = listed(&providers_of(text));
     // The same server again (set up again): its entry replaced.
     let again = existing.iter().any(|s| s.name == name && s.base_url == base_url);
     if !again && (existing.iter().any(|s| s.name == name) || taken.iter().any(|t| t == name)) {
-        return Err(format!("There's already a provider called {name}. Pick another name."));
+        return Err(anyhow::anyhow!("There's already a provider called {name}. Pick another name."));
     }
     let text = if again {
-        let mut v: Value = serde_json::from_str(text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
+        let mut v: Value = serde_json::from_str(text).map_err(|e| anyhow::anyhow!("{shown} isn't valid JSON ({e})"))?;
         v["providers"].as_object_mut().map(|m| m.remove(name));
         serde_json::to_string_pretty(&v).unwrap_or_default()
     } else {
         text.to_owned()
     };
-    entry_with(&text, name, base_url, placeholder(key), models, free_by_default(base_url, key)).map_err(|e| format!("{e} ({shown})"))
+    entry_with(&text, name, base_url, placeholder(key), models, free_by_default(base_url, key)).map_err(|e| anyhow::anyhow!("{e} ({shown})"))
 }
 
 /// Whether a server added is taken to charge nothing, until said otherwise:
@@ -446,25 +476,33 @@ pub fn free(kind: HarnessKind, name: &str) -> Option<bool> {
 
 /// Says in the agent's file whether a server charges nothing (unpriced and
 /// not free, its cost is unknown).
-pub fn set_free(kind: HarnessKind, name: &str, free: bool) -> Result<(), String> {
-    let f = file(kind).ok_or("harlo can't change this agent's model servers.")?;
+///
+/// # Errors
+///
+/// When the agent's file can't be read, isn't valid, or can't be written.
+pub fn set_free(kind: HarnessKind, name: &str, free: bool) -> anyhow::Result<()> {
+    let f = file(kind).ok_or_else(|| anyhow::Error::msg("harlo can't change this agent's model servers."))?;
     let shown = f.display();
-    let text = std::fs::read_to_string(&f).map_err(|e| format!("Couldn't read {shown}: {e}"))?;
-    let mut v: Value = serde_json::from_str(&text).map_err(|e| format!("{shown} isn't valid JSON ({e})"))?;
-    let Some(p) = v["providers"].get_mut(name).and_then(Value::as_object_mut) else { return Err(format!("There's no server called {name}")) };
+    let text = std::fs::read_to_string(&f).map_err(|e| anyhow::anyhow!("Couldn't read {shown}: {e}"))?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{shown} isn't valid JSON ({e})"))?;
+    let Some(p) = v["providers"].get_mut(name).and_then(Value::as_object_mut) else { return Err(anyhow::anyhow!("There's no server called {name}")) };
     p.insert("free".into(), json!(free));
-    write(&f, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| format!("Couldn't write {shown}: {e}"))
+    write(&f, &(serde_json::to_string_pretty(&v).unwrap_or_default() + "\n")).map_err(|e| anyhow::anyhow!("Couldn't write {shown}: {e}"))
 }
 
-/// Servers in the agent's file that don't say whether they charge: said,
-/// as they'd be taken when added ([`free_by_default`]). (Before, a server
-/// on this computer or its network was taken as free.) Whether it changed
+/// Says, for servers in the agent's file that don't, whether they charge.
+///
+/// As they'd be taken when added ([`free_by_default`]). Whether it changed
 /// anything.
-pub fn mark_free(kind: HarnessKind) -> Result<bool, String> {
+///
+/// # Errors
+///
+/// When the agent's file can't be read, isn't valid, or can't be written.
+pub fn mark_free(kind: HarnessKind) -> anyhow::Result<bool> {
     let Some(f) = file(kind) else { return Ok(false) };
     let Ok(text) = std::fs::read_to_string(&f) else { return Ok(false) };
     let Some(out) = marked_free(&text) else { return Ok(false) };
-    write(&f, &out).map_err(|e| format!("Couldn't write {}: {e}", f.display()))?;
+    write(&f, &out).map_err(|e| anyhow::anyhow!("Couldn't write {}: {e}", f.display()))?;
     Ok(true)
 }
 
@@ -490,13 +528,13 @@ fn placeholder(key: &str) -> &str {
     if key.trim().is_empty() { "none" } else { key.trim() }
 }
 
-fn entry_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found], free: bool) -> Result<String, String> {
-    let mut v: Value = if text.trim().is_empty() { json!({}) } else { serde_json::from_str(text).map_err(|e| format!("The file isn't valid JSON ({e}); fix it first"))? };
-    let root = v.as_object_mut().ok_or("The file isn't a JSON object")?;
+fn entry_with(text: &str, name: &str, base_url: &str, key: &str, models: &[Found], free: bool) -> anyhow::Result<String> {
+    let mut v: Value = if text.trim().is_empty() { json!({}) } else { serde_json::from_str(text).map_err(|e| anyhow::anyhow!("The file isn't valid JSON ({e}); fix it first"))? };
+    let root = v.as_object_mut().ok_or_else(|| anyhow::Error::msg("The file isn't a JSON object"))?;
     let providers = root.entry("providers").or_insert_with(|| json!({}));
-    let providers = providers.as_object_mut().ok_or("Its providers aren't a JSON object")?;
+    let providers = providers.as_object_mut().ok_or_else(|| anyhow::Error::msg("Its providers aren't a JSON object"))?;
     if providers.contains_key(name) {
-        return Err(format!("There's already a provider called {name}"));
+        return Err(anyhow::anyhow!("There's already a provider called {name}"));
     }
     let list: Vec<Value> = models
         .iter()
@@ -543,22 +581,22 @@ fn file_on(host: &str, kind: HarnessKind) -> Option<PathBuf> {
 
 /// A file there: its text, "" when there's none (never when it couldn't be
 /// read: that's an error, so nothing is written over it).
-fn read_on(file: &Path) -> Result<String, String> {
-    let (name, path) = crate::remote::split(file).ok_or("not another machine's file")?;
-    let host = crate::remote::host(&name).ok_or_else(|| format!("unknown host {name}"))?;
+fn read_on(file: &Path) -> anyhow::Result<String> {
+    let (name, path) = crate::remote::split(file).ok_or_else(|| anyhow::Error::msg("not another machine's file"))?;
+    let host = crate::remote::host(&name).ok_or_else(|| anyhow::anyhow!("unknown host {name}"))?;
     let q = crate::remote::quote(&path);
-    let out = crate::remote::run(&host, &format!("if [ -f {q} ]; then cat -- {q}; else exit 3; fi"), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    let out = crate::remote::run(&host, &format!("if [ -f {q} ]; then cat -- {q}; else exit 3; fi"), Duration::from_secs(30)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     match out.status.code() {
         Some(0) => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
         Some(3) => Ok(String::new()),
-        _ => Err(format!("Couldn't read {path} on {name}: {}", String::from_utf8_lossy(&out.stderr).trim())),
+        _ => Err(anyhow::anyhow!("Couldn't read {path} on {name}: {}", String::from_utf8_lossy(&out.stderr).trim())),
     }
 }
 
 /// Writes a file there whole (its folder made; a new one only for you).
-fn write_on(file: &Path, text: &str) -> Result<(), String> {
-    let (name, path) = crate::remote::split(file).ok_or("not another machine's file")?;
-    let host = crate::remote::host(&name).ok_or_else(|| format!("unknown host {name}"))?;
+fn write_on(file: &Path, text: &str) -> anyhow::Result<()> {
+    let (name, path) = crate::remote::split(file).ok_or_else(|| anyhow::Error::msg("not another machine's file"))?;
+    let host = crate::remote::host(&name).ok_or_else(|| anyhow::anyhow!("unknown host {name}"))?;
     let q = crate::remote::quote;
     let dir = Path::new(&path).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = format!("{path}.harlo.tmp");
@@ -568,24 +606,35 @@ fn write_on(file: &Path, text: &str) -> Result<(), String> {
         t = q(&tmp),
         f = q(&path)
     );
-    let out = crate::remote::run_with_input(&host, &script, Some(text.as_bytes()), Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+    let out = crate::remote::run_with_input(&host, &script, Some(text.as_bytes()), Duration::from_secs(30)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     if !out.status.success() {
-        return Err(format!("Couldn't write {path} on {name}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(anyhow::anyhow!("Couldn't write {path} on {name}: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
     Ok(())
 }
 
 /// The servers an agent on `host` has.
-pub fn servers_on(host: &str, kind: HarnessKind) -> Result<Vec<Server>, String> {
-    let f = file_on(host, kind).ok_or("harlo doesn't add model servers to this agent there.")?;
+///
+/// # Errors
+///
+/// When the machine can't be reached or harlo's agent there can't be started.
+/// Or when the agent's file there can't be read.
+pub fn servers_on(host: &str, kind: HarnessKind) -> anyhow::Result<Vec<Server>> {
+    let f = file_on(host, kind).ok_or_else(|| anyhow::Error::msg("harlo doesn't add model servers to this agent there."))?;
     Ok(listed(&providers_of(&read_on(&f)?)))
 }
 
 /// Adds a server to an agent on `host` (see [`add`]). `forward`: it runs on
 /// this computer, its port forwarded there (else it's the machine's own, or
 /// reached at the same address from there).
-pub fn add_on(host: &str, kind: HarnessKind, name: &str, base_url: &str, key: &str, models: &[Found], forward_here: bool) -> Result<(), String> {
-    let f = file_on(host, kind).ok_or("harlo doesn't add model servers to this agent there.")?;
+///
+/// # Errors
+///
+/// When the machine can't be reached or harlo's agent there can't be started.
+/// Or when the agent's file there can't be written, or the port can't be
+/// forwarded.
+pub fn add_on(host: &str, kind: HarnessKind, name: &str, base_url: &str, key: &str, models: &[Found], forward_here: bool) -> anyhow::Result<()> {
+    let f = file_on(host, kind).ok_or_else(|| anyhow::Error::msg("harlo doesn't add model servers to this agent there."))?;
     let name = name.trim();
     check_new(name, models)?;
     if let Some(port) = local_port(base_url).filter(|_| forward_here) {
@@ -603,8 +652,13 @@ pub fn add_on(host: &str, kind: HarnessKind, name: &str, base_url: &str, key: &s
 
 /// Takes a server out of an agent on `host`; its port stops being
 /// forwarded there once no agent there has a server on it.
-pub fn remove_on(host: &str, kind: HarnessKind, name: &str) -> Result<(), String> {
-    let f = file_on(host, kind).ok_or("harlo doesn't change this agent's model servers there.")?;
+///
+/// # Errors
+///
+/// When the machine can't be reached or harlo's agent there can't be started.
+/// Or when the agent's file there can't be written.
+pub fn remove_on(host: &str, kind: HarnessKind, name: &str) -> anyhow::Result<()> {
+    let f = file_on(host, kind).ok_or_else(|| anyhow::Error::msg("harlo doesn't change this agent's model servers there."))?;
     let text = read_on(&f)?;
     if let Some(out) = without_server(&text, &f.to_string_lossy(), name)? {
         write_on(&f, &out)?;
@@ -638,8 +692,8 @@ fn save_forwards(host: &str, ports: &[u16]) {
     }
 }
 
-fn forward_control(host: &str, port: u16, op: &str) -> Result<std::process::Output, String> {
-    let h = crate::remote::host(host).ok_or_else(|| format!("unknown host {host}"))?;
+fn forward_control(host: &str, port: u16, op: &str) -> anyhow::Result<std::process::Output> {
+    let h = crate::remote::host(host).ok_or_else(|| anyhow::anyhow!("unknown host {host}"))?;
     let args = crate::remote::ssh_args(&h);
     let (options, destination) = args.split_at(args.len().saturating_sub(1));
     std::process::Command::new("ssh")
@@ -648,15 +702,15 @@ fn forward_control(host: &str, port: u16, op: &str) -> Result<std::process::Outp
         .args(destination)
         .stdin(std::process::Stdio::null())
         .output()
-        .map_err(|e| e.to_string())
+        .map_err(anyhow::Error::from)
 }
 
 /// This computer's `port`, as `localhost:<port>` on `host` (its connection
 /// open first).
-fn forward(host: &str, port: u16) -> Result<(), String> {
-    let h = crate::remote::host(host).ok_or_else(|| format!("unknown host {host}"))?;
+fn forward(host: &str, port: u16) -> anyhow::Result<()> {
+    let h = crate::remote::host(host).ok_or_else(|| anyhow::anyhow!("unknown host {host}"))?;
     if !crate::remote::connected(&h) {
-        crate::remote::run(&h, "true", Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+        crate::remote::run(&h, "true", Duration::from_secs(30)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     }
     let out = forward_control(host, port, "forward")?;
     if out.status.success() {
@@ -667,7 +721,7 @@ fn forward(host: &str, port: u16) -> Result<(), String> {
     if err.contains("already") {
         return Ok(());
     }
-    Err(format!("Couldn't forward port {port} to {host} (is it taken there?): {}", err.trim()))
+    Err(anyhow::anyhow!("Couldn't forward port {port} to {host} (is it taken there?): {}", err.trim()))
 }
 
 /// Before a session starts on `host`: this computer's servers its agents
@@ -675,7 +729,7 @@ fn forward(host: &str, port: u16) -> Result<(), String> {
 pub fn forward_to(host: &str) {
     for port in forwards(host) {
         if let Err(e) = forward(host, port) {
-            tracing::warn!("model server on {host}: {e}");
+            tracing::event!(name: "model_server.forward.failed", tracing::Level::WARN, server.address = %host, network.peer.port = port, error.message = %e, "model server on {{server.address}}: {{error.message}}");
         }
     }
 }
@@ -689,7 +743,7 @@ pub fn forward_to(host: &str) {
 // forward back before a message on it, the server started there first.
 
 fn load_uses() -> serde_json::Map<String, Value> {
-    let Ok(db) = crate::db::Db::open(&crate::db::default_path()) else { return Default::default() };
+    let Ok(db) = crate::db::Db::open(&crate::db::default_path()) else { return Map::default() };
     db.get("host_uses").ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
 }
 
@@ -714,12 +768,16 @@ pub fn used_here(host: &str, url: &str) -> Option<String> {
 
 /// An address here for `url` on `host` (the one it has, else a free port
 /// here: its own number when that's free), its port forwarded now.
-pub fn use_from(host: &str, url: &str) -> Result<String, String> {
+///
+/// # Errors
+///
+/// When the machine can't be reached or the port can't be forwarded.
+pub fn use_from(host: &str, url: &str) -> anyhow::Result<String> {
     if let Some(here) = used_here(host, url) {
         forward_here(&here)?;
         return Ok(here);
     }
-    let port = local_port(url).ok_or("Only a server on that machine's own address can be reached through SSH.")?;
+    let port = local_port(url).ok_or_else(|| anyhow::Error::msg("Only a server on that machine's own address can be reached through SSH."))?;
     let mut uses = load_uses();
     let taken: Vec<u16> = uses.keys().filter_map(|k| local_port(k)).chain(crate::servers::ports_in_use().into_iter().map(|(p, _)| p)).collect();
     let mut here_port = port;
@@ -760,8 +818,8 @@ pub fn forget_unused_uses() {
     }
 }
 
-fn local_forward(host: &str, port: u16, remote_port: u16, op: &str) -> Result<std::process::Output, String> {
-    let h = crate::remote::host(host).ok_or_else(|| format!("unknown host {host}"))?;
+fn local_forward(host: &str, port: u16, remote_port: u16, op: &str) -> anyhow::Result<std::process::Output> {
+    let h = crate::remote::host(host).ok_or_else(|| anyhow::anyhow!("unknown host {host}"))?;
     let args = crate::remote::ssh_args(&h);
     let (options, destination) = args.split_at(args.len().saturating_sub(1));
     std::process::Command::new("ssh")
@@ -770,17 +828,22 @@ fn local_forward(host: &str, port: u16, remote_port: u16, op: &str) -> Result<st
         .args(destination)
         .stdin(std::process::Stdio::null())
         .output()
-        .map_err(|e| e.to_string())
+        .map_err(anyhow::Error::from)
 }
 
 /// The forward behind an address here (its machine's connection opened
 /// first).
-pub fn forward_here(here: &str) -> Result<(), String> {
-    let (host, url) = through(here).ok_or("harlo doesn't know this address.")?;
-    let (Some(port), Some(remote_port)) = (local_port(here), local_port(&url)) else { return Err("Not an address harlo forwards.".into()) };
-    let h = crate::remote::host(&host).ok_or_else(|| format!("unknown host {host}"))?;
+///
+/// # Errors
+///
+/// When the machine's connection can't be opened or the port can't be
+/// forwarded.
+pub fn forward_here(here: &str) -> anyhow::Result<()> {
+    let (host, url) = through(here).ok_or_else(|| anyhow::Error::msg("harlo doesn't know this address."))?;
+    let (Some(port), Some(remote_port)) = (local_port(here), local_port(&url)) else { return Err(anyhow::Error::msg("Not an address harlo forwards.")) };
+    let h = crate::remote::host(&host).ok_or_else(|| anyhow::anyhow!("unknown host {host}"))?;
     if !crate::remote::connected(&h) {
-        crate::remote::run(&h, "true", Duration::from_secs(30)).map_err(|e| format!("{e:#}"))?;
+        crate::remote::run(&h, "true", Duration::from_secs(30)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     }
     let out = local_forward(&host, port, remote_port, "forward")?;
     let err = String::from_utf8_lossy(&out.stderr);
@@ -791,13 +854,17 @@ pub fn forward_here(here: &str) -> Result<(), String> {
     if answers(here) {
         return Ok(());
     }
-    Err(format!("Couldn't reach {host}'s server through port {port} here (is it taken?): {}", err.trim()))
+    Err(anyhow::anyhow!("Couldn't reach {host}'s server through port {port} here (is it taken?): {}", err.trim()))
 }
 
 /// Before a message on an address here that reaches another machine's
 /// server: the forward back, and the server started there if it's stopped
 /// (blocking).
-pub fn reach(here: &str) -> Result<(), String> {
+///
+/// # Errors
+///
+/// When the forward can't be made, or the server there can't be started.
+pub fn reach(here: &str) -> anyhow::Result<()> {
     if answers(here) {
         return Ok(());
     }
@@ -805,10 +872,10 @@ pub fn reach(here: &str) -> Result<(), String> {
     if answers(here) {
         return Ok(());
     }
-    let (host, url) = through(here).ok_or("harlo doesn't know this address.")?;
-    let v = crate::engine_host::json(&host, &["start", &url], Duration::from_secs(20 * 60)).map_err(|e| format!("{e:#}"))?;
+    let (host, url) = through(here).ok_or_else(|| anyhow::Error::msg("harlo doesn't know this address."))?;
+    let v = crate::engine_host::json(&host, &["start", &url], Duration::from_mins(20)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     if let Some(e) = v["error"].as_str() {
-        return Err(e.to_owned());
+        return Err(anyhow::Error::msg(e.to_owned()));
     }
     Ok(())
 }
@@ -822,7 +889,7 @@ pub fn forward_uses() {
             continue;
         }
         if let Err(e) = forward_here(&here) {
-            tracing::warn!("model server on {host}: {e}");
+            tracing::event!(name: "model_server.forward.failed", tracing::Level::WARN, server.address = %host, error.message = %e, "model server on {{server.address}}: {{error.message}}");
         }
     }
 }
@@ -834,7 +901,7 @@ fn write(file: &Path, text: &str) -> std::io::Result<()> {
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mode = std::fs::metadata(file).map(|m| m.permissions().mode() & 0o7777).unwrap_or(0o600);
+    let mode = std::fs::metadata(file).map_or(0o600, |m| m.permissions().mode() & 0o7777);
     let tmp = file.with_extension(format!("harlo-{}.tmp", std::process::id()));
     std::fs::write(&tmp, text)?;
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
@@ -978,9 +1045,9 @@ mod tests {
         let addr = fake_server();
         let l = find(&format!("{addr}/"), "k").unwrap();
         assert_eq!(l, Listing { base_url: format!("http://{addr}/v1"), models: vec![found("qwen", Some(4096))] });
-        assert_eq!(find(&addr, "").unwrap_err(), "The server wants a key.");
-        assert_eq!(find(&addr, "wrong").unwrap_err(), "The server didn't accept the key.");
-        assert_eq!(find("127.0.0.1:9", "").unwrap_err(), "Nothing is answering at http://127.0.0.1:9. Is the server running?");
+        assert_eq!(find(&addr, "").unwrap_err().to_string(), "The server wants a key.");
+        assert_eq!(find(&addr, "wrong").unwrap_err().to_string(), "The server didn't accept the key.");
+        assert_eq!(find("127.0.0.1:9", "").unwrap_err().to_string(), "Nothing is answering at http://127.0.0.1:9. Is the server running?");
     }
 
     #[test]
@@ -1046,7 +1113,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
-        }
+        };
 
         // Someone's own file: its providers and their order stay.
         std::fs::write(&f, r#"{"$schema":"x","providers":{"mine":{"baseUrl":"http://a/v1","api":"openai-completions","models":[{"id":"m","samplingParams":{"top_k":20}}]},"anthropic":{"baseUrl":"https://proxy/v1"}}}"#).unwrap();
@@ -1060,12 +1127,12 @@ mod tests {
         let names: Vec<String> = servers_in(HarnessKind::Harlo, &f).into_iter().map(|s| s.name).collect();
         assert_eq!(names, ["mine", "gpu"]);
 
-        assert!(add_to(HarnessKind::Harlo, &f, "mine", "http://b/v1", "", &models, &[]).unwrap_err().contains("already"));
-        assert!(add_to(HarnessKind::Harlo, &f, "openai", "http://b/v1", "", &models, &["openai".into()]).unwrap_err().contains("already"));
+        assert!(add_to(HarnessKind::Harlo, &f, "mine", "http://b/v1", "", &models, &[]).unwrap_err().to_string().contains("already"));
+        assert!(add_to(HarnessKind::Harlo, &f, "openai", "http://b/v1", "", &models, &["openai".into()]).unwrap_err().to_string().contains("already"));
         assert!(add_to(HarnessKind::Harlo, &f, "bad name", "http://b/v1", "", &models, &[]).is_err());
         assert!(add_to(HarnessKind::Harlo, &f, "none", "http://b/v1", "", &[], &[]).is_err());
         std::fs::write(&f, "{ broken").unwrap();
-        assert!(add_to(HarnessKind::Harlo, &f, "x", "http://b/v1", "", &models, &[]).unwrap_err().contains("valid JSON"));
+        assert!(add_to(HarnessKind::Harlo, &f, "x", "http://b/v1", "", &models, &[]).unwrap_err().to_string().contains("valid JSON"));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "{ broken");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1085,7 +1152,7 @@ mod tests {
                 { "id": "qwen3", "contextWindow": 32768, "reasoning": true, "thinkingLevelMap": thinking_levels(false) }, { "id": "plain" }], "free": true })
         );
         assert_eq!(servers_in(HarnessKind::Harlo, &f)[0].models, ["qwen3", "plain"]);
-        assert!(add_to(HarnessKind::Harlo, &f, "chatgpt", "http://b/v1", "", &[found("m", None)], &["chatgpt".into()]).unwrap_err().contains("already"));
+        assert!(add_to(HarnessKind::Harlo, &f, "chatgpt", "http://b/v1", "", &[found("m", None)], &["chatgpt".into()]).unwrap_err().to_string().contains("already"));
         // Its levels offered later, its context changed, set up again, taken out.
         assert!(offer_levels_in(HarnessKind::Harlo, &f, "llamacpp").unwrap());
         assert!(set_context_in(HarnessKind::Harlo, &f, "llamacpp", 65536).unwrap());
@@ -1101,7 +1168,7 @@ mod tests {
     /// A port here, reached from another machine (`HARLO_TEST_SSH`, e.g.
     /// "ssh myhost") as its own `localhost:<port>`, then no more.
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH host"]
     fn forwards_a_port_there() {
         use std::io::{Read, Write};
         let args = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
@@ -1134,7 +1201,7 @@ mod tests {
     /// here at an address of its own, then not once nothing uses it. Its
     /// HOME a scratch folder (harlo's settings there).
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH host"]
     fn reaches_a_server_there() {
         let args = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
         let host = crate::remote::Host { name: "t".into(), ssh: args };

@@ -6,6 +6,9 @@
 //! sends what a running one would. Tools that only look run at once; the
 //! rest one after another, in the order called.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -109,7 +112,7 @@ pub enum Compacted {
 /// Decides whether a call that changes something may run: `Err` says why
 /// not (the call's result).
 pub trait Gate: Send + Sync {
-    fn check(&self, name: &str, args: &Value) -> BoxFuture<'static, Result<(), String>>;
+    fn check(&self, name: &str, args: &Value) -> BoxFuture<'static, anyhow::Result<()>>;
     /// Asks the user yes or no, in every approval mode (`title` as an
     /// approval's: "Allow tool: …\n<why>"; `message`: the call).
     fn confirm(&self, title: &str, message: &str) -> BoxFuture<'static, bool>;
@@ -192,7 +195,7 @@ pub async fn aside(parts: &AsideParts, history: &[Value], question: &str, on_tex
     let size = compact::estimate_text(&parts.system) + asked.iter().map(compact::estimate).sum::<u64>();
     // (A try that failed or was cut off: out of the budget as it ends, and
     // waiting with the side questions' to be logged in its session.)
-    let (side, session, path) = (parts.side.clone(), parts.session.clone(), parts.log_path.clone());
+    let (side, session, path) = (Arc::clone(&parts.side), parts.session.clone(), parts.log_path.clone());
     let sink = Box::new(move |s: Spent| {
         let used = Used::from_api(&s.usage).estimating(&s.usage, s.size, 0).priced(&s.pricing);
         side.lock().unwrap().push(SideUse { used, logged: used.log(&s.usage, &s.pricing), session: session.clone(), path: path.clone() });
@@ -272,15 +275,15 @@ impl Budget {
     /// Holds a request's expected spend against the budget while it's out
     /// (until the hold's dropped): refused once what's spent and held
     /// reaches the limit, so helpers at once can't all pass the check.
-    fn hold(self: &Arc<Self>, tokens: u64) -> Result<Hold, String> {
+    fn hold(self: &Arc<Self>, tokens: u64) -> anyhow::Result<Hold> {
         use std::sync::atomic::Ordering;
         let mut held = self.held.load(Ordering::Acquire);
         loop {
             if let Some(why) = self.over(held) {
-                return Err(why);
+                return Err(anyhow::Error::msg(why));
             }
             match self.held.compare_exchange(held, held + tokens, Ordering::AcqRel, Ordering::Acquire) {
-                Ok(_) => return Ok(Hold { budget: self.clone(), tokens }),
+                Ok(_) => return Ok(Hold { budget: Arc::clone(self), tokens }),
                 Err(now) => held = now,
             }
         }
@@ -323,7 +326,7 @@ const REPLY_ROOM: u64 = 2_000;
 /// request a session makes comes through here: its own, a side question's,
 /// a web search's, a summary's. (The limit is soft: a request let go may
 /// still cross it.)
-fn admit(budget: Option<&Arc<Budget>>, tokens: u64) -> Result<Option<Hold>, String> {
+fn admit(budget: Option<&Arc<Budget>>, tokens: u64) -> anyhow::Result<Option<Hold>> {
     budget.map(|b| b.hold(tokens)).transpose()
 }
 
@@ -379,14 +382,14 @@ impl Drop for Tries {
 }
 
 impl Tries {
-    fn admit(budget: Option<&Arc<Budget>>, room: u64, size: u64, pricing: crate::used::Pricing, source: &'static str, sink: Box<dyn Fn(Spent) + Send + Sync>) -> Result<Self, String> {
+    fn admit(budget: Option<&Arc<Budget>>, room: u64, size: u64, pricing: crate::used::Pricing, source: &'static str, sink: Box<dyn Fn(Spent) + Send + Sync>) -> anyhow::Result<Self> {
         let hold = admit(budget, room)?;
         Ok(Self { budget: budget.cloned(), hold, room, size, pricing, source, sink, seen: Value::Null })
     }
 
     /// Into a session's ledger.
-    fn into_ledger(budget: Option<&Arc<Budget>>, room: u64, size: u64, pricing: crate::used::Pricing, source: &'static str, ledger: &Ledger) -> Result<Self, String> {
-        let ledger = ledger.clone();
+    fn into_ledger(budget: Option<&Arc<Budget>>, room: u64, size: u64, pricing: crate::used::Pricing, source: &'static str, ledger: &Ledger) -> anyhow::Result<Self> {
+        let ledger = Arc::clone(ledger);
         Self::admit(budget, room, size, pricing, source, Box::new(move |s| ledger.lock().unwrap().push(s)))
     }
 
@@ -410,7 +413,7 @@ impl Tries {
 
     /// Another try, if the budget has room for it (its own hold let go
     /// first, so it isn't refused for that).
-    fn again(&mut self) -> Result<(), String> {
+    fn again(&mut self) -> anyhow::Result<()> {
         self.hold = None;
         self.hold = admit(self.budget.as_ref(), self.room)?;
         Ok(())
@@ -427,6 +430,7 @@ pub fn tokens(n: u64) -> String {
 }
 
 /// `400k`, `2m`, `1.5m`, `400000`.
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn parse_tokens(s: &str) -> Option<u64> {
     let s = s.trim().to_lowercase().replace(['_', ','], "");
     let (num, times) = match s.strip_suffix('k') {
@@ -461,7 +465,7 @@ impl Launch {
 /// other sessions, report to a parent, the project's plan and specs)
 /// called through it. `_tools` and `_instructions` say what they are.
 pub trait Harlo: Send + Sync {
-    fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, Result<Value, String>>;
+    fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, anyhow::Result<Value>>;
 }
 
 /// Frames for harlo beside a run's own events (its subagents').
@@ -765,14 +769,14 @@ impl Agent {
         }
         if self.logged.1 != self.effort {
             self.log.append(json!({ "type": "thinking_level_change", "thinkingLevel": self.effort.as_deref().unwrap_or("off") }))?;
-            self.logged.1 = self.effort.clone();
+            self.logged.1.clone_from(&self.effort);
         }
         // (Stop while these start ends the run at once: the turn below
         // sees it, and they're started again with the next prompt.)
         tokio::select! {
             biased;
-            _ = stop.cancelled() => {}
-            _ = self.ask_harlo() => {}
+            () = stop.cancelled() => {}
+            () = self.ask_harlo() => {}
         }
         self.start_mcp(stop, show).await;
         self.push_user(prompt, images, show)?;
@@ -834,27 +838,13 @@ impl Agent {
             if Some(round) == wrap_up_round(max) {
                 self.push(json!({ "role": "custom", "customType": "harlo_rounds_note", "content": ROUNDS_NOTE, "display": false, "timestamp": now_ms() }), show)?;
             }
-            // Getting full: old tool outputs set aside first, when that's
-            // turned on (cheap, and `recall` gets them back).
-            if let Some(keep) = self.set_aside_point().await {
-                self.set_aside(keep, 0, show)?;
-            }
-            // Another model after the server's own compaction (which only
-            // the model that made it can read): a summary of its own first.
-            if matches!(self.carry_over(stop, show).await, Compacted::Stopped) {
-                self.stopped(show)?;
-                return Ok(Ended::Stopped);
-            }
-            // Near the end of the window: the older part summarized first
-            // (if that fails, the request goes as it is).
-            if self.full().await && matches!(self.compact("threshold", None, stop, show).await, Compacted::Stopped) {
-                self.stopped(show)?;
+            if self.make_room(stop, show).await? {
                 return Ok(Ended::Stopped);
             }
             // A reply cut off is dropped whole: its parts can't go back alone.
             let asked = tokio::select! {
                 biased;
-                _ = stop.cancelled() => None,
+                () = stop.cancelled() => None,
                 r = self.ask(show) => Some(r),
             };
             let Some(reply) = asked else {
@@ -895,13 +885,7 @@ impl Agent {
             // A reply cut off at the length limit: its calls may be
             // incomplete (a file's content cut short), so none run.
             if cut_off && !calls.is_empty() {
-                for c in &calls {
-                    let (id, name) = (c["id"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default());
-                    show(Shown::ToolStart { call_id: id, name, args: &c["arguments"] });
-                    show(Shown::ToolEnd { call_id: id, name, text: CUT_OFF, failed: true });
-                    let result = json!({ "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"], "content": [{ "type": "text", "text": CUT_OFF }], "isError": true, "timestamp": now_ms() });
-                    self.push(result, show)?;
-                }
+                self.refuse_cut_off(&calls, show)?;
                 continue;
             }
             if calls.is_empty() {
@@ -924,54 +908,11 @@ impl Agent {
             for ((id, name), args) in ids.iter().zip(&names).zip(&args) {
                 show(Shown::ToolStart { call_id: id, name, args });
             }
-            let triples: Vec<(&str, &str, &Value)> = ids.iter().copied().zip(names.iter().copied()).zip(&args).map(|((i, n), a)| (i, n, a)).collect();
-            // (Subagents: what they take from this session, when asked for.)
-            let task = names.contains(&"task").then(|| self.task_ctx());
-            let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
-            let pricing = if names.contains(&crate::search::NAME) { self.pricing().await } else { crate::used::Pricing::Unknown };
-            let extra = Extra {
-                gate: self.gate.as_deref(),
-                harlo: self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice())),
-                allowed: self.allowed,
-                task: task.as_ref(),
-                mcp: self.mcp.as_ref(),
-                search: Some((&self.model, &key, pricing, self.budget.as_ref(), &self.unsettled)),
-            };
-            // (The rules sent with the last batch's results are read now.)
-            self.tools.batch_starts();
-            let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
-            // (Searches' tries that failed, finished or stopped.)
-            self.settle();
+            let outcomes = self.run_batch(&ids, &names, &args, stop).await;
             handed_over |= hands_over(&names, &outcomes);
             let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write" | "apply_patch") && !o.failed);
-            let (mut nudge, mut stuck) = (None, None);
-            if changed {
-                repeats.changed();
-            }
-            for ((name, args), o) in names.iter().zip(&args).zip(&outcomes) {
-                match repeats.see(name, args, &o.text, o.failed) {
-                    crate::repeats::Repeat::Nudge(n) => nudge = nudge.or(Some((name.to_string(), n))),
-                    crate::repeats::Repeat::Stop(n) => stuck = stuck.or(Some((name.to_string(), n))),
-                    crate::repeats::Repeat::No => {}
-                }
-            }
-            for ((c, name), o) in calls.iter().zip(&names).zip(outcomes) {
-                show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
-                let mut content = vec![json!({ "type": "text", "text": o.text })];
-                content.extend(o.images);
-                let mut result = json!({
-                    "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"],
-                    "content": content, "isError": o.failed, "timestamp": now_ms(),
-                });
-                if !o.details.is_null() {
-                    // (Subagents' and web searches' requests count as this
-                    // session's; they took theirs out of the budget
-                    // themselves, as each ended.)
-                    self.count(&Used::from_details(&o.details["usage"]), false);
-                    result["details"] = o.details;
-                }
-                self.push(result, show)?;
-            }
+            let (nudge, stuck) = repeated(&mut repeats, changed, &names, &args, &outcomes);
+            self.push_results(&calls, &names, outcomes, show)?;
             if let Some((tool, n)) = stuck {
                 bail!("The turn was stopped: the same {tool} call kept getting the same result ({n} times), so it was going round in circles. Send a message to go on.")
             }
@@ -987,6 +928,83 @@ impl Agent {
             }
         }
         bail!("The turn ended after {max} rounds of tool calls, the most one turn may take. Send a message to go on.")
+    }
+
+    /// Runs a batch of calls (at once, where they may be).
+    async fn run_batch(&mut self, ids: &[&str], names: &[&str], args: &[Value], stop: &CancellationToken) -> Vec<tools::Outcome> {
+        let triples: Vec<(&str, &str, &Value)> = ids.iter().copied().zip(names.iter().copied()).zip(args).map(|((i, n), a)| (i, n, a)).collect();
+        // (Subagents: what they take from this session, when asked for.)
+        let task = names.contains(&"task").then(|| self.task_ctx());
+        let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
+        let pricing = if names.contains(&crate::search::NAME) { self.pricing().await } else { crate::used::Pricing::Unknown };
+        let extra = Extra {
+            gate: self.gate.as_deref(),
+            harlo: self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice())),
+            allowed: self.allowed,
+            task: task.as_ref(),
+            mcp: self.mcp.as_ref(),
+            search: Some((&self.model, &key, pricing, self.budget.as_ref(), &self.unsettled)),
+        };
+        // (The rules sent with the last batch's results are read now.)
+        self.tools.batch_starts();
+        let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
+        // (Searches' tries that failed, finished or stopped.)
+        self.settle();
+        outcomes
+    }
+
+    /// Room made before a request: old tool outputs set aside, when that's
+    /// turned on (cheap, and `recall` gets them back); a summary of its own
+    /// after another model's server-side compaction (which only the model
+    /// that made it can read); near the end of the window, the older part
+    /// summarized (if that fails, the request goes as it is). True: stopped
+    /// meanwhile.
+    async fn make_room(&mut self, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<bool> {
+        if let Some(keep) = self.set_aside_point().await {
+            self.set_aside(keep, 0, show)?;
+        }
+        if matches!(self.carry_over(stop, show).await, Compacted::Stopped)
+            || (self.full().await && matches!(self.compact("threshold", None, stop, show).await, Compacted::Stopped))
+        {
+            self.stopped(show)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// A reply cut off at the length limit: its calls may be incomplete (a
+    /// file's content cut short), so none run; each gets an error saying so.
+    fn refuse_cut_off(&mut self, calls: &[Value], show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
+        for c in calls {
+            let (id, name) = (c["id"].as_str().unwrap_or_default(), c["name"].as_str().unwrap_or_default());
+            show(Shown::ToolStart { call_id: id, name, args: &c["arguments"] });
+            show(Shown::ToolEnd { call_id: id, name, text: CUT_OFF, failed: true });
+            let result = json!({ "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"], "content": [{ "type": "text", "text": CUT_OFF }], "isError": true, "timestamp": now_ms() });
+            self.push(result, show)?;
+        }
+        Ok(())
+    }
+
+    /// The calls' results, shown and kept.
+    fn push_results(&mut self, calls: &[Value], names: &[&str], outcomes: Vec<tools::Outcome>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
+        for ((c, name), o) in calls.iter().zip(names).zip(outcomes) {
+            show(Shown::ToolEnd { call_id: c["id"].as_str().unwrap_or_default(), name, text: &o.text, failed: o.failed });
+            let mut content = vec![json!({ "type": "text", "text": o.text })];
+            content.extend(o.images);
+            let mut result = json!({
+                "role": "toolResult", "toolCallId": c["id"], "toolName": c["name"],
+                "content": content, "isError": o.failed, "timestamp": now_ms(),
+            });
+            if !o.details.is_null() {
+                // (Subagents' and web searches' requests count as this
+                // session's; they took theirs out of the budget
+                // themselves, as each ended.)
+                self.count(&Used::from_details(&o.details["usage"]), false);
+                result["details"] = o.details;
+            }
+            self.push(result, show)?;
+        }
+        Ok(())
     }
 
     /// After the first change made, once: on with `HARLO_AGENT_PREWALK`'s
@@ -1136,12 +1154,12 @@ impl Agent {
             cache_key: self.cache_key.clone().unwrap_or_else(|| self.log.id.clone()),
             notify: self.notify.clone(),
             known: self.known.clone(),
-            running: self.subagents.clone(),
+            running: Arc::clone(&self.subagents),
             profiles: self.profiles.clone(),
             task_model: self.task_model.clone(),
             budget: self.budget.clone(),
             fallback: self.fallback.clone(),
-            lsp: self.tools.lsp.clone(),
+            lsp: Arc::clone(&self.tools.lsp),
             // (The conversation before the reply that asked for them.)
             fork: crate::task::forks().then(|| {
                 let before = self.history.len().saturating_sub(1);
@@ -1151,8 +1169,8 @@ impl Agent {
     }
 
     pub fn launch(&mut self, l: &Launch) {
-        self.task_model = l.task_model.clone();
-        self.fallback = l.fallback.clone();
+        self.task_model.clone_from(&l.task_model);
+        self.fallback.clone_from(&l.fallback);
         // (What the session used before, when it goes on.)
         self.budget = l.budget.map(|limit| Arc::new(Budget { limit, spent: crate::session::used(&self.log.path).billed().into(), ..Budget::default() }));
     }
@@ -1168,7 +1186,7 @@ impl Agent {
             key: self.cache_key.clone().unwrap_or_else(|| self.log.id.clone()),
             images,
             budget: self.budget.clone(),
-            side: self.side.clone(),
+            side: Arc::clone(&self.side),
             session: self.log.id.clone(),
             log_path: self.log.path.clone(),
             pricing: self.pricing().await,
@@ -1236,7 +1254,7 @@ impl Agent {
         let notes = match &mut self.mcp {
             Some(m) => tokio::select! {
                 biased;
-                _ = stop.cancelled() => return,
+                () = stop.cancelled() => return,
                 notes = m.refresh() => notes,
             },
             None => {
@@ -1246,16 +1264,16 @@ impl Agent {
                 // (A slow one says so, naming it: the first request waits.)
                 let (m, started) = tokio::select! {
                     biased;
-                    _ = stop.cancelled() => return,
+                    () = stop.cancelled() => return,
                     done = &mut starting => done,
-                    _ = tokio::time::sleep(crate::mcp::SAID_AFTER) => {
+                    () = tokio::time::sleep(crate::mcp::SAID_AFTER) => {
                         let waiting = crate::mcp::Mcp::waiting_for(&pending.lock().unwrap());
                         if let Some(text) = waiting {
                             show(Shown::Notice { level: "info", text: &text });
                         }
                         tokio::select! {
                             biased;
-                            _ = stop.cancelled() => return,
+                            () = stop.cancelled() => return,
                             done = &mut starting => done,
                         }
                     }
@@ -1348,7 +1366,7 @@ impl Agent {
         let list: Vec<&Value> = specs.as_array().map(|l| l.iter().collect()).unwrap_or_default();
         let of = |names: &[&Value]| list.iter().copied().filter(|t| names.contains(&&t["name"])).collect::<Vec<_>>();
         let native: Vec<&Value> = list.iter().copied().filter(|t| !mcp_names.contains(&&t["name"]) && !harlo_names.contains(&&t["name"])).collect();
-        let notes = self.mcp.as_ref().map(|m| m.notes()).unwrap_or_default();
+        let notes = self.mcp.as_ref().map(super::mcp::Mcp::notes).unwrap_or_default();
         json!({
             "base": est(&(head + &tail)),
             "rules": est(&rules),
@@ -1592,7 +1610,7 @@ impl Agent {
         let mut quiet = |_: Shown| {};
         let sent = tokio::select! {
             biased;
-            _ = stop.cancelled() => None,
+            () = stop.cancelled() => None,
             r = send(request, &mut quiet, &mut tries) => Some(r),
         };
         tries.stopped();
@@ -1644,17 +1662,12 @@ impl Agent {
     /// writes (`focus`: what the user asked it to keep). Shown as it goes,
     /// unless there's too little to summarize.
     pub async fn compact(&mut self, reason: &str, focus: Option<&str>, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Compacted {
-        let at = compact::threshold(self.window().await);
-        // (Too long even so: only the newest message kept.)
-        let keep = if reason == "manual" { compact::keep(at).min(compact::ASKED_KEEP) } else { compact::keep(at) };
-        let cut = compact::cut(&self.history, keep).or_else(|| if reason == "overflow" { compact::cut(&self.history, 1) } else { None });
-        let Some(cut) = cut else { return Compacted::Nothing };
-        let Some(first_kept) = self.ids.get(cut).cloned() else { return Compacted::Nothing };
+        let Some((cut, first_kept)) = self.compaction_cut(reason).await else { return Compacted::Nothing };
         let size = compact::estimate_text(&self.system()) + self.history[..cut].iter().map(compact::estimate).sum::<u64>();
         let pricing = self.pricing().await;
-        let mut tries = match Tries::into_ledger(self.budget.as_ref(), size + REPLY_ROOM, size, pricing, "compaction", &self.unsettled) {
+        let mut tries = match self.compaction_tries(size, pricing) {
             Ok(t) => t,
-            Err(why) => return Compacted::Failed(why),
+            Err(why) => return Compacted::Failed(format!("{why:#}")),
         };
         show(Shown::CompactionStart { reason });
         let tokens_before = self.next_tokens();
@@ -1667,13 +1680,7 @@ impl Agent {
         let mut entry = None;
         if let Some((pid, bare)) = providers::resolve(&self.model).ok().filter(|(p, _)| p.api == Api::Responses && compact::native(&p.id)).map(|(p, m)| (p.id, m)) {
             let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &self.history[..cut], session: &key, specs: &specs, tools: true, images, trigger: true };
-            let mut quiet = |_: Shown| {};
-            let sent = tokio::select! {
-                biased;
-                _ = stop.cancelled() => None,
-                r = send(request, &mut quiet, &mut tries) => Some(r),
-            };
-            tries.stopped();
+            let sent = quiet_send(request, &mut tries, stop).await;
             self.settle();
             match sent {
                 None => {
@@ -1681,9 +1688,7 @@ impl Agent {
                     return Compacted::Stopped;
                 }
                 Some(Ok((mut reply, usage))) => {
-                    let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
-                    reply["usage"] = used.log(&usage, &pricing);
-                    self.count(&used, true);
+                    self.count_summary(&mut reply, &usage, size, pricing);
                     match reply["content"].as_array().into_iter().flatten().find(|b| b["type"] == "compaction") {
                         Some(b) => {
                             let asked = compact::native_requests(&self.history[..cut]);
@@ -1698,12 +1703,12 @@ impl Agent {
                         None => {
                             // (Its request, logged on its own.)
                             let _ = self.log.append(json!({ "type": "harlo_usage", "source": "compaction", "usage": reply["usage"] }));
-                            show(Shown::Notice { level: "info", text: "The server's compaction sent nothing back: summarizing instead." })
+                            show(Shown::Notice { level: "info", text: "The server's compaction sent nothing back: summarizing instead." });
                         }
                     }
                 }
                 Some(Err(e)) => {
-                    show(Shown::Notice { level: "info", text: &format!("The server's compaction failed ({e:#}): summarizing instead.") })
+                    show(Shown::Notice { level: "info", text: &format!("The server's compaction failed ({e:#}): summarizing instead.") });
                 }
             }
         }
@@ -1717,22 +1722,15 @@ impl Agent {
                 // (A request of its own, admitted on its own: the server's
                 // compaction before it may have used the rest.)
                 drop(tries);
-                let mut tries = match Tries::into_ledger(self.budget.as_ref(), size + REPLY_ROOM, size, pricing, "compaction", &self.unsettled) {
+                let mut tries = match self.compaction_tries(size, pricing) {
                     Ok(t) => t,
-                    Err(why) => return failed(show, why),
+                    Err(why) => return failed(show, format!("{why:#}")),
                 };
                 let mut asked: Vec<Value> = self.history[..cut].to_vec();
                 let turn = compact::turn_cut(&self.history, cut);
                 asked.push(json!({ "role": "user", "content": [{ "type": "text", "text": compact::request(focus, turn.as_deref()) }], "timestamp": now_ms() }));
                 let request = Asked { model: &self.model, effort: self.effort.as_deref(), instructions: &system, history: &asked, session: &key, specs: &specs, tools: false, images, trigger: false };
-                // (The summary isn't shown as it's written.)
-                let mut quiet = |_: Shown| {};
-                let sent = tokio::select! {
-                    biased;
-                    _ = stop.cancelled() => None,
-                    r = send(request, &mut quiet, &mut tries) => Some(r),
-                };
-                tries.stopped();
+                let sent = quiet_send(request, &mut tries, stop).await;
                 self.settle();
                 let (mut reply, usage) = match sent {
                     None => {
@@ -1742,22 +1740,15 @@ impl Agent {
                     Some(Err(e)) => return failed(show, format!("{e:#}")),
                     Some(Ok(r)) => r,
                 };
-                let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
-                reply["usage"] = used.log(&usage, &pricing);
-                self.count(&used, true);
-                let text: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("");
-                let wrong = if reply["stopReason"] == "length" {
-                    Some("The summary was cut off")
-                } else if text.trim().is_empty() {
-                    Some("The model wrote no summary")
-                } else {
-                    None
+                self.count_summary(&mut reply, &usage, size, pricing);
+                let text = match summary_of(&reply) {
+                    Ok(text) => text,
+                    Err(why) => {
+                        // (Its request, logged on its own.)
+                        let _ = self.log.append(json!({ "type": "harlo_usage", "source": "compaction", "usage": reply["usage"] }));
+                        return failed(show, why.into());
+                    }
                 };
-                if let Some(why) = wrong {
-                    // (Its request, logged on its own.)
-                    let _ = self.log.append(json!({ "type": "harlo_usage", "source": "compaction", "usage": reply["usage"] }));
-                    return failed(show, why.into());
-                }
                 let summary = compact::with_files(&text, &files);
                 json!({
                     "type": "compaction", "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before,
@@ -1767,12 +1758,44 @@ impl Agent {
                 })
             }
         };
-        let summary = entry["summary"].as_str().unwrap_or_default().to_owned();
-        let id = match self.log.append(entry.clone()) {
-            Ok(id) => id,
-            Err(e) => return failed(show, format!("{e:#}")),
-        };
-        self.history.splice(..cut, [crate::session::summary_message(&entry)]);
+        match self.splice_summary(&entry, cut, files) {
+            Ok(after) => {
+                let summary = entry["summary"].as_str().unwrap_or_default();
+                let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
+                show(Shown::CompactionEnd { reason, result: Some(&result), error: None, will_retry: reason == "overflow" });
+                Compacted::Done(result)
+            }
+            Err(e) => failed(show, format!("{e:#}")),
+        }
+    }
+
+    /// Where a compaction cuts the history (what's before it is summarized),
+    /// and the id of the first entry it keeps; None: nothing to summarize.
+    async fn compaction_cut(&mut self, reason: &str) -> Option<(usize, String)> {
+        let at = compact::threshold(self.window().await);
+        // (Too long even so: only the newest message kept.)
+        let keep = if reason == "manual" { compact::keep(at).min(compact::ASKED_KEEP) } else { compact::keep(at) };
+        let cut = compact::cut(&self.history, keep).or_else(|| if reason == "overflow" { compact::cut(&self.history, 1) } else { None })?;
+        Some((cut, self.ids.get(cut)?.clone()))
+    }
+
+    /// A compaction's request admitted (its `size` and room for the reply).
+    fn compaction_tries(&self, size: u64, pricing: crate::used::Pricing) -> Result<Tries> {
+        Tries::into_ledger(self.budget.as_ref(), size + REPLY_ROOM, size, pricing, "compaction", &self.unsettled)
+    }
+
+    /// A summary's request counted, and its usage written into `reply`.
+    fn count_summary(&mut self, reply: &mut Value, usage: &Value, size: u64, pricing: crate::used::Pricing) {
+        let used = Used::from_api(usage).estimating(usage, size, compact::estimate(reply)).priced(&pricing);
+        reply["usage"] = used.log(usage, &pricing);
+        self.count(&used, true);
+    }
+
+    /// The compaction `entry` kept, and in place of the history before
+    /// `cut`: the context it leaves, estimated.
+    fn splice_summary(&mut self, entry: &Value, cut: usize, files: (Vec<String>, Vec<String>)) -> Result<u64> {
+        let id = self.log.append(entry.clone())?;
+        self.history.splice(..cut, [crate::session::summary_message(entry)]);
         self.tools.rules_seen_in(&self.history);
         self.ids.splice(..cut, [id]);
         self.files = files;
@@ -1781,9 +1804,7 @@ impl Agent {
         self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
         self.measured = self.history.len();
         self.anchor = self.fingerprint();
-        let result = json!({ "summary": summary, "firstKeptEntryId": first_kept, "tokensBefore": tokens_before, "estimatedTokensAfter": after });
-        show(Shown::CompactionEnd { reason, result: Some(&result), error: None, will_retry: reason == "overflow" });
-        Compacted::Done(result)
+        Ok(after)
     }
 }
 
@@ -1808,12 +1829,38 @@ struct Asked<'a> {
     trigger: bool,
 }
 
+/// A request whose reply isn't shown as it's written (a summary), unless
+/// stopped first (None).
+async fn quiet_send(request: Asked<'_>, tries: &mut Tries, stop: &CancellationToken) -> Option<Result<(Value, Value)>> {
+    let mut quiet = |_: Shown| {};
+    let sent = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        r = send(request, &mut quiet, tries) => Some(r),
+    };
+    tries.stopped();
+    sent
+}
+
+/// A summary's text, unless it was cut off or empty.
+fn summary_of(reply: &Value) -> std::result::Result<String, &'static str> {
+    let text: String = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("");
+    if reply["stopReason"] == "length" {
+        Err("The summary was cut off")
+    } else if text.trim().is_empty() {
+        Err("The model wrote no summary")
+    } else {
+        Ok(text)
+    }
+}
+
 /// Sends a request: the reply, as pi's assistant message, and its usage.
 /// One that failed for a passing reason (see `retry`) is sent again, the
 /// reply it had started dropped, with a notice. What a try the server
 /// answered but didn't finish spent ([`spent_by`]) goes to `tries` as it
 /// ends (so a Stop doesn't lose it), and it's sent again only if the
 /// budget still has room.
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), tries: &mut Tries) -> Result<(Value, Value)> {
     let mut tried = 0;
     loop {
@@ -1971,7 +2018,7 @@ impl Blocks {
             E::Reasoning { index, part, delta } => {
                 let Some((ci, last)) = self.at.get_mut(&index) else { return Vec::new() };
                 // Summary parts are joined by a blank line.
-                let sep = if part != *last { "\n\n" } else { "" };
+                let sep = if part == *last { "" } else { "\n\n" };
                 *last = part;
                 vec![json!({ "type": "thinking_delta", "contentIndex": *ci, "delta": format!("{sep}{delta}") })]
             }
@@ -1992,6 +2039,10 @@ impl Blocks {
     }
 }
 
+/// What a web search runs with: the session's model, cache key, pricing,
+/// budget and spending ledger.
+type SearchUse<'a> = (&'a str, &'a str, crate::used::Pricing, Option<&'a Arc<Budget>>, &'a Ledger);
+
 /// Runs one round's calls: those that only look at once, otherwise one
 /// after another, in the order called. When `stop` is cancelled, the
 /// call running ends (dropping it ends its command) and what's left
@@ -2006,7 +2057,7 @@ struct Extra<'a> {
     task: Option<&'a crate::task::Ctx>,
     mcp: Option<&'a crate::mcp::Mcp>,
     /// The session's model, cache key, pricing and budget, for web searches.
-    search: Option<(&'a str, &'a str, crate::used::Pricing, Option<&'a Arc<Budget>>, &'a Ledger)>,
+    search: Option<SearchUse<'a>>,
 }
 
 impl Extra<'_> {
@@ -2031,7 +2082,7 @@ async fn web_search(args: &Value, model: &str, key: &str, pricing: crate::used::
     // into the session's ledger, which a Stop doesn't drop.)
     let mut tries = match Tries::into_ledger(budget, size + REPLY_ROOM, size, pricing, "search", ledger) {
         Ok(t) => t,
-        Err(why) => return tools::Outcome::new(why, true),
+        Err(why) => return tools::Outcome::new(format!("{why:#}"), true),
     };
     let mut quiet = |_: Shown| {};
     let sent = send(asked, &mut quiet, &mut tries).await;
@@ -2052,7 +2103,7 @@ async fn web_search(args: &Value, model: &str, key: &str, pricing: crate::used::
 }
 
 /// A call of ours or of an MCP server's.
-async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<(&str, &str, crate::used::Pricing, Option<&Arc<Budget>>, &Ledger)>, name: &str, args: &Value) -> tools::Outcome {
+async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<SearchUse<'_>>, name: &str, args: &Value) -> tools::Outcome {
     if name == crate::search::NAME
         && let Some((model, key, pricing, budget, ledger)) = search
     {
@@ -2075,6 +2126,85 @@ async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<
 
 const NO_ONE_TO_ASK: &str = "Commands can't run outside the sandbox here: there's no one to ask. Do it another way inside the sandbox, or say what the user should run.";
 
+/// A tool, and how many times its call got the same result.
+type Repeated = Option<(String, usize)>;
+
+/// The same calls getting the same results: the first one to point out,
+/// and the first that ends the run (each with its tool and how many times).
+/// A change made (`changed`) starts the count again.
+fn repeated(repeats: &mut crate::repeats::Repeats, changed: bool, names: &[&str], args: &[Value], outcomes: &[tools::Outcome]) -> (Repeated, Repeated) {
+    let (mut nudge, mut stuck) = (None, None);
+    if changed {
+        repeats.changed();
+    }
+    for ((name, args), o) in names.iter().zip(args).zip(outcomes) {
+        match repeats.see(name, args, &o.text, o.failed) {
+            crate::repeats::Repeat::Nudge(n) => nudge = nudge.or(Some(((*name).to_owned(), n))),
+            crate::repeats::Repeat::Stop(n) => stuck = stuck.or(Some(((*name).to_owned(), n))),
+            crate::repeats::Repeat::No => {}
+        }
+    }
+    (nudge, stuck)
+}
+
+/// One of harlo's tools, called through harlo.
+async fn call_harlo(h: &dyn Harlo, name: &str, args: &Value, stop: &CancellationToken) -> tools::Outcome {
+    let ran = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        r = h.call(name, args) => Some(r),
+    };
+    match ran {
+        None => tools::Outcome::new(INTERRUPTED, true),
+        Some(Ok(Value::String(text))) => tools::Outcome::new(text, false),
+        Some(Ok(v)) => tools::Outcome::new(v.to_string(), false),
+        Some(Err(e)) => tools::Outcome::new(format!("{e:#}"), true),
+    }
+}
+
+/// The `ask` tool: questions for the user, on harlo's card (`gate`: None
+/// when no one is there to answer).
+async fn ask_user(gate: Option<&dyn Gate>, args: &Value, stop: &CancellationToken) -> tools::Outcome {
+    let Some(g) = gate else {
+        return tools::Outcome::new("No one is here to answer questions: decide yourself, and say what you assumed.", true);
+    };
+    let questions = match ask_questions(args) {
+        Ok(q) => q,
+        Err(e) => return tools::Outcome::new(format!("{e:#}"), true),
+    };
+    let answered = tokio::select! {
+        biased;
+        () = stop.cancelled() => return tools::Outcome::new(INTERRUPTED, true),
+        a = g.ask(questions.clone()) => a,
+    };
+    match answered {
+        Some(a) => tools::Outcome::new(ask_answers(&questions, &a), false),
+        None => tools::Outcome::new("The user dismissed the questions without answering. Don't ask them again: go on as you think best and say what you assumed, or end your turn and ask in your reply.", false),
+    }
+}
+
+/// A command that can't be undone: asked about in every mode (and then not
+/// asked again), refused with no one to ask. Whether the user said yes to
+/// it; Err: not run, and why (the call's result).
+async fn confirm_danger(tools: &Tools, gate: Option<&dyn Gate>, name: &str, args: &Value, stop: &CancellationToken) -> std::result::Result<bool, String> {
+    let Some(why) = (name == "bash").then(|| crate::danger::check(args["command"].as_str().unwrap_or_default(), &tools.project(), &home())).flatten() else {
+        return Ok(false);
+    };
+    let Some(g) = gate else {
+        return Err(format!("Not run: {why}, and there's no one here to ask. Do it another way, or say what the user should run."));
+    };
+    let yes = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        y = g.confirm(&format!("Allow tool: bash\nReason: this can't be undone: {why}"), args["command"].as_str().unwrap_or_default()) => Some(y),
+    };
+    match yes {
+        None => Err(NOT_RUN.to_owned()),
+        Some(false) => Err(format!("The user said no: {why}. Don't try it another way; ask what they'd like instead.")),
+        Some(true) => Ok(true),
+    }
+}
+
 /// `calls`: (id, name, arguments).
 async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<'_>, stop: &CancellationToken) -> Vec<tools::Outcome> {
     // (An MCP tool called through mcp_call, when they're listed, is that
@@ -2090,7 +2220,7 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
     // (apply_patch is edit when it's offered in its place.)
     // (web_search goes with fetch.)
     let not_here = |name: &str| {
-        extra.allowed.is_some_and(|only| !only.contains(&name) && !(name == "apply_patch" && only.contains(&"edit")) && !(name == crate::search::NAME && only.contains(&"fetch")))
+        extra.allowed.is_some_and(|only| !(only.contains(&name) || (name == "apply_patch" && only.contains(&"edit")) || (name == crate::search::NAME && only.contains(&"fetch"))))
     };
     let mcp = extra.mcp;
     if calls.iter().all(|(_, n, _)| extra.read_only(n) && !not_here(n)) {
@@ -2103,7 +2233,7 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         }));
         tokio::select! {
             biased;
-            _ = stop.cancelled() => {}
+            () = stop.cancelled() => {}
             _ = all => {}
         }
         return done.into_iter().map(|slot| slot.into_inner().unwrap().unwrap_or_else(|| cut(INTERRUPTED))).collect();
@@ -2128,44 +2258,12 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         }
         // harlo's: it asks the user itself where it should.
         if let Some((h, _)) = harlo.filter(|(_, specs)| specs.iter().any(|s| s["name"] == *name)) {
-            let ran = tokio::select! {
-                biased;
-                _ = stop.cancelled() => None,
-                r = h.call(name, args) => Some(r),
-            };
-            out.push(match ran {
-                None => cut(INTERRUPTED),
-                Some(Ok(Value::String(text))) => tools::Outcome::new(text, false),
-                Some(Ok(v)) => tools::Outcome::new(v.to_string(), false),
-                Some(Err(e)) => cut(&e),
-            });
+            out.push(call_harlo(h, name, args, stop).await);
             continue;
         }
         // Questions for the user, on harlo's card.
         if *name == "ask" {
-            let Some(g) = gate.filter(|_| extra.allowed.is_none()) else {
-                out.push(cut("No one is here to answer questions: decide yourself, and say what you assumed."));
-                continue;
-            };
-            let questions = match ask_questions(args) {
-                Ok(q) => q,
-                Err(e) => {
-                    out.push(cut(&e));
-                    continue;
-                }
-            };
-            let answered = tokio::select! {
-                biased;
-                _ = stop.cancelled() => {
-                    out.push(cut(INTERRUPTED));
-                    continue;
-                }
-                a = g.ask(questions.clone()) => a,
-            };
-            out.push(match answered {
-                Some(a) => tools::Outcome::new(ask_answers(&questions, &a), false),
-                None => tools::Outcome::new("The user dismissed the questions without answering. Don't ask them again: go on as you think best and say what you assumed, or end your turn and ask in your reply.", false),
-            });
+            out.push(ask_user(gate.filter(|_| extra.allowed.is_none()), args, stop).await);
             continue;
         }
         // Subagents: their own calls ask where they should.
@@ -2177,45 +2275,27 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         }
         // A command that can't be undone: asked about in every mode (and
         // then not asked again), refused with no one to ask.
-        let mut confirmed = false;
-        if *name == "bash"
-            && let Some(why) = crate::danger::check(args["command"].as_str().unwrap_or_default(), &tools.project(), &home())
-        {
-            let Some(g) = gate else {
-                out.push(cut(&format!("Not run: {why}, and there's no one here to ask. Do it another way, or say what the user should run.")));
+        let confirmed = match confirm_danger(tools, gate, name, args, stop).await {
+            Ok(confirmed) => confirmed,
+            Err(why) => {
+                out.push(cut(&why));
                 continue;
-            };
-            let yes = tokio::select! {
-                biased;
-                _ = stop.cancelled() => None,
-                y = g.confirm(&format!("Allow tool: bash\nReason: this can't be undone: {why}"), args["command"].as_str().unwrap_or_default()) => Some(y),
-            };
-            match yes {
-                None => {
-                    out.push(cut(NOT_RUN));
-                    continue;
-                }
-                Some(false) => {
-                    out.push(cut(&format!("The user said no: {why}. Don't try it another way; ask what they'd like instead.")));
-                    continue;
-                }
-                Some(true) => confirmed = true,
             }
-        }
+        };
         // Outside the sandbox: only with the user's yes.
         if gate.is_none() && *name == "bash" && args["outside_sandbox"] == true && tools.sandbox.is_some() {
             out.push(cut(NO_ONE_TO_ASK));
             continue;
         }
         // What changes something may need the user's yes first.
-        if let Some(gate) = gate.filter(|_| !extra.read_only(name) && !(confirmed && args["outside_sandbox"] != true)) {
+        if let Some(gate) = gate.filter(|_| !(extra.read_only(name) || (confirmed && args["outside_sandbox"] != true))) {
             let verdict = tokio::select! {
                 biased;
-                _ = stop.cancelled() => Err(NOT_RUN.to_owned()),
+                () = stop.cancelled() => Err(anyhow::Error::msg(NOT_RUN)),
                 v = gate.check(name, args) => v,
             };
             if let Err(why) = verdict {
-                out.push(cut(&why));
+                out.push(cut(&format!("{why:#}")));
                 continue;
             }
         }
@@ -2226,7 +2306,7 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         }
         let ran = tokio::select! {
             biased;
-            _ = stop.cancelled() => None,
+            () = stop.cancelled() => None,
             o = call_tool(tools, mcp, extra.search, name, args) => Some(o),
         };
         out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
@@ -2236,14 +2316,14 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
 
 /// `ask`'s questions as harlo's card takes them (`q0`, `q1`… as ids), or
 /// what's wrong with them.
-fn ask_questions(args: &Value) -> Result<Value, String> {
-    let list = args["questions"].as_array().filter(|l| !l.is_empty()).ok_or("Give questions: one to four, each with a question and its options.")?;
+fn ask_questions(args: &Value) -> anyhow::Result<Value> {
+    let list = args["questions"].as_array().filter(|l| !l.is_empty()).ok_or_else(|| anyhow::Error::msg("Give questions: one to four, each with a question and its options."))?;
     if list.len() > 4 {
-        return Err("At most four questions at a time.".into());
+        return Err(anyhow::Error::msg("At most four questions at a time."));
     }
     let mut out = Vec::new();
     for (i, q) in list.iter().enumerate() {
-        let question = q["question"].as_str().map(str::trim).filter(|t| !t.is_empty()).ok_or(format!("Question {} has no text.", i + 1))?;
+        let question = q["question"].as_str().map(str::trim).filter(|t| !t.is_empty()).ok_or(format!("Question {} has no text.", i + 1)).map_err(anyhow::Error::msg)?;
         let options: Vec<Value> = q["options"]
             .as_array()
             .into_iter()
@@ -2254,7 +2334,7 @@ fn ask_questions(args: &Value) -> Result<Value, String> {
             })
             .collect();
         if options.len() < 2 {
-            return Err(format!("Question {} needs at least two options (they can also write their own answer).", i + 1));
+            return Err(anyhow::anyhow!("Question {} needs at least two options (they can also write their own answer).", i + 1));
         }
         let header = q["header"].as_str().map(str::trim).filter(|h| !h.is_empty()).map_or_else(|| format!("Question {}", i + 1), str::to_owned);
         out.push(json!({ "id": format!("q{i}"), "header": header, "question": question, "multi": q["multiple"] == true, "options": options }));
@@ -2272,13 +2352,13 @@ fn ask_answers(questions: &Value, answers: &Value) -> String {
             said.push(format!("(in their words) {own}"));
         }
         let said = if said.is_empty() { "(nothing picked)".to_owned() } else { said.join("; ") };
-        text.push_str(&format!("\n- {}\n  {said}", q["question"].as_str().unwrap_or_default()));
+        let _ = write!(text, "\n- {}\n  {said}", q["question"].as_str().unwrap_or_default());
     }
     text
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 /// Whether a round's calls handed the turn over (a report, or a question
@@ -2333,30 +2413,30 @@ fn instruction_parts(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> [
     );
     let mut s = String::new();
     for (path, text) in project_instructions(cwd) {
-        s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
+        let _ = write!(s, "\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim());
     }
     let (rules, scoped) = other_rules(cwd);
     for (path, text) in rules {
-        s.push_str(&format!("\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim()));
+        let _ = write!(s, "\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim());
     }
     if !scoped.is_empty() {
         s.push_str("\n<project_rules>\nRules for some of the project's files: read one before you work on the files it's for.\n");
         for (path, about) in scoped {
-            s.push_str(&format!("- {} ({about})\n", path.display()));
+            let _ = writeln!(s, "- {} ({about})", path.display());
         }
         s.push_str("</project_rules>\n");
     }
     let rules = std::mem::take(&mut s);
     let skills = crate::skills::listing(&crate::skills::find(cwd, &home(), &crate::auth::config_dir()));
-    s.push_str(&format!("\nWorking directory: {}\n", cwd.display()));
+    let _ = write!(s, "\nWorking directory: {}\n", cwd.display());
     // (The day only, so the instructions stay the same all day; the time
     // is a tool.)
-    s.push_str(&format!("The session started on {}; current_time gives the time now.\n", crate::clock::now().date()));
+    let _ = writeln!(s, "The session started on {}; current_time gives the time now.", crate::clock::now().date());
     if let Some(sb) = sandbox {
-        s.push_str(&format!("{}\n", sb.describe()));
+        let _ = writeln!(s, "{}", sb.describe());
     }
     if let Some(listing) = listing(cwd) {
-        s.push_str(&format!("\nIts files when the session started:\n{listing}\n"));
+        let _ = write!(s, "\nIts files when the session started:\n{listing}\n");
     }
     [head, rules, skills, s]
 }
@@ -2384,7 +2464,7 @@ fn listing(cwd: &Path) -> Option<String> {
     names.truncate(LISTED);
     let mut out = names.join("\n");
     if more > 0 {
-        out.push_str(&format!("\n… and {more} more (use ls)"));
+        let _ = write!(out, "\n… and {more} more (use ls)");
     }
     Some(out)
 }
@@ -2409,11 +2489,14 @@ fn project_instructions(cwd: &Path) -> Vec<(PathBuf, String)> {
 /// Of another agent's rule file, what goes in the instructions.
 const RULES_KEPT: usize = 20_000;
 
+/// Rule files, each with its path and text.
+type RuleFiles = Vec<(PathBuf, String)>;
+
 /// Other agents' rules in the project's top folder (the repository's, else
 /// the working directory): Copilot's, Cursor's, Cline's and Windsurf's.
 /// Cursor's rules for some files only are listed (path, and what they're
 /// for), not sent.
-fn other_rules(cwd: &Path) -> (Vec<(PathBuf, String)>, Vec<(PathBuf, String)>) {
+fn other_rules(cwd: &Path) -> (RuleFiles, RuleFiles) {
     let top = cwd.ancestors().find(|d| d.join(".git").exists()).unwrap_or(cwd);
     let keep = |t: String| -> Option<String> { (!t.trim().is_empty()).then(|| t.chars().take(RULES_KEPT).collect()) };
     let mut sent = Vec::new();
@@ -2461,10 +2544,16 @@ fn other_rules(cwd: &Path) -> (Vec<(PathBuf, String)>, Vec<(PathBuf, String)>) {
     (sent, scoped)
 }
 
+/// `text` ending as a sentence does (a full stop added when it has none).
+fn sentence(text: &str) -> String {
+    let t = text.trim_end();
+    if t.ends_with(['.', '!', '?']) { t.to_owned() } else { format!("{t}.") }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     #[test]
     fn a_side_question_leaves_out_calls_still_running() {
@@ -2613,7 +2702,7 @@ mod tests {
         agent.log.append(json!({ "type": "compaction", "summary": "s", "firstKeptEntryId": "x", "tokensBefore": 9_000, "usage": summary.log(&api(9_000, 0, 800), &price) })).unwrap();
         let search = spend(&mut agent, &api(2_000, 0, 150));
         agent.log.append(json!({ "type": "message", "message": { "role": "toolResult", "toolName": crate::search::NAME, "content": [], "details": { "usage": search.details() } } })).unwrap();
-        let parts = AsideParts { budget: agent.budget.clone(), side: agent.side.clone(), ..AsideParts::default() };
+        let parts = AsideParts { budget: agent.budget.clone(), side: Arc::clone(&agent.side), ..AsideParts::default() };
         let btw = api(6_000, 5_000, 40);
         let asked = Used::from_api(&btw).priced(&price);
         parts.budget.as_ref().unwrap().spent.fetch_add(asked.billed(), std::sync::atomic::Ordering::Relaxed);
@@ -2654,7 +2743,7 @@ mod tests {
     async fn a_used_budget_stops_every_kind_of_request() {
         // (Refused before anything's sent: no server here to reach.)
         let b = Arc::new(Budget { limit: 1_000, spent: 1_010.into(), ..Budget::default() });
-        let parts = AsideParts { model: "nowhere/model".into(), budget: Some(b.clone()), ..AsideParts::default() };
+        let parts = AsideParts { model: "nowhere/model".into(), budget: Some(Arc::clone(&b)), ..AsideParts::default() };
         let mut quiet = |_: &str| {};
         let err = aside(&parts, &[], "Can you still answer?", &mut quiet).await.unwrap_err();
         assert!(format!("{err:#}").contains("token budget"), "{err:#}");
@@ -2684,7 +2773,7 @@ mod tests {
         // Used up by a try: the next isn't sent, and nothing's left held.
         tries.ended(json!({ "input_tokens": 1_000, "output_tokens": 0 }));
         let refused = tries.again().unwrap_err();
-        assert!(refused.contains("token budget"), "{refused}");
+        assert!(refused.to_string().contains("token budget"), "{refused}");
         assert_eq!(b.held.load(Relaxed), 0);
         // Dropped (a Stop), the ledger keeps what they spent.
         drop(tries);
@@ -2710,7 +2799,7 @@ mod tests {
         let b = Arc::new(Budget { limit: 10_000, ..Budget::default() });
         let holds: Vec<_> = (0..4).map(|_| b.hold(4_000)).collect();
         assert_eq!(holds.iter().filter(|h| h.is_ok()).count(), 3);
-        assert!(holds[3].as_ref().err().unwrap().contains("requests already out"), "{:?}", holds[3].as_ref().err());
+        assert!(holds[3].as_ref().err().unwrap().to_string().contains("requests already out"), "{:?}", holds[3].as_ref().err());
         // Counted as they end: the holds go, what they spent stays.
         b.spent.fetch_add(2_500, std::sync::atomic::Ordering::Relaxed);
         drop(holds);
@@ -2718,7 +2807,7 @@ mod tests {
         assert!(b.hold(4_000).is_ok(), "the rest is free again");
         // Parallel for real: never more than three out.
         let b = Arc::new(Budget { limit: 10_000, ..Budget::default() });
-        let passed: usize = std::thread::scope(|s| (0..8).map(|_| s.spawn(|| b.hold(4_000).map(std::mem::forget).is_ok())).collect::<Vec<_>>().into_iter().map(|t| t.join().unwrap() as usize).sum());
+        let passed: usize = std::thread::scope(|s| (0..8).map(|_| s.spawn(|| b.hold(4_000).map(std::mem::forget).is_ok())).collect::<Vec<_>>().into_iter().map(|t| usize::from(t.join().unwrap())).sum());
         assert_eq!(passed, 3);
     }
 
@@ -2775,8 +2864,8 @@ mod tests {
 
     #[test]
     fn questions_and_their_answers() {
-        assert!(ask_questions(&json!({ "questions": [] })).is_err());
-        assert!(ask_questions(&json!({ "questions": [{ "question": "Which?", "options": [{ "label": "one" }] }] })).unwrap_err().contains("two options"));
+        ask_questions(&json!({ "questions": [] })).unwrap_err();
+        assert!(ask_questions(&json!({ "questions": [{ "question": "Which?", "options": [{ "label": "one" }] }] })).unwrap_err().to_string().contains("two options"));
         let q = ask_questions(&json!({ "questions": [
             { "question": "Which cache?", "header": "Cache", "options": [{ "label": "Redis", "description": "fast" }, { "label": "None" }] },
             { "question": "Which parts?", "multiple": true, "options": [{ "label": "api" }, { "label": "ui" }] },
@@ -2824,7 +2913,7 @@ mod tests {
         let pipe = dir.join("pipe");
         assert!(std::process::Command::new("mkfifo").arg(&pipe).status().unwrap().success());
         let running = || std::process::Command::new("pgrep").arg("-f").arg(pipe.to_string_lossy().as_ref()).output().is_ok_and(|o| !o.stdout.is_empty());
-        let tools = Tools::new(dir.clone(), dir.join("spill"));
+        let mut tools = Tools::new(dir.clone(), dir.join("spill"));
         let stop = CancellationToken::new();
         let stopper = stop.clone();
         tokio::spawn(async move {
@@ -2838,8 +2927,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert!(!running(), "the search command is gone too");
         // Not stopped: it ends at its time limit.
-        // SAFETY: only this test reads it with a search that long.
-        unsafe { std::env::set_var("HARLO_AGENT_SEARCH_SECS", "1") };
+        tools.search_limit = std::time::Duration::from_secs(1);
         let started = std::time::Instant::now();
         let out = tools.call("grep", &args).await;
         assert!(out.failed && out.text.contains("ran past 1 s and was stopped"), "{}", out.text);
@@ -2852,12 +2940,12 @@ mod tests {
     /// harlo answering: a list, a tool's result, an error.
     struct FakeHarlo;
     impl Harlo for FakeHarlo {
-        fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, Result<Value, String>> {
+        fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, anyhow::Result<Value>> {
             let answer = match tool {
                 "list_sessions" => Ok(json!({ "sessions": [], "asked": args.clone() })),
                 "_instructions" => Ok(json!("What harlo's tools are for.")),
                 "say" => Ok(json!("plain text")),
-                _ => Err(format!("no {tool}")),
+                _ => Err(anyhow::anyhow!("no {tool}")),
             };
             Box::pin(async move { answer })
         }
@@ -2910,10 +2998,4 @@ mod tests {
         assert!(hands_over(&["request_approval"], &[o(false)]));
         assert!(!hands_over(&["list_sessions", "bash"], &[o(false), o(false)]));
     }
-}
-
-/// `text` ending as a sentence does (a full stop added when it has none).
-fn sentence(text: &str) -> String {
-    let t = text.trim_end();
-    if t.ends_with(['.', '!', '?']) { t.to_owned() } else { format!("{t}.") }
 }

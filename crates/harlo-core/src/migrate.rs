@@ -9,6 +9,8 @@
 //!
 //! Only when harlo has nothing of its own yet, so it runs once.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 
 fn base(var: &str, fallback: &str) -> Option<PathBuf> {

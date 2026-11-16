@@ -19,6 +19,8 @@
 //! It reads the command's text, so it can be fooled; it's a second look
 //! for mistakes, not a wall (the sandbox is that).
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Component, Path, PathBuf};
 
 /// Why `command` can't be undone (None: nothing found). `project`: the

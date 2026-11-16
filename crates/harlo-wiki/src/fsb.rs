@@ -1,9 +1,12 @@
-//! The file access a wiki run makes, confined the way OpenWiki confines its
-//! own: virtual paths ("/openwiki/x.md") under the repository root, no
+//! The file access a wiki run makes, confined as OpenWiki confines its own.
+//!
+//! Virtual paths ("/openwiki/x.md") under the repository root, no
 //! `..`, symlinks not followed out of the root, paths a `.openwikiignore`
 //! excludes and the Claims folder refused, and writes only under
 //! `/openwiki/`. Results and their wording are the same, so a lifecycle
 //! error reads the same.
+
+// Rust guideline compliant 2026-10-09
 
 use crate::collate;
 use crate::ignore::{FILE as IGNORE_FILE, Ignore};
@@ -44,6 +47,8 @@ impl ReadError {
     }
 }
 
+/// A wiki run's confined view of a repository's files.
+#[derive(Debug)]
 pub struct Backend {
     root: PathBuf,
     ignore: Ignore,
@@ -153,7 +158,7 @@ impl Backend {
         let Ok(real_root) = fs::canonicalize(&self.root) else { return Ok(resolved.to_path_buf()) };
         let rel = resolved.strip_prefix(&self.root).unwrap_or(Path::new(""));
         let segs: Vec<_> = rel.components().collect();
-        let checked = if include_leaf { &segs[..] } else { &segs[..segs.len().saturating_sub(1)] };
+        let checked = if include_leaf { &*segs } else { &segs[..segs.len().saturating_sub(1)] };
         let mut current = self.root.clone();
         for s in checked {
             let next = current.join(s);
@@ -176,6 +181,11 @@ impl Backend {
     }
 
     /// `readRaw`: a file's text.
+    ///
+    /// # Errors
+    ///
+    /// A [`ReadError`] in OpenWiki's words when the path is refused or the file
+    /// can't be read.
     pub fn read_raw(&self, p: &str) -> Result<String, ReadError> {
         if let Some(e) = self.ignored_error(p, false).or_else(|| Self::claims_error(p)) {
             return Err(ReadError::Error(e));
@@ -196,6 +206,11 @@ impl Backend {
     }
 
     /// `write`: creates or truncates in place, folders made as needed.
+    ///
+    /// # Errors
+    ///
+    /// OpenWiki's message when the path is refused (outside `/openwiki/`,
+    /// ignored, the Claims folder) or the file can't be written.
     pub fn write(&self, p: &str, content: &str) -> Result<(), String> {
         if let Some(e) = self.write_guard(p) {
             return Err(e);
@@ -224,6 +239,12 @@ impl Backend {
     }
 
     /// `edit`: one replacement of `old` with `new` (`performStringReplacement`).
+    ///
+    /// # Errors
+    ///
+    /// OpenWiki's message when the path is refused, the file is missing or
+    /// can't be written, or `old` is empty in a file with content or isn't
+    /// there exactly once.
     pub fn edit(&self, p: &str, old: &str, new: &str) -> Result<(), String> {
         if let Some(e) = self.write_guard(p) {
             return Err(e);
@@ -267,6 +288,10 @@ impl Backend {
     }
 
     /// `delete`: a file, or a folder and everything in it.
+    ///
+    /// # Errors
+    ///
+    /// OpenWiki's message when the path is refused or can't be removed.
     pub fn delete(&self, p: &str) -> Result<(), String> {
         if let Some(e) = self.write_guard(p) {
             return Err(e);
@@ -281,7 +306,11 @@ impl Backend {
 
     /// `ls`: a folder's files and folders (symlinks followed), sorted as
     /// `localeCompare` sorts, without what's ignored or the Claims folder;
-    /// nothing when it can't be listed. Err: the path itself is refused.
+    /// nothing when it can't be listed.
+    ///
+    /// # Errors
+    ///
+    /// OpenWiki's message when the path itself is refused.
     pub fn ls(&self, p: &str) -> Result<Vec<Entry>, String> {
         if let Some(e) = self.ignored_error(p, true).or_else(|| Self::claims_error(p)) {
             return Err(e);

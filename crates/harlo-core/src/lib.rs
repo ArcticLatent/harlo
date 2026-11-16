@@ -2,7 +2,10 @@
 //! live session driving, the sidebar model and persistence. Nothing here
 //! depends on Qt.
 
+// Rust guideline compliant 2026-10-09
+
 pub mod actions;
+pub mod agents;
 pub mod attach;
 pub mod autostart;
 pub mod commitmsg;
@@ -61,6 +64,7 @@ pub mod templates;
 pub mod visuals;
 pub mod stats;
 pub mod terminal;
+pub mod tool_calls;
 pub mod tool_facts;
 pub mod transcript;
 pub mod updates;

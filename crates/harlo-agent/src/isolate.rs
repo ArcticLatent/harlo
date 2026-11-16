@@ -14,18 +14,20 @@
 //!   first); one that still clashes (another changed the same lines) is
 //!   left in its worktree, with its patch, for the model to bring over.
 //!   Nothing is forced.
-//! - Not done (the tasks share the folder, as before): a repository with
+//! - Not done (the tasks share the folder, unisolated): a repository with
 //!   submodules, a sparse checkout, a folder that isn't in a repository.
 //!   Worktrees left over for more than a week are removed.
+
+// Rust guideline compliant 2026-10-09
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
 /// Worktrees older than this are removed (one kept for a conflict).
-const KEEP_FOR: Duration = Duration::from_secs(7 * 24 * 3600);
+const KEEP_FOR: Duration = Duration::from_hours(168);
 
-fn git(dir: &Path, args: &[&str], index: Option<&Path>) -> Result<String, String> {
+fn git(dir: &Path, args: &[&str], index: Option<&Path>) -> anyhow::Result<String> {
     let mut c = Command::new("git");
     c.arg("-C").arg(dir).args(args).stdin(Stdio::null());
     if let Some(i) = index {
@@ -33,9 +35,9 @@ fn git(dir: &Path, args: &[&str], index: Option<&Path>) -> Result<String, String
     }
     // (No hooks, no prompts, a fixed author for the start commit.)
     c.env("GIT_TERMINAL_PROMPT", "0").env("GIT_AUTHOR_NAME", "harlo-agent").env("GIT_AUTHOR_EMAIL", "harlo-agent@localhost").env("GIT_COMMITTER_NAME", "harlo-agent").env("GIT_COMMITTER_EMAIL", "harlo-agent@localhost");
-    let out = c.output().map_err(|e| format!("git didn't run: {e}"))?;
+    let out = c.output().map_err(|e| anyhow::anyhow!("git didn't run: {e}"))?;
     if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_owned());
+        return Err(anyhow::Error::msg(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_owned())
 }
@@ -72,7 +74,7 @@ fn merge_insertions(ours: &[u8], base: &[u8], theirs: &[u8], scratch: &Path) -> 
     if code == 0 {
         return Some(out.stdout);
     }
-    if code < 0 || code > 127 {
+    if !(0..=127).contains(&code) {
         return None;
     }
     let text = String::from_utf8(out.stdout).ok()?;
@@ -117,7 +119,7 @@ fn cache_root() -> PathBuf {
 /// them, and hold back each other's real changes.
 const CACHES: [&str; 5] = [":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.py[co]", ":(exclude,glob)**/.pytest_cache/**", ":(exclude,glob)**/.mypy_cache/**", ":(exclude,glob)**/.ruff_cache/**"];
 
-fn tree_of(dir: &Path, scratch: &Path) -> Result<String, String> {
+fn tree_of(dir: &Path, scratch: &Path) -> anyhow::Result<String> {
     let index = scratch.join(format!("index-{}", rand()));
     let head = git(dir, &["rev-parse", "--verify", "-q", "HEAD"], None).ok();
     let result = (|| {
@@ -169,21 +171,21 @@ pub enum Applied {
 impl Baseline {
     /// The start for subagents working in `cwd`, or why they can't have
     /// worktrees there.
-    pub fn take(cwd: &Path) -> Result<Baseline, String> {
+    pub fn take(cwd: &Path) -> anyhow::Result<Baseline> {
         Baseline::take_in(cwd, &cache_root())
     }
 
-    fn take_in(cwd: &Path, cache: &Path) -> Result<Baseline, String> {
-        let root = PathBuf::from(git(cwd, &["rev-parse", "--show-toplevel"], None).map_err(|_| "not in a git repository".to_owned())?);
+    fn take_in(cwd: &Path, cache: &Path) -> anyhow::Result<Baseline> {
+        let root = PathBuf::from(git(cwd, &["rev-parse", "--show-toplevel"], None).ok().ok_or_else(|| anyhow::Error::msg("not in a git repository"))?);
         if git(&root, &["config", "--bool", "core.sparseCheckout"], None).is_ok_and(|v| v == "true") {
-            return Err("the repository is a sparse checkout".into());
+            return Err(anyhow::Error::msg("the repository is a sparse checkout"));
         }
         if git(&root, &["ls-files", "-s"], None).is_ok_and(|l| l.lines().any(|l| l.starts_with("160000 "))) {
-            return Err("the repository has submodules".into());
+            return Err(anyhow::Error::msg("the repository has submodules"));
         }
         prune_old(&root, cache);
         let folder = cache.join(format!("{}-{}", std::process::id(), rand()));
-        std::fs::create_dir_all(&folder).map_err(|e| format!("can't make {}: {e}", folder.display()))?;
+        std::fs::create_dir_all(&folder).map_err(|e| anyhow::anyhow!("can't make {}: {e}", folder.display()))?;
         let tree = tree_of(&root, &folder)?;
         let mut args = vec!["commit-tree", tree.as_str(), "-m", "harlo-agent: where subagents started"];
         let head = git(&root, &["rev-parse", "--verify", "-q", "HEAD"], None).ok();
@@ -196,7 +198,7 @@ impl Baseline {
     }
 
     /// A worktree for the subagent `name`.
-    pub fn worktree(&self, name: &str) -> Result<Worktree, String> {
+    pub fn worktree(&self, name: &str) -> anyhow::Result<Worktree> {
         let dir = self.folder.join(name);
         git(&self.root, &["worktree", "add", "-q", "--detach", &dir.to_string_lossy(), &self.commit], None)?;
         let cwd = dir.join(&self.rel);
@@ -236,7 +238,7 @@ impl Baseline {
                     let _ = std::fs::remove_file(&file);
                     Applied::Done(files)
                 }
-                Err(clash) => Applied::Kept { why: clash.unwrap_or_else(|| why.lines().next().unwrap_or("it conflicts").trim_start_matches("error: ").to_owned()), dir: w.dir.clone(), patch: file, files },
+                Err(clash) => Applied::Kept { why: clash.unwrap_or_else(|| why.to_string().lines().next().unwrap_or("it conflicts").trim_start_matches("error: ").to_owned()), dir: w.dir.clone(), patch: file, files },
             },
         }
     }

@@ -4,6 +4,9 @@
 //! scaled first to what a model takes well: at most `MAX_SIDE` pixels a
 //! side and about `MAX_BYTES`.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::io::Cursor;
 
 use base64::Engine as _;
@@ -52,36 +55,37 @@ impl Fitted {
         let kind = self.mime.trim_start_matches("image/").to_uppercase();
         let mut s = format!("{}×{} {kind}, {}", self.size.0, self.size.1, kb(self.data.len()));
         if let Some((w, h)) = self.was {
-            s.push_str(&format!(", scaled from {w}×{h}"));
+            let _ = write!(s, ", scaled from {w}×{h}");
         }
         s
     }
 }
 
 fn kb(n: usize) -> String {
-    if n >= 1 << 20 { format!("{:.1} MB", n as f64 / (1 << 20) as f64) } else { format!("{} KB", n.div_ceil(1024)) }
+    if n >= 1 << 20 { format!("{:.1} MB", n as f64 / f64::from(1 << 20)) } else { format!("{} KB", n.div_ceil(1024)) }
 }
 
 /// [`fit`], off the async threads (decoding and scaling a large image
 /// takes a while).
-pub async fn fit_apart(bytes: Vec<u8>) -> Result<Fitted, String> {
-    tokio::task::spawn_blocking(move || fit(&bytes)).await.unwrap_or_else(|e| Err(format!("it couldn't be read ({e})")))
+pub async fn fit_apart(bytes: Vec<u8>) -> anyhow::Result<Fitted> {
+    tokio::task::spawn_blocking(move || fit(&bytes)).await.unwrap_or_else(|e| Err(anyhow::anyhow!("it couldn't be read ({e})")))
 }
 
 /// `bytes` as they'll be sent: as they are when they're small enough,
 /// otherwise scaled down (its first frame, for an animation) and saved
 /// again (a photo as JPEG). Err: why it can't be sent.
-pub fn fit(bytes: &[u8]) -> Result<Fitted, String> {
-    let Some(mime) = mime_of(bytes) else { return Err("it isn't a PNG, JPEG, GIF or WebP image".into()) };
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
+pub fn fit(bytes: &[u8]) -> anyhow::Result<Fitted> {
+    let Some(mime) = mime_of(bytes) else { return Err(anyhow::Error::msg("it isn't a PNG, JPEG, GIF or WebP image")) };
     if bytes.len() > MAX_FILE {
-        return Err(format!("it's {}, more than the {} an image may be", kb(bytes.len()), kb(MAX_FILE)));
+        return Err(anyhow::anyhow!("it's {}, more than the {} an image may be", kb(bytes.len()), kb(MAX_FILE)));
     }
-    let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
-    let (w, h) = reader.into_dimensions().map_err(|e| format!("it can't be read ({e})"))?;
+    let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    let (w, h) = reader.into_dimensions().map_err(|e| anyhow::anyhow!("it can't be read ({e})"))?;
     if w <= MAX_SIDE && h <= MAX_SIDE && bytes.len() <= MAX_BYTES {
         return Ok(Fitted { data: bytes.to_vec(), mime, size: (w, h), was: None });
     }
-    let img = image::load_from_memory(bytes).map_err(|e| format!("it can't be read ({e})"))?;
+    let img = image::load_from_memory(bytes).map_err(|e| anyhow::anyhow!("it can't be read ({e})"))?;
     let mut side = MAX_SIDE.min(w.max(h));
     // (A photo stays a JPEG; anything else tries PNG first, which keeps
     // text and lines sharp.)
@@ -98,26 +102,26 @@ pub fn fit(bytes: &[u8]) -> Result<Fitted, String> {
         } else {
             // (Smaller by the share it's over, and a little more.)
             let share = (MAX_BYTES as f64 / data.len() as f64).sqrt() * 0.9;
-            side = ((side as f64 * share) as u32).max(64);
+            side = ((f64::from(side) * share) as u32).max(64);
         }
     }
-    Err("it's too large even scaled down".into())
+    Err(anyhow::Error::msg("it's too large even scaled down"))
 }
 
-fn encode_png(img: &DynamicImage) -> Result<Vec<u8>, String> {
+fn encode_png(img: &DynamicImage) -> anyhow::Result<Vec<u8>> {
     let mut out = Vec::new();
-    img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png).map_err(|e| e.to_string())?;
+    img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png)?;
     Ok(out)
 }
 
 /// As a JPEG (quality 85), what's see-through on white.
-fn encode_jpeg(img: &DynamicImage) -> Result<Vec<u8>, String> {
+fn encode_jpeg(img: &DynamicImage) -> anyhow::Result<Vec<u8>> {
     let rgb = if img.color().has_alpha() {
         let mut rgba = img.to_rgba8();
         for p in rgba.pixels_mut() {
-            let a = p[3] as u32;
+            let a = u32::from(p[3]);
             for c in 0..3 {
-                p[c] = ((p[c] as u32 * a + 255 * (255 - a)) / 255) as u8;
+                p[c] = u8::try_from((u32::from(p[c]) * a + 255 * (255 - a)) / 255).unwrap_or(u8::MAX);
             }
         }
         DynamicImage::ImageRgba8(rgba).to_rgb8()
@@ -125,15 +129,15 @@ fn encode_jpeg(img: &DynamicImage) -> Result<Vec<u8>, String> {
         img.to_rgb8()
     };
     let mut out = Vec::new();
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&rgb).map_err(|e| e.to_string())?;
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&rgb)?;
     Ok(out)
 }
 
 /// An image block from elsewhere (harlo's prompt, an MCP server's result),
 /// fitted: Err says why it can't be sent.
-pub fn from_block(b: &Value) -> Result<Fitted, String> {
-    let data = b["data"].as_str().ok_or("it has no data")?;
-    let bytes = STANDARD.decode(data.trim()).map_err(|_| "its data isn't base64".to_owned())?;
+pub fn from_block(b: &Value) -> anyhow::Result<Fitted> {
+    let data = b["data"].as_str().ok_or_else(|| anyhow::Error::msg("it has no data"))?;
+    let bytes = STANDARD.decode(data.trim()).ok().ok_or_else(|| anyhow::Error::msg("its data isn't base64"))?;
     fit(&bytes)
 }
 
@@ -170,7 +174,7 @@ mod tests {
     use image::{Rgba, RgbaImage};
 
     fn png(w: u32, h: u32) -> Vec<u8> {
-        let img = RgbaImage::from_fn(w, h, |x, y| Rgba([(x % 256) as u8, (y % 256) as u8, 128, 255]));
+        let img = RgbaImage::from_fn(w, h, |x, y| Rgba([u8::try_from(x % 256).unwrap_or(u8::MAX), u8::try_from(y % 256).unwrap_or(u8::MAX), 128, 255]));
         encode_png(&DynamicImage::ImageRgba8(img)).unwrap()
     }
 
@@ -180,7 +184,7 @@ mod tests {
         assert_eq!(mime_of(b"GIF89a.."), Some("image/gif"));
         assert_eq!(mime_of(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
         assert_eq!(mime_of(b"hello"), None);
-        assert!(fit(b"hello").unwrap_err().contains("isn't a PNG"));
+        assert!(fit(b"hello").unwrap_err().to_string().contains("isn't a PNG"));
     }
 
     #[test]

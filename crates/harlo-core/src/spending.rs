@@ -1,8 +1,12 @@
-//! Spending limits (Settings → Usage): a session may cost up to `session`
-//! dollars, and harlo's sessions together up to `day` dollars a day (0:
-//! no limit). Costs are what the agents report (a session's total so far,
-//! after each model call; Claude Code after each turn). Past a limit harlo
-//! stops the run and holds further messages until you allow more.
+//! Spending limits (Settings → Usage), per session and per day.
+//!
+//! A session may cost up to `session` dollars, and harlo's sessions together up
+//! to `day` dollars a day (0: no limit). Costs are what the agents report (a
+//! session's total so far, after each model call; Claude Code after each turn).
+//! Past a limit harlo stops the run and holds further messages until you allow
+//! more.
+
+// Rust guideline compliant 2026-10-09
 
 use serde_json::{Value, json};
 

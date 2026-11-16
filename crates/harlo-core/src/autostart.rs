@@ -1,6 +1,8 @@
 //! Start at login: an XDG autostart entry (`~/.config/autostart/harlo.desktop`)
 //! that launches harlo in the background (into the tray).
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 
 /// The autostart entry's path (`$XDG_CONFIG_HOME/autostart/harlo.desktop`).
@@ -38,6 +40,10 @@ pub fn is_enabled() -> bool {
 }
 
 /// Writes (`on`) or removes the entry; `exe` is the program to start.
+///
+/// # Errors
+///
+/// An I/O error when the entry can't be written or removed.
 pub fn set(on: bool, exe: &Path) -> std::io::Result<()> {
     let Some(path) = entry_path() else { return Err(std::io::Error::other("no home folder")) };
     if on {

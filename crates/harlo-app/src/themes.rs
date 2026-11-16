@@ -1,6 +1,8 @@
 //! Colour themes (themes/*.json), compiled in.
 //! Each family (harlo, Dracula, Nord…) has a dark and a light variant.
 
+// Rust guideline compliant 2026-10-09
+
 use std::sync::OnceLock;
 
 use serde_json::Value;

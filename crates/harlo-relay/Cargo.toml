@@ -4,6 +4,9 @@ description = "Lets phones reach harlo from anywhere: serves harlo's phone app a
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -13,17 +16,19 @@ name = "harlo-relay"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query"] }
-tokio = { workspace = true, features = ["net", "signal"] }
-futures-util = "0.3"
-serde_json.workspace = true
-serde = { workspace = true }
-sha2 = "0.10"
-base64 = "0.22"
+axum = { workspace = true, features = ["http1", "tokio", "ws", "query"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal", "net"] }
+futures-util.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2.workspace = true
+base64.workspace = true
 # The iOS app's notifications, sent with the app's APNs key (POST /push).
 harlo-apns.workspace = true
 
 [dev-dependencies]
-tokio-tungstenite = "0.29"
+tokio-tungstenite.workspace = true
 # A stand-in for Apple's push service (HTTP/2) in the tests.
-axum = { version = "0.8", default-features = false, features = ["http1", "http2", "tokio", "ws", "query"] }
+axum = { workspace = true, features = ["http1", "http2", "tokio", "ws", "query"] }
+
+[lints]
+workspace = true

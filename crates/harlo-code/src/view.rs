@@ -2,6 +2,8 @@
 //! and the mouse and keys mapped back to positions. Sizes here are logical
 //! pixels (QML's) unless they say device pixels.
 
+// Rust guideline compliant 2026-10-09
+
 use cosmic_text::{Attrs, AttrsList, BufferLine, CacheKey, Ellipsize, Family, Hinting, LayoutGlyph, LineEnding, Shaping, SwashContent, Wrap};
 
 use crate::doc::Doc;
@@ -18,9 +20,11 @@ impl Rgba {
         Self([r, g, b, a])
     }
     /// This colour with its alpha scaled by `a`.
+    #[must_use]
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn with_alpha(self, a: f32) -> Self {
         let [r, g, b, a0] = self.0;
-        Self([r, g, b, (a0 as f32 * a).round().clamp(0.0, 255.0) as u8])
+        Self([r, g, b, (f32::from(a0) * a).round().clamp(0.0, 255.0) as u8])
     }
 }
 
@@ -79,7 +83,9 @@ impl Default for Palette {
     }
 }
 
-/// A diff row's look. `kind`: 0 unchanged, 1 changed (removed on the old
+/// A diff row's look.
+///
+/// `kind`: 0 unchanged, 1 changed (removed on the old
 /// side, added on the new), 2 nothing on this side (hatched), 3 a fold, 4 a
 /// comment's room (both drawn over in QML). `from..to`: the changed part
 /// (UTF-16 columns), if known.
@@ -106,7 +112,7 @@ impl Row {
             n += 1;
             if n == 5 {
                 let [kind, side, number, from, to] = fields;
-                out.push(Row { kind: kind.clamp(0, 255) as u8, side: side.clamp(0, 1) as u8, number: number as i32, from: from as i32, to: to as i32 });
+                out.push(Row { kind: u8::try_from(kind.clamp(0, 255)).unwrap_or(0), side: u8::try_from(side.clamp(0, 1)).unwrap_or(0), number: i32::try_from(number).unwrap_or(i32::MAX), from: i32::try_from(from).unwrap_or(i32::MAX), to: i32::try_from(to).unwrap_or(i32::MAX) });
                 n = 0;
             }
         }
@@ -137,6 +143,10 @@ struct Digits {
     ascent: f32,
     descent: f32,
 }
+
+/// What a bracket pair was found for: the text's revision, the anchor and
+/// the cursor.
+type BracketKey = (u64, usize, usize);
 
 pub struct View {
     pub doc: Doc,
@@ -178,7 +188,19 @@ pub struct View {
     /// The widest line: (columns, line), and whether to measure again.
     widest: (usize, usize),
     widest_dirty: bool,
-    brackets: Option<((u64, usize, usize), Option<(usize, usize)>)>,
+    /// The bracket pair found last, and the revision and selection it was for.
+    brackets: Option<(BracketKey, Option<(usize, usize)>)>,
+}
+
+impl std::fmt::Debug for View {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("View")
+            .field("doc", &self.doc)
+            .field("colouring", &self.colouring)
+            .field("size", &(self.width, self.height))
+            .field("scroll", &(self.scroll_x, self.scroll_y))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for View {
@@ -345,7 +367,7 @@ impl View {
         if family == self.family && font_px == self.font_px && gutter_px == self.gutter_px {
             return;
         }
-        self.family = family.to_owned();
+        family.clone_into(&mut self.family);
         self.font_px = font_px.max(1.0);
         self.gutter_px = gutter_px.max(1.0);
         // (JetBrains Mono's ascent and descent.)
@@ -482,6 +504,7 @@ impl View {
     }
 
     /// The lines in view (and a part one at each end).
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn visible_lines(&self) -> std::ops::Range<usize> {
         let first = ((self.scroll_y - self.top_pad) / self.line_px).floor().max(0.0) as usize;
         let last = ((self.scroll_y - self.top_pad + self.height) / self.line_px).ceil().max(0.0) as usize + 1;
@@ -521,6 +544,7 @@ impl View {
     }
 
     /// The position nearest content point (x, y).
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn pos_at_content(&mut self, x: f32, y: f32) -> usize {
         let n = self.doc.text.line_count();
         let l = ((y / self.line_px).floor().max(0.0) as usize).min(n - 1);
@@ -560,8 +584,8 @@ impl View {
 
     /// The position a line up or down (`lines` negative: up), at the same x.
     pub fn pos_vertical(&mut self, from: usize, lines: isize) -> usize {
-        let l = self.doc.text.line_of(from) as isize;
-        let n = self.doc.text.line_count() as isize;
+        let l = isize::try_from(self.doc.text.line_of(from)).unwrap_or(isize::MAX);
+        let n = isize::try_from(self.doc.text.line_count()).unwrap_or(isize::MAX);
         let x = match self.goal_x {
             Some(x) => x,
             None => {
@@ -578,7 +602,7 @@ impl View {
             return self.doc.text.len();
         }
         let mut f = fonts::lock();
-        self.pos_in_line(&mut f, target as usize, x)
+        self.pos_in_line(&mut f, usize::try_from(target).unwrap_or(0), x)
     }
 
     /// Scrolls so `pos` is in view (`margin`: room kept around it).
@@ -645,13 +669,14 @@ impl View {
 
     /// Draws the view (`width`×`height` device pixels) into `out`: RGBA,
     /// premultiplied, rows of `width * 4` bytes.
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn render(&mut self, out: &mut Vec<u8>, width: usize, height: usize, dpr: f32) {
         // (No line on screen waits for its colours.)
         self.colour_shown();
         out.clear();
         out.resize(width * height * 4, 0);
         let bg = premultiply(self.palette.background);
-        for px in out.chunks_exact_mut(4) {
+        for px in out.as_chunks_mut::<4>().0 {
             px.copy_from_slice(&bg);
         }
         let mut guard = fonts::lock();
@@ -667,7 +692,6 @@ impl View {
         let gutter_w = self.gutter_width();
         let text_x = self.text_x();
         let x0 = text_x - self.scroll_x;
-        let (sel_a, sel_b) = self.doc.selection();
         let brackets = if self.doc.read_only { None } else { self.bracket_pair() };
         let p = self.palette.clone();
         let line_count = self.doc.text.line_count();
@@ -683,66 +707,7 @@ impl View {
             let units = self.doc.text.lines[i].units as usize;
             let end = start + units;
             let row = self.rows.get(i).copied();
-            // The row: a diff's tint or hatching.
-            if let Some(r) = row {
-                match r.kind {
-                    1 => c.fill(0.0, top, self.width, lh, if r.side == 0 { p.removed } else { p.added }),
-                    2 => c.hatch(gutter_w, top, self.width - gutter_w, lh, p.border),
-                    _ => {}
-                }
-            }
-            if self.arrival == Some(i) && self.arrival_glow > 0.0 {
-                c.fill(0.0, top, self.width, lh, p.arrival.with_alpha(self.arrival_glow));
-            }
-            // The changed part of a diff's line.
-            if let Some(r) = row
-                && r.kind == 1
-                && r.from >= 0
-            {
-                let a = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(r.from as usize));
-                let b = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(r.to.max(r.from) as usize));
-                c.fill(x0 + a, top, (b - a).max(2.0), lh, if r.side == 0 { p.removed_strong } else { p.added_strong });
-            }
-            // The selection (a line's break included).
-            if sel_a < sel_b && sel_a <= end && sel_b > start {
-                let a = if sel_a > start { self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(sel_a - start)) } else { 0.0 };
-                let b = if sel_b <= end {
-                    self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(sel_b - start))
-                } else {
-                    self.x_in_line(fonts, i, usize::MAX) + self.char_w * 0.6
-                };
-                if b > a {
-                    c.fill(x0 + a, top, b - a, lh, p.selection);
-                }
-            }
-            // Matches.
-            while m < self.matches.len() && self.matches[m] <= end {
-                let s = self.matches[m];
-                if s >= start {
-                    let a = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(s - start));
-                    let b = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(s + self.match_len - start));
-                    let current = m as i32 == self.current_match;
-                    let (x, w) = (x0 + a - 1.0, (b - a).max(2.0) + 2.0);
-                    c.fill(x, top, w, lh, if current { p.find_current } else { p.find });
-                    if current {
-                        c.frame(x, top, w, lh, p.find_edge);
-                    }
-                }
-                m += 1;
-            }
-            // The bracket pair.
-            if let Some((a, b)) = brackets {
-                for q in [a, b] {
-                    if q >= start && q < end {
-                        let col = q - start;
-                        let xa = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(col));
-                        let xb = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(col + 1));
-                        let w = (xb - xa).max(4.0);
-                        c.fill(x0 + xa, top, w, lh, p.bracket);
-                        c.frame(x0 + xa, top, w, lh, p.bracket_edge);
-                    }
-                }
-            }
+            self.draw_marks(fonts, &mut c, i, &mut m, brackets, &p);
             // The text.
             let spans = std::mem::take(&mut self.doc.text.lines[i].spans);
             if let Some(layout) = self.layout_line(fonts, i) {
@@ -768,30 +733,7 @@ impl View {
                     c.fill(x, top, 1.5, lh, p.cursor);
                 }
             }
-            // The gutter.
-            match self.gutter {
-                Gutter::Lines => {
-                    c.fill(0.0, top, gutter_w, lh, p.background);
-                    let color = if self.arrival == Some(i) && self.arrival_glow > 0.0 {
-                        p.arrival_text.with_alpha(0.55 + 0.45 * self.arrival_glow)
-                    } else {
-                        p.gutter_text
-                    };
-                    self.draw_number(fonts, &mut c, (i + 1) as i64, gutter_w - 10.0, top, color);
-                }
-                Gutter::Rows => {
-                    let r = row.unwrap_or_default();
-                    let tint = if r.side == 0 { p.removed_text } else { p.added_text };
-                    c.fill(0.0, top, gutter_w, lh, p.background.with_alpha(if r.kind == 1 { 0.35 } else { 1.0 }));
-                    if r.kind < 2 && r.number > 0 {
-                        self.draw_number(fonts, &mut c, r.number as i64, gutter_w - 18.0, top, if r.kind == 1 { tint } else { p.gutter_text });
-                    }
-                    if r.kind == 1 {
-                        self.draw_sign(fonts, &mut c, r.side == 1, gutter_w - 14.0, top, tint);
-                    }
-                }
-                Gutter::None => {}
-            }
+            self.draw_gutter(fonts, &mut c, i, top, row.unwrap_or_default());
         }
         // Above the first line and past the last: the gutter's background.
         if self.gutter != Gutter::None {
@@ -819,6 +761,102 @@ impl View {
     }
 
     /// A number right-aligned to `right` (logical x), in the gutter's size.
+    /// What's drawn under line `i`'s text: a diff's tint and changed part,
+    /// the arrival glow, the selection, find's matches (`m`: the next one)
+    /// and the bracket pair.
+    fn draw_marks(&mut self, fonts: &mut Fonts, c: &mut Canvas, i: usize, m: &mut usize, brackets: Option<(usize, usize)>, p: &Palette) {
+        let lh = self.line_px;
+        let top = self.top_pad + i as f32 * lh - self.scroll_y;
+        let (gutter_w, x0) = (self.gutter_width(), self.text_x() - self.scroll_x);
+        let (sel_a, sel_b) = self.doc.selection();
+        let start = self.doc.text.line_start(i);
+        let end = start + self.doc.text.lines[i].units as usize;
+        let row = self.rows.get(i).copied();
+        // The row: a diff's tint or hatching.
+        if let Some(r) = row {
+            match r.kind {
+                1 => c.fill(0.0, top, self.width, lh, if r.side == 0 { p.removed } else { p.added }),
+                2 => c.hatch(gutter_w, top, self.width - gutter_w, lh, p.border),
+                _ => {}
+            }
+        }
+        if self.arrival == Some(i) && self.arrival_glow > 0.0 {
+            c.fill(0.0, top, self.width, lh, p.arrival.with_alpha(self.arrival_glow));
+        }
+        // The changed part of a diff's line.
+        if let Some(r) = row
+            && r.kind == 1
+            && r.from >= 0
+        {
+            let a = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(usize::try_from(r.from).unwrap_or(0)));
+            let b = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(usize::try_from(r.to.max(r.from)).unwrap_or(0)));
+            c.fill(x0 + a, top, (b - a).max(2.0), lh, if r.side == 0 { p.removed_strong } else { p.added_strong });
+        }
+        // The selection (a line's break included).
+        if sel_a < sel_b && sel_a <= end && sel_b > start {
+            let a = if sel_a > start { self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(sel_a - start)) } else { 0.0 };
+            let b = if sel_b <= end {
+                self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(sel_b - start))
+            } else {
+                self.x_in_line(fonts, i, usize::MAX) + self.char_w * 0.6
+            };
+            if b > a {
+                c.fill(x0 + a, top, b - a, lh, p.selection);
+            }
+        }
+        // Matches.
+        while *m < self.matches.len() && self.matches[*m] <= end {
+            let s = self.matches[*m];
+            if s >= start {
+                let a = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(s - start));
+                let b = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(s + self.match_len - start));
+                let current = i32::try_from(*m).unwrap_or(i32::MAX) == self.current_match;
+                let (x, w) = (x0 + a - 1.0, (b - a).max(2.0) + 2.0);
+                c.fill(x, top, w, lh, if current { p.find_current } else { p.find });
+                if current {
+                    c.frame(x, top, w, lh, p.find_edge);
+                }
+            }
+            *m += 1;
+        }
+        // The bracket pair.
+        for q in brackets.into_iter().flat_map(|(a, b)| [a, b]).filter(|q| (start..end).contains(q)) {
+            let col = q - start;
+            let xa = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(col));
+            let xb = self.x_in_line(fonts, i, self.doc.text.lines[i].byte_at(col + 1));
+            let w = (xb - xa).max(4.0);
+            c.fill(x0 + xa, top, w, lh, p.bracket);
+            c.frame(x0 + xa, top, w, lh, p.bracket_edge);
+        }
+    }
+
+    /// Line `i`'s gutter: its number, or a diff row's number and sign.
+    fn draw_gutter(&self, fonts: &mut Fonts, c: &mut Canvas, i: usize, top: f32, r: Row) {
+        let (p, lh, gutter_w) = (&self.palette, self.line_px, self.gutter_width());
+        match self.gutter {
+            Gutter::Lines => {
+                c.fill(0.0, top, gutter_w, lh, p.background);
+                let color = if self.arrival == Some(i) && self.arrival_glow > 0.0 {
+                    p.arrival_text.with_alpha(0.55 + 0.45 * self.arrival_glow)
+                } else {
+                    p.gutter_text
+                };
+                self.draw_number(fonts, c, i64::try_from(i + 1).unwrap_or(i64::MAX), gutter_w - 10.0, top, color);
+            }
+            Gutter::Rows => {
+                let tint = if r.side == 0 { p.removed_text } else { p.added_text };
+                c.fill(0.0, top, gutter_w, lh, p.background.with_alpha(if r.kind == 1 { 0.35 } else { 1.0 }));
+                if r.kind < 2 && r.number > 0 {
+                    self.draw_number(fonts, c, i64::from(r.number), gutter_w - 18.0, top, if r.kind == 1 { tint } else { p.gutter_text });
+                }
+                if r.kind == 1 {
+                    self.draw_sign(fonts, c, r.side == 1, gutter_w - 14.0, top, tint);
+                }
+            }
+            Gutter::None => {}
+        }
+    }
+
     fn draw_number(&self, fonts: &mut Fonts, c: &mut Canvas, n: i64, right: f32, top: f32, color: Rgba) {
         let Some(d) = &self.digits else { return };
         let s = n.to_string();
@@ -863,7 +901,7 @@ impl View {
 
 fn premultiply(c: Rgba) -> [u8; 4] {
     let [r, g, b, a] = c.0;
-    let m = |v: u8| ((v as u32 * a as u32 + 127) / 255) as u8;
+    let m = |v: u8| u8::try_from((u32::from(v) * u32::from(a) + 127) / 255).unwrap_or(u8::MAX);
     [m(r), m(g), m(b), a]
 }
 
@@ -882,13 +920,14 @@ impl Canvas<'_> {
             return;
         }
         let ia = 255 - a;
-        d[0] = ((c[0] as u32 * a + d[0] as u32 * ia + 127) / 255) as u8;
-        d[1] = ((c[1] as u32 * a + d[1] as u32 * ia + 127) / 255) as u8;
-        d[2] = ((c[2] as u32 * a + d[2] as u32 * ia + 127) / 255) as u8;
-        d[3] = (a + (d[3] as u32 * ia + 127) / 255) as u8;
+        d[0] = u8::try_from((u32::from(c[0]) * a + u32::from(d[0]) * ia + 127) / 255).unwrap_or(u8::MAX);
+        d[1] = u8::try_from((u32::from(c[1]) * a + u32::from(d[1]) * ia + 127) / 255).unwrap_or(u8::MAX);
+        d[2] = u8::try_from((u32::from(c[2]) * a + u32::from(d[2]) * ia + 127) / 255).unwrap_or(u8::MAX);
+        d[3] = u8::try_from(a + (u32::from(d[3]) * ia + 127) / 255).unwrap_or(u8::MAX);
     }
 
     /// The device pixels a logical span covers.
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn span(&self, x: f32, w: f32, max: usize) -> (usize, usize) {
         let a = (x * self.dpr).round().clamp(0.0, max as f32) as usize;
         let b = ((x + w) * self.dpr).round().clamp(0.0, max as f32) as usize;
@@ -899,7 +938,7 @@ impl Canvas<'_> {
     fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Rgba) {
         let (x0, x1) = self.span(x, w, self.width);
         let (y0, y1) = self.span(y, h, self.height);
-        let a = color.0[3] as u32;
+        let a = u32::from(color.0[3]);
         if a == 0 || x0 == x1 {
             return;
         }
@@ -907,11 +946,11 @@ impl Canvas<'_> {
         for py in y0..y1 {
             let row = &mut self.data[(py * self.width + x0) * 4..(py * self.width + x1) * 4];
             if a == 255 {
-                for d in row.chunks_exact_mut(4) {
+                for d in row.as_chunks_mut::<4>().0 {
                     d.copy_from_slice(&solid);
                 }
             } else {
-                for d in row.chunks_exact_mut(4) {
+                for d in row.as_chunks_mut::<4>().0 {
                     Self::blend(d, color.0, a);
                 }
             }
@@ -928,12 +967,13 @@ impl Canvas<'_> {
     }
 
     /// Diagonal hatching (nothing on this side of a diff).
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn hatch(&mut self, x: f32, y: f32, w: f32, h: f32, color: Rgba) {
         let (x0, x1) = self.span(x, w, self.width);
         let (y0, y1) = self.span(y, h, self.height);
         let period = (8.0 * self.dpr).round().max(2.0) as usize;
         let stroke = (1.2 * self.dpr).max(1.0);
-        let a = color.0[3] as f32;
+        let a = f32::from(color.0[3]);
         for py in y0..y1 {
             for px in x0..x1 {
                 // Distance along the row to the nearest stroke.
@@ -953,30 +993,30 @@ impl Canvas<'_> {
         let Some(image) = fonts.glyphs.get_image(&mut fonts.system, key) else { return };
         let left = x + image.placement.left;
         let top = y - image.placement.top;
-        let (w, h) = (image.placement.width as i32, image.placement.height as i32);
+        let (w, h) = (i32::try_from(image.placement.width).unwrap_or(i32::MAX), i32::try_from(image.placement.height).unwrap_or(i32::MAX));
         let col0 = (min_x.max(0) - left).max(0);
-        let col1 = (self.width as i32 - left).min(w);
+        let col1 = (i32::try_from(self.width).unwrap_or(i32::MAX) - left).min(w);
         let row0 = (-top).max(0);
-        let row1 = (self.height as i32 - top).min(h);
-        let ca = color.0[3] as u32;
+        let row1 = (i32::try_from(self.height).unwrap_or(i32::MAX) - top).min(h);
+        let ca = u32::from(color.0[3]);
         for row in row0..row1 {
-            let py = (top + row) as usize;
+            let py = usize::try_from(top + row).unwrap_or(0);
             for col in col0..col1 {
-                let o = (py * self.width + (left + col) as usize) * 4;
+                let o = (py * self.width + usize::try_from(left + col).unwrap_or(0)) * 4;
                 let d = &mut self.data[o..o + 4];
                 match image.content {
                     SwashContent::Mask => {
-                        let cov = image.data[(row * w + col) as usize] as u32;
+                        let cov = u32::from(image.data[usize::try_from(row * w + col).unwrap_or(0)]);
                         Self::blend(d, color.0, cov * ca / 255);
                     }
                     SwashContent::Color => {
-                        let i = ((row * w + col) * 4) as usize;
+                        let i = usize::try_from((row * w + col) * 4).unwrap_or(0);
                         let s = &image.data[i..i + 4];
-                        Self::blend(d, [s[0], s[1], s[2], 255], s[3] as u32);
+                        Self::blend(d, [s[0], s[1], s[2], 255], u32::from(s[3]));
                     }
                     SwashContent::SubpixelMask => {
-                        let i = ((row * w + col) * 4) as usize;
-                        let cov = image.data[i..i + 3].iter().map(|&v| v as u32).sum::<u32>() / 3;
+                        let i = usize::try_from((row * w + col) * 4).unwrap_or(0);
+                        let cov = image.data[i..i + 3].iter().map(|&v| u32::from(v)).sum::<u32>() / 3;
                         Self::blend(d, color.0, cov * ca / 255);
                     }
                 }
@@ -1000,7 +1040,7 @@ mod tests {
         v.height = 200.0;
         let mut out = Vec::new();
         v.render(&mut out, 600, 200, 1.0);
-        let lit = out.chunks_exact(4).filter(|p| p[0] > 120).count();
+        let lit = out.as_chunks::<4>().0.iter().filter(|p| p[0] > 120).count();
         assert!(lit > 50, "{lit} lit pixels");
         // Column 4 of line 1 is four characters in.
         let x = v.x_of(v.doc.text.pos(1, 4));

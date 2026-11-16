@@ -2,6 +2,8 @@
 //! diff lines of the selected file; the file list and branch state are
 //! properties.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -335,7 +337,7 @@ fn read_request(root: &Path) -> serde_json::Value {
                     && let Ok(v) = serde_json::from_str::<serde_json::Value>(out.trim())
                     && v["state"] == "OPEN"
                 {
-                    url = v["url"].as_str().unwrap_or_default().to_owned();
+                    v["url"].as_str().unwrap_or_default().clone_into(&mut url);
                     number = v["number"].as_i64().unwrap_or(0);
                 }
             }
@@ -345,7 +347,7 @@ fn read_request(root: &Path) -> serde_json::Value {
                     && let Ok(v) = serde_json::from_str::<serde_json::Value>(out.trim())
                     && let Some(mr) = v.as_array().and_then(|a| a.first())
                 {
-                    url = mr["web_url"].as_str().unwrap_or_default().to_owned();
+                    mr["web_url"].as_str().unwrap_or_default().clone_into(&mut url);
                     number = mr["iid"].as_i64().unwrap_or(0);
                 }
             }
@@ -371,9 +373,10 @@ fn read_request(root: &Path) -> serde_json::Value {
 /// What a background job hands back to the Qt thread.
 enum Outcome {
     Diff(FileDiff, Vec<DiffRow>, Option<SplitView>),
-    Done(Result<String, String>),
+    Done(anyhow::Result<String>),
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl GitPanel {
     fn root_path(&self) -> Option<PathBuf> {
         self.status.as_ref().map(|s| s.root.clone())
@@ -420,6 +423,8 @@ impl GitPanel {
                     }
                 }
                 self.as_mut().rust_mut().diff = Some(diff);
+                // SAFETY: begin_reset_model and end_reset_model are paired here, on the
+                // GUI thread that owns the model, and the rows change only between them.
                 unsafe {
                     self.as_mut().begin_reset_model();
                     self.as_mut().rust_mut().rows = rows;
@@ -429,7 +434,7 @@ impl GitPanel {
             Outcome::Done(result) => {
                 let (text, failed) = match result {
                     Ok(t) => (t, false),
-                    Err(e) => (e, true),
+                    Err(e) => (format!("{e:#}"), true),
                 };
                 self.as_mut().set_error(failed);
                 self.as_mut().set_message(QString::from(&text));
@@ -455,23 +460,23 @@ impl GitPanel {
                 f.path,
                 f.index,
                 f.worktree,
-                f.untracked as u8,
-                f.conflicted as u8,
+                u8::from(f.untracked),
+                u8::from(f.conflicted),
                 f.orig_path.as_deref().unwrap_or("")
             )));
         }
-        let staged = st.files.iter().filter(|f| f.staged()).count() as i32;
-        let unstaged = st.files.iter().filter(|f| f.unstaged()).count() as i32;
+        let staged = i32::try_from(st.files.iter().filter(|f| f.staged()).count()).unwrap_or(i32::MAX);
+        let unstaged = i32::try_from(st.files.iter().filter(|f| f.unstaged()).count()).unwrap_or(i32::MAX);
         self.as_mut().set_is_repo(true);
         self.as_mut().set_root(QString::from(&st.root.to_string_lossy().into_owned()));
         self.as_mut().set_branch(QString::from(if st.branch.is_empty() { &st.head } else { &st.branch }));
         self.as_mut().set_upstream(QString::from(&st.upstream));
-        self.as_mut().set_ahead(st.ahead as i32);
-        self.as_mut().set_behind(st.behind as i32);
+        self.as_mut().set_ahead(i32::try_from(st.ahead).unwrap_or(i32::MAX));
+        self.as_mut().set_behind(i32::try_from(st.behind).unwrap_or(i32::MAX));
         self.as_mut().set_files(files);
         self.as_mut().set_staged_count(staged);
         self.as_mut().set_unstaged_count(unstaged);
-        self.as_mut().set_stash_count(st.stashes as i32);
+        self.as_mut().set_stash_count(i32::try_from(st.stashes).unwrap_or(i32::MAX));
         // Keep the selection only while that side of the file still has changes.
         let selected = self.selected_path.to_string();
         let selected_staged = self.selected_staged;
@@ -494,6 +499,8 @@ impl GitPanel {
             self.as_mut().set_split_json(QString::default());
         }
         self.as_mut().rust_mut().diff = None;
+        // SAFETY: begin_reset_model and end_reset_model are paired here, on the
+        // GUI thread that owns the model, and the rows change only between them.
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().rows.clear();
@@ -643,7 +650,7 @@ impl GitPanel {
     fn file_op(self: Pin<&mut Self>, path: &QString, op: fn(&Path, &str) -> anyhow::Result<()>, done: &'static str) {
         let Some(root) = self.root_path() else { return };
         let path = relative_to(&root, &path.to_string());
-        self.run(true, move || vec![Outcome::Done(op(&root, &path).map(|_| format!("{done} {path}")).map_err(|e| format!("{e:#}")))]);
+        self.run(true, move || vec![Outcome::Done(op(&root, &path).map(|()| format!("{done} {path}")).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn stage_file(self: Pin<&mut Self>, path: &QString) {
@@ -664,14 +671,14 @@ impl GitPanel {
         // An untracked file has no committed version: move it to the trash.
         self.run(true, move || {
             let result = harlo_core::remote::trash(&root.join(&rel));
-            vec![Outcome::Done(result.map(|_| format!("Moved {rel} to the trash")).map_err(|e| format!("{e:#}")))]
+            vec![Outcome::Done(result.map(|()| format!("Moved {rel} to the trash")).map_err(|e| anyhow::anyhow!("{e:#}")))]
         });
     }
 
     fn hunk_op(self: Pin<&mut Self>, index: i32, op: fn(&Path, &FileDiff, usize) -> anyhow::Result<()>, done: &'static str) {
         let (Some(root), Some(diff)) = (self.root_path(), self.diff.clone()) else { return };
         self.run(true, move || {
-            vec![Outcome::Done(op(&root, &diff, index.max(0) as usize).map(|_| done.to_owned()).map_err(|e| format!("{e:#}")))]
+            vec![Outcome::Done(op(&root, &diff, usize::try_from(index).unwrap_or(0)).map(|()| done.to_owned()).map_err(|e| anyhow::anyhow!("{e:#}")))]
         });
     }
 
@@ -689,13 +696,13 @@ impl GitPanel {
 
     pub fn stage_all(self: Pin<&mut Self>) {
         let Some(root) = self.root_path() else { return };
-        self.run(true, move || vec![Outcome::Done(git::stage_all(&root).map(|_| "Staged all changes".to_owned()).map_err(|e| format!("{e:#}")))]);
+        self.run(true, move || vec![Outcome::Done(git::stage_all(&root).map(|()| "Staged all changes".to_owned()).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn commit(self: Pin<&mut Self>, message: &QString) {
         let Some(root) = self.root_path() else { return };
         let message = message.to_string();
-        self.run(true, move || vec![Outcome::Done(git::commit(&root, &message).map_err(|e| format!("{e:#}")))]);
+        self.run(true, move || vec![Outcome::Done(git::commit(&root, &message).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn generate_message(mut self: Pin<&mut Self>, program: &QString, model: &QString, staged_only: bool) {
@@ -730,20 +737,20 @@ impl GitPanel {
         let Some(root) = self.root_path() else { return };
         let message = message.to_string();
         self.run(true, move || {
-            let result = git::stage_all(&root).and_then(|_| git::commit(&root, &message));
-            vec![Outcome::Done(result.map_err(|e| format!("{e:#}")))]
+            let result = git::stage_all(&root).and_then(|()| git::commit(&root, &message));
+            vec![Outcome::Done(result.map_err(|e| anyhow::anyhow!("{e:#}")))]
         });
     }
 
     pub fn push(self: Pin<&mut Self>) {
         let Some(root) = self.root_path() else { return };
         let set_upstream = self.upstream.is_empty();
-        self.run(true, move || vec![Outcome::Done(git::push(&root, set_upstream).map_err(|e| format!("{e:#}")))]);
+        self.run(true, move || vec![Outcome::Done(git::push(&root, set_upstream).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn pull(self: Pin<&mut Self>) {
         let Some(root) = self.root_path() else { return };
-        self.run(true, move || vec![Outcome::Done(git::pull(&root).map_err(|e| format!("{e:#}")))]);
+        self.run(true, move || vec![Outcome::Done(git::pull(&root).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn branches_json(&self) -> QString {
@@ -754,7 +761,7 @@ impl GitPanel {
     pub fn switch_branch(self: Pin<&mut Self>, name: &QString, create: bool, remote: bool, stash: bool) {
         let Some(root) = self.root_path() else { return };
         let name = name.to_string();
-        self.run(true, move || vec![Outcome::Done(git::switch_branch(&root, &name, create, remote, stash).map_err(|e| format!("{e:#}")))]);
+        self.run(true, move || vec![Outcome::Done(git::switch_branch(&root, &name, create, remote, stash).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn stashes_json(&self) -> QString {
@@ -803,17 +810,17 @@ impl GitPanel {
             let result = (|| {
                 // Its latest commits first.
                 if ahead {
-                    git::push(&root, false).map_err(|e| format!("Pushing first failed: {e:#}"))?;
+                    git::push(&root, false).map_err(|e| anyhow::anyhow!("Pushing first failed: {e:#}"))?;
                 }
                 if service == "forgejo" {
-                    let api = crate::setup::forgejo_api(req["host"].as_str().unwrap_or_default()).ok_or("Sign in to Forgejo first (Settings → Git).")?;
+                    let api = crate::setup::forgejo_api(req["host"].as_str().unwrap_or_default()).ok_or_else(|| anyhow::Error::msg("Sign in to Forgejo first (Settings → Git)."))?;
                     let repo = req["repo"].as_str().unwrap_or_default();
-                    let url = api.create_pull(repo, &head, &base, title.trim(), &body, draft).map_err(|e| format!("{e:#}"))?;
+                    let url = api.create_pull(repo, &head, &base, title.trim(), &body, draft).map_err(|e| anyhow::anyhow!("{e:#}"))?;
                     let number = url.rsplit('/').next().and_then(|n| n.parse::<i64>().ok()).unwrap_or(0);
                     let checks = crate::ci::read(&service, &full, &url, number).map_or(serde_json::Value::Null, |c| c.to_json());
                     return Ok((url, checks));
                 }
-                let mut c = crate::setup::tool(&service).ok_or_else(|| format!("Creating it here needs {}.", harlo_core::git_hosting::cli(&service).unwrap_or("its site")))?;
+                let mut c = crate::setup::tool(&service).ok_or_else(|| anyhow::anyhow!("Creating it here needs {}.", harlo_core::git_hosting::cli(&service).unwrap_or("its site")))?;
                 match service.as_str() {
                     "github" => {
                         c.args(["pr", "create", "--repo", &full, "--head", &head, "--base", &base, "--title", title.trim(), "--body", &body]);
@@ -827,7 +834,7 @@ impl GitPanel {
                             c.arg("--draft");
                         }
                     }
-                    _ => return Err("Open it on the site.".to_owned()),
+                    _ => return Err(anyhow::Error::msg("Open it on the site.")),
                 }
                 let out = crate::setup::run(c, None)?;
                 let url = out.lines().rev().find_map(harlo_core::signin::url_in).unwrap_or_default();
@@ -852,7 +859,7 @@ impl GitPanel {
                         this.as_mut().set_message(QString::from(&format!("Opened the {word}{}.", if number > 0 { format!(" #{number}") } else { String::new() })));
                     }
                     Err(e) => {
-                        v["error"] = e.into();
+                        v["error"] = format!("{e:#}").into();
                     }
                 }
                 this.as_mut().set_request(QString::from(&v.to_string()));
@@ -944,23 +951,23 @@ impl GitPanel {
     pub fn stash_push(self: Pin<&mut Self>, message: &QString) {
         let Some(root) = self.root_path() else { return };
         let message = message.to_string();
-        self.run(true, move || vec![Outcome::Done(git::stash_push(&root, &message).map_err(|e| format!("{e:#}")))]);
+        self.run(true, move || vec![Outcome::Done(git::stash_push(&root, &message).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn stash_apply(self: Pin<&mut Self>, index: i32, pop: bool) {
         let Some(root) = self.root_path() else { return };
-        let index = index.max(0) as usize;
-        self.run(true, move || vec![Outcome::Done(git::stash_apply(&root, index, pop).map_err(|e| format!("{e:#}")))]);
+        let index = usize::try_from(index).unwrap_or(0);
+        self.run(true, move || vec![Outcome::Done(git::stash_apply(&root, index, pop).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn stash_drop(self: Pin<&mut Self>, index: i32) {
         let Some(root) = self.root_path() else { return };
-        let index = index.max(0) as usize;
-        self.run(true, move || vec![Outcome::Done(git::stash_drop(&root, index).map_err(|e| format!("{e:#}")))]);
+        let index = usize::try_from(index).unwrap_or(0);
+        self.run(true, move || vec![Outcome::Done(git::stash_drop(&root, index).map_err(|e| anyhow::anyhow!("{e:#}")))]);
     }
 
     pub fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Some(r) = self.rows.get(index.row() as usize) else {
+        let Some(r) = self.rows.get(usize::try_from(index.row()).unwrap_or(0)) else {
             return QVariant::default();
         };
         match role {
@@ -982,7 +989,7 @@ impl GitPanel {
     }
 
     pub fn row_count(&self, _parent: &QModelIndex) -> i32 {
-        self.rows.len() as i32
+        i32::try_from(self.rows.len()).unwrap_or(i32::MAX)
     }
 }
 
@@ -1020,8 +1027,8 @@ fn split_view(root: &Path, path: &str, staged: bool, untracked: bool, diff: &Fil
     }
     let split = harlo_core::splitdiff::split(&full, diff);
     let cell = |c: &harlo_core::splitdiff::Cell| {
-        let (from, to) = c.inline.map_or((-1, -1), |(a, b)| (a as i64, b as i64));
-        [c.kind as i64, c.no as i64, c.offset as i64, from, to]
+        let (from, to) = c.inline.map_or((-1, -1), |(a, b)| (i64::from(a), i64::from(b)));
+        [i64::from(c.kind), i64::from(c.no), i64::from(c.offset), from, to]
     };
     let rows: Vec<Vec<i64>> = split.rows.iter().map(|r| cell(&r.left).into_iter().chain(cell(&r.right)).collect()).collect();
     let note = if rows.is_empty() { "No changes." } else { "" };
@@ -1037,7 +1044,7 @@ fn load_diff(root: &Path, path: &str, staged: bool, untracked: bool, split: bool
         Err(e) => {
             let why = format!("Couldn't compare the file: {e:#}");
             let mut failed = FileDiff::default();
-            failed.path = path.to_owned();
+            path.clone_into(&mut failed.path);
             if split {
                 return (failed, Vec::new(), Some(note_view(&why)));
             }
@@ -1063,7 +1070,7 @@ fn render_rows(diff: &FileDiff) -> Vec<DiffRow> {
     for (hi, hunk) in diff.hunks.iter().enumerate() {
         let mut header = String::new();
         harlo_core::markdown::escape_into(&mut header, &hunk.header);
-        rows.push(DiffRow { kind: "hunk", old_no: 0, new_no: 0, html: header, hunk: hi as i32 });
+        rows.push(DiffRow { kind: "hunk", old_no: 0, new_no: 0, html: header, hunk: i32::try_from(hi).unwrap_or(i32::MAX) });
         let texts: Vec<&str> = hunk.lines.iter().map(|l| l.text.as_str()).collect();
         let html = harlo_core::markdown::highlight_lines(&diff.path, &texts);
         for (line, html) in hunk.lines.iter().zip(html) {
@@ -1075,10 +1082,10 @@ fn render_rows(diff: &FileDiff) -> Vec<DiffRow> {
             };
             rows.push(DiffRow {
                 kind,
-                old_no: line.old_no.map_or(0, |n| n as i32),
-                new_no: line.new_no.map_or(0, |n| n as i32),
+                old_no: line.old_no.map_or(0, |n| i32::try_from(n).unwrap_or(i32::MAX)),
+                new_no: line.new_no.map_or(0, |n| i32::try_from(n).unwrap_or(i32::MAX)),
                 html,
-                hunk: hi as i32,
+                hunk: i32::try_from(hi).unwrap_or(i32::MAX),
             });
             if rows.len() >= MAX_DIFF_ROWS {
                 rows.push(DiffRow { kind: "note", old_no: 0, new_no: 0, html: "Diff truncated…".into(), hunk: -1 });
@@ -1095,9 +1102,7 @@ fn render_rows(diff: &FileDiff) -> Vec<DiffRow> {
 /// Turns an absolute path (e.g. from a tool call) into one relative to the repo.
 fn relative_to(root: &Path, path: &str) -> String {
     Path::new(path)
-        .strip_prefix(root)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| path.trim_start_matches("./").to_owned())
+        .strip_prefix(root).map_or_else(|_| path.trim_start_matches("./").to_owned(), |p| p.to_string_lossy().into_owned())
 }
 
 /// A repository's branches, JSON (`{current, local, remote}` or `{error}`).

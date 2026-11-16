@@ -1,6 +1,8 @@
 //! `Workspace`: the QML singleton that owns projects, the on-disk session
 //! list, live sessions and the sidebar model built from them.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -826,6 +828,7 @@ pub mod qobject {
     }
 }
 
+use std::fmt::Write as _;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -836,6 +839,7 @@ use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QStringList, QVariant, QVector};
 use harlo_core::db::{Db, Project, SessionMeta, WorktreeRecord};
 use harlo_core::git;
+use harlo_core::{agents, tool_calls};
 use harlo_core::listdiff::{ListChange, diff_by};
 use harlo_core::scanner::{ScanDelta, Scanner};
 use harlo_core::sidebar::{self, LiveInfo, SidebarInput, SidebarKind, SidebarRow};
@@ -875,7 +879,7 @@ pub(crate) fn wiki_page_at(cwd: &Path, page: &str) -> serde_json::Value {
             v["sources"] = json!(harlo_core::openwiki::sources_of(&text, harlo_core::openwiki::claims(&root, &shown).as_deref()));
             v
         }
-        Err(e) => json!({ "path": shown, "error": e }),
+        Err(e) => json!({ "path": shown, "error": format!("{e:#}") }),
     }
 }
 
@@ -888,7 +892,7 @@ pub(crate) fn wiki_search_at(cwd: &Path, query: &str, workspace: &str) -> serde_
     if !workspace.is_empty() {
         args["workspace"] = json!(workspace);
     }
-    let found = harlo_core::openwiki::call(&root, "openwiki_search", args).map_err(|e| format!("{e:#}")).and_then(|r| harlo_core::openwiki::answer(&r));
+    let found = harlo_core::openwiki::call(&root, "openwiki_search", args).map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|r| harlo_core::openwiki::answer(&r));
     match found {
         Ok(answer) => {
             let mut found = harlo_core::openwiki::search_hits(&answer, query);
@@ -897,7 +901,7 @@ pub(crate) fn wiki_search_at(cwd: &Path, query: &str, workspace: &str) -> serde_
         }
         // (The search couldn't run: the pages' own words.)
         Err(e) => {
-            tracing::warn!("wiki search: {e}");
+            tracing::event!(name: "wiki.search.failed", tracing::Level::WARN, error.message = %e, "wiki search: {{error.message}}");
             json!({ "hits": harlo_core::openwiki::search_text(&root, query, 12), "workspaces": [], "plain": true })
         }
     }
@@ -916,7 +920,7 @@ pub fn sweep_branch_previews() {
         let gone = if cfg!(target_os = "linux") {
             !Path::new(&format!("/proc/{pid}")).exists()
         } else {
-            e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > std::time::Duration::from_secs(86_400))
+            e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > std::time::Duration::from_hours(24))
         };
         if gone {
             let _ = std::fs::remove_dir_all(e.path());
@@ -952,7 +956,7 @@ const REMOTE_SCAN_INTERVAL: Duration = Duration::from_secs(10);
 /// A host that didn't answer is tried again after this, doubling up to
 /// `REMOTE_RETRY_MAX` while it keeps not answering.
 const REMOTE_RETRY: Duration = Duration::from_secs(60);
-const REMOTE_RETRY_MAX: Duration = Duration::from_secs(30 * 60);
+const REMOTE_RETRY_MAX: Duration = Duration::from_mins(30);
 const WORKTREE_INTERVAL: Duration = Duration::from_secs(20);
 /// How often the sidebar's uncommitted-change counts are refreshed (sooner
 /// when a turn ends, the window comes back, or new folders show up).
@@ -973,6 +977,72 @@ struct LiveEntry {
     model_id: String,
     /// Its thinking level ("" its default, or not known).
     thinking: String,
+}
+
+/// What a batch of a live session's updates changed, for acting on.
+#[derive(Default)]
+struct Changes {
+    became_idle: bool,
+    became_busy: bool,
+    /// Its session file, once it says it.
+    lane_file: Option<PathBuf>,
+    cost: Option<(f64, String)>,
+    notes: Vec<Note>,
+    /// A question of its was answered.
+    answered: bool,
+    /// Approvals the agent asked for with harlo's tools, answered.
+    gates: Vec<(String, String, serde_json::Value)>,
+    stopped: bool,
+    /// harlo's tools, called on the session's pipe.
+    harlo_calls: Vec<(String, String, serde_json::Value)>,
+    /// Claude's limits as it just said (a host's may be another account's).
+    limits: Option<serde_json::Value>,
+}
+
+impl Changes {
+    /// Applies `updates` to the session's entry, and says what they changed.
+    fn of(entry: &mut LiveEntry, updates: Vec<SessionUpdate>) -> Self {
+        let mut c = Changes::default();
+        for u in updates {
+            match u {
+                SessionUpdate::Status(s) => {
+                    c.became_idle |= entry.info.status == SessionStatus::Busy && s == SessionStatus::Idle;
+                    c.became_busy |= entry.info.status != SessionStatus::Busy && s == SessionStatus::Busy;
+                    entry.info.status = s;
+                }
+                SessionUpdate::Meta(m) => {
+                    c.cost = Some((m.cost, m.cost_kind.clone()));
+                    entry.info.session_file = m.session_file.or(entry.info.session_file.take());
+                    c.lane_file.clone_from(&entry.info.session_file);
+                    entry.info.name = m.name;
+                    entry.info.first_message = m.first_message;
+                    entry.model = m.model;
+                    entry.model_id = m.model_id;
+                    entry.thinking = m.thinking;
+                }
+                SessionUpdate::UiRequest(r) => {
+                    if !entry.requests.iter().any(|(q, _)| q.id == r.id) {
+                        c.notes.push(Note::Question(r.question().to_owned(), crate::phone_server::request_json(&r)));
+                        let asked = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+                        entry.requests.push((r, asked));
+                    }
+                }
+                SessionUpdate::Notable(n) => c.notes.push(Note::Event(n)),
+                SessionUpdate::UiCleared(id) => {
+                    let before = entry.requests.len();
+                    entry.requests.retain(|(q, _)| q.id != id);
+                    c.answered |= entry.requests.len() != before;
+                }
+                SessionUpdate::Limits(info) => c.limits = Some(info),
+                SessionUpdate::GateAnswered { id, question, answer } => c.gates.push((id, question, answer)),
+                SessionUpdate::Stopped => c.stopped = true,
+                SessionUpdate::HarloCall { id, tool, args } => c.harlo_calls.push((id, tool, args)),
+                _ => {}
+            }
+        }
+        entry.info.needs_input = !entry.requests.is_empty();
+        c
+    }
 }
 
 /// Something a session did that may notify (Settings → Notifications).
@@ -1145,7 +1215,7 @@ pub struct WorkspaceRust {
     /// Wakes the search indexer (new or changed session files).
     search_kick: Arc<tokio::sync::Notify>,
     /// Remote project folders per host, for the remote session scan.
-    remote_roots: Arc<std::sync::Mutex<RemoteRoots>>,
+    remote_roots: Arc<std::sync::Mutex<harlo_core::remote::HostRoots>>,
     /// Wakes the remote session scan (a remote project was added).
     remote_kick: Arc<tokio::sync::Notify>,
     /// Restored tabs of remote sessions not found yet (their host is
@@ -1172,92 +1242,6 @@ struct BranchReads {
     running: HashMap<String, bool>,
     /// The answer for a file as it was (modified, size).
     known: HashMap<String, ((std::time::SystemTime, u64), String)>,
-}
-
-/// Remote project folders, grouped by host name.
-type RemoteRoots = Vec<(String, Vec<PathBuf>)>;
-
-/// Remote projects, grouped by host, for the remote session scan.
-/// A worktree's state for the finish dialog: its main checkout's branch,
-/// and its commits and changes against its base (blocking: git there).
-fn worktree_details(w: &WorktreeRecord, project: Option<&Path>, exists: bool) -> serde_json::Value {
-    let main = project.and_then(git::repo_root);
-    let main_branch = main.as_ref().and_then(|m| git::status(m).ok()).map(|s| s.branch).unwrap_or_default();
-    let base = if w.base.is_empty() { main_branch.clone() } else { w.base.clone() };
-    let summary = if exists { git::worktree_summary(&w.path, &base).ok() } else { None }.unwrap_or_default();
-    json!({
-        "path": w.path.to_string_lossy(),
-        "branch": w.branch,
-        "base": base,
-        "mainBranch": main_branch,
-        "exists": exists,
-        "dirty": summary.dirty,
-        "ahead": summary.ahead,
-        "behind": summary.behind,
-    })
-}
-
-fn remote_roots_of<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> RemoteRoots {
-    let mut roots = RemoteRoots::new();
-    for path in paths {
-        if let Some(host) = harlo_core::remote::host_of(path) {
-            match roots.iter_mut().find(|(h, _)| *h == host) {
-                Some((_, list)) => list.push(path.clone()),
-                None => roots.push((host, vec![path.clone()])),
-            }
-        }
-    }
-    roots
-}
-
-fn parse_resumes(text: &str) -> serde_json::Map<String, serde_json::Value> {
-    serde_json::from_str(text).unwrap_or_default()
-}
-
-/// Which sessions' limits have reset by `now` (a minute's grace: the limit
-/// must have lifted), and whether it's been so long there's no point any more.
-fn due_resumes(resumes: &serde_json::Map<String, serde_json::Value>, now: i64) -> Vec<(String, bool)> {
-    resumes
-        .iter()
-        .filter_map(|(id, at)| {
-            let at = at.as_i64()?;
-            (now >= at + 60_000).then(|| (id.clone(), now > at + 24 * 3600 * 1000))
-        })
-        .collect()
-}
-
-/// harlo-agent: harlo's tools on its pipe (when orchestration is off,
-/// harlo says so and it has none).
-/// Harlo's: harlo's tools, and its sandbox when it isn't the default
-/// (`sandbox`, `network`: Settings → Providers → Harlo).
-fn harlo_args(kind: HarnessKind, sandbox: bool, network: bool) -> Vec<String> {
-    if kind != HarnessKind::Harlo {
-        return Vec::new();
-    }
-    let mut args = vec!["--harlo-tools".to_owned()];
-    match (sandbox, network) {
-        (false, _) => args.extend(["--sandbox".into(), "off".into()]),
-        (true, false) => args.extend(["--sandbox".into(), "no-network".into()]),
-        (true, true) => {}
-    }
-    args
-}
-
-/// Harlo's subagents' model and the one it goes on with at the plan's
-/// limit, as its launch arguments (empty settings: none).
-fn model_args(task_model: &str, fallback: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    for (flag, value) in [("--task-model", task_model.trim()), ("--fallback", fallback.trim())] {
-        if !value.is_empty() && !value.contains(char::is_whitespace) {
-            args.extend([flag.to_owned(), value.to_owned()]);
-        }
-    }
-    args
-}
-
-/// Whether the agent's sessions have a shield (harlo's approval modes).
-fn has_shield(harness: &str, _cwd: &Path) -> bool {
-    matches!(harness, "demo" | "claude" | "harlo")
 }
 
 /// A session's approval mode (None: the one it starts in) and plan mode.
@@ -1307,6 +1291,316 @@ impl SessionSink for WorkspaceSink {
 
 impl cxx_qt::Initialize for Workspace {
     fn initialize(mut self: Pin<&mut Self>) {
+        self.as_mut().load_saved();
+
+        // The interface font for the whole app: the chosen one, else harlo's.
+        crate::fonts::set_application_font_family(&QString::from(&crate::fonts::ui_family(&self.ui_font.to_string())));
+        self.as_mut().rebuild();
+
+        self.start_timers();
+
+        self.count_changes();
+
+        self.as_mut().keep_search_index();
+
+        // Agents' harlo tools (orchestration).
+        crate::orchestration::serve(self.qt_thread());
+        // Start on the default instance.
+        let start = self.saved_default_instance();
+        self.as_mut().set_default_instance(QString::from(&start));
+        self.as_mut().set_instance(QString::from(&start));
+        self.as_mut().show_meter_of(&start);
+        // A graphics choice that didn't start last time.
+        let dropped = crate::graphics::take_dropped();
+        if !dropped.is_empty() {
+            let name = match dropped.as_str() { "vulkan" => "Vulkan", "opengl" => "OpenGL", "software" => "Software", other => other };
+            self.as_mut().set_notice_text(&format!("{name} graphics didn't start last time, so harlo went back to Automatic (Settings → General → Graphics)."), false);
+        }
+        let on = self.setting_str("orchestration") != "0";
+        self.as_mut().set_orchestration_on(on);
+        harlo_harness::set_orchestration(on);
+        // The skills earlier versions installed.
+        harlo_core::orchestration::remove_old_skills();
+
+        // Poll the session directories in the background.
+        let thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            let mut scanner = Scanner::default();
+            loop {
+                let (s, delta) = tokio::task::spawn_blocking(move || {
+                    let delta = scanner.poll();
+                    (scanner, delta)
+                })
+                .await
+                .expect("scanner task");
+                scanner = s;
+                if !delta.is_empty() && thread.queue(move |this| this.apply_scan(delta)).is_err() {
+                    break;
+                }
+                tokio::time::sleep(SCAN_INTERVAL).await;
+            }
+        });
+
+        // The phone server's requests that need the workspace.
+        let mut requests = crate::phone_bridge::serve();
+        let thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            while let Some((request, reply)) = requests.recv().await {
+                let queued = thread.queue(move |this| {
+                    let _ = reply.send(this.phone_call(&request));
+                });
+                if queued.is_err() {
+                    break;
+                }
+            }
+        });
+
+        self.scan_hosts();
+    }
+}
+
+impl Workspace {
+
+    /// Looks for remote hosts' saved sessions over SSH, in the background.
+    fn scan_hosts(&self) {
+        // Remote hosts with projects: their saved sessions, over SSH.
+        let thread = self.qt_thread();
+        let (roots, kick) = (Arc::clone(&self.remote_roots), Arc::clone(&self.remote_kick));
+        crate::runtime().spawn(async move {
+            let mut scanner = harlo_core::remote_sessions::RemoteScanner::default();
+            // A host that doesn't answer: tried again later each time (one
+            // minute, doubling to half an hour), and logged once.
+            let mut retry_at: HashMap<String, (std::time::Instant, u32)> = HashMap::new();
+            let mut scanned: HashSet<String> = HashSet::new();
+            let mut looked_at: HashSet<String> = HashSet::new();
+            loop {
+                // Hosts with projects, and those connected without any
+                // (their sessions go in Other sessions).
+                let mut hosts = roots.lock().unwrap().clone();
+                for h in harlo_core::remote::hosts() {
+                    if harlo_core::remote::info_of(&h.name).is_some() && !hosts.iter().any(|(n, _)| *n == h.name) {
+                        hosts.push((h.name, Vec::new()));
+                    }
+                }
+                // One no longer looked at (removed, say): its sessions leave.
+                let now: HashSet<String> = hosts.iter().map(|(n, _)| n.clone()).collect();
+                for name in looked_at.difference(&now).cloned().collect::<Vec<_>>() {
+                    let delta = scanner.forget_host(&name);
+                    scanned.remove(&name);
+                    if !delta.is_empty() && thread.queue(move |this| this.apply_scan(delta)).is_err() {
+                        return;
+                    }
+                }
+                looked_at = now;
+                for (name, _) in hosts {
+                    if harlo_core::remote::is_disconnected(&name) || retry_at.get(&name).is_some_and(|(t, _)| std::time::Instant::now() < *t) {
+                        continue;
+                    }
+                    let host = harlo_core::remote::host(&name);
+                    let (s, result) = tokio::task::spawn_blocking(move || {
+                        let mut scanner = scanner;
+                        let result = match &host {
+                            Some(h) => scanner.poll(h),
+                            // Removed from Settings: its sessions leave.
+                            None => Ok(scanner.forget_host(&name)),
+                        };
+                        (scanner, (name, result))
+                    })
+                    .await
+                    .expect("remote scan task");
+                    scanner = s;
+                    let (name, result) = result;
+                    // Disconnected meanwhile: what this look opened goes too.
+                    if harlo_core::remote::is_disconnected(&name)
+                        && let Some(host) = harlo_core::remote::host(&name)
+                    {
+                        tokio::task::spawn_blocking(move || harlo_core::remote::disconnect(&host));
+                    }
+                    match result {
+                        Ok(delta) => {
+                            if retry_at.remove(&name).is_some() {
+                                tracing::event!(name: "remote.sessions.reachable", tracing::Level::DEBUG, server.address = %name, "remote sessions on {{server.address}}: reachable again");
+                            }
+                            let first = scanned.insert(name);
+                            if (first || !delta.is_empty()) && thread.queue(move |this| this.apply_scan(delta)).is_err() {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let failures = retry_at.get(&name).map_or(0, |(_, n)| *n) + 1;
+                            // (Background work nobody asked for: the debug log only.)
+                            if failures == 1 {
+                                tracing::event!(name: "remote.sessions.unreachable", tracing::Level::DEBUG, server.address = %name, error.message = %format_args!("{e:#}"), "remote sessions on {{server.address}}: {{error.message}} (trying again later, less and less often)");
+                            }
+                            let wait = REMOTE_RETRY.saturating_mul(1 << (failures - 1).min(5)).min(REMOTE_RETRY_MAX);
+                            retry_at.insert(name, (std::time::Instant::now() + wait, failures));
+                        }
+                    }
+                }
+                tokio::select! {
+                    // Asked for (a host connected, its instance shown): now.
+                    () = kick.notified() => {
+                        for (t, _) in retry_at.values_mut() {
+                            *t = std::time::Instant::now();
+                        }
+                    }
+                    () = tokio::time::sleep(REMOTE_SCAN_INTERVAL) => {}
+                }
+            }
+        });
+    }
+
+    /// Opens the message search index and keeps it current in the background.
+    fn keep_search_index(mut self: Pin<&mut Self>) {
+        // Keep the message search index current.
+        match harlo_core::search::SearchIndex::open(&harlo_core::search::default_path()) {
+            Ok(index) => {
+                let index = Arc::new(std::sync::Mutex::new(index));
+                self.as_mut().rust_mut().search = Some(Arc::clone(&index));
+                match harlo_core::search::SearchReader::open(&harlo_core::search::default_path()) {
+                    Ok(r) => self.as_mut().rust_mut().search_reader = Some(Arc::new(std::sync::Mutex::new(r))),
+                    Err(e) => tracing::event!(name: "search.reader.unavailable", tracing::Level::WARN, error.message = %format_args!("{e:#}"), "search reader unavailable: {{error.message}}"),
+                }
+                let s_thread = self.qt_thread();
+                let kick = Arc::clone(&self.search_kick);
+                crate::runtime().spawn(async move {
+                    loop {
+                        // Wait for the first scan (or a later change) before reading files.
+                        tokio::select! {
+                            () = kick.notified() => {}
+                            () = tokio::time::sleep(SEARCH_INTERVAL) => {}
+                        }
+                        // Every session the sidebar knows, here or on a remote
+                        // host, with its stamp (modified, size) and agent.
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        if s_thread
+                            .queue(move |this| {
+                                let list: Vec<(PathBuf, i64, i64, HarnessKind)> = this
+                                    .sessions
+                                    .values()
+                                    .map(|s| (s.path.clone(), s.modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)), i64::try_from(s.size).unwrap_or(i64::MAX), s.harness))
+                                    .collect();
+                                let _ = tx.send(list);
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                        let Ok(list) = rx.await else { break };
+                        let index = Arc::clone(&index);
+                        let grew = s_thread.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let kinds: HashMap<PathBuf, HarnessKind> = list.iter().map(|(p, _, _, k)| (p.clone(), *k)).collect();
+                            let files: Vec<(PathBuf, i64, i64)> = list.into_iter().map(|(p, m, s, _)| (p, m, s)).collect();
+                            // (Tests: a slow disk or host, each file taking this long.)
+                            let slow = std::env::var("HARLO_TEST_SLOW_INDEX_MS").ok().and_then(|v| v.parse::<u64>().ok()).map(Duration::from_millis);
+                            let read = |p: &Path, resume: Option<&harlo_harness::claude::Resume>| {
+                                if let Some(d) = slow {
+                                    std::thread::sleep(d);
+                                }
+                                harlo_core::search::read_session(p, kinds.get(p).copied().unwrap_or(HarnessKind::Harlo), resume)
+                            };
+                            let told = || {
+                                let _ = grew.queue(qobject::Workspace::search_index_grew);
+                            };
+                            if let Err(e) = index.lock().unwrap().update_batched(&files, read, told) {
+                                tracing::event!(name: "search.index.failed", tracing::Level::WARN, error.message = %format_args!("{e:#}"), "search index: {{error.message}}");
+                            }
+                        })
+                        .await;
+                    }
+                });
+            }
+            Err(e) => tracing::event!(name: "search.index.unavailable", tracing::Level::WARN, error.message = %format_args!("{e:#}"), "search index unavailable: {{error.message}}"),
+        }
+    }
+
+    /// Counts uncommitted changes in listed sessions' repositories, in the background.
+    fn count_changes(&self) {
+        // Uncommitted changes in the repositories of listed sessions.
+        let ch_thread = self.qt_thread();
+        let kick = Arc::clone(&self.change_kick);
+        crate::runtime().spawn(async move {
+            let mut counter = git::ChangeCounter::default();
+            loop {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                if ch_thread.queue(move |this| { let _ = tx.send(this.change_dirs()); }).is_err() {
+                    break;
+                }
+                let Ok(dirs) = rx.await else { break };
+                if let Some((dirs, ignored)) = dirs {
+                    let (c, dirs, counts) = tokio::task::spawn_blocking(move || {
+                        let counts = counter.count(&dirs, &ignored);
+                        (counter, dirs, counts)
+                    })
+                    .await
+                    .expect("change counter");
+                    counter = c;
+                    // (Other machines' repositories, for asking without SSH.)
+                    let roots: HashMap<PathBuf, PathBuf> = counter.roots().iter().filter(|(d, _)| harlo_core::remote::is_remote(d)).map(|(d, r)| (d.clone(), r.clone())).collect();
+                    if ch_thread.queue(move |mut this| {
+                        this.as_mut().rust_mut().remote_repo_roots = roots;
+                        this.apply_change_counts(dirs, counts);
+                    }).is_err() {
+                        break;
+                    }
+                }
+                tokio::select! {
+                    () = tokio::time::sleep(CHANGES_INTERVAL) => {}
+                    () = kick.notified() => {}
+                }
+                // Let bursts of triggers settle into one count.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        });
+    }
+
+    /// Starts the checks that run now and then, and takes later launches' commands.
+    fn start_timers(&self) {
+        // Worktrees can also be made outside harlo; look for them now and then.
+        let wt_thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            loop {
+                if wt_thread.queue(qobject::Workspace::refresh_worktrees).is_err() {
+                    break;
+                }
+                tokio::time::sleep(WORKTREE_INTERVAL).await;
+            }
+        });
+
+        // Offers to update a wiki, as merged work lands: now and then.
+        let offer_thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            loop {
+                if offer_thread.queue(qobject::Workspace::check_wiki_offers).is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        });
+
+        // The Settled shelf: a minute after starting, then every half hour.
+        let settle_thread = self.qt_thread();
+        crate::runtime().spawn(async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            loop {
+                if settle_thread.queue(qobject::Workspace::settle_sessions).is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_mins(30)).await;
+            }
+        });
+
+        // Commands from later launches (`harlo`, `harlo --toggle-dropdown`).
+        let r_thread = self.qt_thread();
+        crate::instance::set_handler(move |cmd| {
+            let _ = r_thread.queue(move |this| this.remote_command(&QString::from(&cmd)));
+        });
+    }
+
+    /// Reads what harlo saved: projects, tabs, settings, worktrees, schedules.
+    fn load_saved(mut self: Pin<&mut Self>) {
         match Db::open(&harlo_core::db::default_path()) {
             Ok(db) => {
                 let projects = db.projects().unwrap_or_default();
@@ -1372,7 +1666,7 @@ impl cxx_qt::Initialize for Workspace {
                 this.schedules = schedules;
                 this.window_active = true;
                 // (From the start: without them no host's sessions are looked for.)
-                *this.remote_roots.lock().unwrap() = remote_roots_of(projects.iter().map(|p| &p.path));
+                *this.remote_roots.lock().unwrap() = harlo_core::remote::roots_by_host(projects.iter().map(|p| &p.path));
                 this.projects = projects;
                 this.meta = meta;
                 this.other_collapsed = other_collapsed;
@@ -1384,293 +1678,32 @@ impl cxx_qt::Initialize for Workspace {
                 self.as_mut().set_text_scale(1.0);
                 self.as_mut().set_glass(true);
                 self.as_mut().set_glass_opacity(GLASS_OPACITY);
-                self.as_mut().set_error_text(QString::from(&format!("Could not open the database: {e:#}")))
+                self.as_mut().set_error_text(QString::from(&format!("Could not open the database: {e:#}")));
             }
         }
-        // The interface font for the whole app: the chosen one, else harlo's.
-        crate::fonts::set_application_font_family(&QString::from(&crate::fonts::ui_family(&self.ui_font.to_string())));
-        self.as_mut().rebuild();
-
-        // Worktrees can also be made outside harlo; look for them now and then.
-        let wt_thread = self.qt_thread();
-        crate::runtime().spawn(async move {
-            loop {
-                if wt_thread.queue(|this| this.refresh_worktrees()).is_err() {
-                    break;
-                }
-                tokio::time::sleep(WORKTREE_INTERVAL).await;
-            }
-        });
-
-        // Offers to update a wiki, as merged work lands: now and then.
-        let offer_thread = self.qt_thread();
-        crate::runtime().spawn(async move {
-            tokio::time::sleep(Duration::from_secs(20)).await;
-            loop {
-                if offer_thread.queue(|this| this.check_wiki_offers()).is_err() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_secs(60)).await;
-            }
-        });
-
-        // The Settled shelf: a minute after starting, then every half hour.
-        let settle_thread = self.qt_thread();
-        crate::runtime().spawn(async move {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            loop {
-                if settle_thread.queue(|this| this.settle_sessions()).is_err() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_secs(30 * 60)).await;
-            }
-        });
-
-        // Commands from later launches (`harlo`, `harlo --toggle-dropdown`).
-        let r_thread = self.qt_thread();
-        crate::instance::set_handler(move |cmd| {
-            let _ = r_thread.queue(move |this| this.remote_command(&QString::from(&cmd)));
-        });
-
-        // Uncommitted changes in the repositories of listed sessions.
-        let ch_thread = self.qt_thread();
-        let kick = self.change_kick.clone();
-        crate::runtime().spawn(async move {
-            let mut counter = git::ChangeCounter::default();
-            loop {
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                if ch_thread.queue(move |this| { let _ = tx.send(this.change_dirs()); }).is_err() {
-                    break;
-                }
-                let Ok(dirs) = rx.await else { break };
-                if let Some((dirs, ignored)) = dirs {
-                    let (c, dirs, counts) = tokio::task::spawn_blocking(move || {
-                        let counts = counter.count(&dirs, &ignored);
-                        (counter, dirs, counts)
-                    })
-                    .await
-                    .expect("change counter");
-                    counter = c;
-                    // (Other machines' repositories, for asking without SSH.)
-                    let roots: HashMap<PathBuf, PathBuf> = counter.roots().iter().filter(|(d, _)| harlo_core::remote::is_remote(d)).map(|(d, r)| (d.clone(), r.clone())).collect();
-                    if ch_thread.queue(move |mut this| {
-                        this.as_mut().rust_mut().remote_repo_roots = roots;
-                        this.apply_change_counts(dirs, counts);
-                    }).is_err() {
-                        break;
-                    }
-                }
-                tokio::select! {
-                    _ = tokio::time::sleep(CHANGES_INTERVAL) => {}
-                    _ = kick.notified() => {}
-                }
-                // Let bursts of triggers settle into one count.
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-        });
-
-        // Keep the message search index current.
-        match harlo_core::search::SearchIndex::open(&harlo_core::search::default_path()) {
-            Ok(index) => {
-                let index = Arc::new(std::sync::Mutex::new(index));
-                self.as_mut().rust_mut().search = Some(Arc::clone(&index));
-                match harlo_core::search::SearchReader::open(&harlo_core::search::default_path()) {
-                    Ok(r) => self.as_mut().rust_mut().search_reader = Some(Arc::new(std::sync::Mutex::new(r))),
-                    Err(e) => tracing::warn!("search reader unavailable: {e:#}"),
-                }
-                let s_thread = self.qt_thread();
-                let kick = self.search_kick.clone();
-                crate::runtime().spawn(async move {
-                    loop {
-                        // Wait for the first scan (or a later change) before reading files.
-                        tokio::select! {
-                            _ = kick.notified() => {}
-                            _ = tokio::time::sleep(SEARCH_INTERVAL) => {}
-                        }
-                        // Every session the sidebar knows, here or on a remote
-                        // host, with its stamp (modified, size) and agent.
-                        let (tx, rx) = tokio::sync::oneshot::channel();
-                        if s_thread
-                            .queue(move |this| {
-                                let list: Vec<(PathBuf, i64, i64, HarnessKind)> = this
-                                    .sessions
-                                    .values()
-                                    .map(|s| (s.path.clone(), s.modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64), s.size as i64, s.harness))
-                                    .collect();
-                                let _ = tx.send(list);
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                        let Ok(list) = rx.await else { break };
-                        let index = Arc::clone(&index);
-                        let grew = s_thread.clone();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            let kinds: HashMap<PathBuf, HarnessKind> = list.iter().map(|(p, _, _, k)| (p.clone(), *k)).collect();
-                            let files: Vec<(PathBuf, i64, i64)> = list.into_iter().map(|(p, m, s, _)| (p, m, s)).collect();
-                            // (Tests: a slow disk or host, each file taking this long.)
-                            let slow = std::env::var("HARLO_TEST_SLOW_INDEX_MS").ok().and_then(|v| v.parse::<u64>().ok()).map(Duration::from_millis);
-                            let read = |p: &Path, resume: Option<&harlo_harness::claude::Resume>| {
-                                if let Some(d) = slow {
-                                    std::thread::sleep(d);
-                                }
-                                session_part(p, kinds.get(p).copied().unwrap_or(HarnessKind::Harlo), resume)
-                            };
-                            let told = || {
-                                let _ = grew.queue(|this| this.search_index_grew());
-                            };
-                            if let Err(e) = index.lock().unwrap().update_batched(&files, read, told) {
-                                tracing::warn!("search index: {e:#}");
-                            }
-                        })
-                        .await;
-                    }
-                });
-            }
-            Err(e) => tracing::warn!("search index unavailable: {e:#}"),
-        }
-
-        // Agents' harlo tools (orchestration).
-        crate::orchestration::serve(self.qt_thread());
-        // Start on the default instance.
-        let start = self.saved_default_instance();
-        self.as_mut().set_default_instance(QString::from(&start));
-        self.as_mut().set_instance(QString::from(&start));
-        self.as_mut().show_meter_of(&start);
-        // A graphics choice that didn't start last time.
-        let dropped = crate::graphics::take_dropped();
-        if !dropped.is_empty() {
-            let name = match dropped.as_str() { "vulkan" => "Vulkan", "opengl" => "OpenGL", "software" => "Software", other => other };
-            self.as_mut().set_notice_text(&format!("{name} graphics didn't start last time, so harlo went back to Automatic (Settings → General → Graphics)."), false);
-        }
-        let on = self.setting_str("orchestration") != "0";
-        self.as_mut().set_orchestration_on(on);
-        harlo_harness::set_orchestration(on);
-        // The skills earlier versions installed.
-        harlo_core::orchestration::remove_old_skills();
-
-        // Poll the session directories in the background.
-        let thread = self.qt_thread();
-        crate::runtime().spawn(async move {
-            let mut scanner = Scanner::default();
-            loop {
-                let (s, delta) = tokio::task::spawn_blocking(move || {
-                    let delta = scanner.poll();
-                    (scanner, delta)
-                })
-                .await
-                .expect("scanner task");
-                scanner = s;
-                if !delta.is_empty() && thread.queue(move |this| this.apply_scan(delta)).is_err() {
-                    break;
-                }
-                tokio::time::sleep(SCAN_INTERVAL).await;
-            }
-        });
-
-        // The phone server's requests that need the workspace.
-        let mut requests = crate::phone_bridge::serve();
-        let thread = self.qt_thread();
-        crate::runtime().spawn(async move {
-            while let Some((request, reply)) = requests.recv().await {
-                let queued = thread.queue(move |this| {
-                    let _ = reply.send(this.phone_call(&request));
-                });
-                if queued.is_err() {
-                    break;
-                }
-            }
-        });
-
-        // Remote hosts with projects: their saved sessions, over SSH.
-        let thread = self.qt_thread();
-        let (roots, kick) = (self.remote_roots.clone(), self.remote_kick.clone());
-        crate::runtime().spawn(async move {
-            let mut scanner = harlo_core::remote_sessions::RemoteScanner::default();
-            // A host that doesn't answer: tried again later each time (one
-            // minute, doubling to half an hour), and logged once.
-            let mut retry_at: HashMap<String, (std::time::Instant, u32)> = HashMap::new();
-            let mut scanned: HashSet<String> = HashSet::new();
-            let mut looked_at: HashSet<String> = HashSet::new();
-            loop {
-                // Hosts with projects, and those connected without any
-                // (their sessions go in Other sessions).
-                let mut hosts = roots.lock().unwrap().clone();
-                for h in harlo_core::remote::hosts() {
-                    if harlo_core::remote::info_of(&h.name).is_some() && !hosts.iter().any(|(n, _)| *n == h.name) {
-                        hosts.push((h.name, Vec::new()));
-                    }
-                }
-                // One no longer looked at (removed, say): its sessions leave.
-                let now: HashSet<String> = hosts.iter().map(|(n, _)| n.clone()).collect();
-                for name in looked_at.difference(&now).cloned().collect::<Vec<_>>() {
-                    let delta = scanner.forget_host(&name);
-                    scanned.remove(&name);
-                    if !delta.is_empty() && thread.queue(move |this| this.apply_scan(delta)).is_err() {
-                        return;
-                    }
-                }
-                looked_at = now;
-                for (name, _) in hosts {
-                    if harlo_core::remote::is_disconnected(&name) || retry_at.get(&name).is_some_and(|(t, _)| std::time::Instant::now() < *t) {
-                        continue;
-                    }
-                    let host = harlo_core::remote::host(&name);
-                    let (s, result) = tokio::task::spawn_blocking(move || {
-                        let mut scanner = scanner;
-                        let result = match &host {
-                            Some(h) => scanner.poll(h),
-                            // Removed from Settings: its sessions leave.
-                            None => Ok(scanner.forget_host(&name)),
-                        };
-                        (scanner, (name, result))
-                    })
-                    .await
-                    .expect("remote scan task");
-                    scanner = s;
-                    let (name, result) = result;
-                    // Disconnected meanwhile: what this look opened goes too.
-                    if harlo_core::remote::is_disconnected(&name)
-                        && let Some(host) = harlo_core::remote::host(&name)
-                    {
-                        tokio::task::spawn_blocking(move || harlo_core::remote::disconnect(&host));
-                    }
-                    match result {
-                        Ok(delta) => {
-                            if retry_at.remove(&name).is_some() {
-                                tracing::debug!("remote sessions on {name}: reachable again");
-                            }
-                            let first = scanned.insert(name);
-                            if (first || !delta.is_empty()) && thread.queue(move |this| this.apply_scan(delta)).is_err() {
-                                return;
-                            }
-                        }
-                        Err(e) => {
-                            let failures = retry_at.get(&name).map_or(0, |(_, n)| *n) + 1;
-                            // (Background work nobody asked for: the debug log only.)
-                            if failures == 1 {
-                                tracing::debug!("remote sessions on {name}: {e:#} (trying again later, less and less often)");
-                            }
-                            let wait = REMOTE_RETRY.saturating_mul(1 << (failures - 1).min(5)).min(REMOTE_RETRY_MAX);
-                            retry_at.insert(name, (std::time::Instant::now() + wait, failures));
-                        }
-                    }
-                }
-                tokio::select! {
-                    // Asked for (a host connected, its instance shown): now.
-                    _ = kick.notified() => {
-                        for (t, _) in retry_at.values_mut() {
-                            *t = std::time::Instant::now();
-                        }
-                    }
-                    _ = tokio::time::sleep(REMOTE_SCAN_INTERVAL) => {}
-                }
-            }
-        });
     }
 }
 
+/// A machine's home folder ("" this one's).
+fn home_on(inst: &str) -> PathBuf {
+    let inst = inst.to_owned();
+    if !inst.is_empty()
+        && let Some(home) = harlo_core::remote::info_of(&inst).map(|i| i.home).filter(|h| !h.is_empty())
+    {
+        return harlo_core::remote::join(&inst, &home);
+    }
+    // (Its home not known yet: still that machine, never this one.)
+    if !inst.is_empty() {
+        return harlo_core::remote::join(&inst, "/");
+    }
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
+}
+
+/// The shield's mode a session starts in, before it's switched: ask first
+/// (Claude's own settings may differ).
+const STARTING_APPROVAL: &str = "always-ask";
+
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Workspace {
     fn db(&self) -> Option<&Db> {
         self.db.as_ref()
@@ -1687,13 +1720,13 @@ impl Workspace {
     }
 
     fn reload_projects(mut self: Pin<&mut Self>) {
-        let projects = self.db().map(|db| db.projects()).transpose();
+        let projects = self.db().map(harlo_core::db::Db::projects).transpose();
         if let Some(projects) = self.as_mut().report(projects) {
             self.as_mut().rust_mut().projects = projects.unwrap_or_default();
         }
         let n = self.projects_revision + 1;
         self.as_mut().set_projects_revision(n);
-        let roots = remote_roots_of(self.projects.iter().map(|p| &p.path));
+        let roots = harlo_core::remote::roots_by_host(self.projects.iter().map(|p| &p.path));
         // (Only when they changed: collapsing a project changes nothing there.)
         let changed = {
             let mut current = self.remote_roots.lock().unwrap();
@@ -1746,7 +1779,7 @@ impl Workspace {
     }
 
     pub fn remove_project(mut self: Pin<&mut Self>, id: i32) {
-        let r = self.db().map(|db| db.remove_project(id as i64)).transpose();
+        let r = self.db().map(|db| db.remove_project(i64::from(id))).transpose();
         self.as_mut().report(r);
         self.reload_projects();
     }
@@ -1781,7 +1814,7 @@ impl Workspace {
             s if s > 0 && at + 1 < ids.len() => ids.get(at + 2).copied().unwrap_or(-1),
             _ => return,
         };
-        self.move_project(id, before as i32);
+        self.move_project(id, i32::try_from(before).unwrap_or(i32::MAX));
     }
 
     pub fn project_place(&self, id: i32) -> QString {
@@ -1815,7 +1848,7 @@ impl Workspace {
             expanded: &[],
             shelves_open: &[],
         });
-        let r = self.db().map(|db| db.set_project_order(&ids).and_then(|_| db.set(PLACED, "1"))).transpose();
+        let r = self.db().map(|db| db.set_project_order(&ids).and_then(|()| db.set(PLACED, "1"))).transpose();
         self.as_mut().report(r);
         self.reload_projects();
     }
@@ -1831,7 +1864,7 @@ impl Workspace {
     }
 
     pub fn project_sessions(&self, id: i32) -> QString {
-        let list = self.sessions_of_project(id as i64);
+        let list = self.sessions_of_project(i64::from(id));
         let count = |f: &dyn Fn(&sidebar::ProjectSession) -> bool| list.iter().filter(|s| f(s)).count();
         // (A session with nothing sent yet has nothing to delete, and goes when it stops.)
         let saved = |s: &sidebar::ProjectSession| self.file_for_key(&s.key).is_some();
@@ -1846,7 +1879,7 @@ impl Workspace {
     }
 
     pub fn remove_project_and_sessions(mut self: Pin<&mut Self>, id: i32) {
-        let list = self.sessions_of_project(id as i64);
+        let list = self.sessions_of_project(i64::from(id));
         let mut files = Vec::new();
         for s in &list {
             let file = self.file_for_key(&s.key);
@@ -1861,7 +1894,7 @@ impl Workspace {
                 files
                     .into_iter()
                     .map(|file| {
-                        let done = harlo_core::remote::trash(&file).map_err(|e| format!("{e:#}"));
+                        let done = harlo_core::remote::trash(&file).map_err(|e| anyhow::anyhow!("{e:#}"));
                         (file, done)
                     })
                     .collect::<Vec<_>>()
@@ -2005,12 +2038,12 @@ impl Workspace {
         let name = name.to_string().trim().to_owned();
         // Empty: back to the folder's name.
         let name = if name.is_empty() {
-            let Some(p) = self.projects.iter().find(|p| p.id == id as i64) else { return };
-            p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.path.to_string_lossy().into_owned())
+            let Some(p) = self.projects.iter().find(|p| p.id == i64::from(id)) else { return };
+            p.path.file_name().map_or_else(|| p.path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned())
         } else {
             name
         };
-        let r = self.db().map(|db| db.set_project_name(id as i64, &name)).transpose();
+        let r = self.db().map(|db| db.set_project_name(i64::from(id), &name)).transpose();
         self.as_mut().report(r);
         self.reload_projects();
     }
@@ -2020,17 +2053,17 @@ impl Workspace {
         if !icon.is_empty() && !harlo_core::project_icons::PRESETS.contains(&icon.as_str()) {
             return;
         }
-        let r = self.db().map(|db| db.set_project_look(id as i64, &icon, &color)).transpose();
+        let r = self.db().map(|db| db.set_project_look(i64::from(id), &icon, &color)).transpose();
         self.as_mut().report(r);
         self.reload_projects();
     }
 
     pub fn set_project_harness(mut self: Pin<&mut Self>, id: i32, harness: &QString) {
         let harness = harness.to_string();
-        if !HarnessKind::parse(&harness).is_some_and(|k| k.can_chat()) {
+        if !HarnessKind::parse(&harness).is_some_and(harlo_harness::HarnessKind::can_chat) {
             return;
         }
-        let r = self.db().map(|db| db.set_project_harness(id as i64, &harness)).transpose();
+        let r = self.db().map(|db| db.set_project_harness(i64::from(id), &harness)).transpose();
         self.as_mut().report(r);
         self.reload_projects();
     }
@@ -2067,7 +2100,7 @@ impl Workspace {
     }
 
     pub fn show_more(mut self: Pin<&mut Self>, project_id: i32) {
-        self.as_mut().rust_mut().expanded.push(project_id as i64);
+        self.as_mut().rust_mut().expanded.push(i64::from(project_id));
         self.rebuild();
     }
 
@@ -2107,7 +2140,7 @@ impl Workspace {
         } else {
             let info = self.sessions.get(Path::new(key)).cloned()?;
             let (program, remote) = self.launch_for(info.harness, &info.cwd);
-            let token = orch_token();
+            let token = agents::session_token();
             let cfg = HarnessConfig {
                 kind: info.harness,
                 program,
@@ -2137,16 +2170,14 @@ impl Workspace {
     /// A new session in a project (-1: the home folder) with an agent (""
     /// the project's) and a model (`provider/model`; "" the agent's own).
     fn new_session_on(self: Pin<&mut Self>, project_id: i32, harness: &str, model: &str) -> String {
-        let project = self.projects.iter().find(|p| p.id == project_id as i64).cloned();
-        let harness = if !harness.is_empty() {
-            harness.to_owned()
+        let project = self.projects.iter().find(|p| p.id == i64::from(project_id)).cloned();
+        let harness = if harness.is_empty() {
+            project.as_ref().map_or_else(|| self.default_harness(), |p| p.harness.clone())
         } else {
-            project.as_ref().map(|p| p.harness.clone()).unwrap_or_else(|| self.default_harness())
+            harness.to_owned()
         };
         let Some(kind) = HarnessKind::parse(&harness) else { return String::new() };
-        let cwd = project
-            .map(|p| p.path)
-            .unwrap_or_else(|| self.instance_home());
+        let cwd = project.map_or_else(|| self.instance_home(), |p| p.path);
         self.start_session_with(kind, cwd, model, true)
     }
 
@@ -2165,7 +2196,7 @@ impl Workspace {
     /// The same, with a token budget (Harlo's: `--budget`).
     fn start_session_budget(mut self: Pin<&mut Self>, kind: HarnessKind, cwd: PathBuf, model: &str, thinking: &str, activate: bool, budget: Option<u64>) -> String {
         let (program, remote) = self.launch_for(kind, &cwd);
-        let token = orch_token();
+        let token = agents::session_token();
         let cfg = HarnessConfig {
             kind,
             program,
@@ -2299,7 +2330,7 @@ impl Workspace {
         let key = format!("file:{path}");
         // One file tab: swap its file in place rather than adding a tab.
         if let Some(i) = self.tab_keys.iter().position(|k| k.starts_with("file:")) {
-            self.as_mut().rust_mut().tab_keys[i] = key.clone();
+            self.as_mut().rust_mut().tab_keys[i].clone_from(&key);
         }
         self.activate(&key);
     }
@@ -2388,7 +2419,9 @@ impl Workspace {
         }
         // Another machine's: what was read of it, read again in the
         // background (wikiReady says when).
-        static READ: OnceLock<Mutex<HashMap<PathBuf, (Instant, Option<serde_json::Value>)>>> = OnceLock::new();
+        /// When each folder's list was read, and the list once it came.
+        type Listed = (Instant, Option<serde_json::Value>);
+        static READ: OnceLock<Mutex<HashMap<PathBuf, Listed>>> = OnceLock::new();
         let read_list = READ.get_or_init(Default::default);
         let (fresh, cached) = read_list.lock().unwrap().get(&cwd).map_or((false, None), |(at, v)| (at.elapsed() < Duration::from_secs(5), v.clone()));
         if !fresh && !harlo_core::remote::is_disconnected(&harlo_core::remote::host_of(&cwd).unwrap_or_default()) {
@@ -2500,7 +2533,7 @@ impl Workspace {
             if mode == "update" {
                 let quiet = harlo_core::openwiki::quiet_update(&root);
                 if let Err(e) = &quiet {
-                    tracing::warn!("wiki: checking for an update without a model: {e:#}");
+                    tracing::event!(name: "wiki.quiet_update.failed", tracing::Level::WARN, error.message = %format_args!("{e:#}"), "wiki: checking for an update without a model: {{error.message}}");
                 }
                 let recorded = quiet.as_ref().ok().filter(|v| v["recorded"] == true).map(|v| v["commits"].as_u64().unwrap_or(0));
                 if let Some(commits) = recorded {
@@ -2530,7 +2563,6 @@ impl Workspace {
                 // (Continuing a first run: Create's writer.)
                 let (kind, model, thinking) = if mode == "create" || (mode == "continue" && run_mode == "init") { create } else { update };
                 let title = match mode.as_str() { "create" => "Wiki: create", "update" | "update-anyway" => "Wiki: update", _ => "Wiki: continue" };
-                let cwd_of_run = root.clone();
                 let key = this.as_mut().start_session_budget(kind, root, &model, &thinking, true, None);
                 this.as_mut().rust_mut().wiki_sessions.insert(key.clone());
                 this.as_mut().apply_thinking(&key, &thinking);
@@ -2539,7 +2571,7 @@ impl Workspace {
                 }
                 // (It writes a page at a time, all in openwiki/: its writes
                 // go ahead and land in Changes; commands still ask.)
-                if has_shield(kind.as_str(), &cwd_of_run) {
+                if agents::has_shield(kind.as_str()) {
                     this.as_mut().set_approval_mode(&QString::from(&key), &QString::from("write"));
                 }
                 send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(this.qt_thread()));
@@ -2661,16 +2693,17 @@ impl Workspace {
         self.as_mut().set_limit_resumes(QString::from(&text));
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn resume_at_reset(self: Pin<&mut Self>, key: &QString, at: f64) {
         let id = self.resume_id(&key.to_string());
-        let mut resumes = parse_resumes(&self.limit_resumes.to_string());
+        let mut resumes = harlo_core::quota::resumes(&self.limit_resumes.to_string());
         resumes.insert(id, json!(at as i64));
         self.store_resumes(&resumes);
     }
 
     pub fn cancel_resume(self: Pin<&mut Self>, key: &QString) {
         let (key, id) = (key.to_string(), self.resume_id(&key.to_string()));
-        let mut resumes = parse_resumes(&self.limit_resumes.to_string());
+        let mut resumes = harlo_core::quota::resumes(&self.limit_resumes.to_string());
         // (Asked before it had a file: under its key.)
         if resumes.remove(&id).is_some() | resumes.remove(&key).is_some() {
             self.store_resumes(&resumes);
@@ -2678,14 +2711,14 @@ impl Workspace {
     }
 
     pub fn resume_at_for(&self, key: &QString) -> f64 {
-        let (key, resumes) = (key.to_string(), parse_resumes(&self.limit_resumes.to_string()));
-        resumes.get(&self.resume_id(&key)).or_else(|| resumes.get(&key)).and_then(|v| v.as_i64()).unwrap_or(0) as f64
+        let (key, resumes) = (key.to_string(), harlo_core::quota::resumes(&self.limit_resumes.to_string()));
+        resumes.get(&self.resume_id(&key)).or_else(|| resumes.get(&key)).and_then(serde_json::Value::as_i64).unwrap_or(0) as f64
     }
 
     /// The sessions whose limit has reset get their message.
     fn continue_after_limits(mut self: Pin<&mut Self>) {
-        let mut resumes = parse_resumes(&self.limit_resumes.to_string());
-        let due = due_resumes(&resumes, chrono::Local::now().timestamp_millis());
+        let mut resumes = harlo_core::quota::resumes(&self.limit_resumes.to_string());
+        let due = harlo_core::quota::due_resumes(&resumes, chrono::Local::now().timestamp_millis());
         if due.is_empty() {
             return;
         }
@@ -2730,7 +2763,7 @@ impl Workspace {
         let title = title.to_string();
         std::thread::spawn(move || {
             if let Err(e) = crate::keep_above::set(&title, on) {
-                tracing::debug!("keeping {title:?} on top: {e}");
+                tracing::event!(name: "app.keep_above.failed", tracing::Level::DEBUG, window.title = ?title, error.message = %e, "keeping {{window.title}} on top: {{error.message}}");
             }
         });
     }
@@ -2744,11 +2777,11 @@ impl Workspace {
 
     pub fn working_on_host(&self, name: &QString) -> i32 {
         let name = name.to_string();
-        self.live
+        i32::try_from(self.live
             .values()
             .filter(|e| harlo_core::remote::host_of(&e.info.cwd).as_deref() == Some(name.as_str()))
             .filter(|e| e.info.needs_input || matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting))
-            .count() as i32
+            .count()).unwrap_or(i32::MAX)
     }
 
     pub fn switch_instance(mut self: Pin<&mut Self>, name: &QString) {
@@ -2780,27 +2813,13 @@ impl Workspace {
     /// The home folder of the instance shown: this computer's, or the
     /// host's (as its check found it).
     fn instance_home(&self) -> PathBuf {
-        self.home_on(&self.instance.to_string())
+        home_on(&self.instance.to_string())
     }
 
-    /// A machine's home folder ("" this one's).
-    fn home_on(&self, inst: &str) -> PathBuf {
-        let inst = inst.to_owned();
-        if !inst.is_empty()
-            && let Some(home) = harlo_core::remote::info_of(&inst).map(|i| i.home).filter(|h| !h.is_empty())
-        {
-            return harlo_core::remote::join(&inst, &home);
-        }
-        // (Its home not known yet: still that machine, never this one.)
-        if !inst.is_empty() {
-            return harlo_core::remote::join(&inst, "/");
-        }
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
-    }
 
     pub fn draft_folder(&self, project_id: i32) -> QString {
         let inst = self.instance.to_string();
-        let path = match self.projects.iter().find(|p| p.id == project_id as i64) {
+        let path = match self.projects.iter().find(|p| p.id == i64::from(project_id)) {
             Some(p) => p.path.clone(),
             None if !inst.is_empty() && harlo_core::remote::info_of(&inst).is_none_or(|i| i.home.is_empty()) => return QString::default(),
             None => self.instance_home(),
@@ -2838,8 +2857,8 @@ impl Workspace {
             };
             let answer = match if signed_out { Ok(Vec::new()) } else { harlo_core::providers::host_models(kind, remote, cwd).await } {
                 Ok(list) => serde_json::json!({ "models": list.into_iter().map(|(id, name, local)| serde_json::json!({ "id": id, "name": name, "local": local })).collect::<Vec<_>>() }),
-                Err(e) if e == "harness exited before responding" => serde_json::json!({ "error": "it quit before answering, which usually means it has no login there yet." }),
-                Err(e) => serde_json::json!({ "error": e }),
+                Err(e) if e.to_string() == "harness exited before responding" => serde_json::json!({ "error": "it quit before answering, which usually means it has no login there yet." }),
+                Err(e) => serde_json::json!({ "error": format!("{e:#}") }),
             };
             let _ = thread.queue(move |this| reply(this, &QString::from(&name), &QString::from(&answer.to_string())));
         });
@@ -2855,9 +2874,9 @@ impl Workspace {
         if path.is_empty() {
             return;
         }
-        let key = format!("diff:{}:{path}", staged as u8);
+        let key = format!("diff:{}:{path}", u8::from(staged));
         if let Some(i) = self.tab_keys.iter().position(|k| k.starts_with("diff:")) {
-            self.as_mut().rust_mut().tab_keys[i] = key.clone();
+            self.as_mut().rust_mut().tab_keys[i].clone_from(&key);
         }
         self.activate(&key);
     }
@@ -2883,24 +2902,24 @@ impl Workspace {
     }
 
     pub fn next_tab(self: Pin<&mut Self>, delta: i32) {
-        let n = self.tab_keys.len() as i32;
+        let n = i32::try_from(self.tab_keys.len()).unwrap_or(i32::MAX);
         if n == 0 {
             return;
         }
-        let current = self.tab_keys.iter().position(|k| *k == self.active_key.to_string()).map_or(0, |i| i as i32);
+        let current = self.tab_keys.iter().position(|k| *k == self.active_key.to_string()).map_or(0, |i| i32::try_from(i).unwrap_or(i32::MAX));
         let index = (current + delta).rem_euclid(n);
         self.activate_tab(index);
     }
 
     pub fn activate_tab(mut self: Pin<&mut Self>, index: i32) {
-        if let Some(key) = self.tab_keys.get(index.max(0) as usize).cloned() {
+        if let Some(key) = self.tab_keys.get(usize::try_from(index).unwrap_or(0)).cloned() {
             self.as_mut().activate(&key);
         }
     }
 
     pub fn move_tab(mut self: Pin<&mut Self>, from: i32, to: i32) {
         let n = self.tab_keys.len();
-        let (from, to) = (from.max(0) as usize, to.max(0) as usize);
+        let (from, to) = (usize::try_from(from).unwrap_or(0), usize::try_from(to).unwrap_or(0));
         if from >= n || to >= n || from == to {
             return;
         }
@@ -2929,12 +2948,12 @@ impl Workspace {
                 continue;
             }
             if let Some(path) = key.strip_prefix("file:") {
-                let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned());
+                let name = Path::new(path).file_name().map_or_else(|| path.to_owned(), |n| n.to_string_lossy().into_owned());
                 list.append(QString::from(&format!("{key}\t{}\t\tfile\t", name.replace(['\t', '\n'], " "))));
                 continue;
             }
             if let Some((staged, path)) = diff_key(key) {
-                let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned());
+                let name = Path::new(path).file_name().map_or_else(|| path.to_owned(), |n| n.to_string_lossy().into_owned());
                 let title = format!("{} ({})", name.replace(['\t', '\n'], " "), if staged { "staged" } else { "changes" });
                 list.append(QString::from(&format!("{key}\t{title}\t\tdiff\t")));
                 continue;
@@ -2975,7 +2994,7 @@ impl Workspace {
 
     pub fn project_roots(&self, project_id: i32) -> QStringList {
         let mut list = QStringList::default();
-        if let Some(p) = self.projects.iter().find(|p| p.id == project_id as i64) {
+        if let Some(p) = self.projects.iter().find(|p| p.id == i64::from(project_id)) {
             list.append(QString::from(&p.path.to_string_lossy().into_owned()));
             for w in self.worktrees.iter().filter(|w| w.project_id == p.id) {
                 list.append(QString::from(&w.path.to_string_lossy().into_owned()));
@@ -2988,13 +3007,13 @@ impl Workspace {
         let key = self.active_key.to_string();
         let Some(cwd) = self.live.get(&key).map(|e| e.info.cwd.clone()) else { return -1 };
         if let Some(w) = self.worktrees.iter().filter(|w| cwd.starts_with(&w.path)).max_by_key(|w| w.path.components().count()) {
-            return w.project_id as i32;
+            return i32::try_from(w.project_id).unwrap_or(i32::MAX);
         }
         self.projects
             .iter()
             .filter(|p| cwd.starts_with(&p.path))
             .max_by_key(|p| p.path.components().count())
-            .map_or(-1, |p| p.id as i32)
+            .map_or(-1, |p| i32::try_from(p.id).unwrap_or(i32::MAX))
     }
 
     pub fn file_icon(&self, path: &QString) -> QString {
@@ -3022,7 +3041,7 @@ impl Workspace {
             haystack: String,
             modified: i64,
         }
-        let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
         let mut items: Vec<Item> = Vec::new();
         let mut seen_files: HashSet<PathBuf> = HashSet::new();
         for e in self.live.values() {
@@ -3071,7 +3090,7 @@ impl Workspace {
         let clean: Vec<String> = items.iter().map(|i| i.haystack.replace(['\t', '\n'], " ")).collect();
         let order = harlo_core::palette::rank(&query.to_string(), &clean);
         let mut list = QStringList::default();
-        for i in order.into_iter().take(limit.max(1) as usize) {
+        for i in order.into_iter().take(usize::try_from(limit.max(1)).unwrap_or(usize::MAX)) {
             list.append(QString::from(&items[i].line.replace('\n', " ")));
         }
         list
@@ -3101,7 +3120,7 @@ impl Workspace {
 
     fn mark_viewed(mut self: Pin<&mut Self>, file: &Path) {
         let mut meta = self.meta.get(file).cloned().unwrap_or_default();
-        meta.last_viewed_at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        meta.last_viewed_at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
         if let Some(db) = self.db() {
             let _ = db.set_session_meta(file, &meta);
         }
@@ -3186,7 +3205,19 @@ impl Workspace {
     /// (sessions in a harlo project only).
     fn features_of(&self, key: &str) -> Option<(PathBuf, bool, bool, bool)> {
         let (cwd, project) = self.project_of(key)?;
-        Some((cwd, self.wiki_on(project), self.plan_on(project as i32), self.plan_commits_on(project as i32)))
+        Some((cwd, self.wiki_on(project), self.plan_on(i32::try_from(project).unwrap_or(i32::MAX)), self.plan_commits_on(i32::try_from(project).unwrap_or(i32::MAX))))
+    }
+
+    /// What harlo knows of a session calling its tools (None: one it doesn't).
+    fn caller_facts(&self, caller: Option<&str>) -> tool_calls::Caller {
+        let Some(c) = caller else { return tool_calls::Caller::default() };
+        tool_calls::Caller {
+            harness: self.live.get(c).map(|e| e.info.harness.clone()).unwrap_or_default(),
+            // (A helper: it reports to its parent, and offers no splits.)
+            helper: self.orch_children.get(c).is_some_and(|ch| ch.notify),
+            writing: self.wiki_sessions.contains(c),
+            project: self.features_of(c).map(|(cwd, wiki, plan, commits)| tool_calls::Project { cwd, wiki, plan, commits }),
+        }
     }
 
     /// A project's agents use its wiki (when it has one) unless its Wiki
@@ -3257,7 +3288,7 @@ impl Workspace {
     /// `helpers_json` gives them, or {} when it has none (the same as the
     /// session).
     pub fn project_helpers_json(&self, project_id: i32) -> QString {
-        let v = self.team_of(project_id as i64).map_or(json!({}), |h| {
+        let v = self.team_of(i64::from(project_id)).map_or(json!({}), |h| {
             json!({ "agent": h.agent.as_str(), "agentName": h.agent.label(), "model": h.model, "thinking": h.thinking, "team": true })
         });
         QString::from(&v.to_string())
@@ -3287,7 +3318,7 @@ impl Workspace {
         match self.setting_str(&format!("plan_{project_id}")).as_str() {
             "1" => true,
             "0" => false,
-            _ => self.projects.iter().find(|p| p.id == project_id as i64).is_some_and(|p| harlo_core::git::looks_like_repo(&p.path)),
+            _ => self.projects.iter().find(|p| p.id == i64::from(project_id)).is_some_and(|p| harlo_core::git::looks_like_repo(&p.path)),
         }
     }
 
@@ -3313,17 +3344,17 @@ impl Workspace {
     pub fn plan_edit(mut self: Pin<&mut Self>, key: &QString, op: &QString) {
         let key = key.to_string();
         let op: serde_json::Value = serde_json::from_str(&op.to_string()).unwrap_or_default();
-        let id = op["id"].as_u64().unwrap_or(0) as u32;
+        let id = u32::try_from(op["id"].as_u64().unwrap_or(0)).unwrap_or(u32::MAX);
         let text = |k: &str| op[k].as_str().unwrap_or_default().to_owned();
         crate::plans::update(self.file_for_key(&key).as_deref(), &key, |p| match op["op"].as_str().unwrap_or_default() {
             "add" if !text("title").trim().is_empty() => {
-                p.add(&text("title"), &text("detail"), op["after"].as_u64().map(|a| a as u32));
+                p.add(&text("title"), &text("detail"), op["after"].as_u64().map(|a| u32::try_from(a).unwrap_or(u32::MAX)));
             }
             "edit" if !text("title").trim().is_empty() => {
                 let _ = p.edit(id, &text("title"), &text("detail"));
             }
             "remove" => p.remove(id),
-            "shift" => p.shift(id, op["by"].as_i64().unwrap_or(0) as i32),
+            "shift" => p.shift(id, i32::try_from(op["by"].as_i64().unwrap_or(0)).unwrap_or(i32::MAX)),
             "skip" => {
                 let _ = p.set_skipped(id, op["skipped"].as_bool().unwrap_or(true));
             }
@@ -3348,7 +3379,7 @@ impl Workspace {
     pub fn review_step(mut self: Pin<&mut Self>, key: &QString, id: i32, agent: &QString) -> QString {
         let key = key.to_string();
         let plan = crate::plans::get(self.file_for_key(&key).as_deref(), &key);
-        let Some(step) = plan.step(id as u32).filter(|s| !s.commit.is_empty()) else { return QString::from("That step has no commit to review.") };
+        let Some(step) = plan.step(u32::try_from(id).unwrap_or(0)).filter(|s| !s.commit.is_empty()) else { return QString::from("That step has no commit to review.") };
         let Some(kind) = HarnessKind::parse(&agent.to_string()).filter(|k| self.usable_harness(*k)) else { return QString::from("That agent isn't available.") };
         let Some((cwd, ..)) = self.features_of(&key) else { return QString::from("That session isn't in a project here.") };
         if !self.live.contains_key(&key) {
@@ -3397,8 +3428,8 @@ impl Workspace {
         if self.settling || self.setting_str("settle_sessions") == "0" {
             return;
         }
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-        let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
         let live: HashSet<PathBuf> = self.live.values().filter_map(|e| e.info.session_file.clone()).collect();
         // Sessions in a worktree on this computer that could go on the
         // shelf, by worktree; and those worked in since they went.
@@ -3485,7 +3516,7 @@ impl Workspace {
                     if meta.archived || meta.pinned || now_modified != Some(modified) || this.live.values().any(|e| e.info.session_file.as_ref() == Some(&file)) {
                         continue;
                     }
-                    meta.settled_why = why.to_owned();
+                    why.clone_into(&mut meta.settled_why);
                     meta.settled_at = modified;
                     let r = this.db().map(|db| db.set_session_meta(&file, &meta)).transpose();
                     this.as_mut().report(r);
@@ -3541,7 +3572,7 @@ impl Workspace {
     }
 
     pub fn key_at(&self, index: i32) -> QString {
-        self.rows.get(index as usize).map(|r| QString::from(&r.key)).unwrap_or_default()
+        self.rows.get(usize::try_from(index).unwrap_or(0)).map(|r| QString::from(&r.key)).unwrap_or_default()
     }
 
     fn set_notice_text(mut self: Pin<&mut Self>, text: &str, error: bool) {
@@ -3572,7 +3603,7 @@ impl Workspace {
     }
 
     fn reload_worktrees(mut self: Pin<&mut Self>) {
-        if let Some(Ok(list)) = self.db().map(|db| db.worktrees()) {
+        if let Some(Ok(list)) = self.db().map(harlo_core::db::Db::worktrees) {
             self.as_mut().rust_mut().worktrees = list;
         }
         self.rebuild();
@@ -3595,41 +3626,15 @@ impl Workspace {
         }
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let mut found = Vec::new();
-            // Projects on other machines whose worktrees were listed.
-            let mut listed: Vec<i64> = Vec::new();
-            for (id, path) in projects {
-                let Some(root) = git::repo_root(&path) else { continue };
-                let Ok(list) = git::list_worktrees(&root) else { continue };
-                if harlo_core::remote::is_remote(&root) {
-                    listed.push(id);
-                }
-                for wt in list {
-                    if !wt.is_main && !wt.prunable {
-                        found.push(WorktreeRecord { path: wt.path, project_id: id, branch: wt.branch, base: String::new(), base_commit: String::new(), removed: false });
-                    }
-                }
-            }
+            let scan = harlo_core::db::scan_worktrees(projects);
             let _ = thread.queue(move |mut this| {
                 let mut changed = false;
                 if let Some(db) = this.db() {
-                    for rec in &found {
-                        let known = this.worktrees.iter().find(|w| w.path == rec.path);
-                        if known.is_none_or(|k| k.branch != rec.branch || k.removed) {
-                            let _ = db.upsert_worktree(rec);
-                            changed = true;
-                        }
+                    for rec in scan.changed(&this.worktrees) {
+                        let _ = db.upsert_worktree(rec);
+                        changed = true;
                     }
-                    // Recorded worktrees whose folder disappeared (another
-                    // machine's: not in its list, when it was listed).
-                    let gone = |w: &WorktreeRecord| {
-                        if harlo_core::remote::is_remote(&w.path) {
-                            listed.contains(&w.project_id) && !found.iter().any(|f| f.path == w.path)
-                        } else {
-                            !w.path.exists()
-                        }
-                    };
-                    for w in this.worktrees.iter().filter(|w| !w.removed && gone(w)) {
+                    for w in scan.gone(&this.worktrees) {
                         let _ = db.mark_worktree_removed(&w.path);
                         changed = true;
                     }
@@ -3655,13 +3660,13 @@ impl Workspace {
     }
 
     fn project_root(&self, project_id: i32) -> Option<(Project, PathBuf)> {
-        let project = self.projects.iter().find(|p| p.id == project_id as i64)?.clone();
+        let project = self.projects.iter().find(|p| p.id == i64::from(project_id))?.clone();
         let root = git::repo_root(&project.path)?;
         Some((project, root))
     }
 
     pub fn request_branches(&self, project_id: i32) {
-        let Some(path) = self.projects.iter().find(|p| p.id == project_id as i64).map(|p| p.path.clone()) else { return };
+        let Some(path) = self.projects.iter().find(|p| p.id == i64::from(project_id)).map(|p| p.path.clone()) else { return };
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let mut names = Vec::new();
@@ -3702,7 +3707,7 @@ impl Workspace {
     pub fn suggest_branch(&self) -> QString {
         const ADJ: &[&str] = &["brave", "calm", "eager", "fuzzy", "gentle", "lucky", "nimble", "quiet", "rapid", "sunny", "tidy", "witty"];
         const NOUN: &[&str] = &["otter", "falcon", "maple", "comet", "badger", "harbor", "lynx", "meadow", "pebble", "quartz", "willow", "zephyr"];
-        let n = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_nanos() as usize ^ d.as_secs() as usize).unwrap_or(0);
+        let n = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.subsec_nanos() as usize ^ usize::try_from(d.as_secs()).unwrap_or(usize::MAX));
         QString::from(&format!("harlo/{}-{}", ADJ[n % ADJ.len()], NOUN[(n / ADJ.len()) % NOUN.len()]))
     }
 
@@ -3717,12 +3722,17 @@ impl Workspace {
     pub fn start_draft(mut self: Pin<&mut Self>, form: &QString) -> QString {
         let form: serde_json::Value = serde_json::from_str(&form.to_string()).unwrap_or_default();
         let field = |k: &str| form[k].as_str().unwrap_or_default().to_owned();
-        let mut project_id = form["projectId"].as_i64().unwrap_or(-1) as i32;
+        let mut project_id = i32::try_from(form["projectId"].as_i64().unwrap_or(-1)).unwrap_or(i32::MAX);
         // (The page says what it shows: never a project of another machine.)
-        if let Some(p) = self.projects.iter().find(|p| p.id == project_id as i64)
+        if let Some(p) = self.projects.iter().find(|p| p.id == i64::from(project_id))
             && !self.here(&p.path)
         {
-            tracing::warn!("new session: project {} isn't on the machine shown ({:?})", p.path.display(), self.instance.to_string());
+            tracing::event!(
+                name: "session.new.wrong_machine", tracing::Level::WARN,
+                file.path = %p.path.display(),
+                instance = %self.instance,
+                "new session: project {{file.path}} isn't on the machine shown ({{instance}})",
+            );
             project_id = -1;
         }
         let (harness, worktree_branch, base, starter, text) = (field("harness"), field("worktreeBranch"), field("base"), field("starter"), field("text"));
@@ -3735,9 +3745,9 @@ impl Workspace {
         let attachments: Vec<String> = form["attachments"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default();
         let mut message = text.trim().to_owned();
         let harness_name = if harness.is_empty() {
-            self.projects.iter().find(|p| p.id == project_id as i64).map(|p| p.harness.clone()).unwrap_or_else(|| self.default_harness())
+            self.projects.iter().find(|p| p.id == i64::from(project_id)).map_or_else(|| self.default_harness(), |p| p.harness.clone())
         } else {
-            harness.to_string()
+            harness.clone()
         };
         if let Some(s) = harlo_core::starters::find(&starter) {
             message = harlo_core::starters::wrap(s, &message);
@@ -3774,7 +3784,7 @@ impl Workspace {
             // An agent's helper, or a plan's step: told, not left waiting.
             let why = "the project isn't a git repository";
             match (step_of, parent) {
-                (Some((owner, id)), _) => self.plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {why}"))),
+                (Some((owner, id)), _) => self.plan_step_ended(&owner, id, Err(anyhow::anyhow!("its worktree couldn't be made: {why}"))),
                 (None, Some((parent, title, ..))) => self.tell_worktree_failed(&parent, &title, &branch.to_string(), why),
                 _ => {}
             }
@@ -3830,7 +3840,7 @@ impl Workspace {
                     }
                     if let Some(lane) = lane {
                         if let Some(mut l) = this.find_run(&lane.0).and_then(|r| r.lanes.into_iter().find(|l| l.idx == lane.1)) {
-                            l.cwd = path.clone();
+                            l.cwd.clone_from(&path);
                             if let Some(db) = this.db() {
                                 let _ = db.upsert_lane(&lane.0, &l);
                             }
@@ -3848,13 +3858,13 @@ impl Workspace {
                         send_first_prompt(&key, first, Some(this.qt_thread()));
                     }
                     this.as_mut().set_notice_text(&format!("Worktree {branch} ready"), false);
-                    this.run_setup(path, setup);
+                    this.run_setup(path, &setup);
                 }
                 Err(e) => {
                     this.as_mut().set_notice_text(&format!("Could not create the worktree: {e:#}"), true);
                     // A plan's step: back to waiting, and the run paused.
                     if let Some((owner, id)) = step_of {
-                        this.as_mut().plan_step_ended(&owner, id, Err(format!("its worktree couldn't be made: {e:#}")));
+                        this.as_mut().plan_step_ended(&owner, id, Err(anyhow::anyhow!("its worktree couldn't be made: {e:#}")));
                     } else if let Some((parent, title, ..)) = parent {
                         this.tell_worktree_failed(&parent, &title, &branch, &format!("{e:#}"));
                     }
@@ -3864,7 +3874,7 @@ impl Workspace {
     }
 
     /// Runs a project's setup commands in a new worktree, one per line.
-    fn run_setup(self: Pin<&mut Self>, dir: PathBuf, setup: String) {
+    fn run_setup(self: Pin<&mut Self>, dir: PathBuf, setup: &str) {
         let commands: Vec<String> = setup.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_owned).collect();
         if commands.is_empty() {
             return;
@@ -3875,23 +3885,23 @@ impl Workspace {
                 let host = harlo_core::remote::split(&dir).and_then(|(h, p)| Some((harlo_core::remote::host(&h)?, p)));
                 for cmd in &commands {
                     let out = match &host {
-                        Some((host, p)) => harlo_core::remote::run(host, &format!("cd {} && {cmd}", harlo_core::remote::quote(p)), Duration::from_secs(1800)).map_err(|e| std::io::Error::other(format!("{e:#}"))),
+                        Some((host, p)) => harlo_core::remote::run(host, &format!("cd {} && {cmd}", harlo_core::remote::quote(p)), Duration::from_mins(30)).map_err(|e| std::io::Error::other(format!("{e:#}"))),
                         None => std::process::Command::new("sh").arg("-c").arg(cmd).current_dir(&dir).output(),
                     };
                     match out {
                         Ok(o) if o.status.success() => {}
                         Ok(o) => {
                             let err = String::from_utf8_lossy(&o.stderr);
-                            return Err(format!("Setup command failed: {cmd}\n{}", err.trim().lines().last().unwrap_or("")));
+                            return Err(anyhow::anyhow!("Setup command failed: {cmd}\n{}", err.trim().lines().last().unwrap_or("")));
                         }
-                        Err(e) => return Err(format!("Setup command failed: {cmd}: {e}")),
+                        Err(e) => return Err(anyhow::anyhow!("Setup command failed: {cmd}: {e}")),
                     }
                 }
                 Ok(commands.len())
             },
             |this, result| match result {
                 Ok(n) => this.set_notice_text(&format!("Worktree setup finished ({n} command{})", if n == 1 { "" } else { "s" }), false),
-                Err(e) => this.set_notice_text(&e, true),
+                Err(e) => this.set_notice_text(&format!("{e:#}"), true),
             },
         );
     }
@@ -3923,7 +3933,7 @@ impl Workspace {
             let thread = self.qt_thread();
             let (w2, k) = (w.clone(), key.clone());
             crate::runtime().spawn_blocking(move || {
-                let info = worktree_details(&w2, project.as_deref(), !w2.removed);
+                let info = w2.details(project.as_deref(), !w2.removed);
                 let _ = thread.queue(move |mut this| this.as_mut().worktree_info_ready(&QString::from(&k), &QString::from(&info.to_string())));
             });
             return QString::from(
@@ -3932,7 +3942,7 @@ impl Workspace {
                 .to_string(),
             );
         }
-        QString::from(&worktree_details(&w, project.as_deref(), w.path.exists() && !w.removed).to_string())
+        QString::from(&w.details(project.as_deref(), w.path.exists() && !w.removed).to_string())
     }
 
     pub fn merge_worktree(mut self: Pin<&mut Self>, key: &QString) {
@@ -3943,12 +3953,12 @@ impl Workspace {
         let branch = w.branch.clone();
         self.background(
             move || {
-                let main = git::repo_root(&project).ok_or_else(|| "The project isn't a git repository.".to_owned())?;
-                git::merge_branch(&main, &branch).map_err(|e| format!("{e:#}"))
+                let main = git::repo_root(&project).ok_or_else(|| anyhow::Error::msg("The project isn't a git repository."))?;
+                git::merge_branch(&main, &branch).map_err(|e| anyhow::anyhow!("{e:#}"))
             },
             |this, result| match result {
                 Ok(msg) => this.set_notice_text(&msg, false),
-                Err(e) => this.set_notice_text(&e, true),
+                Err(e) => this.set_notice_text(&format!("{e:#}"), true),
             },
         );
     }
@@ -3964,9 +3974,9 @@ impl Workspace {
         self.as_mut().set_notice_text(&format!("Removing worktree {}…", w.branch), false);
         let rec = w.clone();
         self.background(
-            move || -> Result<String, String> {
-                let main = git::repo_root(&project).ok_or_else(|| "The project isn't a git repository.".to_owned())?;
-                git::remove_worktree(&main, &rec.path, force).map_err(|e| format!("{e:#}"))?;
+            move || -> anyhow::Result<String> {
+                let main = git::repo_root(&project).ok_or_else(|| anyhow::Error::msg("The project isn't a git repository."))?;
+                git::remove_worktree(&main, &rec.path, force).map_err(|e| anyhow::anyhow!("{e:#}"))?;
                 if delete_branch && !rec.branch.is_empty() {
                     // Unmerged work is only discarded when the user forced removal.
                     if let Err(e) = git::delete_branch(&main, &rec.branch, force) {
@@ -3984,7 +3994,7 @@ impl Workspace {
                         }
                         this.as_mut().set_notice_text(&msg, false);
                     }
-                    Err(e) => this.as_mut().set_notice_text(&e, true),
+                    Err(e) => this.as_mut().set_notice_text(&format!("{e:#}"), true),
                 }
                 this.reload_worktrees();
             },
@@ -3992,11 +4002,11 @@ impl Workspace {
     }
 
     pub fn project_setup(&self, project_id: i32) -> QString {
-        self.projects.iter().find(|p| p.id == project_id as i64).map(|p| QString::from(&p.setup)).unwrap_or_default()
+        self.projects.iter().find(|p| p.id == i64::from(project_id)).map(|p| QString::from(&p.setup)).unwrap_or_default()
     }
 
     pub fn set_project_setup(mut self: Pin<&mut Self>, project_id: i32, setup: &QString) {
-        let r = self.db().map(|db| db.set_project_setup(project_id as i64, &setup.to_string())).transpose();
+        let r = self.db().map(|db| db.set_project_setup(i64::from(project_id), &setup.to_string())).transpose();
         self.as_mut().report(r);
         self.reload_projects();
     }
@@ -4091,16 +4101,16 @@ impl Workspace {
         Some((dirs, self.ignored_repos.clone()))
     }
 
-    /// A saved setting (`settings.<key>` in the database), or "".
-    /// Harlo's arguments, with its sandbox as set.
+    /// Harlo's arguments, with its sandbox and models as set.
     fn harlo_args(&self, kind: HarnessKind) -> Vec<String> {
-        let mut args = harlo_args(kind, self.setting_str("harlo_sandbox") != "0", self.setting_str("harlo_sandbox_net") != "0");
+        let mut args = agents::harlo_args(kind, self.setting_str("harlo_sandbox") != "0", self.setting_str("harlo_sandbox_net") != "0");
         if kind == HarnessKind::Harlo {
-            args.extend(model_args(&self.setting_str("harlo_task_model"), &self.setting_str("harlo_fallback")));
+            args.extend(agents::model_args(&self.setting_str("harlo_task_model"), &self.setting_str("harlo_fallback")));
         }
         args
     }
 
+    /// A saved setting (`settings.<key>` in the database), or "".
     fn setting_str(&self, key: &str) -> String {
         self.db.as_ref().and_then(|db| db.get(&format!("settings.{key}")).ok().flatten()).unwrap_or_default()
     }
@@ -4214,7 +4224,7 @@ impl Workspace {
         if self.ci_watch.is_empty() || self.ci_polling {
             return;
         }
-        self.as_mut().rust_mut().ci_watch.retain(|(_, since)| since.elapsed() < Duration::from_secs(6 * 3600));
+        self.as_mut().rust_mut().ci_watch.retain(|(_, since)| since.elapsed() < Duration::from_hours(6));
         self.as_mut().rust_mut().ci_polling = true;
         let watched: Vec<serde_json::Value> = self.ci_watch.iter().map(|(r, _)| r.clone()).collect();
         let thread = self.qt_thread();
@@ -4230,7 +4240,7 @@ impl Workspace {
             let _ = thread.queue(move |mut this| {
                 this.as_mut().rust_mut().ci_polling = false;
                 for (req, checks) in read {
-                    let Some(checks) = checks.filter(|c| c.settled()) else { continue };
+                    let Some(checks) = checks.filter(harlo_core::git_hosting::Checks::settled) else { continue };
                     this.as_mut().rust_mut().ci_watch.retain(|(r, _)| r["url"] != req["url"]);
                     this.as_mut().ci_settled(&req, &checks);
                 }
@@ -4277,7 +4287,7 @@ impl Workspace {
                 s.extra = (s.cost - limits.session).max(0.0) + limits.session;
             }
             this.spend_stopped.clear();
-        }
+        };
         self.save_setting("spend_today", &self.spend_ledger.to_json().to_string());
         self.as_mut().refresh_spending();
     }
@@ -4346,57 +4356,13 @@ impl Workspace {
     }
 
     pub fn save_schedule(mut self: Pin<&mut Self>, json: &QString) -> QString {
-        use harlo_core::schedules::{Repeat, Schedule, parse_local, parse_time};
-        let v: serde_json::Value = serde_json::from_str(&json.to_string()).unwrap_or_default();
-        let prompt = v["prompt"].as_str().unwrap_or_default().trim().to_owned();
-        if prompt.is_empty() {
-            return QString::from("Write the prompt to send.");
-        }
-        let r = &v["repeat"];
-        let repeat = match r["kind"].as_str().unwrap_or_default() {
-            "days" => {
-                let Some((hour, minute)) = parse_time(r["time"].as_str().unwrap_or_default()) else { return QString::from("Use a time like 09:00.") };
-                let days = r["days"].as_u64().unwrap_or(0) as u8 & 0x7f;
-                if days == 0 {
-                    return QString::from("Pick at least one day.");
-                }
-                Repeat::Days { days, hour, minute }
-            }
-            "every" => {
-                let minutes = r["minutes"].as_u64().unwrap_or(0);
-                if minutes < 1 {
-                    return QString::from("Use an interval of at least a minute.");
-                }
-                Repeat::Every { minutes: minutes as u32 }
-            }
-            "once" => {
-                let Some(at) = parse_local(r["at"].as_str().unwrap_or_default()) else { return QString::from("Use a date and time like 2026-10-13 09:00.") };
-                if at <= chrono::Local::now().timestamp() {
-                    return QString::from("That time has passed.");
-                }
-                Repeat::Once { at }
-            }
-            _ => return QString::from("Choose when it runs."),
+        let form: serde_json::Value = serde_json::from_str(&json.to_string()).unwrap_or_default();
+        let id = form["id"].as_i64().unwrap_or(0);
+        let previous = self.schedules.iter().find(|s| s.id == id);
+        let mut schedule = match harlo_core::schedules::Schedule::from_form(&form, previous, &self.instance.to_string(), chrono::Local::now()) {
+            Ok(schedule) => schedule,
+            Err(what) => return QString::from(what),
         };
-        let id = v["id"].as_i64().unwrap_or(0);
-        let previous = self.schedules.iter().find(|s| s.id == id).cloned();
-        let title = v["title"].as_str().unwrap_or_default().trim().to_owned();
-        let mut schedule = Schedule {
-            id,
-            title: if title.is_empty() { prompt.lines().next().unwrap_or_default().chars().take(48).collect() } else { title },
-            prompt,
-            project_id: v["projectId"].as_i64().unwrap_or(-1),
-            // (Without a project: the machine it was made on, kept through edits.)
-            host: previous.as_ref().map_or_else(|| self.instance.to_string(), |p| p.host.clone()),
-            harness: v["harness"].as_str().unwrap_or_default().to_owned(),
-            model: v["model"].as_str().unwrap_or_default().trim().to_owned(),
-            repeat,
-            enabled: v["enabled"].as_bool().unwrap_or(true),
-            catch_up: v["catchUp"].as_bool().unwrap_or(true),
-            last_run: previous.as_ref().and_then(|p| p.last_run),
-            next_run: None,
-        };
-        schedule.reschedule(chrono::Local::now());
         let Some(db) = self.db() else { return QString::from("harlo's database is not available.") };
         if let Err(e) = db.save_schedule(&mut schedule) {
             return QString::from(&format!("Could not save: {e:#}"));
@@ -4412,21 +4378,21 @@ impl Workspace {
 
     pub fn delete_schedule(mut self: Pin<&mut Self>, id: i32) {
         if let Some(db) = self.db() {
-            let _ = db.delete_schedule(id as i64);
+            let _ = db.delete_schedule(i64::from(id));
         }
-        self.as_mut().rust_mut().schedules.retain(|s| s.id != id as i64);
+        self.as_mut().rust_mut().schedules.retain(|s| s.id != i64::from(id));
         self.bump_schedules();
     }
 
     pub fn set_schedule_enabled(mut self: Pin<&mut Self>, id: i32, on: bool) {
-        let Some(mut s) = self.schedules.iter().find(|s| s.id == id as i64).cloned() else { return };
+        let Some(mut s) = self.schedules.iter().find(|s| s.id == i64::from(id)).cloned() else { return };
         s.enabled = on;
         s.reschedule(chrono::Local::now());
         self.as_mut().store_schedule(s);
     }
 
     pub fn run_schedule_now(mut self: Pin<&mut Self>, id: i32) {
-        let Some(mut s) = self.schedules.iter().find(|s| s.id == id as i64).cloned() else { return };
+        let Some(mut s) = self.schedules.iter().find(|s| s.id == i64::from(id)).cloned() else { return };
         self.as_mut().start_scheduled(&s);
         let now = chrono::Local::now();
         s.last_run = Some(now.timestamp());
@@ -4470,15 +4436,15 @@ impl Workspace {
     /// Starts a schedule's session in the background (no tab switch).
     fn start_scheduled(mut self: Pin<&mut Self>, s: &harlo_core::schedules::Schedule) {
         let project = self.projects.iter().find(|p| p.id == s.project_id).cloned();
-        let harness = if !s.harness.is_empty() {
-            s.harness.clone()
+        let harness = if s.harness.is_empty() {
+            project.as_ref().map_or_else(|| self.default_harness(), |p| p.harness.clone())
         } else {
-            project.as_ref().map(|p| p.harness.clone()).unwrap_or_else(|| self.default_harness())
+            s.harness.clone()
         };
         let Some(kind) = HarnessKind::parse(&harness) else { return };
         // (Without a project: the home folder of the machine it was made on.)
-        let cwd = project.map(|p| p.path).unwrap_or_else(|| self.home_on(&s.host));
-        tracing::info!("scheduled prompt \"{}\" starts", s.title);
+        let cwd = project.map_or_else(|| home_on(&s.host), |p| p.path);
+        tracing::event!(name: "schedule.prompt.start", tracing::Level::INFO, schedule.title = %s.title, "scheduled prompt {{schedule.title}} starts");
         let key = self.as_mut().start_session_with(kind, cwd, &s.model, false);
         let first = FirstPrompt { text: s.prompt.clone(), ..Default::default() };
         send_first_prompt(&key, first, Some(self.qt_thread()));
@@ -4557,31 +4523,7 @@ impl Workspace {
             let _ = thread.queue(move |mut this| {
                 this.as_mut().rust_mut().quota_loading = false;
                 let previous: serde_json::Value = serde_json::from_str(&this.quota_json.to_string()).unwrap_or_default();
-                let kept = |claude: bool| -> Vec<serde_json::Value> {
-                    previous["accounts"].as_array().into_iter().flatten().filter(|a| (a["provider"] == "Claude") == claude).cloned().collect()
-                };
-                let (mut accounts, mut errors) = (Vec::new(), Vec::new());
-                match from_claude {
-                    Some(Ok(Some(a))) => accounts.push(a),
-                    None if keep_claude => accounts.extend(kept(true)),
-                    Some(Ok(None)) | None => {}
-                    Some(Err(e)) => {
-                        accounts.extend(kept(true));
-                        errors.push(format!("Claude: {e:#}"));
-                    }
-                }
-                match from_harlo {
-                    Some(Ok(Some(usage))) => {
-                        harlo_core::quota::apply_live(&mut accounts, &usage);
-                    }
-                    Some(Ok(None)) | None => {}
-                    Some(Err(e)) => {
-                        accounts.extend(kept(false));
-                        errors.push(format!("{e:#}"));
-                    }
-                }
-                let updated = if errors.is_empty() { serde_json::json!(chrono::Local::now().timestamp_millis()) } else { previous["updatedAt"].clone() };
-                let json = serde_json::json!({ "accounts": accounts, "updatedAt": updated, "error": errors.join("\n") });
+                let json = harlo_core::quota::refreshed(&previous, from_claude, keep_claude, from_harlo, chrono::Local::now().timestamp_millis());
                 // Shown at once next time.
                 if let Some(db) = this.db.as_ref() {
                     let _ = db.set("cache.quota", &serde_json::json!({ "accounts": json["accounts"], "updatedAt": json["updatedAt"], "error": "" }).to_string());
@@ -4667,7 +4609,7 @@ impl Workspace {
                 let claude_account = match from_claude {
                     Ok(a) => Some(a),
                     Err(e) => {
-                        tracing::debug!("{host}'s Claude limits: {e:#}");
+                        tracing::event!(name: "quota.claude.failed", tracing::Level::DEBUG, server.address = %host, error.message = %format_args!("{e:#}"), "{{server.address}}'s Claude limits: {{error.message}}");
                         errors.push(format!("{e:#}"));
                         None
                     }
@@ -4849,28 +4791,20 @@ impl Workspace {
     pub fn approval_mode(&self, key: &QString) -> QString {
         let key = key.to_string();
         let Some(entry) = self.live.get(&key) else { return QString::default() };
-        if !has_shield(&entry.info.harness, &entry.info.cwd) {
+        if !agents::has_shield(&entry.info.harness) {
             return QString::default();
         }
         if let Some(mode) = self.modes.get(&key).and_then(|m| m.approval.clone()) {
             return QString::from(&mode);
         }
-        self.starting_approval(&entry.info.harness, &entry.info.cwd)
+        QString::from(STARTING_APPROVAL)
     }
 
-    pub fn draft_approval(&self, harness: &QString, project_id: i32) -> QString {
-        let harness = harness.to_string();
-        let cwd = self.projects.iter().find(|p| p.id == project_id as i64).map(|p| p.path.clone()).unwrap_or_else(|| self.instance_home());
-        if !has_shield(&harness, &cwd) {
+    pub fn draft_approval(&self, harness: &QString, _project_id: i32) -> QString {
+        if !agents::has_shield(&harness.to_string()) {
             return QString::default();
         }
-        self.starting_approval(&harness, &cwd)
-    }
-
-    /// The shield's mode a session starts in, before it's switched: ask
-    /// first (Claude's own settings may differ).
-    fn starting_approval(&self, _harness: &str, _cwd: &Path) -> QString {
-        QString::from("always-ask")
+        QString::from(STARTING_APPROVAL)
     }
 
     pub fn set_approval_mode(mut self: Pin<&mut Self>, key: &QString, mode: &QString) {
@@ -4884,7 +4818,7 @@ impl Workspace {
         // Its helpers at work (theirs too) follow it, whatever their agent
         // (one without a permission shield has none to follow).
         for helper in self.working_helpers(&key) {
-            let shielded = self.live.get(&helper).is_some_and(|e| has_shield(&e.info.harness, &e.info.cwd));
+            let shielded = self.live.get(&helper).is_some_and(|e| agents::has_shield(&e.info.harness));
             if shielded && self.modes.get(&helper).and_then(|m| m.approval.as_deref()) != Some(mode.as_str()) {
                 self.as_mut().rust_mut().modes.entry(helper.clone()).or_default().approval = Some(mode.clone());
                 self.as_mut().modes_changed(&helper);
@@ -5100,7 +5034,7 @@ impl Workspace {
                     Ok(())
                 });
                 if let Err(e) = &fetched {
-                    tracing::warn!("copying {}: {e:#}", p.display());
+                    tracing::event!(name: "file.copy.failed", tracing::Level::WARN, file.path = %p.display(), error.message = %format_args!("{e:#}"), "copying {{file.path}}: {{error.message}}");
                 }
                 let _ = thread.queue(move |mut this| {
                     this.copying.borrow_mut().remove(&p);
@@ -5178,15 +5112,15 @@ impl Workspace {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let id = format!("{:x}", now.as_millis());
         let project = self.projects.iter().find(|p| p.id == project_id).cloned();
-        let cwd = project.as_ref().map(|p| p.path.clone()).unwrap_or_else(|| self.instance_home());
-        let use_worktrees = form["worktrees"].as_bool().unwrap_or(false) && project.is_some() && self.project_root(project_id as i32).is_some();
+        let cwd = project.as_ref().map_or_else(|| self.instance_home(), |p| p.path.clone());
+        let use_worktrees = form["worktrees"].as_bool().unwrap_or(false) && project.is_some() && self.project_root(i32::try_from(project_id).unwrap_or(i32::MAX)).is_some();
         let base = form["base"].as_str().unwrap_or_default().to_owned();
         let slug: String = git::branch_slug(&title.to_lowercase()).chars().take(24).collect::<String>().trim_matches('-').to_owned();
         let mut record = RunRecord { id: id.clone(), title: title.clone(), prompt: prompt.clone(), project_id, ..Default::default() };
         for (idx, (harness, model)) in lanes.iter().enumerate() {
-            let letter = (b'a' + idx as u8) as char;
+            let letter = (b'a' + u8::try_from(idx).unwrap_or(u8::MAX)) as char;
             let Some(kind) = HarnessKind::parse(harness) else { continue };
-            let lane_ref = (id.clone(), idx as i64);
+            let lane_ref = (id.clone(), i64::try_from(idx).unwrap_or(i64::MAX));
             // (Its model's server, started first if stopped.)
             let server = Some((harness.clone(), model.clone()));
             let first = FirstPrompt { server, ..first.clone() };
@@ -5194,16 +5128,16 @@ impl Workspace {
                 let branch = format!("harlo/run-{}-{}-{letter}", if slug.is_empty() { "run" } else { &slug }, &id[id.len().saturating_sub(4)..]);
                 let project = project.as_ref().unwrap();
                 let path = self.worktree_base().join(format!("{}-{}", git::branch_slug(&project.name), project.id)).join(git::branch_slug(&branch));
-                record.lanes.push(RunLane { idx: idx as i64, harness: harness.clone(), model: model.clone(), cwd: path, branch: branch.clone(), session_file: PathBuf::new() });
+                record.lanes.push(RunLane { idx: i64::try_from(idx).unwrap_or(i64::MAX), harness: harness.clone(), model: model.clone(), cwd: path, branch: branch.clone(), session_file: PathBuf::new() });
                 self.as_mut().create_worktree_session(
-                    project_id as i32,
+                    i32::try_from(project_id).unwrap_or(i32::MAX),
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(harness),
                     WorktreeStart { first: Some(first.clone()), model: model.clone(), lane: Some(lane_ref), ..Default::default() },
                 );
             } else {
-                record.lanes.push(RunLane { idx: idx as i64, harness: harness.clone(), model: model.clone(), cwd: cwd.clone(), branch: String::new(), session_file: PathBuf::new() });
+                record.lanes.push(RunLane { idx: i64::try_from(idx).unwrap_or(i64::MAX), harness: harness.clone(), model: model.clone(), cwd: cwd.clone(), branch: String::new(), session_file: PathBuf::new() });
                 let key = self.as_mut().start_session_with(kind, cwd.clone(), model, false);
                 self.as_mut().rust_mut().lane_keys.insert(key.clone(), lane_ref);
                 send_first_prompt(&key, first.clone(), None);
@@ -5266,12 +5200,12 @@ impl Workspace {
                 let gone = !l.branch.is_empty() && if remote { !self.worktrees.iter().any(|w| w.path == l.cwd && !w.removed) } else { !l.cwd.is_dir() };
                 let changes = match (l.branch.is_empty() || gone, remote) {
                     (true, _) => -1,
-                    (false, true) => self.change_counts.get(&l.cwd).map_or(-1, |n| *n as i64),
-                    (false, false) => git::status(&l.cwd).map(|s| s.files.len() as i64).unwrap_or(-1),
+                    (false, true) => self.change_counts.get(&l.cwd).map_or(-1, |n| i64::try_from(*n).unwrap_or(i64::MAX)),
+                    (false, false) => git::status(&l.cwd).map_or(-1, |s| i64::try_from(s.files.len()).unwrap_or(i64::MAX)),
                 };
                 serde_json::json!({
                     "idx": l.idx,
-                    "letter": ((b'A' + l.idx as u8) as char).to_string(),
+                    "letter": ((b'A' + u8::try_from(l.idx).unwrap_or(0)) as char).to_string(),
                     "harness": l.harness,
                     "model": l.model,
                     "branch": l.branch,
@@ -5288,9 +5222,9 @@ impl Workspace {
 
     pub fn keep_run_lane(mut self: Pin<&mut Self>, id: &QString, idx: i32) {
         let Some(run) = self.find_run(&id.to_string()) else { return };
-        let root = self.project_root(run.project_id as i32).map(|(_, r)| r);
+        let root = self.project_root(i32::try_from(run.project_id).unwrap_or(i32::MAX)).map(|(_, r)| r);
         let mut cleanup = Vec::new();
-        for lane in run.lanes.iter().filter(|l| l.idx != idx as i64) {
+        for lane in run.lanes.iter().filter(|l| l.idx != i64::from(idx)) {
             // Stop and archive the other lanes' sessions.
             let key = self.lane_keys.iter().find(|(_, v)| v.0 == run.id && v.1 == lane.idx).map(|(k, _)| k.clone());
             if let Some(k) = key {
@@ -5307,7 +5241,7 @@ impl Workspace {
             }
         }
         if let Some(db) = self.db() {
-            let _ = db.set_run_kept(&run.id, idx as i64);
+            let _ = db.set_run_kept(&run.id, i64::from(idx));
         }
         let run_id = run.id.clone();
         self.as_mut().set_notice_text("Keeping the chosen lane; cleaning up the others…", false);
@@ -5315,7 +5249,7 @@ impl Workspace {
             move || {
                 let mut failed = Vec::new();
                 for lane in cleanup {
-                    let letter = (b'a' + lane.idx as u8) as char;
+                    let letter = (b'a' + u8::try_from(lane.idx).unwrap_or(0)) as char;
                     let result = (|| -> anyhow::Result<()> {
                         let there = if harlo_core::remote::is_remote(&lane.cwd) { harlo_core::remote::exists(&lane.cwd, true) } else { lane.cwd.is_dir() };
                         if there {
@@ -5471,12 +5405,12 @@ impl Workspace {
         if harlo_core::remote::is_remote(&original) {
             let leaf = leaf.to_string();
             self.as_mut().background(
-                move || -> Result<(PathBuf, String), String> {
-                    let copy = harlo_core::remote::local_copy(&original).map_err(|e| format!("{e:#}"))?;
-                    let text = std::fs::read_to_string(copy).map_err(|e| e.to_string())?;
-                    let (name, body) = harlo_harness::branches::branch_file(&text, &leaf, &harlo_harness::on_host(&original)).map_err(|e| e.to_string())?;
+                move || -> anyhow::Result<(PathBuf, String)> {
+                    let copy = harlo_core::remote::local_copy(&original).map_err(|e| anyhow::anyhow!("{e:#}"))?;
+                    let text = std::fs::read_to_string(copy)?;
+                    let (name, body) = harlo_harness::branches::branch_file(&text, &leaf, &harlo_harness::on_host(&original))?;
                     let dest = original.with_file_name(name);
-                    harlo_core::remote::write(&dest, body.as_bytes()).map_err(|e| format!("{e:#}"))?;
+                    harlo_core::remote::write(&dest, body.as_bytes()).map_err(|e| anyhow::anyhow!("{e:#}"))?;
                     Ok((dest, body))
                 },
                 move |mut this, result| match result {
@@ -5526,7 +5460,7 @@ impl Workspace {
                     "title": i.display_title().chars().take(100).collect::<String>(),
                     "harness": i.harness.as_str(),
                     "path": i.path.to_string_lossy(),
-                    "modified": i.modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                    "modified": i.modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
                 })
             })
             .collect();
@@ -5541,16 +5475,16 @@ impl Workspace {
     /// `list_sessions`' answer from its search's `hits` (done off this
     /// thread): `cwd`'s sessions (or all, `everywhere`), not the caller's
     /// own (`own`), each with a couple of its matches.
-    pub(crate) fn found_sessions(&self, hits: Vec<harlo_core::search::Hit>, everywhere: bool, cwd: Option<PathBuf>, own: Option<PathBuf>) -> serde_json::Value {
+    pub(crate) fn found_sessions(&self, hits: &[harlo_core::search::Hit], everywhere: bool, cwd: Option<&Path>, own: Option<&Path>) -> serde_json::Value {
         use serde_json::json;
         let mut order: Vec<PathBuf> = Vec::new();
         let mut passages: HashMap<PathBuf, Vec<String>> = HashMap::new();
         for h in hits {
             let Some(info) = self.sessions.get(&h.path) else { continue };
-            if !everywhere && cwd.as_ref().is_some_and(|c| *c != info.cwd) {
+            if !everywhere && cwd.is_some_and(|c| c != info.cwd) {
                 continue;
             }
-            if own.as_ref() == Some(&h.path) {
+            if own == Some(h.path.as_path()) {
                 continue;
             }
             let list = passages.entry(h.path.clone()).or_default();
@@ -5582,7 +5516,7 @@ impl Workspace {
             self.messages_found(generation, &QString::from("[]"));
             return;
         };
-        let (query, limit) = (query.to_string(), limit.clamp(1, 500) as usize);
+        let (query, limit) = (query.to_string(), usize::try_from(limit.clamp(1, 500)).unwrap_or(0));
         let latest = Arc::clone(&self.find_latest);
         latest.store(generation, std::sync::atomic::Ordering::SeqCst);
         let thread = self.qt_thread();
@@ -5618,7 +5552,7 @@ impl Workspace {
                     "title": info.map(|i| i.display_title().to_owned()).unwrap_or_default(),
                     "harness": info.map(|i| i.harness.as_str()).unwrap_or_default(),
                     "cwd": info.map(|i| harlo_core::sidebar::tilde(&i.cwd)).unwrap_or_default(),
-                    "modified": info.map(|i| i.modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)).unwrap_or(0),
+                    "modified": info.map_or(0, |i| i.modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())),
                 })
             })
             .collect();
@@ -5627,17 +5561,17 @@ impl Workspace {
 
     pub fn recent_sessions(&self, limit: i32) -> QString {
         let mut list: Vec<_> = self.sessions.values().collect();
-        list.sort_by(|a, b| b.modified.cmp(&a.modified));
+        list.sort_by_key(|a| std::cmp::Reverse(a.modified));
         let out: Vec<serde_json::Value> = list
             .into_iter()
-            .take(limit.clamp(1, 50) as usize)
+            .take(usize::try_from(limit.clamp(1, 50)).unwrap_or(0))
             .map(|i| {
                 serde_json::json!({
                     "path": i.path.to_string_lossy(),
                     "title": i.display_title(),
                     "harness": i.harness.as_str(),
                     "cwd": harlo_core::sidebar::tilde(&i.cwd),
-                    "modified": i.modified.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                    "modified": i.modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
                 })
             })
             .collect();
@@ -5649,7 +5583,7 @@ impl Workspace {
     }
 
     pub fn default_worktree_dir(&self) -> QString {
-        QString::from(&worktrees_dir().to_string_lossy().into_owned())
+        QString::from(&harlo_core::db::worktrees_dir().to_string_lossy().into_owned())
     }
 
     pub fn ignored_repo_list(&self) -> QStringList {
@@ -5700,7 +5634,7 @@ impl Workspace {
     /// Where new worktrees go: the setting, else harlo's data folder.
     fn worktree_base(&self) -> PathBuf {
         let set = self.setting_str("worktree_dir");
-        if set.is_empty() { worktrees_dir() } else { PathBuf::from(url_to_path(&set)) }
+        if set.is_empty() { harlo_core::db::worktrees_dir() } else { PathBuf::from(url_to_path(&set)) }
     }
 
     pub fn session_repo(&self, key: &QString) -> QString {
@@ -5760,7 +5694,7 @@ impl Workspace {
 
     /// The iOS app's notification for `note`, while it's closed (see
     /// `phone_push`): questions and approvals, finished and failed runs.
-    fn push_to_phones(&self, key: &str, note: &Note, quiet: &harlo_core::notifications::Quiet) {
+    fn push_to_phones(&self, key: &str, note: &Note, quiet: harlo_core::notifications::Quiet) {
         use crate::phone_push::What;
         use harlo_core::Notable;
         let (what, body) = match note {
@@ -5785,7 +5719,7 @@ impl Workspace {
         if self.is_helper(key) && !matches!(note, Note::Question(..)) {
             return;
         }
-        self.push_to_phones(key, &note, &settings.quiet);
+        self.push_to_phones(key, &note, settings.quiet);
         let model = entry.map(|e| e.model.clone()).unwrap_or_default();
         let plan = self.modes.get(key).is_some_and(|m| m.plan);
         let title_case = |s: &str| s.split(['-', '_', ' ']).filter(|w| !w.is_empty()).map(|w| { let mut c = w.chars(); c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default() }).collect::<Vec<_>>().join(" ");
@@ -5822,8 +5756,7 @@ impl Workspace {
 
         let row = self.rows.iter().find(|r| r.key == key).cloned();
         let cwd = row.as_ref().map(|r| r.cwd.clone()).unwrap_or_default();
-        let project = row.as_ref().and_then(|r| self.projects.iter().find(|p| p.id == r.project_id)).map(|p| p.name.clone())
-            .unwrap_or_else(|| cwd.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        let project = row.as_ref().and_then(|r| self.projects.iter().find(|p| p.id == r.project_id)).map_or_else(|| cwd.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |p| p.name.clone());
         let session = row.as_ref().map(|r| r.title.clone()).unwrap_or_default();
         let branch = row.as_ref().map(|r| r.branch.clone()).unwrap_or_default();
         let last = harlo_core::notifications::summary(&last, harlo_core::notifications::LAST_MESSAGE_CHARS);
@@ -5906,60 +5839,8 @@ impl Workspace {
         let active = self.active_key.to_string() == key;
         let mut this = self.as_mut().rust_mut();
         let Some(entry) = this.live.get_mut(key) else { return };
-        let mut became_idle = false;
-        let mut became_busy = false;
-        let mut lane_file: Option<PathBuf> = None;
-        let mut cost: Option<(f64, String)> = None;
-        let mut notes: Vec<Note> = Vec::new();
-        let mut answered = false;
-        // Approvals the agent asked for with harlo's tools, answered.
-        let mut gates: Vec<(String, String, serde_json::Value)> = Vec::new();
-        let mut stopped = false;
-        // harlo's tools, called on the session's pipe.
-        let mut harlo_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
-        // Claude's limits as it just said (a host's may be another account's).
-        let mut limits: Option<serde_json::Value> = None;
-        let needed_input = entry.info.needs_input;
         let file_before = entry.info.session_file.clone();
-        for u in updates {
-            match u {
-                SessionUpdate::Status(s) => {
-                    became_idle |= entry.info.status == SessionStatus::Busy && s == SessionStatus::Idle;
-                    became_busy |= entry.info.status != SessionStatus::Busy && s == SessionStatus::Busy;
-                    entry.info.status = s;
-                }
-                SessionUpdate::Meta(m) => {
-                    cost = Some((m.cost, m.cost_kind.clone()));
-                    entry.info.session_file = m.session_file.or(entry.info.session_file.take());
-                    lane_file = entry.info.session_file.clone();
-                    entry.info.name = m.name;
-                    entry.info.first_message = m.first_message;
-                    entry.model = m.model;
-                    entry.model_id = m.model_id;
-                    entry.thinking = m.thinking;
-                }
-                SessionUpdate::UiRequest(r) => {
-                    if !entry.requests.iter().any(|(q, _)| q.id == r.id) {
-                        notes.push(Note::Question(question_text(&r), crate::phone_server::request_json(&r)));
-                        let asked = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
-                        entry.requests.push((r, asked));
-                    }
-                }
-                SessionUpdate::Notable(n) => notes.push(Note::Event(n)),
-                SessionUpdate::UiCleared(id) => {
-                    let before = entry.requests.len();
-                    entry.requests.retain(|(q, _)| q.id != id);
-                    answered |= entry.requests.len() != before;
-                }
-                SessionUpdate::Limits(info) => limits = Some(info),
-                SessionUpdate::GateAnswered { id, question, answer } => gates.push((id, question, answer)),
-                SessionUpdate::Stopped => stopped = true,
-                SessionUpdate::HarloCall { id, tool, args } => harlo_calls.push((id, tool, args)),
-                _ => {}
-            }
-        }
-        entry.info.needs_input = !entry.requests.is_empty();
-        let _ = needed_input;
+        let Changes { became_idle, became_busy, lane_file, cost, notes, answered, gates, stopped, harlo_calls, limits } = Changes::of(entry, updates);
         let file_changed = entry.info.session_file != file_before;
         // Whose limits it's using: Claude's sign-in, or Harlo's plan
         // through the Codex sign-in ("codex/…"; the official sign-in, API
@@ -6008,16 +5889,7 @@ impl Workspace {
             }
         // What it cost since the last report: the day's too.
         if let Some((cost, kind)) = cost {
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            let mut this = self.as_mut().rust_mut();
-            let spend = this.spend.entry(key.to_owned()).or_default();
-            spend.kind = kind;
-            let added = spend.observe(cost);
-            if added > 0.0 {
-                this.spend_ledger.add(&today, added);
-                self.save_setting("spend_today", &self.spend_ledger.to_json().to_string());
-            }
-            self.as_mut().refresh_spending();
+            self.as_mut().add_cost(key, cost, kind);
         }
         if let Some(used) = used.filter(|u| *u != self.setting_str(&meter_setting(&on_host))) {
             self.save_setting(&meter_setting(&on_host), &used);
@@ -6054,16 +5926,7 @@ impl Workspace {
         }
         // The user's answers to its approval requests (and split offers):
         // to the agent.
-        for (id, question, answer) in gates {
-            let message = match self.as_mut().rust_mut().proposals.remove(&id) {
-                Some((_, helpers)) => self.as_mut().answer_proposal(key, helpers, &answer),
-                None => harlo_core::orchestration::approval_answer(&question, &answer),
-            };
-            if let Some(live) = registry::get(key) {
-                let busy = self.live.get(key).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
-            }
-        }
+        self.as_mut().answer_gates(key, gates);
         // Its calls of harlo's tools: the caller is the session itself.
         for (call, tool, args) in harlo_calls {
             let result = self.as_mut().orchestrate_as(Some(key.to_owned()), &tool, &args);
@@ -6086,6 +5949,34 @@ impl Workspace {
         }
         if active {
             self.update_active_title();
+        }
+    }
+
+    /// Adds what a session cost since its last report, to it and the day.
+    fn add_cost(mut self: Pin<&mut Self>, key: &str, cost: f64, kind: String) {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut this = self.as_mut().rust_mut();
+        let spend = this.spend.entry(key.to_owned()).or_default();
+        spend.kind = kind;
+        let added = spend.observe(cost);
+        if added > 0.0 {
+            this.spend_ledger.add(&today, added);
+            self.save_setting("spend_today", &self.spend_ledger.to_json().to_string());
+        }
+        self.as_mut().refresh_spending();
+    }
+
+    /// Takes the user's answers to a session's approval requests and split offers to its agent.
+    fn answer_gates(mut self: Pin<&mut Self>, key: &str, gates: Vec<(String, String, serde_json::Value)>) {
+        for (id, question, answer) in gates {
+            let message = match self.as_mut().rust_mut().proposals.remove(&id) {
+                Some((_, helpers)) => self.as_mut().answer_proposal(key, &helpers, &answer),
+                None => harlo_core::orchestration::approval_answer(&question, &answer),
+            };
+            if let Some(live) = registry::get(key) {
+                let busy = self.live.get(key).is_some_and(|e| e.info.status == SessionStatus::Busy);
+                live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+            }
         }
     }
 
@@ -6118,6 +6009,7 @@ impl Workspace {
     }
 
     /// A phone's request (see `phone_server`): `{ op, … }` → its reply.
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn phone_call(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
         // (The agents' models, for a phone's new session.)
         if msg["op"] == "projects" {
@@ -6144,104 +6036,8 @@ impl Workspace {
                     None => fail("That session isn't available."),
                 }
             }
-            "projects" => {
-                let mut agents: Vec<serde_json::Value> = HarnessKind::PROVIDERS
-                    .iter()
-                    .filter(|&&k| self.usable_harness(k))
-                    .map(|k| json!({ "id": k.as_str(), "label": k.label() }))
-                    .collect();
-                // (Tests start demo sessions.)
-                if std::env::args().any(|a| a.starts_with("--selftest")) {
-                    agents.push(json!({ "id": "demo", "label": "Demo" }));
-                }
-                // The shield's mode each agent starts in, there ("" none).
-                let approvals = |project: i64| -> serde_json::Value {
-                    agents.iter().map(|a| {
-                        let id = a["id"].as_str().unwrap_or_default();
-                        (id.to_owned(), json!(self.draft_approval(&QString::from(id), project as i32).to_string()))
-                    }).collect::<serde_json::Map<_, _>>().into()
-                };
-                // Every machine's projects (whichever one the window shows),
-                // each with its machine and the agents there.
-                let projects: Vec<serde_json::Value> = self
-                    .projects
-                    .iter()
-                    .map(|p| json!({ "id": p.id, "name": p.name, "where": where_on_host(&p.path), "agent": p.harness, "icon": p.icon, "color": p.color,
-                                     "approvals": approvals(p.id), "host": harlo_core::remote::host_of(&p.path).unwrap_or_default(),
-                                     "agents": self.agents_at(&p.path),
-                                     // Its own model per agent (Settings → Projects), where it has one.
-                                     "ownModels": self.agents_at(&p.path).iter()
-                                         .map(|a| (a.to_string(), self.setting_str(&format!("project_model_{}_{a}", p.id))))
-                                         .filter(|(_, m)| !m.is_empty()).map(|(a, m)| (a, json!(m))).collect::<serde_json::Map<_, _>>() }))
-                    .collect();
-                let models: serde_json::Value = serde_json::from_str(&self.known_models().to_string()).unwrap_or_default();
-                // Every model each agent offers (Settings → Providers reads them).
-                let all: serde_json::Map<String, serde_json::Value> = self
-                    .provider_checks
-                    .iter()
-                    .filter_map(|(id, st)| {
-                        let list: Vec<serde_json::Value> = st.as_ref()?.models.iter().map(|(m, name)| json!({ "id": m, "name": name })).collect();
-                        Some((id.clone(), serde_json::Value::from(list)))
-                    })
-                    .collect();
-                let templates: serde_json::Value = serde_json::from_str(&self.templates_json.to_string()).unwrap_or_default();
-                // Your other machines: connected (and looked at) or not, and
-                // the agents found there.
-                let machines: Vec<serde_json::Value> = harlo_core::remote::hosts().iter().map(|h| {
-                    let connected = !harlo_core::remote::is_disconnected(&h.name) && harlo_core::remote::info_of(&h.name).is_some();
-                    let home = harlo_core::remote::info_of(&h.name).map(|i| i.home).unwrap_or_default();
-                    json!({ "host": h.name, "connected": connected, "home": home,
-                            "agents": if connected { self.agents_at(&self.home_on(&h.name)) } else { Vec::new() } })
-                }).collect();
-                json!({ "projects": projects, "agents": agents, "defaultAgent": self.default_harness(), "models": models, "agentModels": all, "approvals": approvals(-1),
-                        "templates": templates, "machines": machines })
-            }
-            "new" => {
-                let project = msg["project"].as_i64().unwrap_or(-1);
-                let project = self.projects.iter().find(|p| p.id == project).cloned();
-                let agent = match text("agent") {
-                    a if a.is_empty() => project.as_ref().map(|p| p.harness.clone()).unwrap_or_else(|| self.default_harness()),
-                    a => a,
-                };
-                // (No project: the home folder of the machine asked for, this
-                // computer's by default, whichever machine the window shows.)
-                let host = text("host");
-                if project.is_none() && !host.is_empty() && (harlo_core::remote::is_disconnected(&host) || harlo_core::remote::info_of(&host).is_none()) {
-                    return fail(&format!("Connect to {host} first."));
-                }
-                let cwd = match &project {
-                    Some(p) => p.path.clone(),
-                    None if !host.is_empty() => self.home_on(&host),
-                    None => PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into())),
-                };
-                // (On the project's own machine: its agents.)
-                let Some(kind) = HarnessKind::parse(&agent).filter(|k| self.agents_at(&cwd).contains(&k.as_str())) else {
-                    return fail(&format!("harlo can't start {agent} sessions there."));
-                };
-                let (first, images) = (text("text"), phone_images(&msg["images"]));
-                // The model picked, else the project's own for that agent
-                // (Settings → Projects), else the agent's default from
-                // Settings (the setup guide; not on another machine: its
-                // agent's own).
-                let model = match text("model") {
-                    m if m.is_empty() => self.model_for(project.as_ref().map(|p| p.id), kind, &cwd),
-                    m => m,
-                };
-                let key = self.as_mut().start_session_with(kind, cwd, &model, false);
-                // The shield's mode it starts in (before its first message).
-                let approval = text("approval");
-                if !approval.is_empty() {
-                    self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&approval));
-                }
-                self.as_mut().rebuild();
-                if (!first.trim().is_empty() || !images.is_empty())
-                    && let Some(live) = registry::get(&key)
-                    && !live.handle.prompt_typed(&format!("{}{first}", image_blocks(images.len())), images, harlo_harness::SendMode::Normal, Some(harlo_core::Typed { words: first.clone(), files: Vec::new(), by_you: true }))
-                {
-                    return json!({ "key": key, "harness": kind.as_str(), "model": model, "error": live.handle.held().unwrap_or_default() });
-                }
-                json!({ "key": key, "harness": kind.as_str(), "model": model })
-            }
+            "projects" => self.phone_projects(),
+            "new" => self.as_mut().phone_new(msg),
             // A session's plan limit, as the line above the composer says it
             // (`limit` null: under 90%), and when it continues (`resumesAt`,
             // unix ms, 0 if it isn't going to).
@@ -6255,19 +6051,7 @@ impl Workspace {
                 None => fail("That session isn't running."),
             },
             // Stop (when it works) and continue once its used-up limit resets.
-            "resumeAtReset" => {
-                let at = self.limit_of(&key).and_then(|l| l["resetAt"].as_i64()).unwrap_or(0);
-                if at <= chrono::Local::now().timestamp_millis() {
-                    return fail("This session's limit isn't used up.");
-                }
-                if self.live.get(&key).is_some_and(|e| e.info.status == harlo_core::SessionStatus::Busy)
-                    && let Some(live) = registry::get(&key)
-                {
-                    live.handle.abort();
-                }
-                self.as_mut().resume_at_reset(&QString::from(&key), at as f64);
-                json!({ "ok": true, "resumesAt": at })
-            }
+            "resumeAtReset" => self.as_mut().phone_resume_at_reset(msg),
             "cancelResume" => {
                 self.as_mut().cancel_resume(&QString::from(&key));
                 json!({ "ok": true })
@@ -6276,82 +6060,17 @@ impl Workspace {
             // yet) and machine ("" this one), for its model's server.
             // A phone connected a machine (see `phone_server`): its
             // sessions and limits, and what it can start a session with.
-            "hostConnected" => {
-                let host = text("host");
-                self.as_mut().host_connected(&QString::from(&host));
-                self.remote_kick.notify_one();
-                self.as_mut().refresh_host_limits(&host, true, false);
-                let home = self.home_on(&host);
-                let shown = harlo_core::remote::info_of(&host).map(|i| i.home).unwrap_or_default();
-                json!({ "host": host, "home": shown, "agents": self.agents_at(&home) })
-            }
+            "hostConnected" => self.as_mut().phone_host_connected(msg),
             "serverOf" => match self.live.get(&key) {
                 Some(e) => json!({ "agent": e.info.harness, "model": e.model_id,
                                    "host": harlo_core::remote::host_of(&e.info.cwd).unwrap_or_default() }),
                 None => fail("That session isn't running."),
             },
-            "send" => {
-                let Some(live) = registry::get(&key) else { return fail("That session isn't running.") };
-                let mode = match msg["mode"].as_str() {
-                    Some("steer") => harlo_harness::SendMode::Steer,
-                    Some("followUp") => harlo_harness::SendMode::FollowUp,
-                    _ => harlo_harness::SendMode::Normal,
-                };
-                let images = phone_images(&msg["images"]);
-                // (As typed: its pictures are its images.)
-                let typed = Some(harlo_core::Typed { words: text("text"), files: Vec::new(), by_you: true });
-                let mut text = format!("{}{}", image_blocks(images.len()), text("text"));
-                // Plan mode: a plan first, no changes (as the desktop sends).
-                if self.modes.get(&key).is_some_and(|m| m.plan) && mode == harlo_harness::SendMode::Normal {
-                    text.push_str(harlo_harness::file_blocks::PLAN_NOTE);
-                }
-                // Sessions it mentions (picked from the `@` list): read in
-                // before it, off this thread, as the desktop sends them.
-                let mentioned: Vec<harlo_harness::SessionInfo> = harlo_core::session_ref::tokens(&text)
-                    .iter()
-                    .filter_map(|m| harlo_core::session_ref::find(self.sessions.values(), m).cloned())
-                    .collect();
-                if !mentioned.is_empty() {
-                    if let Some(held) = live.handle.held() {
-                        return fail(&held);
-                    }
-                    crate::runtime().spawn_blocking(move || {
-                        let text = harlo_core::session_ref::expand(&text, |m| harlo_core::session_ref::find(&mentioned, m).cloned());
-                        live.handle.prompt_typed(&text, images, mode, typed);
-                    });
-                    return json!({ "ok": true });
-                }
-                if !live.handle.prompt_typed(&text, images, mode, typed) {
-                    return fail(&live.handle.held().unwrap_or_else(|| "harlo holds this session's messages.".into()));
-                }
-                json!({ "ok": true })
-            }
+            "send" => self.phone_send(msg),
             "modes" => self.phone_modes(&key),
-            "setModes" => {
-                if let Some(mode) = msg["approval"].as_str() {
-                    self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
-                }
-                if let Some(on) = msg["plan"].as_bool() {
-                    self.as_mut().set_plan_mode(&QString::from(&key), on);
-                }
-                self.phone_modes(&key)
-            }
-            "rename" => {
-                let name = text("name");
-                let Some(live_key) = self.as_mut().make_live(&key) else { return fail("That session isn't available.") };
-                if let Some(live) = registry::get(&live_key) {
-                    live.handle.send_raw(json!({ "type": "set_session_name", "name": name.trim() }));
-                }
-                json!({ "ok": true })
-            }
-            "archive" => {
-                if self.file_for_key(&key).is_none() {
-                    return fail("This session isn't saved yet.");
-                }
-                let on = msg["archived"].as_bool().unwrap_or(true);
-                self.as_mut().update_meta(&key, |m| m.archived = on);
-                json!({ "ok": true })
-            }
+            "setModes" => self.as_mut().phone_set_modes(msg),
+            "rename" => self.as_mut().phone_rename(msg),
+            "archive" => self.as_mut().phone_archive(msg),
             // A session's shared plan (as the dock above the desktop's
             // composer), the agents that can review a step, and its edits.
             // A session's helpers (the sessions its agent, or its plan's run,
@@ -6359,43 +6078,10 @@ impl Workspace {
             "helpers" => json!({ "helpers": serde_json::from_str::<serde_json::Value>(&self.orchestrated_json(&QString::from(&key)).to_string()).unwrap_or_default() }),
             // A helper's request (a tool's approval) answered from the
             // phone, as from the Subagents box: the helpers after it.
-            "answerHelper" => {
-                let helper = text("helper");
-                if !self.orchestrated(&key, &helper) {
-                    return fail("That isn't one of this session's helpers.");
-                }
-                let id = text("id");
-                self.as_mut().answer_helper(&QString::from(&helper), &QString::from(&id), &QString::from(&text("value")));
-                // (Without the request just answered: it's gone once the
-                // helper hears.)
-                let mut list: serde_json::Value = serde_json::from_str(&self.orchestrated_json(&QString::from(&key)).to_string()).unwrap_or_default();
-                for h in list.as_array_mut().into_iter().flatten().filter(|h| h["id"] == helper.as_str() && h["asks"]["id"] == id.as_str()) {
-                    h["asks"] = serde_json::Value::Null;
-                }
-                json!({ "helpers": list })
-            }
-            "plan" | "planEdit" | "planRun" | "planStop" => {
-                if msg["op"] == "planEdit" {
-                    self.as_mut().plan_edit(&QString::from(&key), &QString::from(&msg["edit"].to_string()));
-                }
-                if msg["op"] == "planStop" {
-                    self.as_mut().stop_plan_run(&QString::from(&key));
-                }
-                if msg["op"] == "planRun" {
-                    let problem = self.as_mut().run_plan(&QString::from(&key), &QString::from(&text("agent")), &QString::from(&text("model"))).to_string();
-                    if !problem.is_empty() {
-                        return fail(&problem);
-                    }
-                }
-                let mut plan: serde_json::Value = serde_json::from_str(&self.plan_json(&QString::from(&key)).to_string()).unwrap_or_default();
-                plan["reviewers"] = HarnessKind::PROVIDERS.iter().filter(|&&k| self.usable_harness(k)).map(|k| json!({ "id": k.as_str(), "label": k.label() })).collect();
-                // Who "the team's helpers" are (its project's Team, else the
-                // session's agent).
-                plan["team"] = serde_json::from_str(&self.helpers_json(&QString::from(&key)).to_string()).unwrap_or_default();
-                plan
-            }
+            "answerHelper" => self.as_mut().phone_answer_helper(msg),
+            "plan" | "planEdit" | "planRun" | "planStop" => self.as_mut().phone_plan(msg),
             "reviewStep" => {
-                let id = msg["id"].as_i64().unwrap_or(-1) as i32;
+                let id = i32::try_from(msg["id"].as_i64().unwrap_or(-1)).unwrap_or(i32::MAX);
                 match self.as_mut().review_step(&QString::from(&key), id, &QString::from(&text("agent"))).to_string() {
                     e if !e.is_empty() => fail(&e),
                     _ => json!({ "ok": true }),
@@ -6422,21 +6108,7 @@ impl Workspace {
                 Some((cwd, _)) => json!({ "cwd": cwd.to_string_lossy() }),
                 None => fail("The wiki is for a harlo project's sessions."),
             },
-            "wikiRun" => {
-                let mode = text("mode");
-                if !["create", "update", "continue"].contains(&mode.as_str()) {
-                    return fail("harlo doesn't know that wiki run.");
-                }
-                if mode == "create" {
-                    if let Some((_, project)) = self.wiki_folder(&key) {
-                        self.as_mut().set_setting(&QString::from(&format!("wiki_{project}")), &QString::from("1"));
-                    }
-                }
-                match self.as_mut().start_wiki_run(&QString::from(&key), &QString::from(&mode)).to_string() {
-                    e if !e.is_empty() => fail(&e),
-                    _ => json!({ "ok": true }),
-                }
-            }
+            "wikiRun" => self.as_mut().phone_wiki_run(msg),
             "theme" => self.phone_theme(),
             // The phone picked your penguin: the left rail's too.
             "setAvatar" => {
@@ -6449,6 +6121,292 @@ impl Workspace {
             }
             other => fail(&format!("unknown op {other}")),
         }
+    }
+
+    /// Archives a session for a phone, or takes it out of the archive.
+    fn phone_archive(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let key = msg["key"].as_str().unwrap_or_default().to_owned();
+        let fail = |e: &str| serde_json::json!({ "error": e });
+        if self.file_for_key(&key).is_none() {
+            return fail("This session isn't saved yet.");
+        }
+        let on = msg["archived"].as_bool().unwrap_or(true);
+        self.as_mut().update_meta(&key, |m| m.archived = on);
+        json!({ "ok": true })
+    }
+
+    /// Renames a session for a phone.
+    fn phone_rename(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let key = text("key");
+        let fail = |e: &str| serde_json::json!({ "error": e });
+        let name = text("name");
+        let Some(live_key) = self.as_mut().make_live(&key) else { return fail("That session isn't available.") };
+        if let Some(live) = registry::get(&live_key) {
+            live.handle.send_raw(json!({ "type": "set_session_name", "name": name.trim() }));
+        }
+        json!({ "ok": true })
+    }
+
+    /// A session's approval and plan modes, as a phone set them.
+    fn phone_set_modes(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        let key = msg["key"].as_str().unwrap_or_default().to_owned();
+        if let Some(mode) = msg["approval"].as_str() {
+            self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
+        }
+        if let Some(on) = msg["plan"].as_bool() {
+            self.as_mut().set_plan_mode(&QString::from(&key), on);
+        }
+        self.phone_modes(&key)
+    }
+
+    /// A machine a phone connected: its home folder and the agents there.
+    fn phone_host_connected(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let host = text("host");
+        self.as_mut().host_connected(&QString::from(&host));
+        self.remote_kick.notify_one();
+        self.as_mut().refresh_host_limits(&host, true, false);
+        let home = home_on(&host);
+        let shown = harlo_core::remote::info_of(&host).map(|i| i.home).unwrap_or_default();
+        json!({ "host": host, "home": shown, "agents": self.agents_at(&home) })
+    }
+
+    /// Continues a session when its plan limit resets, as a phone asked.
+    fn phone_resume_at_reset(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let key = text("key");
+        let fail = |e: &str| json!({ "error": e });
+        let at = self.limit_of(&key).and_then(|l| l["resetAt"].as_i64()).unwrap_or(0);
+        if at <= chrono::Local::now().timestamp_millis() {
+            return fail("This session's limit isn't used up.");
+        }
+        if self.live.get(&key).is_some_and(|e| e.info.status == harlo_core::SessionStatus::Busy)
+            && let Some(live) = registry::get(&key)
+        {
+            live.handle.abort();
+        }
+        self.as_mut().resume_at_reset(&QString::from(&key), at as f64);
+        json!({ "ok": true, "resumesAt": at })
+    }
+
+    /// Starts a wiki run a phone asked for.
+    fn phone_wiki_run(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let key = text("key");
+        let fail = |e: &str| json!({ "error": e });
+        let mode = text("mode");
+        if !["create", "update", "continue"].contains(&mode.as_str()) {
+            return fail("harlo doesn't know that wiki run.");
+        }
+        if mode == "create"
+            && let Some((_, project)) = self.wiki_folder(&key) {
+                self.as_mut().set_setting(&QString::from(&format!("wiki_{project}")), &QString::from("1"));
+            }
+        match self.as_mut().start_wiki_run(&QString::from(&key), &QString::from(&mode)).to_string() {
+            e if !e.is_empty() => fail(&e),
+            _ => json!({ "ok": true }),
+        }
+    }
+
+    /// A phone's answer to a helper's question.
+    fn phone_answer_helper(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let key = text("key");
+        let fail = |e: &str| json!({ "error": e });
+        let helper = text("helper");
+        if !self.orchestrated(&key, &helper) {
+            return fail("That isn't one of this session's helpers.");
+        }
+        let id = text("id");
+        self.as_mut().answer_helper(&QString::from(&helper), &QString::from(&id), &QString::from(&text("value")));
+        // (Without the request just answered: it's gone once the
+        // helper hears.)
+        let mut list: serde_json::Value = serde_json::from_str(&self.orchestrated_json(&QString::from(&key)).to_string()).unwrap_or_default();
+        for h in list.as_array_mut().into_iter().flatten().filter(|h| h["id"] == helper.as_str() && h["asks"]["id"] == id.as_str()) {
+            h["asks"] = serde_json::Value::Null;
+        }
+        json!({ "helpers": list })
+    }
+
+    /// A session's plan for a phone, after the change it asked for.
+    fn phone_plan(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let key = text("key");
+        let fail = |e: &str| json!({ "error": e });
+        if msg["op"] == "planEdit" {
+            self.as_mut().plan_edit(&QString::from(&key), &QString::from(&msg["edit"].to_string()));
+        }
+        if msg["op"] == "planStop" {
+            self.as_mut().stop_plan_run(&QString::from(&key));
+        }
+        if msg["op"] == "planRun" {
+            let problem = self.as_mut().run_plan(&QString::from(&key), &QString::from(&text("agent")), &QString::from(&text("model"))).to_string();
+            if !problem.is_empty() {
+                return fail(&problem);
+            }
+        }
+        let mut plan: serde_json::Value = serde_json::from_str(&self.plan_json(&QString::from(&key)).to_string()).unwrap_or_default();
+        plan["reviewers"] = HarnessKind::PROVIDERS.iter().filter(|&&k| self.usable_harness(k)).map(|k| json!({ "id": k.as_str(), "label": k.label() })).collect();
+        // Who "the team's helpers" are (its project's Team, else the
+        // session's agent).
+        plan["team"] = serde_json::from_str(&self.helpers_json(&QString::from(&key)).to_string()).unwrap_or_default();
+        plan
+    }
+
+    /// Sends a phone's message to a running session.
+    fn phone_send(&self, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let key = text("key");
+        let fail = |e: &str| json!({ "error": e });
+        let Some(live) = registry::get(&key) else { return fail("That session isn't running.") };
+        let mode = match msg["mode"].as_str() {
+            Some("steer") => harlo_harness::SendMode::Steer,
+            Some("followUp") => harlo_harness::SendMode::FollowUp,
+            _ => harlo_harness::SendMode::Normal,
+        };
+        let images = harlo_core::phone::images(&msg["images"]);
+        // (As typed: its pictures are its images.)
+        let typed = Some(harlo_core::Typed { words: text("text"), files: Vec::new(), by_you: true });
+        let mut text = format!("{}{}", harlo_core::phone::image_blocks(images.len()), text("text"));
+        // Plan mode: a plan first, no changes (as the desktop sends).
+        if self.modes.get(&key).is_some_and(|m| m.plan) && mode == harlo_harness::SendMode::Normal {
+            text.push_str(harlo_harness::file_blocks::PLAN_NOTE);
+        }
+        // Sessions it mentions (picked from the `@` list): read in
+        // before it, off this thread, as the desktop sends them.
+        let mentioned: Vec<harlo_harness::SessionInfo> = harlo_core::session_ref::tokens(&text)
+            .iter()
+            .filter_map(|m| harlo_core::session_ref::find(self.sessions.values(), m).cloned())
+            .collect();
+        if !mentioned.is_empty() {
+            if let Some(held) = live.handle.held() {
+                return fail(&held);
+            }
+            crate::runtime().spawn_blocking(move || {
+                let text = harlo_core::session_ref::expand(&text, |m| harlo_core::session_ref::find(&mentioned, m).cloned());
+                live.handle.prompt_typed(&text, images, mode, typed);
+            });
+            return json!({ "ok": true });
+        }
+        if !live.handle.prompt_typed(&text, images, mode, typed) {
+            return fail(&live.handle.held().unwrap_or_else(|| "harlo holds this session's messages.".into()));
+        }
+        json!({ "ok": true })
+    }
+
+    /// Starts a session a phone asked for, with its first message and photos.
+    fn phone_new(mut self: Pin<&mut Self>, msg: &serde_json::Value) -> serde_json::Value {
+        use serde_json::json;
+        let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+        let fail = |e: &str| json!({ "error": e });
+        let project = msg["project"].as_i64().unwrap_or(-1);
+        let project = self.projects.iter().find(|p| p.id == project).cloned();
+        let agent = match text("agent") {
+            a if a.is_empty() => project.as_ref().map_or_else(|| self.default_harness(), |p| p.harness.clone()),
+            a => a,
+        };
+        // (No project: the home folder of the machine asked for, this
+        // computer's by default, whichever machine the window shows.)
+        let host = text("host");
+        if project.is_none() && !host.is_empty() && (harlo_core::remote::is_disconnected(&host) || harlo_core::remote::info_of(&host).is_none()) {
+            return fail(&format!("Connect to {host} first."));
+        }
+        let cwd = match &project {
+            Some(p) => p.path.clone(),
+            None if !host.is_empty() => home_on(&host),
+            None => PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into())),
+        };
+        // (On the project's own machine: its agents.)
+        let Some(kind) = HarnessKind::parse(&agent).filter(|k| self.agents_at(&cwd).contains(&k.as_str())) else {
+            return fail(&format!("harlo can't start {agent} sessions there."));
+        };
+        let (first, images) = (text("text"), harlo_core::phone::images(&msg["images"]));
+        // The model picked, else the project's own for that agent
+        // (Settings → Projects), else the agent's default from
+        // Settings (the setup guide; not on another machine: its
+        // agent's own).
+        let model = match text("model") {
+            m if m.is_empty() => self.model_for(project.as_ref().map(|p| p.id), kind, &cwd),
+            m => m,
+        };
+        let key = self.as_mut().start_session_with(kind, cwd, &model, false);
+        // The shield's mode it starts in (before its first message).
+        let approval = text("approval");
+        if !approval.is_empty() {
+            self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&approval));
+        }
+        self.as_mut().rebuild();
+        if (!first.trim().is_empty() || !images.is_empty())
+            && let Some(live) = registry::get(&key)
+            && !live.handle.prompt_typed(&format!("{}{first}", harlo_core::phone::image_blocks(images.len())), images, harlo_harness::SendMode::Normal, Some(harlo_core::Typed { words: first.clone(), files: Vec::new(), by_you: true }))
+        {
+            return json!({ "key": key, "harness": kind.as_str(), "model": model, "error": live.handle.held().unwrap_or_default() });
+        }
+        json!({ "key": key, "harness": kind.as_str(), "model": model })
+    }
+
+    /// The projects and agents a phone offers for a new session.
+    fn phone_projects(&self) -> serde_json::Value {
+        use serde_json::json;
+        let mut agents: Vec<serde_json::Value> = HarnessKind::PROVIDERS
+            .iter()
+            .filter(|&&k| self.usable_harness(k))
+            .map(|k| json!({ "id": k.as_str(), "label": k.label() }))
+            .collect();
+        // (Tests start demo sessions.)
+        if std::env::args().any(|a| a.starts_with("--selftest")) {
+            agents.push(json!({ "id": "demo", "label": "Demo" }));
+        }
+        // The shield's mode each agent starts in, there ("" none).
+        let approvals = |project: i64| -> serde_json::Value {
+            agents.iter().map(|a| {
+                let id = a["id"].as_str().unwrap_or_default();
+                (id.to_owned(), json!(self.draft_approval(&QString::from(id), i32::try_from(project).unwrap_or(i32::MAX)).to_string()))
+            }).collect::<serde_json::Map<_, _>>().into()
+        };
+        // Every machine's projects (whichever one the window shows),
+        // each with its machine and the agents there.
+        let projects: Vec<serde_json::Value> = self
+            .projects
+            .iter()
+            .map(|p| json!({ "id": p.id, "name": p.name, "where": where_on_host(&p.path), "agent": p.harness, "icon": p.icon, "color": p.color,
+                             "approvals": approvals(p.id), "host": harlo_core::remote::host_of(&p.path).unwrap_or_default(),
+                             "agents": self.agents_at(&p.path),
+                             // Its own model per agent (Settings → Projects), where it has one.
+                             "ownModels": self.agents_at(&p.path).iter()
+                                 .map(|a| (a.to_string(), self.setting_str(&format!("project_model_{}_{a}", p.id))))
+                                 .filter(|(_, m)| !m.is_empty()).map(|(a, m)| (a, json!(m))).collect::<serde_json::Map<_, _>>() }))
+            .collect();
+        let models: serde_json::Value = serde_json::from_str(&self.known_models().to_string()).unwrap_or_default();
+        // Every model each agent offers (Settings → Providers reads them).
+        let all: serde_json::Map<String, serde_json::Value> = self
+            .provider_checks
+            .iter()
+            .filter_map(|(id, st)| {
+                let list: Vec<serde_json::Value> = st.as_ref()?.models.iter().map(|(m, name)| json!({ "id": m, "name": name })).collect();
+                Some((id.clone(), serde_json::Value::from(list)))
+            })
+            .collect();
+        let templates: serde_json::Value = serde_json::from_str(&self.templates_json.to_string()).unwrap_or_default();
+        // Your other machines: connected (and looked at) or not, and
+        // the agents found there.
+        let machines: Vec<serde_json::Value> = harlo_core::remote::hosts().iter().map(|h| {
+            let connected = !harlo_core::remote::is_disconnected(&h.name) && harlo_core::remote::info_of(&h.name).is_some();
+            let home = harlo_core::remote::info_of(&h.name).map(|i| i.home).unwrap_or_default();
+            json!({ "host": h.name, "connected": connected, "home": home,
+                    "agents": if connected { self.agents_at(&home_on(&h.name)) } else { Vec::new() } })
+        }).collect();
+        json!({ "projects": projects, "agents": agents, "defaultAgent": self.default_harness(), "models": models, "agentModels": all, "approvals": approvals(-1),
+                "templates": templates, "machines": machines })
     }
 
     /// The theme's colours, its mode and your avatar, for phones.
@@ -6513,33 +6471,14 @@ impl Workspace {
         let parents = self.helper_parents();
         let mut rows = rows;
         sidebar::nest_helpers(&mut rows, &parents);
-        let mut group = String::new();
-        let mut list = Vec::new();
-        for r in rows {
-            match r.kind {
-                SidebarKind::Project => group = r.title.clone(),
-                SidebarKind::OtherGroup => group = String::new(),
-                SidebarKind::Session => {
-                    // What it waits on you for (a phone answers from its list).
-                    let requests: Vec<serde_json::Value> = self.live.get(&r.key).into_iter()
-                        .flat_map(|e| &e.requests)
-                        .map(|(q, asked)| { let mut v = crate::phone_server::request_json(q); v["asked"] = json!(asked); v })
-                        .collect();
-                    list.push(json!({
-                        "key": r.key, "title": r.title, "project": group, "harness": r.harness,
-                        "status": r.status, "modified": r.modified, "branch": r.branch, "pinned": r.pinned,
-                        "where": if r.cwd.as_os_str().is_empty() { String::new() } else { sidebar::tilde(&r.cwd) },
-                        // Its machine ("" this one), and why it's settled ("" not).
-                        "host": harlo_core::remote::host_of(&r.cwd).unwrap_or_default(), "settled": match harlo_core::shelf::why_text(&r.settled) { "" => r.settled.as_str(), t => t },
-                        "requests": requests,
-                        // A helper: the session that started it (shown under it).
-                        "parent": if r.nest > 0 { parents.get(&r.key).cloned() } else { None }, "helperOf": r.helper_of, "nest": r.nest,
-                    }))
-                }
-                SidebarKind::More | SidebarKind::Shelf => {}
-            }
-        }
-        crate::phone_bridge::publish_sessions(serde_json::Value::Array(list));
+        // What each waits on you for (a phone answers from its list).
+        let requests = |key: &str| -> Vec<serde_json::Value> {
+            self.live.get(key).into_iter()
+                .flat_map(|e| &e.requests)
+                .map(|(q, asked)| { let mut v = crate::phone_server::request_json(q); v["asked"] = json!(asked); v })
+                .collect()
+        };
+        crate::phone_bridge::publish_sessions(serde_json::Value::Array(sidebar::phone_list(rows, &parents, requests)));
     }
 
     fn rebuild(mut self: Pin<&mut Self>) {
@@ -6596,15 +6535,15 @@ impl Workspace {
         let changes = diff_by(&self.rows, &new_rows, |a, b| a.key == b.key, |a, b| a == b);
         self.as_mut().apply_changes(changes);
         self.as_mut().update_tabs();
-        let busy = self.live.values().filter(|e| matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting)).count() as i32;
-        let input = self.live.values().filter(|e| e.info.needs_input).count() as i32;
+        let busy = i32::try_from(self.live.values().filter(|e| matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting)).count()).unwrap_or(i32::MAX);
+        let input = i32::try_from(self.live.values().filter(|e| e.info.needs_input).count()).unwrap_or(i32::MAX);
         if self.busy_count != busy {
             self.as_mut().set_busy_count(busy);
         }
         if self.input_count != input {
             self.as_mut().set_input_count(input);
         }
-        let (projects, count) = (self.projects.len() as i32, sessions.len() as i32);
+        let (projects, count) = (i32::try_from(self.projects.len()).unwrap_or(i32::MAX), i32::try_from(sessions.len()).unwrap_or(i32::MAX));
         if self.project_count != projects {
             self.as_mut().set_project_count(projects);
         }
@@ -6619,16 +6558,22 @@ impl Workspace {
             match change {
                 ListChange::Update { at, row } => {
                     self.as_mut().rust_mut().rows[at] = row;
-                    let idx = self.index(at as i32, 0, &root);
+                    let idx = self.index(i32::try_from(at).unwrap_or(i32::MAX), 0, &root);
                     self.as_mut().data_changed(&idx, &idx, &QVector::<i32>::default());
                 }
+                // SAFETY: begin/end_remove_rows are paired here, on the GUI thread;
+                // diff_by made this change from `self.rows`, so `at..at + count`
+                // is a non-empty range of existing rows, drained between them.
                 ListChange::Remove { at, count } => unsafe {
-                    self.as_mut().begin_remove_rows(&root, at as i32, (at + count - 1) as i32);
+                    self.as_mut().begin_remove_rows(&root, i32::try_from(at).unwrap_or(i32::MAX), i32::try_from(at + count - 1).unwrap_or(i32::MAX));
                     self.as_mut().rust_mut().rows.drain(at..at + count);
                     self.as_mut().end_remove_rows();
                 },
+                // SAFETY: begin/end_insert_rows are paired here, on the GUI thread;
+                // diff_by made this change from `self.rows`: `rows` is non-empty
+                // and `at` within them, and exactly these are spliced in between.
                 ListChange::Insert { at, rows } => unsafe {
-                    self.as_mut().begin_insert_rows(&root, at as i32, (at + rows.len() - 1) as i32);
+                    self.as_mut().begin_insert_rows(&root, i32::try_from(at).unwrap_or(i32::MAX), i32::try_from(at + rows.len() - 1).unwrap_or(i32::MAX));
                     self.as_mut().rust_mut().rows.splice(at..at, rows);
                     self.as_mut().end_insert_rows();
                 },
@@ -6637,14 +6582,14 @@ impl Workspace {
     }
 
     pub fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Some(r) = self.rows.get(index.row() as usize) else {
+        let Some(r) = self.rows.get(usize::try_from(index.row()).unwrap_or(0)) else {
             return QVariant::default();
         };
         let s = |v: &str| QVariant::from(&QString::from(v));
         match role {
             ROLE_KIND => s(r.kind.as_str()),
             ROLE_KEY => s(&r.key),
-            ROLE_PROJECT => QVariant::from(&(r.project_id as i32)),
+            ROLE_PROJECT => QVariant::from(&i32::try_from(r.project_id).unwrap_or(i32::MAX)),
             ROLE_TITLE => s(&r.title),
             ROLE_SUBTITLE => s(&r.subtitle),
             ROLE_HARNESS => s(&r.harness),
@@ -6653,14 +6598,14 @@ impl Workspace {
             ROLE_MODIFIED => QVariant::from(&(r.modified as f64)),
             ROLE_COLLAPSED => QVariant::from(&r.collapsed),
             ROLE_PINNED => QVariant::from(&r.pinned),
-            ROLE_COUNT => QVariant::from(&(r.count as i32)),
+            ROLE_COUNT => QVariant::from(&i32::try_from(r.count).unwrap_or(i32::MAX)),
             ROLE_BRANCH => s(&r.branch),
-            ROLE_CHANGES => QVariant::from(&(r.changes as i32)),
+            ROLE_CHANGES => QVariant::from(&i32::try_from(r.changes).unwrap_or(i32::MAX)),
             ROLE_ICON => s(harlo_core::project_icons::shown(&r.icon)),
             ROLE_COLOR => s(&r.color),
             ROLE_SETTLED => s(harlo_core::shelf::why_text(&r.settled)),
             ROLE_HELPER_OF => s(&r.helper_of),
-            ROLE_NEST => QVariant::from(&(r.nest as i32)),
+            ROLE_NEST => QVariant::from(&i32::try_from(r.nest).unwrap_or(i32::MAX)),
             _ => QVariant::default(),
         }
     }
@@ -6694,7 +6639,7 @@ impl Workspace {
     }
 
     pub fn row_count(&self, _parent: &QModelIndex) -> i32 {
-        self.rows.len() as i32
+        i32::try_from(self.rows.len()).unwrap_or(i32::MAX)
     }
 }
 
@@ -6825,7 +6770,7 @@ fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<W
             Some(h) => crate::accounts::host_server(h, agent, model),
             None => crate::accounts::managed_server(agent, model),
         });
-        if let Some(server) = server.filter(|s| s.needs_start()) {
+        if let Some(server) = server.filter(super::accounts::ModelServer::needs_start) {
             let name = server.name();
             let say = |text: String, error: bool| {
                 if let Some(thread) = &notify {
@@ -6845,43 +6790,9 @@ fn send_first_prompt(key: &str, first: FirstPrompt, notify: Option<CxxQtThread<W
     });
 }
 
-/// The plan limits for phones, from this computer's (`quota_json`) and each
-/// machine's (`host_limits_json`).
-fn publish_phone_limits(quota: &QString, hosts: &QString) {
-    let parse = |v: &QString| serde_json::from_str::<serde_json::Value>(&v.to_string()).unwrap_or_default();
-    let (here, hosts) = (parse(quota), parse(hosts));
-    crate::phone_bridge::publish_limits(json!({
-        "here": { "accounts": here["accounts"].as_array().cloned().unwrap_or_default(), "updatedAt": here["updatedAt"] },
-        "hosts": if hosts.is_object() { hosts } else { json!({}) },
-    }));
-}
-
-/// Photos a phone sent (`[{ data, mimeType }]`, base64) as image contents;
-/// other types are dropped.
-fn phone_images(list: &serde_json::Value) -> Vec<serde_json::Value> {
-    list.as_array()
-        .into_iter()
-        .flatten()
-        .filter(|i| matches!(i["mimeType"].as_str(), Some("image/jpeg" | "image/png" | "image/gif" | "image/webp")) && i["data"].as_str().is_some_and(|d| !d.is_empty()))
-        .map(|i| json!({ "type": "image", "data": i["data"], "mimeType": i["mimeType"] }))
-        .collect()
-}
-
-/// The `<file>` blocks naming a phone's photos (as attachments are named).
-fn image_blocks(n: usize) -> String {
-    (1..=n).map(|i| format!("<file name=\"Photo {i}\"></file>\n")).collect()
-}
-
-/// What a question asks, for its notification: an ask's first question,
-/// else the dialog's message or title.
-fn question_text(r: &harlo_core::UiRequest) -> String {
-    let asked = r.raw["questions"][0]["question"].as_str().unwrap_or_default();
-    [asked, r.message.as_str(), r.title.as_str()].into_iter().map(str::trim).find(|t| !t.is_empty()).unwrap_or_default().to_owned()
-}
-
 /// Pasted images from before last week: they've been sent or dropped by now.
 fn prune_pasted(dir: &Path) {
-    let week = std::time::Duration::from_secs(7 * 24 * 3600);
+    let week = std::time::Duration::from_hours(168);
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         if entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > week) {
             let _ = std::fs::remove_file(entry.path());
@@ -6889,8 +6800,11 @@ fn prune_pasted(dir: &Path) {
     }
 }
 
-fn worktrees_dir() -> PathBuf {
-    harlo_core::db::default_path().parent().map(|p| p.join("worktrees")).unwrap_or_else(|| PathBuf::from("worktrees"))
+/// The plan limits for phones, from this computer's (`quota_json`) and each
+/// machine's (`host_limits_json`).
+fn publish_phone_limits(quota: &QString, hosts: &QString) {
+    let parse = |v: &QString| serde_json::from_str::<serde_json::Value>(&v.to_string()).unwrap_or_default();
+    crate::phone_bridge::publish_limits(harlo_core::phone::limits(&parse(quota), &parse(hosts)));
 }
 
 /// Accepts a plain path or a `file://` URL (from a QML dialog or drop).
@@ -6921,44 +6835,37 @@ fn branches_json(list: Vec<harlo_harness::branches::BranchInfo>) -> String {
     serde_json::Value::Array(json).to_string()
 }
 
-/// A saved session's messages for the search index: read as its agent
-/// writes them, here or (over SSH) on its host. None: not readable now.
-fn session_messages(path: &Path, kind: HarnessKind) -> Option<Vec<serde_json::Value>> {
-    let remote = harlo_core::remote::host_of(path).and_then(|h| harlo_core::remote::host(&h));
-    match remote {
-        Some(_) => harlo_core::remote::local_copy(path).ok().and_then(|copy| harlo_harness::store::read_saved_for(kind, &copy).ok()).map(|s| s.messages),
-        None => harlo_harness::store::read_saved_for(kind, path).ok().map(|s| s.messages),
+/// An agent's tool call, as the handlers of its tools read it.
+struct ToolCall<'a> {
+    /// The calling session's key (None: an agent harlo didn't start).
+    caller: Option<String>,
+    args: &'a serde_json::Value,
+    /// The caller's folder, and its machine (None: this one).
+    cwd: Option<PathBuf>,
+    host: Option<String>,
+}
+
+impl ToolCall<'_> {
+    /// A text argument, trimmed ("" when it's missing).
+    fn text(&self, key: &str) -> String {
+        self.args[key].as_str().map(str::trim).unwrap_or_default().to_owned()
     }
 }
 
-/// What the search index needs of a session: a local one is read on from
-/// `resume` (a Claude transcript only grows; a Harlo session is read whole
-/// again when what was added doesn't go on from its last entry). None:
-/// not readable now (the index keeps what it had, and tries again).
-fn session_part(path: &Path, kind: HarnessKind, resume: Option<&harlo_harness::claude::Resume>) -> Option<harlo_harness::claude::Part> {
-    if !harlo_core::remote::is_remote(path) {
-        return match kind {
-            HarnessKind::Claude => harlo_harness::claude::read_part(path, resume),
-            _ => harlo_harness::store::read_part(path, resume),
-        }
-        .ok();
-    }
-    session_messages(path, kind).map(|messages| harlo_harness::claude::Part { messages, ..Default::default() })
-}
-
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Workspace {
     /// An agent's tool call (orchestration): `token` is its session's
     /// `HARLO_SESSION`.
-    pub(crate) fn orchestrate(self: Pin<&mut Self>, token: &str, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    pub(crate) fn orchestrate(self: Pin<&mut Self>, token: &str, tool: &str, args: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let caller = self.orch_tokens.get(token).cloned();
         self.orchestrate_as(caller, tool, args)
     }
 
     /// A tool call from `caller` (None: not a session harlo knows).
-    fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, tool: &str, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, tool: &str, args: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         use serde_json::json;
         if !self.orchestration_on {
-            return Err("Orchestration is turned off in harlo (Settings → Orchestration).".into());
+            return Err(anyhow::Error::msg("Orchestration is turned off in harlo (Settings → Orchestration)."));
         }
         // (A session working again: its helpers start again.)
         if let Some(c) = &caller {
@@ -6967,411 +6874,353 @@ impl Workspace {
         if tool == harlo_core::orchestration::ENABLED {
             return Ok(json!(true));
         }
-        // The caller's tools, and what they're for: harlo's, and its
-        // project's wiki and plan when they're on.
-        let features = caller.as_deref().and_then(|c| self.features_of(c));
-        // (A helper: it reports to its parent, and offers no splits.)
-        let helper = caller.as_ref().and_then(|c| self.orch_children.get(c)).is_some_and(|c| c.notify);
+        let facts = self.caller_facts(caller.as_deref());
+        let helper = facts.helper;
         let starting = self.agents_starting().for_session(helper);
+        let wiki_found = || facts.project.as_ref().is_some_and(|p| harlo_core::openwiki::has_wiki(&p.cwd));
         if tool == harlo_core::orchestration::TOOLS {
-            let mut tools = harlo_core::orchestration::tools(starting).as_array().cloned().unwrap_or_default();
-            // (A Harlo session asks the user with its own ask tool: the same
-            // question card, notifications and phone.)
-            if caller.as_ref().and_then(|c| self.live.get(c)).is_some_and(|e| e.info.harness == "harlo") {
-                tools.retain(|t| t["name"] != "request_approval");
-            }
-            // A helper: its report and its questions for its parent.
-            if helper {
-                tools.extend(harlo_core::orchestration::helper_tools().as_array().cloned().unwrap_or_default());
-            }
-            let writing = caller.as_ref().is_some_and(|c| self.wiki_sessions.contains(c));
-            if let Some((cwd, wiki, plan, commits)) = &features {
-                // (A wiki session: the reading and writing tools.)
-                if writing {
-                    tools.extend(harlo_core::openwiki::writing_tools());
-                } else if *wiki && harlo_core::openwiki::has_wiki(cwd) {
-                    tools.extend(harlo_core::openwiki::reading_tools().as_array().cloned().unwrap_or_default());
-                }
-                if *plan {
-                    tools.extend(harlo_core::plan::tools(*commits).as_array().cloned().unwrap_or_default());
-                }
-            }
-            return Ok(json!(tools));
+            return Ok(json!(tool_calls::offered(starting, &facts, wiki_found())));
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
-            let mut text = format!("{} {}\n\n{}", harlo_core::orchestration::BASE_INSTRUCTIONS, harlo_core::orchestration::when_to_start(starting), harlo_core::orchestration::DIAGRAMS);
-            let writing = caller.as_ref().is_some_and(|c| self.wiki_sessions.contains(c));
-            if let Some((cwd, wiki, plan, commits)) = &features {
-                if *wiki && !writing && harlo_core::openwiki::has_wiki(cwd) {
-                    text = format!("{text}\n\n{}", harlo_core::openwiki::READ_INSTRUCTIONS);
-                }
-                if *plan {
-                    // (Claude Code plans in its own flow: its plan question.)
-                    let own_flow = caller.as_ref().and_then(|c| self.live.get(c)).is_some_and(|e| e.info.harness == "claude");
-                    text = format!("{text}\n\n{}", harlo_core::plan::instructions(*commits, !own_flow));
-                }
-            }
-            return Ok(json!(text));
+            return Ok(json!(tool_calls::instructions(starting, &facts, wiki_found())));
         }
-        // The wiki: OpenWiki answers, off this thread (crate::orchestration).
+        // The wiki: answered off this thread (crate::orchestration).
         if tool.starts_with("openwiki_") {
-            let Some((cwd, wiki, ..)) = &features else {
-                return Err("The wiki is for sessions in a harlo project.".into());
-            };
-            let writing = caller.as_ref().is_some_and(|c| self.wiki_sessions.contains(c));
-            let allowed = if writing {
-                harlo_core::openwiki::OFFERED.contains(&tool) || harlo_core::openwiki::WRITE_TOOLS.contains(&tool)
-            } else {
-                *wiki && harlo_core::openwiki::OFFERED.contains(&tool)
-            };
-            if !allowed {
-                return Err(if harlo_core::openwiki::WRITE_TOOLS.contains(&tool) {
-                    "Only a wiki session harlo starts (its Wiki panel) writes the wiki.".to_owned()
-                } else {
-                    "The wiki is off for this project (its settings in harlo).".to_owned()
-                });
-            }
-            return Ok(json!({ "_defer": true, "cwd": cwd.to_string_lossy() }));
+            let cwd = tool_calls::wiki_folder(tool, &facts)?;
+            return Ok(tool_calls::deferred(json!({ "cwd": cwd.to_string_lossy() })));
         }
         // The plan: done off this thread (crate::orchestration), with what
         // it needs from here.
         if tool.starts_with("plan_") {
-            let (Some(caller), Some((cwd, _wiki, plan, commits))) = (caller.as_deref(), &features) else {
-                return Err("The shared plan is for sessions in a harlo project on this computer.".into());
-            };
-            if !plan {
-                return Err("The shared plan is off for this project (its settings in harlo).".into());
-            }
-            // A plan running with helpers is harlo's to hand out.
-            if matches!(tool, "plan_set" | "plan_start" | "plan_done") && self.plan_runs.get(caller).is_some_and(|r| r.paused.is_empty()) {
-                return Err("This plan is running with helpers: harlo hands its steps to them, so leave the steps alone until the run ends (the user can stop it).".into());
-            }
-            // Other sessions' last work (now, while busy), for telling a
-            // step's changes apart.
-            let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-            let others: Vec<serde_json::Value> = self
-                .live
-                .values()
-                .filter(|e| e.info.key != caller)
-                .map(|e| {
-                    let busy = matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting);
-                    let last = e.info.session_file.as_ref().and_then(|f| self.sessions.get(f)).map_or(unix(e.info.started_at), |s| unix(s.modified));
-                    json!({ "cwd": e.info.cwd.to_string_lossy(), "last": if busy { i64::MAX } else { last } })
-                })
-                .collect();
-            let file = self.file_for_key(caller).map(|f| f.to_string_lossy().into_owned());
-            return Ok(json!({ "_defer": true, "cwd": cwd.to_string_lossy(), "key": caller, "file": file, "commits": commits, "others": others }));
+            return self.plan_call(caller.as_deref(), tool, &facts);
         }
-        let text = |k: &str| args[k].as_str().map(str::trim).unwrap_or_default().to_owned();
-        let session = |this: &Self| -> Result<String, String> {
-            let key = text("session");
-            this.live.contains_key(&key).then_some(key.clone()).ok_or_else(|| format!("There's no open session {key}."))
-        };
-        // The caller's folder, and its machine (None: this one).
-        let caller_cwd = caller.as_ref().and_then(|c| self.live.get(c)).map(|e| e.info.cwd.clone());
-        let caller_host = caller_cwd.as_deref().and_then(harlo_core::remote::host_of);
+        let cwd = caller.as_ref().and_then(|c| self.live.get(c)).map(|e| e.info.cwd.clone());
+        let host = cwd.as_deref().and_then(harlo_core::remote::host_of);
+        let call = ToolCall { caller, args, cwd, host };
         match tool {
-            "list_agents" => {
-                let list: Vec<serde_json::Value> = HarnessKind::PROVIDERS
-                    .iter()
-                    .filter(|k| self.usable_harness(**k))
-                    .map(|k| {
-                        // (A caller on another machine: what's installed there.)
-                        let installed = match &caller_host {
-                            Some(h) => harlo_core::remote::found_on(h, k.as_str()),
-                            None => harlo_harness::resolve_program(*k).is_some() || !self.setting_str(&format!("{}_path", k.as_str())).is_empty(),
-                        };
-                        json!({ "id": k.as_str(), "name": k.label(), "installed": installed })
-                    })
-                    .collect();
-                Ok(json!({ "agents": list }))
-            }
+            "list_agents" => Ok(self.list_agents_for(&call)),
             // Past sessions whose messages match: this folder's (or all).
             // (The search itself runs off this thread: `found_sessions`.)
-            "list_sessions" if !text("query").is_empty() => {
+            "list_sessions" if !call.text("query").is_empty() => {
                 if self.search_reader.is_none() {
-                    return Err("Searching sessions isn't available here.".into());
+                    return Err(anyhow::Error::msg("Searching sessions isn't available here."));
                 }
-                let own = caller.as_ref().and_then(|c| self.live.get(c)).and_then(|e| e.info.session_file.clone());
-                Ok(json!({ "_defer": true, "query": text("query"), "everywhere": args["everywhere"] == true, "cwd": caller_cwd, "own": own }))
+                let own = call.caller.as_ref().and_then(|c| self.live.get(c)).and_then(|e| e.info.session_file.clone());
+                Ok(tool_calls::deferred(json!({ "query": call.text("query"), "everywhere": call.args["everywhere"] == true, "cwd": call.cwd, "own": own })))
             }
-            "list_sessions" => {
-                let list: Vec<serde_json::Value> = self
-                    .live
-                    .values()
-                    .map(|e| {
-                        let i = &e.info;
-                        let title = if !i.name.is_empty() { i.name.clone() } else { i.first_message.chars().take(80).collect() };
-                        json!({
-                            "session": i.key, "title": title, "agent": i.harness, "status": if i.needs_input { "waiting for input" } else { i.status.as_str() },
-                            "folder": i.cwd.to_string_lossy(), "startedBy": self.orch_children.get(&i.key).map(|c| c.parent.clone()),
-                            "you": caller.as_deref() == Some(i.key.as_str()),
-                        })
-                    })
-                    .collect();
-                Ok(json!({ "sessions": list }))
-            }
-            "start_session" => {
-                let agent = text("agent").to_lowercase();
-                let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                    return Err(format!("Unknown agent \"{agent}\": use harlo or claude (list_agents)."));
-                };
-                if !self.usable_harness(kind) {
-                    return Err(format!("{} is turned off in harlo (Settings → Providers).", kind.label()));
-                }
-                if caller.as_deref().is_some_and(|c| self.helper_depth(c) >= MAX_HELPER_DEPTH) {
-                    return Err(format!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself, or ask your parent (ask_parent)."));
-                }
-                let prompt = text("prompt");
-                if prompt.is_empty() {
-                    return Err("Give it a prompt.".into());
-                }
-                let folder = text("folder");
-                // A folder is the caller's machine's (relative: to its folder).
-                let cwd = if folder.is_empty() {
-                    caller_cwd.clone().unwrap_or_else(|| self.instance_home())
-                } else if harlo_core::remote::is_remote(Path::new(&folder)) {
-                    PathBuf::from(&folder)
-                } else if Path::new(&folder).is_absolute() {
-                    match &caller_host {
-                        Some(h) => harlo_core::remote::join(h, &folder),
-                        None => PathBuf::from(&folder),
-                    }
-                } else {
-                    match &caller_cwd {
-                        Some(c) => c.join(&folder),
-                        None => PathBuf::from(&folder),
-                    }
-                };
-                if let Some(h) = harlo_core::remote::host_of(&cwd)
-                    && !harlo_core::remote::found_on(&h, kind.as_str())
-                    && harlo_core::remote::info_of(&h).is_some()
-                {
-                    return Err(format!("{} isn't installed on {h}.", kind.label()));
-                }
-                if !harlo_core::remote::is_remote(&cwd) && !cwd.is_dir() {
-                    return Err(format!("{} isn't a folder.", cwd.display()));
-                }
-                let title = { let t = text("title"); if t.is_empty() { prompt.lines().next().unwrap_or_default().chars().take(60).collect() } else { t } };
-                let notify = args["notify"].as_bool().unwrap_or(true) && caller.is_some();
-                let model = text("model");
-                let thinking = text("thinking");
-                // Its token budget: asked for, else a helper's from Settings.
-                let asked = match &args["budget"] {
-                    serde_json::Value::Number(n) => n.as_u64().filter(|n| *n > 0).map(Some).ok_or("Give the budget as a number of tokens, as 400k or 2m.")?,
-                    serde_json::Value::String(b) if !b.trim().is_empty() => Some(harlo_core::orchestration::parse_tokens(b).ok_or("Give the budget as a number of tokens, as 400k or 2m.")?),
-                    _ => None,
-                };
-                if asked.is_some() && kind != HarnessKind::Harlo {
-                    return Err("A token budget is for Harlo sessions only.".into());
-                }
-                let budget = asked.or_else(|| (kind == HarnessKind::Harlo && caller.is_some()).then(|| harlo_core::orchestration::parse_tokens(&self.setting_str("harlo_helper_budget"))).flatten());
-                let parent = caller.clone().unwrap_or_default();
-                // A helper works as its parent may: the same permission mode.
-                let approval = caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| has_shield(kind.as_str(), &cwd));
-                // A helper: told what it is and how its result goes back.
-                let branch = text("worktree");
-                // (The closest: a project can be inside another's folder.)
-                let project = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned();
-                // A name that's taken (an earlier helper's): the next free one.
-                let branch = match &project {
-                    Some(p) if !branch.is_empty() => self.free_branch(p, &branch),
-                    _ => branch,
-                };
-                // In a worktree: told where it works (its task names the
-                // checkout's paths).
-                let prompt = match (&project, branch.is_empty()) {
-                    (Some(p), false) => format!("{prompt}{}", harlo_core::orchestration::worktree_note(&branch, &p.path.to_string_lossy())),
-                    _ => prompt,
-                };
-                let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, kind.as_str() == "harlo") } else { prompt };
-                // In a new worktree: made in the background; it shows when ready.
-                if !branch.is_empty() {
-                    let Some(project) = project else {
-                        return Err("Worktrees are for a project's folder (that one isn't a harlo project).".into());
-                    };
-                    let first = FirstPrompt { text: prompt, ..Default::default() };
-                    self.as_mut().create_worktree_session(
-                        project.id as i32,
-                        &QString::from(&branch),
-                        &QString::default(),
-                        &QString::from(kind.as_str()),
-                        WorktreeStart { first: Some(first), plan: false, model, thinking: thinking.clone(), lane: None, parent: caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None, budget },
-                    );
-                    return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
-                }
-                let key = self.as_mut().start_session_budget(kind, cwd.clone(), &model, &thinking, false, budget);
-                // (Named in the background: renaming would open it.)
-                if let Some(live) = registry::get(&key) {
-                    live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
-                }
-                if caller.is_some() {
-                    self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, None);
-                }
-                if let Some(mode) = &approval {
-                    self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
-                }
-                self.as_mut().apply_thinking(&key, &thinking);
-                send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
-                Ok(json!({ "session": key, "title": title, "agent": kind.as_str(), "folder": cwd.to_string_lossy(), "notify": notify }))
-            }
-            "send_message" => {
-                // One session, or all the caller's open helpers at once.
-                let keys: Vec<String> = if text("session") == "helpers" {
-                    let me = caller.clone().unwrap_or_default();
-                    let mut keys: Vec<String> = self.orch_children.iter().filter(|(k, c)| c.parent == me && self.live.contains_key(*k)).map(|(k, _)| k.clone()).collect();
-                    keys.sort();
-                    if keys.is_empty() {
-                        return Err("None of the helpers you started is open.".into());
-                    }
-                    keys
-                } else {
-                    vec![session(&self)?]
-                };
-                let message = text("message");
-                if message.is_empty() {
-                    return Err("Give it a message.".into());
-                }
-                let mut sent = Vec::new();
-                for key in keys {
-                    let busy = self.live.get(&key).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                    if let Some(live) = registry::get(&key) {
-                        live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
-                    }
-                    // (A helper that asked: this is its answer.)
-                    if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
-                        c.status = "running".into();
-                        c.asking = false;
-                    }
-                    sent.push(json!({ "session": key, "queued": busy }));
-                }
-                self.as_mut().bump_orchestration();
-                Ok(if sent.len() == 1 { sent.remove(0) } else { json!({ "sent": sent }) })
-            }
+            "list_sessions" => Ok(self.open_sessions_for(&call)),
+            "start_session" => self.start_helper(&call),
+            "send_message" => self.send_to_sessions(&call),
             // A past one: what it said last, from its file.
-            "read_session" if !self.live.contains_key(&text("session")) && harlo_core::session_ref::find(self.sessions.values(), &text("session")).is_some() => {
-                let i = harlo_core::session_ref::find(self.sessions.values(), &text("session")).expect("found");
-                let wanted = args["messages"].as_u64().unwrap_or(6).clamp(1, 50) as usize;
+            "read_session" if !self.live.contains_key(&call.text("session")) && harlo_core::session_ref::find(self.sessions.values(), &call.text("session")).is_some() => {
+                let i = harlo_core::session_ref::find(self.sessions.values(), &call.text("session")).expect("found");
+                let wanted = call.args["messages"].as_u64().unwrap_or(6).clamp(1, 50) as usize;
                 let messages = harlo_core::session_ref::latest(&harlo_core::session_ref::messages_of(i.harness, &i.path), wanted);
                 let when = chrono::DateTime::<chrono::Local>::from(i.modified).format("%Y-%m-%d %H:%M").to_string();
                 Ok(json!({ "session": harlo_core::session_ref::token(&i.id), "title": i.display_title(), "agent": i.harness.as_str(), "status": "closed", "lastActive": when, "messages": messages }))
             }
             "read_session" => {
-                let key = session(&self)?;
+                let key = self.open_session(&call)?;
                 let e = &self.live[&key];
-                let title = if !e.info.name.is_empty() { e.info.name.clone() } else { e.info.first_message.chars().take(80).collect() };
-                Ok(json!({ "session": key, "title": title, "agent": e.info.harness, "status": if e.info.needs_input { "waiting for input" } else { e.info.status.as_str() } }))
+                Ok(json!({ "session": key, "title": tool_calls::session_title(&e.info.name, &e.info.first_message), "agent": e.info.harness, "status": tool_calls::status_word(e.info.needs_input, e.info.status.as_str()) }))
             }
             "bring_over" => {
-                let key = session(&self)?;
-                let me = caller.clone().unwrap_or_default();
+                let key = self.open_session(&call)?;
+                let me = call.caller.clone().unwrap_or_default();
                 if self.orch_children.get(&key).is_none_or(|c| c.parent != me) {
-                    return Err(format!("{key} isn't your helper: you can bring over only what a helper you started did."));
+                    return Err(anyhow::anyhow!("{key} isn't your helper: you can bring over only what a helper you started did."));
                 }
-                let (Some(helper), Some(here)) = (self.live.get(&key).map(|e| e.info.cwd.clone()), caller_cwd.clone()) else {
-                    return Err("Its folder or yours isn't known.".into());
+                let (Some(helper), Some(here)) = (self.live.get(&key).map(|e| e.info.cwd.clone()), call.cwd.clone()) else {
+                    return Err(anyhow::Error::msg("Its folder or yours isn't known."));
                 };
                 // Its worktree: where it started.
                 let tree = self.worktrees.iter().filter(|w| helper.starts_with(&w.path)).max_by_key(|w| w.path.components().count());
                 let Some(tree) = tree else {
-                    return Err("That helper doesn't work in a worktree harlo made: its changes are in its folder already.".into());
+                    return Err(anyhow::Error::msg("That helper doesn't work in a worktree harlo made: its changes are in its folder already."));
                 };
-                Ok(json!({ "_defer": true, "helper": tree.path.to_string_lossy(), "here": here.to_string_lossy(), "start": tree.base_commit, "base": tree.base }))
+                Ok(tool_calls::deferred(json!({ "helper": tree.path.to_string_lossy(), "here": here.to_string_lossy(), "start": tree.base_commit, "base": tree.base })))
             }
             "stop_session" => {
-                let key = session(&self)?;
+                let key = self.open_session(&call)?;
                 self.stop_session(&QString::from(&key));
                 Ok(json!({ "session": key, "stopped": true }))
             }
             "request_approval" => {
-                let Some(live) = caller.as_deref().and_then(registry::get) else {
-                    return Err("Only a session harlo started can ask the user here.".into());
+                let Some(live) = call.caller.as_deref().and_then(registry::get) else {
+                    return Err(anyhow::Error::msg("Only a session harlo started can ask the user here."));
                 };
-                let question = text("question");
+                let question = call.text("question");
                 if question.is_empty() {
-                    return Err("Give the question.".into());
+                    return Err(anyhow::Error::msg("Give the question."));
                 }
-                let mut options: Vec<String> = args["options"].as_array().into_iter().flatten().filter_map(|o| o.as_str().map(str::trim)).filter(|o| !o.is_empty()).map(str::to_owned).collect();
-                if options.is_empty() {
-                    options = vec!["Approve".into(), "Reject".into()];
-                }
-                live.handle.open_gate("", &question, options);
+                live.handle.open_gate("", &question, &tool_calls::approval_options(&call.args["options"]));
                 Ok(json!({ "asked": true, "next": "End your turn now: harlo sends you the user's answer as a message." }))
             }
-            "propose_helpers" => {
-                let Some((caller, live)) = caller.as_ref().and_then(|c| registry::get(c).map(|l| (c.clone(), l))) else {
-                    return Err("Only a session harlo started can offer a split.".into());
-                };
-                if helper {
-                    return Err("You're a helper: do your task yourself. If it's too big for one session, say so to your parent with ask_parent.".into());
-                }
-                if self.agents_starting() != harlo_core::orchestration::Starting::Offer {
-                    return Err("harlo isn't set to have agents offer splits now (Settings → Orchestration): start helpers only when the user asks.".into());
-                }
-                if self.helper_depth(&caller) >= MAX_HELPER_DEPTH {
-                    return Err(format!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself."));
-                }
-                let (why, helpers) = harlo_core::orchestration::parse_proposal(args)?;
-                // (Unnamed: the team's helpers, else as the caller.)
-                let team = self.helpers_for(&caller);
-                let mut lines = Vec::new();
-                let mut starts = Vec::new();
-                for mut h in helpers {
-                    let mut thinking = String::new();
-                    if h.agent.is_empty()
-                        && let Some(t) = &team
-                    {
-                        h.agent = t.agent.as_str().to_owned();
-                        if h.model.is_empty() {
-                            h.model = t.model.clone();
-                        }
-                        thinking = t.thinking.clone();
-                    }
-                    let agent = h.agent.clone();
-                    let Some(kind) = HarnessKind::parse(&agent).filter(|k| *k != HarnessKind::Demo || agent == "demo") else {
-                        return Err(format!("Unknown agent \"{agent}\" for \"{}\": use harlo or claude (list_agents).", h.title));
-                    };
-                    if !self.usable_harness(kind) {
-                        return Err(format!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
-                    }
-                    lines.push((h.title.clone(), kind.label().to_owned(), h.model.clone(), h.worktree.clone()));
-                    starts.push(json!({ "agent": kind.as_str(), "prompt": h.prompt, "title": h.title, "model": h.model, "thinking": thinking, "worktree": h.worktree }));
-                }
-                let options = harlo_core::orchestration::PROPOSAL_OPTIONS.iter().map(|o| o.to_string()).collect();
-                let id = live.handle.open_gate(harlo_core::orchestration::PROPOSAL_TITLE, &harlo_core::orchestration::proposal_question(&why, &lines), options);
-                self.as_mut().rust_mut().proposals.insert(id, (caller, starts));
-                Ok(json!({ "asked": true, "next": "End your turn now: harlo tells you the user's answer as a message (and starts the helpers if they agree)." }))
-            }
-            "report_done" | "ask_parent" => {
-                let Some((key, child)) = caller.as_ref().and_then(|c| self.orch_children.get(c).map(|ch| (c.clone(), ch.clone()))).filter(|(_, c)| c.notify) else {
-                    return Err("You weren't started by another session, so there's no one to report to or ask.".into());
-                };
-                if tool == "report_done" {
-                    let report = harlo_core::orchestration::Report::parse(args)?;
-                    if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
-                        c.report = Some(report);
-                    }
-                    return Ok(json!({ "reported": true, "next": "End your turn now: harlo sends your report when it ends." }));
-                }
-                let question = text("question");
-                if question.is_empty() {
-                    return Err("Give the question.".into());
-                }
-                let Some(parent) = registry::get(&child.parent) else {
-                    return Err("The session that started you is closed. Ask the user instead (end your turn with the question).".into());
-                };
-                let message = harlo_core::orchestration::question_message(agent_label(&child.agent), &child.title, &key, &question);
-                let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
-                if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
-                    c.asking = true;
-                    c.status = "asking".into();
-                }
-                self.as_mut().bump_orchestration();
-                Ok(json!({ "asked": true, "next": "End your turn now: harlo sends you the answer as a message." }))
-            }
-            _ => Err(format!("harlo has no tool {tool}.")),
+            "propose_helpers" => self.propose_split(&call, helper),
+            "report_done" | "ask_parent" => self.tell_parent(&call, tool),
+            _ => Err(anyhow::anyhow!("harlo has no tool {tool}.")),
         }
+    }
+
+    /// The open sessions, for an agent's `list_sessions` without a query.
+    fn open_sessions_for(&self, call: &ToolCall<'_>) -> serde_json::Value {
+        use serde_json::json;
+        let list: Vec<serde_json::Value> = self
+            .live
+            .values()
+            .map(|e| {
+                let i = &e.info;
+                json!({
+                    "session": i.key, "title": tool_calls::session_title(&i.name, &i.first_message), "agent": i.harness, "status": tool_calls::status_word(i.needs_input, i.status.as_str()),
+                    "folder": i.cwd.to_string_lossy(), "startedBy": self.orch_children.get(&i.key).map(|c| c.parent.clone()),
+                    "you": call.caller.as_deref() == Some(i.key.as_str()),
+                })
+            })
+            .collect();
+        json!({ "sessions": list })
+    }
+
+    /// What a plan tool needs from here, for it to be done off this thread.
+    fn plan_call(&self, caller: Option<&str>, tool: &str, facts: &tool_calls::Caller) -> anyhow::Result<serde_json::Value> {
+        use serde_json::json;
+        let handed_out = caller.is_some_and(|c| self.plan_runs.get(c).is_some_and(|r| r.paused.is_empty()));
+        let project = tool_calls::plan_project(tool, facts, caller.is_some(), handed_out)?;
+        let (caller, cwd, commits) = (caller.unwrap_or_default(), &project.cwd, project.commits);
+        // Other sessions' last work (now, while busy), for telling a
+        // step's changes apart.
+        let unix = |t: SystemTime| t.duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        let others: Vec<serde_json::Value> = self
+            .live
+            .values()
+            .filter(|e| e.info.key != caller)
+            .map(|e| {
+                let busy = matches!(e.info.status, SessionStatus::Busy | SessionStatus::Starting);
+                let last = e.info.session_file.as_ref().and_then(|f| self.sessions.get(f)).map_or(unix(e.info.started_at), |s| unix(s.modified));
+                json!({ "cwd": e.info.cwd.to_string_lossy(), "last": if busy { i64::MAX } else { last } })
+            })
+            .collect();
+        let file = self.file_for_key(caller).map(|f| f.to_string_lossy().into_owned());
+        Ok(tool_calls::deferred(json!({ "cwd": cwd.to_string_lossy(), "key": caller, "file": file, "commits": commits, "others": others })))
+    }
+
+    /// The open session an agent's call names (`session`).
+    fn open_session(&self, call: &ToolCall<'_>) -> anyhow::Result<String> {
+        let key = call.text("session");
+        self.live.contains_key(&key).then_some(key.clone()).ok_or_else(|| anyhow::anyhow!("There's no open session {key}."))
+    }
+
+    /// The agents a caller can start, and whether each is installed where it runs.
+    fn list_agents_for(&self, call: &ToolCall<'_>) -> serde_json::Value {
+        use serde_json::json;
+        let list: Vec<serde_json::Value> = HarnessKind::PROVIDERS
+            .iter()
+            .filter(|k| self.usable_harness(**k))
+            .map(|k| {
+                // (A call.caller on another machine: what's installed there.)
+                let installed = match &call.host {
+                    Some(h) => harlo_core::remote::found_on(h, k.as_str()),
+                    None => harlo_harness::resolve_program(*k).is_some() || !self.setting_str(&format!("{}_path", k.as_str())).is_empty(),
+                };
+                json!({ "id": k.as_str(), "name": k.label(), "installed": installed })
+            })
+            .collect();
+        json!({ "agents": list })
+    }
+
+    /// Starts a session for an agent's `start_session`: a helper when it has a caller.
+    fn start_helper(mut self: Pin<&mut Self>, call: &ToolCall<'_>) -> anyhow::Result<serde_json::Value> {
+        use serde_json::json;
+        let kind = tool_calls::agent(&call.text("agent"))?;
+        if !self.usable_harness(kind) {
+            return Err(anyhow::anyhow!("{} is turned off in harlo (Settings → Providers).", kind.label()));
+        }
+        if call.caller.as_deref().is_some_and(|c| self.helper_depth(c) >= MAX_HELPER_DEPTH) {
+            return Err(anyhow::anyhow!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself, or ask your parent (ask_parent)."));
+        }
+        let prompt = call.text("prompt");
+        if prompt.is_empty() {
+            return Err(anyhow::Error::msg("Give it a prompt."));
+        }
+        // A folder is the call.caller's machine's (relative: to its folder).
+        let cwd = tool_calls::folder(&call.text("folder"), call.cwd.as_deref(), &self.instance_home());
+        if let Some(h) = harlo_core::remote::host_of(&cwd)
+            && !harlo_core::remote::found_on(&h, kind.as_str())
+            && harlo_core::remote::info_of(&h).is_some()
+        {
+            return Err(anyhow::anyhow!("{} isn't installed on {h}.", kind.label()));
+        }
+        if !harlo_core::remote::is_remote(&cwd) && !cwd.is_dir() {
+            return Err(anyhow::anyhow!("{} isn't a folder.", cwd.display()));
+        }
+        let title = tool_calls::title(&call.text("title"), &prompt);
+        let notify = call.args["notify"].as_bool().unwrap_or(true) && call.caller.is_some();
+        let model = call.text("model");
+        let thinking = call.text("thinking");
+        // Its token budget: asked for, else a helper's from Settings.
+        let asked = tool_calls::budget(&call.args["budget"])?;
+        if asked.is_some() && kind != HarnessKind::Harlo {
+            return Err(anyhow::Error::msg("A token budget is for Harlo sessions only."));
+        }
+        let budget = asked.or_else(|| (kind == HarnessKind::Harlo && call.caller.is_some()).then(|| harlo_core::orchestration::parse_tokens(&self.setting_str("harlo_helper_budget"))).flatten());
+        let parent = call.caller.clone().unwrap_or_default();
+        // A helper works as its parent may: the same permission mode.
+        let approval = call.caller.as_deref().and_then(|c| self.approval_of(c)).filter(|_| agents::has_shield(kind.as_str()));
+        // A helper: told what it is and how its result goes back.
+        let branch = call.text("worktree");
+        // (The closest: a project can be inside another's folder.)
+        let project = self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).cloned();
+        // A name that's taken (an earlier helper's): the next free one.
+        let branch = match &project {
+            Some(p) if !branch.is_empty() => self.free_branch(p, &branch),
+            _ => branch,
+        };
+        // In a worktree: told where it works (its task names the
+        // checkout's paths).
+        let prompt = match (&project, branch.is_empty()) {
+            (Some(p), false) => format!("{prompt}{}", harlo_core::orchestration::worktree_note(&branch, &p.path.to_string_lossy())),
+            _ => prompt,
+        };
+        let prompt = if notify { harlo_core::orchestration::helper_brief(&self.title_of(&parent), &prompt, kind.as_str() == "harlo") } else { prompt };
+        // In a new worktree: made in the background; it shows when ready.
+        if !branch.is_empty() {
+            let Some(project) = project else {
+                return Err(anyhow::Error::msg("Worktrees are for a project's folder (that one isn't a harlo project)."));
+            };
+            let first = FirstPrompt { text: prompt, ..Default::default() };
+            self.as_mut().create_worktree_session(
+                i32::try_from(project.id).unwrap_or(i32::MAX),
+                &QString::from(&branch),
+                &QString::default(),
+                &QString::from(kind.as_str()),
+                WorktreeStart { first: Some(first), plan: false, model, thinking: thinking.clone(), lane: None, parent: call.caller.as_ref().map(|_| (parent, title.clone(), notify)), approval, plan_step: None, budget },
+            );
+            return Ok(json!({ "status": "creating the worktree; the session starts in it shortly (see list_sessions)", "branch": branch, "title": title }));
+        }
+        let key = self.as_mut().start_session_budget(kind, cwd.clone(), &model, &thinking, false, budget);
+        // (Named in the background: renaming would open it.)
+        if let Some(live) = registry::get(&key) {
+            live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
+        }
+        if call.caller.is_some() {
+            self.as_mut().adopt(&key, &parent, &title, kind.as_str(), notify, None);
+        }
+        if let Some(mode) = &approval {
+            self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(mode));
+        }
+        self.as_mut().apply_thinking(&key, &thinking);
+        send_first_prompt(&key, FirstPrompt { text: prompt, ..Default::default() }, Some(self.qt_thread()));
+        Ok(json!({ "session": key, "title": title, "agent": kind.as_str(), "folder": cwd.to_string_lossy(), "notify": notify }))
+    }
+
+    /// Sends an agent's message to one session, or to all its open helpers.
+    fn send_to_sessions(mut self: Pin<&mut Self>, call: &ToolCall<'_>) -> anyhow::Result<serde_json::Value> {
+        use serde_json::json;
+        // One session, or all the call.caller's open helpers at once.
+        let keys: Vec<String> = if call.text("session") == "helpers" {
+            let me = call.caller.clone().unwrap_or_default();
+            let mut keys: Vec<String> = self.orch_children.iter().filter(|(k, c)| c.parent == me && self.live.contains_key(*k)).map(|(k, _)| k.clone()).collect();
+            keys.sort();
+            if keys.is_empty() {
+                return Err(anyhow::Error::msg("None of the helpers you started is open."));
+            }
+            keys
+        } else {
+            vec![self.open_session(call)?]
+        };
+        let message = call.text("message");
+        if message.is_empty() {
+            return Err(anyhow::Error::msg("Give it a message."));
+        }
+        let mut sent = Vec::new();
+        for key in keys {
+            let busy = self.live.get(&key).is_some_and(|e| e.info.status == SessionStatus::Busy);
+            if let Some(live) = registry::get(&key) {
+                live.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+            }
+            // (A helper that asked: this is its answer.)
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
+                c.status = "running".into();
+                c.asking = false;
+            }
+            sent.push(json!({ "session": key, "queued": busy }));
+        }
+        self.as_mut().bump_orchestration();
+        Ok(if sent.len() == 1 { sent.remove(0) } else { json!({ "sent": sent }) })
+    }
+
+    /// Asks the user whether to split the caller's task among helpers.
+    fn propose_split(mut self: Pin<&mut Self>, call: &ToolCall<'_>, helper: bool) -> anyhow::Result<serde_json::Value> {
+        use serde_json::json;
+        let Some((me, live)) = call.caller.as_ref().and_then(|c| registry::get(c).map(|l| (c.clone(), l))) else {
+            return Err(anyhow::Error::msg("Only a session harlo started can offer a split."));
+        };
+        if helper {
+            return Err(anyhow::Error::msg("You're a helper: do your task yourself. If it's too big for one session, say so to your parent with ask_parent."));
+        }
+        if self.agents_starting() != harlo_core::orchestration::Starting::Offer {
+            return Err(anyhow::Error::msg("harlo isn't set to have agents offer splits now (Settings → Orchestration): start helpers only when the user asks."));
+        }
+        if self.helper_depth(&me) >= MAX_HELPER_DEPTH {
+            return Err(anyhow::anyhow!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself."));
+        }
+        let (why, helpers) = harlo_core::orchestration::parse_proposal(call.args)?;
+        // (Unnamed: the team's helpers, else as the call.caller.)
+        let team = self.helpers_for(&me);
+        let mut lines = Vec::new();
+        let mut starts = Vec::new();
+        for mut h in helpers {
+            let mut thinking = String::new();
+            if h.agent.is_empty()
+                && let Some(t) = &team
+            {
+                t.agent.as_str().clone_into(&mut h.agent);
+                if h.model.is_empty() {
+                    h.model.clone_from(&t.model);
+                }
+                thinking.clone_from(&t.thinking);
+            }
+            let kind = tool_calls::agent(&h.agent).map_err(|e| anyhow::anyhow!("{e} (for \"{}\")", h.title))?;
+            if !self.usable_harness(kind) {
+                return Err(anyhow::anyhow!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
+            }
+            lines.push((h.title.clone(), kind.label().to_owned(), h.model.clone(), h.worktree.clone()));
+            starts.push(json!({ "agent": kind.as_str(), "prompt": h.prompt, "title": h.title, "model": h.model, "thinking": thinking, "worktree": h.worktree }));
+        }
+        let options: Vec<String> = harlo_core::orchestration::PROPOSAL_OPTIONS.iter().map(std::string::ToString::to_string).collect();
+        let id = live.handle.open_gate(harlo_core::orchestration::PROPOSAL_TITLE, &harlo_core::orchestration::proposal_question(&why, &lines), &options);
+        self.as_mut().rust_mut().proposals.insert(id, (me.clone(), starts));
+        Ok(json!({ "asked": true, "next": "End your turn now: harlo tells you the user's answer as a message (and starts the helpers if they agree)." }))
+    }
+
+    /// A helper's report to the session that started it, or its question.
+    fn tell_parent(mut self: Pin<&mut Self>, call: &ToolCall<'_>, tool: &str) -> anyhow::Result<serde_json::Value> {
+        use serde_json::json;
+        let Some((key, child)) = call.caller.as_ref().and_then(|c| self.orch_children.get(c).map(|ch| (c.clone(), ch.clone()))).filter(|(_, c)| c.notify) else {
+            return Err(anyhow::Error::msg("You weren't started by another session, so there's no one to report to or ask."));
+        };
+        if tool == "report_done" {
+            let report = harlo_core::orchestration::Report::parse(call.args)?;
+            if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
+                c.report = Some(report);
+            }
+            return Ok(json!({ "reported": true, "next": "End your turn now: harlo sends your report when it ends." }));
+        }
+        let question = call.text("question");
+        if question.is_empty() {
+            return Err(anyhow::Error::msg("Give the question."));
+        }
+        let Some(parent) = registry::get(&child.parent) else {
+            return Err(anyhow::Error::msg("The session that started you is closed. Ask the user instead (end your turn with the question)."));
+        };
+        let message = harlo_core::orchestration::question_message(agents::label(&child.agent), &child.title, &key, &question);
+        let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
+        parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+        if let Some(c) = self.as_mut().rust_mut().orch_children.get_mut(&key) {
+            c.asking = true;
+            c.status = "asking".into();
+        }
+        self.as_mut().bump_orchestration();
+        Ok(json!({ "asked": true, "next": "End your turn now: harlo sends you the answer as a message." }))
     }
 
     /// `key` was started by `parent`'s agent: it's that session's subagent.
@@ -7389,7 +7238,7 @@ impl Workspace {
         if let Some(id) = plan_step {
             crate::plans::update(self.plan_file(parent).as_deref(), parent, |p| {
                 if let Some(s) = p.steps.iter_mut().find(|s| s.id == id) {
-                    s.helper = key.to_owned();
+                    key.clone_into(&mut s.helper);
                 }
             });
             self.as_mut().plans_changed();
@@ -7469,40 +7318,11 @@ impl Workspace {
         self.as_mut().bump_orchestration();
         // A step's review: its verdict goes to the run.
         if let Some(id) = child.review_of {
-            let verdict = match &child.report {
-                Some(r) => Some((r.succeeded, r.summary.clone())),
-                None => reply.as_deref().and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 600)))),
-            };
-            self.as_mut().settle_helper(key);
-            return self.as_mut().plan_step_reviewed(&child.parent, id, verdict, error);
+            return self.as_mut().review_finished(key, &child, id, reply.as_deref(), error);
         }
         // A plan's step: its result goes to the run.
         if let Some(id) = child.plan_step {
-            let said = match &child.report {
-                Some(r) => Some((r.succeeded, r.summary.clone())),
-                None => reply.as_deref().and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 300)))),
-            };
-            // Done: reviewed before the run goes on (when the run reviews).
-            if let Some((true, summary)) = &said
-                && self.plan_runs.get(&child.parent).is_some_and(|r| r.review && r.paused.is_empty())
-            {
-                let files = child.report.as_ref().map(|r| r.files.clone()).unwrap_or_default();
-                return self.as_mut().review_plan_step(&child.parent, id, key, summary, &files);
-            }
-            if said.as_ref().is_some_and(|(ok, _)| *ok) {
-                self.as_mut().settle_helper(key);
-            } else {
-                self.as_mut().settle_after_look(key);
-            }
-            let result = match said {
-                Some((true, summary)) => Ok(summary),
-                Some((false, summary)) => Err(format!("it failed: {summary}")),
-                None => Err(match error {
-                    Some(e) => format!("it stopped with an error: {e}"),
-                    None => "it ended without saying whether it worked (no report)".into(),
-                }),
-            };
-            return self.as_mut().plan_step_ended(&child.parent, id, result);
+            return self.as_mut().plan_step_finished(key, &child, id, reply.as_deref(), error);
         }
         if child.report.as_ref().is_some_and(|r| r.succeeded) {
             self.as_mut().settle_helper(key);
@@ -7527,7 +7347,7 @@ impl Workspace {
         let model = self.live.get(key).map(|e| e.model_id.clone()).unwrap_or_default();
         let meta_cost = self.spend.get(key).map_or(0.0, |s| s.cost);
         let file = matches!(HarnessKind::parse(&child.agent), Some(HarnessKind::Harlo)).then(|| self.file_for_key(key)).flatten();
-        let (agent, title, key) = (agent_label(&child.agent).to_owned(), child.title.clone(), key.to_owned());
+        let (agent, title, key) = (agents::label(&child.agent).to_owned(), child.title.clone(), key.to_owned());
         // (Files and git in the background, then the message.)
         crate::runtime().spawn_blocking(move || {
             let used = match file.and_then(|f| harlo_core::context::spent_in_file(&f)).filter(|s| s.requests > 0) {
@@ -7547,6 +7367,45 @@ impl Workspace {
         });
     }
 
+    /// A step's reviewer finished: its verdict goes to the run.
+    fn review_finished(mut self: Pin<&mut Self>, key: &str, child: &OrchChild, id: u32, reply: Option<&str>, error: Option<String>) {
+        let verdict = match &child.report {
+            Some(r) => Some((r.succeeded, r.summary.clone())),
+            None => reply.and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 600)))),
+        };
+        self.as_mut().settle_helper(key);
+        self.as_mut().plan_step_reviewed(&child.parent, id, verdict, error);
+    }
+
+    /// A plan step's helper finished: its review, or its result to the run.
+    fn plan_step_finished(mut self: Pin<&mut Self>, key: &str, child: &OrchChild, id: u32, reply: Option<&str>, error: Option<String>) {
+        let said = match &child.report {
+            Some(r) => Some((r.succeeded, r.summary.clone())),
+            None => reply.and_then(|r| harlo_core::plan::outcome_in(r).map(|ok| (ok, harlo_core::notifications::summary(r, 300)))),
+        };
+        // Done: reviewed before the run goes on (when the run reviews).
+        if let Some((true, summary)) = &said
+            && self.plan_runs.get(&child.parent).is_some_and(|r| r.review && r.paused.is_empty())
+        {
+            let files = child.report.as_ref().map(|r| r.files.clone()).unwrap_or_default();
+            return self.as_mut().review_plan_step(&child.parent, id, key, summary, &files);
+        }
+        if said.as_ref().is_some_and(|(ok, _)| *ok) {
+            self.as_mut().settle_helper(key);
+        } else {
+            self.as_mut().settle_after_look(key);
+        }
+        let result = match said {
+            Some((true, summary)) => Ok(summary),
+            Some((false, summary)) => Err(anyhow::anyhow!("it failed: {summary}")),
+            None => Err(anyhow::Error::msg(match error {
+                Some(e) => format!("it stopped with an error: {e}"),
+                None => "it ended without saying whether it worked (no report)".into(),
+            })),
+        };
+        self.as_mut().plan_step_ended(&child.parent, id, result);
+    }
+
     /// A started session waits for the user (an approval, its question):
     /// its parent is told (once a run: approvals come one after another).
     fn child_waiting(mut self: Pin<&mut Self>, key: &str, what: &str, approval: bool) {
@@ -7560,7 +7419,7 @@ impl Workspace {
         // (A tool's approval: yours alone, and you're notified; the parent
         // isn't woken just to say so.)
         let Some(parent) = registry::get(&child.parent).filter(|_| child.notify && !child.told_waiting && child.plan_step.is_none() && !approval) else { return };
-        let message = harlo_core::orchestration::waiting_message(agent_label(&child.agent), &child.title, key, what);
+        let message = harlo_core::orchestration::waiting_message(agents::label(&child.agent), &child.title, key, what);
         let busy = self.live.get(&child.parent).is_some_and(|e| e.info.status == SessionStatus::Busy);
         parent.handle.prompt(&message, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
     }
@@ -7580,20 +7439,20 @@ impl Workspace {
     /// A session's permission mode (its shield's), if it has one.
     fn approval_of(&self, key: &str) -> Option<String> {
         let entry = self.live.get(key)?;
-        if !has_shield(&entry.info.harness, &entry.info.cwd) {
+        if !agents::has_shield(&entry.info.harness) {
             return None;
         }
-        let mode = self.modes.get(key).and_then(|m| m.approval.clone()).unwrap_or_else(|| self.starting_approval(&entry.info.harness, &entry.info.cwd).to_string());
+        let mode = self.modes.get(key).and_then(|m| m.approval.clone()).unwrap_or_else(|| STARTING_APPROVAL.to_owned());
         harlo_core::session::APPROVAL_MODES.contains(&mode.as_str()).then_some(mode)
     }
 
     /// The user answered `key`'s split offer: its helpers started (if they
     /// agreed); what to tell it.
-    fn answer_proposal(mut self: Pin<&mut Self>, key: &str, helpers: Vec<serde_json::Value>, answer: &serde_json::Value) -> String {
+    fn answer_proposal(mut self: Pin<&mut Self>, key: &str, helpers: &[serde_json::Value], answer: &serde_json::Value) -> String {
         if answer["value"].as_str() != Some(harlo_core::orchestration::PROPOSAL_OPTIONS[0]) {
             return harlo_core::orchestration::proposal_answer(None);
         }
-        let started: Vec<(String, Result<String, String>)> = helpers
+        let started: Vec<(String, anyhow::Result<String>)> = helpers
             .iter()
             .map(|args| {
                 let title = args["title"].as_str().unwrap_or_default().to_owned();
@@ -7617,7 +7476,7 @@ impl Workspace {
         if let Some(row) = self.rows.iter().find(|r| r.key == key) {
             return row.title.clone();
         }
-        self.live.get(key).map(|e| if !e.info.name.is_empty() { e.info.name.clone() } else { e.info.first_message.chars().take(80).collect() }).unwrap_or_default()
+        self.live.get(key).map(|e| tool_calls::session_title(&e.info.name, &e.info.first_message)).unwrap_or_default()
     }
 
     /// Runs a session's plan with helpers (`agent`: "" for the session's
@@ -7650,11 +7509,7 @@ impl Workspace {
         }
         let file = self.file_for_key(&key);
         // A step the agent left started (stopped midway): a helper's now.
-        crate::plans::update(file.as_deref(), &key, |p| {
-            for step in p.steps.iter_mut().filter(|s| s.status == harlo_core::plan::Status::Active && s.helper.is_empty()) {
-                step.status = harlo_core::plan::Status::Pending;
-            }
-        });
+        crate::plans::update(file.as_deref(), &key, harlo_core::plan::Plan::release_unassigned);
         let plan = crate::plans::get(file.as_deref(), &key);
         if plan.current_stage().is_none() {
             return QString::from("Every step of the plan has finished.");
@@ -7696,17 +7551,12 @@ impl Workspace {
         let Some(stage) = plan.current_stage() else {
             self.as_mut().rust_mut().plan_runs.remove(owner);
             self.as_mut().plans_changed();
-            let done = plan.steps.iter().filter(|s| s.status == harlo_core::plan::Status::Done).count();
-            let skipped = plan.steps.iter().filter(|s| s.status == harlo_core::plan::Status::Skipped).count();
-            let said = format!("{done} step{} done{}", if done == 1 { "" } else { "s" }, if skipped > 0 { format!(", {skipped} skipped") } else { String::new() });
-            self.as_mut().tell_about_run(owner, "Plan finished", &said, false);
+            self.as_mut().tell_about_run(owner, "Plan finished", &plan.tally(), false);
             // Its agent sums it up (the work on the last step's branch,
             // when the steps ran in worktrees).
             if let Some(live) = registry::get(owner) {
                 let busy = self.live.get(owner).is_some_and(|e| e.info.status == SessionStatus::Busy);
-                let branch = plan.where_work_is();
-                let text = format!("[harlo] Your plan ran with helpers and has finished: {said}.{branch} Read each step's summary with plan_read, check the work fits together, and tell the user what was done and what's still open.");
-                live.handle.prompt(&text, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
+                live.handle.prompt(&plan.finished_message(), Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
             }
             return;
         };
@@ -7743,13 +7593,13 @@ impl Workspace {
                 Some(k) => (k, step.model.clone(), if k == run.agent { run.thinking.clone() } else { String::new() }),
                 None => (run.agent, run.model.clone(), run.thinking.clone()),
             };
-            let approval = self.approval_of(owner).filter(|_| has_shield(agent.as_str(), &cwd));
+            let approval = self.approval_of(owner).filter(|_| agents::has_shield(agent.as_str()));
             let title = format!("Step {n}: {}", step.title);
             let branch = if together { format!("plan/{}-{id}-{stamp}", git::branch_slug(&step.title).chars().take(30).collect::<String>().trim_matches('-')) } else { String::new() };
             let task = harlo_core::plan::step_prompt(&plan, id, &merge, commits, together);
             let prompt = harlo_core::orchestration::helper_brief(&owner_title, &task, agent.as_str() == "harlo");
             if let Err(e) = crate::plans::update(file.as_deref(), owner, |p| p.hand_out(id, "", &branch)) {
-                tracing::warn!("plan run: {e}");
+                tracing::event!(name: "plan.run.failed", tracing::Level::WARN, error.message = %e, "plan run: {{error.message}}");
                 continue;
             }
             // (Harlo's: the budget per helper, if set.)
@@ -7758,7 +7608,7 @@ impl Workspace {
                 let base = tree.as_ref().map(|t| t.branch.clone()).unwrap_or_default();
                 let first = FirstPrompt { text: prompt, ..Default::default() };
                 self.as_mut().create_worktree_session(
-                    project.id as i32,
+                    i32::try_from(project.id).unwrap_or(i32::MAX),
                     &QString::from(&branch),
                     &QString::from(&base),
                     &QString::from(agent.as_str()),
@@ -7789,7 +7639,7 @@ impl Workspace {
 
     /// A plan's step ended: done with its summary (`Ok`), or (`Err`, why)
     /// back to waiting with the run paused for you. Then the run goes on.
-    fn plan_step_ended(mut self: Pin<&mut Self>, owner: &str, id: u32, result: Result<String, String>) {
+    fn plan_step_ended(mut self: Pin<&mut Self>, owner: &str, id: u32, result: anyhow::Result<String>) {
         let file = self.plan_file(owner);
         let plan = crate::plans::get(file.as_deref(), owner);
         let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
@@ -7826,7 +7676,7 @@ impl Workspace {
         let step = plan.step(id).cloned().unwrap_or_default();
         let mut task = format!("Step {n} of {}: {}", plan.steps.len(), step.title);
         if !step.detail.is_empty() {
-            task.push_str(&format!("\n\n{}", step.detail));
+            let _ = write!(task, "\n\n{}", step.detail);
         }
         // Where it started: the session's folder then, or its worktree's base.
         let base = run.bases.get(&id).cloned().or_else(|| {
@@ -7845,10 +7695,10 @@ impl Workspace {
             Some((k, m)) => (*k, m.clone(), if *k == run.agent && *m == run.model { run.thinking.clone() } else { String::new() }),
             None => (run.agent, run.model.clone(), run.thinking.clone()),
         };
-        let approval = self.approval_of(owner).filter(|_| has_shield(agent.as_str(), &cwd));
+        let approval = self.approval_of(owner).filter(|_| agents::has_shield(agent.as_str()));
         let key = self.as_mut().start_session_budget(agent, cwd, &model, &thinking, false, None);
         if let Some(r) = self.as_mut().rust_mut().plan_runs.get_mut(owner).and_then(|r| r.reviews.get_mut(&id)) {
-            r.reviewer = key.clone();
+            r.reviewer.clone_from(&key);
         }
         if let Some(live) = registry::get(&key) {
             live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
@@ -7923,8 +7773,8 @@ impl Workspace {
         {
             let mut this = self.as_mut().rust_mut();
             let Some(run) = this.plan_runs.get_mut(owner) else { return };
-            run.paused = why.to_owned();
-        }
+            why.clone_into(&mut run.paused);
+        };
         self.as_mut().plans_changed();
         let text = format!("Paused: {why}. Run it again to retry the step, or skip or change it first.");
         self.as_mut().tell_about_run(owner, "Plan run paused", &text, true);
@@ -8019,7 +7869,7 @@ impl Workspace {
                 let asks = live.and_then(|e| e.requests.first()).map_or(serde_json::Value::Null, |(r, _)| {
                     serde_json::json!({
                         "id": r.id, "approval": r.is_approval, "options": r.options,
-                        "text": harlo_core::orchestration::waiting_what(&r.title, &question_text(r), r.is_approval),
+                        "text": harlo_core::orchestration::waiting_what(&r.title, r.question(), r.is_approval),
                     })
                 });
                 // Its model, and what it used so far.
@@ -8044,7 +7894,9 @@ impl Workspace {
     /// it's Harlo's (its subagents' included; read again only when the
     /// file changed), else its cost as its agent said.
     fn used_by(&self, key: &str, agent: &str) -> Option<harlo_core::context::Spent> {
-        static READ: OnceLock<Mutex<HashMap<PathBuf, (u64, SystemTime, harlo_core::context::Spent)>>> = OnceLock::new();
+        /// A session file's size and time when read, and what it spent.
+        type Read = (u64, SystemTime, harlo_core::context::Spent);
+        static READ: OnceLock<Mutex<HashMap<PathBuf, Read>>> = OnceLock::new();
         if HarnessKind::parse(agent) == Some(HarnessKind::Harlo)
             && let Some(file) = self.file_for_key(key)
             && let Ok(meta) = std::fs::metadata(&file)
@@ -8054,10 +7906,10 @@ impl Workspace {
             if let Some((len, at, spent)) = cache.lock().unwrap().get(&file)
                 && (*len, *at) == stamp
             {
-                return Some(spent.clone()).filter(|s| s.requests > 0);
+                return Some(*spent).filter(|s| s.requests > 0);
             }
             let spent = harlo_core::context::spent_in_file(&file).unwrap_or_default();
-            cache.lock().unwrap().insert(file, (stamp.0, stamp.1, spent.clone()));
+            cache.lock().unwrap().insert(file, (stamp.0, stamp.1, spent));
             return Some(spent).filter(|s| s.requests > 0);
         }
         let cost = self.spend.get(key).map_or(0.0, |s| s.cost);
@@ -8106,7 +7958,7 @@ impl Workspace {
         }
         self.as_mut().rust_mut().settle_later.remove(key);
         // (A little after now: its last writes may land a moment later.)
-        let at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) + 5;
+        let at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)) + 5;
         // (A wiki run that's done: on the Wiki shelf.)
         let why = if self.wiki_sessions.contains(key) { "wiki" } else { "helper" };
         self.as_mut().update_meta(key, |m| {
@@ -8231,24 +8083,16 @@ const ORCH_ON_THEIR_OWN: &str = "orchestration_on_their_own";
 /// Whether a plan's run reviews each step ("0" off; on by default).
 const PLAN_REVIEW: &str = "plan_review";
 
-/// An agent's name ("claude" → "Claude").
-fn agent_label(agent: &str) -> &str {
-    HarnessKind::parse(agent).map_or(agent, |k| k.label())
-}
-
-/// A session's `HARLO_SESSION` token (its agent's harlo tools say it).
-fn orch_token() -> String {
-    let mut b = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        let _ = f.read_exact(&mut b);
-    }
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
 /// The setting with what was used last on `host` ("" this computer).
 fn meter_setting(host: &str) -> String {
     if host.is_empty() { "meter_last".to_owned() } else { format!("meter_last@{host}") }
+}
+
+/// A diff tab's key, `diff:<0|1>:<path>`: (staged, path).
+fn diff_key(key: &str) -> Option<(bool, &str)> {
+    let rest = key.strip_prefix("diff:")?;
+    let (staged, path) = rest.split_once(':')?;
+    Some((staged == "1", path))
 }
 
 #[cfg(test)]
@@ -8260,34 +8104,6 @@ mod tests {
         assert!(super::workspace_wants(&answered));
     }
 
-    #[test]
-    fn a_hosts_projects_are_looked_in_from_the_start() {
-        let paths = ["ssh://nas/a", "/local/b", "ssh://pi/c", "ssh://nas/d"].map(std::path::PathBuf::from);
-        let roots = super::remote_roots_of(paths.iter());
-        assert_eq!(roots.iter().map(|(h, l)| (h.as_str(), l.len())).collect::<Vec<_>>(), [("nas", 2), ("pi", 1)]);
-    }
-
-    #[test]
-    fn a_session_continues_a_minute_after_its_limit_resets() {
-        let resumes = super::parse_resumes(r#"{"/a.jsonl": 1000000, "/b.jsonl": 2000000}"#);
-        assert!(super::due_resumes(&resumes, 1_000_000).is_empty());
-        assert_eq!(super::due_resumes(&resumes, 1_060_000), [("/a.jsonl".to_owned(), false)]);
-        assert_eq!(super::due_resumes(&resumes, 90_000_000).iter().filter(|(_, give_up)| *give_up).count(), 2);
-        assert!(super::parse_resumes("").is_empty());
-    }
-
-    #[test]
-    fn harlos_sandbox_goes_on_its_command_line() {
-        use super::{HarnessKind, harlo_args, model_args};
-        assert_eq!(harlo_args(HarnessKind::Harlo, true, true), ["--harlo-tools"]);
-        assert_eq!(harlo_args(HarnessKind::Harlo, true, false), ["--harlo-tools", "--sandbox", "no-network"]);
-        assert_eq!(harlo_args(HarnessKind::Harlo, false, true), ["--harlo-tools", "--sandbox", "off"]);
-        assert!(harlo_args(HarnessKind::Claude, false, false).is_empty());
-        assert_eq!(model_args(" codex/gpt-6.1-mini ", ""), ["--task-model", "codex/gpt-6.1-mini"]);
-        assert_eq!(model_args("", "local/qwen"), ["--fallback", "local/qwen"]);
-        assert!(model_args("", "not a model").is_empty());
-    }
-
     use super::url_to_path;
 
     #[test]
@@ -8296,11 +8112,4 @@ mod tests {
         assert_eq!(url_to_path("/plain/path"), "/plain/path");
         assert_eq!(url_to_path("file:///a%2"), "/a%2");
     }
-}
-
-/// A diff tab's key, `diff:<0|1>:<path>`: (staged, path).
-fn diff_key(key: &str) -> Option<(bool, &str)> {
-    let rest = key.strip_prefix("diff:")?;
-    let (staged, path) = rest.split_once(':')?;
-    Some((staged == "1", path))
 }

@@ -1,7 +1,11 @@
-//! Colouring code a line at a time (harlo-core's syntaxes and token
-//! classes), a slice of lines at a time so the window keeps answering.
+//! Colours code by syntax, a slice of lines at a time.
+//!
+//! Lines are coloured with harlo-core's syntaxes and token classes, a slice
+//! at a time so the window keeps answering.
 //! After an edit only the lines whose colours change are done again: it
 //! stops once a line ends in the state it ended in before.
+
+// Rust guideline compliant 2026-10-09
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -23,7 +27,7 @@ const GUESS_CONTEXT: usize = 24;
 /// pass in order: it gets there within a frame or two.
 const SOON: usize = 300;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
     parse: ParseState,
     highlight: HighlightState,
@@ -43,6 +47,12 @@ pub struct Colouring {
     /// (to guess on from as the view moves down, or after an edit).
     guessed: std::ops::Range<usize>,
     guess_states: Vec<State>,
+}
+
+impl std::fmt::Debug for Colouring {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Colouring").field("language", &self.language()).field("valid", &self.valid).field("guessed", &self.guessed).finish_non_exhaustive()
+    }
 }
 
 impl Default for Colouring {
@@ -180,7 +190,7 @@ impl Colouring {
             for (style, piece) in HighlightIterator::new(&mut state.highlight, &ops, &with_newline, &self.highlighter) {
                 let class = style.foreground.r;
                 if at < text.len() && spans.last().is_none_or(|&(_, c)| c != class) {
-                    spans.push((at as u32, class));
+                    spans.push((u32::try_from(at).unwrap_or(u32::MAX), class));
                 }
                 at += piece.len();
             }

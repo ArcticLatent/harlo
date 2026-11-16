@@ -6,6 +6,8 @@
 //! ids counted (00000000-0000-4000-8000-<n>), as the bench's reference run
 //! has them, so the two can be compared byte for byte.
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::Value;
 use std::io::Write;
 use std::path::Path;
@@ -14,12 +16,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Now as JavaScript's `toISOString` ("2026-01-02T03:04:05.678Z").
 pub fn now_iso() -> String {
-    if let Ok(t) = std::env::var("WIKI_TEST_NOW") {
-        if !t.is_empty() {
+    if let Ok(t) = std::env::var("WIKI_TEST_NOW")
+        && !t.is_empty() {
             return t;
         }
-    }
-    let ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    let ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
     iso_from_millis(ms)
 }
 
@@ -43,8 +44,8 @@ fn random_bytes() -> [u8; 16] {
     let mut b = [0u8; 16];
     if std::fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b)).is_err() {
         static N: AtomicU64 = AtomicU64::new(0);
-        let t = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0) as u64;
-        let x = t ^ (std::process::id() as u64) << 32 ^ N.fetch_add(1, Ordering::SeqCst).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        let t = u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos())).unwrap_or(u64::MAX);
+        let x = t ^ u64::from(std::process::id()) << 32 ^ N.fetch_add(1, Ordering::SeqCst).wrapping_mul(0x9e37_79b9_7f4a_7c15);
         b[..8].copy_from_slice(&x.to_le_bytes());
         b[8..].copy_from_slice(&x.rotate_left(29).wrapping_mul(0xbf58_476d_1ce4_e5b9).to_le_bytes());
     }
@@ -80,6 +81,11 @@ pub fn json_pretty(v: &Value) -> String {
 /// Writes `content` to `path` through a temporary file beside it, created
 /// with an existing file's permissions, else `default_mode` (less the
 /// umask, as Node does).
+///
+/// # Errors
+///
+/// An I/O error when the temporary file can't be made or written, or the rename
+/// fails.
 pub fn write_text_atomic(path: &Path, content: &str, default_mode: u32) -> std::io::Result<()> {
     let mode = match std::fs::symlink_metadata(path) {
         #[cfg(unix)]
@@ -94,6 +100,11 @@ pub fn write_text_atomic(path: &Path, content: &str, default_mode: u32) -> std::
 
 /// Writes `content` to `path` through a new temporary file beside it,
 /// created with `mode` (less the umask).
+///
+/// # Errors
+///
+/// An I/O error when the temporary file can't be made or written, or the rename
+/// fails.
 pub fn write_new_then_rename(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -115,26 +126,6 @@ pub fn write_new_then_rename(path: &Path, content: &str, mode: u32) -> std::io::
         let _ = std::fs::remove_file(&tmp);
     }
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn iso_times() {
-        assert_eq!(iso_from_millis(0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso_from_millis(1_767_323_045_678), "2026-01-02T03:04:05.678Z");
-        assert_eq!(iso_from_millis(951_782_400_000), "2000-02-29T00:00:00.000Z");
-    }
-
-    #[test]
-    fn uuids() {
-        let u = random_uuid();
-        assert_eq!(u.len(), 36);
-        assert_eq!(&u[14..15], "4");
-        assert!(matches!(&u[19..20], "8" | "9" | "a" | "b"));
-    }
 }
 
 /// An I/O error as Node words it ("ENOENT: no such file or directory,
@@ -164,5 +155,25 @@ pub fn truncate_points(value: &str, limit: usize) -> String {
     match value.char_indices().nth(limit) {
         None => value.to_owned(),
         Some((i, _)) => format!("{}…", &value[..i]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iso_times() {
+        assert_eq!(iso_from_millis(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso_from_millis(1_767_323_045_678), "2026-01-02T03:04:05.678Z");
+        assert_eq!(iso_from_millis(951_782_400_000), "2000-02-29T00:00:00.000Z");
+    }
+
+    #[test]
+    fn uuids() {
+        let u = random_uuid();
+        assert_eq!(u.len(), 36);
+        assert_eq!(&u[14..15], "4");
+        assert!(matches!(&u[19..20], "8" | "9" | "a" | "b"));
     }
 }

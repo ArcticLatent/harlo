@@ -1,6 +1,8 @@
 //! Microphone recording for dictation (Qt Multimedia, `cpp/harlo_audio.h`).
 //! Called on the Qt thread.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod ffi {
     unsafe extern "C++" {

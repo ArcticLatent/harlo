@@ -8,6 +8,10 @@
 //! it's kept by path until the file is opened again (`restore`), saved or
 //! discarded (`CodeDrafts`).
 
+// Rust guideline compliant 2026-10-09
+
+#![expect(clippy::needless_pass_by_value, reason = "the code cxx-qt generates for this file's bridge passes property values by value")]
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -324,7 +328,7 @@ use harlo_code::view::{Gutter, Palette, Rgba, Row, View};
 static KEPT: LazyLock<Mutex<HashMap<String, Doc>>> = LazyLock::new(Default::default);
 
 fn kept() -> std::sync::MutexGuard<'static, HashMap<String, Doc>> {
-    KEPT.lock().unwrap_or_else(|e| e.into_inner())
+    KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 // Qt's key codes and modifiers.
@@ -565,7 +569,7 @@ fn colour_spent(d: Duration) {
 }
 
 fn to_pos(p: i32) -> usize {
-    p.max(0) as usize
+    usize::try_from(p).unwrap_or(0)
 }
 
 impl qobject::CodeView {
@@ -590,22 +594,22 @@ impl qobject::CodeView {
             let (a, b) = v.doc.selection();
             let cursor = v.doc.cursor;
             let (x, y, _, h) = v.position_rect(cursor);
-            let item = ((v.text_x() + x - v.scroll_x) as f64, (v.top_pad + y - v.scroll_y) as f64, h as f64);
+            let item = (f64::from(v.text_x() + x - v.scroll_x), f64::from(v.top_pad + y - v.scroll_y), f64::from(h));
             (
-                v.doc.text.len() as i32,
-                v.doc.text.line_count() as i32,
-                v.doc.text.line_of(cursor) as i32,
-                cursor as i32,
-                (a as i32, b as i32),
+                i32::try_from(v.doc.text.len()).unwrap_or(i32::MAX),
+                i32::try_from(v.doc.text.line_count()).unwrap_or(i32::MAX),
+                i32::try_from(v.doc.text.line_of(cursor)).unwrap_or(i32::MAX),
+                i32::try_from(cursor).unwrap_or(i32::MAX),
+                (i32::try_from(a).unwrap_or(i32::MAX), i32::try_from(b).unwrap_or(i32::MAX)),
                 v.doc.modified(),
                 v.doc.can_undo(),
                 v.doc.can_redo(),
-                v.content_width() as f64,
-                v.content_height() as f64,
-                v.line_height() as f64,
-                v.text_x() as f64,
-                v.gutter_width() as f64,
-                QRectF::new(x as f64, y as f64, 1.0, h as f64),
+                f64::from(v.content_width()),
+                f64::from(v.content_height()),
+                f64::from(v.line_height()),
+                f64::from(v.text_x()),
+                f64::from(v.gutter_width()),
+                QRectF::new(f64::from(x), f64::from(y), 1.0, f64::from(h)),
                 item,
             )
         };
@@ -652,7 +656,7 @@ impl qobject::CodeView {
             let v = &mut rust.view;
             let (sx, sy) = (v.scroll_x, v.scroll_y);
             v.set_scroll(sx, sy);
-            (v.scroll_x as f64, v.scroll_y as f64)
+            (f64::from(v.scroll_x), f64::from(v.scroll_y))
         };
         if x != self.content_x {
             self.as_mut().rust_mut().content_x = x;
@@ -707,7 +711,7 @@ impl qobject::CodeView {
             let mut rust = self.as_mut().rust_mut();
             let c = rust.view.doc.cursor;
             rust.view.reveal(c, 20.0);
-        }
+        };
         self.wake_cursor();
     }
 
@@ -728,6 +732,7 @@ impl qobject::CodeView {
     }
 
     /// A new text: nothing to undo, not modified.
+    #[expect(clippy::needless_pass_by_value, reason = "a property's WRITE setter takes its value, as cxx-qt calls it")]
     pub fn set_text(mut self: Pin<&mut Self>, text: QString) {
         let s = String::from(&text);
         if self.revision != 0 && s == self.view.doc.text.to_string() && !self.view.doc.modified() {
@@ -745,7 +750,7 @@ impl qobject::CodeView {
             v.scroll_y = 0.0;
             v.goal_x = None;
             v.matches.clear();
-        }
+        };
         let unit = QString::from(&self.view.doc.unit);
         self.as_mut().set_indent_unit(unit);
         self.as_mut().set_match_count(0);
@@ -786,26 +791,29 @@ impl qobject::CodeView {
         self.refresh(false);
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn set_content_x(mut self: Pin<&mut Self>, x: f64) {
         {
             let mut rust = self.as_mut().rust_mut();
             let y = rust.view.scroll_y;
             rust.view.set_scroll(x as f32, y);
-        }
+        };
         self.as_mut().sync_scroll();
         self.update();
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn set_content_y(mut self: Pin<&mut Self>, y: f64) {
         {
             let mut rust = self.as_mut().rust_mut();
             let x = rust.view.scroll_x;
             rust.view.set_scroll(x, y as f32);
-        }
+        };
         self.as_mut().sync_scroll();
         self.update();
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn set_top_padding(mut self: Pin<&mut Self>, pad: f64) {
         if pad == self.top_padding {
             return;
@@ -830,6 +838,7 @@ impl qobject::CodeView {
         self.refresh(false);
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn set_gutter_width(mut self: Pin<&mut Self>, width: f64) {
         if width == self.gutter_width {
             return;
@@ -840,6 +849,7 @@ impl qobject::CodeView {
         self.refresh(false);
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn apply_font(mut self: Pin<&mut Self>) {
         let family = String::from(&self.font_family);
         let (size, gutter) = (self.font_pixel_size as f32, self.gutter_pixel_size as f32);
@@ -900,11 +910,12 @@ impl qobject::CodeView {
             return;
         }
         self.as_mut().rust_mut().arrival_line = line;
-        self.as_mut().rust_mut().view.arrival = (line >= 0).then_some(line as usize);
+        self.as_mut().rust_mut().view.arrival = (line >= 0).then_some(usize::try_from(line).unwrap_or(0));
         self.as_mut().arrival_line_changed();
         self.update();
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn set_arrival_glow(mut self: Pin<&mut Self>, glow: f64) {
         if glow == self.arrival_glow {
             return;
@@ -989,7 +1000,7 @@ impl qobject::CodeView {
 
     pub fn apply(self: Pin<&mut Self>, edits: &QString) -> bool {
         let Ok(v) = serde_json::from_str::<Vec<(i64, i64, String)>>(&String::from(edits)) else { return false };
-        let list: Vec<(usize, usize, String)> = v.into_iter().map(|(a, b, s)| (a.max(0) as usize, b.max(0) as usize, s)).collect();
+        let list: Vec<(usize, usize, String)> = v.into_iter().map(|(a, b, s)| (usize::try_from(a).unwrap_or(0), usize::try_from(b).unwrap_or(0), s)).collect();
         self.edit(|d| d.apply(&list, Kind::Other, None))
     }
 
@@ -1028,19 +1039,20 @@ impl qobject::CodeView {
 
     pub fn position_to_rectangle(mut self: Pin<&mut Self>, pos: i32) -> QRectF {
         let (x, y, w, h) = self.as_mut().rust_mut().view.position_rect(to_pos(pos));
-        QRectF::new(x as f64, y as f64, w as f64, h as f64)
+        QRectF::new(f64::from(x), f64::from(y), f64::from(w), f64::from(h))
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn position_at(mut self: Pin<&mut Self>, x: f64, y: f64) -> i32 {
-        self.as_mut().rust_mut().view.pos_at_content(x as f32, y as f32) as i32
+        i32::try_from(self.as_mut().rust_mut().view.pos_at_content(x as f32, y as f32)).unwrap_or(i32::MAX)
     }
 
     pub fn line_start(&self, line: i32) -> i32 {
-        self.view.doc.text.line_start(to_pos(line)) as i32
+        i32::try_from(self.view.doc.text.line_start(to_pos(line))).unwrap_or(i32::MAX)
     }
 
     pub fn line_of(&self, pos: i32) -> i32 {
-        self.view.doc.text.line_of(to_pos(pos)) as i32
+        i32::try_from(self.view.doc.text.line_of(to_pos(pos))).unwrap_or(i32::MAX)
     }
 
     pub fn reveal(mut self: Pin<&mut Self>, pos: i32, always: bool) {
@@ -1051,14 +1063,14 @@ impl qobject::CodeView {
 
     pub fn find_all(mut self: Pin<&mut Self>, query: &QString, match_case: bool, limit: i32) -> QString {
         let q = String::from(query);
-        let found = self.view.doc.find_all(&q, match_case, limit.max(1) as usize);
+        let found = self.view.doc.find_all(&q, match_case, usize::try_from(limit.max(1)).unwrap_or(usize::MAX));
         let json = serde_json::to_string(&found).unwrap_or_else(|_| "[]".into());
-        let n = found.len() as i32;
+        let n = i32::try_from(found.len()).unwrap_or(i32::MAX);
         {
             let mut rust = self.as_mut().rust_mut();
             rust.view.matches = found;
             rust.view.match_len = q.encode_utf16().count();
-        }
+        };
         self.as_mut().set_match_count(n);
         self.update();
         QString::from(&json)
@@ -1072,7 +1084,7 @@ impl qobject::CodeView {
     }
 
     pub fn visible_matches(&self) -> i32 {
-        self.view.visible_matches() as i32
+        i32::try_from(self.view.visible_matches()).unwrap_or(i32::MAX)
     }
 
     pub fn bracket_pair(mut self: Pin<&mut Self>) -> QString {
@@ -1093,6 +1105,7 @@ impl qobject::CodeView {
         self.view.line_coloured(to_pos(line))
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn row_at(&self, y: f64) -> i32 {
         let v = &self.view;
         ((y as f32 - v.top_pad + v.scroll_y) / v.line_height()).floor() as i32
@@ -1100,6 +1113,7 @@ impl qobject::CodeView {
 
     // ---- drawing -----------------------------------------------------------------
 
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     unsafe fn paint(mut self: Pin<&mut Self>, painter: *mut qobject::QPainter) {
         let t = Instant::now();
         let dpr = self.pixel_ratio();
@@ -1109,19 +1123,25 @@ impl qobject::CodeView {
             let mut rust = self.as_mut().rust_mut();
             let rust = &mut *rust;
             rust.view.render(&mut rust.pixels, w, h, dpr as f32);
-        }
-        unsafe { self.blit(painter, self.pixels.as_ptr(), w as i32, h as i32) };
+        };
+        let pixels = &self.pixels;
+        assert!(pixels.len() >= w * h * 4, "the view drew {} bytes for a {w}x{h} frame", pixels.len());
+        // SAFETY: Qt passes a painter valid for this paint call; blit reads
+        // `w * h * 4` bytes, which the check above guarantees `pixels` holds,
+        // and draws them before returning, while `pixels` is still borrowed.
+        unsafe { self.blit(painter, pixels.as_ptr(), i32::try_from(w).unwrap_or(i32::MAX), i32::try_from(h).unwrap_or(i32::MAX)) };
         // (Read by the self-tests; no signal from the render thread.)
         self.as_mut().rust_mut().paint_ms = t.elapsed().as_secs_f64() * 1000.0;
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn size_hook(mut self: Pin<&mut Self>) {
         let (w, h) = (self.width() as f32, self.height() as f32);
         {
             let mut rust = self.as_mut().rust_mut();
             rust.view.width = w;
             rust.view.height = h;
-        }
+        };
         self.refresh(false);
     }
 
@@ -1186,7 +1206,7 @@ impl qobject::CodeView {
         }
     }
 
-    fn key_hook(mut self: Pin<&mut Self>, key: i32, modifiers: i32, text: &QString, press: bool) -> bool {
+    fn key_hook(self: Pin<&mut Self>, key: i32, modifiers: i32, text: &QString, press: bool) -> bool {
         if !press {
             return false;
         }
@@ -1197,8 +1217,24 @@ impl qobject::CodeView {
             // (Alt+arrows go to the diff, Alt+letters to menus.)
             return false;
         }
-        let ro = self.read_only;
-        // Moving the cursor (Shift: selecting).
+        match key {
+            KEY_LEFT | KEY_RIGHT | KEY_UP | KEY_DOWN | KEY_HOME | KEY_END | KEY_PAGE_UP | KEY_PAGE_DOWN => self.move_key(key, shift, ctrl),
+            KEY_A if ctrl => {
+                self.select_all();
+                true
+            }
+            KEY_C | KEY_INSERT if ctrl => {
+                self.copy();
+                true
+            }
+            _ if self.read_only => false,
+            _ => self.edit_key(key, shift, ctrl, alt, text),
+        }
+    }
+
+    /// A key that moves the cursor (Shift: selecting; Ctrl+Up/Down: scrolling).
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
+    fn move_key(mut self: Pin<&mut Self>, key: i32, shift: bool, ctrl: bool) -> bool {
         let motion = |this: Pin<&mut Self>, to: usize, keep_goal: bool| {
             let mut this = this;
             this.as_mut().doc().set_cursor(to, shift);
@@ -1234,7 +1270,7 @@ impl qobject::CodeView {
                 motion(self, to, false)
             }
             KEY_UP | KEY_DOWN if ctrl => {
-                let lh = self.view.line_height() as f64;
+                let lh = f64::from(self.view.line_height());
                 let y = self.content_y + if key == KEY_UP { -lh } else { lh };
                 self.set_content_y(y);
                 true
@@ -1254,7 +1290,7 @@ impl qobject::CodeView {
                     let mut rust = self.as_mut().rust_mut();
                     let (sx, sy) = (rust.view.scroll_x, rust.view.scroll_y);
                     rust.view.set_scroll(sx, sy + lines as f32 * lh);
-                }
+                };
                 motion(self, to, true)
             }
             KEY_HOME => {
@@ -1265,19 +1301,13 @@ impl qobject::CodeView {
                 let to = if ctrl { self.view.doc.text.len() } else { self.view.doc.line_end(cursor) };
                 motion(self, to, false)
             }
-            KEY_A if ctrl => {
-                self.select_all();
-                true
-            }
-            KEY_C if ctrl => {
-                self.copy();
-                true
-            }
-            KEY_INSERT if ctrl => {
-                self.copy();
-                true
-            }
-            _ if ro => false,
+            _ => false,
+        }
+    }
+
+    /// A key that edits the text (not in a read-only view).
+    fn edit_key(mut self: Pin<&mut Self>, key: i32, shift: bool, ctrl: bool, alt: bool, text: &QString) -> bool {
+        match key {
             KEY_X if ctrl => {
                 self.cut();
                 true
@@ -1359,6 +1389,7 @@ impl qobject::CodeView {
 
     // ---- the mouse ---------------------------------------------------------------
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn pointer_hook(mut self: Pin<&mut Self>, kind: i32, x: f64, y: f64, button: i32, modifiers: i32) {
         let shift = modifiers & SHIFT != 0;
         self.as_mut().rust_mut().last_pointer = (x, y);
@@ -1401,7 +1432,7 @@ impl qobject::CodeView {
                     rust.clicks = clicks;
                     rust.last_press = Some((now, x, y));
                     rust.view.goal_x = None;
-                }
+                };
                 match clicks {
                     1 => {
                         self.as_mut().doc().set_cursor(pos, shift);
@@ -1430,7 +1461,7 @@ impl qobject::CodeView {
                     return;
                 }
                 self.as_mut().drag_to(x, y);
-                let outside = y < self.view.top_pad as f64 || y > self.height();
+                let outside = y < f64::from(self.view.top_pad) || y > self.height();
                 if outside && self.drag_timer == 0 {
                     let id = self.as_mut().start_ticks(16);
                     self.as_mut().rust_mut().drag_timer = id;
@@ -1452,6 +1483,7 @@ impl qobject::CodeView {
     }
 
     /// The selection stretched to the pointer.
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn drag_to(mut self: Pin<&mut Self>, x: f64, y: f64) {
         let pos = self.as_mut().rust_mut().view.pos_at(x as f32, y as f32);
         let drag = self.drag;
@@ -1474,7 +1506,7 @@ impl qobject::CodeView {
     /// While dragging past the top or bottom: scroll, and select on.
     fn drag_scroll(mut self: Pin<&mut Self>) {
         let (x, y) = self.last_pointer;
-        let top = self.view.top_pad as f64;
+        let top = f64::from(self.view.top_pad);
         let h = self.height();
         let dy = if y < top { y - top } else if y > h { y - h } else { 0.0 };
         if dy == 0.0 || self.drag == DragBy::None {
@@ -1489,7 +1521,7 @@ impl qobject::CodeView {
     }
 
     fn wheel_hook(mut self: Pin<&mut Self>, dx: f64, dy: f64, modifiers: i32, pixels: bool) -> bool {
-        let lh = self.view.line_height() as f64;
+        let lh = f64::from(self.view.line_height());
         let (mut dx, mut dy) = if pixels { (dx, dy) } else { (dx * 3.0 * lh, dy * 3.0 * lh) };
         if modifiers & SHIFT != 0 && dx == 0.0 {
             (dx, dy) = (dy, 0.0);
@@ -1512,9 +1544,9 @@ impl qobject::CodeView {
         self.as_mut().rust_mut().view.preedit = String::from(preedit);
         if !commit.is_empty() || replace_length > 0 {
             if replace_length > 0 {
-                let c = self.view.doc.cursor as i64;
-                let a = (c + replace_start as i64).max(0) as usize;
-                let b = a + replace_length.max(0) as usize;
+                let c = i64::try_from(self.view.doc.cursor).unwrap_or(i64::MAX);
+                let a = usize::try_from((c + i64::from(replace_start)).max(0)).unwrap_or(0);
+                let b = a + usize::try_from(replace_length).unwrap_or(0);
                 self.as_mut().doc().select(a, b);
             }
             self.as_mut().edit(|d| d.type_text(&commit));
@@ -1532,6 +1564,7 @@ impl Default for CodeDraftsRust {
     }
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl qobject::CodeDrafts {
     pub fn discard(&self, path: &QString) {
         kept().remove(&String::from(path));

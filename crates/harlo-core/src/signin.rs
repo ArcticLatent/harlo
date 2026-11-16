@@ -1,9 +1,12 @@
-//! Signing the agents in to their model providers from harlo: reading what
-//! their own sign-in commands print (`claude auth login`) into
+//! Signing the agents in to their model providers from harlo.
+//!
+//! What their own sign-in commands print (`claude auth login`) is read into
 //! steps a dialog shows: links to open, codes to see, what they ask for.
 //!
 //! The agents keep their credentials themselves; harlo only shows the
 //! links and hands what the user types to the command, as a terminal would.
+
+// Rust guideline compliant 2026-10-09
 
 use serde_json::{Value, json};
 

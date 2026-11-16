@@ -1,8 +1,12 @@
-//! A program of harlo's put on another machine: harlo's own build of it for
-//! that machine's kind (x86_64 or aarch64), stripped and gzipped once, sent
-//! over SSH when that build isn't there yet, and kept in harlo's cache
-//! there (`~/.cache/harlo/<name>-<build>`; older builds go). harlo-engines
-//! (model servers there) and harlo-agent (Harlo's sessions there) go so.
+//! A program of harlo's put on another machine.
+//!
+//! It's harlo's own build of it for that machine's kind (x86_64 or aarch64),
+//! stripped and gzipped once, sent over SSH when that build isn't there yet,
+//! and kept in harlo's cache there (`~/.cache/harlo/<name>-<build>`; older
+//! builds go). harlo-engines (model servers there) and harlo-agent (Harlo's
+//! sessions there) go so.
+
+// Rust guideline compliant 2026-10-09
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -17,6 +21,8 @@ use crate::remote::{self, Host};
 /// The machines harlo's helpers run on.
 pub const ARCHES: [&str; 2] = ["x86_64", "aarch64"];
 
+/// One of harlo's helper programs, as it's put on other machines.
+#[derive(Debug)]
 pub struct Helper {
     /// Its name, and its name on the machine (`<name>-<build>`).
     pub name: &'static str,
@@ -32,7 +38,7 @@ pub struct Helper {
 }
 
 /// A build as it goes over, and its name (made once).
-type Packed = OnceLock<std::result::Result<(Vec<u8>, String), String>>;
+type Packed = OnceLock<anyhow::Result<(Vec<u8>, String)>>;
 
 impl Helper {
     pub const fn new(name: &'static str, static_only: bool, what: &'static str, check: &'static str) -> Self {
@@ -72,20 +78,20 @@ impl Helper {
                     } else {
                         format!("This harlo has no {} for {arch} machines (harlo's releases have one).", self.what)
                     }
-                })?;
+                }).map_err(anyhow::Error::msg)?;
                 let tmp = std::env::temp_dir().join(format!("{}-{arch}-{}", self.name, std::process::id()));
                 let stripped = std::process::Command::new("strip").arg("-o").arg(&tmp).arg(&helper).stdin(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-                let bytes = std::fs::read(if stripped { &tmp } else { &helper }).map_err(|e| e.to_string());
+                let bytes = std::fs::read(if stripped { &tmp } else { &helper }).map_err(anyhow::Error::from);
                 let _ = std::fs::remove_file(&tmp);
                 let bytes = bytes?;
-                let id = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100_0000_01b3));
-                let mut gz = std::process::Command::new("gzip").args(["-c", "-6"]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().map_err(|e| format!("gzip: {e}"))?;
+                let id = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3));
+                let mut gz = std::process::Command::new("gzip").args(["-c", "-6"]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().map_err(|e| anyhow::anyhow!("gzip: {e}"))?;
                 let mut input = gz.stdin.take().expect("piped");
                 let feed = std::thread::spawn(move || input.write_all(&bytes));
-                let out = gz.wait_with_output().map_err(|e| e.to_string())?;
+                let out = gz.wait_with_output()?;
                 let _ = feed.join();
                 if !out.status.success() {
-                    return Err("gzip failed".into());
+                    return Err(anyhow::Error::msg("gzip failed"));
                 }
                 Ok((out.stdout, format!("{id:016x}")))
             })
@@ -94,6 +100,10 @@ impl Helper {
     }
 
     /// Whether some build of it is on `host` (harlo has put it there before).
+    ///
+    /// # Errors
+    ///
+    /// When `host` can't be reached.
     pub fn there(&self, host: &Host) -> Result<bool> {
         let out = remote::run(host, &format!("ls \"$HOME\"/.cache/harlo/{}-* >/dev/null 2>&1 && echo yes || echo no", self.name), Duration::from_secs(30))?;
         Ok(String::from_utf8_lossy(&out.stdout).trim() == "yes")
@@ -101,6 +111,11 @@ impl Helper {
 
     /// It on `host`, put there first if this build of it isn't: its path
     /// there.
+    ///
+    /// # Errors
+    ///
+    /// When `host` can't be reached, there's no build of it for its kind, or it
+    /// can't be written there.
     pub fn on(&self, host: &Host) -> Result<String> {
         let arch = arch_of(host)?;
         let (gz, id) = self.packed(&arch).map_err(|e| anyhow::anyhow!("{} is an {arch} machine: {e:#}", host.name))?;
@@ -135,16 +150,20 @@ fn put_script(name: &str, file: &str, check: &str) -> String {
 
 /// What kind of machine `host` is (`uname -m`, aarch64 for arm64), asked
 /// once (or known from its check).
+///
+/// # Errors
+///
+/// When `host` can't be reached.
 pub fn arch_of(host: &Host) -> Result<String> {
     static SEEN: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
-    if let Some((_, a)) = SEEN.lock().unwrap().iter().find(|(h, _)| *h == host.name) {
+    if let Some((_, a)) = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().find(|(h, _)| *h == host.name) {
         return Ok(a.clone());
     }
     let arch = match remote::info_of(&host.name).map(|i| i.arch).filter(|a| !a.is_empty()) {
         Some(a) => a,
         None => normal_arch(String::from_utf8_lossy(&remote::run(host, "uname -m", Duration::from_secs(30))?.stdout).trim()),
     };
-    SEEN.lock().unwrap().push((host.name.clone(), arch.clone()));
+    SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((host.name.clone(), arch.clone()));
     Ok(arch)
 }
 
@@ -183,7 +202,7 @@ mod tests {
     #[test]
     fn putting_it_there_keeps_others_being_put() {
         let s = put_script("harlo-agent", "harlo-agent-00ff", "--version");
-        assert!(s.contains(r#"t="$p.tmp.$$""#) && s.contains(r#"*.tmp.*) ;;"#) && s.ends_with(r#""$p" --version"#), "{s}");
+        assert!(s.contains(r#"t="$p.tmp.$$""#) && s.contains(r"*.tmp.*) ;;") && s.ends_with(r#""$p" --version"#), "{s}");
         // A POSIX shell takes it.
         let ok = std::process::Command::new("sh").args(["-n", "-c", &s]).status().unwrap();
         assert!(ok.success());

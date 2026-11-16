@@ -1,6 +1,8 @@
 //! Page frontmatter: the leading `---` YAML block, parsed as OpenWiki parses
 //! it (YAML 1.2 core schema, duplicate keys an error) into JSON values.
 
+// Rust guideline compliant 2026-10-09
+
 use crate::jsre::Re;
 use serde_json::{Map, Number, Value};
 use std::sync::LazyLock;
@@ -131,11 +133,10 @@ impl MarkedEventReceiver for Builder {
 }
 
 fn scalar(text: &str, style: TScalarStyle, tag: Option<&TokenType>) -> Value {
-    if let Some(TokenType::Tag(handle, suffix)) = tag {
-        if handle == "!!" && suffix == "str" {
+    if let Some(TokenType::Tag(handle, suffix)) = tag
+        && handle == "!!" && suffix == "str" {
             return Value::String(text.to_owned());
         }
-    }
     if style != TScalarStyle::Plain {
         return Value::String(text.to_owned());
     }
@@ -163,7 +164,7 @@ fn core(t: &str) -> Value {
         if let Ok(i) = t.parse::<i64>() {
             return Value::Number(Number::from(i));
         }
-        return t.parse::<f64>().ok().and_then(Number::from_f64).map(Value::Number).unwrap_or(Value::Null);
+        return t.parse::<f64>().ok().and_then(Number::from_f64).map_or(Value::Null, Value::Number);
     }
     if OCT.is_match(t) {
         return Value::Number(Number::from(u64::from_str_radix(&t[2..], 8).unwrap_or(0)));
@@ -172,7 +173,7 @@ fn core(t: &str) -> Value {
         return Value::Number(Number::from(u64::from_str_radix(&t[2..], 16).unwrap_or(0)));
     }
     if FLOAT.is_match(t) {
-        return t.parse::<f64>().ok().and_then(Number::from_f64).map(Value::Number).unwrap_or(Value::Null);
+        return t.parse::<f64>().ok().and_then(Number::from_f64).map_or(Value::Null, Value::Number);
     }
     Value::String(t.to_owned())
 }
@@ -194,15 +195,15 @@ pub fn js_number(f: f64) -> String {
     let (mantissa, exp) = e.split_once('e').unwrap_or((&e, "0"));
     let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
     let exp: i32 = exp.parse().unwrap_or(0);
-    let k = digits.len() as i32;
+    let k = i32::try_from(digits.len()).unwrap_or(i32::MAX);
     let n = exp + 1;
     let sign = if f < 0.0 { "-" } else { "" };
     let body = if k <= n && n <= 21 {
-        format!("{digits}{}", "0".repeat((n - k) as usize))
+        format!("{digits}{}", "0".repeat(usize::try_from(n - k).unwrap_or(0)))
     } else if 0 < n && n <= 21 {
-        format!("{}.{}", &digits[..n as usize], &digits[n as usize..])
+        format!("{}.{}", &digits[..usize::try_from(n).unwrap_or(0)], &digits[usize::try_from(n).unwrap_or(0)..])
     } else if -6 < n && n <= 0 {
-        format!("0.{}{digits}", "0".repeat((-n) as usize))
+        format!("0.{}{digits}", "0".repeat(usize::try_from(-n).unwrap_or(0)))
     } else {
         let e = n - 1;
         let es = if e >= 0 { format!("+{e}") } else { e.to_string() };

@@ -1,7 +1,11 @@
 # The Rust tests of Harlo's agent (harlo-agent) and harlo's core
 # (harlo-core) on every push to main and every pull request: plain
-# `cargo test`, no Qt, no model, no network service of ours. The click tests
-# and the agent's end-to-end tests run on a desktop, with stand-in models.
+# `cargo test`, no Qt, no model, no network service of ours. Then clippy, with
+# warnings as errors, on every crate that builds without Qt (all but
+# harlo-app). A separate job checks the dependencies: known
+# vulnerabilities and unsound versions (cargo-audit) and unused ones
+# (cargo-machete). The click tests and the agent's end-to-end tests run on a
+# desktop, with stand-in models.
 name: tests
 
 on:
@@ -32,7 +36,29 @@ jobs:
           # Harlo's sandbox (bubblewrap) needs user namespaces, which Ubuntu
           # limits by default; without them its tests only check arguments.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned so a new clippy's lints arrive with a deliberate update, not
+      # with an unrelated push.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: harlo-agent and harlo-core
         run: cargo test --locked -p harlo-agent -p harlo-core
+      - name: clippy
+        run: cargo clippy --locked --workspace --exclude harlo-app --all-targets -- -D warnings
+
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-machete
+      # Unmaintained crates (all without a maintained replacement yet) are
+      # listed but don't fail the job.
+      - name: cargo audit
+        run: cargo audit --deny unsound --deny yanked
+      - name: cargo machete
+        run: cargo machete

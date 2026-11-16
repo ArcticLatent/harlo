@@ -1,6 +1,8 @@
 //! Builds the flat sidebar row list: project headers, their sessions, and
 //! an "Other sessions" group for sessions outside every project.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,9 +32,10 @@ pub struct LiveInfo {
     pub started_at: SystemTime,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SidebarKind {
     Project,
+    #[default]
     Session,
     OtherGroup,
     More,
@@ -52,7 +55,7 @@ impl SidebarKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SidebarRow {
     pub kind: SidebarKind,
     /// Project: `project:<id>`. Session: live key if running, else the file path.
@@ -88,6 +91,8 @@ pub struct SidebarRow {
     pub nest: u32,
 }
 
+/// What the sidebar is built from.
+#[derive(Debug)]
 pub struct SidebarInput<'a> {
     pub projects: &'a [Project],
     /// Worktrees of the projects; sessions inside one belong to its project.
@@ -190,8 +195,9 @@ pub fn project_sessions(id: i64, input: &SidebarInput<'_>) -> Vec<ProjectSession
     out
 }
 
-pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
-    let filter = input.filter.trim().to_lowercase();
+/// The sessions to list, matching the filter: newest first (pinned before
+/// them), each with the project it belongs to.
+fn entries(input: &SidebarInput<'_>, filter: &str) -> Vec<Entry> {
     let mut entries: Vec<Entry> = Vec::new();
     let mut live_by_file: HashMap<&Path, &LiveInfo> = HashMap::new();
     for l in input.live {
@@ -213,7 +219,7 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             Some(l) => (l.key.clone(), live_status(l)),
             None => (s.path.to_string_lossy().into_owned(), String::new()),
         };
-        let title = live.filter(|l| !l.name.is_empty()).map(|l| l.name.clone()).unwrap_or_else(|| s.display_title().to_owned());
+        let title = live.filter(|l| !l.name.is_empty()).map_or_else(|| s.display_title().to_owned(), |l| l.name.clone());
         // Settled: on the shelf until there's newer work in it (or it's
         // working, waiting on you, or pinned).
         let settled = if !meta.settled_why.is_empty() && !meta.pinned && !active && unix(s.modified) <= meta.settled_at { meta.settled_why.clone() } else { String::new() };
@@ -262,15 +268,21 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
     }
 
     if !filter.is_empty() {
-        entries.retain(|e| e.title.to_lowercase().contains(&filter));
+        entries.retain(|e| e.title.to_lowercase().contains(filter));
     }
     entries.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(b.at.cmp(&a.at)).then_with(|| a.key.cmp(&b.key)));
 
     // Assign each session to a worktree's project, else to the deepest
     // project containing its cwd.
-    for e in entries.iter_mut() {
+    for e in &mut entries {
         (e.branch, e.owner) = owner_of(&e.cwd, input.projects, input.worktrees);
     }
+    entries
+}
+
+pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
+    let filter = input.filter.trim().to_lowercase();
+    let entries = entries(input, &filter);
     let mut by_project: HashMap<i64, Vec<&Entry>> = HashMap::new();
     let mut other: Vec<&Entry> = Vec::new();
     for e in &entries {
@@ -302,16 +314,10 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             path: p.path.to_string_lossy().into_owned(),
             modified: sessions.first().map_or(0, |e| e.modified),
             collapsed,
-            pinned: false,
             count: sessions.len(),
-            branch: String::new(),
-            cwd: PathBuf::new(),
-            changes: 0,
             icon: p.icon.clone(),
             color: p.color.clone(),
-            settled: String::new(),
-            helper_of: String::new(),
-            nest: 0,
+            ..SidebarRow::default()
         });
         if !collapsed {
             push_sessions(&mut rows, &sessions, p.id, false, filtering || input.expanded.contains(&p.id));
@@ -327,22 +333,10 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
                     key: format!("{key}:{}", p.id),
                     project_id: p.id,
                     title: title.into(),
-                    subtitle: String::new(),
-                    harness: String::new(),
-                    status: String::new(),
-                    path: String::new(),
                     modified: shelf[0].modified,
                     collapsed: !open,
-                    pinned: false,
                     count: shelf.len(),
-                    branch: String::new(),
-                    cwd: PathBuf::new(),
-                    changes: 0,
-                    icon: String::new(),
-                    color: String::new(),
-                    settled: String::new(),
-                    helper_of: String::new(),
-                    nest: 0,
+                    ..SidebarRow::default()
                 });
                 if open {
                     push_sessions(&mut rows, &shelf, p.id, false, true);
@@ -359,22 +353,11 @@ pub fn build(input: &SidebarInput<'_>) -> Vec<SidebarRow> {
             key: "group:other".into(),
             project_id: -1,
             title: "Other sessions".into(),
-            subtitle: String::new(),
-            harness: String::new(),
             status: aggregate_status(&other),
-            path: String::new(),
             modified: other.first().map_or(0, |e| e.modified),
             collapsed,
-            pinned: false,
             count: other.len(),
-            branch: String::new(),
-            cwd: PathBuf::new(),
-            changes: 0,
-            icon: String::new(),
-            color: String::new(),
-            settled: String::new(),
-            helper_of: String::new(),
-            nest: 0,
+            ..SidebarRow::default()
         });
         if !collapsed {
             push_sessions(&mut rows, &other, -1, true, filtering || input.expanded.contains(&-1));
@@ -403,17 +386,11 @@ fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i6
             status: e.status.clone(),
             path: e.path.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
             modified: e.modified,
-            collapsed: false,
             pinned: e.pinned,
-            count: 0,
             branch: e.branch.clone(),
             cwd: e.cwd.clone(),
-            changes: 0,
-            icon: String::new(),
-            color: String::new(),
             settled: e.settled.clone(),
-            helper_of: String::new(),
-            nest: 0,
+            ..SidebarRow::default()
         });
     }
     if hidden > 0 {
@@ -422,22 +399,8 @@ fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i6
             key: format!("more:{project_id}"),
             project_id,
             title: format!("Show {hidden} more"),
-            subtitle: String::new(),
-            harness: String::new(),
-            status: String::new(),
-            path: String::new(),
-            modified: 0,
-            collapsed: false,
-            pinned: false,
             count: hidden,
-            branch: String::new(),
-            cwd: PathBuf::new(),
-            changes: 0,
-            icon: String::new(),
-            color: String::new(),
-            settled: String::new(),
-            helper_of: String::new(),
-            nest: 0,
+            ..SidebarRow::default()
         });
     }
 }
@@ -471,7 +434,7 @@ fn aggregate_status(sessions: &[&Entry]) -> String {
 }
 
 fn unix(t: SystemTime) -> i64 {
-    t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    t.duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// The path with the home folder shown as `~` (a remote one as `host:~/…`).
@@ -486,10 +449,11 @@ pub fn tilde(p: &Path) -> String {
     p.display().to_string()
 }
 
-/// Puts each session another one started (`parent_of`: key → its
-/// parent's key) right under its parent, when they're in the same part of
-/// the list (one project's sessions, or its Settled shelf), marked with the
-/// parent's title and indented a step deeper. The rest keep their order.
+/// Puts each session another one started right under its parent.
+///
+/// `parent_of` maps a key to its parent's key. Only when they're in the same
+/// part of the list (one project's sessions, or its Settled shelf), marked with
+/// the parent's title and indented a step deeper. The rest keep their order.
 pub fn nest_helpers(rows: &mut Vec<SidebarRow>, parent_of: &HashMap<String, String>) {
     // Each row's part of the list: what non-session rows came before it.
     let mut part = 0usize;
@@ -528,35 +492,62 @@ pub fn nest_helpers(rows: &mut Vec<SidebarRow>, parent_of: &HashMap<String, Stri
         }
         return;
     }
-    fn place(i: usize, depth: u32, rows: &[SidebarRow], under: &HashMap<usize, Vec<usize>>, done: &mut [bool], order: &mut Vec<(usize, u32)>) {
+    fn place(i: usize, depth: u32, under: &HashMap<usize, Vec<usize>>, done: &mut [bool], order: &mut Vec<(usize, u32)>) {
         if std::mem::replace(&mut done[i], true) {
             return;
         }
         order.push((i, depth));
         for &c in under.get(&i).into_iter().flatten() {
-            place(c, depth + 1, rows, under, done, order);
+            place(c, depth + 1, under, done, order);
         }
     }
     let mut done = vec![false; rows.len()];
     let mut order = Vec::with_capacity(rows.len());
-    for i in 0..rows.len() {
-        if !nested[i] {
-            place(i, 0, rows, &under, &mut done, &mut order);
-        }
+    for (i, _) in nested.iter().enumerate().filter(|(_, n)| !**n) {
+        place(i, 0, &under, &mut done, &mut order);
     }
     // (A loop of parents: left where they were.)
     for i in 0..rows.len() {
         if !done[i] {
-            place(i, 0, rows, &under, &mut done, &mut order);
+            place(i, 0, &under, &mut done, &mut order);
         }
     }
     let mut old: Vec<Option<SidebarRow>> = std::mem::take(rows).into_iter().map(Some).collect();
     for (i, depth) in order {
-        let mut row = old[i].take().expect("each row placed once");
+        // (Each row is placed once.)
+        let Some(mut row) = old[i].take() else { continue };
         row.nest = depth;
-        row.helper_of = named[i].clone();
+        row.helper_of.clone_from(&named[i]);
         rows.push(row);
     }
+}
+
+/// The sidebar's sessions as a phone lists them, each with its project's name.
+///
+/// `parents` names the session each nested helper is under, and `requests`
+/// gives what a session (by key) waits on you for: a phone answers from its
+/// list.
+pub fn phone_list(rows: Vec<SidebarRow>, parents: &HashMap<String, String>, requests: impl Fn(&str) -> Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut group = String::new();
+    let mut list = Vec::new();
+    for r in rows {
+        match r.kind {
+            SidebarKind::Project => group.clone_from(&r.title),
+            SidebarKind::OtherGroup => group = String::new(),
+            SidebarKind::Session => list.push(serde_json::json!({
+                "key": r.key, "title": r.title, "project": group, "harness": r.harness,
+                "status": r.status, "modified": r.modified, "branch": r.branch, "pinned": r.pinned,
+                "where": if r.cwd.as_os_str().is_empty() { String::new() } else { tilde(&r.cwd) },
+                // Its machine ("" this one), and why it's settled ("" not).
+                "host": crate::remote::host_of(&r.cwd).unwrap_or_default(), "settled": match crate::shelf::why_text(&r.settled) { "" => r.settled.as_str(), t => t },
+                "requests": requests(&r.key),
+                // A helper: the session that started it (shown under it).
+                "parent": if r.nest > 0 { parents.get(&r.key).cloned() } else { None }, "helperOf": r.helper_of, "nest": r.nest,
+            })),
+            SidebarKind::More | SidebarKind::Shelf => {}
+        }
+    }
+    list
 }
 
 #[cfg(test)]
@@ -566,11 +557,7 @@ mod tests {
     use std::time::Duration;
 
     fn row(kind: SidebarKind, key: &str) -> SidebarRow {
-        SidebarRow {
-            kind, key: key.into(), project_id: 1, title: format!("T {key}"), subtitle: String::new(), harness: String::new(), status: String::new(),
-            path: String::new(), modified: 0, collapsed: false, pinned: false, count: 0, branch: String::new(), cwd: PathBuf::new(), changes: 0,
-            icon: String::new(), color: String::new(), settled: String::new(), helper_of: String::new(), nest: 0,
-        }
+        SidebarRow { kind, key: key.into(), project_id: 1, title: format!("T {key}"), ..SidebarRow::default() }
     }
 
     #[test]
@@ -646,7 +633,7 @@ mod tests {
     #[test]
     fn sessions_in_the_same_second_keep_their_order() {
         let projects = [project(1, "/w")];
-        let second = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let second = UNIX_EPOCH + Duration::from_hours(500000);
         let at = |path: &str, title: &str, ms: u64| SessionInfo { modified: second + Duration::from_millis(ms), ..session(path, "/w", title, 0) };
         let meta = HashMap::new();
         let order = |sessions: &[SessionInfo]| -> Vec<String> {
@@ -827,5 +814,20 @@ mod tests {
         let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         assert_eq!(rows.len(), 1 + SESSIONS_PER_PROJECT + 1);
         assert_eq!(rows.last().unwrap().kind, SidebarKind::More);
+    }
+
+    #[test]
+    fn a_phone_lists_sessions_under_their_projects_name() {
+        use SidebarKind::*;
+        let mut lead = row(Session, "lead");
+        lead.settled = "merged".into();
+        let mut helper = row(Session, "helper");
+        (helper.nest, helper.helper_of, helper.cwd) = (1, "T lead".into(), PathBuf::from("ssh://nas/src"));
+        let rows = vec![row(Project, "p"), lead, helper, row(Shelf, "s"), row(OtherGroup, "o"), row(Session, "loose")];
+        let parents: HashMap<String, String> = [("helper".to_owned(), "lead".to_owned())].into();
+        let list = phone_list(rows, &parents, |key| if key == "lead" { vec![serde_json::json!({ "id": "q" })] } else { Vec::new() });
+        let shown: Vec<_> = list.iter().map(|s| (s["key"].as_str(), s["project"].as_str(), s["parent"].as_str(), s["host"].as_str(), s["requests"].as_array().map(Vec::len))).collect();
+        assert_eq!(shown, [(Some("lead"), Some("T p"), None, Some(""), Some(1)), (Some("helper"), Some("T p"), Some("lead"), Some("nas"), Some(0)), (Some("loose"), Some(""), None, Some(""), Some(0))]);
+        assert_ne!(list[0]["settled"], "", "a settled session says why");
     }
 }

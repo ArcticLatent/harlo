@@ -2,6 +2,8 @@
 //! on this computer with the built-in whisper.cpp; the text goes into the
 //! composer that asked. Also downloads the speech models.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -103,6 +105,7 @@ fn test_speech() -> Option<String> {
     std::env::var("HARLO_TEST_DICTATION").ok()
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Dictation {
     pub fn models_json(&self) -> QString {
         let list: Vec<serde_json::Value> = dictation::MODELS
@@ -153,7 +156,7 @@ impl Dictation {
                 }
                 Some(_) => Err("The speech model isn't downloaded yet.".to_owned()),
                 None => {
-                    let input = dictation::to_whisper_input(&samples, rate.max(0) as u32, channels.max(1) as u16);
+                    let input = dictation::to_whisper_input(&samples, u32::try_from(rate).unwrap_or(0), u16::try_from(channels.max(1)).unwrap_or(u16::MAX));
                     dictation::transcribe(&model, &input, &language).map_err(|e| format!("{e:#}"))
                 }
             };
@@ -185,7 +188,7 @@ impl Dictation {
         } else if test_speech().is_some() {
             0.5
         } else {
-            crate::audio::audio_level() as f64
+            f64::from(crate::audio::audio_level())
         }
     }
 
@@ -195,7 +198,7 @@ impl Dictation {
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        self.as_mut().rust_mut().cancel_download = cancel.clone();
+        self.as_mut().rust_mut().cancel_download = Arc::clone(&cancel);
         self.as_mut().set_download_error(QString::default());
         self.as_mut().set_download_progress(0.0);
         self.as_mut().set_downloading(QString::from(&name));

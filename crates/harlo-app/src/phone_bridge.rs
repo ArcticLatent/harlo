@@ -4,6 +4,8 @@
 //! without switching the desktop's tab, starting one, its modes, renaming,
 //! archiving, sending with Plan's note).
 
+// Rust guideline compliant 2026-10-09
+
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Value, json};

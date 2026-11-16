@@ -12,6 +12,8 @@
 //! on every refresh, so refreshes are serialized across processes (helpers
 //! share one sign-in) with a file lock, and the file is re-read under it.
 
+// Rust guideline compliant 2026-10-09
+
 use std::fs::{self, File, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -94,7 +96,7 @@ pub fn config_dir() -> PathBuf {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 fn creds_path(sign: Sign) -> PathBuf {
@@ -134,8 +136,8 @@ pub fn write_private(path: &Path, text: &str) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
+        opts.mode(0o600)
+    };
     let mut f = opts.open(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
     f.write_all(text.as_bytes())?;
     f.sync_all()?;

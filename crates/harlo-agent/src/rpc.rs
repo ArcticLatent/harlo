@@ -15,6 +15,8 @@
 //! `{"type":"harlo_result", call: <that id>, ok, result|error}` in (a
 //! command like any other, answered). harlo knows the caller by the pipe.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -111,12 +113,12 @@ impl Shared {
     }
 
     /// A run's events as pi's frames.
-    fn show(&self, s: Shown) {
+    fn show(&self, s: &Shown) {
         match s {
             Shown::MessageStart(m) => self.emit(json!({ "type": "message_start", "message": m })),
             Shown::Stream(e) => self.emit(json!({ "type": "message_update", "assistantMessageEvent": e })),
             Shown::MessageEnd(m) => {
-                self.view.lock().unwrap().messages.push(m.clone());
+                self.view.lock().unwrap().messages.push(Value::clone(m));
                 self.emit(json!({ "type": "message_end", "message": m }));
             }
             Shown::Withdrawn => self.emit(json!({ "type": "message_end", "message": { "role": "assistant", "content": [], "timestamp": crate::session::now_ms() } })),
@@ -125,13 +127,13 @@ impl Shared {
                 "type": "tool_execution_end", "toolCallId": call_id, "toolName": name,
                 "result": { "content": [{ "type": "text", "text": text }] }, "isError": failed,
             })),
-            Shown::Usage { usage, .. } => self.view.lock().unwrap().last_usage = usage.clone(),
+            Shown::Usage { usage, .. } => self.view.lock().unwrap().last_usage = Value::clone(usage),
             Shown::Queue { steering, follow_up } => self.emit(json!({ "type": "queue_update", "steering": steering, "followUp": follow_up })),
             Shown::CompactionStart { reason } => self.emit(json!({ "type": "compaction_start", "reason": reason })),
             Shown::Limits(l) => self.emit(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
             Shown::Notice { level, text } => self.emit(json!({ "type": "notice", "level": level, "message": text })),
             Shown::ModelChanged(model) => {
-                self.view.lock().unwrap().model = model.to_owned();
+                (*model).clone_into(&mut self.view.lock().unwrap().model);
                 self.emit(json!({ "type": "model_changed", "model": self.model_json(model) }));
             }
             // (The context's size drops: harlo's meter follows it.)
@@ -190,7 +192,7 @@ impl Shared {
         }
         match providers::resolve(key) {
             Ok((p, id)) if !p.reasons(&id) => vec!["off".to_owned()],
-            _ => LEVELS.iter().map(|l| l.to_string()).collect(),
+            _ => LEVELS.iter().map(std::string::ToString::to_string).collect(),
         }
     }
 }
@@ -199,8 +201,8 @@ impl Shared {
 struct Approvals(Arc<Shared>);
 
 impl Gate for Approvals {
-    fn check(&self, name: &str, args: &Value) -> BoxFuture<'static, Result<(), String>> {
-        let sh = self.0.clone();
+    fn check(&self, name: &str, args: &Value) -> BoxFuture<'static, anyhow::Result<()>> {
+        let sh = Arc::clone(&self.0);
         let name = name.to_owned();
         let args = args.clone();
         Box::pin(async move {
@@ -212,12 +214,12 @@ impl Gate for Approvals {
             // not in plan mode.)
             let mcp = name.starts_with(crate::mcp::PREFIX);
             if plan && (mcp || matches!(name.as_str(), "write" | "edit" | "apply_patch")) {
-                return Err(if mcp { PLAN_REFUSAL_MCP.to_owned() } else { PLAN_REFUSAL.to_owned() });
+                return Err(anyhow::Error::msg(if mcp { PLAN_REFUSAL_MCP } else { PLAN_REFUSAL }));
             }
             // Outside the sandbox: asked every time, in every mode.
             if name == "bash" && args["outside_sandbox"] == true && crate::sandbox::policy().on {
                 let yes = yes_or_no(&sh, "Allow tool: bash\nOutside the sandbox", args["command"].as_str().unwrap_or_default()).await;
-                return if yes { Ok(()) } else { Err(DENIED_OUTSIDE.to_owned()) };
+                return if yes { Ok(()) } else { Err(anyhow::Error::msg(DENIED_OUTSIDE)) };
             }
             let free = matches!(approval.as_str(), "yolo" | "auto");
             let ask = match approval.as_str() {
@@ -259,18 +261,18 @@ impl Gate for Approvals {
                     sh.always.lock().unwrap().insert(name);
                     Ok(())
                 }
-                _ => Err(DENIED.to_owned()),
+                _ => Err(anyhow::Error::msg(DENIED)),
             }
         })
     }
 
     fn confirm(&self, title: &str, message: &str) -> BoxFuture<'static, bool> {
-        let (sh, title, message) = (self.0.clone(), title.to_owned(), message.to_owned());
+        let (sh, title, message) = (Arc::clone(&self.0), title.to_owned(), message.to_owned());
         Box::pin(async move { yes_or_no(&sh, &title, &message).await })
     }
 
     fn ask(&self, questions: Value) -> BoxFuture<'static, Option<Value>> {
-        let sh = self.0.clone();
+        let sh = Arc::clone(&self.0);
         Box::pin(async move {
             let id = format!("harlo_agent_ui_{}", sh.next_ui.fetch_add(1, Ordering::Relaxed) + 1);
             let (tx, rx) = oneshot::channel();
@@ -295,8 +297,8 @@ async fn yes_or_no(sh: &Shared, title: &str, message: &str) -> bool {
 struct Pipe(Arc<Shared>);
 
 impl Harlo for Pipe {
-    fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, Result<Value, String>> {
-        let sh = self.0.clone();
+    fn call(&self, tool: &str, args: &Value) -> BoxFuture<'static, anyhow::Result<Value>> {
+        let sh = Arc::clone(&self.0);
         let id = format!("hc-{}", sh.next_harlo.fetch_add(1, Ordering::Relaxed) + 1);
         let (tx, rx) = oneshot::channel();
         sh.harlo_waiting.lock().unwrap().insert(id.clone(), tx);
@@ -306,11 +308,27 @@ impl Harlo for Pipe {
             sh.harlo_waiting.lock().unwrap().remove(&id);
             match answer {
                 Ok(Ok(a)) if a["ok"] == true => Ok(a["result"].clone()),
-                Ok(Ok(a)) => Err(a["error"].as_str().unwrap_or("harlo couldn't do that").to_owned()),
-                Ok(Err(_)) => Err("harlo is gone".to_owned()),
-                Err(_) => Err("harlo didn't answer in time".to_owned()),
+                Ok(Ok(a)) => Err(anyhow::Error::msg(a["error"].as_str().unwrap_or("harlo couldn't do that").to_owned())),
+                Ok(Err(_)) => Err(anyhow::Error::msg("harlo is gone")),
+                Err(_) => Err(anyhow::Error::msg("harlo didn't answer in time")),
             }
         })
+    }
+}
+
+/// Writes what's sent to stdout, a line each, until a Null (everything's
+/// been written) or stdout closes.
+async fn write_out(mut out_rx: mpsc::UnboundedReceiver<Value>) {
+    let mut stdout = tokio::io::stdout();
+    while let Some(v) = out_rx.recv().await {
+        if v.is_null() {
+            break;
+        }
+        let mut line = v.to_string();
+        line.push('\n');
+        if stdout.write_all(line.as_bytes()).await.is_err() || stdout.flush().await.is_err() {
+            break;
+        }
     }
 }
 
@@ -328,21 +346,8 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
     let mut agent = Agent::new(cwd.clone(), log, past, model, Some(effort));
     agent.launch(&launch);
 
-    let (out, mut out_rx) = mpsc::unbounded_channel::<Value>();
-    let writer = tokio::spawn(async move {
-        let mut stdout = tokio::io::stdout();
-        // (Null: everything's been written.)
-        while let Some(v) = out_rx.recv().await {
-            if v.is_null() {
-                break;
-            }
-            let mut line = v.to_string();
-            line.push('\n');
-            if stdout.write_all(line.as_bytes()).await.is_err() || stdout.flush().await.is_err() {
-                break;
-            }
-        }
-    });
+    let (out, out_rx) = mpsc::unbounded_channel::<Value>();
+    let writer = tokio::spawn(write_out(out_rx));
     let shared = Arc::new(Shared {
         out,
         waiting: Mutex::default(),
@@ -352,40 +357,40 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         harlo_waiting: Mutex::default(),
         next_harlo: AtomicU64::new(0),
         view: Mutex::default(),
-        inbox: agent.inbox.clone(),
+        inbox: Arc::clone(&agent.inbox),
         running: Mutex::default(),
         pending: Mutex::default(),
         models: Mutex::default(),
-        subagents: agent.subagents.clone(),
+        subagents: Arc::clone(&agent.subagents),
         wake: Mutex::default(),
         aside: Mutex::default(),
         asides: Mutex::default(),
-        spend: agent.spend.clone(),
+        spend: Arc::clone(&agent.spend),
     });
-    agent.gate = Some(Arc::new(Approvals(shared.clone())));
+    agent.gate = Some(Arc::new(Approvals(Arc::clone(&shared))));
     if harlo_tools {
-        agent.harlo = Some(Arc::new(Pipe(shared.clone())));
+        agent.harlo = Some(Arc::new(Pipe(Arc::clone(&shared))));
     }
     // Its subagents' frames, as omp's.
     {
-        let sh = shared.clone();
+        let sh = Arc::clone(&shared);
         agent.notify = Some(Arc::new(move |frame| sh.emit(frame)));
-    }
+    };
     {
         let mut v = shared.view.lock().unwrap();
-        v.model = agent.model.clone();
+        v.model.clone_from(&agent.model);
         v.effort = agent.effort.clone().unwrap_or_default();
         v.name = name;
         v.session_file = (!agent.session_file().as_os_str().is_empty()).then(|| agent.session_file().display().to_string());
-        v.session_id = agent.session_id().to_owned();
+        agent.session_id().clone_into(&mut v.session_id);
         v.messages = agent.messages().to_vec();
-    }
+    };
     let agent = Arc::new(tokio::sync::Mutex::new(agent));
     // A background command that ends while nothing runs starts a run.
     {
-        let (sh, weak) = (shared.clone(), Arc::downgrade(&agent));
+        let (sh, weak) = (Arc::clone(&shared), Arc::downgrade(&agent));
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
-            let (sh, weak) = (sh.clone(), weak.clone());
+            let (sh, weak) = (Arc::clone(&sh), std::sync::Weak::clone(&weak));
             tokio::spawn(async move {
                 if sh.running.lock().unwrap().is_some() {
                     return;
@@ -395,16 +400,16 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
                 }
             });
         });
-        *shared.wake.lock().unwrap() = Some(wake.clone());
+        *shared.wake.lock().unwrap() = Some(Arc::clone(&wake));
         agent.lock().await.on_job_end(wake);
-    }
+    };
     // The models (and a new session's model) in the background.
     {
-        let sh = shared.clone();
+        let sh = Arc::clone(&shared);
         tokio::spawn(async move {
             let _ = load_models(&sh).await;
-        });
-    }
+        })
+    };
 
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -437,7 +442,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
 async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: &std::path::Path, cwd: &std::path::Path, cmd: Value) {
     let ty = cmd["type"].as_str().unwrap_or_default().to_owned();
     let id = cmd["id"].clone();
-    let reply = |result: Result<Value, String>| {
+    let reply = |result: anyhow::Result<Value>| {
         let mut r = json!({ "type": "response", "command": ty, "success": result.is_ok() });
         if !id.is_null() {
             r["id"] = id.clone();
@@ -445,7 +450,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
         match result {
             Ok(data) if !data.is_null() => r["data"] = data,
             Ok(_) => {}
-            Err(e) => r["error"] = json!(e),
+            Err(e) => r["error"] = json!(format!("{e:#}")),
         }
         sh.emit(r);
     };
@@ -463,7 +468,7 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
         // "/compact [what to keep]", typed: as the compact command.
         "prompt" if text().trim() == "/compact" || text().trim_start().starts_with("/compact ") => {
             if busy {
-                return reply(Err("A run is working: wait for it, or stop it first.".into()));
+                return reply(Err(anyhow::Error::msg("A run is working: wait for it, or stop it first.")));
             }
             let focus = text().trim_start().strip_prefix("/compact").map(|f| f.trim().to_owned()).filter(|f| !f.is_empty());
             reply(Ok(Value::Null));
@@ -471,46 +476,34 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
         }
         "compact" => {
             if busy {
-                return reply(Err("A run is working: wait for it, or stop it first.".into()));
+                return reply(Err(anyhow::Error::msg("A run is working: wait for it, or stop it first.")));
             }
             let focus = cmd["customInstructions"].as_str().map(str::to_owned);
             compact_now(sh, agent, focus, Some(id.clone())).await;
         }
-        "prompt" => {
+        // (A prompt while a run works: steering it, or after it.)
+        "prompt" | "steer" | "follow_up" => {
             let behavior = cmd["streamingBehavior"].as_str().unwrap_or_default();
-            if busy && behavior.is_empty() {
-                return reply(Err("A run is working: steer it or queue a follow-up.".into()));
+            if busy && ty == "prompt" && behavior.is_empty() {
+                return reply(Err(anyhow::Error::msg("A run is working: steer it or queue a follow-up.")));
             }
             if busy {
-                queue(sh, behavior == "steer", text(), images());
+                queue(sh, if ty == "prompt" { behavior == "steer" } else { ty == "steer" }, text(), images());
                 return reply(Ok(Value::Null));
             }
-            match start(sh, agent, Some((text(), images()))).await {
-                Ok(()) => reply(Ok(Value::Null)),
-                Err(e) => reply(Err(e)),
-            }
-        }
-        "steer" | "follow_up" => {
-            if busy {
-                queue(sh, ty == "steer", text(), images());
-                return reply(Ok(Value::Null));
-            }
-            match start(sh, agent, Some((text(), images()))).await {
-                Ok(()) => reply(Ok(Value::Null)),
-                Err(e) => reply(Err(e)),
-            }
+            reply(start(sh, agent, Some((text(), images()))).await.map(|()| Value::Null));
         }
         "abort" => {
             if let Some(stop) = sh.running.lock().unwrap().as_ref() {
                 stop.cancel();
             }
             sh.withdraw();
-            reply(Ok(Value::Null))
+            reply(Ok(Value::Null));
         }
         "clear_queue" => {
             let (steering, follow_up) = std::mem::take(&mut *sh.inbox.lock().unwrap()).texts();
             sh.queue_update();
-            reply(Ok(json!({ "steering": steering, "followUp": follow_up })))
+            reply(Ok(json!({ "steering": steering, "followUp": follow_up })));
         }
         "extension_ui_response" => {
             let ui = cmd["id"].as_str().unwrap_or_default();
@@ -524,227 +517,254 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             if let Some(tx) = sh.harlo_waiting.lock().unwrap().remove(call) {
                 let _ = tx.send(cmd.clone());
             }
-            reply(Ok(Value::Null))
+            reply(Ok(Value::Null));
         }
         "harlo_set_modes" => {
             let mut m = sh.modes.lock().unwrap();
             if let Some(a) = cmd["approval"].as_str() {
-                m.approval = a.to_owned();
+                a.clone_into(&mut m.approval);
             }
             if let Some(p) = cmd["plan"].as_bool() {
                 m.plan = p;
             }
             drop(m);
-            reply(Ok(Value::Null))
+            reply(Ok(Value::Null));
         }
-        "get_state" => {
-            let v = sh.view.lock().unwrap();
-            let inbox = sh.inbox.lock().unwrap();
-            let state = json!({
-                "model": if v.model.is_empty() { Value::Null } else { sh.model_json(&v.model) },
-                "thinkingLevel": v.effort,
-                "isStreaming": busy,
-                "isCompacting": false,
-                "sessionFile": v.session_file,
-                "sessionId": v.session_id,
-                "sessionName": v.name,
-                "messageCount": v.messages.len(),
-                "pendingMessageCount": inbox.steering.len() + inbox.follow_up.len(),
-                "steeringMode": "all",
-                "followUpMode": "one-at-a-time",
-                "autoCompactionEnabled": false,
-                "todoPhases": crate::todo::phases(&v.messages),
-            });
-            drop((v, inbox));
-            reply(Ok(state))
-        }
+        _ => reply(answer(sh, agent, root, cwd, &cmd, busy).await),
+    }
+}
+
+/// A command answered with a result: what's asked for, or what changed.
+async fn answer(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: &std::path::Path, cwd: &std::path::Path, cmd: &Value, busy: bool) -> anyhow::Result<Value> {
+    match cmd["type"].as_str().unwrap_or_default() {
+        "get_state" => Ok(state_json(sh, busy)),
         "get_messages" => {
             let messages = sh.view.lock().unwrap().messages.clone();
-            reply(Ok(json!({ "messages": messages })))
+            Ok(json!({ "messages": messages }))
         }
-        "get_available_models" => match load_models(sh).await {
-            Ok(()) => {
-                let ids: Vec<String> = sh.models.lock().unwrap().iter().map(|m| m.key()).collect();
-                reply(Ok(json!({ "models": ids.iter().map(|id| sh.model_json(id)).collect::<Vec<_>>() })))
-            }
-            Err(e) => reply(Err(e)),
-        },
+        "get_available_models" => {
+            load_models(sh).await?;
+            let ids: Vec<String> = sh.models.lock().unwrap().iter().map(super::providers::ModelInfo::key).collect();
+            Ok(json!({ "models": ids.iter().map(|id| sh.model_json(id)).collect::<Vec<_>>() }))
+        }
         "get_available_thinking_levels" => {
             let _ = load_models(sh).await;
             let model = sh.view.lock().unwrap().model.clone();
-            reply(Ok(json!({ "levels": sh.levels(&model) })))
+            Ok(json!({ "levels": sh.levels(&model) }))
         }
-        "set_model" => {
-            let id = cmd["modelId"].as_str().or_else(|| cmd["model"].as_str()).unwrap_or_default();
-            if id.is_empty() {
-                return reply(Err("set_model needs modelId".into()));
-            }
-            let model = providers::full(&match cmd["provider"].as_str().filter(|p| !p.is_empty()) {
-                Some(p) => format!("{p}/{id}"),
-                None => id.to_owned(),
-            });
-            if let Err(e) = providers::resolve(&model) {
-                return reply(Err(format!("{e:#}")));
-            }
-            let _ = load_models(sh).await;
-            // A level this model doesn't take: the usual one, else its first
-            // that thinks (one that only has off and high: high).
-            let levels = sh.levels(&model);
-            let effort = sh.view.lock().unwrap().effort.clone();
-            if !levels.contains(&effort) {
-                let thinks = (effort != "off").then(|| levels.iter().find(|l| *l != "off")).flatten();
-                let level = if levels.iter().any(|l| l == DEFAULT_LEVEL) && effort != "off" { DEFAULT_LEVEL.to_owned() } else { thinks.unwrap_or(&levels[0]).clone() };
-                match agent.try_lock() {
-                    Ok(mut a) => a.effort = (level != "off").then(|| level.clone()),
-                    Err(_) => sh.pending.lock().unwrap().effort = Some(level.clone()),
-                }
-                sh.view.lock().unwrap().effort = level.clone();
-                sh.emit(json!({ "type": "thinking_level_changed", "level": level }));
-            }
-            match agent.try_lock() {
-                Ok(mut a) => a.model = model.clone(),
-                Err(_) => sh.pending.lock().unwrap().model = Some(model.clone()),
-            }
-            sh.view.lock().unwrap().model = model.clone();
-            let m = sh.model_json(&model);
-            sh.emit(json!({ "type": "model_changed", "model": m }));
-            reply(Ok(m))
-        }
-        "set_thinking_level" => {
-            let level = cmd["level"].as_str().unwrap_or_default().to_owned();
-            let _ = load_models(sh).await;
-            let levels = sh.levels(&sh.view.lock().unwrap().model.clone());
-            if !levels.contains(&level) {
-                return reply(Err(format!("This model's levels are {}", levels.join(", "))));
-            }
-            match agent.try_lock() {
-                Ok(mut a) => a.effort = (level != "off").then(|| level.clone()),
-                Err(_) => sh.pending.lock().unwrap().effort = Some(level.clone()),
-            }
-            sh.view.lock().unwrap().effort = level.clone();
-            sh.emit(json!({ "type": "thinking_level_changed", "level": level }));
-            reply(Ok(Value::Null))
-        }
-        "set_session_name" => {
-            let name = cmd["name"].as_str().unwrap_or_default().trim().to_owned();
-            let saved = match agent.try_lock() {
-                Ok(mut a) => a.rename(&name).map_err(|e| format!("{e:#}")),
-                Err(_) => {
-                    sh.pending.lock().unwrap().name = Some(name.clone());
-                    Ok(())
-                }
-            };
-            if let Err(e) = saved {
-                return reply(Err(e));
-            }
-            sh.view.lock().unwrap().name = (!name.is_empty()).then(|| name.clone());
-            sh.emit(json!({ "type": "session_info_changed", "name": name }));
-            reply(Ok(Value::Null))
-        }
-        "get_session_stats" => {
-            let v = sh.view.lock().unwrap();
-            let u = &v.last_usage;
-            let tokens = u["input_tokens"].as_u64().unwrap_or(0) + u["output_tokens"].as_u64().unwrap_or(0);
-            let count = |role: &str| v.messages.iter().filter(|m| m["role"] == role).count();
-            let calls: usize = v.messages.iter().filter(|m| m["role"] == "assistant").map(|m| m["content"].as_array().map_or(0, |c| c.iter().filter(|b| b["type"] == "toolCall").count())).sum();
-            let window = sh.context_window(&v.model);
-            let mut stats = json!({
-                "sessionFile": v.session_file, "sessionId": v.session_id,
-                "userMessages": count("user"), "assistantMessages": count("assistant"), "toolCalls": calls, "toolResults": count("toolResult"),
-                "totalMessages": v.messages.len(),
-                "contextUsage": {
-                    "tokens": tokens, "contextWindow": window, "compactAt": crate::compact::threshold(window),
-                    "percent": if window > 0 { tokens as f64 * 100.0 / window as f64 } else { 0.0 },
-                },
-            });
-            // What every request has cost (those whose cost is known), and
-            // what kind of cost that is: plan, local, priced, partly (some
-            // unknown: at least this) or unknown.
-            let spend = *sh.spend.lock().unwrap();
-            stats["cost"] = json!(spend.cost);
-            stats["costKind"] = json!(spend.cost_kind());
-            stats["tokens"] = json!({ "input": spend.input, "cached": spend.cached, "output": spend.output, "requests": spend.requests, "unreported": spend.unreported });
-            drop(v);
-            reply(Ok(stats))
-        }
-        "get_commands" | "get_available_commands" => {
-            let mut commands = vec![
-                json!({
-                    "name": "compact", "description": "Summarize the conversation so far to free up context",
-                    "source": "builtin", "input": { "hint": "what to keep (optional)" },
-                }),
-                json!({
-                    "name": "btw", "description": "Ask a side question while the agent works: answered from the conversation, without tools, and not kept",
-                    "source": "builtin", "input": { "hint": "your question" },
-                }),
-            ];
-            let cwd = std::env::current_dir().unwrap_or_default();
-            let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
-            for s in crate::skills::find(&cwd, &home, &crate::auth::config_dir()) {
-                commands.push(json!({ "name": format!("skill:{}", s.name), "description": s.description, "source": "skill", "path": s.path, "input": { "hint": s.hint.as_deref().unwrap_or("what to do (optional)") } }));
-            }
-            reply(Ok(json!({ "commands": commands })))
-        }
+        "set_model" => set_model(sh, agent, cmd).await,
+        "set_thinking_level" => set_thinking(sh, agent, cmd).await,
+        "set_session_name" => rename(sh, agent, cmd),
+        "get_session_stats" => Ok(session_stats(sh)),
+        "get_commands" | "get_available_commands" => Ok(command_list()),
         // (The running ones come as events.)
-        "get_subagents" => reply(Ok(json!({ "subagents": [] }))),
+        "get_subagents" => Ok(json!({ "subagents": [] })),
         "cancel_subagent" => {
             let id = cmd["subagentId"].as_str().unwrap_or_default();
             let token = sh.subagents.lock().unwrap().get(id).cloned();
             if let Some(t) = &token {
                 t.cancel();
             }
-            reply(Ok(json!({ "cancelled": token.is_some() })))
+            Ok(json!({ "cancelled": token.is_some() }))
         }
-        "steer_subagent" => reply(Err("Harlo's subagents can't be steered: cancel one, or wait for its answer.".into())),
-        "new_session" => {
-            if busy {
-                return reply(Err("A run is working: stop it first.".into()));
-            }
-            let mut a = agent.lock().await;
-            let ephemeral = a.session_file().as_os_str().is_empty();
-            a.new_session(if ephemeral { session::Log::ephemeral(cwd) } else { session::Log::new(root, cwd) });
-            let mut v = sh.view.lock().unwrap();
-            v.messages.clear();
-            v.name = None;
-            v.last_usage = Value::Null;
-            v.session_id = a.session_id().to_owned();
-            v.session_file = (!ephemeral).then(|| a.session_file().display().to_string());
-            drop(v);
-            sh.always.lock().unwrap().clear();
-            reply(Ok(json!({ "cancelled": false })))
-        }
+        "steer_subagent" => Err(anyhow::Error::msg("Harlo's subagents can't be steered: cancel one, or wait for its answer.")),
+        "new_session" => new_session(sh, agent, root, cwd, busy).await,
         // The session from just before one of your messages, in the same
         // file (what you send next is a new branch; the old one stays): its
         // text comes back to edit and send again.
-        "fork" => {
-            if busy {
-                return reply(Err("A run is working: stop it first.".into()));
-            }
-            let Some(entry) = cmd["entryId"].as_str().filter(|e| !e.is_empty()) else { return reply(Err("fork needs entryId".into())) };
-            let mut a = agent.lock().await;
-            let file = a.session_file().to_owned();
-            if file.as_os_str().is_empty() || !file.exists() {
-                return reply(Err("This session isn't saved yet, so its messages can't be edited.".into()));
-            }
-            let (loaded, text) = match session::Log::branch_before(&file, entry) {
-                Ok(f) => f,
-                Err(e) => return reply(Err(format!("{e:#}"))),
-            };
-            let name = loaded.name.clone();
-            a.switch(loaded);
-            let mut v = sh.view.lock().unwrap();
-            v.messages = a.messages().to_vec();
-            v.name = name;
-            v.last_usage = Value::Null;
-            v.session_id = a.session_id().to_owned();
-            v.session_file = Some(a.session_file().display().to_string());
-            drop(v);
-            sh.always.lock().unwrap().clear();
-            reply(Ok(json!({ "text": text, "cancelled": false })))
-        }
-        "" => reply(Err("The command has no type".into())),
-        other => reply(Err(format!("harlo-agent doesn't know the command {other}"))),
+        "fork" => fork_before(sh, agent, cmd, busy).await,
+        "" => Err(anyhow::Error::msg("The command has no type")),
+        other => Err(anyhow::anyhow!("harlo-agent doesn't know the command {other}")),
     }
+}
+
+/// The session's state, as harlo asks for it.
+fn state_json(sh: &Shared, busy: bool) -> Value {
+    let v = sh.view.lock().unwrap();
+    let inbox = sh.inbox.lock().unwrap();
+    let state = json!({
+        "model": if v.model.is_empty() { Value::Null } else { sh.model_json(&v.model) },
+        "thinkingLevel": v.effort,
+        "isStreaming": busy,
+        "isCompacting": false,
+        "sessionFile": v.session_file,
+        "sessionId": v.session_id,
+        "sessionName": v.name,
+        "messageCount": v.messages.len(),
+        "pendingMessageCount": inbox.steering.len() + inbox.follow_up.len(),
+        "steeringMode": "all",
+        "followUpMode": "one-at-a-time",
+        "autoCompactionEnabled": false,
+        "todoPhases": crate::todo::phases(&v.messages),
+    });
+    drop((v, inbox));
+    state
+}
+
+/// Another model, with a level it takes: the model as harlo shows it.
+async fn set_model(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, cmd: &Value) -> anyhow::Result<Value> {
+    let id = cmd["modelId"].as_str().or_else(|| cmd["model"].as_str()).unwrap_or_default();
+    if id.is_empty() {
+        return Err(anyhow::Error::msg("set_model needs modelId"));
+    }
+    let model = providers::full(&match cmd["provider"].as_str().filter(|p| !p.is_empty()) {
+        Some(p) => format!("{p}/{id}"),
+        None => id.to_owned(),
+    });
+    if let Err(e) = providers::resolve(&model) {
+        return Err(anyhow::anyhow!("{e:#}"));
+    }
+    let _ = load_models(sh).await;
+    // A level this model doesn't take: the usual one, else its first
+    // that thinks (one that only has off and high: high).
+    let levels = sh.levels(&model);
+    let effort = sh.view.lock().unwrap().effort.clone();
+    if !levels.contains(&effort) {
+        let thinks = (effort != "off").then(|| levels.iter().find(|l| *l != "off")).flatten();
+        let level = if levels.iter().any(|l| l == DEFAULT_LEVEL) && effort != "off" { DEFAULT_LEVEL.to_owned() } else { thinks.unwrap_or(&levels[0]).clone() };
+        match agent.try_lock() {
+            Ok(mut a) => a.effort = (level != "off").then(|| level.clone()),
+            Err(_) => sh.pending.lock().unwrap().effort = Some(level.clone()),
+        }
+        sh.view.lock().unwrap().effort.clone_from(&level);
+        sh.emit(json!({ "type": "thinking_level_changed", "level": level }));
+    }
+    match agent.try_lock() {
+        Ok(mut a) => a.model.clone_from(&model),
+        Err(_) => sh.pending.lock().unwrap().model = Some(model.clone()),
+    }
+    sh.view.lock().unwrap().model.clone_from(&model);
+    let m = sh.model_json(&model);
+    sh.emit(json!({ "type": "model_changed", "model": m }));
+    Ok(m)
+}
+
+/// Another thinking level, one of the model's.
+async fn set_thinking(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, cmd: &Value) -> anyhow::Result<Value> {
+    let level = cmd["level"].as_str().unwrap_or_default().to_owned();
+    let _ = load_models(sh).await;
+    let levels = sh.levels(&sh.view.lock().unwrap().model.clone());
+    if !levels.contains(&level) {
+        return Err(anyhow::anyhow!("This model's levels are {}", levels.join(", ")));
+    }
+    match agent.try_lock() {
+        Ok(mut a) => a.effort = (level != "off").then(|| level.clone()),
+        Err(_) => sh.pending.lock().unwrap().effort = Some(level.clone()),
+    }
+    sh.view.lock().unwrap().effort.clone_from(&level);
+    sh.emit(json!({ "type": "thinking_level_changed", "level": level }));
+    Ok(Value::Null)
+}
+
+/// A name of the session's own (now, or once the run ends).
+fn rename(sh: &Shared, agent: &Arc<tokio::sync::Mutex<Agent>>, cmd: &Value) -> anyhow::Result<Value> {
+    let name = cmd["name"].as_str().unwrap_or_default().trim().to_owned();
+    let saved = match agent.try_lock() {
+        Ok(mut a) => a.rename(&name).map_err(|e| anyhow::anyhow!("{e:#}")),
+        Err(_) => {
+            sh.pending.lock().unwrap().name = Some(name.clone());
+            Ok(())
+        }
+    };
+    saved?;
+    sh.view.lock().unwrap().name = (!name.is_empty()).then(|| name.clone());
+    sh.emit(json!({ "type": "session_info_changed", "name": name }));
+    Ok(Value::Null)
+}
+
+/// The session's messages, context used and spend.
+fn session_stats(sh: &Shared) -> Value {
+    let v = sh.view.lock().unwrap();
+    let u = &v.last_usage;
+    let tokens = u["input_tokens"].as_u64().unwrap_or(0) + u["output_tokens"].as_u64().unwrap_or(0);
+    let count = |role: &str| v.messages.iter().filter(|m| m["role"] == role).count();
+    let calls: usize = v.messages.iter().filter(|m| m["role"] == "assistant").map(|m| m["content"].as_array().map_or(0, |c| c.iter().filter(|b| b["type"] == "toolCall").count())).sum();
+    let window = sh.context_window(&v.model);
+    let mut stats = json!({
+        "sessionFile": v.session_file, "sessionId": v.session_id,
+        "userMessages": count("user"), "assistantMessages": count("assistant"), "toolCalls": calls, "toolResults": count("toolResult"),
+        "totalMessages": v.messages.len(),
+        "contextUsage": {
+            "tokens": tokens, "contextWindow": window, "compactAt": crate::compact::threshold(window),
+            "percent": if window > 0 { tokens as f64 * 100.0 / window as f64 } else { 0.0 },
+        },
+    });
+    // What every request has cost (those whose cost is known), and
+    // what kind of cost that is: plan, local, priced, partly (some
+    // unknown: at least this) or unknown.
+    let spend = *sh.spend.lock().unwrap();
+    stats["cost"] = json!(spend.cost);
+    stats["costKind"] = json!(spend.cost_kind());
+    stats["tokens"] = json!({ "input": spend.input, "cached": spend.cached, "output": spend.output, "requests": spend.requests, "unreported": spend.unreported });
+    drop(v);
+    stats
+}
+
+/// The "/" commands: the built-in ones, then the skills.
+fn command_list() -> Value {
+    let mut commands = vec![
+        json!({
+            "name": "compact", "description": "Summarize the conversation so far to free up context",
+            "source": "builtin", "input": { "hint": "what to keep (optional)" },
+        }),
+        json!({
+            "name": "btw", "description": "Ask a side question while the agent works: answered from the conversation, without tools, and not kept",
+            "source": "builtin", "input": { "hint": "your question" },
+        }),
+    ];
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    for s in crate::skills::find(&cwd, &home, &crate::auth::config_dir()) {
+        commands.push(json!({ "name": format!("skill:{}", s.name), "description": s.description, "source": "skill", "path": s.path, "input": { "hint": s.hint.as_deref().unwrap_or("what to do (optional)") } }));
+    }
+    json!({ "commands": commands })
+}
+
+/// A new session in place of this one (not while a run works).
+async fn new_session(sh: &Shared, agent: &Arc<tokio::sync::Mutex<Agent>>, root: &std::path::Path, cwd: &std::path::Path, busy: bool) -> anyhow::Result<Value> {
+    if busy {
+        return Err(anyhow::Error::msg("A run is working: stop it first."));
+    }
+    let mut a = agent.lock().await;
+    let ephemeral = a.session_file().as_os_str().is_empty();
+    a.new_session(if ephemeral { session::Log::ephemeral(cwd) } else { session::Log::new(root, cwd) });
+    let mut v = sh.view.lock().unwrap();
+    v.messages.clear();
+    v.name = None;
+    v.last_usage = Value::Null;
+    a.session_id().clone_into(&mut v.session_id);
+    v.session_file = (!ephemeral).then(|| a.session_file().display().to_string());
+    drop(v);
+    sh.always.lock().unwrap().clear();
+    Ok(json!({ "cancelled": false }))
+}
+
+/// The session from just before one of your messages; that message's text.
+async fn fork_before(sh: &Shared, agent: &Arc<tokio::sync::Mutex<Agent>>, cmd: &Value, busy: bool) -> anyhow::Result<Value> {
+    if busy {
+        return Err(anyhow::Error::msg("A run is working: stop it first."));
+    }
+    let Some(entry) = cmd["entryId"].as_str().filter(|e| !e.is_empty()) else { return Err(anyhow::Error::msg("fork needs entryId")); };
+    let mut a = agent.lock().await;
+    let file = a.session_file().to_owned();
+    if file.as_os_str().is_empty() || !file.exists() {
+        return Err(anyhow::Error::msg("This session isn't saved yet, so its messages can't be edited."));
+    }
+    let (loaded, text) = match session::Log::branch_before(&file, entry) {
+        Ok(f) => f,
+        Err(e) => return Err(anyhow::anyhow!("{e:#}")),
+    };
+    let name = loaded.name.clone();
+    a.switch(loaded);
+    let mut v = sh.view.lock().unwrap();
+    v.messages = a.messages().to_vec();
+    v.name = name;
+    v.last_usage = Value::Null;
+    a.session_id().clone_into(&mut v.session_id);
+    v.session_file = Some(a.session_file().display().to_string());
+    drop(v);
+    sh.always.lock().unwrap().clear();
+    Ok(json!({ "text": text, "cancelled": false }))
 }
 
 fn queue(sh: &Shared, steer: bool, text: String, images: Vec<Value>) {
@@ -758,21 +778,21 @@ fn queue(sh: &Shared, steer: bool, text: String, images: Vec<Value>) {
 
 /// The plan's models, listed once. A session with no model yet gets the
 /// plan's first (the agent takes it at its first run).
-async fn load_models(sh: &Shared) -> Result<(), String> {
+async fn load_models(sh: &Shared) -> anyhow::Result<()> {
     if !sh.models.lock().unwrap().is_empty() {
         return Ok(());
     }
     let (list, errors) = providers::every_model().await;
     if list.is_empty() {
-        return Err(if errors.is_empty() { "No models: sign in with ChatGPT or set up a provider".to_owned() } else { errors.join("; ") });
+        return Err(if errors.is_empty() { anyhow::Error::msg("No models: sign in with ChatGPT or set up a provider".to_owned()) } else { anyhow::Error::msg(errors.join("; ")) });
     }
-    let first = list.first().map(|m| m.key());
+    let first = list.first().map(super::providers::ModelInfo::key);
     *sh.models.lock().unwrap() = list;
     let chosen = {
         let mut v = sh.view.lock().unwrap();
         match first {
             Some(m) if v.model.is_empty() => {
-                v.model = m.clone();
+                v.model.clone_from(&m);
                 Some(m)
             }
             _ => None,
@@ -788,27 +808,27 @@ async fn load_models(sh: &Shared) -> Result<(), String> {
 /// Summarizes the conversation so far (the agent is free), as a run:
 /// answered when done when `reply_to` is a command's id.
 async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, focus: Option<String>, reply_to: Option<Value>) {
-    let mut a = agent.clone().lock_owned().await;
+    let mut a = Arc::clone(agent).lock_owned().await;
     let _ = load_models(sh).await;
     a.known.add(sh.models.lock().unwrap().iter());
     let stop = CancellationToken::new();
     *sh.running.lock().unwrap() = Some(stop.clone());
-    let sh = sh.clone();
+    let sh = Arc::clone(sh);
     // (Typed, it's a run as a prompt's is; asked for, only the command's answer.)
     let typed = reply_to.is_none();
     tokio::spawn(async move {
         if typed {
             sh.emit(json!({ "type": "agent_start" }));
         }
-        let shown = sh.clone();
-        let mut show = |s: Shown| shown.show(s);
+        let shown = Arc::clone(&sh);
+        let mut show = |s: Shown| shown.show(&s);
         let outcome = a.compact("manual", focus.as_deref(), &stop, &mut show).await;
         let too_little = matches!(outcome, Compacted::Nothing);
         let result = match outcome {
             Compacted::Done(r) => Ok(r),
-            Compacted::Nothing => Err("There's nothing to compact yet: the conversation is still short.".to_owned()),
-            Compacted::Stopped => Err("Stopped.".to_owned()),
-            Compacted::Failed(e) => Err(e),
+            Compacted::Nothing => Err(anyhow::Error::msg("There's nothing to compact yet: the conversation is still short.")),
+            Compacted::Stopped => Err(anyhow::Error::msg("Stopped.")),
+            Compacted::Failed(e) => Err(anyhow::Error::msg(e)),
         };
         drop(a);
         *sh.running.lock().unwrap() = None;
@@ -816,13 +836,13 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
             let mut r = json!({ "type": "response", "command": "compact", "id": id, "success": result.is_ok() });
             match result {
                 Ok(data) => r["data"] = data,
-                Err(e) => r["error"] = json!(e),
+                Err(e) => r["error"] = json!(format!("{e:#}")),
             }
             sh.emit(r);
         } else if too_little {
             // (Typed, with nothing shown yet: a line says why, not as a
             // failure.)
-            sh.emit(json!({ "type": "notice", "level": "warning", "message": result.err() }));
+            sh.emit(json!({ "type": "notice", "level": "warning", "message": result.err().map(|e| format!("{e:#}")) }));
         }
         if typed {
             sh.emit(json!({ "type": "agent_end", "messages": [] }));
@@ -850,15 +870,15 @@ async fn side_question(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>,
     }
     // Idle: the agent's own; working: as the run started, and the
     // messages so far.
-    let (parts, history) = match agent.clone().try_lock_owned() {
+    let (parts, history) = match Arc::clone(agent).try_lock_owned() {
         Ok(mut a) => (a.aside_parts().await, a.history().to_vec()),
         Err(_) => (sh.aside.lock().unwrap().clone(), sh.view.lock().unwrap().messages.clone()),
     };
-    let (shared, agent) = (sh.clone(), agent.clone());
+    let (shared, agent) = (Arc::clone(sh), Arc::clone(agent));
     let task = tokio::spawn(async move {
         let sh = shared;
         sh.emit(json!({ "type": "harlo_aside", "question": question, "text": "", "done": false }));
-        let shown = sh.clone();
+        let shown = Arc::clone(&sh);
         let q = question.clone();
         let mut on_text = move |t: &str| shown.emit(json!({ "type": "harlo_aside", "question": q, "text": t, "done": false }));
         match crate::agent::aside(&parts, &history, &question, &mut on_text).await {
@@ -874,8 +894,8 @@ async fn side_question(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>,
     asides.push(task);
 }
 
-async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: Option<(String, Vec<Value>)>) -> Result<(), String> {
-    let mut a = agent.clone().lock_owned().await;
+async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: Option<(String, Vec<Value>)>) -> anyhow::Result<()> {
+    let mut a = Arc::clone(agent).lock_owned().await;
     if what.is_none() && (!a.has_notices() || sh.running.lock().unwrap().is_some()) {
         return Ok(());
     }
@@ -884,18 +904,18 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: O
         load_models(sh).await?;
         let m = sh.view.lock().unwrap().model.clone();
         if m.is_empty() {
-            return Err("Your plan lists no models".into());
+            return Err(anyhow::Error::msg("Your plan lists no models"));
         }
         a.model = m;
     }
     let stop = CancellationToken::new();
     *sh.running.lock().unwrap() = Some(stop.clone());
     *sh.aside.lock().unwrap() = a.aside_parts().await;
-    let sh = sh.clone();
+    let sh = Arc::clone(sh);
     tokio::spawn(async move {
         sh.emit(json!({ "type": "agent_start" }));
-        let shown = sh.clone();
-        let mut show = |s: Shown| shown.show(s);
+        let shown = Arc::clone(&sh);
+        let mut show = |s: Shown| shown.show(&s);
         let result = match &what {
             Some((prompt, images)) => a.run(prompt, images, &stop, &mut show).await,
             None => a.wake(&stop, &mut show).await,

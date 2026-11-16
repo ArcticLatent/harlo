@@ -2,6 +2,8 @@
 //! harlo's editing commands (indentation, brackets, comments). Positions are
 //! UTF-16 code units, as QML counts them.
 
+// Rust guideline compliant 2026-10-09
+
 use std::time::{Duration, Instant};
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -55,11 +57,7 @@ const SCAN: usize = 200_000;
 fn char_class(c: char) -> u8 {
     if c.is_alphanumeric() || c == '_' {
         2
-    } else if c.is_whitespace() {
-        0
-    } else {
-        1
-    }
+    } else { u8::from(!c.is_whitespace()) }
 }
 
 fn len16(s: &str) -> usize {
@@ -84,6 +82,19 @@ pub struct Doc {
     splices: Vec<Splice>,
     /// Counts changes to the text.
     pub revision: u64,
+}
+
+impl std::fmt::Debug for Doc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Doc")
+            .field("path", &self.path)
+            .field("lines", &self.text.line_count())
+            .field("cursor", &self.cursor)
+            .field("anchor", &self.anchor)
+            .field("revision", &self.revision)
+            .field("read_only", &self.read_only)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for Doc {
@@ -128,7 +139,7 @@ impl Doc {
 
     /// The file's name, for its comments and indentation rules.
     pub fn set_path(&mut self, path: &str) {
-        self.path = path.to_owned();
+        path.clone_into(&mut self.path);
         self.comment = lang::comment_for(path);
         self.colon = lang::colon_indents(path);
     }
@@ -335,7 +346,7 @@ impl Doc {
         let len = self.text.len();
         let mut list: Vec<(usize, usize, &str)> =
             edits.iter().map(|(a, b, s)| ((*a).min(*b).min(len), (*a).max(*b).min(len), s.as_str())).collect();
-        list.sort_by(|x, y| y.0.cmp(&x.0));
+        list.sort_by_key(|x| std::cmp::Reverse(x.0));
         let before = (self.anchor, self.cursor);
         let (mut anchor, mut cursor) = before;
         let mut done = Vec::new();
@@ -533,17 +544,17 @@ impl Doc {
 
     /// Replaces whole lines, keeping the selection on them (or the cursor
     /// where it was in its line).
-    fn replace_lines(&mut self, start: usize, end: usize, old: &[&str], new: Vec<String>, had: bool) -> bool {
+    fn replace_lines(&mut self, start: usize, end: usize, old: &[&str], new: &[String], had: bool) -> bool {
         let joined = new.join("\n");
         let old_len: usize = old.iter().map(|l| len16(l)).sum::<usize>() + old.len() - 1;
-        if old.iter().zip(&new).all(|(o, n)| o == n) {
+        if old.iter().zip(new).all(|(o, n)| o == n) {
             return false;
         }
         let new_len = len16(&joined);
         let after = if had {
             (start, start + new_len)
         } else {
-            let c = (self.cursor as isize + new_len as isize - old_len as isize).max(start as isize) as usize;
+            let c = usize::try_from((isize::try_from(self.cursor).unwrap_or(isize::MAX) + isize::try_from(new_len).unwrap_or(isize::MAX) - isize::try_from(old_len).unwrap_or(isize::MAX)).max(isize::try_from(start).unwrap_or(isize::MAX))).unwrap_or(0);
             let c = c.min(start + new_len);
             (c, c)
         };
@@ -570,7 +581,7 @@ impl Doc {
             .collect();
         let old: Vec<String> = old.iter().map(|s| (*s).to_owned()).collect();
         let old: Vec<&str> = old.iter().map(String::as_str).collect();
-        self.replace_lines(start, end, &old, new, had)
+        self.replace_lines(start, end, &old, &new, had)
     }
 
     /// Backspace in the spaces before a line's text: back a level.
@@ -673,7 +684,7 @@ impl Doc {
             .collect();
         let old: Vec<String> = old.iter().map(|s| (*s).to_owned()).collect();
         let old: Vec<&str> = old.iter().map(String::as_str).collect();
-        self.replace_lines(start, end, &old, new, had)
+        self.replace_lines(start, end, &old, &new, had)
     }
 
     // ---- brackets, search --------------------------------------------------------

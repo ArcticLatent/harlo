@@ -1,7 +1,10 @@
-//! An embedded terminal: a shell on a pty, emulated by `alacritty_terminal`
-//! (the engine of the Alacritty terminal), read out as a grid of coloured
-//! cells. The UI calls `render` after a wakeup and sends input as bytes;
+//! An embedded terminal: a shell on a pty, read out as coloured cells.
+//!
+//! It's emulated by `alacritty_terminal` (the engine of the Alacritty
+//! terminal). The UI calls `render` after a wakeup and sends input as bytes;
 //! keys are translated with `key_bytes`.
+
+// Rust guideline compliant 2026-10-09
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -51,7 +54,8 @@ pub fn parse_rgb(hex: &str) -> Option<Rgb> {
         return None;
     }
     let v = u32::from_str_radix(h, 16).ok()?;
-    Some(Rgb { r: (v >> 16) as u8, g: (v >> 8) as u8, b: v as u8 })
+    let [_, r, g, b] = v.to_be_bytes();
+    Some(Rgb { r, g, b })
 }
 
 impl Palette {
@@ -62,7 +66,7 @@ impl Palette {
             "#1d1f21", "#cc6666", "#b5bd68", "#f0c674", "#81a2be", "#b294bb", "#8abeb7", "#c5c8c6", "#666666", "#d54e53", "#b9ca4a",
             "#e7c547", "#7aa6da", "#c397d8", "#70c0b1", "#eaeaea", "#c5c8c6", "#1d1f21", "#c5c8c6", "#373b41",
         ];
-        let at = |i: usize| colors.get(i).and_then(|c| parse_rgb(c)).unwrap_or_else(|| parse_rgb(DEFAULTS[i]).expect("default colour"));
+        let at = |i: usize| colors.get(i).and_then(|c| parse_rgb(c)).unwrap_or_else(|| DEFAULTS.get(i).and_then(|d| parse_rgb(d)).unwrap_or_default());
         Palette {
             ansi: std::array::from_fn(at),
             foreground: at(16),
@@ -73,7 +77,7 @@ impl Palette {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct Size {
     cols: usize,
     lines: usize,
@@ -109,7 +113,7 @@ impl EventListener for Proxy {
             Event::Exit => (self.sink)(TermEvent::Exited(None)),
             // Replies the shell asked for (cursor position, device attributes…).
             Event::PtyWrite(text) => {
-                if let Some(s) = self.sender.lock().unwrap().as_ref() {
+                if let Some(s) = self.sender.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
                     let _ = s.send(Msg::Input(Cow::Owned(text.into_bytes())));
                 }
             }
@@ -180,15 +184,26 @@ impl Screen {
     }
 }
 
+/// A terminal: its shell, screen and the thread feeding it.
 pub struct Terminal {
     term: Arc<FairMutex<Term<Proxy>>>,
     sender: EventLoopSender,
     size: Size,
 }
 
+impl std::fmt::Debug for Terminal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Terminal").field("size", &self.size).finish_non_exhaustive()
+    }
+}
+
 impl Terminal {
     /// Starts `shell` (a program and its arguments; else the user's login
     /// shell) in `cwd`.
+    ///
+    /// # Errors
+    ///
+    /// When the pty or the shell can't be started.
     pub fn spawn(cwd: PathBuf, shell: Option<(String, Vec<String>)>, cols: usize, lines: usize, sink: impl Fn(TermEvent) + Send + Sync + 'static) -> Result<Terminal> {
         let size = Size { cols: cols.max(2), lines: lines.max(1) };
         let mut env = std::collections::HashMap::new();
@@ -201,7 +216,7 @@ impl Terminal {
             drain_on_exit: false,
             env,
         };
-        let window = WindowSize { num_lines: size.lines as u16, num_cols: size.cols as u16, cell_width: 8, cell_height: 16 };
+        let window = WindowSize { num_lines: u16::try_from(size.lines).unwrap_or(u16::MAX), num_cols: u16::try_from(size.cols).unwrap_or(u16::MAX), cell_width: 8, cell_height: 16 };
         let pty = tty::new(&options, window, 0).context("starting the shell")?;
         let sender_slot = Arc::new(Mutex::new(None));
         let proxy = Proxy { sink: Arc::new(sink), sender: Arc::clone(&sender_slot) };
@@ -209,7 +224,7 @@ impl Terminal {
         let term = Arc::new(FairMutex::new(Term::new(config, &size, proxy.clone())));
         let event_loop = EventLoop::new(Arc::clone(&term), proxy, pty, false, false).context("starting the terminal")?;
         let sender = event_loop.channel();
-        *sender_slot.lock().unwrap() = Some(sender.clone());
+        *sender_slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender.clone());
         event_loop.spawn();
         Ok(Terminal { term, sender, size })
     }
@@ -242,7 +257,7 @@ impl Terminal {
         }
         self.size = size;
         self.term.lock().resize(size);
-        let _ = self.sender.send(Msg::Resize(WindowSize { num_lines: size.lines as u16, num_cols: size.cols as u16, cell_width: 8, cell_height: 16 }));
+        let _ = self.sender.send(Msg::Resize(WindowSize { num_lines: u16::try_from(size.lines).unwrap_or(u16::MAX), num_cols: u16::try_from(size.cols).unwrap_or(u16::MAX), cell_width: 8, cell_height: 16 }));
     }
 
     /// Mouse wheel: scrollback, or arrow keys in full-screen programs
@@ -260,9 +275,9 @@ impl Terminal {
     }
 
     fn point(term: &Term<Proxy>, row: i32, col: i32) -> Point {
-        let offset = term.grid().display_offset() as i32;
-        let line = (row.clamp(0, term.screen_lines() as i32 - 1)) - offset;
-        Point::new(Line(line), Column(col.clamp(0, term.columns() as i32 - 1) as usize))
+        let offset = i32::try_from(term.grid().display_offset()).unwrap_or(i32::MAX);
+        let line = (row.clamp(0, i32::try_from(term.screen_lines()).unwrap_or(i32::MAX) - 1)) - offset;
+        Point::new(Line(line), Column(usize::try_from(col.clamp(0, i32::try_from(term.columns()).unwrap_or(i32::MAX) - 1)).unwrap_or(0)))
     }
 
     /// Starts a selection at a screen cell (`kind`: 1 click, 2 word, 3 line).
@@ -317,7 +332,7 @@ impl Terminal {
             for c in 0..cols {
                 let cell = &grid[Line(l)][Column(c)];
                 if Line(l) == p.line && c == p.column.0 {
-                    at = chars.len().saturating_sub(cell.flags.contains(Flags::WIDE_CHAR_SPACER) as usize);
+                    at = chars.len().saturating_sub(usize::from(cell.flags.contains(Flags::WIDE_CHAR_SPACER)));
                 }
                 if !cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
                     chars.push(cell.c);
@@ -345,7 +360,7 @@ impl Terminal {
     pub fn render(&self, palette: &Palette, screen: &mut Screen) {
         let term = self.term.lock();
         let content = term.renderable_content();
-        let offset = content.display_offset as i32;
+        let offset = i32::try_from(content.display_offset).unwrap_or(i32::MAX);
         let (rows, cols) = (term.screen_lines(), term.columns());
         let colors = content.colors;
         let selection = content.selection;
@@ -356,7 +371,7 @@ impl Terminal {
         for cell in content.display_iter {
             let row = cell.point.line.0 + offset;
             let col = cell.point.column.0;
-            if row < 0 || row as usize >= rows || col >= cols {
+            if row < 0 || usize::try_from(row).unwrap_or(0) >= rows || col >= cols {
                 continue;
             }
             let selected = selection.is_some_and(|s| s.contains(cell.point));
@@ -388,15 +403,15 @@ impl Terminal {
                 }
             }
             let c = if flags & Cell::SPACER != 0 || cell.c == '\0' || cell.c == '\t' { ' ' } else { cell.c };
-            screen.cells[row as usize * cols + col] = Cell { c, fg, bg, flags };
+            screen.cells[usize::try_from(row).unwrap_or(0) * cols + col] = Cell { c, fg, bg, flags };
         }
         let cursor = content.cursor;
         let cursor_row = cursor.point.line.0 + offset;
         use alacritty_terminal::vte::ansi::CursorShape as Shape;
         let hidden = matches!(cursor.shape, Shape::Hidden) || !content.mode.contains(TermMode::SHOW_CURSOR);
         screen.cursor_row = cursor_row;
-        screen.cursor_col = cursor.point.column.0 as i32;
-        screen.cursor_visible = !hidden && cursor_row >= 0 && (cursor_row as usize) < rows;
+        screen.cursor_col = i32::try_from(cursor.point.column.0).unwrap_or(i32::MAX);
+        screen.cursor_visible = !hidden && cursor_row >= 0 && usize::try_from(cursor_row).unwrap_or(0) < rows;
         screen.cursor_shape = match cursor.shape {
             Shape::Underline => CursorShape::Underline,
             Shape::Beam => CursorShape::Beam,
@@ -452,7 +467,7 @@ fn link_in(text: &[char], at: usize) -> Option<String> {
 }
 
 fn mix(a: Rgb, b: Rgb) -> Rgb {
-    Rgb { r: ((a.r as u16 + b.r as u16) / 2) as u8, g: ((a.g as u16 + b.g as u16) / 2) as u8, b: ((a.b as u16 + b.b as u16) / 2) as u8 }
+    Rgb { r: u8::try_from(u16::midpoint(u16::from(a.r), u16::from(b.r))).unwrap_or(u8::MAX), g: u8::try_from(u16::midpoint(u16::from(a.g), u16::from(b.g))).unwrap_or(u8::MAX), b: u8::try_from(u16::midpoint(u16::from(a.b), u16::from(b.b))).unwrap_or(u8::MAX) }
 }
 
 fn xterm_256(i: u8) -> Rgb {
@@ -504,10 +519,10 @@ const ALT: u32 = 0x0800_0000;
 /// bits and the event's text. `app_cursor`: the program asked for
 /// application cursor keys (DECCKM).
 pub fn key_bytes(key: i32, modifiers: u32, text: &str, app_cursor: bool) -> Vec<u8> {
-    let key = key as u32;
+    let key = u32::try_from(key).unwrap_or(0);
     let (shift, ctrl, alt) = (modifiers & SHIFT != 0, modifiers & CTRL != 0, modifiers & ALT != 0);
     // xterm modifier parameter: 1 + shift + 2·alt + 4·ctrl.
-    let m = 1 + shift as u32 + 2 * alt as u32 + 4 * ctrl as u32;
+    let m = 1 + u32::from(shift) + 2 * u32::from(alt) + 4 * u32::from(ctrl);
     let csi = |final_: char| -> Vec<u8> {
         if m > 1 { format!("\x1b[1;{m}{final_}") } else if app_cursor { format!("\x1bO{final_}") } else { format!("\x1b[{final_}") }.into_bytes()
     };
@@ -551,7 +566,7 @@ pub fn key_bytes(key: i32, modifiers: u32, text: &str, app_cursor: bool) -> Vec<
     }
     if ctrl {
         let control = match key {
-            0x41..=0x5a => Some((key - 0x40) as u8), // Ctrl+A … Ctrl+Z
+            0x41..=0x5a => Some(u8::try_from(key - 0x40).unwrap_or(u8::MAX)), // Ctrl+A … Ctrl+Z
             0x20 | 0x40 => Some(0),                  // Ctrl+Space, Ctrl+@
             0x5b => Some(0x1b),                      // Ctrl+[
             0x5c => Some(0x1c),                      // Ctrl+\
@@ -664,7 +679,7 @@ mod tests {
             term.render(&palette, &mut screen);
             row = (0..screen.rows).position(|r| screen.row_text(r).starts_with("https://example.org/"));
         }
-        let row = row.expect("printed") as i32;
+        let row = i32::try_from(row.expect("printed")).unwrap_or(i32::MAX);
         assert_eq!(term.link_at(row, 3), url, "on its first row");
         assert_eq!(term.link_at(row + 1, 2), url, "on the row it wrapped onto");
         assert_eq!(term.link_at(row + 1, 19), "", "past its end");

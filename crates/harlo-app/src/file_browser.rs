@@ -1,6 +1,8 @@
 //! `FileBrowser`: the active session's folder as an expandable tree (a
 //! flat list of visible rows). Files open in editor tabs (`TextFile`).
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -135,6 +137,7 @@ fn build_rows(root: &Path, rel: &str, depth: i32, expanded: &HashSet<String>, ou
     }
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl FileBrowser {
     pub fn set_root(mut self: Pin<&mut Self>, dir: &QString) {
         if &self.folder == dir {
@@ -171,6 +174,8 @@ impl FileBrowser {
     }
 
     fn set_rows(mut self: Pin<&mut Self>, rows: Vec<Row>) {
+        // SAFETY: begin_reset_model and end_reset_model are paired here, on the
+        // GUI thread that owns the model, and the rows change only between them.
         unsafe {
             self.as_mut().begin_reset_model();
             self.as_mut().rust_mut().rows = rows;
@@ -189,9 +194,12 @@ impl FileBrowser {
         }
         let children: Vec<Row> = entries.into_iter().map(|entry| Row { entry, depth: depth + 1, expanded: false }).collect();
         if !children.is_empty() {
+            // SAFETY: begin/end_insert_rows are paired here, on the GUI thread;
+            // the rows announced (after row `i`, one per child, at least one)
+            // are exactly the ones spliced in between them.
             unsafe {
-                self.as_mut().begin_insert_rows(&root, (i + 1) as i32, (i + children.len()) as i32);
-                self.as_mut().rust_mut().rows.splice(i + 1..i + 1, children);
+                self.as_mut().begin_insert_rows(&root, i32::try_from(i + 1).unwrap_or(i32::MAX), i32::try_from(i + children.len()).unwrap_or(i32::MAX));
+                self.as_mut().rust_mut().rows.splice((i + 1)..=i, children);
                 self.as_mut().end_insert_rows();
             }
         }
@@ -203,7 +211,7 @@ impl FileBrowser {
     }
 
     pub fn toggle(mut self: Pin<&mut Self>, index: i32) {
-        let i = index.max(0) as usize;
+        let i = usize::try_from(index).unwrap_or(0);
         let Some(row) = self.rows.get(i).cloned() else { return };
         if !row.entry.is_dir {
             return;
@@ -212,8 +220,11 @@ impl FileBrowser {
         if row.expanded {
             let end = self.rows[i + 1..].iter().position(|r| r.depth <= row.depth).map_or(self.rows.len(), |p| i + 1 + p);
             if end > i + 1 {
+                // SAFETY: begin/end_remove_rows are paired here, on the GUI thread;
+                // `i + 1..end` is a non-empty range of existing rows (the open
+                // folder's descendants), drained exactly between them.
                 unsafe {
-                    self.as_mut().begin_remove_rows(&root, (i + 1) as i32, (end - 1) as i32);
+                    self.as_mut().begin_remove_rows(&root, i32::try_from(i + 1).unwrap_or(i32::MAX), i32::try_from(end - 1).unwrap_or(i32::MAX));
                     self.as_mut().rust_mut().rows.drain(i + 1..end);
                     self.as_mut().end_remove_rows();
                 }
@@ -239,12 +250,12 @@ impl FileBrowser {
                 self.as_mut().insert_children(&rel, entries);
             }
         }
-        let idx = self.index(i as i32, 0, &root);
+        let idx = self.index(i32::try_from(i).unwrap_or(i32::MAX), 0, &root);
         self.as_mut().data_changed(&idx, &idx, &QVector::<i32>::default());
     }
 
     pub fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Some(r) = self.rows.get(index.row() as usize) else { return QVariant::default() };
+        let Some(r) = self.rows.get(usize::try_from(index.row()).unwrap_or(0)) else { return QVariant::default() };
         match role {
             ROLE_REL => QVariant::from(&QString::from(&r.entry.rel)),
             ROLE_NAME => QVariant::from(&QString::from(&r.entry.name)),
@@ -265,6 +276,6 @@ impl FileBrowser {
     }
 
     pub fn row_count(&self, _parent: &QModelIndex) -> i32 {
-        self.rows.len() as i32
+        i32::try_from(self.rows.len()).unwrap_or(i32::MAX)
     }
 }

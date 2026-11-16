@@ -6,6 +6,9 @@
 //! `\w`, `\d` and `\b` are ASCII, `.` doesn't match line terminators, `\/`
 //! is a slash, and inside a class `[`, `&` and `~` are plain characters.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use fancy_regex::{Captures, Regex, RegexBuilder};
 
 const WS: &str = r"\t\n\x0B\x0C\r \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
@@ -32,14 +35,12 @@ pub fn translate(src: &str, flags: &str) -> String {
             let n = chars[i + 1];
             i += 2;
             match (n, class) {
-                ('s', false) => out.push_str(&format!("[{WS}]")),
+                ('s', false) => _ = write!(out, "[{WS}]"),
                 ('s', true) => out.push_str(WS),
-                ('S', false) => out.push_str(&format!("[^{WS}]")),
-                ('S', true) => out.push_str(&format!("[^{WS}]")),
-                ('w', false) => out.push_str(&format!("[{WORD}]")),
+                ('S', _) => _ = write!(out, "[^{WS}]"),
+                ('w', false) => _ = write!(out, "[{WORD}]"),
                 ('w', true) => out.push_str(WORD),
-                ('W', false) => out.push_str(&format!("[^{WORD}]")),
-                ('W', true) => out.push_str(&format!("[^{WORD}]")),
+                ('W', _) => _ = write!(out, "[^{WORD}]"),
                 ('d', false) => out.push_str("[0-9]"),
                 ('d', true) => out.push_str("0-9"),
                 ('D', _) => out.push_str("[^0-9]"),
@@ -49,12 +50,12 @@ pub fn translate(src: &str, flags: &str) -> String {
                 ('x', _) => {
                     let hex: String = chars[i..(i + 2).min(chars.len())].iter().collect();
                     i += 2;
-                    out.push_str(&format!("\\x{{{hex}}}"));
+                    let _ = write!(out, "\\x{{{hex}}}");
                 }
                 ('u', _) if i + 4 <= chars.len() && chars[i] != '{' => {
                     let hex: String = chars[i..i + 4].iter().collect();
                     i += 4;
-                    out.push_str(&format!("\\x{{{hex}}}"));
+                    let _ = write!(out, "\\x{{{hex}}}");
                 }
                 (n, _) => {
                     out.push('\\');
@@ -127,12 +128,13 @@ fn anchored_alternatives(src: &str) -> bool {
 }
 
 /// A compiled JavaScript pattern.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Re {
     re: Regex,
 }
 
 /// One match: its groups (None when a group didn't take part).
+#[derive(Debug)]
 pub struct Match<'t> {
     caps: Captures<'t>,
 }
@@ -152,10 +154,10 @@ impl<'t> Match<'t> {
         self.str(0)
     }
     pub fn start(&self) -> usize {
-        self.caps.get(0).unwrap().start()
+        self.caps.get(0).map_or(0, |m| m.start())
     }
     pub fn end(&self) -> usize {
-        self.caps.get(0).unwrap().end()
+        self.caps.get(0).map_or(0, |m| m.end())
     }
     pub fn name(&self, n: &str) -> Option<&'t str> {
         self.caps.name(n).map(|m| m.as_str())
@@ -163,6 +165,12 @@ impl<'t> Match<'t> {
 }
 
 impl Re {
+    /// Compiles a JavaScript pattern with its flags.
+    ///
+    /// # Panics
+    ///
+    /// When `src` with `flags` isn't a pattern the regex engine takes. The
+    /// patterns are harlo's own constants, so the tests that use them show it.
     pub fn new(src: &str, flags: &str) -> Re {
         // `^a|^b` matches only at the start, as `^(?:a|b)` does, but only
         // the second is run that way here: the first is tried again at
@@ -232,12 +240,12 @@ impl Re {
 
     /// The first match's byte position (`s.search(re)`), -1 for none.
     pub fn search(&self, s: &str) -> isize {
-        self.exec(s).map(|m| m.start() as isize).unwrap_or(-1)
+        self.exec(s).map_or(-1, |m| isize::try_from(m.start()).unwrap_or(isize::MAX))
     }
 }
 
 fn next_char(s: &str, i: usize) -> usize {
-    s[i..].chars().next().map(|c| i + c.len_utf8()).unwrap_or(s.len() + 1)
+    s[i..].chars().next().map_or(s.len() + 1, |c| i + c.len_utf8())
 }
 
 /// JavaScript's `trim()`: its whitespace and line terminators.
@@ -278,10 +286,10 @@ pub fn at16(s: &str, n: usize) -> usize {
 
 /// `s.slice(a, b)` in UTF-16 units, negative counting from the end.
 pub fn slice16(s: &str, a: isize, b: Option<isize>) -> &str {
-    let len = len16(s) as isize;
-    let fix = |x: isize| if x < 0 { (len + x).max(0) } else { x.min(len) } as usize;
+    let len = isize::try_from(len16(s)).unwrap_or(isize::MAX);
+    let fix = |x: isize| usize::try_from(if x < 0 { (len + x).max(0) } else { x.min(len) }).unwrap_or(0);
     let a = fix(a);
-    let b = b.map(fix).unwrap_or(len as usize);
+    let b = b.map_or(usize::try_from(len).unwrap_or(0), fix);
     if b <= a {
         return "";
     }

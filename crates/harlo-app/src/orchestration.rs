@@ -3,6 +3,8 @@
 //! and harlo-agent's calls on its own pipe ([`answer_pipe`]). Each call is
 //! carried out on the UI thread, where the sessions are.
 
+// Rust guideline compliant 2026-10-09
+
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::time::Duration;
@@ -20,7 +22,7 @@ pub fn serve(thread: CxxQtThread<Workspace>) {
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) => {
-            tracing::warn!("orchestration: can't listen on {}: {e}", path.display());
+            tracing::event!(name: "orchestration.listen.failed", tracing::Level::WARN, file.path = %path.display(), error.message = %e, "orchestration: can't listen on {{file.path}}: {{error.message}}");
             return;
         }
     };
@@ -29,7 +31,7 @@ pub fn serve(thread: CxxQtThread<Workspace>) {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
-    std::thread::Builder::new()
+    let _ = std::thread::Builder::new()
         .name("orchestration".into())
         .spawn(move || {
             for stream in listener.incoming().flatten() {
@@ -42,7 +44,7 @@ pub fn serve(thread: CxxQtThread<Workspace>) {
                     let answer = match serde_json::from_str::<Value>(&line) {
                         Ok(call) => match handle(&thread, &call) {
                             Ok(result) => json!({ "ok": true, "result": result }),
-                            Err(error) => json!({ "ok": false, "error": error }),
+                            Err(error) => json!({ "ok": false, "error": format!("{error:#}") }),
                         },
                         Err(_) => json!({ "ok": false, "error": "not a tool call" }),
                     };
@@ -50,13 +52,12 @@ pub fn serve(thread: CxxQtThread<Workspace>) {
                     let _ = writeln!(stream, "{answer}");
                 });
             }
-        })
-        .ok();
+        });
 }
 
 /// One tool call: done on the UI thread (and, for read_session, the
 /// session's messages asked for here).
-fn handle(thread: &CxxQtThread<Workspace>, call: &Value) -> Result<Value, String> {
+fn handle(thread: &CxxQtThread<Workspace>, call: &Value) -> anyhow::Result<Value> {
     let session = call["session"].as_str().unwrap_or_default().to_owned();
     let (tool, args) = (call["tool"].as_str().unwrap_or_default().to_owned(), call["args"].clone());
     let (tx, rx) = std::sync::mpsc::channel();
@@ -66,31 +67,31 @@ fn handle(thread: &CxxQtThread<Workspace>, call: &Value) -> Result<Value, String
             .queue(move |this| {
                 let _ = tx.send(this.orchestrate(&session, &tool, &args));
             })
-            .map_err(|_| "harlo is closing".to_owned())?;
-    }
-    let result = rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "harlo didn't answer in time".to_owned())??;
+            .ok().ok_or_else(|| anyhow::Error::msg("harlo is closing"))?;
+    };
+    let result = rx.recv_timeout(Duration::from_secs(60)).ok().ok_or_else(|| anyhow::Error::msg("harlo didn't answer in time"))??;
     finish(thread, &tool, &args, result)
 }
 
 /// `f` done on the UI thread, waited for here (not on the UI thread).
-fn on_ui<T: Send + 'static>(thread: &CxxQtThread<Workspace>, f: impl FnOnce(std::pin::Pin<&mut Workspace>) -> T + Send + 'static) -> Result<T, String> {
+fn on_ui<T: Send + 'static>(thread: &CxxQtThread<Workspace>, f: impl FnOnce(std::pin::Pin<&mut Workspace>) -> T + Send + 'static) -> anyhow::Result<T> {
     let (tx, rx) = std::sync::mpsc::channel();
     thread
         .queue(move |this| {
             let _ = tx.send(f(this));
         })
-        .map_err(|_| "harlo is closing".to_owned())?;
-    rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "harlo didn't answer in time".to_owned())
+        .ok().ok_or_else(|| anyhow::Error::msg("harlo is closing"))?;
+    rx.recv_timeout(Duration::from_secs(60)).ok().ok_or_else(|| anyhow::Error::msg("harlo didn't answer in time"))
 }
 
 /// A harlo-agent session's call on its pipe, done on the UI thread
 /// (`result`): finished here in the background, then the answer to the
 /// session.
-pub fn answer_pipe(thread: CxxQtThread<Workspace>, key: String, call: String, tool: String, args: Value, result: Result<Value, String>) {
+pub fn answer_pipe(thread: CxxQtThread<Workspace>, key: String, call: String, tool: String, args: Value, result: anyhow::Result<Value>) {
     std::thread::spawn(move || {
         let answer = match result.and_then(|r| finish(&thread, &tool, &args, r)) {
             Ok(result) => json!({ "type": "harlo_result", "call": call, "ok": true, "result": result }),
-            Err(error) => json!({ "type": "harlo_result", "call": call, "ok": false, "error": error }),
+            Err(error) => json!({ "type": "harlo_result", "call": call, "ok": false, "error": format!("{error:#}") }),
         };
         if let Some(live) = crate::registry::get(&key) {
             live.handle.send_raw(answer);
@@ -100,34 +101,34 @@ pub fn answer_pipe(thread: CxxQtThread<Workspace>, key: String, call: String, to
 
 /// What's left of a call after the UI thread's part: the wiki and the plan
 /// worked on, a session's messages read.
-fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Value) -> Result<Value, String> {
+fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Value) -> anyhow::Result<Value> {
     // The wiki and the plan: their work here, with what the UI thread gave.
     if result["_defer"] == true {
         if tool == "bring_over" {
             let path = |k: &str| std::path::PathBuf::from(result[k].as_str().unwrap_or_default());
             let text = |k: &str| result[k].as_str().unwrap_or_default().to_owned();
             let helper = path("helper");
-            let brought = harlo_core::git::bring_over(&helper, &path("here"), &text("start"), &text("base")).map_err(|e| format!("Not brought over: {e:#}."))?;
+            let brought = harlo_core::git::bring_over(&helper, &path("here"), &text("start"), &text("base")).map_err(|e| anyhow::anyhow!("Not brought over: {e:#}."))?;
             let shown = harlo_core::remote::display(&helper);
             return Ok(json!({ "applied": brought.applied, "clashed": brought.clashed, "text": harlo_core::orchestration::brought_text(&brought.applied, &brought.clashed, &shown) }));
         }
         // Past sessions' messages: searched here, then shown with what the
         // UI thread knows of them.
         if tool == "list_sessions" {
-            let reader = on_ui(thread, |this| this.session_search())?.ok_or("Searching sessions isn't available here.")?;
+            let reader = on_ui(thread, |this| this.session_search())?.ok_or_else(|| anyhow::Error::msg("Searching sessions isn't available here."))?;
             let query = result["query"].as_str().unwrap_or_default().to_owned();
-            let hits = reader.lock().map_err(|_| "The session search broke.".to_owned())?.search(&query, 300).unwrap_or_default();
+            let hits = reader.lock().ok().ok_or_else(|| anyhow::Error::msg("The session search broke."))?.search(&query, 300).unwrap_or_default();
             let path = |k: &str| result[k].as_str().map(std::path::PathBuf::from);
             let (everywhere, cwd, own) = (result["everywhere"] == true, path("cwd"), path("own"));
-            return on_ui(thread, move |this| this.found_sessions(hits, everywhere, cwd, own));
+            return on_ui(thread, move |this| this.found_sessions(&hits, everywhere, cwd.as_deref(), own.as_deref()));
         }
         if tool.starts_with("openwiki_") {
             let root = harlo_core::openwiki::root_of(std::path::Path::new(result["cwd"].as_str().unwrap_or_default()));
-            let said = harlo_core::openwiki::call(&root, tool, args.clone()).map_err(|e| format!("{e:#}"))?;
+            let said = harlo_core::openwiki::call(&root, tool, args.clone()).map_err(|e| anyhow::anyhow!("{e:#}"))?;
             return harlo_core::openwiki::answer(&said);
         }
         let outcome = crate::plans::tool(tool, args, &result);
-        let _ = thread.queue(|this| this.plans_changed());
+        let _ = thread.queue(super::workspace::qobject::Workspace::plans_changed);
         return outcome;
     }
     if tool != "read_session" {
@@ -159,7 +160,7 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
         .collect();
     let mut result = result;
     if wanted == 1 {
-        result["lastReply"] = readable.iter().rev().find(|m| m["role"] == "assistant").map(|m| m["text"].clone()).unwrap_or(Value::Null);
+        result["lastReply"] = readable.iter().rev().find(|m| m["role"] == "assistant").map_or(Value::Null, |m| m["text"].clone());
     } else {
         result["messages"] = json!(readable[readable.len().saturating_sub(wanted)..]);
     }

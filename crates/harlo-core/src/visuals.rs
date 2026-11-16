@@ -1,10 +1,13 @@
-//! What an agent can show in a reply besides prose and code, each in a
-//! fenced block harlo draws in the chat, on the desktop and the phone:
-//! a Mermaid diagram (```mermaid), a comparison of choices (```options,
-//! drawn as cards) and a UI mockup (```mockup: an HTML file the agent
-//! wrote, shown as a picture, beside the one before it). The block stays
-//! plain text in the transcript, so any agent can write one and any
-//! viewer can read it; this module reads what the blocks say.
+//! What an agent can show in a reply besides prose and code.
+//!
+//! Each is a fenced block harlo draws in the chat, on the desktop and the
+//! phone: a Mermaid diagram (```mermaid), a comparison of choices (```options,
+//! drawn as cards) and a UI mockup (```mockup: an HTML file the agent wrote,
+//! shown as a picture, beside the one before it). The block stays plain text in
+//! the transcript, so any agent can write one and any viewer can read it; this
+//! module reads what the blocks say.
+
+// Rust guideline compliant 2026-10-09
 
 /// What harlo tells agents about them (with orchestration on).
 pub const INSTRUCTIONS: &str = "harlo draws three kinds of block in your replies, on the desktop and on the phone. A Mermaid diagram (```mermaid) as a picture: draw one when a flow, a structure or a sequence of steps is clearer as a picture than in words. A choice between approaches (```options) as cards: each option a `## name` line (add `(recommended)` to the one you'd pick), a line about it, then `+ ` lines for its pros and `- ` lines for its cons. A UI change (```mockup) as a picture: write a self-contained HTML mockup into a file (in mockups/, say), then a block with `path: mockups/x.html`, and `before: …` for one of how it is now, `size: 390x844` for a phone (the default is 1280x800); harlo shows the file as it is, so editing it updates the picture.";
@@ -52,7 +55,11 @@ pub struct Choice {
 
 /// An ```options block's choices: `## name` (with `(recommended)` on the
 /// one to pick), lines about it, `+ pro` and `- con` lines.
-pub fn options(source: &str) -> Result<Vec<Choice>, String> {
+///
+/// # Errors
+///
+/// What's wrong with the block: no choices, or a choice without a name.
+pub fn options(source: &str) -> anyhow::Result<Vec<Choice>> {
     let mut out: Vec<Choice> = Vec::new();
     for line in source.lines() {
         let t = line.trim();
@@ -88,8 +95,8 @@ pub fn options(source: &str) -> Result<Vec<Choice>, String> {
     }
     out.retain(|c| !c.name.is_empty());
     match out.len() {
-        0 => Err("it has no choices: start each with a `## name` line".into()),
-        1 => Err("it has only one choice: compare two or more".into()),
+        0 => Err(anyhow::Error::msg("it has no choices: start each with a `## name` line")),
+        1 => Err(anyhow::Error::msg("it has only one choice: compare two or more")),
         _ => Ok(out),
     }
 }
@@ -109,7 +116,11 @@ pub struct Mockup {
 
 /// A ```mockup block: `path: x.html` (or the path alone on its line),
 /// `before: y.html`, `title: …`, `size: 390x844`.
-pub fn mockup(source: &str) -> Result<Mockup, String> {
+///
+/// # Errors
+///
+/// When the block names no file.
+pub fn mockup(source: &str) -> anyhow::Result<Mockup> {
     let mut m = Mockup { path: String::new(), before: None, title: String::new(), width: 1280, height: 800 };
     for line in source.lines() {
         let t = line.trim();
@@ -125,20 +136,20 @@ pub fn mockup(source: &str) -> Result<Mockup, String> {
             "before" => m.before = Some(value).filter(|v| !v.is_empty()),
             "title" => m.title = value,
             "size" => {
-                let (w, h) = value.split_once(['x', 'X', '×']).ok_or_else(|| format!("its size `{value}` isn't width x height"))?;
+                let (w, h) = value.split_once(['x', 'X', '×']).ok_or_else(|| anyhow::anyhow!("its size `{value}` isn't width x height"))?;
                 let n = |s: &str| s.trim().trim_end_matches("px").parse::<u32>().ok().filter(|n| (200..=4000).contains(n));
-                (m.width, m.height) = n(w).zip(n(h)).ok_or_else(|| format!("its size `{value}` isn't width x height, from 200 to 4000"))?;
+                (m.width, m.height) = n(w).zip(n(h)).ok_or_else(|| anyhow::anyhow!("its size `{value}` isn't width x height, from 200 to 4000"))?;
             }
             _ => {}
         }
     }
     if m.path.is_empty() {
-        return Err("it names no file: give `path: mockups/x.html`".into());
+        return Err(anyhow::Error::msg("it names no file: give `path: mockups/x.html`"));
     }
     for p in std::iter::once(&m.path).chain(m.before.as_ref()) {
         let lower = p.to_lowercase();
         if !(lower.ends_with(".html") || lower.ends_with(".htm") || lower.ends_with(".svg")) {
-            return Err(format!("`{p}` isn't an HTML file"));
+            return Err(anyhow::anyhow!("`{p}` isn't an HTML file"));
         }
     }
     Ok(m)
@@ -150,10 +161,11 @@ pub fn file_in(cwd: &std::path::Path, path: &str) -> std::path::PathBuf {
     if p.is_absolute() { p.to_path_buf() } else { cwd.join(p) }
 }
 
-/// What can't be shown of a reply's options and mockups (its diagrams are
-/// checked where they're drawn): "an options block has only one choice",
-/// "a mockup names `x.html`, which isn't there". Files are looked for in
-/// `cwd` when it's on this computer.
+/// What can't be shown of a reply's options and mockups.
+///
+/// Its diagrams are checked where they're drawn. Each problem in a line: "an
+/// options block has only one choice", "a mockup names `x.html`, which isn't
+/// there". Files are looked for in `cwd` when it's on this computer.
 pub fn problems(reply: &str, cwd: Option<&std::path::Path>) -> Vec<String> {
     let mut out = Vec::new();
     for b in blocks(reply, "options") {
@@ -196,8 +208,8 @@ mod tests {
             Choice { name: "Match rows by key".into(), recommended: true, about: "Rows are updated in place.".into(), pros: vec!["nothing to restore".into(), "no redraw".into()], cons: vec!["more code".into()] },
             Choice { name: "Remember the offset".into(), recommended: false, about: "Smaller. Still redraws.".into(), pros: vec![], cons: vec!["the list flickers".into()] },
         ]);
-        assert!(options("### One ★\n+ x").unwrap_err().contains("only one choice"));
-        assert!(options("Just prose.").unwrap_err().contains("no choices"));
+        assert!(options("### One ★\n+ x").unwrap_err().to_string().contains("only one choice"));
+        assert!(options("Just prose.").unwrap_err().to_string().contains("no choices"));
     }
 
     #[test]
@@ -205,9 +217,9 @@ mod tests {
         let m = mockup("path: mockups/settings.html\nbefore: \"mockups/settings-now.html\"\ntitle: Settings with sync\nsize: 390x844\n").unwrap();
         assert_eq!(m, Mockup { path: "mockups/settings.html".into(), before: Some("mockups/settings-now.html".into()), title: "Settings with sync".into(), width: 390, height: 844 });
         assert_eq!(mockup("mockups/a.html").unwrap().width, 1280);
-        assert!(mockup("title: x").unwrap_err().contains("names no file"));
-        assert!(mockup("path: a.png").unwrap_err().contains("isn't an HTML file"));
-        assert!(mockup("path: a.html\nsize: big").unwrap_err().contains("width x height"));
+        assert!(mockup("title: x").unwrap_err().to_string().contains("names no file"));
+        assert!(mockup("path: a.png").unwrap_err().to_string().contains("isn't an HTML file"));
+        assert!(mockup("path: a.html\nsize: big").unwrap_err().to_string().contains("width x height"));
         let dir = std::env::temp_dir().join(format!("harlo-visuals-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("mockups")).unwrap();
         std::fs::write(dir.join("mockups/a.html"), "<p>a</p>").unwrap();

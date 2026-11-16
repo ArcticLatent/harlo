@@ -6,6 +6,8 @@
 //! harlo keeps the connection up while the relay is on, reconnecting with
 //! backoff, and reports how it's going.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -58,7 +60,7 @@ pub fn start(ws_base: String, secret: String, shared: Arc<Shared>, status: impl 
             }
             status(Status::Failed(failure.0));
             tokio::select! {
-                _ = tokio::time::sleep(backoff) => {}
+                () = tokio::time::sleep(backoff) => {}
                 _ = &mut stopped => return,
             }
             backoff = (backoff * 2).min(Duration::from_secs(30));
@@ -99,7 +101,7 @@ async fn session(ws_base: &str, secret: &str, shared: &Arc<Shared>, status: &(im
     let why = loop {
         tokio::select! {
             frame = for_relay.recv() => {
-                let Some(frame) = frame else { break "".to_owned() };
+                let Some(frame) = frame else { break String::new() };
                 if sink.send(Message::Text(frame.into())).await.is_err() {
                     break "The relay closed the connection.".to_owned();
                 }
@@ -124,7 +126,7 @@ async fn session(ws_base: &str, secret: &str, shared: &Arc<Shared>, status: &(im
                         let (in_tx, incoming) = mpsc::channel(64);
                         let (outgoing, mut out_rx) = mpsc::channel::<String>(64);
                         phones.insert(c, in_tx);
-                        let shared = shared.clone();
+                        let shared = Arc::clone(shared);
                         let to_relay = to_relay.clone();
                         tokio::spawn(async move {
                             let forward = async {
@@ -180,7 +182,7 @@ mod tests {
         let harlo_public = shared.identity.public_b64();
         let secret = harlo_core::phone::random_id(32);
         let (status_tx, mut statuses) = mpsc::unbounded_channel();
-        let client = start(format!("ws://{addr}"), secret.clone(), shared.clone(), move |s| {
+        let client = start(format!("ws://{addr}"), secret.clone(), std::sync::Arc::clone(&shared), move |s| {
             let _ = status_tx.send(s);
         });
         let id = loop {

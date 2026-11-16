@@ -1,8 +1,11 @@
-//! `a.localeCompare(b)` as OpenWiki sorts pages and workspace names with it
-//! (Unicode's root collation): punctuation and symbols before digits before
+//! `a.localeCompare(b)`, as OpenWiki sorts pages and workspace names.
+//!
+//! It's Unicode's root collation: punctuation and symbols before digits before
 //! letters, letters by their base letter first, then accents, then case
 //! (lowercase first). Exact for ASCII; other characters follow their base
 //! letter where they have one, else their code point.
+
+// Rust guideline compliant 2026-10-09
 
 use std::cmp::Ordering;
 
@@ -10,23 +13,23 @@ const ASCII_ORDER: &str = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789aAbBcCdD
 
 fn ascii_primary(c: char) -> Option<u32> {
     let lower = c.to_ascii_lowercase();
-    ASCII_ORDER.find(lower).map(|i| i as u32)
+    ASCII_ORDER.find(lower).map(|i| u32::try_from(i).unwrap_or(u32::MAX))
 }
 
 /// One character's (primary, secondary, tertiary) weights.
 fn weights(c: char) -> (u32, u32, u32) {
     if c.is_ascii() {
         let p = ascii_primary(c).unwrap_or(c as u32);
-        return (p, 0, c.is_ascii_uppercase() as u32);
+        return (p, 0, u32::from(c.is_ascii_uppercase()));
     }
     // A Latin letter with a mark: its base letter, then the mark.
     let base = fold(c);
     if let Some(b) = base {
         let p = ascii_primary(b).unwrap_or(b as u32);
-        let upper = c.is_uppercase() as u32;
+        let upper = u32::from(c.is_uppercase());
         return (p, c.to_lowercase().next().unwrap_or(c) as u32, upper);
     }
-    (1000 + c as u32, 0, c.is_uppercase() as u32)
+    (1000 + c as u32, 0, u32::from(c.is_uppercase()))
 }
 
 fn fold(c: char) -> Option<char> {

@@ -14,6 +14,9 @@
 //!   compactions. In the log: a `compaction` entry, as pi writes it; the
 //!   messages before stay in the file.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::BTreeSet;
 
 use serde_json::Value;
@@ -57,7 +60,7 @@ pub fn estimate(m: &Value) -> u64 {
                 Some("thinking") => b["thinking"].as_str().map_or(0, str::len),
                 Some("toolCall") => b["name"].as_str().map_or(0, str::len) + b["arguments"].to_string().len(),
                 // (An image costs about the same whatever its bytes.)
-                Some("image") => crate::images::TOKENS as usize * 4,
+                Some("image") => usize::try_from(crate::images::TOKENS).unwrap_or(usize::MAX) * 4,
                 _ => b.to_string().len(),
             })
             .sum(),
@@ -89,7 +92,7 @@ pub fn cut(history: &[Value], keep: u64) -> Option<usize> {
     }
     // Only a summary before it: nothing new to summarize.
     let before = &history[..i];
-    (!before.is_empty() && !(before.len() == 1 && before[0]["role"] == "compactionSummary")).then_some(i)
+    (!(before.is_empty() || (before.len() == 1 && before[0]["role"] == "compactionSummary"))).then_some(i)
 }
 
 /// The user's request that the cut falls inside of (its text), when the
@@ -131,13 +134,13 @@ pub fn request(focus: Option<&str>, turn: Option<&str>) -> String {
     if let Some(t) = turn.map(str::trim).filter(|t| !t.is_empty()) {
         let quoted: String = t.chars().take(QUOTED).collect();
         let more = if quoted.len() < t.len() { " (cut short here)" } else { "" };
-        s.push_str(&format!(
+        let _ = write!(s, 
             "\n\nThis is the middle of a turn: the messages kept after the summary continue your work on the user's latest request, which is in the part summarized. \
              Under Goal, quote that request word for word, and under In progress say exactly where the work stands, so the kept messages make sense after it. The request:\n<request>\n{quoted}{more}\n</request>"
-        ));
+        );
     }
     if let Some(f) = focus.map(str::trim).filter(|f| !f.is_empty()) {
-        s.push_str(&format!("\n\nThe user asks you to focus on: {f}"));
+        let _ = write!(s, "\n\nThe user asks you to focus on: {f}");
     }
     s
 }
@@ -216,7 +219,7 @@ pub fn native_note(asked: &[String], model: &str) -> String {
         let from = asked.len().saturating_sub(NOTE_REQUESTS);
         note.push_str("\n\nThe user's requests in it, the newest last:\n");
         for a in &asked[from..] {
-            note.push_str(&format!("\n- {}", a.replace('\n', "\n  ")));
+            let _ = write!(note, "\n- {}", a.replace('\n', "\n  "));
         }
     }
     note
@@ -256,10 +259,10 @@ pub fn files(history: &[Value], known: &(Vec<String>, Vec<String>)) -> (Vec<Stri
 pub fn with_files(summary: &str, files: &(Vec<String>, Vec<String>)) -> String {
     let mut s = summary.trim().to_owned();
     if !files.0.is_empty() {
-        s.push_str(&format!("\n\n## Files read\n{}", files.0.join("\n")));
+        let _ = write!(s, "\n\n## Files read\n{}", files.0.join("\n"));
     }
     if !files.1.is_empty() {
-        s.push_str(&format!("\n\n## Files changed\n{}", files.1.join("\n")));
+        let _ = write!(s, "\n\n## Files changed\n{}", files.1.join("\n"));
     }
     s
 }

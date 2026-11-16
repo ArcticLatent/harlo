@@ -14,6 +14,9 @@
 //! `status`, `meta`, `request`, `cleared`, `commands`, `queue`, `todos`,
 //! `subagents`, `aside`).
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -57,7 +60,7 @@ struct Online(Arc<Shared>, String);
 impl Online {
     fn new(shared: &Arc<Shared>, id: &str) -> Self {
         *shared.online.lock().unwrap().entry(id.to_owned()).or_default() += 1;
-        Self(shared.clone(), id.to_owned())
+        Self(Arc::clone(shared), id.to_owned())
     }
 }
 
@@ -106,7 +109,7 @@ impl Shared {
 /// A running server; dropping it stops it.
 pub struct Server {
     /// Where it listens (the port, when 0 was asked for).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(test), expect(dead_code, reason = "only the tests read it"))]
     pub addr: SocketAddr,
     stop: Option<oneshot::Sender<()>>,
 }
@@ -120,7 +123,7 @@ impl Drop for Server {
 }
 
 fn now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 fn asset(content_type: &'static str, body: &'static str) -> Response {
@@ -263,7 +266,7 @@ fn phone_code(full: &[Arc<harlo_core::Row>], i: usize) -> Option<(String, String
                 let shown = html[..end].matches('\n').count() + 1;
                 let left = html[end..].matches('\n').count();
                 html.truncate(end);
-                html.push_str(&format!("\n… ({left} more lines, in harlo on your computer)"));
+                let _ = write!(html, "\n… ({left} more lines, in harlo on your computer)");
                 text = text.split('\n').take(shown).collect::<Vec<_>>().join("\n");
             }
             // Its first line alone is too long: that line's start, as
@@ -368,7 +371,7 @@ fn row_frames(key: &str, window: &mut Window, u: &SessionUpdate) -> Vec<Value> {
     use harlo_core::listdiff::ListChange;
     match u {
         SessionUpdate::Reset(rows) => {
-            window.full = rows.clone();
+            window.full.clone_from(rows);
             let shown = window.reset(rows).len();
             let from = window.skipped;
             let mut frames = Vec::new();
@@ -458,7 +461,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
         // Stopped before they were sent: their words and pictures back in
         // the composer (files the phone can't attach stay on the desktop).
         SessionUpdate::Unsent(held) => {
-            let words: Vec<String> = held.iter().map(|u| u.words()).filter(|w| !w.trim().is_empty()).collect();
+            let words: Vec<String> = held.iter().map(harlo_core::Unsent::words).filter(|w| !w.trim().is_empty()).collect();
             let photos: Vec<Value> = held.iter().flat_map(|u| &u.images).map(|i| json!({ "data": i["data"], "mimeType": i["mimeType"] })).collect();
             json!({ "ev": "unsent", "key": key, "text": words.join("\n\n"), "photos": photos })
         }
@@ -515,8 +518,8 @@ async fn send_after_server(msg: Value) -> Value {
             return Ok(());
         }
         let server = if host.is_empty() { crate::accounts::managed_server(&agent, &model) } else { crate::accounts::host_server(&host, &agent, &model) };
-        match server.filter(|s| s.needs_start()) {
-            Some(s) => s.start().map_err(|e| format!("{} didn't start, so your message wasn't sent: {e}", s.name())),
+        match server.filter(super::accounts::ModelServer::needs_start) {
+            Some(s) => s.start().map_err(|e| anyhow::anyhow!("{} didn't start, so your message wasn't sent: {e}", s.name())),
             None => Ok(()),
         }
     })
@@ -524,7 +527,7 @@ async fn send_after_server(msg: Value) -> Value {
     .unwrap_or(Ok(()));
     let sent = match started {
         Ok(()) => crate::phone_bridge::call(json!({ "op": "send", "key": key, "text": msg["text"], "images": msg["images"], "mode": msg["mode"] })).await,
-        Err(e) => json!({ "error": e }),
+        Err(e) => json!({ "error": format!("{e:#}") }),
     };
     match created {
         // (The session started: the phone opens it, with what went wrong.)
@@ -598,7 +601,7 @@ async fn diagram(msg: &Value) -> Value {
     let (source, light, colors) = (msg["source"].as_str().unwrap_or_default().to_owned(), msg["light"].as_bool().unwrap_or(false), msg["colors"].clone());
     match tokio::task::spawn_blocking(move || crate::diagrams::phone_reply(&source, light, &colors)).await {
         Ok(Ok(drawn)) => drawn,
-        Ok(Err(e)) => json!({ "error": e }),
+        Ok(Err(e)) => json!({ "error": format!("{e:#}") }),
         Err(_) => json!({ "error": "merman couldn't draw this diagram." }),
     }
 }
@@ -631,11 +634,11 @@ async fn model_servers() -> Value {
             } else {
                 harlo_core::engine_host::json_if_there(&host, &["servers"], std::time::Duration::from_secs(30))
                     .map(|v| v.and_then(|v| v.as_array().cloned()).unwrap_or_default())
-                    .map_err(|e| format!("{e:#}"))
+                    .map_err(|e| anyhow::anyhow!("{e:#}"))
             };
             match found {
                 Ok(list) => json!({ "host": host, "servers": list.iter().map(server_json).collect::<Vec<_>>() }),
-                Err(e) => json!({ "host": host, "servers": [], "error": e }),
+                Err(e) => json!({ "host": host, "servers": [], "error": format!("{e:#}") }),
             }
         })
     });
@@ -655,10 +658,10 @@ async fn start_or_stop_server(msg: &Value, start: bool) -> Value {
     if !connected_machines().contains(&host) {
         return json!({ "error": format!("Connect to {host} first.") });
     }
-    let done = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+    let done = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
         if host.is_empty() {
             if !harlo_core::servers::set_up_servers().iter().any(|(u, _)| *u == url) {
-                return Err("harlo didn't set up that server.".into());
+                return Err(anyhow::Error::msg("harlo didn't set up that server."));
             }
             if start {
                 harlo_core::servers::ensure_running(&url)?;
@@ -668,18 +671,18 @@ async fn start_or_stop_server(msg: &Value, start: bool) -> Value {
             return Ok(harlo_core::model_servers::answers(&url));
         }
         let limit = std::time::Duration::from_secs(if start { 20 * 60 } else { 60 });
-        let v = harlo_core::engine_host::json(&host, &[if start { "start" } else { "stop" }, &url], limit).map_err(|e| format!("{e:#}"))?;
+        let v = harlo_core::engine_host::json(&host, &[if start { "start" } else { "stop" }, &url], limit).map_err(|e| anyhow::anyhow!("{e:#}"))?;
         if let Some(e) = v["error"].as_str() {
-            return Err(e.to_owned());
+            return Err(anyhow::Error::msg(e.to_owned()));
         }
         Ok(harlo_core::engine_host::json(&host, &["needs-start", &url], std::time::Duration::from_secs(30)).is_ok_and(|v| v == false))
     })
     .await
-    .unwrap_or_else(|_| Err("It stopped partway.".into()));
+    .unwrap_or_else(|_| Err(anyhow::Error::msg("It stopped partway.")));
     match done {
         Ok(running) if running != start => json!({ "running": running, "error": if start { "It didn't start." } else { "It still answers." } }),
         Ok(running) => json!({ "running": running }),
-        Err(e) => json!({ "error": e }),
+        Err(e) => json!({ "error": format!("{e:#}") }),
     }
 }
 
@@ -713,7 +716,7 @@ async fn branch(live: &crate::registry::LiveRef, file: Option<std::path::PathBuf
             live.handle.reload();
             json!({ "ok": true, "text": data["text"] })
         }
-        Err(e) => json!({ "error": e }),
+        Err(e) => json!({ "error": format!("{e:#}") }),
     }
 }
 
@@ -737,13 +740,13 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
                 json!({ "type": "promote_queued_message", "message": text("text") })
             };
             if let Err(e) = live.handle.request(command).await {
-                return failed(e);
+                return failed(format!("{e:#}"));
             }
         }
         "models" => {
             let data = match live.handle.request(json!({ "type": "get_available_models" })).await {
                 Ok(data) => data,
-                Err(e) => return failed(e),
+                Err(e) => return failed(format!("{e:#}")),
             };
             let mut models: Vec<Value> = data["models"].as_array().into_iter().flatten().map(|m| json!({
                 "provider": m["provider"], "id": m["id"], "name": m["name"], "reasoning": m["reasoning"].as_bool() == Some(true),
@@ -776,60 +779,12 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
         "thinking" => {
             return match live.handle.request(json!({ "type": "get_available_thinking_levels" })).await {
                 Ok(data) => json!({ "levels": data["levels"] }),
-                Err(e) => failed(e),
+                Err(e) => failed(format!("{e:#}")),
             };
         }
         "changes" | "diff" => {
             let (cwd, path, op) = (live.cwd.clone(), text("path"), op.to_owned());
-            return tokio::task::spawn_blocking(move || {
-                use harlo_core::git;
-                let file_json = |f: &git::FileChange, prefix: &str| json!({
-                    "path": format!("{prefix}{}", f.path), "from": f.orig_path.as_ref().map(|o| format!("{prefix}{o}")),
-                    "status": if f.untracked { '?' } else if f.worktree != '.' { f.worktree } else { f.index },
-                    "staged": f.staged(), "untracked": f.untracked, "conflicted": f.conflicted,
-                });
-                // A folder of repositories: each with changes, its files' paths
-                // starting with its place in the folder.
-                let Some(root) = git::repo_root(&cwd) else {
-                    let repos: Vec<(String, git::GitStatus)> = git::nested_repos(&cwd).into_iter().filter_map(|r| {
-                        let rel = r.strip_prefix(&cwd).ok()?.to_string_lossy().into_owned();
-                        Some((rel, git::status(&r).ok()?))
-                    }).collect();
-                    if repos.is_empty() {
-                        return json!({ "error": "This session's folder isn't a git repository, and holds none." });
-                    }
-                    if op == "changes" {
-                        let files: Vec<Value> = repos.iter().flat_map(|(rel, st)| st.files.iter().map(move |f| (rel, f))).map(|(rel, f)| file_json(f, &format!("{rel}/"))).collect();
-                        let list: Vec<Value> = repos.iter().map(|(rel, st)| json!({ "name": rel, "branch": if st.branch.is_empty() { &st.head } else { &st.branch },
-                            "ahead": st.ahead, "behind": st.behind, "changes": st.files.len() })).collect();
-                        return json!({ "branch": "", "ahead": 0, "behind": 0, "repos": list, "files": files });
-                    }
-                    let Some((rel, st)) = repos.iter().filter(|(rel, _)| path.starts_with(&format!("{rel}/"))).max_by_key(|(rel, _)| rel.len()) else {
-                        return json!({ "error": "That file has no changes now." });
-                    };
-                    let inner = &path[rel.len() + 1..];
-                    let Some(file) = st.files.iter().find(|f| f.path == inner) else { return json!({ "error": "That file has no changes now." }) };
-                    return match git::diff_file(&st.root, &file.path, !file.unstaged(), file.untracked) {
-                        Ok(mut d) => {
-                            d.path = path.clone();
-                            diff_json(&d)
-                        }
-                        Err(e) => json!({ "error": format!("{e:#}") }),
-                    };
-                };
-                let status = match git::status(&root) {
-                    Ok(s) => s,
-                    Err(e) => return json!({ "error": format!("{e:#}") }),
-                };
-                if op == "changes" {
-                    return json!({ "branch": status.branch, "ahead": status.ahead, "behind": status.behind, "files": status.files.iter().map(|f| file_json(f, "")).collect::<Vec<_>>() });
-                }
-                let Some(file) = status.files.iter().find(|f| f.path == path) else { return json!({ "error": "That file has no changes now." }) };
-                match git::diff_file(&root, &file.path, !file.unstaged(), file.untracked) {
-                    Ok(d) => diff_json(&d),
-                    Err(e) => json!({ "error": format!("{e:#}") }),
-                }
-            })
+            return tokio::task::spawn_blocking(move || changes_or_diff(&cwd, &path, &op))
             .await
             .unwrap_or_else(|e| json!({ "error": e.to_string() }));
         }
@@ -847,24 +802,7 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
         "branches" | "switchBranch" => {
             let (cwd, name, op) = (live.cwd.clone(), text("name"), op.to_owned());
             let (remote, stash) = (msg["remote"].as_bool() == Some(true), msg["stash"].as_bool() == Some(true));
-            return tokio::task::spawn_blocking(move || {
-                let Some(root) = harlo_core::git::repo_root(&cwd) else { return json!({ "error": "This session's folder isn't a git repository." }) };
-                if op == "switchBranch" {
-                    return match harlo_core::git::switch_branch(&root, &name, false, remote, stash) {
-                        Ok(said) => json!({ "ok": true, "message": said }),
-                        Err(e) => json!({ "error": format!("{e:#}") }),
-                    };
-                }
-                let changed = harlo_core::git::status(&root).map(|s| s.files.len()).unwrap_or(0);
-                match harlo_core::git::branches(&root) {
-                    Ok(b) => {
-                        let entry = |b: &harlo_core::git::BranchInfo| json!({ "name": b.name, "upstream": b.upstream, "ahead": b.ahead, "date": b.date });
-                        json!({ "current": b.current, "local": b.local.iter().map(entry).collect::<Vec<_>>(),
-                                "remote": b.remote.iter().map(entry).collect::<Vec<_>>(), "changed": changed })
-                    }
-                    Err(e) => json!({ "error": format!("{e:#}") }),
-                }
-            })
+            return tokio::task::spawn_blocking(move || branches_or_switch(&cwd, &name, &op, remote, stash))
             .await
             .unwrap_or_else(|e| json!({ "error": e.to_string() }));
         }
@@ -873,29 +811,100 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
     json!({ "ok": true })
 }
 
+/// A session's branches (`branches`), or a switch to one (`switchBranch`), for a phone; it runs git.
+fn branches_or_switch(cwd: &std::path::Path, name: &str, op: &str, remote: bool, stash: bool) -> Value {
+    let Some(root) = harlo_core::git::repo_root(cwd) else { return json!({ "error": "This session's folder isn't a git repository." }) };
+    if op == "switchBranch" {
+        return match harlo_core::git::switch_branch(&root, name, false, remote, stash) {
+            Ok(said) => json!({ "ok": true, "message": said }),
+            Err(e) => json!({ "error": format!("{e:#}") }),
+        };
+    }
+    let changed = harlo_core::git::status(&root).map_or(0, |s| s.files.len());
+    match harlo_core::git::branches(&root) {
+        Ok(b) => {
+            let entry = |b: &harlo_core::git::BranchInfo| json!({ "name": b.name, "upstream": b.upstream, "ahead": b.ahead, "date": b.date });
+            json!({ "current": b.current, "local": b.local.iter().map(entry).collect::<Vec<_>>(),
+                    "remote": b.remote.iter().map(entry).collect::<Vec<_>>(), "changed": changed })
+        }
+        Err(e) => json!({ "error": format!("{e:#}") }),
+    }
+}
+
+/// A session's changed files (`changes`), or one file's diff (`diff`), for a phone; it runs git.
+fn changes_or_diff(cwd: &std::path::Path, path: &str, op: &str) -> Value {
+    use harlo_core::git;
+    let file_json = |f: &git::FileChange, prefix: &str| json!({
+        "path": format!("{prefix}{}", f.path), "from": f.orig_path.as_ref().map(|o| format!("{prefix}{o}")),
+        "status": if f.untracked { '?' } else if f.worktree != '.' { f.worktree } else { f.index },
+        "staged": f.staged(), "untracked": f.untracked, "conflicted": f.conflicted,
+    });
+    // A folder of repositories: each with changes, its files' paths
+    // starting with its place in the folder.
+    let Some(root) = git::repo_root(cwd) else {
+        let repos: Vec<(String, git::GitStatus)> = git::nested_repos(cwd).into_iter().filter_map(|r| {
+            let rel = r.strip_prefix(cwd).ok()?.to_string_lossy().into_owned();
+            Some((rel, git::status(&r).ok()?))
+        }).collect();
+        if repos.is_empty() {
+            return json!({ "error": "This session's folder isn't a git repository, and holds none." });
+        }
+        if op == "changes" {
+            let files: Vec<Value> = repos.iter().flat_map(|(rel, st)| st.files.iter().map(move |f| (rel, f))).map(|(rel, f)| file_json(f, &format!("{rel}/"))).collect();
+            let list: Vec<Value> = repos.iter().map(|(rel, st)| json!({ "name": rel, "branch": if st.branch.is_empty() { &st.head } else { &st.branch },
+                "ahead": st.ahead, "behind": st.behind, "changes": st.files.len() })).collect();
+            return json!({ "branch": "", "ahead": 0, "behind": 0, "repos": list, "files": files });
+        }
+        let Some((rel, st)) = repos.iter().filter(|(rel, _)| path.starts_with(&format!("{rel}/"))).max_by_key(|(rel, _)| rel.len()) else {
+            return json!({ "error": "That file has no changes now." });
+        };
+        let inner = &path[rel.len() + 1..];
+        let Some(file) = st.files.iter().find(|f| f.path == inner) else { return json!({ "error": "That file has no changes now." }) };
+        return match git::diff_file(&st.root, &file.path, !file.unstaged(), file.untracked) {
+            Ok(mut d) => {
+                path.clone_into(&mut d.path);
+                diff_json(&d)
+            }
+            Err(e) => json!({ "error": format!("{e:#}") }),
+        };
+    };
+    let status = match git::status(&root) {
+        Ok(s) => s,
+        Err(e) => return json!({ "error": format!("{e:#}") }),
+    };
+    if op == "changes" {
+        return json!({ "branch": status.branch, "ahead": status.ahead, "behind": status.behind, "files": status.files.iter().map(|f| file_json(f, "")).collect::<Vec<_>>() });
+    }
+    let Some(file) = status.files.iter().find(|f| f.path == path) else { return json!({ "error": "That file has no changes now." }) };
+    match git::diff_file(&root, &file.path, !file.unstaged(), file.untracked) {
+        Ok(d) => diff_json(&d),
+        Err(e) => json!({ "error": format!("{e:#}") }),
+    }
+}
+
 /// A path a reply mentions, found in the session's folder (or its
 /// repository): the file and its path as shown. Only files inside it.
-fn in_folder(cwd: &std::path::Path, path: &str) -> Result<(std::path::PathBuf, String), String> {
+fn in_folder(cwd: &std::path::Path, path: &str) -> anyhow::Result<(std::path::PathBuf, String)> {
     let wanted = std::path::Path::new(path.trim());
     let base = harlo_core::git::repo_root(cwd).unwrap_or_else(|| cwd.to_owned());
     // (On another machine, an absolute path is that machine's.)
     let host = harlo_core::remote::host_of(cwd);
     let absolute = |p: &std::path::Path| match &host {
-        Some(h) => std::path::PathBuf::from(harlo_core::remote::join(h, &p.to_string_lossy())),
+        Some(h) => harlo_core::remote::join(h, &p.to_string_lossy()),
         None => p.to_owned(),
     };
     let full = if wanted.is_absolute() { absolute(wanted) } else { cwd.join(wanted) };
     // Relative to the repository when not to the folder (agents write either).
     let full = if wanted.is_absolute() || real_path(&full).is_some() { full } else { base.join(wanted) };
-    let (Some((real, is_dir)), Some((base_real, _))) = (real_path(&full), real_path(&base)) else { return Err(format!("{path} isn't there.")) };
+    let (Some((real, is_dir)), Some((base_real, _))) = (real_path(&full), real_path(&base)) else { return Err(anyhow::anyhow!("{path} isn't there.")) };
     let cwd_real = real_path(cwd).map_or_else(|| base_real.clone(), |(p, _)| p);
     if !real.starts_with(&base_real) && !real.starts_with(&cwd_real) {
-        return Err("Only files in the session's folder open here.".into());
+        return Err(anyhow::Error::msg("Only files in the session's folder open here."));
     }
     if is_dir {
-        return Err(format!("{path} is a folder."));
+        return Err(anyhow::anyhow!("{path} is a folder."));
     }
-    let shown = real.strip_prefix(&base_real).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_owned());
+    let shown = real.strip_prefix(&base_real).map_or_else(|_| path.to_owned(), |p| p.to_string_lossy().into_owned());
     Ok((real, shown))
 }
 
@@ -915,7 +924,7 @@ fn picture_json(cwd: &std::path::Path, path: &str, shown: bool, thumb: bool) -> 
         }
         match in_folder(cwd, path) {
             Ok((real, _)) => real,
-            Err(e) => return json!({ "error": e }),
+            Err(e) => return json!({ "error": format!("{e:#}") }),
         }
     };
     if !file.is_file() {
@@ -936,7 +945,7 @@ const FILE_LINES: usize = 5000;
 fn file_json(cwd: &std::path::Path, path: &str) -> Value {
     let (real, shown) = match in_folder(cwd, path) {
         Ok(found) => found,
-        Err(e) => return json!({ "error": e }),
+        Err(e) => return json!({ "error": format!("{e:#}") }),
     };
     match harlo_core::files::read_text(&real) {
         Ok(harlo_core::files::FileContent::Text(t)) => {
@@ -968,7 +977,7 @@ fn real_path(path: &std::path::Path) -> Option<(std::path::PathBuf, bool)> {
     let text = String::from_utf8_lossy(&out.stdout);
     let mut lines = text.lines();
     let real = lines.next().filter(|l| l.starts_with('/'))?;
-    Some((std::path::PathBuf::from(harlo_core::remote::join(&name, real)), lines.next() == Some("dir")))
+    Some((harlo_core::remote::join(&name, real), lines.next() == Some("dir")))
 }
 
 /// A file's diff for a phone: hunks of lines (`k`: `+`, `-`, ` `, `\\`),
@@ -1042,8 +1051,8 @@ async fn websocket(socket: WebSocket, shared: Arc<Shared>) {
     // connection ending closes the writer.
     tokio::join!(connection(Link { incoming, outgoing }, shared), async {
         tokio::select! {
-            _ = reader => {}
-            _ = writer => {}
+            () = reader => {}
+            () = writer => {}
         }
     });
 }
@@ -1063,37 +1072,7 @@ async fn deny(link: &mut Link, reason: &str) {
 
 /// One phone's connection, from its hello to its last frame.
 pub async fn connection(mut link: Link, shared: Arc<Shared>) {
-    // Hello: the phone's key, and the first time its pairing code.
-    let Ok(Some(text)) = tokio::time::timeout(Duration::from_secs(20), link.incoming.recv()).await else { return };
-    let hello: Value = serde_json::from_str(&text).unwrap_or_default();
-    let key_b64 = hello["key"].as_str().unwrap_or_default().to_owned();
-    let Some(key) = phone::unb64(&key_b64).ok().and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
-        deny(&mut link, "bad hello").await;
-        return;
-    };
-    let known = shared.devices.lock().unwrap().find_by_key(&key_b64).cloned();
-    let device = match known {
-        Some(d) => d,
-        None => {
-            let code = hello["code"].as_str().unwrap_or_default();
-            if code.is_empty() || !shared.take_code(code) {
-                let reason = if code.is_empty() { "This phone isn't paired (or was removed). Pair it again from harlo." } else { "That pairing code was used or has expired. Show a new QR code in harlo." };
-                deny(&mut link, reason).await;
-                return;
-            }
-            let added = shared.devices.lock().unwrap().add(hello["name"].as_str().unwrap_or("Phone"), &key_b64, now());
-            match added {
-                Ok(d) => {
-                    shared.bump_devices();
-                    d
-                }
-                Err(e) => {
-                    deny(&mut link, &format!("{e:#}")).await;
-                    return;
-                }
-            }
-        }
-    };
+    let Some((device, key, hello)) = greet(&mut link, &shared).await else { return };
     shared.devices.lock().unwrap().touch(&device.id, now());
     let conn = phone::random_id(12);
     let mut session = Session::new(shared.identity.channel(&key), conn.clone());
@@ -1106,29 +1085,24 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
     }
     let _online = Online::new(&shared, &device.id);
 
-    let mut sessions = crate::phone_bridge::watch_sessions();
     let mut devices = shared.devices_changed.subscribe();
-    let mut wants_sessions = false;
-    let mut limits = crate::phone_bridge::watch_limits();
-    let mut wants_limits = false;
-    // (A phone that asked for a plan hears when one changes.)
     let mut plans = crate::phone_bridge::watch_plans();
-    let mut wants_plans = false;
-    // The open session's subagents, from their frames.
-    let mut subagents: Vec<Value> = Vec::new();
-    // The open session's rows the phone has.
-    let mut window = Window::default();
-    // The session this phone has open: its live key, subscription, updates.
-    let mut open: Option<(String, u64)> = None;
     let (updates_tx, mut updates) = mpsc::unbounded_channel::<Vec<SessionUpdate>>();
-    // Replies that come later (a message waiting on its model's server).
     let (later_tx, mut later) = mpsc::unbounded_channel::<Value>();
-    let close_open = |open: &mut Option<(String, u64)>| {
-        if let Some((key, sub)) = open.take()
-            && let Some(live) = crate::registry::get(&key)
-        {
-            live.handle.unsubscribe(sub);
-        }
+    let mut conn = Conn {
+        shared: Arc::clone(&shared),
+        device: device.clone(),
+        shows_settled,
+        sessions: crate::phone_bridge::watch_sessions(),
+        wants_sessions: false,
+        limits: crate::phone_bridge::watch_limits(),
+        wants_limits: false,
+        wants_plans: false,
+        subagents: Vec::new(),
+        window: Window::default(),
+        open: None,
+        updates_tx,
+        later_tx,
     };
 
     loop {
@@ -1138,162 +1112,12 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                 let msg = match session.open(&text) {
                     Ok(m) => m,
                     Err(e) => {
-                        tracing::info!("phone {}: {e:#}", device.name);
+                        tracing::event!(name: "phone.connection.ended", tracing::Level::INFO, phone.name = %device.name, error.message = %format_args!("{e:#}"), "phone {{phone.name}}: {{error.message}}");
                         break;
                     }
                 };
                 let id = msg["id"].clone();
-                let reply = match msg["op"].as_str().unwrap_or_default() {
-                    "sessions" => {
-                        wants_sessions = true;
-                        let _ = crate::phone_bridge::call(json!({ "op": "publish" })).await;
-                        json!({ "sessions": for_phone(sessions.borrow_and_update().clone(), shows_settled) })
-                    }
-                    "open" => {
-                        close_open(&mut open);
-                        match crate::phone_bridge::open(msg["key"].as_str().unwrap_or_default()).await.and_then(|k| crate::registry::get(&k).map(|l| (k, l))) {
-                            Some((key, live)) => {
-                                subagents.clear();
-                                window = Window { cwd: live.cwd.clone(), ..Window::default() };
-                                let sub = live.handle.subscribe(Forward(updates_tx.clone()));
-                                open = Some((key.clone(), sub));
-                                json!({ "key": key, "harness": live.harness })
-                            }
-                            None => json!({ "error": "That session isn't available." }),
-                        }
-                    }
-                    // (Off the loop: a model's server may start first.)
-                    "send" | "new" => {
-                        let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
-                        tokio::spawn(async move {
-                            let mut reply = send_after_server(msg).await;
-                            reply["id"] = id;
-                            let _ = later.send(reply);
-                        });
-                        Value::Null
-                    }
-                    // (Off the loop: machines and model servers are asked over SSH.)
-                    "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" | "mockup" => {
-                        let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
-                        tokio::spawn(async move {
-                            let mut reply = match msg["op"].as_str().unwrap_or_default() {
-                                "connect" => connect_machine(&msg).await,
-                                "servers" => model_servers().await,
-                                "diagram" => diagram(&msg).await,
-                                "mockup" => mockup(&msg).await,
-                                "stoppedModels" => {
-                                    let models: Vec<String> = msg["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(str::to_owned)).collect();
-                                    let (agent, host) = (msg["agent"].as_str().unwrap_or_default().to_owned(), msg["host"].as_str().unwrap_or_default().to_owned());
-                                    json!({ "stopped": stopped_models(agent, host, models).await })
-                                }
-                                op => start_or_stop_server(&msg, op == "startServer").await,
-                            };
-                            reply["id"] = id;
-                            let _ = later.send(reply);
-                        });
-                        Value::Null
-                    }
-                    "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "theme" | "setAvatar" | "wiki" | "wikiRun" => crate::phone_bridge::call(msg.clone()).await,
-                    // A wiki page or search: the repository from harlo, read off
-                    // the loop (OpenWiki answers a search; a host's over SSH).
-                    "wikiPage" | "wikiSearch" => {
-                        let (msg, later, id) = (msg.clone(), later_tx.clone(), id.clone());
-                        tokio::spawn(async move {
-                            let at = crate::phone_bridge::call(json!({ "op": "wikiFolder", "key": msg["key"] })).await;
-                            let mut reply = match at["cwd"].as_str().map(std::path::PathBuf::from) {
-                                None => at,
-                                Some(cwd) => {
-                                    let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
-                                    let (op, a, b) = (text("op"), text(if msg["op"] == "wikiPage" { "page" } else { "query" }), text("workspace"));
-                                    tokio::task::spawn_blocking(move || if op == "wikiPage" { crate::workspace::wiki_page_at(&cwd, &a) } else { crate::workspace::wiki_search_at(&cwd, &a, &b) })
-                                        .await
-                                        .unwrap_or_else(|_| json!({ "error": "The wiki couldn't be read." }))
-                                }
-                            };
-                            reply["id"] = id;
-                            let _ = later.send(reply);
-                        });
-                        Value::Null
-                    }
-                    "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
-                        wants_plans = true;
-                        crate::phone_bridge::call(msg.clone()).await
-                    }
-                    // A picture the conversation shows (or a picture file in the
-                    // session's folder), as a thumbnail or fitted to a phone's
-                    // screen. (Off the loop: it's decoded.)
-                    "picture" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
-                        (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
-                            let path = msg["path"].as_str().unwrap_or_default().to_owned();
-                            let shown = !path.is_empty() && window.full.iter().any(|r| harlo_core::pictures::shown(r, &window.cwd).contains(&path));
-                            let (cwd, later, id, thumb) = (live.cwd.clone(), later_tx.clone(), id.clone(), msg["size"].as_str() == Some("thumb"));
-                            tokio::task::spawn_blocking(move || {
-                                let mut reply = picture_json(&cwd, &path, shown, thumb);
-                                reply["id"] = id;
-                                let _ = later.send(reply);
-                            });
-                            Value::Null
-                        }
-                        _ => json!({ "error": "Open the session first." }),
-                    },
-                    // Edit & resend (`fork` false) or fork from one of the user's messages.
-                    "branch" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
-                        (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
-                            let row = msg["row"].as_str().unwrap_or_default();
-                            let ordinal = window.full.iter().position(|r| r.key == row).filter(|&i| window.full[i].kind == harlo_core::RowKind::User)
-                                .map(|i| window.full[..i].iter().filter(|r| r.is_sent()).count());
-                            branch(&live, window.file.clone(), ordinal, msg["fork"].as_bool() == Some(true)).await
-                        }
-                        _ => json!({ "error": "Open the session first." }),
-                    },
-                    // Undo a turn: which of the user's messages have a snapshot from before
-                    // them (`undoTargets`), what undoing to one does (`undoPlan`), and
-                    // doing it (`undo`). (The snapshot is found here, by the message.)
-                    op @ ("undoTargets" | "undoPlan" | "undo") => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &open) {
-                        (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
-                            let prompts: Vec<(String, i64)> = window.full.iter().filter(|r| r.is_sent()).map(|r| (r.key.clone(), r.time)).collect();
-                            let (cwd, row, op) = (live.cwd.clone(), msg["row"].as_str().unwrap_or_default().to_owned(), op.to_owned());
-                            tokio::task::spawn_blocking(move || {
-                                let mut reply = undo_op(&op, &cwd, &prompts, &row);
-                                // (And whether its changes have diffs: a repository, or a folder of them.)
-                                if op == "undoTargets" {
-                                    reply["git"] = json!(harlo_core::git::repo_root(&cwd).is_some() || !harlo_core::git::nested_repos(&cwd).is_empty());
-                                }
-                                reply
-                            })
-                            .await
-                            .unwrap_or_else(|e| json!({ "error": e.to_string() }))
-                        }
-                        _ => json!({ "error": "Open the session first." }),
-                    },
-                    op @ ("abort" | "answer" | "models" | "setModel" | "thinking" | "setThinking" | "changes" | "diff" | "actions" | "markdown" | "unqueue" | "promote"
-                          | "files" | "file" | "branches" | "switchBranch") => match crate::registry::get(msg["key"].as_str().unwrap_or_default()) {
-                        Some(live) => session_op(op, &msg, &live).await,
-                        None => json!({ "error": "That session isn't running." }),
-                    },
-                    // The app's notifications: its token and what it wants.
-                    "push" => {
-                        if shared.devices.lock().unwrap().set_push(&device.id, &msg) {
-                            shared.bump_devices();
-                            json!({ "ok": true })
-                        } else {
-                            json!({ "error": "That isn't a push token." })
-                        }
-                    }
-                    // A Live Activity for a session: its push token ("" ended).
-                    "activity" => match crate::phone_activity::register(&shared, &device, msg["key"].as_str().unwrap_or_default(),
-                                                                         msg["token"].as_str().unwrap_or_default(), msg["sandbox"].as_bool() == Some(true)) {
-                        Ok(()) => json!({ "ok": true }),
-                        Err(e) => json!({ "error": e }),
-                    },
-                    // Plan limits: this computer's and each machine's (then as they change).
-                    "limits" => {
-                        wants_limits = true;
-                        limits.borrow_and_update().clone()
-                    }
-                    "ping" => json!({ "pong": true }),
-                    other => json!({ "error": format!("unknown op {other}") }),
-                };
+                let reply = conn.reply(&msg, &id).await;
                 if reply.is_null() {
                     Vec::new()
                 } else {
@@ -1303,42 +1127,23 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                 }
             }
             Some(reply) = later.recv() => vec![reply],
-            Ok(()) = plans.changed(), if wants_plans => {
+            Ok(()) = plans.changed(), if conn.wants_plans => {
                 plans.borrow_and_update();
-                match &open {
+                match &conn.open {
                     Some((key, _)) => vec![json!({ "ev": "plan", "key": key })],
                     None => Vec::new(),
                 }
             }
-            Ok(()) = limits.changed(), if wants_limits => {
-                let mut ev = limits.borrow_and_update().clone();
+            Ok(()) = conn.limits.changed(), if conn.wants_limits => {
+                let mut ev = conn.limits.borrow_and_update().clone();
                 ev["ev"] = json!("limits");
                 vec![ev]
             }
-            Ok(()) = sessions.changed(), if wants_sessions => vec![json!({ "ev": "sessions", "sessions": for_phone(sessions.borrow_and_update().clone(), shows_settled) })],
-            Some(batch) = updates.recv() => match &open {
-                Some((key, _)) => {
-                    let mut out: Vec<Value> = Vec::new();
-                    for u in &batch {
-                        if let SessionUpdate::Meta(m) = u {
-                            window.file = m.session_file.clone();
-                        }
-                        out.extend(row_frames(key, &mut window, u));
-                        out.extend(event(key, u));
-                    }
-                    // Subagents: their frames folded into one list.
-                    let frames: Vec<&Value> = batch.iter().filter_map(|u| match u { SessionUpdate::SubagentActivity(f) => Some(f), _ => None }).collect();
-                    if !frames.is_empty() {
-                        frames.into_iter().for_each(|f| harlo_core::subagents::apply_event(&mut subagents, f));
-                        out.push(json!({ "ev": "subagents", "key": key, "subagents": subagents.iter().map(subagent_json).collect::<Vec<_>>() }));
-                    }
-                    out
-                }
-                None => Vec::new(),
-            },
+            Ok(()) = conn.sessions.changed(), if conn.wants_sessions => vec![json!({ "ev": "sessions", "sessions": for_phone(conn.sessions.borrow_and_update().clone(), conn.shows_settled) })],
+            Some(batch) = updates.recv() => conn.updates(&batch),
             Ok(()) = devices.changed() => {
                 // Removed while connected: goodbye.
-                if shared.devices.lock().unwrap().find_by_key(&key_b64).is_none() {
+                if shared.devices.lock().unwrap().find_by_key(hello["key"].as_str().unwrap_or_default()).is_none() {
                     let _ = link.outgoing.send(session.seal(&json!({ "ev": "revoked" }))).await;
                     break;
                 }
@@ -1347,13 +1152,258 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
         };
         for v in out {
             if link.outgoing.send(session.seal(&v)).await.is_err() {
-                close_open(&mut open);
+                conn.close_open();
                 return;
             }
         }
     }
-    close_open(&mut open);
+    conn.close_open();
     shared.devices.lock().unwrap().touch(&device.id, now());
+}
+
+/// What a phone's connection keeps between its requests.
+struct Conn {
+    shared: Arc<Shared>,
+    device: phone::Device,
+    /// What the phone shows of what harlo sends (an older app: none of the
+    /// later things, so harlo leaves them out).
+    shows_settled: bool,
+    sessions: tokio::sync::watch::Receiver<Value>,
+    wants_sessions: bool,
+    limits: tokio::sync::watch::Receiver<Value>,
+    wants_limits: bool,
+    /// A phone that asked for a plan hears when one changes.
+    wants_plans: bool,
+    /// The open session's subagents, from their frames.
+    subagents: Vec<Value>,
+    /// The open session's rows the phone has.
+    window: Window,
+    /// The session this phone has open: its live key and subscription.
+    open: Option<(String, u64)>,
+    updates_tx: mpsc::UnboundedSender<Vec<SessionUpdate>>,
+    /// Replies that come later (a message waiting on its model's server).
+    later_tx: mpsc::UnboundedSender<Value>,
+}
+
+impl Conn {
+    /// Stops following the session the phone had open.
+    fn close_open(&mut self) {
+        if let Some((key, sub)) = self.open.take()
+            && let Some(live) = crate::registry::get(&key)
+        {
+            live.handle.unsubscribe(sub);
+        }
+    }
+
+    /// The frames for a batch of the open session's updates.
+    fn updates(&mut self, batch: &[SessionUpdate]) -> Vec<Value> {
+        let Some((key, _)) = &self.open else { return Vec::new() };
+        let mut out: Vec<Value> = Vec::new();
+        for u in batch {
+            if let SessionUpdate::Meta(m) = u {
+                self.window.file.clone_from(&m.session_file);
+            }
+            out.extend(row_frames(key, &mut self.window, u));
+            out.extend(event(key, u));
+        }
+        // Subagents: their frames folded into one list.
+        let frames: Vec<&Value> = batch.iter().filter_map(|u| match u { SessionUpdate::SubagentActivity(f) => Some(f), _ => None }).collect();
+        if !frames.is_empty() {
+            for f in frames { harlo_core::subagents::apply_event(&mut self.subagents, f); }
+            out.push(json!({ "ev": "subagents", "key": key, "subagents": self.subagents.iter().map(subagent_json).collect::<Vec<_>>() }));
+        }
+        out
+    }
+
+    /// The reply to a phone's request (Null: it comes later, with `id`).
+    async fn reply(&mut self, msg: &Value, id: &Value) -> Value {
+        match msg["op"].as_str().unwrap_or_default() {
+                "sessions" => {
+                    self.wants_sessions = true;
+                    let _ = crate::phone_bridge::call(json!({ "op": "publish" })).await;
+                    json!({ "sessions": for_phone(self.sessions.borrow_and_update().clone(), self.shows_settled) })
+                }
+                "open" => {
+                    self.close_open();
+                    match crate::phone_bridge::open(msg["key"].as_str().unwrap_or_default()).await.and_then(|k| crate::registry::get(&k).map(|l| (k, l))) {
+                        Some((key, live)) => {
+                            self.subagents.clear();
+                            self.window = Window { cwd: live.cwd.clone(), ..Window::default() };
+                            let sub = live.handle.subscribe(Forward(self.updates_tx.clone()));
+                            self.open = Some((key.clone(), sub));
+                            json!({ "key": key, "harness": live.harness })
+                        }
+                        None => json!({ "error": "That session isn't available." }),
+                    }
+                }
+                // (Off the loop: a model's server may start first; machines
+                // and model servers are asked over SSH; a wiki is read.)
+                "send" | "new" | "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" | "mockup" | "wikiPage" | "wikiSearch" => {
+                    let (msg, later, id) = (msg.clone(), self.later_tx.clone(), id.clone());
+                    tokio::spawn(async move {
+                        let mut reply = slow_reply(msg).await;
+                        reply["id"] = id;
+                        let _ = later.send(reply);
+                    });
+                    Value::Null
+                }
+                "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "theme" | "setAvatar" | "wiki" | "wikiRun" => crate::phone_bridge::call(msg.clone()).await,
+                "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
+                    self.wants_plans = true;
+                    crate::phone_bridge::call(msg.clone()).await
+                }
+                // A picture the conversation shows (or a picture file in the
+                // session's folder), as a thumbnail or fitted to a phone's
+                // screen. (Off the loop: it's decoded.)
+                "picture" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &self.open) {
+                    (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
+                        let path = msg["path"].as_str().unwrap_or_default().to_owned();
+                        let shown = !path.is_empty() && self.window.full.iter().any(|r| harlo_core::pictures::shown(r, &self.window.cwd).contains(&path));
+                        let (cwd, later, id, thumb) = (live.cwd.clone(), self.later_tx.clone(), id.clone(), msg["size"].as_str() == Some("thumb"));
+                        tokio::task::spawn_blocking(move || {
+                            let mut reply = picture_json(&cwd, &path, shown, thumb);
+                            reply["id"] = id;
+                            let _ = later.send(reply);
+                        });
+                        Value::Null
+                    }
+                    _ => json!({ "error": "Open the session first." }),
+                },
+                // Edit & resend (`fork` false) or fork from one of the user's messages.
+                "branch" => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &self.open) {
+                    (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => {
+                        let row = msg["row"].as_str().unwrap_or_default();
+                        let ordinal = self.window.full.iter().position(|r| r.key == row).filter(|&i| self.window.full[i].kind == harlo_core::RowKind::User)
+                            .map(|i| self.window.full[..i].iter().filter(|r| r.is_sent()).count());
+                        branch(&live, self.window.file.clone(), ordinal, msg["fork"].as_bool() == Some(true)).await
+                    }
+                    _ => json!({ "error": "Open the session first." }),
+                },
+                // Undo a turn: which of the user's messages have a snapshot from before
+                // them (`undoTargets`), what undoing to one does (`undoPlan`), and
+                // doing it (`undo`). (The snapshot is found here, by the message.)
+                op @ ("undoTargets" | "undoPlan" | "undo") => match (crate::registry::get(msg["key"].as_str().unwrap_or_default()), &self.open) {
+                    (Some(live), Some((key, _))) if key == msg["key"].as_str().unwrap_or_default() => undo_reply(&live, &self.window, msg, op).await,
+                    _ => json!({ "error": "Open the session first." }),
+                },
+                op @ ("abort" | "answer" | "models" | "setModel" | "thinking" | "setThinking" | "changes" | "diff" | "actions" | "markdown" | "unqueue" | "promote"
+                      | "files" | "file" | "branches" | "switchBranch") => match crate::registry::get(msg["key"].as_str().unwrap_or_default()) {
+                    Some(live) => session_op(op, msg, &live).await,
+                    None => json!({ "error": "That session isn't running." }),
+                },
+                // The app's notifications: its token and what it wants.
+                "push" => {
+                    if self.shared.devices.lock().unwrap().set_push(&self.device.id, msg) {
+                        self.shared.bump_devices();
+                        json!({ "ok": true })
+                    } else {
+                        json!({ "error": "That isn't a push token." })
+                    }
+                }
+                // A Live Activity for a session: its push token ("" ended).
+                "activity" => match crate::phone_activity::register(&self.shared, &self.device, msg["key"].as_str().unwrap_or_default(),
+                                                                     msg["token"].as_str().unwrap_or_default(), msg["sandbox"].as_bool() == Some(true)) {
+                    Ok(()) => json!({ "ok": true }),
+                    Err(e) => json!({ "error": format!("{e:#}") }),
+                },
+                // Plan limits: this computer's and each machine's (then as they change).
+                "limits" => {
+                    self.wants_limits = true;
+                    self.limits.borrow_and_update().clone()
+                }
+                "ping" => json!({ "pong": true }),
+                other => json!({ "error": format!("unknown op {other}") }),
+            }
+    }
+}
+
+/// A phone's hello: its key, and the first time its pairing code. None: turned away.
+async fn greet(link: &mut Link, shared: &Shared) -> Option<(phone::Device, [u8; 32], Value)> {
+    // Hello: the phone's key, and the first time its pairing code.
+    let Ok(Some(text)) = tokio::time::timeout(Duration::from_secs(20), link.incoming.recv()).await else { return None };
+    let hello: Value = serde_json::from_str(&text).unwrap_or_default();
+    let key_b64 = hello["key"].as_str().unwrap_or_default().to_owned();
+    let Some(key) = phone::unb64(&key_b64).ok().and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+        deny(link, "bad hello").await;
+        return None;
+    };
+    let known = shared.devices.lock().unwrap().find_by_key(&key_b64).cloned();
+    let device = match known {
+        Some(d) => d,
+        None => {
+            let code = hello["code"].as_str().unwrap_or_default();
+            if code.is_empty() || !shared.take_code(code) {
+                let reason = if code.is_empty() { "This phone isn't paired (or was removed). Pair it again from harlo." } else { "That pairing code was used or has expired. Show a new QR code in harlo." };
+                deny(link, reason).await;
+                return None;
+            }
+            let added = shared.devices.lock().unwrap().add(hello["name"].as_str().unwrap_or("Phone"), &key_b64, now());
+            match added {
+                Ok(d) => {
+                    shared.bump_devices();
+                    d
+                }
+                Err(e) => {
+                    deny(link, &format!("{e:#}")).await;
+                    return None;
+                }
+            }
+        }
+    };
+    Some((device, key, hello))
+}
+
+/// Undo for the open session (`undoTargets`, `undoPlan`, `undo`), found by its messages.
+async fn undo_reply(live: &crate::registry::LiveRef, window: &Window, msg: &Value, op: &str) -> Value {
+    let prompts: Vec<(String, i64)> = window.full.iter().filter(|r| r.is_sent()).map(|r| (r.key.clone(), r.time)).collect();
+    let (cwd, row, op) = (live.cwd.clone(), msg["row"].as_str().unwrap_or_default().to_owned(), op.to_owned());
+    tokio::task::spawn_blocking(move || {
+        let mut reply = undo_op(&op, &cwd, &prompts, &row);
+        // (And whether its changes have diffs: a repository, or a folder of them.)
+        if op == "undoTargets" {
+            reply["git"] = json!(harlo_core::git::repo_root(&cwd).is_some() || !harlo_core::git::nested_repos(&cwd).is_empty());
+        }
+        reply
+    })
+    .await
+    .unwrap_or_else(|e| json!({ "error": e.to_string() }))
+}
+
+/// The answer to a request that waits on something slow, worked out off the connection's loop.
+///
+/// A model's server may start first, machines and model servers are asked
+/// over SSH, and a wiki page or search is read where the repository is.
+async fn slow_reply(msg: Value) -> Value {
+    let op = msg["op"].as_str().unwrap_or_default().to_owned();
+    match op.as_str() {
+        "connect" => connect_machine(&msg).await,
+        "servers" => model_servers().await,
+        "diagram" => diagram(&msg).await,
+        "mockup" => mockup(&msg).await,
+        "stoppedModels" => {
+            let models: Vec<String> = msg["models"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(str::to_owned)).collect();
+            let (agent, host) = (msg["agent"].as_str().unwrap_or_default().to_owned(), msg["host"].as_str().unwrap_or_default().to_owned());
+            json!({ "stopped": stopped_models(agent, host, models).await })
+        }
+        "send" | "new" => send_after_server(msg).await,
+        "wikiPage" | "wikiSearch" => wiki_reply(&msg).await,
+        op => start_or_stop_server(&msg, op == "startServer").await,
+    }
+}
+
+/// A wiki page or search: the repository from harlo, read off the loop (a host's over SSH).
+async fn wiki_reply(msg: &Value) -> Value {
+    let at = crate::phone_bridge::call(json!({ "op": "wikiFolder", "key": msg["key"] })).await;
+    match at["cwd"].as_str().map(std::path::PathBuf::from) {
+        None => at,
+        Some(cwd) => {
+            let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+            let (op, a, b) = (text("op"), text(if msg["op"] == "wikiPage" { "page" } else { "query" }), text("workspace"));
+            tokio::task::spawn_blocking(move || if op == "wikiPage" { crate::workspace::wiki_page_at(&cwd, &a) } else { crate::workspace::wiki_search_at(&cwd, &a, &b) })
+                .await
+                .unwrap_or_else(|_| json!({ "error": "The wiki couldn't be read." }))
+        }
+    }
 }
 
 /// Undo a turn, for a phone: `undoTargets`, `undoPlan` or `undo` (see the
@@ -1430,7 +1480,7 @@ pub(crate) mod tests {
         let html = |t: &str| lines.iter().find(|l| l["t"].as_str().unwrap().trim() == t).map(|l| l["h"].as_str().unwrap_or("").to_owned()).unwrap();
         assert!(html("fn main() {").contains("<span class=\"s"), "{lines:?}");
         let (opened, old, new) = (html("/* old"), html("still */"), html("let y = 2;"));
-        let comment = &opened[opened.find('<').unwrap()..opened.find('>').unwrap() + 1];
+        let comment = &opened[opened.find('<').unwrap()..=opened.find('>').unwrap()];
         assert!(comment.starts_with("<span class=\"s") && old.split("</span>").filter(|p| !p.is_empty()).all(|p| p.starts_with(comment)),
                 "the comment goes on: {opened} / {old}");
         assert!(new.contains("let</span>"), "the new side isn't in the comment: {new}");
@@ -1501,10 +1551,10 @@ pub(crate) mod tests {
                 continue;
             }
             for c in f["changes"].as_array().into_iter().flatten() {
-                let at = c["at"].as_u64().unwrap() as usize;
+                let at = usize::try_from(c["at"].as_u64().unwrap()).unwrap_or(usize::MAX);
                 match c["op"].as_str() {
                     Some("update") => rows[at] = c["row"].clone(),
-                    Some("remove") => drop(rows.drain(at..at + c["count"].as_u64().unwrap() as usize)),
+                    Some("remove") => drop(rows.drain(at..at + usize::try_from(c["count"].as_u64().unwrap()).unwrap_or(usize::MAX))),
                     _ => {
                         for (k, r) in c["rows"].as_array().unwrap().iter().enumerate() {
                             rows.insert(at + k, r.clone());
@@ -1731,7 +1781,7 @@ pub(crate) mod tests {
             let c = match c {
                 ListChange::Update { at, .. } => { next += 1; ListChange::Update { at, row: next } }
                 ListChange::Insert { at, rows } => ListChange::Insert { at: at.min(full.len()), rows: rows.iter().map(|_| { next += 1; next }).collect() },
-                other => other,
+                other @ ListChange::Remove { .. } => other,
             };
             match &c {
                 ListChange::Update { at, row } => full[*at] = *row,
@@ -1797,9 +1847,9 @@ pub(crate) mod tests {
             codes: Mutex::new(HashMap::new()),
             devices_changed: watch::channel(0).0,
             name: "desk".into(),
-            port: Default::default(),
-            remote_endpoints: Default::default(),
-            online: Default::default(),
+            port: std::sync::atomic::AtomicU16::default(),
+            remote_endpoints: Mutex::default(),
+            online: Mutex::default(),
         })
     }
 
@@ -1838,7 +1888,7 @@ pub(crate) mod tests {
             loop {
                 match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await.unwrap() {
                     Some(Ok(WsMessage::Text(t))) => return self.session.as_mut().unwrap().open(&t).unwrap(),
-                    Some(Ok(_)) => continue,
+                    Some(Ok(_)) => {}
                     _ => return Value::Null,
                 }
             }
@@ -1856,7 +1906,7 @@ pub(crate) mod tests {
         let dir = std::env::temp_dir().join(format!("harlo-phone-server-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let shared = shared(&dir);
-        let server = start("127.0.0.1:0".parse().unwrap(), shared.clone()).await.unwrap();
+        let server = start("127.0.0.1:0".parse().unwrap(), std::sync::Arc::clone(&shared)).await.unwrap();
         let harlo_public = shared.identity.public_b64();
         let secret = crypto_box::SecretKey::generate(&mut OsRng);
 
@@ -1883,7 +1933,7 @@ pub(crate) mod tests {
         assert_eq!(reply["sessions"][0]["title"], "Fix it");
         crate::phone_bridge::publish_sessions(json!([{ "key": "live:1", "title": "Fix it" }, { "key": "live:2", "title": "New" }]));
         let ev = phone.next().await;
-        assert_eq!((ev["ev"].as_str(), ev["sessions"].as_array().map(|a| a.len())), (Some("sessions"), Some(2)));
+        assert_eq!((ev["ev"].as_str(), ev["sessions"].as_array().map(std::vec::Vec::len)), (Some("sessions"), Some(2)));
 
         // Plan limits: asked, then as they change.
         crate::phone_bridge::publish_limits(json!({ "here": { "accounts": [{ "provider": "Claude" }] }, "hosts": {} }));

@@ -1,11 +1,14 @@
-//! Optional log of harness traffic (`--debug-protocol`, or Settings →
-//! Harnesses): one JSONL file per harness process with every frame sent and
-//! received and its stderr, for tracking down protocol problems. Applies to
-//! harnesses started after it is turned on.
+//! Optional log of harness traffic, for tracking down protocol problems.
+//!
+//! Turned on by `--debug-protocol` or Settings → Harnesses: one JSONL file
+//! per harness process with every frame sent and received and its stderr.
+//! Applies to harnesses started after it is turned on.
 //!
 //! Each line: `{"t": "<UTC time>", "dir": "in" | "out" | "stderr" | "start", ...}`
 //! with the frame under `frame` (or the raw text under `text` when a line
 //! is not JSON).
+
+// Rust guideline compliant 2026-10-09
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -28,11 +31,12 @@ pub(crate) static TEST_DIR: Mutex<()> = Mutex::new(());
 
 /// Turns the log on (into `dir`) or off (`None`).
 pub fn set_dir(dir: Option<PathBuf>) {
-    *DIR.lock().unwrap() = dir;
+    *DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = dir;
 }
 
+/// Where the log goes, while it's on.
 pub fn dir() -> Option<PathBuf> {
-    DIR.lock().unwrap().clone()
+    DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 fn now() -> String {
@@ -50,7 +54,7 @@ impl ProtocolLog {
         let dir = dir()?;
         std::fs::create_dir_all(&dir).ok()?;
         prune(&dir);
-        let stamp: String = now().chars().filter(|c| c.is_ascii_digit()).take(14).collect();
+        let stamp: String = now().chars().filter(char::is_ascii_digit).take(14).collect();
         let name = format!("{}-{}-{}-{}.jsonl", &stamp[..8], &stamp[8..], kind.as_str(), std::process::id());
         // Two harnesses in the same second: number the second one.
         let mut path = dir.join(&name);
@@ -60,9 +64,9 @@ impl ProtocolLog {
             n += 1;
         }
         let file = File::create(&path).ok()?;
-        tracing::info!("logging harness traffic to {}", path.display());
+        tracing::event!(name: "harness.protocol_log.start", tracing::Level::INFO, file.path = %path.display(), "logging harness traffic to {{file.path}}");
         let log = Arc::new(Self { out: Mutex::new(BufWriter::new(file)) });
-        log.write(json!({ "t": now(), "dir": "start", "program": program, "args": args, "cwd": cwd }));
+        log.write(&json!({ "t": now(), "dir": "start", "program": program, "args": args, "cwd": cwd }));
         Some(log)
     }
 
@@ -72,17 +76,17 @@ impl ProtocolLog {
             Ok(frame) => json!({ "t": now(), "dir": dir, "frame": frame }),
             Err(_) => json!({ "t": now(), "dir": dir, "text": String::from_utf8_lossy(raw).trim_end() }),
         };
-        self.write(line);
+        self.write(&line);
     }
 
     pub(crate) fn stderr(&self, line: &str) {
-        self.write(json!({ "t": now(), "dir": "stderr", "text": line }));
+        self.write(&json!({ "t": now(), "dir": "stderr", "text": line }));
     }
 
-    fn write(&self, line: Value) {
+    fn write(&self, line: &Value) {
         let mut out = self.out.lock().unwrap();
         // Flushed per line: the point is to have it when something breaks.
-        let _ = writeln!(out, "{line}").and_then(|_| out.flush());
+        let _ = writeln!(out, "{line}").and_then(|()| out.flush());
     }
 }
 
@@ -106,7 +110,7 @@ mod tests {
 
     #[test]
     fn writes_frames_and_prunes() {
-        let _dir = TEST_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        let _dir = TEST_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = std::env::temp_dir().join(format!("harlo-protocol-log-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

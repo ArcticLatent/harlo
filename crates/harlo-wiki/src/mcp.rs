@@ -1,6 +1,8 @@
 //! The wiki's tools as a stdio MCP server (newline-delimited JSON-RPC), the
 //! way harlo reaches a wiki on another machine (`harlo-agent wiki`).
 
+// Rust guideline compliant 2026-10-09
+
 use crate::tools;
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
@@ -79,7 +81,7 @@ pub fn handle(msg: &Value) -> Option<Value> {
 }
 
 /// Answers one message; with a writer, the six writing tools too.
-pub fn handle_with(msg: &Value, mut writer: Option<&mut crate::run::Writer>) -> Option<Value> {
+pub fn handle_with(msg: &Value, writer: Option<&mut crate::run::Writer>) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let method = msg["method"].as_str().unwrap_or("");
     let reply = |r: Value| Some(json!({"jsonrpc": "2.0", "id": id, "result": r}));
@@ -99,8 +101,8 @@ pub fn handle_with(msg: &Value, mut writer: Option<&mut crate::run::Writer>) -> 
             if let Some(a) = tools::call_reading(name, args) {
                 return reply(result(a));
             }
-            match writer.as_deref_mut().filter(|_| tools::tool(name).is_some()) {
-                Some(w) => reply(result(tools::validate(name, args).and_then(|a| w.call(name, &a).map_err(crate::run::error_text)))),
+            match writer.filter(|_| tools::tool(name).is_some()) {
+                Some(w) => reply(result(tools::validate(name, args).and_then(|a| w.call(name, &a).map_err(shown)))),
                 None => error(-32602, format!("MCP error -32602: Tool {name} not found")),
             }
         }
@@ -108,9 +110,18 @@ pub fn handle_with(msg: &Value, mut writer: Option<&mut crate::run::Writer>) -> 
     }
 }
 
+/// A writing tool's error as the host sees it; one OpenWiki doesn't expect
+/// also goes to stderr, the tool server's log, as OpenWiki's does.
+fn shown(e: crate::store::Error) -> String {
+    if let Some(m) = crate::run::unexpected(&e) {
+        eprintln!("OpenWiki MCP operation failed: {m}");
+    }
+    crate::run::error_text(e)
+}
+
 /// Serves stdin/stdout until stdin closes.
 pub fn serve() {
-    serve_as(None)
+    serve_as(None);
 }
 
 /// Serves; with a host name, the writing tools too, run as that host.

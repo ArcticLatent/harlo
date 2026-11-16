@@ -4664,7 +4664,7 @@ ApplicationWindow {
                       && results.some(r => r.indexOf("7 passed") >= 0) && results.some(r => r.indexOf("exit 101") >= 0), "what each came to (" + results.join(" | ") + ")")
             const tails = win.findAllNames("toolTail", box).map(l => l.text)
             win.check(tails.some(x => x.indexOf("7 passed") >= 0), "a command's last lines (" + tails.join(" | ") + ")")
-            const code = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), [])
+            const code = win.findAllNames("codeView", box).sort((a, b) => a.mapToItem(box, 0, 0).y - b.mapToItem(box, 0, 0).y).reduce((all, v) => all.concat(v.lines), [])
             win.check(code.length === 7 && code[0].n === "1" && code[0].h === "hello", "a read's line, numbered (" + JSON.stringify(code[0]) + ")")
             win.check(code[1].n === "3" && code[1].mark === "match" && code[3].mark === "context" && code[3].h.indexOf("}") >= 0,
                       "grep's line numbers as a gutter, its matches tinted among their context (" + JSON.stringify(code.slice(1, 4)) + ")")
@@ -4789,7 +4789,7 @@ ApplicationWindow {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const box = win.listingBox()
-            const code = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), [])
+            const code = win.findAllNames("codeView", box).sort((a, b) => a.mapToItem(box, 0, 0).y - b.mapToItem(box, 0, 0).y).reduce((all, v) => all.concat(v.lines), [])
             win.check(code.length === 33, "cat -n, the read, grep, sed, head and cat show 6, 6, 6, 6, 6 and 3 lines (" + code.length + ")")
             win.check(code[0].n === "1" && code[0].h.indexOf("<span") >= 0 && code[5].n === "6", "cat -n: its numbers, TypeScript highlighted (" + JSON.stringify(code[0]) + ")")
             win.check(code[6].n === "1" && code[9].h.indexOf("<span") >= 0, "a read: its first lines at once, QML highlighted (" + JSON.stringify(code[9]) + ")")
@@ -4841,7 +4841,7 @@ ApplicationWindow {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const box = win.listingBox()
-            const code = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), [])
+            const code = win.findAllNames("codeView", box).sort((a, b) => a.mapToItem(box, 0, 0).y - b.mapToItem(box, 0, 0).y).reduce((all, v) => all.concat(v.lines), [])
             const qml = code.filter(l => /Item|QtQuick/.test(l.h))
             win.check(code.length === 40 && qml.length >= 2 && qml[0].h.indexOf("<span") >= 0, "the read, opened: its 13 lines numbered, QML highlighted (" + code.length + ")")
             win.listingAt("qml/Badge.qml")
@@ -4915,7 +4915,7 @@ ApplicationWindow {
             win.check(t.fullPath("src/a.rs", "", "ssh://box/home/u/p") === "ssh://box/home/u/p/src/a.rs" && t.fullPath("/etc/hosts", "", "ssh://box/home/u/p") === "ssh://box/etc/hosts"
                       && t.fullPath("x.rs", "cd sub && cat -n x.rs", "/home/u/p") === "/home/u/p/sub/x.rs" && t.fullPath("/a/b", "", "/home/u/p") === "/a/b",
                       "paths: on the session's host, from a command's cd (" + [t.fullPath("src/a.rs", "", "ssh://box/home/u/p"), t.fullPath("/etc/hosts", "", "ssh://box/home/u/p")] + ")")
-            const grepHead = win.findAllNames("codeView", box).reduce((all, v) => all.concat(v.lines), []).find(l => l.mark === "file")
+            const grepHead = win.findAllNames("codeView", box).sort((a, b) => a.mapToItem(box, 0, 0).y - b.mapToItem(box, 0, 0).y).reduce((all, v) => all.concat(v.lines), []).find(l => l.mark === "file")
             win.check(grepHead && grepHead.h.indexOf("harlo-open:3:") >= 0 && grepHead.h.indexOf("↗") >= 0, "a grep file's name: a link, marked ↗")
             // A line number: opens the file at that line.
             const n38 = win.findAllNames("codeNumber", sed).find(l => l.text === "38")

@@ -2,6 +2,8 @@
 //! `harlo` (or `harlo --toggle-dropdown`, for a desktop shortcut) hands its
 //! command to it and exits.
 
+// Rust guideline compliant 2026-10-09
+
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -21,15 +23,15 @@ fn early() -> &'static Mutex<Vec<String>> {
 }
 
 fn socket_path() -> PathBuf {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
     // The data folder is part of the name, so test runs with their own
     // XDG_DATA_HOME don't talk to the running app.
     let data = harlo_core::db::default_path();
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in data.to_string_lossy().bytes() {
-        hash = (hash ^ b as u64).wrapping_mul(0x100000001b3);
+        hash = (hash ^ u64::from(b)).wrapping_mul(0x100000001b3);
     }
-    dir.join(format!("harlo-{:08x}.sock", hash as u32))
+    dir.join(format!("harlo-{:08x}.sock", u32::try_from(hash & u64::from(u32::MAX)).unwrap_or_default()))
 }
 
 /// The command this launch carries: `toggle-dropdown`, `toggle-mini-chat`,
@@ -95,7 +97,7 @@ pub fn listen() {
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) => {
-            tracing::warn!("single-instance socket {}: {e}", path.display());
+            tracing::event!(name: "app.instance.listen.failed", tracing::Level::WARN, file.path = %path.display(), error.message = %e, "single-instance socket {{file.path}}: {{error.message}}");
             return;
         }
     };
@@ -103,7 +105,7 @@ pub fn listen() {
     if command() != "show" {
         early().lock().unwrap().push(command().to_owned());
     }
-    std::thread::Builder::new()
+    let _ = std::thread::Builder::new()
         .name("harlo-instance".into())
         .spawn(move || {
             for mut stream in listener.incoming().flatten() {
@@ -113,8 +115,7 @@ pub fn listen() {
                     dispatch(line.trim().to_owned());
                 }
             }
-        })
-        .ok();
+        });
 }
 
 fn dispatch(cmd: String) {

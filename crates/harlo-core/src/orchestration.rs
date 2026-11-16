@@ -9,6 +9,9 @@
 //! few environment variables, so each entry names the socket (`--socket`)
 //! and sets `HARLO_SESSION` itself (or as `${HARLO_SESSION}`).
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
@@ -21,7 +24,7 @@ pub fn socket_path() -> PathBuf {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     crate::db::default_path().hash(&mut h);
     let name = format!("harlo-mcp-{:012x}.sock", h.finish() & 0xffff_ffff_ffff);
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
     // A socket's path has to be short (about 100 bytes).
     match dir.join(&name) {
         path if path.as_os_str().len() < 100 => path,
@@ -55,6 +58,7 @@ impl Starting {
     /// it): it doesn't offer splits of its own part (the split was
     /// planned above it; a part too big goes back by ask_parent), so
     /// "offer" is "only when asked" there.
+    #[must_use]
     pub fn for_session(self, helper: bool) -> Starting {
         match self {
             Starting::Offer if helper => Starting::WhenAsked,
@@ -179,11 +183,16 @@ pub struct Proposed {
 }
 
 /// `propose_helpers`' arguments: why, and its helpers.
-pub fn parse_proposal(args: &Value) -> Result<(String, Vec<Proposed>), String> {
+///
+/// # Errors
+///
+/// When `why` or the helpers are missing, there are too many, or one lacks its
+/// task.
+pub fn parse_proposal(args: &Value) -> anyhow::Result<(String, Vec<Proposed>)> {
     let text = |v: &Value, k: &str| v[k].as_str().map(str::trim).unwrap_or_default().to_owned();
     let why = text(args, "why");
     if why.is_empty() {
-        return Err("Say why splitting helps (why).".into());
+        return Err(anyhow::Error::msg("Say why splitting helps (why)."));
     }
     let helpers: Vec<Proposed> = args["helpers"]
         .as_array()
@@ -192,13 +201,13 @@ pub fn parse_proposal(args: &Value) -> Result<(String, Vec<Proposed>), String> {
         .map(|h| Proposed { title: text(h, "title"), prompt: text(h, "prompt"), agent: text(h, "agent").to_lowercase(), model: text(h, "model"), worktree: text(h, "worktree") })
         .collect();
     if helpers.is_empty() {
-        return Err("Give the helpers.".into());
+        return Err(anyhow::Error::msg("Give the helpers."));
     }
     if helpers.len() > MAX_PROPOSED {
-        return Err(format!("At most {MAX_PROPOSED} helpers: combine some parts."));
+        return Err(anyhow::anyhow!("At most {MAX_PROPOSED} helpers: combine some parts."));
     }
     if let Some(h) = helpers.iter().find(|h| h.title.is_empty() || h.prompt.is_empty()) {
-        return Err(format!("Each helper needs a title and a prompt{}.", if h.title.is_empty() { String::new() } else { format!(" (\"{}\" has no prompt)", h.title) }));
+        return Err(anyhow::anyhow!("Each helper needs a title and a prompt{}.", if h.title.is_empty() { String::new() } else { format!(" (\"{}\" has no prompt)", h.title) }));
     }
     Ok((why, helpers))
 }
@@ -220,7 +229,7 @@ pub fn proposal_question(why: &str, helpers: &[(String, String, String, String)]
         if !worktree.is_empty() {
             how.push(format!("on its own copy, branch {worktree}"));
         }
-        text.push_str(&format!("\n• {title}: {}", how.join(" · ")));
+        let _ = write!(text, "\n• {title}: {}", how.join(" · "));
     }
     text
 }
@@ -228,7 +237,7 @@ pub fn proposal_question(why: &str, helpers: &[(String, String, String, String)]
 /// What the proposer is told of the user's answer: `started`, each helper's
 /// title and what became of it (Ok: where it is; Err: why it didn't start),
 /// or None when they said no.
-pub fn proposal_answer(started: Option<&[(String, Result<String, String>)]>) -> String {
+pub fn proposal_answer(started: Option<&[(String, anyhow::Result<String>)]>) -> String {
     let Some(started) = started else {
         return "[harlo] The user turned down your split (propose_helpers): do the work yourself, in this session, without helpers.".into();
     };
@@ -236,10 +245,10 @@ pub fn proposal_answer(started: Option<&[(String, Result<String, String>)]>) -> 
     let failed: Vec<String> = started.iter().filter_map(|(t, r)| r.as_ref().err().map(|e| format!("\"{t}\": {e}"))).collect();
     let mut text = String::from("[harlo] The user agreed to your split.");
     if !ok.is_empty() {
-        text.push_str(&format!(" harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it (a helper's in a worktree: bring its changes over with bring_over; don't retype them).", ok.join(", ")));
+        let _ = write!(text, " harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it (a helper's in a worktree: bring its changes over with bring_over; don't retype them).", ok.join(", "));
     }
     if !failed.is_empty() {
-        text.push_str(&format!(" These didn't start: {}. Do those parts yourself, or start them with start_session once the problem is fixed.", failed.join("; ")));
+        let _ = write!(text, " These didn't start: {}. Do those parts yourself, or start them with start_session once the problem is fixed.", failed.join("; "));
     }
     text
 }
@@ -276,15 +285,19 @@ pub struct Report {
 
 impl Report {
     /// From `report_done`'s arguments.
-    pub fn parse(args: &Value) -> Result<Report, String> {
+    ///
+    /// # Errors
+    ///
+    /// When the outcome isn't succeeded or failed, or the summary is missing.
+    pub fn parse(args: &Value) -> anyhow::Result<Report> {
         let succeeded = match args["outcome"].as_str().map(str::trim) {
             Some("succeeded") => true,
             Some("failed") => false,
-            _ => return Err("Give an outcome: succeeded or failed.".into()),
+            _ => return Err(anyhow::Error::msg("Give an outcome: succeeded or failed.")),
         };
         let summary = args["summary"].as_str().map(str::trim).unwrap_or_default().to_owned();
         if summary.is_empty() {
-            return Err("Give a summary: what you did, what you found, what's left.".into());
+            return Err(anyhow::Error::msg("Give a summary: what you did, what you found, what's left."));
         }
         let files = args["files"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::trim)).filter(|f| !f.is_empty()).map(str::to_owned).collect();
         Ok(Report { succeeded, summary, files })
@@ -307,10 +320,11 @@ pub fn helper_brief(parent: &str, task: &str, own_ask: bool) -> String {
     )
 }
 
-/// What the reviewer of a plan's step is told, in a run with helpers:
-/// the step (`task`, as its helper got it), what the helper said it did
-/// and changed, and where to see the changes (`base`: the commit the step
-/// started from, "" when unknown). It reports its verdict with report_done.
+/// What the reviewer of a plan's step is told, in a run with helpers.
+///
+/// The step (`task`, as its helper got it), what the helper said it did and
+/// changed, and where to see the changes (`base`: the commit the step started
+/// from, "" when unknown). It reports its verdict with report_done.
 pub fn review_brief(parent: &str, task: &str, summary: &str, files: &[String], base: &str) -> String {
     let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
     let files = if files.is_empty() { String::new() } else { format!("\nFiles it says it changed: {}.", files.join(", ")) };
@@ -347,9 +361,10 @@ pub fn worktree_note(branch: &str, root: &str) -> String {
     )
 }
 
-/// What a parent is told when its helper `title` (`agent`, `key`) finished:
-/// its report, else its last reply (`reply`), or its error; and what it
-/// used (`used`: its model, requests and tokens, cost), when known.
+/// What a parent is told when its helper `title` (`agent`, `key`) finished.
+///
+/// Its report, else its last reply (`reply`), or its error; and what it used
+/// (`used`: its model, requests and tokens, cost), when known.
 pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>, used: Option<&str>) -> String {
     let text = finished_text(agent, title, key, report, reply, error);
     match used.map(str::trim).filter(|u| !u.is_empty()) {
@@ -364,7 +379,7 @@ fn finished_text(agent: &str, title: &str, key: &str, report: Option<&Report>, r
         Some(r) => {
             let mut text = format!("{head} finished and reported: {}.\n\n{}", if r.succeeded { "succeeded" } else { "FAILED" }, r.summary);
             if !r.files.is_empty() {
-                text.push_str(&format!("\n\nFiles changed: {}", r.files.join(", ")));
+                let _ = write!(text, "\n\nFiles changed: {}", r.files.join(", "));
             }
             text
         }
@@ -376,10 +391,11 @@ fn finished_text(agent: &str, title: &str, key: &str, report: Option<&Report>, r
     }
 }
 
-/// harlo's message to an agent (without its "[harlo] " prefix), as the
-/// user reads it in the chat: what happened, in a line, without the
-/// session keys and tool names the agent needs. The full text stays one
-/// click away. Unknown shapes come back as their first line.
+/// harlo's message to an agent, in a line, as the user reads it in the chat.
+///
+/// Without its "[harlo] " prefix: what happened, without the session keys and
+/// tool names the agent needs. The full text stays one click away. Unknown
+/// shapes come back as their first line.
 pub fn said_plainly(said: &str) -> String {
     let said = said.trim();
     let first = |t: &str| -> String {
@@ -398,8 +414,8 @@ pub fn said_plainly(said: &str) -> String {
         Some((t[..end].to_owned(), rest[close + 1..].trim_start().to_owned()))
     };
     // A helper's news: "The <agent> session "<title>" (<key>) …".
-    if let Some(rest) = said.strip_prefix("The ").and_then(|r| r.find(" session \"").map(|i| &r[i + 9..])) {
-        if let Some((title, rest)) = quoted(rest) {
+    if let Some(rest) = said.strip_prefix("The ").and_then(|r| r.find(" session \"").map(|i| &r[i + 9..]))
+        && let Some((title, rest)) = quoted(rest) {
             let after = |p: &str| rest.strip_prefix(p).map(str::trim);
             if let Some(r) = after("finished and reported: succeeded.") {
                 return format!("{title} finished: {}", first(r));
@@ -424,28 +440,24 @@ pub fn said_plainly(said: &str) -> String {
                 return if what.is_empty() { format!("{title} is waiting for you.") } else { format!("{title} is waiting for you: {what}") };
             }
         }
-    }
     if said.starts_with("The user turned down your split") {
         return "You turned down the split: the agent does the work itself.".into();
     }
     if said.starts_with("The user agreed to your split.") {
         return "You agreed to the split: the helpers are working.".into();
     }
-    if let Some(r) = said.strip_prefix("The user answered your approval request (\"") {
-        if let Some(end) = r.find("\"): ") {
+    if let Some(r) = said.strip_prefix("The user answered your approval request (\"")
+        && let Some(end) = r.find("\"): ") {
             return format!("You answered \"{}\": {}", &r[..end], first(&r[end + 4..]));
         }
-    }
-    if let Some(r) = said.strip_prefix("The user dismissed your approval request (\"") {
-        if let Some(end) = r.find("\")") {
+    if let Some(r) = said.strip_prefix("The user dismissed your approval request (\"")
+        && let Some(end) = r.find("\")") {
             return format!("You dismissed \"{}\".", &r[..end]);
         }
-    }
-    if let Some(r) = said.strip_prefix("Your helper \"") {
-        if let Some(end) = r.find("\" didn't start") {
+    if let Some(r) = said.strip_prefix("Your helper \"")
+        && let Some(end) = r.find("\" didn't start") {
             return format!("{} didn't start: its worktree couldn't be made.", &r[..end]);
         }
-    }
     if let Some(r) = said.strip_prefix("Your plan ran with helpers and has finished: ") {
         return format!("The plan has finished: {}", first(r).split(". Read each step").next().unwrap_or_default());
     }
@@ -494,6 +506,7 @@ pub fn drift_note(branch: &str, base: &str, behind: u32) -> String {
 
 /// Tokens as people write them: `400k`, `2m`, `1.5m`, `400000` (None: not
 /// a count).
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn parse_tokens(s: &str) -> Option<u64> {
     let s = s.trim().to_lowercase().replace(['_', ','], "");
     let (num, times) = if let Some(n) = s.strip_suffix('k') {
@@ -605,7 +618,7 @@ pub const DIAGRAMS: &str = crate::visuals::INSTRUCTIONS;
 /// MCP servers with few environment variables), else `socket_path()`.
 fn bridge_socket() -> PathBuf {
     let args: Vec<String> = std::env::args().collect();
-    args.iter().position(|a| a == "--socket").and_then(|i| args.get(i + 1)).map(PathBuf::from).unwrap_or_else(socket_path)
+    args.iter().position(|a| a == "--socket").and_then(|i| args.get(i + 1)).map_or_else(socket_path, PathBuf::from)
 }
 
 fn ask_harlo(line: &str) -> Option<Value> {
@@ -673,11 +686,11 @@ const OLD_SKILLS: [&str; 4] = ["harlo", "harlo-handoff", "harlo-advisor", "harlo
 const SKILL_MARK: &str = ".harlo-skill";
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 fn skill_dirs() -> [PathBuf; 2] {
-    let claude = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".claude"));
+    let claude = std::env::var_os("CLAUDE_CONFIG_DIR").map_or_else(|| home().join(".claude"), PathBuf::from);
     [home().join(".agents/skills"), claude.join("skills")]
 }
 
@@ -686,13 +699,14 @@ fn skill_dirs() -> [PathBuf; 2] {
 pub fn remove_old_skills() {
     for dir in skill_dirs().iter().flat_map(|d| OLD_SKILLS.map(|n| d.join(n))).filter(|d| d.join(SKILL_MARK).is_file()) {
         match std::fs::remove_dir_all(&dir) {
-            Ok(()) => tracing::info!("orchestration: removed harlo's old skill {}", dir.display()),
-            Err(e) => tracing::warn!("orchestration: removing {}: {e}", dir.display()),
+            Ok(()) => tracing::event!(name: "orchestration.skill.removed", tracing::Level::INFO, file.path = %dir.display(), "orchestration: removed harlo's old skill {{file.path}}"),
+            Err(e) => tracing::event!(name: "orchestration.skill.remove.failed", tracing::Level::WARN, file.path = %dir.display(), error.message = %e, "orchestration: removing {{file.path}}: {{error.message}}"),
         }
     }
 }
 
 /// An agent to delegate to (the composer's Delegate menu).
+#[derive(Debug)]
 pub struct Member {
     /// "Claude"
     pub label: String,
@@ -728,7 +742,7 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
                 m.describe()
             );
             if !note.is_empty() {
-                t.push_str(&format!("\n\nAlso: {note}"));
+                let _ = write!(t, "\n\nAlso: {note}");
             }
             t
         }
@@ -769,6 +783,97 @@ pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: b
         _ => return None,
     };
     Some(text)
+}
+
+// Remote hosts: their agents reach this harlo through its socket, forwarded
+// to the host over the SSH connection (`ssh -O forward -R`), and a small
+// Python bridge there (the MCP server they start).
+
+/// The bridge's program, uploaded to each host.
+const BRIDGE_PY: &str = include_str!("../bridge/harlo_mcp_bridge.py");
+
+/// This harlo, in the names of what it puts on hosts (two harlos, two
+/// sockets).
+fn local_id() -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    socket_path().hash(&mut h);
+    format!("{:012x}", h.finish() & 0xffff_ffff_ffff)
+}
+
+/// Where the bridge and the socket go on a host: (script, socket), as the
+/// host sees them.
+pub fn host_bridge_paths(name: &str) -> (String, String) {
+    // (HARLO_TEST_REMOTE_CACHE: the click tests' scratch folder, their
+    // "host" being this machine.)
+    let dir = match std::env::var("HARLO_TEST_REMOTE_CACHE") {
+        Ok(d) if !d.is_empty() => d,
+        _ => format!("{}/.cache/harlo", harlo_harness::on_host(&crate::mcp::host_home(name)).trim_end_matches('/')),
+    };
+    let sock = format!("{dir}/harlo-{}.sock", local_id());
+    // A socket's path has to be short (about 100 bytes): else /tmp's (its
+    // name is this harlo's, and only its owner may use it).
+    let sock = if sock.len() < 100 { sock } else { format!("/tmp/harlo-{}.sock", local_id()) };
+    (format!("{dir}/harlo_mcp_bridge.py"), sock)
+}
+
+/// What an agent on the host runs for harlo's tools: `python3 <bridge>
+/// <socket>`.
+///
+/// The bridge is put there and the socket forwarded: done before each session
+/// starts there (an SSH connection that ended took its forward with it).
+///
+/// # Errors
+///
+/// When the host can't be reached, the bridge can't be written there, or the
+/// socket can't be forwarded.
+pub fn remote_bridge(name: &str) -> anyhow::Result<Vec<String>> {
+    use anyhow::{Context, bail};
+    let host = crate::remote::host(name).with_context(|| format!("unknown remote host {name}"))?;
+    let (script, sock) = host_bridge_paths(name);
+    let q = crate::remote::quote;
+    let args = crate::remote::ssh_args(&host);
+    let (options, destination) = args.split_at(args.len().saturating_sub(1));
+    let spec = format!("{sock}:{}", socket_path().display());
+    let control = |op: &str| {
+        let mut c = std::process::Command::new("ssh");
+        c.args(options).args(["-O", op, "-R", &spec]).args(destination).stdin(std::process::Stdio::null());
+        c.output()
+    };
+    // An earlier forward of this socket (a connection asks only once for
+    // the same one): cancelled, so the new one really binds.
+    if crate::remote::connected(&host) {
+        let _ = control("cancel");
+    }
+    let dir = std::path::Path::new(&script).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+    // The bridge (always the current one), the folder private, an old
+    // socket gone (or the forward can't bind), and Python there.
+    let setup = format!(
+        "mkdir -p {d} && chmod 700 {d} && cat > {s}.tmp && mv -f {s}.tmp {s} && rm -f {k} && {{ {old}; }} && command -v python3",
+        d = q(&dir),
+        s = q(&script),
+        k = q(&sock),
+        old = remove_old_skills_on(name)
+    );
+    let out = crate::remote::run_with_input(&host, &setup, Some(BRIDGE_PY.as_bytes()), std::time::Duration::from_secs(30))?;
+    if !out.status.success() {
+        bail!("{name} has no python3, which harlo's tools need there");
+    }
+    // The forward, on the shared connection (open now: the setup used it).
+    let out = control("forward").context("running ssh")?;
+    if !out.status.success() {
+        bail!("couldn't forward harlo's socket to {name}: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(vec!["python3".into(), script, sock])
+}
+
+/// Removes the skills harlo installed on a host: a shell command, run
+/// with the bridge's setup.
+fn remove_old_skills_on(name: &str) -> String {
+    let home = harlo_harness::on_host(&crate::mcp::host_home(name));
+    let home = home.trim_end_matches('/');
+    let dirs: Vec<String> = ["/.agents/skills/", "/.claude/skills/"].iter().flat_map(|d| OLD_SKILLS.map(|n| crate::remote::quote(&format!("{home}{d}{n}")))).collect();
+    format!("for d in {}; do [ -f \"$d/{SKILL_MARK}\" ] && rm -rf \"$d\"; done; true", dirs.join(" "))
 }
 
 #[cfg(test)]
@@ -814,7 +919,7 @@ mod tests {
 
     #[test]
     fn what_bring_over_says() {
-        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let s = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         assert!(brought_text(&[], &[], "/w").contains("nothing to bring over"));
         assert_eq!(brought_text(&s(&["a.rs", "b.rs"]), &[], "/w"), "Brought over, uncommitted: a.rs, b.rs.");
         let both = brought_text(&s(&["a.rs"]), &s(&["c.rs"]), "/w");
@@ -858,8 +963,8 @@ mod tests {
         // A report: its outcome, summary and files.
         let r = Report::parse(&json!({ "outcome": "failed", "summary": " Tried. ", "files": ["a.rs", " ", "b.rs"] })).unwrap();
         assert_eq!(r, Report { succeeded: false, summary: "Tried.".into(), files: vec!["a.rs".into(), "b.rs".into()] });
-        assert!(Report::parse(&json!({ "outcome": "done", "summary": "x" })).is_err());
-        assert!(Report::parse(&json!({ "outcome": "succeeded", "summary": "  " })).is_err());
+        Report::parse(&json!({ "outcome": "done", "summary": "x" })).unwrap_err();
+        Report::parse(&json!({ "outcome": "succeeded", "summary": "  " })).unwrap_err();
         let m = finished_message("Claude", "Fix", "k1", Some(&r), Some("ignored"), None, None);
         assert!(m.starts_with("[harlo] The Claude session \"Fix\" (k1) finished and reported: FAILED.") && m.ends_with("Files changed: a.rs, b.rs"));
         // None: its last reply, else its error.
@@ -913,100 +1018,15 @@ mod tests {
         let (why, helpers) = parse_proposal(&args).unwrap();
         assert_eq!(why, "Two parts.");
         assert_eq!(helpers[0], Proposed { title: "API".into(), prompt: "Do the API".into(), agent: "claude".into(), model: String::new(), worktree: "split/api".into() });
-        assert!(parse_proposal(&json!({ "why": "x", "helpers": [] })).is_err());
-        assert!(parse_proposal(&json!({ "why": "", "helpers": [{ "title": "a", "prompt": "b" }] })).is_err());
-        assert!(parse_proposal(&json!({ "why": "x", "helpers": [{ "title": "a", "prompt": " " }] })).unwrap_err().contains("\"a\" has no prompt"));
+        parse_proposal(&json!({ "why": "x", "helpers": [] })).unwrap_err();
+        parse_proposal(&json!({ "why": "", "helpers": [{ "title": "a", "prompt": "b" }] })).unwrap_err();
+        assert!(parse_proposal(&json!({ "why": "x", "helpers": [{ "title": "a", "prompt": " " }] })).unwrap_err().to_string().contains("\"a\" has no prompt"));
         let many: Vec<Value> = (0..=MAX_PROPOSED).map(|i| json!({ "title": i.to_string(), "prompt": "p" })).collect();
-        assert!(parse_proposal(&json!({ "why": "x", "helpers": many })).is_err());
+        parse_proposal(&json!({ "why": "x", "helpers": many })).unwrap_err();
         let q = proposal_question("Two parts.", &[("API".into(), "Claude".into(), String::new(), "split/api".into()), ("UI".into(), "Harlo".into(), "openai/gpt-5".into(), String::new())]);
         assert_eq!(q, "Two parts.\n\n• API: Claude · on its own copy, branch split/api\n• UI: Harlo · gpt-5");
         assert!(proposal_answer(None).contains("do the work yourself"));
-        let a = proposal_answer(Some(&[("API".into(), Ok("k1".into())), ("UI".into(), Err("Harlo is turned off".into()))]));
+        let a = proposal_answer(Some(&[("API".into(), Ok("k1".into())), ("UI".into(), Err(anyhow::Error::msg("Harlo is turned off")))]));
         assert!(a.contains("started your helpers: \"API\" (k1).") && a.contains("These didn't start: \"UI\": Harlo is turned off."), "{a}");
     }
-}
-
-// Remote hosts: their agents reach this harlo through its socket, forwarded
-// to the host over the SSH connection (`ssh -O forward -R`), and a small
-// Python bridge there (the MCP server they start).
-
-/// The bridge's program, uploaded to each host.
-const BRIDGE_PY: &str = include_str!("../bridge/harlo_mcp_bridge.py");
-
-/// This harlo, in the names of what it puts on hosts (two harlos, two
-/// sockets).
-fn local_id() -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    socket_path().hash(&mut h);
-    format!("{:012x}", h.finish() & 0xffff_ffff_ffff)
-}
-
-/// Where the bridge and the socket go on a host: (script, socket), as the
-/// host sees them.
-pub fn host_bridge_paths(name: &str) -> (String, String) {
-    // (HARLO_TEST_REMOTE_CACHE: the click tests' scratch folder, their
-    // "host" being this machine.)
-    let dir = match std::env::var("HARLO_TEST_REMOTE_CACHE") {
-        Ok(d) if !d.is_empty() => d,
-        _ => format!("{}/.cache/harlo", harlo_harness::on_host(&crate::mcp::host_home(name)).trim_end_matches('/')),
-    };
-    let sock = format!("{dir}/harlo-{}.sock", local_id());
-    // A socket's path has to be short (about 100 bytes): else /tmp's (its
-    // name is this harlo's, and only its owner may use it).
-    let sock = if sock.len() < 100 { sock } else { format!("/tmp/harlo-{}.sock", local_id()) };
-    (format!("{dir}/harlo_mcp_bridge.py"), sock)
-}
-
-/// What an agent on the host runs for harlo's tools (`python3 <bridge>
-/// <socket>`), with the bridge put there and the socket forwarded: done
-/// before each session starts there (an SSH connection that ended took
-/// its forward with it).
-pub fn remote_bridge(name: &str) -> anyhow::Result<Vec<String>> {
-    use anyhow::{Context, bail};
-    let host = crate::remote::host(name).with_context(|| format!("unknown remote host {name}"))?;
-    let (script, sock) = host_bridge_paths(name);
-    let q = crate::remote::quote;
-    let args = crate::remote::ssh_args(&host);
-    let (options, destination) = args.split_at(args.len().saturating_sub(1));
-    let spec = format!("{sock}:{}", socket_path().display());
-    let control = |op: &str| {
-        let mut c = std::process::Command::new("ssh");
-        c.args(options).args(["-O", op, "-R", &spec]).args(destination).stdin(std::process::Stdio::null());
-        c.output()
-    };
-    // An earlier forward of this socket (a connection asks only once for
-    // the same one): cancelled, so the new one really binds.
-    if crate::remote::connected(&host) {
-        let _ = control("cancel");
-    }
-    let dir = std::path::Path::new(&script).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
-    // The bridge (always the current one), the folder private, an old
-    // socket gone (or the forward can't bind), and Python there.
-    let setup = format!(
-        "mkdir -p {d} && chmod 700 {d} && cat > {s}.tmp && mv -f {s}.tmp {s} && rm -f {k} && {{ {old}; }} && command -v python3",
-        d = q(&dir),
-        s = q(&script),
-        k = q(&sock),
-        old = remove_old_skills_on(name)
-    );
-    let out = crate::remote::run_with_input(&host, &setup, Some(BRIDGE_PY.as_bytes()), std::time::Duration::from_secs(30))?;
-    if !out.status.success() {
-        bail!("{name} has no python3, which harlo's tools need there");
-    }
-    // The forward, on the shared connection (open now: the setup used it).
-    let out = control("forward").context("running ssh")?;
-    if !out.status.success() {
-        bail!("couldn't forward harlo's socket to {name}: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(vec!["python3".into(), script, sock])
-}
-
-/// Removes the skills harlo installed on a host: a shell command, run
-/// with the bridge's setup.
-fn remove_old_skills_on(name: &str) -> String {
-    let home = harlo_harness::on_host(&crate::mcp::host_home(name));
-    let home = home.trim_end_matches('/');
-    let dirs: Vec<String> = ["/.agents/skills/", "/.claude/skills/"].iter().flat_map(|d| OLD_SKILLS.map(|n| crate::remote::quote(&format!("{home}{d}{n}")))).collect();
-    format!("for d in {}; do [ -f \"$d/{SKILL_MARK}\" ] && rm -rf \"$d\"; done; true", dirs.join(" "))
 }

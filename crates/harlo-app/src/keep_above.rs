@@ -3,6 +3,8 @@
 //! window (this process's, by title) and sets its "keep above". Elsewhere
 //! the hint does it and this does nothing.
 
+// Rust guideline compliant 2026-10-09
+
 use std::process::{Command, Stdio};
 
 /// Whether the desktop needs asking (KDE on Wayland).
@@ -26,22 +28,22 @@ fn script(pid: u32, title: &str, on: bool) -> String {
 }
 
 /// Asks KWin over D-Bus (blocking; run it off the UI thread).
-pub fn set(title: &str, on: bool) -> Result<(), String> {
+pub fn set(title: &str, on: bool) -> anyhow::Result<()> {
     if !needed() {
         return Ok(());
     }
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, std::path::PathBuf::from);
     let name = format!("harlo-keep-above-{}", std::process::id());
     let file = dir.join(format!("{name}.js"));
-    std::fs::write(&file, script(std::process::id(), title, on)).map_err(|e| e.to_string())?;
-    let call = |path: &str, method: &str, args: &[&str]| -> Result<String, String> {
+    std::fs::write(&file, script(std::process::id(), title, on))?;
+    let call = |path: &str, method: &str, args: &[&str]| -> anyhow::Result<String> {
         let out = Command::new("gdbus")
             .args(["call", "--session", "--dest", "org.kde.KWin", "--object-path", path, "--method", method])
             .args(args)
             .stdin(Stdio::null())
             .output()
-            .map_err(|e| e.to_string())?;
-        if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).into_owned()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()) }
+            ?;
+        if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).into_owned()) } else { Err(anyhow::Error::msg(String::from_utf8_lossy(&out.stderr).trim().to_owned())) }
     };
     let file_text = file.to_string_lossy().into_owned();
     // (One left from before would refuse the name.)

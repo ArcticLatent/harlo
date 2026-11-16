@@ -9,6 +9,8 @@
 //! taken again the next time it's looked at. A mockup on another machine
 //! is copied here first, once.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -69,6 +71,31 @@ pub struct VisualsRust {
     taking: HashSet<String>,
 }
 
+/// Where mockup pictures are kept and which browser takes them.
+struct Camera {
+    /// The folder for the pictures, copies of remote mockups and the
+    /// browsers' profiles.
+    cache: PathBuf,
+    /// The one browser to use (`HARLO_BROWSER`); `None` tries those on PATH.
+    browser: Option<PathBuf>,
+}
+
+impl Camera {
+    /// The camera harlo's environment describes.
+    fn here() -> Self {
+        Self { cache: cache(), browser: std::env::var_os("HARLO_BROWSER").filter(|b| !b.is_empty()).map(PathBuf::from) }
+    }
+
+    /// The browsers that may take pictures: the one named, else the ones
+    /// found on PATH, the one that worked last first.
+    fn browsers(&self) -> Vec<PathBuf> {
+        if let Some(b) = &self.browser {
+            return vec![b.clone()];
+        }
+        browsers_on_path()
+    }
+}
+
 fn cache() -> PathBuf {
     std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
@@ -107,12 +134,9 @@ fn picture_key(file: &Path, size: (u32, u32)) -> String {
     hash((file, size, stamp))
 }
 
-/// The browsers that may take pictures: `HARLO_BROWSER`, else the ones
-/// found on PATH, the one that worked last first.
-fn browsers() -> Vec<PathBuf> {
-    if let Some(b) = std::env::var_os("HARLO_BROWSER").filter(|b| !b.is_empty()) {
-        return vec![PathBuf::from(b)];
-    }
+/// The browsers found on PATH that may take pictures, the one that worked
+/// last first.
+fn browsers_on_path() -> Vec<PathBuf> {
     const NAMES: [&str; 16] = [
         "firefox", "firefox-developer-edition", "firefox-esr", "librewolf", "floorp", "waterfox", "zen-browser", "chromium", "chromium-browser", "google-chrome-stable", "google-chrome", "brave",
         "brave-browser", "brave-origin", "microsoft-edge-stable", "vivaldi-stable",
@@ -136,30 +160,30 @@ static TAKING: Mutex<()> = Mutex::new(());
 const TAKES: Duration = Duration::from_secs(25);
 
 /// Takes a picture of `html` in a `size` window into `out` (blocking).
-pub fn take(html: &Path, size: (u32, u32), out: &Path) -> Result<(), String> {
-    let _one = TAKING.lock().unwrap_or_else(|e| e.into_inner());
-    let found = browsers();
+fn take(camera: &Camera, html: &Path, size: (u32, u32), out: &Path) -> anyhow::Result<()> {
+    let _one = TAKING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let found = camera.browsers();
     if found.is_empty() {
-        return Err("No browser to show it with: harlo uses Firefox or Chromium (or one made from them), without a window.".into());
+        return Err(anyhow::Error::msg("No browser to show it with: harlo uses Firefox or Chromium (or one made from them), without a window."));
     }
     let mut why = String::new();
     for b in found {
-        match shoot(&b, html, size, out) {
+        match shoot(&b, &camera.cache, html, size, out) {
             Ok(()) => {
-                *WORKED.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()) = Some(b);
+                *WORKED.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(b);
                 return Ok(());
             }
-            Err(e) => why = e,
+            Err(e) => why = format!("{e:#}"),
         }
     }
-    Err(why)
+    Err(anyhow::Error::msg(why))
 }
 
-fn shoot(browser: &Path, html: &Path, (w, h): (u32, u32), out: &Path) -> Result<(), String> {
+fn shoot(browser: &Path, cache: &Path, html: &Path, (w, h): (u32, u32), out: &Path) -> anyhow::Result<()> {
     let name = browser.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
     let firefox = ["fox", "wolf", "floorp", "zen"].iter().any(|f| name.contains(f));
-    let profile = cache().join("profiles").join(&name);
-    std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+    let profile = cache.join("profiles").join(&name);
+    std::fs::create_dir_all(&profile)?;
     let _ = std::fs::remove_file(out);
     let url = format!("file://{}", html.display());
     let mut cmd = Command::new(browser);
@@ -174,9 +198,9 @@ fn shoot(browser: &Path, html: &Path, (w, h): (u32, u32), out: &Path) -> Result<
     }
     {
         use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| format!("{name} didn't start: {e}"))?;
+        cmd.process_group(0)
+    };
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| anyhow::anyhow!("{name} didn't start: {e}"))?;
     let started = Instant::now();
     loop {
         match child.try_wait() {
@@ -185,37 +209,37 @@ fn shoot(browser: &Path, html: &Path, (w, h): (u32, u32), out: &Path) -> Result<
                 // (It and what it started.)
                 let _ = Command::new("kill").args(["-9", "--", &format!("-{}", child.id())]).status();
                 let _ = child.wait();
-                return Err(format!("{name} took too long to show it."));
+                return Err(anyhow::anyhow!("{name} took too long to show it."));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(anyhow::Error::msg(e.to_string())),
         }
     }
-    let bytes = std::fs::read(out).map_err(|_| format!("{name} didn't take a picture of it."))?;
-    png_size(&bytes).map(|_| ()).ok_or_else(|| format!("{name} didn't take a picture of it."))
+    let bytes = std::fs::read(out).ok().ok_or_else(|| anyhow::anyhow!("{name} didn't take a picture of it."))?;
+    png_size(&bytes).map(|_| ()).ok_or_else(|| anyhow::anyhow!("{name} didn't take a picture of it."))
 }
 
 /// A mockup's file, here: as it is on this computer, else copied from its
 /// machine into the cache.
-fn local_file(file: &Path) -> Result<PathBuf, String> {
+fn local_file(camera: &Camera, file: &Path) -> anyhow::Result<PathBuf> {
     if !harlo_core::remote::is_remote(file) {
-        return if file.is_file() { Ok(file.to_path_buf()) } else { Err(format!("{} isn't there.", file.display())) };
+        return if file.is_file() { Ok(file.to_path_buf()) } else { Err(anyhow::anyhow!("{} isn't there.", file.display())) };
     }
-    let bytes = harlo_core::remote::read(file).map_err(|_| format!("{} isn't there.", harlo_core::remote::display(file)))?;
-    let copy = cache().join(format!("copy-{}.html", hash(file)));
-    std::fs::create_dir_all(cache()).map_err(|e| e.to_string())?;
-    std::fs::write(&copy, bytes).map_err(|e| e.to_string())?;
+    let bytes = harlo_core::remote::read(file).ok().ok_or_else(|| anyhow::anyhow!("{} isn't there.", harlo_core::remote::display(file)))?;
+    let copy = camera.cache.join(format!("copy-{}.html", hash(file)));
+    std::fs::create_dir_all(&camera.cache)?;
+    std::fs::write(&copy, bytes)?;
     Ok(copy)
 }
 
 /// A mockup's picture, taken now (blocking): the PNG's file.
-fn picture(file: &Path, size: (u32, u32)) -> Result<PathBuf, String> {
-    let png = cache().join(format!("{}.png", picture_key(file, size)));
+fn picture(camera: &Camera, file: &Path, size: (u32, u32)) -> anyhow::Result<PathBuf> {
+    let png = camera.cache.join(format!("{}.png", picture_key(file, size)));
     if ready(&png).is_some() {
         return Ok(png);
     }
-    std::fs::create_dir_all(cache()).map_err(|e| e.to_string())?;
-    take(&local_file(file)?, size, &png)?;
+    std::fs::create_dir_all(&camera.cache)?;
+    take(camera, &local_file(camera, file)?, size, &png)?;
     Ok(png)
 }
 
@@ -225,24 +249,29 @@ const PHONE_BYTES: usize = 2 << 20;
 /// A mockup for a phone (blocking): `{ title, after: { png (base64),
 /// width, height }, before }`, or `{ error }`.
 pub fn for_phone(source: &str, cwd: &Path) -> Value {
+    for_phone_with(&Camera::here(), source, cwd)
+}
+
+fn for_phone_with(camera: &Camera, source: &str, cwd: &Path) -> Value {
     use base64::Engine;
     let m = match visuals::mockup(source) {
         Ok(m) => m,
         Err(e) => return json!({ "error": format!("This mockup can't be shown: {e}.") }),
     };
     let one = |path: &str| -> Value {
-        match picture(&visuals::file_in(cwd, path), (m.width, m.height)).and_then(|p| std::fs::read(p).map_err(|e| e.to_string())) {
+        match picture(camera, &visuals::file_in(cwd, path), (m.width, m.height)).and_then(|p| std::fs::read(p).map_err(anyhow::Error::from)) {
             Ok(png) if png.len() > PHONE_BYTES => json!({ "error": "This picture is too big to send to the phone." }),
             Ok(png) => {
                 let (w, h) = png_size(&png).unwrap_or((0, 0));
                 json!({ "png": base64::engine::general_purpose::STANDARD.encode(&png), "width": w, "height": h })
             }
-            Err(e) => json!({ "error": e }),
+            Err(e) => json!({ "error": format!("{e:#}") }),
         }
     };
     json!({ "title": m.title, "path": m.path, "after": one(&m.path), "before": m.before.as_deref().map(one) })
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Visuals {
     pub fn options(&self, source: &QString) -> QString {
         let v = match visuals::options(&source.to_string()) {
@@ -279,16 +308,17 @@ impl Visuals {
         if let Some(v) = self.known.get(&key) {
             return v.clone();
         }
-        if let Some(v) = ready(&cache().join(format!("{key}.png"))) {
+        let camera = Camera::here();
+        if let Some(v) = ready(&camera.cache.join(format!("{key}.png"))) {
             self.as_mut().rust_mut().known.insert(key, v.clone());
             return v;
         }
         if self.as_mut().rust_mut().taking.insert(key.clone()) {
             let thread = self.qt_thread();
             crate::runtime().spawn_blocking(move || {
-                let v = match picture(&file, size) {
+                let v = match picture(&camera, &file, size) {
                     Ok(png) => ready(&png).unwrap_or_else(|| json!({ "state": "failed", "error": "The picture was empty." })),
-                    Err(e) => json!({ "state": "failed", "error": e }),
+                    Err(e) => json!({ "state": "failed", "error": format!("{e:#}") }),
                 };
                 let _ = thread.queue(move |mut this| {
                     this.as_mut().rust_mut().taking.remove(&key);
@@ -306,7 +336,7 @@ impl Visuals {
         let Some(path) = (if before { m.before } else { Some(m.path) }) else { return };
         let file = visuals::file_in(Path::new(&cwd.to_string()), &path);
         std::thread::spawn(move || {
-            if let Ok(here) = local_file(&file) {
+            if let Ok(here) = local_file(&Camera::here(), &file) {
                 let _ = Command::new("xdg-open").arg(here).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
             }
         });
@@ -343,20 +373,16 @@ open(out, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBB
         std::fs::write(&fake, FAKE).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        // SAFETY: this test alone reads these.
-        unsafe {
-            std::env::set_var("HARLO_BROWSER", &fake);
-            std::env::set_var("XDG_CACHE_HOME", dir.join("cache"));
-        }
+        let camera = Camera { cache: dir.join("cache"), browser: Some(fake) };
         let html = dir.join("a.html");
         std::fs::write(&html, "<p>one</p>").unwrap();
-        let first = picture(&html, (390, 844)).unwrap();
+        let first = picture(&camera, &html, (390, 844)).unwrap();
         assert_eq!(png_size(&std::fs::read(&first).unwrap()), Some((390, 844)));
         std::thread::sleep(Duration::from_millis(20));
         std::fs::write(&html, "<p>two, longer</p>").unwrap();
-        assert_ne!(picture(&html, (390, 844)).unwrap(), first);
-        assert!(picture(&dir.join("none.html"), (390, 844)).unwrap_err().contains("isn't there"));
-        let phone = for_phone("path: a.html\nbefore: none.html\nsize: 390x844", &dir);
+        assert_ne!(picture(&camera, &html, (390, 844)).unwrap(), first);
+        assert!(picture(&camera, &dir.join("none.html"), (390, 844)).unwrap_err().to_string().contains("isn't there"));
+        let phone = for_phone_with(&camera, "path: a.html\nbefore: none.html\nsize: 390x844", &dir);
         assert_eq!(phone["after"]["width"], 390);
         assert!(phone["before"]["error"].as_str().unwrap().contains("isn't there"));
         let _ = std::fs::remove_dir_all(&dir);

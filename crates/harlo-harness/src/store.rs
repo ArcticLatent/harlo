@@ -9,6 +9,8 @@
 //!
 //! Only the head and tail of large files are read.
 
+// Rust guideline compliant 2026-10-09
+
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -118,10 +120,10 @@ fn read_parts(path: &Path, size: u64) -> Option<(String, Option<String>)> {
         file.read_to_string(&mut all).ok()?;
         return Some((all, None));
     }
-    let mut head = vec![0u8; HEAD_BYTES as usize];
+    let mut head = vec![0u8; usize::try_from(HEAD_BYTES).unwrap_or(usize::MAX)];
     file.read_exact(&mut head).ok()?;
-    file.seek(SeekFrom::End(-(TAIL_BYTES as i64))).ok()?;
-    let mut tail = vec![0u8; TAIL_BYTES as usize];
+    file.seek(SeekFrom::End(-i64::try_from(TAIL_BYTES).unwrap_or(i64::MAX))).ok()?;
+    let mut tail = vec![0u8; usize::try_from(TAIL_BYTES).unwrap_or(usize::MAX)];
     file.read_exact(&mut tail).ok()?;
     Some((lossy_complete_lines(&head, false), Some(lossy_complete_lines(&tail, true))))
 }
@@ -161,22 +163,22 @@ pub fn session_from_text(kind: HarnessKind, path: &Path, size: u64, modified: Sy
     for line in lines {
         let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
         match entry["type"].as_str() {
-            Some("title") => title_slot = entry["title"].as_str().unwrap_or_default().trim().to_owned(),
+            Some("title") => entry["title"].as_str().unwrap_or_default().trim().clone_into(&mut title_slot),
             Some("session") if !have_header => {
                 have_header = true;
-                info.id = entry["id"].as_str().unwrap_or_default().to_owned();
+                entry["id"].as_str().unwrap_or_default().clone_into(&mut info.id);
                 info.cwd = PathBuf::from(entry["cwd"].as_str().unwrap_or_default());
-                info.created = entry["timestamp"].as_str().unwrap_or_default().to_owned();
+                entry["timestamp"].as_str().unwrap_or_default().clone_into(&mut info.created);
                 info.parent_session = entry["parentSession"].as_str().map(str::to_owned);
                 if let Some(t) = entry["title"].as_str() {
-                    info.name = t.trim().to_owned();
+                    t.trim().clone_into(&mut info.name);
                 }
             }
             // The latest session_info wins; an absent name clears it.
-            Some("session_info") => info.name = entry["name"].as_str().unwrap_or_default().trim().to_owned(),
+            Some("session_info") => entry["name"].as_str().unwrap_or_default().trim().clone_into(&mut info.name),
             Some("title_change") => {
                 if let Some(t) = entry["title"].as_str() {
-                    info.name = t.trim().to_owned();
+                    t.trim().clone_into(&mut info.name);
                 }
             }
             Some("message") if info.first_message.is_empty() && entry["message"]["role"] == "user" => {
@@ -197,6 +199,10 @@ pub fn session_from_text(kind: HarnessKind, path: &Path, size: u64, modified: Sy
 /// Session files are trees (`id`/`parentId`); the current branch is the path
 /// from the last entry back to the root. Compaction and branch summaries are
 /// returned as `compactionSummary` / `branchSummary` messages.
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn read_messages(path: &Path) -> std::io::Result<Vec<Value>> {
     Ok(read_saved(path)?.messages)
 }
@@ -227,11 +233,12 @@ pub fn after_reading(size: u64) {
     }
 }
 
-/// Allocations of a megabyte or more get pages of their own, given back as
-/// soon as they're freed. (glibc otherwise raises that line to the size of
-/// the biggest block freed, up to 32 MiB, and a picture's pixels decoded
-/// after that stay with the process once it's let go: about 100 MiB after
-/// a few pictures were opened and closed.)
+/// Gives allocations of a megabyte or more pages of their own.
+///
+/// Those pages go back to the system as soon as the allocation is freed. (glibc
+/// otherwise raises that line to the size of the biggest block freed, up to 32
+/// MiB, and a picture's pixels decoded after that stay with the process once
+/// it's let go: about 100 MiB after a few pictures were opened and closed.)
 pub fn map_big_allocations() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {
@@ -266,7 +273,7 @@ pub(crate) fn for_each_line(path: &Path, from: u64, each: &mut dyn FnMut(u64, &s
 /// [`for_each_line`] in the file's first `end` bytes: what a file still
 /// being added to held when `end` was its length.
 pub(crate) fn for_each_line_upto(path: &Path, from: u64, end: u64, each: &mut dyn FnMut(u64, &str)) -> std::io::Result<()> {
-    use std::io::{BufRead, Read, Seek, SeekFrom};
+    use std::io::BufRead;
     let mut file = std::fs::File::open(path)?;
     file.seek(SeekFrom::Start(from))?;
     let mut reader = std::io::BufReader::with_capacity(1024 * 1024, file.take(end.saturating_sub(from)));
@@ -292,6 +299,10 @@ pub(crate) fn for_each_text_line(text: &str, each: &mut dyn FnMut(u64, &str)) {
 }
 
 /// Reads the current branch plus the last model and thinking level.
+///
+/// # Errors
+///
+/// An I/O error when the session file is missing or can't be opened.
 pub fn read_saved(path: &Path) -> std::io::Result<SavedSession> {
     // (Missing or unreadable: said now. Lines are read twice below.)
     drop(std::fs::File::open(path)?);
@@ -302,14 +313,23 @@ pub fn read_saved(path: &Path) -> std::io::Result<SavedSession> {
 
 /// [`read_saved`] for any harness's session file (a long Claude one from
 /// its cache).
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn read_saved_for(kind: HarnessKind, path: &Path) -> std::io::Result<SavedSession> {
     if kind == HarnessKind::Claude { crate::claude::saved_file_cached(path) } else { read_saved(path) }
 }
 
-/// The messages [`read_saved_for`] gives, one at a time and in order, none
-/// held after it's passed on (an export of a session bigger than anything
-/// worth holding at once). An error reading it is said, whatever was passed
-/// on before it.
+/// Passes on the messages [`read_saved_for`] gives, one at a time.
+///
+/// In order, none held after it's passed on (an export of a session bigger than
+/// anything worth holding at once).
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read, whatever was passed on
+/// before it.
 pub fn each_saved_message(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     each_saved_message_upto(kind, path, u64::MAX, each)
 }
@@ -317,6 +337,11 @@ pub fn each_saved_message(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(V
 /// [`each_saved_message`] as the file was when it was `end` bytes long: a
 /// reader going over it twice (an export) sees the same messages both
 /// times, however much is added meanwhile.
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read, whatever was passed on
+/// before it.
 pub fn each_saved_message_upto(kind: HarnessKind, path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     if kind == HarnessKind::Claude {
         return crate::claude::each_saved_message_upto(path, end, each);
@@ -334,16 +359,25 @@ pub fn each_saved_message_upto(kind: HarnessKind, path: &Path, end: u64, each: &
     failed.into_inner().map_or(Ok(()), Err)
 }
 
-/// [`read_saved_for`], its messages passed on one at a time and in order
-/// rather than held (what it gives back has none): a long session opened
-/// without holding all of it. A long Claude transcript's cache is written
-/// as [`read_saved_for`] writes it.
+/// [`read_saved_for`], its messages passed on one at a time.
+///
+/// In order rather than held (what it gives back has none): a long session
+/// opened without holding all of it. A long Claude transcript's cache is
+/// written as [`read_saved_for`] writes it.
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn stream_saved_for(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
     stream_saved_for_upto(kind, path, u64::MAX, each)
 }
 
 /// [`stream_saved_for`] as the file was when it was `end` bytes long (what
 /// its agent adds meanwhile is the agent's to show).
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn stream_saved_for_upto(kind: HarnessKind, path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
     if kind == HarnessKind::Claude {
         return crate::claude::stream_saved_cached_upto(path, end, each);
@@ -393,14 +427,18 @@ struct EntryHead {
     thinking: Value,
 }
 
+/// Goes through a session file's lines, handing each (with its offset) to
+/// the function it is given.
+type EachLine<'a> = dyn Fn(&mut dyn FnMut(u64, &str)) + 'a;
+
 /// The current branch from `lines` (which calls back with each line and where
 /// it starts): the tree first, then only the messages on that branch.
-fn saved_from(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> SavedSession {
+fn saved_from(lines: &EachLine<'_>) -> SavedSession {
     saved_and_leaf(lines).0
 }
 
 /// [`saved_from`], and the id of the branch's last entry.
-fn saved_and_leaf(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> (SavedSession, Option<String>) {
+fn saved_and_leaf(lines: &EachLine<'_>) -> (SavedSession, Option<String>) {
     let mut messages = Vec::new();
     let (saved, leaf) = branch_with_model(lines, &mut |m| messages.push(m));
     (SavedSession { messages, ..saved }, leaf)
@@ -408,7 +446,7 @@ fn saved_and_leaf(lines: &dyn Fn(&mut dyn FnMut(u64, &str))) -> (SavedSession, O
 
 /// [`branch_messages`], and with no model change in it, the model of its
 /// last reply.
-fn branch_with_model(lines: &dyn Fn(&mut dyn FnMut(u64, &str)), each: &mut dyn FnMut(Value)) -> (SavedSession, Option<String>) {
+fn branch_with_model(lines: &EachLine<'_>, each: &mut dyn FnMut(Value)) -> (SavedSession, Option<String>) {
     let mut last = None;
     let (mut saved, leaf) = branch_messages(lines, &mut |m| {
         if m["role"] == "assistant"
@@ -429,7 +467,7 @@ fn branch_with_model(lines: &dyn Fn(&mut dyn FnMut(u64, &str)), each: &mut dyn F
 /// The current branch's messages, each passed on in order (in the file's
 /// order as they're read when that's the branch's, as it is in any file
 /// written by appending), and what else the file says (no messages in it).
-fn branch_messages(lines: &dyn Fn(&mut dyn FnMut(u64, &str)), each: &mut dyn FnMut(Value)) -> (SavedSession, Option<String>) {
+fn branch_messages(lines: &EachLine<'_>, each: &mut dyn FnMut(Value)) -> (SavedSession, Option<String>) {
     let mut leaf = None;
     let mut entries: Vec<(u64, Option<String>)> = Vec::new();
     let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -439,9 +477,9 @@ fn branch_messages(lines: &dyn Fn(&mut dyn FnMut(u64, &str)), each: &mut dyn FnM
         let Ok(entry) = serde_json::from_str::<EntryHead>(line) else { return };
         match entry.kind.as_str() {
             // The latest session_info wins.
-            Some("session_info") => name = entry.name.as_str().unwrap_or_default().trim().to_owned(),
+            Some("session_info") => entry.name.as_str().unwrap_or_default().trim().clone_into(&mut name),
             Some("model_change") => {
-                model = entry.model_id.as_str().or_else(|| entry.model.as_str()).unwrap_or_default().to_owned();
+                entry.model_id.as_str().or_else(|| entry.model.as_str()).unwrap_or_default().clone_into(&mut model);
                 // `provider` + `modelId`, or `model` as `provider/id`.
                 model_id = match entry.provider.as_str() {
                     Some(p) if !p.is_empty() && !model.is_empty() => format!("{p}/{model}"),
@@ -449,7 +487,7 @@ fn branch_messages(lines: &dyn Fn(&mut dyn FnMut(u64, &str)), each: &mut dyn FnM
                 };
             }
             Some("thinking_level_change") => {
-                thinking = entry.thinking.as_str().unwrap_or_default().to_owned();
+                entry.thinking.as_str().unwrap_or_default().clone_into(&mut thinking);
             }
             _ => {}
         }
@@ -515,7 +553,7 @@ fn complete_end(path: &Path) -> std::io::Result<u64> {
     while end > 0 {
         let start = end.saturating_sub(chunk.len() as u64);
         file.seek(SeekFrom::Start(start))?;
-        let part = &mut chunk[..(end - start) as usize];
+        let part = &mut chunk[..usize::try_from(end - start).unwrap_or(usize::MAX)];
         file.read_exact(part)?;
         if let Some(at) = part.iter().rposition(|&b| b == b'\n') {
             return Ok(start + at as u64 + 1);
@@ -525,17 +563,22 @@ fn complete_end(path: &Path) -> std::io::Result<u64> {
     Ok(0)
 }
 
-/// The current branch's messages from where `resume` left off. A Harlo
-/// session is a tree, but what's added to it usually goes on from its last
-/// entry: then only that is read. Anything else (going back to an earlier
+/// The current branch's messages from where `resume` left off.
+///
+/// A Harlo session is a tree, but what's added to it usually goes on from its
+/// last entry: then only that is read. Anything else (going back to an earlier
 /// point, a file rewritten) and it's read whole.
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn read_part(path: &Path, resume: Option<&crate::claude::Resume>) -> std::io::Result<crate::claude::Part> {
     use crate::claude::{Part, Resume};
     let end = complete_end(path)?;
     let lines = |from: u64, each: &mut dyn FnMut(u64, &str)| {
         let _ = for_each_line(path, from, &mut |offset, line| {
             if offset < end {
-                each(offset, line)
+                each(offset, line);
             }
         });
     };
@@ -545,9 +588,9 @@ pub fn read_part(path: &Path, resume: Option<&crate::claude::Resume>) -> std::io
         check.extend(crate::claude::check_at(path, offset)?);
         Ok(Resume { offset, index, check })
     };
-    if let Some(r) = resume.filter(|r| r.offset <= end) {
-        if let Some((leaf, tail)) = r.check.iter().position(|&b| b == b'\n').map(|at| (&r.check[..at], &r.check[at + 1..])) {
-            if !leaf.is_empty() && crate::claude::check_at(path, r.offset).is_ok_and(|now| now == tail) {
+    if let Some(r) = resume.filter(|r| r.offset <= end)
+        && let Some((leaf, tail)) = r.check.iter().position(|&b| b == b'\n').map(|at| (&r.check[..at], &r.check[at + 1..]))
+            && !leaf.is_empty() && crate::claude::check_at(path, r.offset).is_ok_and(|now| now == tail) {
                 let mut leaf = String::from_utf8_lossy(leaf).into_owned();
                 let (mut messages, mut on) = (Vec::new(), true);
                 lines(r.offset, &mut |_, line| {
@@ -561,19 +604,17 @@ pub fn read_part(path: &Path, resume: Option<&crate::claude::Resume>) -> std::io
                             on = false;
                             return;
                         }
-                        leaf = id.to_owned();
+                        id.clone_into(&mut leaf);
                         messages.extend(branch_message(e));
                     }
                 });
                 if on {
-                    let index = r.index + messages.len() as i64;
+                    let index = r.index + i64::try_from(messages.len()).unwrap_or(i64::MAX);
                     return Ok(Part { messages, first_index: r.index, resume: resume_at(end, index, Some(leaf))? });
                 }
             }
-        }
-    }
     let (saved, leaf) = saved_and_leaf(&|each| lines(0, each));
-    let index = saved.messages.len() as i64;
+    let index = i64::try_from(saved.messages.len()).unwrap_or(i64::MAX);
     Ok(Part { messages: saved.messages, first_index: 0, resume: resume_at(end, index, leaf)? })
 }
 
@@ -624,6 +665,10 @@ pub fn sweep_own_files(dir: &Path) {
 
 /// A new file of this process's in `dir` (`<pid>-<n>.<ext>`), only you can
 /// read, opened to read and append; those of processes gone go first.
+///
+/// # Errors
+///
+/// An I/O error when `dir` can't be made or the file can't be created.
 pub fn own_file(dir: &Path, ext: &str) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -804,7 +849,7 @@ mod tests {
             assert_eq!((all, meta.model, meta.model_id, meta.thinking, meta.name), (whole.messages, whole.model, whole.model_id, whole.thinking, whole.name), "{}", file.display());
         }
         assert_eq!(read_saved(&replies).unwrap().model_id, "p/m2");
-        assert!(stream_saved_for(HarnessKind::Harlo, &dir.join("gone.jsonl"), &mut |_| {}).is_err());
+        stream_saved_for(HarnessKind::Harlo, &dir.join("gone.jsonl"), &mut |_| {}).unwrap_err();
     }
 
     #[test]

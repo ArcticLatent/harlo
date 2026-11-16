@@ -1,6 +1,8 @@
 //! Synthetic input for self-tests (`TestInput` in QML): real mouse and key
 //! events through Qt Test, see `cpp/harlo_testinput.h`.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -90,6 +92,7 @@ use cxx_qt_lib::QString;
 #[derive(Default)]
 pub struct TestInputRust;
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl qobject::TestInput {
     pub fn move_to(&self, x: f64, y: f64) {
         qobject::test_move(x, y);
@@ -133,7 +136,7 @@ impl qobject::TestInput {
 
     pub fn list_dir(&self, path: &QString) -> QString {
         let mut names: Vec<String> = std::fs::read_dir(path.to_string())
-            .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .map(|d| d.filter_map(std::result::Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
             .unwrap_or_default();
         names.sort();
         QString::from(&names.join("\n"))

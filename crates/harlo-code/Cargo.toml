@@ -1,12 +1,19 @@
 [package]
 name = "harlo-code"
+description = "harlo's code view, drawn in Rust: text, layout and the pixels of the visible lines"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [dependencies]
-cosmic-text = "0.19"
-unicode-segmentation = "1"
+cosmic-text.workspace = true
+unicode-segmentation.workspace = true
 # Colouring: harlo's syntaxes and token classes.
 harlo-core.workspace = true
-syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
+syntect = { workspace = true, features = ["default-fancy"] }
+
+[lints]
+workspace = true

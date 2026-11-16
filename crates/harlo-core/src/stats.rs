@@ -4,6 +4,8 @@
 //! Each session file is summarised once and cached by (modified time, size);
 //! a report then aggregates the summaries for a period and set of folders.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -78,7 +80,7 @@ pub fn summarize(kind: HarnessKind, path: &Path) -> Option<FileStats> {
                 fs.subagent = e["parentSession"].as_str().is_some();
             }
             Some("thinking_level_change") => {
-                thinking = e["thinkingLevel"].as_str().unwrap_or_default().to_owned();
+                e["thinkingLevel"].as_str().unwrap_or_default().clone_into(&mut thinking);
             }
             Some("message") => {
                 let m = &e["message"];
@@ -133,13 +135,13 @@ pub fn all_sessions() -> Vec<Arc<FileStats>> {
     for kind in [HarnessKind::Harlo] {
         for (path, modified, size) in store::list_files(kind) {
             seen.insert(path.clone());
-            let cached = cache().lock().unwrap().get(&path).filter(|(m, s, _)| *m == modified && *s == size).map(|(_, _, f)| f.clone());
+            let cached = cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&path).filter(|(m, s, _)| *m == modified && *s == size).map(|(_, _, f)| Arc::clone(f));
             let stats = match cached {
                 Some(f) => f,
                 None => match summarize(kind, &path) {
                     Some(f) => {
                         let f = Arc::new(f);
-                        cache().lock().unwrap().insert(path.clone(), (modified, size, f.clone()));
+                        cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path.clone(), (modified, size, Arc::clone(&f)));
                         f
                     }
                     None => continue,
@@ -149,22 +151,23 @@ pub fn all_sessions() -> Vec<Arc<FileStats>> {
         }
     }
     // (Other machines' are kept by [`remote_sessions`].)
-    cache().lock().unwrap().retain(|p, _| seen.contains(p) || crate::remote::split(p).is_some());
+    cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|p, _| seen.contains(p) || crate::remote::split(p).is_some());
     out
 }
 
-/// Summaries of Harlo's sessions on other machines, as the
-/// sidebar last listed them (blocking): each read from harlo's copy of it,
-/// brought up to date first when the file there changed. Only those changed
-/// in the last `days` days (0 = all time) are fetched; an older one counts
-/// when its copy is here and current. A machine that's offline gives what
-/// was read of it before. Paths and folders are `ssh://host/…`.
+/// Summaries of Harlo's sessions on other machines (blocking).
+///
+/// Those the sidebar last listed, each read from harlo's copy of it, brought up
+/// to date first when the file there changed. Only those changed in the last
+/// `days` days (0 = all time) are fetched; an older one counts when its copy is
+/// here and current. A machine that's offline gives what was read of it before.
+/// Paths and folders are `ssh://host/…`.
 pub fn remote_sessions(days: u32) -> Vec<Arc<FileStats>> {
     let files = crate::remote_sessions::session_files();
     let listed: HashSet<PathBuf> = files.iter().map(|f| f.0.clone()).collect();
-    let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     // (A day more: days are local, this is UTC.)
-    let since = if days == 0 { i64::MIN } else { now - (days as i64 + 1) * 86_400 };
+    let since = if days == 0 { i64::MIN } else { now - (i64::from(days) + 1) * 86_400 };
     let todo = Mutex::new(files.into_iter());
     let out = Mutex::new(Vec::new());
     // (A few at a time: one ssh command each.)
@@ -172,26 +175,26 @@ pub fn remote_sessions(days: u32) -> Vec<Arc<FileStats>> {
         for _ in 0..4 {
             s.spawn(|| {
                 loop {
-                    let Some(file) = todo.lock().unwrap().next() else { break };
+                    let Some(file) = todo.lock().unwrap_or_else(std::sync::PoisonError::into_inner).next() else { break };
                     if let Some(f) = remote_one(file, since) {
-                        out.lock().unwrap().push(f);
+                        out.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(f);
                     }
                 }
             });
         }
     });
-    cache().lock().unwrap().retain(|p, _| crate::remote::split(p).is_none() || listed.contains(p));
-    out.into_inner().unwrap()
+    cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|p, _| crate::remote::split(p).is_none() || listed.contains(p));
+    out.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn remote_one((path, kind, mtime, size): (PathBuf, HarnessKind, i64, u64), since: i64) -> Option<Arc<FileStats>> {
-    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(mtime.max(0) as u64);
-    let cached = cache().lock().unwrap().get(&path).cloned();
+    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::try_from(mtime).unwrap_or(0));
+    let cached = cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&path).cloned();
     if let Some((m, s, f)) = &cached
         && *m == modified
         && *s == size
     {
-        return Some(f.clone());
+        return Some(Arc::clone(f));
     }
     let (host, _) = crate::remote::split(&path)?;
     let len = |p: &Path| std::fs::metadata(p).map_or(0, |m| m.len());
@@ -204,12 +207,12 @@ fn remote_one((path, kind, mtime, size): (PathBuf, HarnessKind, i64, u64), since
         None => return cached.map(|c| c.2),
     };
     let mut f = summarize(kind, &copy)?;
-    f.path = path.clone();
+    f.path.clone_from(&path);
     f.cwd = crate::remote::join(&host, &f.cwd.to_string_lossy());
     let f = Arc::new(f);
     // (A copy that came over in part is read again next time.)
     if len(&copy) == size {
-        cache().lock().unwrap().insert(path, (modified, size, f.clone()));
+        cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path, (modified, size, Arc::clone(&f)));
     }
     Some(f)
 }
@@ -229,11 +232,36 @@ struct ModelAgg {
     steps: u64,
 }
 
+/// The longest run of consecutive active days.
+fn longest_streak(active: &HashSet<NaiveDate>) -> u32 {
+    let mut sorted: Vec<NaiveDate> = active.iter().copied().collect();
+    sorted.sort();
+    let (mut streak, mut best) = (0u32, 0u32);
+    let mut prev: Option<NaiveDate> = None;
+    for d in &sorted {
+        streak = if prev.is_some_and(|p| *d - p == chrono::Duration::days(1)) { streak + 1 } else { 1 };
+        best = best.max(streak);
+        prev = Some(*d);
+    }
+    best
+}
+
+/// One bar per day from `start` to `today`: the steps taken that day.
+fn daily_bars(start: NaiveDate, today: NaiveDate, per_day: &BTreeMap<NaiveDate, u64>) -> Vec<Value> {
+    let mut daily = Vec::new();
+    let mut d = start;
+    while d <= today {
+        daily.push(json!({ "date": format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()), "steps": per_day.get(&d).copied().unwrap_or(0) }));
+        d += chrono::Duration::days(1);
+    }
+    daily
+}
+
 /// Aggregates `files` over the last `days` days (0 = all time), keeping
 /// sessions whose folder is inside one of `roots` (empty = all).
 pub fn report(files: &[Arc<FileStats>], days: u32, roots: &[PathBuf]) -> Value {
     let today = Local::now().date_naive();
-    let since = (days > 0).then(|| today - chrono::Duration::days(days as i64 - 1));
+    let since = (days > 0).then(|| today - chrono::Duration::days(i64::from(days) - 1));
     let in_period = |ts: i64| match (since, local_day(ts)) {
         (Some(s), Some(d)) => d >= s,
         (None, _) => true,
@@ -297,25 +325,9 @@ pub fn report(files: &[Arc<FileStats>], days: u32, roots: &[PathBuf]) -> Value {
         }
     }
 
-    // Longest run of consecutive active days.
-    let mut sorted: Vec<NaiveDate> = active.iter().copied().collect();
-    sorted.sort();
-    let (mut streak, mut best) = (0u32, 0u32);
-    let mut prev: Option<NaiveDate> = None;
-    for d in &sorted {
-        streak = if prev.is_some_and(|p| *d - p == chrono::Duration::days(1)) { streak + 1 } else { 1 };
-        best = best.max(streak);
-        prev = Some(*d);
-    }
-
+    let best = longest_streak(&active);
     // One bar per day from the start of the period (or first activity) to today.
-    let start = since.or(first_day).unwrap_or(today);
-    let mut daily = Vec::new();
-    let mut d = start;
-    while d <= today {
-        daily.push(json!({ "date": format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()), "steps": per_day.get(&d).copied().unwrap_or(0) }));
-        d += chrono::Duration::days(1);
-    }
+    let daily = daily_bars(since.or(first_day).unwrap_or(today), today, &per_day);
 
     let total_tokens = input + output + cache_read + cache_write;
     let mut model_rows: Vec<Value> = models
@@ -371,13 +383,13 @@ mod tests {
     fn summarizes_and_reports() {
         let now = Local::now().timestamp_millis();
         let day = 86_400_000i64;
-        let a = format!(r#"{{"type":"message","message":{{"role":"assistant","model":"gpt","provider":"openai","timestamp":{},"usage":{{"input":100,"output":50,"reasoning":20,"cacheRead":850,"cacheWrite":0,"cost":{{"total":0.5}}}},"content":[{{"type":"toolCall","name":"bash"}},{{"type":"toolCall","name":"read"}}]}}}}"#, now);
+        let a = format!(r#"{{"type":"message","message":{{"role":"assistant","model":"gpt","provider":"openai","timestamp":{now},"usage":{{"input":100,"output":50,"reasoning":20,"cacheRead":850,"cacheWrite":0,"cost":{{"total":0.5}}}},"content":[{{"type":"toolCall","name":"bash"}},{{"type":"toolCall","name":"read"}}]}}}}"#);
         let b = format!(r#"{{"type":"message","message":{{"role":"assistant","model":"gpt","provider":"openai","timestamp":{},"usage":{{"input":10,"output":5,"cacheRead":85,"cost":{{"total":0.1}}}},"content":[{{"type":"toolCall","name":"bash"}}]}}}}"#, now - day);
         let old = format!(r#"{{"type":"message","message":{{"role":"assistant","model":"old","timestamp":{},"usage":{{"input":1}}}}}}"#, now - 100 * day);
         let lines = [
             r#"{"type":"session","id":"s","cwd":"/w/app"}"#.to_owned(),
             r#"{"type":"thinking_level_change","thinkingLevel":"high"}"#.to_owned(),
-            format!(r#"{{"type":"message","message":{{"role":"user","content":"hi","timestamp":{}}}}}"#, now),
+            format!(r#"{{"type":"message","message":{{"role":"user","content":"hi","timestamp":{now}}}}}"#),
             a,
             b,
             old,

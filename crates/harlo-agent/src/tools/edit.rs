@@ -10,6 +10,8 @@
 //! All edits match against the file as it was, then apply together. Line
 //! endings (CRLF) and a byte-order mark are kept.
 
+// Rust guideline compliant 2026-10-09
+
 /// One replacement, and its 1-based first changed line once applied.
 pub struct Edit {
     pub old: String,
@@ -17,7 +19,7 @@ pub struct Edit {
 }
 
 /// The new content and the first changed line, or why not (for the model).
-pub fn apply(content: &str, edits: &[Edit]) -> Result<(String, usize), String> {
+pub fn apply(content: &str, edits: &[Edit]) -> anyhow::Result<(String, usize)> {
     let (bom, body) = match content.strip_prefix('\u{feff}') {
         Some(rest) => ("\u{feff}", rest),
         None => ("", content),
@@ -30,17 +32,17 @@ pub fn apply(content: &str, edits: &[Edit]) -> Result<(String, usize), String> {
         let old = e.old.replace("\r\n", "\n");
         let new = e.new.replace("\r\n", "\n");
         if old.is_empty() {
-            return Err(format!("{which}the old text is empty: give the text to replace (to create a file, use write)."));
+            return Err(anyhow::anyhow!("{which}the old text is empty: give the text to replace (to create a file, use write)."));
         }
         if old == new {
-            return Err(format!("{which}the old and new text are the same: nothing to change."));
+            return Err(anyhow::anyhow!("{which}the old and new text are the same: nothing to change."));
         }
-        spans.push(locate(&text, &old, &new).map_err(|why| format!("{which}{why}"))?);
+        spans.push(locate(&text, &old, &new).map_err(|why| anyhow::anyhow!("{which}{why}"))?);
     }
     spans.sort_by_key(|s| s.0);
     if let Some(w) = spans.windows(2).find(|w| w[1].0 < w[0].1) {
         let _ = w;
-        return Err("Two edits overlap: merge them into one, or make each cover a different part.".into());
+        return Err(anyhow::Error::msg("Two edits overlap: merge them into one, or make each cover a different part."));
     }
     let first = spans.first().map_or(1, |s| line_of(&text, s.0));
     let mut out = text.clone();
@@ -48,7 +50,7 @@ pub fn apply(content: &str, edits: &[Edit]) -> Result<(String, usize), String> {
         out.replace_range(start..end, &new);
     }
     if out == text {
-        return Err("The edit changes nothing.".into());
+        return Err(anyhow::Error::msg("The edit changes nothing."));
     }
     let out = if crlf { out.replace('\n', "\r\n") } else { out };
     Ok((format!("{bom}{out}"), first))
@@ -59,11 +61,11 @@ fn line_of(text: &str, byte: usize) -> usize {
 }
 
 /// Where `old` is (byte range) and what replaces it.
-fn locate(text: &str, old: &str, new: &str) -> Result<(usize, usize, String), String> {
+fn locate(text: &str, old: &str, new: &str) -> anyhow::Result<(usize, usize, String)> {
     let exact: Vec<usize> = text.match_indices(old).map(|(i, _)| i).collect();
     match exact.len() {
         1 => return Ok((exact[0], exact[0] + old.len(), new.to_owned())),
-        n if n > 1 => return Err(not_unique(text, &exact)),
+        n if n > 1 => return Err(anyhow::Error::msg(not_unique(text, &exact))),
         _ => {}
     }
     // Line by line, less strict each step.
@@ -75,12 +77,12 @@ fn locate(text: &str, old: &str, new: &str) -> Result<(usize, usize, String), St
     for level in [Level::TrailingSpace, Level::Typographic, Level::Indentation] {
         let norm = |s: &str| level.normalize(s);
         let want_n: Vec<String> = want.iter().map(|l| norm(l)).collect();
-        if want_n.iter().all(|l| l.is_empty()) {
+        if want_n.iter().all(std::string::String::is_empty) {
             break;
         }
         let found: Vec<usize> = (0..lines.len().saturating_sub(want.len() - 1)).filter(|&s| (0..want.len()).all(|k| norm(lines[s + k]) == want_n[k])).collect();
         match found.len() {
-            0 => continue,
+            0 => {}
             1 => {
                 let s = found[0];
                 let e = s + want.len() - 1;
@@ -91,11 +93,11 @@ fn locate(text: &str, old: &str, new: &str) -> Result<(usize, usize, String), St
             }
             _ => {
                 let at: Vec<usize> = found.iter().map(|&s| starts[s]).collect();
-                return Err(not_unique(text, &at));
+                return Err(anyhow::Error::msg(not_unique(text, &at)));
             }
         }
     }
-    Err(not_found(text, &lines, &want, new))
+    Err(anyhow::Error::msg(not_found(text, &lines, &want, new)))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -183,21 +185,21 @@ pub(crate) fn not_found(text: &str, lines: &[&str], want: &[&str], new: &str) ->
 mod tests {
     use super::*;
 
-    fn one(content: &str, old: &str, new: &str) -> Result<String, String> {
+    fn one(content: &str, old: &str, new: &str) -> anyhow::Result<String> {
         apply(content, &[Edit { old: old.into(), new: new.into() }]).map(|r| r.0)
     }
 
     #[test]
     fn exact_and_unique() {
         assert_eq!(one("a\nb\nc\n", "b", "B").unwrap(), "a\nB\nc\n");
-        assert!(one("x = 1\nx = 1\n", "x = 1", "x = 2").unwrap_err().contains("in 2 places (lines 1, 2)"));
-        assert!(one("a", "", "b").unwrap_err().contains("empty"));
+        assert!(one("x = 1\nx = 1\n", "x = 1", "x = 2").unwrap_err().to_string().contains("in 2 places (lines 1, 2)"));
+        assert!(one("a", "", "b").unwrap_err().to_string().contains("empty"));
     }
 
     #[test]
     fn near_duplicates_need_context() {
         let f = "def area(r):\n    return 3.14 * r * r\n\ndef area2(r):\n    return 3.14 * r * r\n";
-        assert!(one(f, "    return 3.14 * r * r", "    return math.pi * r * r").unwrap_err().contains("2 places"));
+        assert!(one(f, "    return 3.14 * r * r", "    return math.pi * r * r").unwrap_err().to_string().contains("2 places"));
         let ok = one(f, "def area2(r):\n    return 3.14 * r * r", "def area2(r):\n    return math.pi * r * r").unwrap();
         assert!(ok.ends_with("def area2(r):\n    return math.pi * r * r\n") && ok.starts_with("def area(r):\n    return 3.14"));
     }
@@ -223,10 +225,10 @@ mod tests {
     fn says_what_went_wrong() {
         let f = "fn main() {\n    println!(\"one\");\n    println!(\"two\");\n}\n";
         let e = one(f, "    println!(\"three\");\n    println!(\"two\");", "x").unwrap_err();
-        assert!(e.contains("closest lines") && e.contains("    3      println!(\"two\");"), "{e}");
-        assert!(one(f, "println!(\"zero\");", "println!(\"one\");").unwrap_err().contains("already is (line 2)"));
+        assert!(e.to_string().contains("closest lines") && e.to_string().contains("    3      println!(\"two\");"), "{e}");
+        assert!(one(f, "println!(\"zero\");", "println!(\"one\");").unwrap_err().to_string().contains("already is (line 2)"));
         let e = apply(f, &[Edit { old: "println!(\"one\");".into(), new: "a".into() }, Edit { old: "\"one\");\n    println".into(), new: "b".into() }]).unwrap_err();
-        assert!(e.contains("overlap"), "{e}");
+        assert!(e.to_string().contains("overlap"), "{e}");
     }
 
     #[test]

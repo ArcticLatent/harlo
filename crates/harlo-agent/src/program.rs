@@ -14,6 +14,9 @@
 //! - Offered when an MCP server has read-only tools (see [`offered`])
 //!   and there's a python3.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -85,7 +88,7 @@ pub fn spec(callable: &[&Value]) -> Value {
         let required: Vec<&str> = s["parameters"]["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
         let params: Vec<String> = order(s).into_iter().map(|p| if required.contains(&p.as_str()) { p } else { format!("{p}=None") }).collect();
         let about: String = s["description"].as_str().unwrap_or_default().split(". ").next().unwrap_or_default().chars().take(140).collect();
-        sdk.push_str(&format!("\n- tools.{}({}): {}", s["name"].as_str().unwrap_or_default(), params.join(", "), about.trim_end_matches('.')));
+        let _ = write!(sdk, "\n- tools.{}({}): {}", s["name"].as_str().unwrap_or_default(), params.join(", "), about.trim_end_matches('.'));
     }
     json!({
         "type": "function", "name": "run_code", "strict": false,
@@ -184,7 +187,7 @@ pub async fn run(args: &Value, tools: &Tools, mcp: Option<&crate::mcp::Mcp>, cal
     let mut calls: Vec<(String, bool)> = Vec::new();
     let work = async {
         let first = json!({ "code": code }).to_string() + "\n";
-        stdin.write_all(first.as_bytes()).await.map_err(|e| format!("Couldn't send the program: {e}"))?;
+        stdin.write_all(first.as_bytes()).await.map_err(|e| anyhow::anyhow!("Couldn't send the program: {e}"))?;
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let Ok(frame) = serde_json::from_str::<Value>(&line) else { continue };
@@ -197,7 +200,7 @@ pub async fn run(args: &Value, tools: &Tools, mcp: Option<&crate::mcp::Mcp>, cal
                         match callable.iter().find(|s| s["name"] == name.as_str()) {
                             None => Outcome::new(format!("A program can't call {name}: its tools are {}.", names(callable)), true),
                             Some(spec) => match arguments(spec, &frame) {
-                                Err(why) => Outcome::new(why, true),
+                                Err(why) => Outcome::new(format!("{why:#}"), true),
                                 Ok(a) => match mcp.filter(|m| m.has(&name)) {
                                     Some(m) => m.call_whole(&name, &a).await,
                                     None => tools.call(&name, &a).await,
@@ -215,7 +218,7 @@ pub async fn run(args: &Value, tools: &Tools, mcp: Option<&crate::mcp::Mcp>, cal
                 _ => {}
             }
         }
-        Err("The program ended without finishing (python3 stopped).".to_owned())
+        Err(anyhow::Error::msg("The program ended without finishing (python3 stopped)."))
     };
     let ended = tokio::time::timeout(Duration::from_secs(secs), work).await;
     let mut err_text = String::new();
@@ -229,11 +232,11 @@ pub async fn run(args: &Value, tools: &Tools, mcp: Option<&crate::mcp::Mcp>, cal
     let mut text = frame["output"].as_str().unwrap_or_default().to_owned();
     let commands = frame["commands"].as_str().unwrap_or_default();
     if !commands.trim().is_empty() {
-        text.push_str(&format!("\n[Its commands' output]\n{commands}"));
+        let _ = write!(text, "\n[Its commands' output]\n{commands}");
     }
     let error = frame["error"].as_str().filter(|e| !e.trim().is_empty());
     if let Some(e) = error {
-        text.push_str(&format!("\n[The program failed]\n{}", tail(e, 30)));
+        let _ = write!(text, "\n[The program failed]\n{}", tail(e, 30));
     }
     let total = text.len();
     let mut shown = crate::tools::bash::shorten(&text, total, &tools.spill_dir);
@@ -248,19 +251,19 @@ pub async fn run(args: &Value, tools: &Tools, mcp: Option<&crate::mcp::Mcp>, cal
 
 /// A call's arguments as the tool takes them: positional ones in the
 /// tool's order, then those by name.
-fn arguments(spec: &Value, frame: &Value) -> Result<Value, String> {
+fn arguments(spec: &Value, frame: &Value) -> anyhow::Result<Value> {
     let order = order(spec);
     let mut out = serde_json::Map::new();
     let positional = frame["args"].as_array().cloned().unwrap_or_default();
     if positional.len() > order.len() {
-        return Err(format!("{} takes {} arguments ({}), not {}.", spec["name"].as_str().unwrap_or_default(), order.len(), order.join(", "), positional.len()));
+        return Err(anyhow::anyhow!("{} takes {} arguments ({}), not {}.", spec["name"].as_str().unwrap_or_default(), order.len(), order.join(", "), positional.len()));
     }
     for (p, v) in order.iter().zip(positional) {
         out.insert(p.clone(), v);
     }
     for (k, v) in frame["kwargs"].as_object().into_iter().flatten() {
         if !order.contains(k) {
-            return Err(format!("{} has no argument {k}: it takes {}.", spec["name"].as_str().unwrap_or_default(), order.join(", ")));
+            return Err(anyhow::anyhow!("{} has no argument {k}: it takes {}.", spec["name"].as_str().unwrap_or_default(), order.join(", ")));
         }
         out.insert(k.clone(), v.clone());
     }

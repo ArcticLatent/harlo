@@ -1,8 +1,10 @@
-//! Session templates: a new session's set-up saved under a name (the agent,
-//! its model, what runs without asking, a new worktree)
-//! with its first message. The new-session page and the phone fill their
-//! draft from one; nothing starts until it's sent. Kept as JSON in the
-//! "templates" setting.
+//! Session templates: a new session's set-up saved under a name.
+//!
+//! The agent, its model, what runs without asking, a new worktree, with its
+//! first message. The new-session page and the phone fill their draft from one;
+//! nothing starts until it's sent. Kept as JSON in the "templates" setting.
+
+// Rust guideline compliant 2026-10-09
 
 use serde_json::{Value, json};
 

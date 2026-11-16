@@ -5,23 +5,37 @@
 //! An agent may additionally wrap one oversized logical frame in a
 //! sequence of `rpc_chunk` frames, which [`ChunkAssembler`] reassembles.
 
-use anyhow::{Context, Result, anyhow, bail};
+// Rust guideline compliant 2026-10-09
+
 use base64::Engine;
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+
+use crate::error::{Context as _, Error, ErrorKind};
+
+/// A protocol error, its text from `format!` arguments.
+macro_rules! bail {
+    ($($arg:tt)*) => {
+        return Err(Error::new(ErrorKind::Protocol, format!($($arg)*)))
+    };
+}
 
 /// Upper bound for one physical line (and one reassembled frame).
 pub const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Reads one LF-terminated record. Returns `None` at EOF.
 /// A trailing CR is stripped so CRLF input is accepted.
+///
+/// # Errors
+///
+/// A protocol [`Error`] when reading fails or a record passes [`MAX_LINE_BYTES`].
 pub async fn read_record<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     buf: &mut Vec<u8>,
-) -> Result<Option<Vec<u8>>> {
+) -> Result<Option<Vec<u8>>, Error> {
     buf.clear();
     loop {
-        let available = reader.fill_buf().await?;
+        let available = reader.fill_buf().await.or_error(ErrorKind::Protocol, || "reading the agent's output".to_owned())?;
         if available.is_empty() {
             if buf.is_empty() {
                 return Ok(None);
@@ -47,7 +61,7 @@ pub async fn read_record<R: AsyncBufRead + Unpin>(
 }
 
 /// Reassembles `rpc_chunk` sequences into one logical JSON frame.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ChunkAssembler {
     current: Option<PendingChunk>,
 }
@@ -58,6 +72,18 @@ struct PendingChunk {
     next_index: u64,
     byte_length: u64,
     data: Vec<u8>,
+}
+
+impl std::fmt::Debug for PendingChunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingChunk")
+            .field("chunk_id", &self.chunk_id)
+            .field("next_index", &self.next_index)
+            .field("count", &self.count)
+            .field("received", &self.data.len())
+            .field("byte_length", &self.byte_length)
+            .finish()
+    }
 }
 
 impl ChunkAssembler {
@@ -73,12 +99,17 @@ impl ChunkAssembler {
 
     /// Feeds one `rpc_chunk` frame. Returns the reassembled frame once the
     /// final chunk arrives.
-    pub fn push(&mut self, frame: &Value) -> Result<Option<Value>> {
-        let chunk_id = frame["chunkId"].as_str().context("rpc_chunk without chunkId")?;
-        let index = frame["index"].as_u64().context("rpc_chunk without index")?;
-        let count = frame["count"].as_u64().context("rpc_chunk without count")?;
-        let byte_length = frame["byteLength"].as_u64().context("rpc_chunk without byteLength")?;
-        let data = frame["data"].as_str().context("rpc_chunk without data")?;
+    ///
+    /// # Errors
+    ///
+    /// A protocol [`Error`] when the frame isn't a valid next chunk, or the
+    /// reassembled frame isn't JSON.
+    pub fn push(&mut self, frame: &Value) -> Result<Option<Value>, Error> {
+        let chunk_id = frame["chunkId"].as_str().or_error(ErrorKind::Protocol, || "rpc_chunk without chunkId".to_owned())?;
+        let index = frame["index"].as_u64().or_error(ErrorKind::Protocol, || "rpc_chunk without index".to_owned())?;
+        let count = frame["count"].as_u64().or_error(ErrorKind::Protocol, || "rpc_chunk without count".to_owned())?;
+        let byte_length = frame["byteLength"].as_u64().or_error(ErrorKind::Protocol, || "rpc_chunk without byteLength".to_owned())?;
+        let data = frame["data"].as_str().or_error(ErrorKind::Protocol, || "rpc_chunk without data".to_owned())?;
         if count == 0 || index >= count {
             self.current = None;
             bail!("rpc_chunk {chunk_id}: index {index} out of range for count {count}");
@@ -98,14 +129,14 @@ impl ChunkAssembler {
                 count,
                 next_index: 0,
                 byte_length,
-                data: Vec::with_capacity(byte_length as usize),
+                data: Vec::with_capacity(usize::try_from(byte_length).unwrap_or(usize::MAX)),
             });
         }
 
         let pending = self
             .current
             .as_mut()
-            .ok_or_else(|| anyhow!("rpc_chunk {chunk_id} index {index} without a start"))?;
+            .or_error(ErrorKind::Protocol, || format!("rpc_chunk {chunk_id} index {index} without a start"))?;
         if pending.chunk_id != chunk_id
             || pending.count != count
             || pending.byte_length != byte_length
@@ -117,7 +148,7 @@ impl ChunkAssembler {
 
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(data)
-            .with_context(|| format!("rpc_chunk {chunk_id}: invalid base64"))?;
+            .or_error(ErrorKind::Protocol, || format!("rpc_chunk {chunk_id}: invalid base64"))?;
         pending.data.extend_from_slice(&decoded);
         pending.next_index += 1;
         if pending.data.len() as u64 > pending.byte_length {
@@ -128,7 +159,7 @@ impl ChunkAssembler {
         if pending.next_index < pending.count {
             return Ok(None);
         }
-        let done = self.current.take().expect("pending chunk");
+        let Some(done) = self.current.take() else { bail!("rpc_chunk {chunk_id}: no sequence open") };
         if done.data.len() as u64 != done.byte_length {
             bail!(
                 "rpc_chunk {}: got {} bytes, expected {}",
@@ -138,8 +169,8 @@ impl ChunkAssembler {
             );
         }
         let text = String::from_utf8(done.data)
-            .with_context(|| format!("rpc_chunk {}: invalid UTF-8", done.chunk_id))?;
-        Ok(Some(serde_json::from_str(&text)?))
+            .or_error(ErrorKind::Protocol, || format!("rpc_chunk {}: invalid UTF-8", done.chunk_id))?;
+        Ok(Some(serde_json::from_str(&text).or_error(ErrorKind::Protocol, || "rpc_chunk: not JSON".to_owned())?))
     }
 }
 
@@ -198,7 +229,7 @@ mod tests {
         let frames = chunks("c1", r#"{"type":"x","pad":"0123456789"}"#, 5);
         let mut asm = ChunkAssembler::default();
         asm.push(&frames[0]).unwrap();
-        assert!(asm.push(&frames[2]).is_err());
+        asm.push(&frames[2]).unwrap_err();
         assert!(!asm.in_progress());
     }
 }

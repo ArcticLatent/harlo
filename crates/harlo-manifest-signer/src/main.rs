@@ -16,6 +16,8 @@
 //!       Checks its signature against harlo's key (or the one given); fails
 //!       otherwise, so a release signed with the wrong key stops there.
 
+// Rust guideline compliant 2026-10-09
+
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signer, SigningKey};
@@ -61,7 +63,7 @@ impl Manifest {
 fn signing_key() -> Result<SigningKey> {
     let b64 = std::env::var(SIGNING_KEY_ENV).with_context(|| format!("{SIGNING_KEY_ENV} isn't set"))?;
     let bytes = STANDARD.decode(b64.trim()).with_context(|| format!("{SIGNING_KEY_ENV} isn't base64"))?;
-    let bytes: [u8; 32] = bytes.try_into().map_err(|_| anyhow::anyhow!("{SIGNING_KEY_ENV} isn't 32 bytes"))?;
+    let bytes: [u8; 32] = bytes.try_into().map_err(|b: Vec<u8>| anyhow::anyhow!("{SIGNING_KEY_ENV} isn't 32 bytes but {}", b.len()))?;
     Ok(SigningKey::from_bytes(&bytes))
 }
 
@@ -70,7 +72,7 @@ fn main() -> Result<()> {
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["keygen"] => {
             let mut seed = [0u8; 32];
-            getrandom::getrandom(&mut seed).map_err(|e| anyhow::anyhow!("no random source: {e}"))?;
+            getrandom::fill(&mut seed).map_err(|e| anyhow::anyhow!("no random source: {e}"))?;
             let key = SigningKey::from_bytes(&seed);
             println!("private (the {SIGNING_KEY_ENV} secret): {}", STANDARD.encode(key.to_bytes()));
             println!("public (PUBLIC_KEY_B64): {}", STANDARD.encode(key.verifying_key().to_bytes()));

@@ -11,6 +11,8 @@
 //! picks one for a single run, and an explicit `QSG_RHI_BACKEND` /
 //! `QT_QUICK_BACKEND` in the environment wins over both.
 
+// Rust guideline compliant 2026-10-09
+
 use harlo_core::db::Db;
 
 const CHOICE: &str = "settings.graphics";
@@ -31,8 +33,16 @@ fn db() -> Option<Db> {
     Db::open(&harlo_core::db::default_path()).ok()
 }
 
-/// Sets up the chosen renderer (before the application is created).
-pub fn apply() {
+/// Sets up the chosen renderer before the application is created.
+///
+/// The choice reaches Qt through its environment variables
+/// (`QSG_RHI_BACKEND`, `QT_QUICK_BACKEND`), which this sets.
+///
+/// # Safety
+///
+/// No other thread may be running: setting a variable while another thread
+/// reads the environment is undefined behavior.
+pub unsafe fn apply() {
     if std::env::var_os("QSG_RHI_BACKEND").is_some() || std::env::var_os("QT_QUICK_BACKEND").is_some() {
         let _ = STARTED.set(String::new());
         return;
@@ -49,7 +59,7 @@ pub fn apply() {
             let d = decide(&get(CHOICE), &get(TRIAL));
             if let Some(db) = &db {
                 if let Some(dropped) = &d.dropped {
-                    tracing::warn!("graphics: {dropped} didn't start last time; back to automatic");
+                    tracing::event!(name: "app.graphics.fallback", tracing::Level::WARN, graphics.choice = %dropped, "graphics: {{graphics.choice}} didn't start last time; back to automatic");
                     let _ = db.set(CHOICE, "auto");
                     let _ = db.set(DROPPED, dropped);
                 }
@@ -61,12 +71,16 @@ pub fn apply() {
         }
     };
     let _ = STARTED.set(if choice.is_empty() { "auto".into() } else { choice.clone() });
-    // SAFETY: still single-threaded; nothing reads the environment yet.
-    match choice.as_str() {
-        "opengl" => unsafe { std::env::set_var("QSG_RHI_BACKEND", "opengl") },
-        "vulkan" => unsafe { std::env::set_var("QSG_RHI_BACKEND", "vulkan") },
-        "software" => unsafe { std::env::set_var("QT_QUICK_BACKEND", "software") },
-        _ => {}
+    let variable = match choice.as_str() {
+        "opengl" => Some(("QSG_RHI_BACKEND", "opengl")),
+        "vulkan" => Some(("QSG_RHI_BACKEND", "vulkan")),
+        "software" => Some(("QT_QUICK_BACKEND", "software")),
+        _ => None,
+    };
+    if let Some((name, value)) = variable {
+        // SAFETY: the caller guarantees no other thread is running, so
+        // nothing reads the environment while it changes.
+        unsafe { std::env::set_var(name, value) };
     }
 }
 
@@ -126,13 +140,13 @@ mod tests {
 
     #[test]
     fn a_choice_is_tried_then_dropped_if_it_never_drew() {
-        assert_eq!(decide("", ""), Decision { choice: "auto".into(), trial: "".into(), dropped: None });
+        assert_eq!(decide("", ""), Decision { choice: "auto".into(), trial: String::new(), dropped: None });
         // First start with Vulkan: on trial.
         assert_eq!(decide("vulkan", ""), Decision { choice: "vulkan".into(), trial: "vulkan".into(), dropped: None });
         // It drew (the trial was cleared): still Vulkan, on trial again until it draws.
         assert_eq!(decide("vulkan", ""), decide("vulkan", ""));
         // It never drew: back to automatic, and say so.
-        assert_eq!(decide("vulkan", "vulkan"), Decision { choice: "auto".into(), trial: "".into(), dropped: Some("vulkan".into()) });
+        assert_eq!(decide("vulkan", "vulkan"), Decision { choice: "auto".into(), trial: String::new(), dropped: Some("vulkan".into()) });
         // Switched while another was on trial: the new one is tried.
         assert_eq!(decide("software", "vulkan").choice, "software");
     }

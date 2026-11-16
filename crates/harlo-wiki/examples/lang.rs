@@ -1,5 +1,8 @@
 //! Dev check: each JSON line [tag, …] on stdin answered as [tag, resolved
 //! ("absent", the canonical tag, or "?"), primary subtag].
+
+// Rust guideline compliant 2026-10-09
+
 use harlo_wiki::lang::{self, Resolved};
 use std::io::BufRead;
 

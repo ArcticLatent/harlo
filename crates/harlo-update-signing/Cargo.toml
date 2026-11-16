@@ -4,8 +4,13 @@ description = "The signature on harlo's update manifest: what is signed, and its
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-base64 = "0.22"
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+base64.workspace = true
+ed25519-dalek = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

@@ -5,6 +5,8 @@
 //! → General → Check for updates, with Check now); a dismissed version
 //! isn't offered again.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -150,7 +152,7 @@ fn harlo_kind() -> Option<updates::InstallKind> {
 
 /// harlo's newest release (looked up at most hourly; `fresh`: now;
 /// self-tests only ask `HARLO_UPDATE_MANIFEST_URL`). Ok(None): not asked.
-fn harlo_latest(fresh: bool) -> Result<Option<updates::Release>, String> {
+fn harlo_latest(fresh: bool) -> anyhow::Result<Option<updates::Release>> {
     if std::env::args().any(|a| a.starts_with("--selftest")) && std::env::var_os("HARLO_UPDATE_MANIFEST_URL").is_none() {
         return Ok(None);
     }
@@ -162,9 +164,9 @@ fn harlo_latest(fresh: bool) -> Result<Option<updates::Release>, String> {
         return Ok(Some(r.clone()));
     }
     let r = updates::harlo_release().map_err(|e| {
-        tracing::warn!("harlo's release: {e:#}");
+        tracing::event!(name: "update.check.failed", tracing::Level::WARN, error.message = %format_args!("{e:#}"), "harlo's release: {{error.message}}");
         format!("{e:#}")
-    })?;
+    }).map_err(anyhow::Error::msg)?;
     *CACHE.lock().unwrap() = Some((r.clone(), Instant::now()));
     Ok(Some(r))
 }
@@ -189,7 +191,7 @@ fn harlo_notes(current: &str, latest: &str) -> String {
             notes
         }
         Err(e) => {
-            tracing::warn!("harlo's changelog: {e:#}");
+            tracing::event!(name: "update.notes.failed", tracing::Level::WARN, error.message = %format_args!("{e:#}"), "harlo's changelog: {{error.message}}");
             String::new()
         }
     }
@@ -211,32 +213,32 @@ struct Install {
 /// Downloads the new harlo for how it was installed, checks it against the
 /// release's signed manifest, and puts it in place (an AppImage) or returns
 /// what installs it (a package).
-fn fetch_harlo(kind: &updates::InstallKind) -> Result<Option<Install>, String> {
-    let release = updates::harlo_release().map_err(|e| format!("{e:#}."))?;
-    let asset = release.asset(kind).cloned().ok_or("The release has no file for this kind of install.")?;
-    let dir = harlo_core::db::default_path().parent().map(|d| d.join("updates")).ok_or("no data folder")?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+fn fetch_harlo(kind: &updates::InstallKind) -> anyhow::Result<Option<Install>> {
+    let release = updates::harlo_release().map_err(|e| anyhow::anyhow!("{e:#}."))?;
+    let asset = release.asset(kind).cloned().ok_or_else(|| anyhow::Error::msg("The release has no file for this kind of install."))?;
+    let dir = harlo_core::db::default_path().parent().map(|d| d.join("updates")).ok_or_else(|| anyhow::Error::msg("no data folder"))?;
+    std::fs::create_dir_all(&dir)?;
     // (Only the file name: the manifest is signed, but a name is all it needs.)
-    let name = std::path::Path::new(&asset.name).file_name().ok_or("The release's file has no name.")?;
+    let name = std::path::Path::new(&asset.name).file_name().ok_or_else(|| anyhow::Error::msg("The release's file has no name."))?;
     let file = dir.join(name);
-    let got = updates::download(&asset.download_url, &file).map_err(|e| format!("{e:#}"))?;
+    let got = updates::download(&asset.download_url, &file).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     if got != asset.sha256 {
         let _ = std::fs::remove_file(&file);
-        return Err("The download didn't match its checksum, so it wasn't installed.".into());
+        return Err(anyhow::Error::msg("The download didn't match its checksum, so it wasn't installed."));
     }
     match kind {
         updates::InstallKind::AppImage(path) => {
             // Beside it, then over it (a running AppImage can be replaced).
             use std::os::unix::fs::PermissionsExt;
             let next = path.with_extension("new");
-            std::fs::copy(&file, &next).map_err(|e| format!("writing {}: {e}", next.display()))?;
-            std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-            std::fs::rename(&next, path).map_err(|e| format!("replacing {}: {e}", path.display()))?;
+            std::fs::copy(&file, &next).map_err(|e| anyhow::anyhow!("writing {}: {e}", next.display()))?;
+            std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o755))?;
+            std::fs::rename(&next, path).map_err(|e| anyhow::anyhow!("replacing {}: {e}", path.display()))?;
             let _ = std::fs::remove_file(&file);
             Ok(None)
         }
         _ => {
-            let argv = kind.install_command(&file, on_path, &updates::elevation()).ok_or("no installer")?;
+            let argv = kind.install_command(&file, on_path, &updates::elevation()).ok_or_else(|| anyhow::Error::msg("no installer"))?;
             let mut command = std::process::Command::new(&argv[0]);
             command.args(&argv[1..]);
             let manual = kind.manual_command(&file, on_path).unwrap_or_default();
@@ -267,6 +269,7 @@ fn local_version(program: &std::path::Path) -> String {
     providers::version(program).map(|v| providers::version_number(&v)).unwrap_or_default()
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Updates {
     fn publish(mut self: Pin<&mut Self>) {
         let list: Vec<Value> = self
@@ -341,7 +344,7 @@ impl Updates {
                         found.push(("harlo".into(), current.into(), r.version));
                     }
                     Ok(None) => {}
-                    Err(e) => error = Some(e),
+                    Err(e) => error = Some(format!("{e:#}")),
                 }
             }
             let _ = thread.queue(move |mut this| {
@@ -433,13 +436,13 @@ impl Updates {
         if let Some(i) = self.as_mut().rust_mut().items.get_mut(&key) {
             i.state = "running".into();
             i.message = format!("Updating {name} to {}…", item.latest);
-            i.log = job.log.clone();
+            i.log.clone_from(&job.log);
             i.pid = job.pid;
         }
         self.as_mut().publish();
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let result = crate::jobs::wait(job, Duration::from_secs(20 * 60));
+            let result = crate::jobs::wait(job, Duration::from_mins(20));
             // What it says it is now.
             let now = match (&program, remote::host(&host)) {
                 (Some(p), _) => local_version(p),
@@ -454,6 +457,14 @@ impl Updates {
                 Ok(()) => ("done", format!("The update finished, but {name}{where_} still says {}.", if now.is_empty() { item.current.clone() } else { now.clone() })),
                 Err(why) => ("failed", format!("Updating {name}{where_} failed: {why}")),
             };
+            tracing::event!(
+                name: "update.agent.finished", tracing::Level::INFO,
+                update.agent = %item.agent,
+                server.address = %host,
+                update.state = state,
+                update.version = %now,
+                "updating {{update.agent}} on {{server.address}}: {{update.state}}, now {{update.version}}",
+            );
             let _ = thread.queue(move |mut this| {
                 if let Some(i) = this.as_mut().rust_mut().items.get_mut(&key) {
                     i.state = state.into();
@@ -480,6 +491,7 @@ impl Updates {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let set = |state: &'static str, message: String| {
+                tracing::event!(name: "update.harlo.finished", tracing::Level::INFO, update.version = %item.latest, update.state = state, "updating harlo to {{update.version}}: {{update.state}}");
                 let key = key.clone();
                 let _ = thread.queue(move |mut this| {
                     if let Some(i) = this.as_mut().rust_mut().items.get_mut(&key) {
@@ -507,7 +519,7 @@ impl Updates {
                         }
                         this.publish();
                     });
-                    match crate::jobs::wait(job, Duration::from_secs(20 * 60)) {
+                    match crate::jobs::wait(job, Duration::from_mins(20)) {
                         Ok(()) => {
                             set("done", installed);
                             let _ = std::fs::remove_file(file);
@@ -525,7 +537,7 @@ impl Updates {
         if let Some(program) = updates::this_program()
             && let Err(e) = updates::relaunch_after_exit(&program)
         {
-            tracing::warn!("harlo won't start again by itself: {e}");
+            tracing::event!(name: "update.restart.failed", tracing::Level::WARN, error.message = %e, "harlo won't start again by itself: {{error.message}}");
         }
     }
 

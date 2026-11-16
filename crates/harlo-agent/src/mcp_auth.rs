@@ -16,6 +16,8 @@
 //!   server's address, refreshed before they expire (under a file lock:
 //!   helpers share them), and sent as a bearer token.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
@@ -175,7 +177,7 @@ async fn discover_resource(url: &str, kind_sse: bool, headers: &[(String, String
     for (k, v) in headers {
         req = req.header(k.as_str(), v.as_str());
     }
-    let resp = tokio::time::timeout(std::time::Duration::from_secs(30), req.send()).await.map_err(|_| anyhow!("{url} didn't answer"))?.with_context(|| format!("reaching {url}"))?;
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(30), req.send()).await.ok().ok_or_else(|| anyhow!("{url} didn't answer"))?.with_context(|| format!("reaching {url}"))?;
     let status = resp.status().as_u16();
     if status != 401 && status != 403 {
         bail!("{url} doesn't ask for a sign-in (it answered HTTP {status})");

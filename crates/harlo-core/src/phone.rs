@@ -1,7 +1,8 @@
-//! Phone access (Settings → Devices, "Pair a device"): a phone pairs with
-//! harlo by scanning a QR code and then reaches harlo's sessions over an
-//! end-to-end encrypted channel, directly (LAN, Tailscale) or through a
-//! relay that only forwards opaque frames.
+//! Phone access (Settings → Devices, "Pair a device").
+//!
+//! A phone pairs with harlo by scanning a QR code and then reaches harlo's
+//! sessions over an end-to-end encrypted channel, directly (LAN, Tailscale) or
+//! through a relay that only forwards opaque frames.
 //!
 //! Crypto is NaCl's box (X25519 + XSalsa20-Poly1305), as tweetnacl does in
 //! the phone's browser:
@@ -17,6 +18,8 @@
 //!   carries the connection's random id and a sequence number (so recorded
 //!   frames can't be replayed into another connection or reordered).
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -29,19 +32,24 @@ use serde_json::{Value, json};
 
 /// Where harlo keeps its phone identity and devices.
 pub fn dir() -> PathBuf {
-    crate::db::default_path().parent().map(|p| p.join("phone")).unwrap_or_else(|| PathBuf::from("phone"))
+    crate::db::default_path().parent().map_or_else(|| PathBuf::from("phone"), |p| p.join("phone"))
 }
 
 pub fn b64(bytes: &[u8]) -> String {
     STANDARD.encode(bytes)
 }
 
+/// Decodes standard base64.
+///
+/// # Errors
+///
+/// When `s` isn't valid base64.
 pub fn unb64(s: &str) -> Result<Vec<u8>> {
     STANDARD.decode(s.trim()).or_else(|_| URL_SAFE_NO_PAD.decode(s.trim())).context("bad base64")
 }
 
 fn key_bytes(s: &str) -> Result<[u8; 32]> {
-    unb64(s)?.try_into().map_err(|_| anyhow::anyhow!("a key is 32 bytes"))
+    unb64(s)?.try_into().ok().ok_or_else(|| anyhow::anyhow!("a key is 32 bytes"))
 }
 
 /// Random bytes, base64url (pairing codes, connection ids).
@@ -86,13 +94,13 @@ pub fn use_relay_for_run(url: &str) {
 
 /// The relay harlo uses.
 pub fn relay_url() -> &'static str {
-    RELAY_FOR_RUN.get().map(String::as_str).unwrap_or(BUILT_IN_RELAY.trim())
+    RELAY_FOR_RUN.get().map_or(BUILT_IN_RELAY.trim(), String::as_str)
 }
 
-/// A harlo relay harlo connects to, so phones can reach it from anywhere. The
-/// secret proves to the relay that this harlo owns its relay id.
-/// (An address saved by earlier harlos, `url`, is no longer read: there's
-/// one relay, `relay_url`.)
+/// A harlo relay harlo connects to, so phones can reach it from anywhere.
+///
+/// The secret proves to the relay that this harlo owns its relay id. There's
+/// one relay, `relay_url`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelaySettings {
     pub on: bool,
@@ -103,10 +111,15 @@ impl RelaySettings {
     /// Loads them, making the secret the first time.
     pub fn load(path: &Path) -> Self {
         let v: Value = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-        let secret = v["secret"].as_str().filter(|s| s.len() >= 32).map(str::to_owned).unwrap_or_else(|| random_id(32));
+        let secret = v["secret"].as_str().filter(|s| s.len() >= 32).map_or_else(|| random_id(32), str::to_owned);
         Self { on: v["on"].as_bool().unwrap_or(false), secret }
     }
 
+    /// Saves the settings, readable only by you.
+    ///
+    /// # Errors
+    ///
+    /// An I/O error when the file can't be written.
     pub fn save(&self, path: &Path) -> Result<()> {
         write_private(path, &json!({ "v": 1, "on": self.on, "secret": self.secret }).to_string())
     }
@@ -154,12 +167,24 @@ fn page_base(url: &str) -> Option<String> {
 
 // ---- harlo's identity -------------------------------------------------------
 
+/// harlo's key pair for talking to paired phones.
 pub struct Identity {
     secret: SecretKey,
 }
 
+impl std::fmt::Debug for Identity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The public half only: the secret key never goes into a log.
+        f.debug_struct("Identity").field("public", &self.public_b64()).finish_non_exhaustive()
+    }
+}
+
 impl Identity {
     /// The saved key pair, or a new one (saved, readable only by you).
+    ///
+    /// # Errors
+    ///
+    /// An I/O error when a new key pair can't be saved.
     pub fn load_or_create(path: &Path) -> Result<Self> {
         if let Ok(text) = std::fs::read_to_string(path)
             && let Ok(v) = serde_json::from_str::<Value>(&text)
@@ -243,6 +268,7 @@ impl PushTarget {
 }
 
 /// Paired devices, in a JSON file.
+#[derive(Debug)]
 pub struct Devices {
     path: PathBuf,
     pub list: Vec<Device>,
@@ -270,6 +296,11 @@ impl Devices {
         Self { path: path.to_owned(), list }
     }
 
+    /// Saves the devices, readable only by you.
+    ///
+    /// # Errors
+    ///
+    /// An I/O error when the file can't be written.
     pub fn save(&self) -> Result<()> {
         let devices: Vec<Value> = self
             .list
@@ -290,6 +321,10 @@ impl Devices {
     }
 
     /// Registers a device (or renames it, if its key is known).
+    ///
+    /// # Errors
+    ///
+    /// When `public_b64` isn't a key, or the devices can't be saved.
     pub fn add(&mut self, name: &str, public_b64: &str, now: i64) -> Result<Device> {
         key_bytes(public_b64)?;
         let name = name.trim().chars().take(60).collect::<String>();
@@ -307,6 +342,11 @@ impl Devices {
         Ok(d)
     }
 
+    /// Forgets a device: whether it was known.
+    ///
+    /// # Errors
+    ///
+    /// When the devices can't be saved.
     pub fn remove(&mut self, id: &str) -> Result<bool> {
         let before = self.list.len();
         self.list.retain(|d| d.id != id);
@@ -380,6 +420,12 @@ impl Offer {
         URL_SAFE_NO_PAD.encode(v.to_string())
     }
 
+    /// Reads an offer from its QR code's text.
+    ///
+    /// # Errors
+    ///
+    /// When `s` isn't an offer: not base64 JSON, an unknown version, or a field
+    /// missing.
     pub fn decode(s: &str) -> Result<Self> {
         let v: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(s.trim())?)?;
         if v["v"] != 1 {
@@ -404,7 +450,20 @@ pub struct Channel {
     cbox: SalsaBox,
 }
 
+impl std::fmt::Debug for Channel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The box holds the shared key: nothing of it is shown.
+        f.debug_struct("Channel").finish_non_exhaustive()
+    }
+}
+
 impl Channel {
+    /// A frame of `plaintext`, sealed with a fresh nonce.
+    ///
+    /// # Panics
+    ///
+    /// When `plaintext` is too big to seal (more than the cipher's limit of
+    /// 256 GiB); a phone message is far smaller.
     pub fn seal(&self, plaintext: &[u8]) -> String {
         let nonce = SalsaBox::generate_nonce(&mut OsRng);
         let ct = self.cbox.encrypt(&nonce, plaintext).expect("encryption doesn't fail");
@@ -413,18 +472,25 @@ impl Channel {
         b64(&out)
     }
 
+    /// The plaintext of a frame from [`seal`](Self::seal).
+    ///
+    /// # Errors
+    ///
+    /// When the frame isn't base64, is too short, or doesn't decrypt (another
+    /// key, or tampered with).
     pub fn open(&self, frame: &str) -> Result<Vec<u8>> {
         let bytes = unb64(frame)?;
         if bytes.len() < 24 + 16 {
             bail!("frame too short");
         }
         let (nonce, ct) = bytes.split_at(24);
-        self.cbox.decrypt(crypto_box::Nonce::from_slice(nonce), ct).map_err(|_| anyhow::anyhow!("a frame didn't decrypt"))
+        self.cbox.decrypt(crypto_box::Nonce::from_slice(nonce), ct).ok().ok_or_else(|| anyhow::anyhow!("a frame didn't decrypt"))
     }
 }
 
 /// One connection's channel: JSON messages tagged with the connection id
 /// and increasing sequence numbers (each direction its own).
+#[derive(Debug)]
 pub struct Session {
     channel: Channel,
     pub id: String,
@@ -445,6 +511,11 @@ impl Session {
 
     /// The message, if the frame is for this connection and newer than the
     /// last one.
+    ///
+    /// # Errors
+    ///
+    /// When the frame doesn't open (see [`Channel::open`]), isn't JSON, is for
+    /// another connection, or isn't newer than the last.
     pub fn open(&mut self, frame: &str) -> Result<Value> {
         let v: Value = serde_json::from_slice(&self.channel.open(frame)?)?;
         if v["c"] != self.id.as_str() {
@@ -459,9 +530,49 @@ impl Session {
     }
 }
 
+/// Photos a phone sent (`[{ data, mimeType }]`, base64) as image contents.
+///
+/// Types other than JPEG, PNG, GIF and WebP, and empty photos, are dropped.
+pub fn images(list: &Value) -> Vec<Value> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter(|i| matches!(i["mimeType"].as_str(), Some("image/jpeg" | "image/png" | "image/gif" | "image/webp")) && i["data"].as_str().is_some_and(|d| !d.is_empty()))
+        .map(|i| json!({ "type": "image", "data": i["data"], "mimeType": i["mimeType"] }))
+        .collect()
+}
+
+/// The `<file>` blocks naming a phone's photos, as attachments are named.
+pub fn image_blocks(n: usize) -> String {
+    (1..=n).map(|i| format!("<file name=\"Photo {i}\"></file>\n")).collect()
+}
+
+/// The plan limits phones show, from this computer's and each machine's.
+///
+/// `here` is this computer's (its `accounts` and `updatedAt`), `hosts` each
+/// machine's by name; anything else there reads as none.
+pub fn limits(here: &Value, hosts: &Value) -> Value {
+    json!({
+        "here": { "accounts": here["accounts"].as_array().cloned().unwrap_or_default(), "updatedAt": here["updatedAt"] },
+        "hosts": if hosts.is_object() { hosts.clone() } else { json!({}) },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_never_shows_the_keys() {
+        let id = Identity::from_secret([7; 32]);
+        let secret = b64(&[7; 32]);
+        let shown = format!("{id:?}");
+        assert!(shown.contains(&id.public_b64()), "{shown}");
+        assert!(!shown.contains(&secret), "{shown}");
+        let session = Session::new(id.channel(&[9; 32]), "c1".into());
+        let shown = format!("{session:?}");
+        assert!(shown.contains("Channel { .. }") && !shown.contains(&secret), "{shown}");
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("harlo-phone-{name}-{}", std::process::id()));
@@ -479,7 +590,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(d.join("identity.json")).unwrap().permissions().mode() & 0o777, 0o600);
-        }
+        };
         assert_eq!(fingerprint(&a.public_b64()).len(), 19);
         std::fs::remove_dir_all(d).unwrap();
     }
@@ -496,17 +607,17 @@ mod tests {
         let f1 = theirs.seal(&json!({ "op": "sessions" }));
         assert_eq!(ours.open(&f1).unwrap(), json!({ "op": "sessions" }));
         // The same frame again: refused.
-        assert!(ours.open(&f1).is_err());
+        ours.open(&f1).unwrap_err();
         let reply = ours.seal(&json!({ "ok": true }));
         assert_eq!(theirs.open(&reply).unwrap()["ok"], true);
         // Another connection's frame: refused.
         let mut other = Session::new(Channel { cbox: SalsaBox::new(&PublicKey::from(harlo_pub), &phone) }, "conn2".into());
-        assert!(ours.open(&other.seal(&json!({}))).is_err());
+        ours.open(&other.seal(&json!({}))).unwrap_err();
         // A stranger's key: doesn't decrypt.
         let stranger = SecretKey::generate(&mut OsRng);
         let mut fake = Session::new(Channel { cbox: SalsaBox::new(&PublicKey::from(harlo_pub), &stranger) }, "conn1".into());
         let _ = fake.seal(&json!({}));
-        assert!(ours.open(&fake.seal(&json!({ "op": "x" }))).is_err());
+        ours.open(&fake.seal(&json!({ "op": "x" }))).unwrap_err();
         std::fs::remove_dir_all(d).unwrap();
     }
 
@@ -517,7 +628,7 @@ mod tests {
         let mut devs = Devices::load(&path);
         let key = b64(SecretKey::generate(&mut OsRng).public_key().as_bytes());
         let dev = devs.add("Robin's phone", &key, 100).unwrap();
-        assert!(devs.add("x", "not a key", 1).is_err());
+        devs.add("x", "not a key", 1).unwrap_err();
         let again = Devices::load(&path);
         assert_eq!(again.find_by_key(&key).unwrap().name, "Robin's phone");
         let mut again = again;
@@ -533,7 +644,7 @@ mod tests {
         let offer = Offer { key: key.clone(), code: random_id(16), name: "desk".into(), relay: "wss://r.example".into(), relay_id: "abc".into(),
             endpoints: vec!["ws://100.64.0.2:7676/ws".into(), "ws://192.168.1.5:7676/ws".into()] };
         assert_eq!(Offer::decode(&offer.encode()).unwrap(), offer);
-        assert!(Offer::decode("!!").is_err());
+        Offer::decode("!!").unwrap_err();
         std::fs::remove_dir_all(d).unwrap();
     }
 
@@ -594,8 +705,30 @@ process.stdout.write(Buffer.concat([Buffer.from(nonce), Buffer.from(box)]).toStr
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        }
+        };
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+
+
+    #[test]
+    fn a_phones_photos_become_images() {
+        let list = json!([
+            { "data": "aGk=", "mimeType": "image/png" },
+            { "data": "", "mimeType": "image/jpeg" },
+            { "data": "aGk=", "mimeType": "application/pdf" },
+        ]);
+        let images = super::images(&list);
+        assert_eq!(images, [json!({ "type": "image", "data": "aGk=", "mimeType": "image/png" })]);
+        assert!(super::images(&json!("not a list")).is_empty());
+        assert_eq!(super::image_blocks(2), "<file name=\"Photo 1\"></file>\n<file name=\"Photo 2\"></file>\n");
+    }
+
+    #[test]
+    fn limits_take_only_what_phones_read() {
+        let here = json!({ "accounts": [{ "plan": "pro" }], "updatedAt": 5, "other": 1 });
+        assert_eq!(super::limits(&here, &json!(null)), json!({ "here": { "accounts": [{ "plan": "pro" }], "updatedAt": 5 }, "hosts": {} }));
+        let hosts = json!({ "nas": { "accounts": [] } });
+        assert_eq!(super::limits(&json!(null), &hosts)["hosts"], hosts);
+    }
 }

@@ -1,6 +1,9 @@
 //! Dev check: front matter validation, repair and field edits over a corpus
 //! (scripts/wiki-bench/okf-corpus.mjs's lines on stdin), printing each
 //! difference.
+
+// Rust guideline compliant 2026-10-09
+
 use harlo_wiki::okf;
 use serde_json::json;
 use std::io::BufRead;

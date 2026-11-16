@@ -17,6 +17,8 @@
 //! Tokens go straight to the tool or to git; harlo keeps none, and never
 //! reads the ones they keep.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -182,22 +184,22 @@ pub(crate) fn forgejo_api(remote_host: &str) -> Option<git_hosting::Forgejo> {
 }
 
 /// Runs a command, `input` on its stdin; its output, or why it failed.
-pub(crate) fn run(mut c: std::process::Command, input: Option<&str>) -> Result<String, String> {
+pub(crate) fn run(mut c: std::process::Command, input: Option<&str>) -> anyhow::Result<String> {
     c.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = c.spawn().map_err(|e| e.to_string())?;
+    let mut child = c.spawn()?;
     if let (Some(text), Some(mut stdin)) = (input, child.stdin.take()) {
         let _ = stdin.write_all(text.as_bytes());
     }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let out = child.wait_with_output()?;
     let text = signin::plain(&format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)));
     if out.status.success() {
         Ok(text)
     } else {
-        Err(text.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("It didn't finish.").to_owned())
+        Err(anyhow::Error::msg(text.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("It didn't finish.").to_owned()))
     }
 }
 
-fn git(args: &[&str], input: Option<&str>) -> Result<String, String> {
+fn git(args: &[&str], input: Option<&str>) -> anyhow::Result<String> {
     let mut c = std::process::Command::new("git");
     c.args(args).env("GIT_TERMINAL_PROMPT", "0");
     run(c, input)
@@ -227,26 +229,26 @@ fn status_of(service: &str) -> Value {
     // (Not signed in, they exit non-zero; what they say is all that matters.)
     let text = match run(c, None) {
         Ok(t) => t,
-        Err(t) => t,
+        Err(e) => format!("{e:#}"),
     };
     with(true, &git_hosting::account_in_status(&text, &host).unwrap_or_default(), "")
 }
 
 /// The credential helper git asks for a host's username and password.
-fn set_helper(host: &str, helper: &str) -> Result<(), String> {
+fn set_helper(host: &str, helper: &str) -> anyhow::Result<()> {
     git(&["config", "--global", "--replace-all", &format!("credential.https://{host}.helper"), helper], None).map(|_| ())
 }
 
 /// After a sign-in: git asks the service's tool for that host.
-fn connect_git(service: &str, host: &str) -> Result<(), String> {
+fn connect_git(service: &str, host: &str) -> anyhow::Result<()> {
     match service {
         "github" => {
-            let mut c = tool(service).ok_or("The GitHub CLI isn't installed.")?;
+            let mut c = tool(service).ok_or_else(|| anyhow::Error::msg("The GitHub CLI isn't installed."))?;
             c.args(["auth", "setup-git", "--hostname", host]);
             run(c, None).map(|_| ())
         }
         "gitlab" => {
-            let glab = find_program("glab").ok_or("glab isn't installed.")?;
+            let glab = find_program("glab").ok_or_else(|| anyhow::Error::msg("glab isn't installed."))?;
             set_helper(host, &format!("!{} auth git-credential", glab.display()))
         }
         _ => Ok(()),
@@ -255,10 +257,10 @@ fn connect_git(service: &str, host: &str) -> Result<(), String> {
 
 /// Forgejo: the token checked, then kept by git for that host only (in the
 /// desktop keyring when git has libsecret, else git's own file).
-fn forgejo_sign_in(host: &str, token: &str) -> Result<String, String> {
+fn forgejo_sign_in(host: &str, token: &str) -> anyhow::Result<String> {
     let base = git_hosting::forgejo_base(&setting("forgejo_host"));
     let base = if setting("forgejo_host").trim().is_empty() { format!("https://{host}") } else { base };
-    let login = git_hosting::forgejo_user(&base, token).map_err(|e| format!("{e:#}"))?;
+    let login = git_hosting::forgejo_user(&base, token).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     let exec = git(&["--exec-path"], None).unwrap_or_default();
     let libsecret = PathBuf::from(exec.trim()).join("git-credential-libsecret").is_file();
     set_helper(host, if libsecret { "libsecret" } else { "store" })?;
@@ -314,12 +316,12 @@ impl Report {
         });
     }
 
-    fn finish(&self, result: Result<String, String>) {
+    fn finish(&self, result: anyhow::Result<String>) {
         self.update(|f| {
             if f.state == "running" {
                 let ok = result.is_ok();
                 f.state = if ok { "done" } else { "failed" }.into();
-                f.message = result.unwrap_or_else(|e| e);
+                f.message = result.unwrap_or_else(|e| format!("{e:#}"));
             }
         });
         let _ = self.thread.queue(|mut this| {
@@ -331,11 +333,11 @@ impl Report {
 
 /// Runs a tool's device sign-in: shows the one-time code and the page it
 /// prints, and waits for it to end (or to be cancelled).
-async fn device_sign_in(mut cmd: tokio::process::Command, report: &Report, mut stop: mpsc::UnboundedReceiver<()>) -> Result<(), String> {
-    let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn().map_err(|e| e.to_string())?;
-    let mut stdin = child.stdin.take().ok_or("no input")?;
+async fn device_sign_in(mut cmd: tokio::process::Command, report: &Report, mut stop: mpsc::UnboundedReceiver<()>) -> anyhow::Result<()> {
+    let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn()?;
+    let mut stdin = child.stdin.take().ok_or_else(|| anyhow::Error::msg("no input"))?;
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
-    for mut pipe in [Box::new(child.stdout.take().ok_or("no output")?) as Box<dyn tokio::io::AsyncRead + Unpin + Send>, Box::new(child.stderr.take().ok_or("no output")?)] {
+    for mut pipe in [Box::new(child.stdout.take().ok_or_else(|| anyhow::Error::msg("no output"))?) as Box<dyn tokio::io::AsyncRead + Unpin + Send>, Box::new(child.stderr.take().ok_or_else(|| anyhow::Error::msg("no output"))?)] {
         let tx = tx.clone();
         tokio::spawn(async move {
             let mut buf = vec![0u8; 4096];
@@ -375,20 +377,21 @@ async fn device_sign_in(mut cmd: tokio::process::Command, report: &Report, mut s
                 }
                 None => open = false,
             },
-            _ = tokio::time::sleep(Duration::from_millis(400)), if pending.to_lowercase().contains("press enter") => {
+            () = tokio::time::sleep(Duration::from_millis(400)), if pending.to_lowercase().contains("press enter") => {
                 pending.clear();
                 let _ = stdin.write_all(b"\n").await;
             },
-            s = stop.recv() => if s.is_none() { return Err("Cancelled.".into()) },
+            s = stop.recv() => if s.is_none() { return Err(anyhow::Error::msg("Cancelled.")) },
             status = child.wait(), if !open => break status,
         }
     };
     match status {
         Ok(s) if s.success() => Ok(()),
-        _ => Err(last.iter().rev().find(|l| { let l = l.to_lowercase(); l.contains("error") || l.contains("fail") }).or(last.last()).cloned().unwrap_or_else(|| "It didn't finish.".into())),
+        _ => Err(anyhow::Error::msg(last.iter().rev().find(|l| { let l = l.to_lowercase(); l.contains("error") || l.contains("fail") }).or(last.last()).cloned().unwrap_or_else(|| "It didn't finish.".into()))),
     }
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Setup {
     fn flow_id(&self) -> u64 {
         serde_json::from_str::<Value>(&self.git_flow.to_string()).ok().and_then(|v| v["id"].as_u64()).unwrap_or(0)
@@ -421,7 +424,7 @@ impl Setup {
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             // (Installers download a lot; a stuck one is stopped after 20 minutes.)
-            let (state, message) = match crate::jobs::wait(job, Duration::from_secs(20 * 60)) {
+            let (state, message) = match crate::jobs::wait(job, Duration::from_mins(20)) {
                 Ok(()) => ("done", format!("{label} is installed.")),
                 Err(why) => ("failed", format!("Installing {label} failed: {why}")),
             };
@@ -501,9 +504,9 @@ impl Setup {
             let result = match device_sign_in(cmd, &report, stop).await {
                 Ok(()) => {
                     let (s, h) = (service.clone(), host.clone());
-                    tokio::task::spawn_blocking(move || connect_git(&s, &h)).await.map_err(|e| e.to_string()).and_then(|r| r)
+                    tokio::task::spawn_blocking(move || connect_git(&s, &h)).await.map_err(anyhow::Error::from).and_then(|r| r)
                         .map(|()| format!("git is signed in to {host}."))
-                        .map_err(|e| format!("Signed in, but setting up git failed: {e}"))
+                        .map_err(|e| anyhow::anyhow!("Signed in, but setting up git failed: {e}"))
                 }
                 Err(e) => Err(e),
             };
@@ -522,17 +525,17 @@ impl Setup {
             let result = match service.as_str() {
                 "forgejo" => forgejo_sign_in(&host, &token),
                 "github" | "gitlab" => (|| {
-                    let mut c = tool(&service).ok_or_else(|| format!("{} isn't installed.", git_hosting::cli(&service).unwrap_or_default()))?;
+                    let mut c = tool(&service).ok_or_else(|| anyhow::anyhow!("{} isn't installed.", git_hosting::cli(&service).unwrap_or_default()))?;
                     if service == "github" {
                         c.args(["auth", "login", "--hostname", &host, "--with-token", "--git-protocol", "https"]);
                     } else {
                         c.args(["auth", "login", "--hostname", &host, "--stdin", "--git-protocol", "https"]);
                     }
                     run(c, Some(&format!("{}\n", token.trim())))?;
-                    connect_git(&service, &host).map_err(|e| format!("Signed in, but setting up git failed: {e}"))?;
+                    connect_git(&service, &host).map_err(|e| anyhow::anyhow!("Signed in, but setting up git failed: {e}"))?;
                     Ok(format!("git is signed in to {host}."))
                 })(),
-                _ => Err("Unknown service.".into()),
+                _ => Err(anyhow::Error::msg("Unknown service.")),
             };
             report.finish(result);
         });
@@ -579,7 +582,7 @@ impl Setup {
             let v = {
                 let mut v = status_of(&service);
                 if let Err(e) = result {
-                    v["error"] = json!(e);
+                    v["error"] = json!(format!("{e:#}"));
                 }
                 v
             };

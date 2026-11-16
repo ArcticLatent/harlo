@@ -1,8 +1,12 @@
-//! A page's front matter as OpenWiki keeps it (its knowledge format): the
-//! checks, the deterministic repair, the field edits, and the verification
+//! A page's front matter as OpenWiki keeps it, in its knowledge format.
+//!
+//! The checks, the deterministic repair, the field edits, and the verification
 //! stamps Claims put there. Lists are written as OpenWiki's YAML library
 //! writes them (no line folding).
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use crate::claims::Verification;
 use crate::jsre::{Re, is_js_space};
 use crate::store::{Result, Store};
@@ -48,24 +52,24 @@ fn node(v: &Value, ctx: &Ctx) -> String {
                 return "[]".into();
             }
             let item_ctx = Ctx { indent: format!("{}{INDENT_STEP}", ctx.indent), implicit_key: false, force_block_indent: false };
-            block(items.iter().map(|i| format!("- {}", node(i, &item_ctx))).collect(), &ctx.indent)
+            block(&items.iter().map(|i| format!("- {}", node(i, &item_ctx))).collect::<Vec<_>>(), &ctx.indent)
         }
         Value::Object(m) => {
             if m.is_empty() {
                 return "{}".into();
             }
-            block(m.iter().map(|(k, v)| pair(k, v, ctx)).collect(), &ctx.indent)
+            block(&m.iter().map(|(k, v)| pair(k, v, ctx)).collect::<Vec<_>>(), &ctx.indent)
         }
     }
 }
 
-fn block(lines: Vec<String>, indent: &str) -> String {
+fn block(lines: &[String], indent: &str) -> String {
     let mut out = lines[0].clone();
     for l in &lines[1..] {
         if l.is_empty() {
             out.push('\n');
         } else {
-            out.push_str(&format!("\n{indent}{l}"));
+            let _ = write!(out, "\n{indent}{l}");
         }
     }
     out
@@ -194,7 +198,7 @@ fn double_quoted(value: &str, ctx: &Ctx) -> String {
                         "00a0" => out.push_str("\\_"),
                         "2028" => out.push_str("\\L"),
                         "2029" => out.push_str("\\P"),
-                        c if c.starts_with("00") => out.push_str(&format!("\\x{}", &c[2..])),
+                        c if c.starts_with("00") => _ = write!(out, "\\x{}", &c[2..]),
                         _ => out.push_str(&slice(i, i + 6)),
                     }
                     i += 5;
@@ -261,12 +265,12 @@ fn block_string(value: &str, ctx: &mut Ctx) -> String {
     while start_end < bchars.len() {
         match bchars[start_end] {
             ' ' => start_with_space = true,
-            '\n' => start_nl = start_end as isize,
+            '\n' => start_nl = isize::try_from(start_end).unwrap_or(isize::MAX),
             _ => break,
         }
         start_end += 1;
     }
-    let take = if start_nl < start_end as isize { (start_nl + 1) as usize } else { start_end };
+    let take = if start_nl < isize::try_from(start_end).unwrap_or(isize::MAX) { usize::try_from(start_nl + 1).unwrap_or(0) } else { start_end };
     let mut start: String = bchars[..take].iter().collect();
     if !start.is_empty() {
         body = bchars[take..].iter().collect();
@@ -368,11 +372,10 @@ pub fn validate(content: &str) -> Validation {
             issues.push(issue(&format!("invalid_{field}"), &format!("Field `{field}` must be a non-empty string."), None));
         }
     }
-    if let Some(tags) = f.get("tags") {
-        if !tags.as_array().is_some_and(|t| t.iter().all(|x| non_empty(Some(x)))) {
+    if let Some(tags) = f.get("tags")
+        && !tags.as_array().is_some_and(|t| t.iter().all(|x| non_empty(Some(x)))) {
             issues.push(issue("invalid_tags", "Field `tags` must be a YAML list of non-empty strings.", None));
         }
-    }
     if f.get("generated").is_some_and(|g| !actor_event(g)) {
         issues.push(issue("invalid_generated", "Field `generated` must be a mapping with a non-empty string `by` (actor) and an optional `at` ISO 8601 datetime with an explicit UTC offset.", None));
     }
@@ -385,11 +388,10 @@ pub fn validate(content: &str) -> Validation {
             issues.push(issue("invalid_verified", "Field `verified` must be a `{by, at}` mapping or a YAML list of them, each with a non-empty string `by` (actor) and any `at` value as an ISO 8601 datetime with an explicit UTC offset.", None));
         }
     }
-    if let Some(s) = f.get("sources") {
-        if !s.as_array().is_some_and(|a| a.iter().all(|e| is_record(e) && non_empty(e.get("resource")))) {
+    if let Some(s) = f.get("sources")
+        && !s.as_array().is_some_and(|a| a.iter().all(|e| is_record(e) && non_empty(e.get("resource")))) {
             issues.push(issue("invalid_sources", "Field `sources` must be a YAML list of mappings, each with a non-empty string `resource`.", None));
         }
-    }
     if f.get("status").is_some_and(|s| !s.as_str().is_some_and(|s| STATUS_VALUES.contains(&s))) {
         issues.push(issue("invalid_status", "Field `status` must be one of `draft`, `stable`, or `deprecated`.", None));
     }
@@ -599,6 +601,10 @@ fn canonical_list(content: &str) -> bool {
 /// `synchronizeClaimsVerification`: each page's OpenWiki verification event
 /// made what its Claims say (others' events kept); the pages it changed,
 /// with what they were.
+///
+/// # Errors
+///
+/// An [`Error`](crate::store::Error) when a page can't be read or written.
 pub fn synchronize_verification(store: &Store, by_page: &[(String, Option<Verification>)], excluded: &HashSet<String>) -> Result<Vec<(String, String)>> {
     let mut changes = Vec::new();
     for page in store.discover_pages()? {

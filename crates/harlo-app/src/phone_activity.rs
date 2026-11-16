@@ -9,6 +9,8 @@
 //! (the app's widget opens it): Apple and the relay see only the phase, the
 //! counts and the times.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -37,7 +39,7 @@ const DISMISS_AFTER: i64 = 15 * 60;
 /// sleep, harlo may have quit) rather than "Working" for hours…
 const STALE_AFTER: i64 = 25 * 60;
 /// …so a quiet run (one long command) is sent again this often.
-const KEEPALIVE: Duration = Duration::from_secs(10 * 60);
+const KEEPALIVE: Duration = Duration::from_mins(10);
 
 /// One phone's activity for a session.
 #[derive(Clone)]
@@ -64,7 +66,7 @@ fn watchers() -> &'static Watchers {
 
 /// A phone's activity for the session `key` (its live key): its push token,
 /// or "" when it ended on the phone.
-pub fn register(shared: &Arc<Shared>, device: &Device, key: &str, token: &str, sandbox: bool) -> Result<(), String> {
+pub fn register(shared: &Arc<Shared>, device: &Device, key: &str, token: &str, sandbox: bool) -> anyhow::Result<()> {
     let mut w = watchers().lock().unwrap();
     if token.is_empty() {
         if let Some((_, tx)) = w.get(key) {
@@ -73,23 +75,23 @@ pub fn register(shared: &Arc<Shared>, device: &Device, key: &str, token: &str, s
         return Ok(());
     }
     if token.len() > 200 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err("That isn't a push token.".into());
+        return Err(anyhow::Error::msg("That isn't a push token."));
     }
-    let public = phone::unb64(&device.public_key).ok().and_then(|b| <[u8; 32]>::try_from(b).ok()).ok_or("This phone's key is unreadable.")?;
+    let public = phone::unb64(&device.public_key).ok().and_then(|b| <[u8; 32]>::try_from(b).ok()).ok_or_else(|| anyhow::Error::msg("This phone's key is unreadable."))?;
     let reg = Reg { device: device.id.clone(), token: token.to_ascii_lowercase(), sandbox, public };
     if let Some((_, tx)) = w.get(key)
         && tx.send(Msg::Add(reg.clone())).is_ok()
     {
         return Ok(());
     }
-    let live = crate::registry::get(key).ok_or("That session isn't running.")?;
+    let live = crate::registry::get(key).ok_or_else(|| anyhow::Error::msg("That session isn't running."))?;
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     note(key, std::slice::from_ref(&reg), now_ms());
     let (tx, rx) = mpsc::unbounded_channel();
     let _ = tx.send(Msg::Add(reg));
     w.insert(key.to_owned(), (id, tx));
-    crate::runtime().spawn(watch(shared.clone(), key.to_owned(), id, live, rx));
+    crate::runtime().spawn(watch(Arc::clone(shared), key.to_owned(), id, live, rx));
     Ok(())
 }
 
@@ -137,7 +139,7 @@ struct Tracker {
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 fn clip(s: &str, n: usize) -> String {
@@ -150,13 +152,13 @@ impl Tracker {
         for u in batch {
             match u {
                 SessionUpdate::Reset(rows) => {
-                    self.rows = rows.clone();
+                    self.rows.clone_from(rows);
                     self.ready = true;
                 }
                 SessionUpdate::Rows(changes) => {
                     for c in changes {
                         match c {
-                            ListChange::Update { at, row } if *at < self.rows.len() => self.rows[*at] = row.clone(),
+                            ListChange::Update { at, row } if *at < self.rows.len() => self.rows[*at] = Arc::clone(row),
                             ListChange::Remove { at, count } => {
                                 let end = (*at + *count).min(self.rows.len());
                                 self.rows.drain((*at).min(end)..end);
@@ -165,7 +167,7 @@ impl Tracker {
                                 let at = (*at).min(self.rows.len());
                                 self.rows.splice(at..at, rows.iter().cloned());
                             }
-                            _ => {}
+                            ListChange::Update { .. } => {}
                         }
                     }
                 }
@@ -284,7 +286,7 @@ async fn watch(shared: Arc<Shared>, key: String, id: u64, live: crate::registry:
                 Some(b) => t.apply(&b),
                 None => break,
             },
-            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            () = tokio::time::sleep(Duration::from_secs(1)) => {}
         }
         let gone = crate::registry::get(&key).is_none();
         // Over: the run ended, the session closed, or it never started.
@@ -313,7 +315,7 @@ async fn watch(shared: Arc<Shared>, key: String, id: u64, live: crate::registry:
                 }
                 apns::Sent::Gone(_) => lost.push(r.device.clone()),
                 apns::Sent::Failed(e) => {
-                    tracing::info!("live activity for {key}: {e}");
+                    tracing::event!(name: "phone.activity.update.failed", tracing::Level::INFO, session.key = %key, error.message = %e, "live activity for {{session.key}}: {{error.message}}");
                     // Tried: not again until the next change, or the gap.
                     sent.insert(r.device.clone(), (state.clone(), Instant::now()));
                 }
@@ -392,7 +394,7 @@ async fn end_left_in(path: &std::path::Path, identity: &phone::Identity) {
     for (token, sandbox, body) in left_ends(path, identity) {
         let push = apns::Push { device_token: &token, sandbox, topic: crate::phone_push::TOPIC, payload: &body, collapse_id: None, kind: apns::Kind::Activity { urgent: true } };
         if let apns::Sent::Failed(e) = crate::phone_push::forward(&push).await {
-            tracing::info!("ending a live activity left over: {e}");
+            tracing::event!(name: "phone.activity.end.failed", tracing::Level::INFO, error.message = %e, "ending a live activity left over: {{error.message}}");
         }
     }
 }
@@ -456,7 +458,7 @@ mod tests {
         // Idle, but not long enough to call it over.
         assert!(!t.finished());
         assert_eq!(t.state().phase, "done");
-        t.idle_since = Some(Instant::now() - SETTLE);
+        t.idle_since = Some(Instant::now().checked_sub(SETTLE).unwrap());
         assert!(t.finished());
     }
 

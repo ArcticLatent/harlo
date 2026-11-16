@@ -3,6 +3,10 @@
 //! on the code view's item (cpp/harlo_codeview.h). TerminalView.qml passes
 //! it the keys and the mouse.
 
+// Rust guideline compliant 2026-10-09
+
+#![expect(clippy::needless_pass_by_value, reason = "the code cxx-qt generates for this file's bridge passes property values by value")]
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -217,9 +221,10 @@ impl cxx_qt::Initialize for TerminalSession {
 }
 
 fn strings(list: &QStringList) -> Vec<String> {
-    list.iter().map(|s| s.to_string()).collect()
+    list.iter().map(std::string::ToString::to_string).collect()
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl TerminalSession {
     pub fn start(mut self: Pin<&mut Self>, cwd: &QString, cols: i32, rows: i32, palette: &QStringList) -> bool {
         if self.terminal.is_some() {
@@ -258,7 +263,7 @@ impl TerminalSession {
                 let _ = thread.queue(move |this| this.set_title(QString::from(&t)));
             }
             TermEvent::Bell => {
-                let _ = thread.queue(|this| this.bell());
+                let _ = thread.queue(qobject::TerminalSession::bell);
             }
             TermEvent::Exited(code) => {
                 let _ = thread.queue(move |mut this| {
@@ -274,7 +279,7 @@ impl TerminalSession {
                 });
             }
         };
-        match Terminal::spawn(local_dir, shell, cols.max(2) as usize, rows.max(1) as usize, sink) {
+        match Terminal::spawn(local_dir, shell, usize::try_from(cols.max(2)).unwrap_or(usize::MAX), usize::try_from(rows.max(1)).unwrap_or(usize::MAX), sink) {
             Ok(t) => {
                 self.as_mut().rust_mut().terminal = Some(t);
                 self.as_mut().set_cwd(QString::from(&dir.to_string_lossy().into_owned()));
@@ -297,14 +302,14 @@ impl TerminalSession {
 
     pub fn resize(mut self: Pin<&mut Self>, cols: i32, rows: i32) {
         if let Some(t) = self.as_mut().rust_mut().terminal.as_mut() {
-            t.resize(cols.max(2) as usize, rows.max(1) as usize);
+            t.resize(usize::try_from(cols.max(2)).unwrap_or(usize::MAX), usize::try_from(rows.max(1)).unwrap_or(usize::MAX));
         }
         self.wake();
     }
 
     pub fn key(self: Pin<&mut Self>, key: i32, modifiers: i32, text: &QString) {
         let Some(t) = self.terminal.as_ref() else { return };
-        let bytes = key_bytes(key, modifiers as u32, &text.to_string(), t.app_cursor());
+        let bytes = key_bytes(key, u32::try_from(modifiers).unwrap_or(0), &text.to_string(), t.app_cursor());
         // (Only a key that types something: Ctrl or Shift alone, on the way
         // to Ctrl+Shift+C, keeps the selection to copy.)
         if bytes.is_empty() {
@@ -349,7 +354,7 @@ impl TerminalSession {
     }
 
     pub fn selected_text(&self) -> QString {
-        QString::from(&self.terminal.as_ref().map(|t| t.selected_text()).unwrap_or_default())
+        QString::from(&self.terminal.as_ref().map(harlo_core::terminal::Terminal::selected_text).unwrap_or_default())
     }
 
     pub fn link_at(&self, row: i32, col: i32) -> QString {
@@ -357,7 +362,7 @@ impl TerminalSession {
     }
 
     pub fn row_text(&self, row: i32) -> QString {
-        QString::from(&self.screen.row_text(row.max(0) as usize))
+        QString::from(&self.screen.row_text(usize::try_from(row).unwrap_or(0)))
     }
 
     pub fn stop(mut self: Pin<&mut Self>) {
@@ -384,6 +389,7 @@ impl TerminalSession {
         }
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     pub fn set_padding(mut self: Pin<&mut Self>, pad: f64) {
         if pad != self.padding {
             self.as_mut().rust_mut().padding = pad;
@@ -402,6 +408,7 @@ impl TerminalSession {
     }
 
     /// The cell's size for the font at the window's scale.
+    #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     fn measure(mut self: Pin<&mut Self>) {
         let dpr = self.pixel_ratio().max(0.5) as f32;
         let (family, px) = (self.font_family.to_string(), self.font_pixel_size as f32);
@@ -410,11 +417,11 @@ impl TerminalSession {
             rust.painter.set_font(&family, px);
             rust.painter.cell_size(dpr)
         };
-        if w as f64 != self.cell_width {
-            self.as_mut().set_cell_width(w as f64);
+        if f64::from(w) != self.cell_width {
+            self.as_mut().set_cell_width(f64::from(w));
         }
-        if h as f64 != self.cell_height {
-            self.as_mut().set_cell_height(h as f64);
+        if f64::from(h) != self.cell_height {
+            self.as_mut().set_cell_height(f64::from(h));
         }
         self.update();
     }
@@ -422,7 +429,7 @@ impl TerminalSession {
     /// Output arrived (or the view moved): draw the screen again, the
     /// cursor holding still meanwhile.
     fn wake(mut self: Pin<&mut Self>) {
-        let back = self.terminal.as_ref().map_or(0, |t| t.scrolled_back()) as i32;
+        let back = i32::try_from(self.terminal.as_ref().map_or(0, harlo_core::terminal::Terminal::scrolled_back)).unwrap_or(i32::MAX);
         if back != self.scrolled_back {
             self.as_mut().set_scrolled_back(back);
         }
@@ -439,6 +446,7 @@ impl TerminalSession {
         self.update();
     }
 
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
     unsafe fn paint(mut self: Pin<&mut Self>, painter: *mut qobject::QPainter) {
         let t = Instant::now();
         let dpr = self.pixel_ratio();
@@ -452,8 +460,13 @@ impl TerminalSession {
             }
             let cursor = rust.terminal.is_some().then_some(CursorLook { focused: rust.focused, on: rust.blink_on, color: rust.palette.cursor });
             rust.painter.render(&rust.screen, rust.palette.background, cursor, w, h, dpr as f32);
-        }
-        unsafe { self.blit(painter, self.painter.pixels().as_ptr(), w as i32, h as i32) };
+        };
+        let pixels = self.painter.pixels();
+        assert!(pixels.len() >= w * h * 4, "the terminal drew {} bytes for a {w}x{h} frame", pixels.len());
+        // SAFETY: Qt passes a painter valid for this paint call; blit reads
+        // `w * h * 4` bytes, which the check above guarantees `pixels` holds,
+        // and draws them before returning, while `pixels` is still borrowed.
+        unsafe { self.blit(painter, pixels.as_ptr(), i32::try_from(w).unwrap_or(i32::MAX), i32::try_from(h).unwrap_or(i32::MAX)) };
         // (Read by the self-tests; no signal from the render thread.)
         self.as_mut().rust_mut().paint_ms = t.elapsed().as_secs_f64() * 1000.0;
     }

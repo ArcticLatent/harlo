@@ -1,17 +1,19 @@
 //! One harness child process speaking JSONL RPC over stdio.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::error::{Context as _, Error, ErrorKind};
 use crate::event::{HarnessEvent, HarnessKind, Translator};
 use crate::framing::{ChunkAssembler, read_record};
 use crate::protocol_log::ProtocolLog;
@@ -100,14 +102,22 @@ pub(crate) enum Outgoing {
     Kill,
 }
 
-/// Handle to a running harness. Dropping it closes stdin, which asks the
-/// harness to shut down; the process is killed if the handle is dropped
-/// before it exits on its own.
+/// Handle to a running harness.
+///
+/// Dropping it closes stdin, which asks the harness to shut down; the
+/// process is killed if the handle is dropped before it exits on its own.
 pub struct Harness {
     kind: HarnessKind,
     tx: mpsc::UnboundedSender<Outgoing>,
     pending: Pending,
     next_id: AtomicU64,
+}
+
+impl std::fmt::Debug for Harness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let waiting = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len();
+        f.debug_struct("Harness").field("kind", &self.kind).field("waiting", &waiting).finish_non_exhaustive()
+    }
 }
 
 const STDERR_TAIL_LINES: usize = 80;
@@ -120,29 +130,29 @@ static GROUPS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 /// An agent started (its pid leads its group).
 pub(crate) fn started(pid: Option<u32>) {
     if let Some(pid) = pid {
-        GROUPS.lock().unwrap().push(pid);
+        GROUPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(pid);
     }
 }
 
 /// An agent ended and was waited for (its pid can be another's now).
 pub(crate) fn ended(pid: Option<u32>) {
     if let Some(pid) = pid {
-        GROUPS.lock().unwrap().retain(|p| *p != pid);
+        GROUPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|p| *p != pid);
     }
 }
 
 /// Ends every agent harlo started, and what they started: asked first, then
 /// made to, after a moment. For when harlo quits.
 pub fn stop_all() {
-    stop_groups(std::mem::take(&mut *GROUPS.lock().unwrap()));
+    stop_groups(&std::mem::take(&mut *GROUPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)));
 }
 
-fn stop_groups(groups: Vec<u32>) {
+fn stop_groups(groups: &[u32]) {
     let signal = |sig| {
-        for pid in &groups {
+        for pid in groups {
             // SAFETY: plain syscall on a group harlo started.
             unsafe {
-                libc::kill(-(*pid as i32), sig);
+                libc::kill(-i32::try_from(*pid).unwrap_or(i32::MAX), sig);
             }
         }
     };
@@ -151,7 +161,7 @@ fn stop_groups(groups: Vec<u32>) {
     // for yet still counts, so this waits a second at most.)
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     // SAFETY: signal 0 only asks whether the group is there.
-    while std::time::Instant::now() < deadline && groups.iter().any(|pid| unsafe { libc::kill(-(*pid as i32), 0) } == 0) {
+    while std::time::Instant::now() < deadline && groups.iter().any(|pid| unsafe { libc::kill(-i32::try_from(*pid).unwrap_or(i32::MAX), 0) } == 0) {
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     signal(libc::SIGKILL);
@@ -159,19 +169,24 @@ fn stop_groups(groups: Vec<u32>) {
 
 impl Harness {
     /// Spawns the harness. Must be called inside a tokio runtime context.
-    pub fn spawn(cfg: HarnessConfig) -> Result<(Self, mpsc::UnboundedReceiver<HarnessEvent>)> {
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] that [`is_start`](Error::is_start) when the kind can't
+    /// chat, or its program can't be found or started.
+    pub fn spawn(cfg: HarnessConfig) -> Result<(Self, mpsc::UnboundedReceiver<HarnessEvent>), Error> {
         if cfg.kind == HarnessKind::Demo {
             return Ok(crate::demo::spawn());
         }
         if !cfg.kind.can_chat() {
-            anyhow::bail!("harlo can't run {} sessions yet", cfg.kind.label());
+            return Err(Error::new(ErrorKind::Start, format!("harlo can't run {} sessions yet", cfg.kind.label())));
         }
         if cfg.kind == HarnessKind::Claude {
             let program = match (&cfg.program, &cfg.remote) {
                 (Some(p), _) => p.clone(),
                 // There: its PATH finds it. (It needn't be on this PC too.)
                 (None, Some(_)) => PathBuf::from(cfg.kind.program_name()),
-                (None, None) => resolve_program(cfg.kind).context("could not find the `claude` binary")?,
+                (None, None) => resolve_program(cfg.kind).or_error(ErrorKind::Start, || "could not find the `claude` binary".to_owned())?,
             };
             return crate::claude_run::spawn(cfg, program);
         }
@@ -186,13 +201,13 @@ impl Harness {
                 let mut cmd = Command::new("ssh");
                 cmd.args(&remote.ssh_args)
                     .arg(remote_script(remote, &program.to_string_lossy(), &args, &cfg.cwd, &cfg.env))
-                    .current_dir(std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/")));
+                    .current_dir(std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from));
                 (program, cmd)
             }
             None => {
                 let program = match &cfg.program {
                     Some(p) => p.clone(),
-                    None => resolve_program(cfg.kind).with_context(|| format!("could not find the `{}` binary", cfg.kind.program_name()))?,
+                    None => resolve_program(cfg.kind).or_error(ErrorKind::Start, || format!("could not find the `{}` binary", cfg.kind.program_name()))?,
                 };
                 let mut cmd = Command::new(&program);
                 cmd.args(&args).current_dir(&cfg.cwd);
@@ -209,21 +224,30 @@ impl Harness {
             // Own process group, so terminal signals aimed at us don't hit it
             // and the whole tree can be torn down together later.
             .process_group(0);
-        let mut child = cmd.spawn().with_context(|| format!("failed to start {}", program.display()))?;
+        let mut child = cmd.spawn().or_error(ErrorKind::Start, || format!("failed to start {}", program.display()))?;
         started(child.id());
-        tracing::info!(program = %program.display(), cwd = %cfg.cwd.display(), remote = cfg.remote.is_some(), "spawned harness");
+        tracing::event!(
+            name: "harness.spawn.success", tracing::Level::INFO,
+            harness.kind = cfg.kind.as_str(),
+            process.executable.path = %program.display(),
+            process.working_directory = %cfg.cwd.display(),
+            process.pid = child.id().unwrap_or(0),
+            remote = cfg.remote.is_some(),
+            "spawned {{harness.kind}}: {{process.executable.path}} in {{process.working_directory}}",
+        );
         let log = ProtocolLog::open(cfg.kind, &program, &args, &cfg.cwd);
 
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
+        let piped = || format!("{} started without its pipes", program.display());
+        let stdin = child.stdin.take().or_error(ErrorKind::Start, piped)?;
+        let stdout = child.stdout.take().or_error(ErrorKind::Start, piped)?;
+        let stderr = child.stderr.take().or_error(ErrorKind::Start, piped)?;
 
         let (tx, rx) = mpsc::unbounded_channel();
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let pending: Pending = Arc::default();
         let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::default();
-        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), pending.clone(), log.clone()));
-        let stderr_done = tokio::spawn(stderr_loop(stderr, stderr_tail.clone(), log.clone()));
+        let reader = tokio::spawn(read_loop(cfg.kind, stdout, events_tx.clone(), Arc::clone(&pending), log.clone()));
+        let stderr_done = tokio::spawn(stderr_loop(stderr, Arc::clone(&stderr_tail), log.clone()));
         let (kill_tx, kill_rx) = oneshot::channel();
         tokio::spawn(write_loop(stdin, rx, events_tx.clone(), kill_tx, log));
         tokio::spawn(wait_loop(child, reader, kill_rx, events_tx, stderr_done, stderr_tail));
@@ -253,10 +277,16 @@ impl Harness {
     }
 
     /// Sends a command and waits for its response `data`.
-    pub async fn request(&self, cmd: Value) -> Result<Value> {
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] when the agent isn't running or ends before answering
+    /// ([`is_gone`](Error::is_gone)), or answers with an error
+    /// ([`is_refused`](Error::is_refused)), its own text the message.
+    pub async fn request(&self, cmd: Value) -> Result<Value, Error> {
         // The queue can only be cleared whole: what's kept goes back in, in
         // order (as text: a queued message's images don't come back).
-        if self.kind == HarnessKind::Harlo && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message")) {
+        if self.in_steps(&cmd) {
             let promote = cmd["type"] == "promote_queued_message";
             let text = cmd["message"].as_str().unwrap_or_default();
             let queue = if promote { "followUp" } else { cmd["queue"].as_str().unwrap_or("followUp") };
@@ -276,28 +306,47 @@ impl Harness {
             }
             return match taken {
                 Some(_) => Ok(Value::Null),
-                None => Err(anyhow!("That message has been sent already.")),
+                None => Err(Error::new(ErrorKind::AlreadySent, "That message has been sent already.")),
             };
         }
         self.rpc(cmd).await
     }
 
-    /// One command to the harness, and its answer.
-    async fn rpc(&self, mut cmd: Value) -> Result<Value> {
+    /// Whether [`request`](Self::request) does this command in several steps.
+    ///
+    /// Harlo's queue can only be cleared whole, so removing or promoting a
+    /// queued message is several commands; [`ask`](Self::ask) sends one.
+    #[must_use]
+    pub fn in_steps(&self, cmd: &Value) -> bool {
+        self.kind == HarnessKind::Harlo && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message"))
+    }
+
+    /// Sends a command now and returns its answer to wait for.
+    ///
+    /// The command goes out in the order of this call, among prompts and
+    /// other commands, whenever the answer is awaited. Use this rather than
+    /// [`request`](Self::request) in a spawned task when order matters: a
+    /// mode change then a prompt.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] that [`is_gone`](Error::is_gone) when the agent isn't
+    /// running.
+    pub fn ask(&self, mut cmd: Value) -> Result<Answer, Error> {
         let id = self.next_id();
         cmd["id"] = Value::String(id.clone());
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id.clone(), tx);
+        self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.clone(), tx);
         if self.tx.send(Outgoing::Frame(cmd)).is_err() {
-            self.pending.lock().unwrap().remove(&id);
-            return Err(anyhow!("harness is not running"));
+            self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);
+            return Err(Error::new(ErrorKind::NotRunning, "harness is not running"));
         }
-        let resp = rx.await.map_err(|_| anyhow!("harness exited before responding"))?;
-        if resp["success"].as_bool() == Some(true) {
-            Ok(resp.get("data").cloned().unwrap_or(Value::Null))
-        } else {
-            Err(anyhow!(resp["error"].as_str().unwrap_or("command failed").to_owned()))
-        }
+        Ok(Answer(rx))
+    }
+
+    /// One command to the harness, and its answer.
+    async fn rpc(&self, cmd: Value) -> Result<Value, Error> {
+        self.ask(cmd)?.get().await
     }
 
     /// Sends a user prompt. `images` are `ImageContent` values (see
@@ -342,17 +391,44 @@ impl Harness {
     }
 }
 
+/// A command's answer from the agent, still to come (from [`Harness::ask`]).
+#[derive(Debug)]
+pub struct Answer(oneshot::Receiver<Value>);
+
+impl Answer {
+    /// Waits for the answer's `data`.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] that [`is_gone`](Error::is_gone) when the agent ends
+    /// before answering, or [`is_refused`](Error::is_refused) when it
+    /// answers with an error.
+    pub async fn get(self) -> Result<Value, Error> {
+        let resp = self.0.await.ok().or_error(ErrorKind::Exited, || "harness exited before responding".to_owned())?;
+        if resp["success"].as_bool() == Some(true) {
+            Ok(resp.get("data").cloned().unwrap_or(Value::Null))
+        } else {
+            Err(Error::new(ErrorKind::Refused, resp["error"].as_str().unwrap_or("command failed")))
+        }
+    }
+}
+
 /// Reads an image file into an `ImageContent` value for a prompt.
-pub fn image_from_file(path: &Path) -> Result<Value> {
+///
+/// # Errors
+///
+/// An [`Error`] that [`is_image`](Error::is_image) when the file isn't PNG,
+/// JPEG, GIF or WebP by its name, or can't be read.
+pub fn image_from_file(path: &Path) -> Result<Value, Error> {
     use base64::Engine;
     let mime = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
-        _ => anyhow::bail!("{} is not a supported image (png, jpeg, gif, webp)", path.display()),
+        _ => return Err(Error::new(ErrorKind::Image, format!("{} is not a supported image (png, jpeg, gif, webp)", path.display()))),
     };
-    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let bytes = std::fs::read(path).or_error(ErrorKind::Image, || format!("reading {}", path.display()))?;
     Ok(json!({
         "type": "image",
         "data": base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -414,7 +490,7 @@ fn shipped_with(exe: &Path, name: &str) -> Option<PathBuf> {
 
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    path.metadata().map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    path.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 async fn read_loop(
@@ -468,7 +544,7 @@ async fn read_loop(
         }
 
         if frame["type"] == "response" {
-            let waiter = frame["id"].as_str().and_then(|id| pending.lock().unwrap().remove(id));
+            let waiter = frame["id"].as_str().and_then(|id| pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(id));
             if let Some(waiter) = waiter {
                 let _ = waiter.send(frame);
                 continue;
@@ -482,7 +558,7 @@ async fn read_loop(
         }
     }
     // Wake anyone still waiting for a response.
-    pending.lock().unwrap().clear();
+    pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
 }
 
 async fn write_loop(
@@ -499,7 +575,7 @@ async fn write_loop(
         match out {
             Outgoing::Frame(frame) => {
                 if let Err(e) = write_frame(&mut stdin, &frame, log.as_deref()).await {
-                    tracing::warn!("harness stdin closed: {e}");
+                    tracing::event!(name: "harness.stdin.closed", tracing::Level::WARN, error.message = %e, "harness stdin closed: {{error.message}}");
                     break;
                 }
             }
@@ -527,7 +603,7 @@ async fn write_frame(stdin: &mut tokio::process::ChildStdin, frame: &Value, log:
 async fn stderr_loop(stderr: tokio::process::ChildStderr, tail: Arc<Mutex<VecDeque<String>>>, log: Option<Arc<ProtocolLog>>) {
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        tracing::debug!(target: "harness_stderr", "{line}");
+        tracing::event!(name: "harness.stderr.line", target: "harness_stderr", tracing::Level::DEBUG, line = %line, "{{line}}");
         if let Some(log) = &log {
             log.stderr(&line);
         }
@@ -547,6 +623,8 @@ async fn wait_loop(
     stderr_done: tokio::task::JoinHandle<()>,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
 ) {
+    // (Taken first: once waited for, the child has no pid to give.)
+    let pid = child.id();
     // Drain stdout fully before reporting the exit so no events are lost.
     tokio::select! {
         _ = reader => {}
@@ -558,9 +636,9 @@ async fn wait_loop(
             }
         }
     }
-    let pid = child.id();
     let code = child.wait().await.ok().and_then(|s| s.code());
     ended(pid);
+    tracing::event!(name: "harness.exit", tracing::Level::INFO, process.pid = pid.unwrap_or(0), process.exit.code = ?code, "harness {{process.pid}} exited with {{process.exit.code}}");
     // What it said last (a child that kept stderr open isn't waited for).
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), stderr_done).await;
     let stderr_tail = stderr_tail.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
@@ -581,13 +659,16 @@ mod tests {
             .unwrap();
         let pid = child.id();
         std::thread::sleep(std::time::Duration::from_millis(200));
-        // SAFETY: signal 0 only asks.
-        assert_eq!(unsafe { libc::kill(-(pid as i32), 0) }, 0, "running");
+        // SAFETY: kill(2) with signal 0 only checks the group exists; it
+        // takes integers and touches no memory of this process.
+        assert_eq!(unsafe { libc::kill(-i32::try_from(pid).unwrap_or(i32::MAX), 0) }, 0, "running");
         let started = std::time::Instant::now();
-        stop_groups(vec![pid]);
+        stop_groups(&[pid]);
         let _ = child.wait();
         std::thread::sleep(std::time::Duration::from_millis(100));
-        assert_ne!(unsafe { libc::kill(-(pid as i32), 0) }, 0, "all of it gone");
+        // SAFETY: kill(2) with signal 0 only checks the group exists; it
+        // takes integers and touches no memory of this process.
+        assert_ne!(unsafe { libc::kill(-i32::try_from(pid).unwrap_or(i32::MAX), 0) }, 0, "all of it gone");
         assert!(started.elapsed() < std::time::Duration::from_secs(3));
     }
 
@@ -603,7 +684,7 @@ mod tests {
         assert_eq!((img["type"].as_str(), img["mimeType"].as_str(), img["data"].as_str()), (Some("image"), Some("image/png"), Some("iVBORw==")));
         let txt = dir.join("b.txt");
         std::fs::write(&txt, "x").unwrap();
-        assert!(image_from_file(&txt).is_err());
+        image_from_file(&txt).unwrap_err();
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -643,7 +724,8 @@ mod tests {
 
     #[test]
     fn a_program_harlo_puts_there() {
-        fn put(_: &str, kind: HarnessKind) -> anyhow::Result<Option<String>> {
+        #[expect(clippy::unnecessary_wraps, reason = "the signature set_remote_program takes")]
+        fn put(_: &str, kind: HarnessKind) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
             Ok((kind == HarnessKind::Harlo).then(|| "/home/me/.cache/harlo/harlo-agent-00ff".to_owned()))
         }
         crate::set_remote_program(put);
@@ -656,20 +738,21 @@ mod tests {
     /// when it's stopped.
     use std::time::Duration;
 
-    #[tokio::test]
-    async fn unanswered_requests_end_with_the_stop() {
-        let dir = std::env::temp_dir().join(format!("harlo-silent-agent-{}", std::process::id()));
+    /// A stand-in agent running `script` (sh) in a folder of its own, named
+    /// `name` and the test's pid.
+    async fn stand_in(name: &str, script: &str) -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("harlo-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let program = dir.join("harlo-agent");
-        std::fs::write(&program, "#!/bin/sh\nwhile read -r _; do :; done\n").unwrap();
+        std::fs::write(&program, format!("#!/bin/sh\n{script}\n")).unwrap();
         std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let cfg = HarnessConfig { kind: HarnessKind::Harlo, program: Some(program), cwd: dir.clone(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
         // Another test thread forking while the script was still open for
         // writing keeps it busy for a moment ("Text file busy"): try again.
         let mut tries = 0;
-        let (harness, _events) = loop {
+        loop {
             let spawned = {
-                let _dir = crate::protocol_log::TEST_DIR.lock().unwrap_or_else(|e| e.into_inner());
+                let _dir = crate::protocol_log::TEST_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 Harness::spawn(cfg.clone())
             };
             match spawned {
@@ -677,16 +760,56 @@ mod tests {
                     tries += 1;
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                other => break other.unwrap(),
+                other => {
+                    let (harness, events) = other.unwrap();
+                    break (harness, events, dir);
+                }
             }
+        }
+    }
+
+    /// A command sent with `ask` goes out before what's sent after it, even
+    /// when its answer is awaited in a task that runs later (here: one
+    /// thread, so it runs only after the prompt is sent).
+    #[tokio::test]
+    async fn asked_commands_go_out_in_the_order_sent() {
+        let (harness, _events, dir) = stand_in("ordered-agent", "while read -r line; do printf '%s\\n' \"$line\" >> sent; done").await;
+        let harness = std::sync::Arc::new(harness);
+        let answer = harness.ask(json!({ "type": "harlo_set_modes", "approval": "write", "plan": false })).unwrap();
+        let waiting = tokio::spawn(answer.get());
+        harness.prompt("and now", Vec::new(), SendMode::Normal);
+        let sent = dir.join("sent");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let lines = loop {
+            let lines: Vec<Value> = std::fs::read_to_string(&sent).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+            if lines.len() >= 2 || std::time::Instant::now() > deadline {
+                break lines;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         };
+        let types: Vec<&str> = lines.iter().map(|l| l["type"].as_str().unwrap_or_default()).collect();
+        assert_eq!(types, ["harlo_set_modes", "prompt"]);
+        harness.kill();
+        assert!(waiting.await.unwrap().unwrap_err().is_gone(), "unanswered: ended by the stop");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn unanswered_requests_end_with_the_stop() {
+        let (harness, mut events, dir) = stand_in("silent-agent", "while read -r _; do :; done").await;
         let wait = Duration::from_secs(5);
         let asked = harness.request(json!({ "type": "get_available_models" }));
         tokio::pin!(asked);
         assert!(tokio::time::timeout(Duration::from_millis(200), &mut asked).await.is_err(), "it never answers");
+        // Its group, among those ended when harlo quits (other tests' too).
+        let ours = |pid: &u32| std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|c| String::from_utf8_lossy(&c).contains(&*dir.to_string_lossy()));
+        let pid = GROUPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().copied().find(ours).expect("its group is kept");
         harness.kill();
         let stopped = tokio::time::timeout(wait, asked).await.expect("ended by the stop").unwrap_err();
         assert_eq!(stopped.to_string(), "harness exited before responding");
+        // Stopped and waited for: its pid is let go, as it may be another's next.
+        while !matches!(tokio::time::timeout(wait, events.recv()).await.expect("its exit is reported"), Some(HarnessEvent::Exited { .. }) | None) {}
+        assert!(!GROUPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&pid), "its group is forgotten once it ends");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

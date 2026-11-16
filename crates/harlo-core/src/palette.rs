@@ -1,5 +1,7 @@
 //! Fuzzy ranking for the command palette.
 
+// Rust guideline compliant 2026-10-09
+
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
@@ -31,7 +33,7 @@ mod tests {
     fn ranks_fuzzy_matches() {
         let items: Vec<String> = ["Fix the build", "procedural rock generator", "omp update", "rock paper"]
             .iter()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         let r = rank("rock gen", &items);
         assert_eq!(r.first(), Some(&1));

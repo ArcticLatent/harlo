@@ -1,10 +1,13 @@
-//! The Settled shelf: harlo puts a worktree's sessions on their project's
-//! shelf (in the sidebar, under the project's sessions) once their work
-//! is done: the branch's pull request merged or closed after the last
-//! activity in them, or nothing happened in them for a week. Newer work in
-//! one brings it back; one put back by hand stays until there's newer
-//! work and a reason again. Pinned sessions, and those running or waiting
-//! on you, stay where they are.
+//! The Settled shelf, where a worktree's finished sessions go.
+//!
+//! harlo puts a worktree's sessions on their project's shelf (in the sidebar,
+//! under the project's sessions) once their work is done: the branch's pull
+//! request merged or closed after the last activity in them, or nothing
+//! happened in them for a week. Newer work in one brings it back; one put back
+//! by hand stays until there's newer work and a reason again. Pinned sessions,
+//! and those running or waiting on you, stay where they are.
+
+// Rust guideline compliant 2026-10-09
 
 use serde_json::Value;
 
@@ -60,7 +63,7 @@ pub fn why_text(why: &str) -> &'static str {
 }
 
 fn unix(iso: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(iso).map(|t| t.timestamp()).unwrap_or(0)
+    chrono::DateTime::parse_from_rfc3339(iso).map_or(0, |t| t.timestamp())
 }
 
 /// The branch's request from a list of them, newest first or not: an open

@@ -2,6 +2,8 @@
 //! cached, gitignore-aware file list that is rebuilt in the background once
 //! it is older than [`STALE_AFTER`].
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -13,6 +15,8 @@ use nucleo_matcher::{Config, Matcher};
 const STALE_AFTER: Duration = Duration::from_secs(30);
 const MAX_FILES: usize = 100_000;
 
+/// A project's file list for quick open, read again when it's stale.
+#[derive(Debug)]
 pub struct FileIndex {
     pub root: PathBuf,
     /// Paths relative to `root`, `/`-separated.
@@ -99,7 +103,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, Arc<FileIndex>>> {
 /// returned immediately and replaced by a fresh one in the background.
 /// Blocking: call from a worker thread.
 pub fn index_for(root: &Path) -> Arc<FileIndex> {
-    let existing = cache().lock().unwrap().get(root).cloned();
+    let existing = cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(root).cloned();
     match existing {
         Some(idx) => {
             if idx.built_at.elapsed() > STALE_AFTER {
@@ -111,17 +115,17 @@ pub fn index_for(root: &Path) -> Arc<FileIndex> {
                     built_at: Instant::now(),
                     truncated: idx.truncated,
                 });
-                cache().lock().unwrap().insert(root.clone(), placeholder);
+                cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(root.clone(), placeholder);
                 std::thread::spawn(move || {
                     let fresh = Arc::new(FileIndex::build(&root));
-                    cache().lock().unwrap().insert(root, fresh);
+                    cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(root, fresh);
                 });
             }
             idx
         }
         None => {
             let idx = Arc::new(FileIndex::build(root));
-            cache().lock().unwrap().insert(root.to_owned(), idx.clone());
+            cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(root.to_owned(), Arc::clone(&idx));
             idx
         }
     }
@@ -138,6 +142,10 @@ pub struct DirEntry {
 
 /// Lists one directory under `root`: directories first, then files, both
 /// by name. Honours .gitignore and hides `.git`; other dotfiles are shown.
+///
+/// # Errors
+///
+/// An I/O error when the directory can't be read.
 pub fn list_dir(root: &Path, rel: &str) -> std::io::Result<Vec<DirEntry>> {
     let dir = root.join(rel);
     if crate::remote::is_remote(&dir) {
@@ -203,6 +211,10 @@ pub enum FileContent {
 }
 
 /// Reads a file for viewing/editing: text (UTF-8, lossy), or why not.
+///
+/// # Errors
+///
+/// An I/O error when the file can't be read.
 pub fn read_text(path: &Path) -> std::io::Result<FileContent> {
     let bytes = if let Some((name, f)) = crate::remote::split(path) {
         // On its host: the size first, then the bytes, in one command.
@@ -223,13 +235,17 @@ pub fn read_text(path: &Path) -> std::io::Result<FileContent> {
         std::fs::read(path)?
     };
     if let Some(at) = bytes[..bytes.len().min(8192)].iter().position(|b| *b == 0) {
-        tracing::info!("{} looks binary: zero byte at offset {at} of {} bytes", path.display(), bytes.len());
+        tracing::event!(name: "file.read.binary", tracing::Level::INFO, file.path = %path.display(), file.offset = at, file.size = bytes.len(), "{{file.path}} looks binary: zero byte at offset {{file.offset}} of {{file.size}} bytes");
         return Ok(FileContent::Binary);
     }
     Ok(FileContent::Text(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 /// Saves text atomically (temp file + rename), keeping the file's mode.
+///
+/// # Errors
+///
+/// An I/O error when the temporary file can't be written or renamed into place.
 pub fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
     // On its host: a temp file next to it, its mode copied, then renamed.
@@ -252,7 +268,7 @@ pub fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(text.as_bytes())?;
         f.sync_all()?;
-    }
+    };
     if let Ok(meta) = std::fs::metadata(path) {
         let _ = std::fs::set_permissions(&tmp, meta.permissions());
     }

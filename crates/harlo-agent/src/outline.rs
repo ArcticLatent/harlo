@@ -6,6 +6,8 @@
 //! calls deep in a 4,900-line module found with 41% fewer tokens; 19% fewer
 //! over both tasks with big files.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::Path;
 
 /// How much outline a read returns, at most.
@@ -114,7 +116,7 @@ fn defines(lang: Lang, t: &str, indent: usize, next: &str) -> bool {
             // A function's definition: a name and its arguments, its body
             // opening on this line or the next.
             let opens = t.ends_with('{') || (t.ends_with(')') && next.trim_start().starts_with('{'));
-            opens && ident_start(t) && t.contains('(') && !t.starts_with("#") && !["if", "for", "while", "switch", "return", "else", "do"].iter().any(|k| t.starts_with(&format!("{k} ")) || t.starts_with(&format!("{k}(")))
+            opens && ident_start(t) && t.contains('(') && !t.starts_with('#') && !["if", "for", "while", "switch", "return", "else", "do"].iter().any(|k| t.starts_with(&format!("{k} ")) || t.starts_with(&format!("{k}(")))
         }
         // (Indented four spaces, it's code.)
         Lang::Markdown => indent < 4 && t.starts_with('#') && t.trim_start_matches('#').starts_with(' '),
@@ -243,6 +245,7 @@ fn closing(c: &[char], at: usize, open: char, close: char) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     #[test]
     fn outlines_rust() {
@@ -280,9 +283,9 @@ mod tests {
     fn keeps_to_the_outer_levels_when_long() {
         let mut py = String::new();
         for c in 0..120 {
-            py.push_str(&format!("class Rule{c}:\n"));
+            let _ = writeln!(py, "class Rule{c}:");
             for m in 0..10 {
-                py.push_str(&format!("    def method_number_{m}_of_rule_{c}(self, value, other_value):\n        return value\n"));
+                let _ = write!(py, "    def method_number_{m}_of_rule_{c}(self, value, other_value):\n        return value\n");
             }
         }
         let o = of(Path::new("rules.py"), &py).unwrap();

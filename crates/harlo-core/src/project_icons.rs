@@ -1,5 +1,7 @@
 //! Project icons (Settings → Projects): the preset symbols.
 
+// Rust guideline compliant 2026-10-09
+
 /// The preset icons (names in the app's icon set), in the picker's order.
 pub const PRESETS: &[&str] = &[
     "code-box", "terminal-box", "rocket", "flask", "gamepad", "briefcase", "home", "global", "leaf", "shield", "palette",

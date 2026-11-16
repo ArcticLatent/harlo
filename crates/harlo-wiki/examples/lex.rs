@@ -1,5 +1,8 @@
 //! Dev check: each file named on stdin lexed, one JSON line per file
 //! (top-level blocks: type, raw, depth, text, the heading's inline text).
+
+// Rust guideline compliant 2026-10-09
+
 use harlo_wiki::marked::{self, Kind};
 use std::io::BufRead;
 

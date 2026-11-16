@@ -8,6 +8,8 @@
 //! ours (Claude Code's names too), and capped at `general`'s; unknown ones
 //! are dropped.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 

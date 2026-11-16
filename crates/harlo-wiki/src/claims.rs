@@ -1,9 +1,13 @@
-//! Claims: the wiki's facts, each tied to the code it comes from
-//! (`repo://path#Lx-Ly` evidence with a version), as OpenWiki keeps them in
-//! `openwiki/.claims/`. Evidence is followed as its lines move; a Claim
+//! Claims: the wiki's facts, each tied to the code it comes from.
+//!
+//! The code is `repo://path#Lx-Ly` evidence with a version, as OpenWiki
+//! keeps it in `openwiki/.claims/`. Evidence is followed as its lines move; a Claim
 //! whose code changed is stale, one whose code is gone (or newly ignored)
 //! unresolved, until a page's writer confirms, revises or retracts it.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use crate::ignore::Ignore;
 use crate::store::{self, Error, Result, Store, hex};
 use crate::util;
@@ -92,6 +96,11 @@ fn claim_to_json(c: &Claim) -> Value {
     json!({"id": c.id, "statement": c.statement, "evidence": c.evidence.iter().map(|e| json!({"resource": e.resource, "version": e.version})).collect::<Vec<_>>()})
 }
 
+/// A page's Claims from its sidecar, if it has one.
+///
+/// # Errors
+///
+/// An [`Error`] when the sidecar can't be read or isn't valid.
 pub fn load(store: &Store, page: &str) -> Result<Option<PageClaims>> {
     Ok(store.load_page(page)?.map(|v| PageClaims::from_json(&v)))
 }
@@ -146,7 +155,7 @@ pub fn encode_component(s: &str) -> String {
         if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out
@@ -178,6 +187,14 @@ fn has_control(s: &str) -> bool {
     s.chars().any(|c| (c as u32) <= 0x1f || c as u32 == 0x7f)
 }
 
+/// Parses a `repo://path#Lx-Ly` evidence resource.
+///
+/// # Errors
+///
+/// An [`Error`] naming the problem when `resource` isn't a `repo://` resource,
+/// isn't escaped right, has a control character, leaves the repository or names
+/// Git metadata or OpenWiki's output, or has a fragment other than a line range
+/// `#Lx-Ly` with x no more than y.
 pub fn parse_resource(resource: &str) -> Result<Resource> {
     let Some(body) = resource.strip_prefix(PREFIX) else {
         return Err(resource_err(format!("Unsupported evidence resource: {resource}")));
@@ -218,6 +235,7 @@ pub fn parse_resource(resource: &str) -> Result<Resource> {
     Ok(Resource { path: normalized, range })
 }
 
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 fn parse_line_range(fragment: &str, resource: &str) -> Result<(u64, u64)> {
     static RANGE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"^L([1-9][0-9]*)(?:-L([1-9][0-9]*))?$").unwrap());
     let Some(m) = RANGE.captures(fragment) else {
@@ -235,6 +253,12 @@ fn parse_line_range(fragment: &str, resource: &str) -> Result<(u64, u64)> {
     Ok((start as u64, end as u64))
 }
 
+/// The `repo://` resource for `r`.
+///
+/// # Errors
+///
+/// An [`Error`] when `r` doesn't make a normalized resource (see
+/// [`parse_resource`]).
 pub fn format_resource(r: &Resource) -> Result<String> {
     let encoded: Vec<String> = r.path.split('/').map(encode_component).collect();
     let fragment = r.range.map(|(s, e)| format!("L{s}-L{e}"));
@@ -249,7 +273,7 @@ pub fn format_resource(r: &Resource) -> Result<String> {
 // ---- Resolving evidence against the repository ----
 
 /// What a resource resolves to now.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Resolved {
     pub evidence: Evidence,
 }
@@ -261,6 +285,8 @@ fn hash_text(s: &str) -> String {
     hex(&sha2::Sha256::digest(s.as_bytes()))
 }
 
+/// Resolves evidence against a repository's files.
+#[derive(Debug)]
 pub struct Resolver {
     root: PathBuf,
     real_root: std::cell::OnceCell<std::result::Result<PathBuf, String>>,
@@ -269,11 +295,15 @@ pub struct Resolver {
 
 impl Resolver {
     pub fn new(root: &Path, ignore: Ignore) -> Resolver {
-        Resolver { root: root.to_path_buf(), real_root: Default::default(), ignore }
+        Resolver { root: root.to_path_buf(), real_root: std::cell::OnceCell::default(), ignore }
     }
 
     /// Resolves through a per-operation cache (OpenWiki caches each batch's,
     /// each finalization's and each preflight's lookups; errors aren't kept).
+    ///
+    /// # Errors
+    ///
+    /// As [`resolve`](Self::resolve); a failed lookup isn't kept.
     pub fn cached(&self, cache: &mut HashMap<(String, Option<String>), Option<Resolved>>, resource: &str, previous: Option<&str>) -> Result<Option<Resolved>> {
         let key = (resource.to_owned(), previous.map(str::to_owned));
         if let Some(r) = cache.get(&key) {
@@ -284,6 +314,14 @@ impl Resolver {
         Ok(r)
     }
 
+    /// What `resource` resolves to now (`None`: its file is gone).
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] when `resource` isn't valid ([`parse_resource`]), is
+    /// excluded by `.openwikiignore` or leaves the repository; a security one
+    /// when it goes through a symbolic link or an alias; another when its file
+    /// can't be read.
     pub fn resolve(&self, resource: &str, previous: Option<&str>) -> Result<Option<Resolved>> {
         let parsed = parse_resource(resource)?;
         let canonical = format_resource(&parsed)?;
@@ -365,7 +403,7 @@ fn content(lines: &[&str], s: Span) -> String {
 
 fn line_range(resource: &str, source: &str, start: u64, end: u64, previous: Option<&str>) -> Result<Option<Resolved>> {
     let lines = split_lines(source);
-    let hinted = (end as usize <= lines.len() && end <= usize::MAX as u64).then(|| Span { start: start as usize - 1, end: end as usize });
+    let hinted = (usize::try_from(end).unwrap_or(usize::MAX) <= lines.len() && usize::try_from(end).is_ok()).then(|| Span { start: usize::try_from(start).unwrap_or(usize::MAX) - 1, end: usize::try_from(end).unwrap_or(usize::MAX) });
     let parsed = previous.and_then(parse_version);
     let (Some(prev), Some(previous)) = (parsed, previous) else {
         return hinted.map(|s| make_range(resource, &lines, s)).transpose();
@@ -399,11 +437,10 @@ fn make_range(resource: &str, lines: &[&str], s: Span) -> Result<Resolved> {
 }
 
 fn unchanged(lines: &[&str], hinted: Option<Span>, hash: &str, m: &Meta) -> Option<Span> {
-    if let Some(h) = hinted {
-        if h.end - h.start == m.selected && hash_text(&content(lines, h)) == hash {
+    if let Some(h) = hinted
+        && h.end - h.start == m.selected && hash_text(&content(lines, h)) == hash {
             return Some(h);
         }
-    }
     let line_hashes: Vec<String> = lines.iter().map(|l| hash_text(l)).collect();
     let mut matching = Vec::new();
     let mut start = 0;
@@ -466,6 +503,7 @@ fn is_sha(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 fn parse_version(v: &str) -> Option<(String, Meta)> {
     let body = v.strip_prefix(LINES_PREFIX)?;
     let sep = body.find(':')?;
@@ -505,7 +543,7 @@ pub fn base64url(bytes: &[u8]) -> String {
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
         let n = chunk.iter().enumerate().fold(0u32, |a, (i, b)| a | (u32::from(*b) << (16 - 8 * i)));
-        for i in 0..chunk.len() + 1 {
+        for i in 0..=chunk.len() {
             out.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
         }
     }
@@ -532,7 +570,7 @@ fn base64_decode(s: &str) -> Vec<u8> {
         bits += 6;
         if bits >= 8 {
             bits -= 8;
-            out.push((acc >> bits) as u8);
+            out.push(u8::try_from(acc >> bits).unwrap_or(u8::MAX));
             acc &= (1 << bits) - 1;
         }
     }
@@ -722,6 +760,7 @@ fn apply(claims: &[Claim], ops: &[Op], resolver: &Resolver, mut new_id: impl FnM
 
 // ---- The session: every page's Claims during a run ----
 
+#[derive(Debug)]
 struct PageState {
     claims: Vec<Claim>,
     verification: Option<Verification>,
@@ -737,6 +776,8 @@ impl PageState {
     }
 }
 
+/// The Claims of every page through one run, with who owns each id.
+#[derive(Debug)]
 pub struct Session {
     pub resolver: Resolver,
     pages: IndexMap<String, PageState>,
@@ -758,7 +799,16 @@ fn locale_sort(v: &mut [String]) {
     v.sort_by(|a, b| crate::collate::compare(a, b));
 }
 
+/// Each page, with its verification for the front matter (None: none).
+type PageVerifications = Vec<(String, Option<Verification>)>;
+
 impl Session {
+    /// A session over the pages' persisted Claims.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when a page name isn't valid, a page is listed twice,
+    /// or one Claim id belongs to two pages.
     pub fn new(resolver: Resolver, persisted: Vec<(String, PageClaims)>, issues: &[Issue], orphans: &[String]) -> Result<Session> {
         let mut orphan_pages: Vec<String> = Vec::new();
         for o in orphans {
@@ -814,6 +864,12 @@ impl Session {
     }
 
     /// Applies a batch to a page; the ids of what it added and targeted.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when `page` isn't a valid page name, an operation
+    /// doesn't apply (a Claim it names isn't the page's, its evidence doesn't
+    /// resolve), or no unique id can be found for a new Claim.
     pub fn resolve_claims(&mut self, page: &str, ops: &[Op]) -> Result<Vec<(String, String)>> {
         let page = store::normalize_page(page).map_err(|e| session_err(e.message()))?;
         let previous = self.state(&page).claims.clone();
@@ -854,6 +910,11 @@ impl Session {
         Ok(results)
     }
 
+    /// The page's Claims as its writer sees them, with their issues.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when `page` isn't a valid page name.
     pub fn inspect(&mut self, page: &str) -> Result<Vec<Value>> {
         let page = store::normalize_page(page).map_err(|e| session_err(e.message()))?;
         let state = self.state(&page);
@@ -863,6 +924,11 @@ impl Session {
         Ok(state.claims.iter().map(|c| inspected(c, &state.issues)).collect())
     }
 
+    /// The page's Claims (none once it's deleted).
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when `page` isn't a valid page name.
     pub fn claims_of(&mut self, page: &str) -> Result<Vec<Claim>> {
         let page = store::normalize_page(page).map_err(|e| session_err(e.message()))?;
         let state = self.state(&page);
@@ -895,6 +961,11 @@ impl Session {
             .collect()
     }
 
+    /// Records that `page` was deleted: its Claims go with it.
+    ///
+    /// # Errors
+    ///
+    /// A Claims [`Error`] when `page` isn't a valid page name.
     pub fn record_deletion(&mut self, page: &str) -> Result<()> {
         let page = store::normalize_page(page).map_err(|e| session_err(e.message()))?;
         let previous = self.state(&page).claims.clone();
@@ -908,7 +979,7 @@ impl Session {
 
     /// Writes every changed page's sidecar (verified now), removes deleted
     /// and orphaned ones; each page's verification for the front matter.
-    fn finalize_sidecars(&mut self, store: &Store, verification: &Verification, excluded: &HashSet<String>) -> Result<(Vec<(String, Option<Verification>)>, Vec<String>)> {
+    fn finalize_sidecars(&mut self, store: &Store, verification: &Verification, excluded: &HashSet<String>) -> Result<(PageVerifications, Vec<String>)> {
         let mut cache = Cache::new();
         let mut warnings = Vec::new();
         let mut missing = Vec::new();
@@ -1028,6 +1099,11 @@ impl Session {
 
     /// The runtime's `finalize`: sidecars, then each page's verification in
     /// its front matter, then every sidecar's page version refreshed.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] when a sidecar or page can't be written, or a Claims one
+    /// listing what wasn't fully durable.
     pub fn finalize(&mut self, store: &Store, at: &str, excluded: &HashSet<String>) -> Result<()> {
         let verification = Verification { by: PRODUCER_ACTOR.into(), at: at.into() };
         let (by_page, mut warnings) = self.finalize_sidecars(store, &verification, excluded)?;
@@ -1056,6 +1132,8 @@ fn warning(page: &str, action: &str, e: &Error) -> String {
 
 // ---- Preflight and the runtime ----
 
+/// A run's Claims: the session, the issues found before it, and the store.
+#[derive(Debug)]
 pub struct Runtime {
     pub session: Session,
     pub issues: Vec<Issue>,
@@ -1064,6 +1142,11 @@ pub struct Runtime {
 
 /// `prepareClaimsRuntime` for a repository run: a fresh init starts with
 /// no Claims; otherwise every page's Claims are checked against the code.
+///
+/// # Errors
+///
+/// An [`Error`] when the pages or sidecars can't be listed or read, or a
+/// sidecar isn't valid.
 pub fn prepare(root: &Path, ignore: &Ignore, fresh_init: bool) -> Result<Runtime> {
     let store = Store::new(root);
     let resolver = Resolver::new(root, ignore.clone());

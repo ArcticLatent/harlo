@@ -7,6 +7,8 @@
 //! and "Open in browser" draws it there with the bundled mermaid.js
 //! (assets/mermaid).
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -148,30 +150,42 @@ fn mermaid_config(light: bool, colors: &Value) -> Value {
 }
 
 /// harlo's fonts for merman (loaded once).
-fn fonts() -> Result<NativeFontContext, String> {
+fn fonts() -> anyhow::Result<NativeFontContext> {
+    // (The error is kept as its text: an error itself can't be cloned.)
     static FONTS: OnceLock<Result<NativeFontContext, String>> = OnceLock::new();
     FONTS
         .get_or_init(|| NativeFontContext::from_font_bytes(GEIST.iter().map(|f| f.to_vec()), NativeFontLimits::default(), &OperationControl::new()).map_err(|e| e.to_string()))
         .clone()
+        .map_err(anyhow::Error::msg)
 }
 
 /// Draws a diagram (blocking): the PNG, at twice its size.
-fn draw(source: &str, light: bool, colors: &Value) -> Result<Vec<u8>, String> {
+fn draw(source: &str, light: bool, colors: &Value) -> anyhow::Result<Vec<u8>> {
     draw_within(source, light, colors, (6000, 6000))
+}
+
+/// Runs merman, turning a panic inside it into `None`.
+///
+/// Catching a panic is a last resort, taken here because merman is a young
+/// third-party renderer that some diagrams make panic. A panic there ends
+/// only that diagram: the closure works on a renderer or engine made for
+/// this one call (with its own clone of the fonts), and touches no state of
+/// harlo's, so nothing is left half-changed when it unwinds.
+fn contained<T>(run: impl FnOnce() -> T) -> Option<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).ok()
 }
 
 /// Draws a diagram at twice its size, made smaller to fit `fit` (in
 /// pixels before it's doubled).
-fn draw_within(source: &str, light: bool, colors: &Value, fit: (u32, u32)) -> Result<Vec<u8>, String> {
-    let environment = SvgEnvironment::deterministic().with_native_font_context(fonts()?).map_err(|e| e.to_string())?;
+fn draw_within(source: &str, light: bool, colors: &Value, fit: (u32, u32)) -> anyhow::Result<Vec<u8>> {
+    let environment = SvgEnvironment::deterministic().with_native_font_context(fonts()?)?;
     let renderer = Renderer::new().with_engine(Engine::new().with_site_config(MermaidConfig::from_value(mermaid_config(light, colors))));
     let raster = RasterOptions::default().with_scale(2.0).with_fit_to(RasterFitBox::contain(fit.0, fit.1));
     let request = RenderRequest::png(source, OperationControl::new(), PngRequest { svg: SvgRequest { environment, ..Default::default() }, options: raster });
-    // merman is new: a failure in it stays a failure of this diagram.
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| renderer.render(request))).map_err(|_| "merman couldn't draw this diagram.".to_owned())?;
-    match outcome.map_err(|e| first_line(&e.to_string()))? {
+    let outcome = contained(|| renderer.render(request)).ok_or_else(|| anyhow::Error::msg("merman couldn't draw this diagram."))?;
+    match outcome.map_err(|e| first_line(&e.to_string())).map_err(anyhow::Error::msg)? {
         RenderOutput::Png(Some(png)) => Ok(png.bytes),
-        _ => Err("That isn't a diagram merman knows.".into()),
+        _ => Err(anyhow::Error::msg("That isn't a diagram merman knows.")),
     }
 }
 
@@ -194,6 +208,7 @@ fn script_json(v: &Value) -> String {
     v.to_string().replace("</", "<\\/")
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Diagrams {
     pub fn diagram(mut self: Pin<&mut Self>, source: &QString, light: bool, colors: &QString) -> QString {
         let source = source.to_string();
@@ -237,9 +252,9 @@ impl Diagrams {
                         .into_iter()
                         .map(|(key, source, light, colors)| {
                             let file = cache().join(format!("{key}.png"));
-                            let v = match draw(&source, light, &colors).and_then(|png| std::fs::write(&file, png).map_err(|e| e.to_string())) {
+                            let v = match draw(&source, light, &colors).and_then(|png| std::fs::write(&file, png).map_err(anyhow::Error::from)) {
                                 Ok(()) => ready(&file).unwrap_or_else(|| json!({ "state": "failed", "error": "The picture was empty." })),
-                                Err(e) => json!({ "state": "failed", "error": e }),
+                                Err(e) => json!({ "state": "failed", "error": format!("{e:#}") }),
                             };
                             (key, v)
                         })
@@ -299,7 +314,7 @@ pub fn node_boxes(source: &str) -> Vec<Value> {
         let environment = SvgEnvironment::deterministic().with_native_font_context(fonts().ok()?).ok()?;
         let renderer = Renderer::new().with_engine(Engine::new().with_site_config(MermaidConfig::from_value(mermaid_config(false, &json!({})))));
         let request = RenderRequest::svg(source, OperationControl::new(), SvgRequest { environment, ..Default::default() });
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| renderer.render(request))).ok()?.ok()? {
+        match contained(|| renderer.render(request))?.ok()? {
             RenderOutput::Svg(Some(out)) => Some(out.svg().to_owned()),
             _ => None,
         }
@@ -315,7 +330,7 @@ fn svg_boxes(svg: &str) -> Vec<Value> {
         let at = tag.find(&format!(" {name}=\""))? + name.len() + 3;
         Some(tag[at..].split('"').next()?.to_owned())
     };
-    let nums = |s: &str| s.split(|c: char| c == ' ' || c == ',').filter(|t| !t.is_empty()).filter_map(|t| t.parse::<f64>().ok()).collect::<Vec<_>>();
+    let nums = |s: &str| s.split([' ', ',']).filter(|t| !t.is_empty()).filter_map(|t| t.parse::<f64>().ok()).collect::<Vec<_>>();
     let Some(view) = svg.find("<svg").and_then(|i| attr(&svg[i..svg[i..].find('>').map_or(svg.len(), |e| i + e)], "viewBox")).map(|v| nums(&v)) else { return vec![] };
     let [vx, vy, vw, vh] = view[..] else { return vec![] };
     if vw <= 0.0 || vh <= 0.0 {
@@ -359,8 +374,7 @@ pub fn problem(source: &str) -> Option<String> {
         return Some("it's empty".into());
     }
     let engine = Engine::new();
-    // (merman is new: a failure in it isn't the diagram's.)
-    let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.parse_diagram_sync(source, merman::ParseOptions::strict()))).ok()?;
+    let parsed = contained(|| engine.parse_diagram_sync(source, merman::ParseOptions::strict()))?;
     match parsed {
         Ok(_) => None,
         Err(merman::Error::DiagramParse { diagnostic, .. }) => {
@@ -409,9 +423,9 @@ const PHONE_BYTES: usize = 2 << 20;
 /// A diagram for a phone (blocking): its PNG and size in points (drawn at
 /// twice that, at most 2400 × 4800 pixels), from the cache when it was
 /// drawn before. `colors` as `diagram` takes them.
-pub fn for_phone(source: &str, light: bool, colors: &Value) -> Result<(Vec<u8>, u32, u32), String> {
+pub fn for_phone(source: &str, light: bool, colors: &Value) -> anyhow::Result<(Vec<u8>, u32, u32)> {
     if source.trim().is_empty() {
-        return Err("It's empty.".into());
+        return Err(anyhow::Error::msg("It's empty."));
     }
     let key = key_of(&format!("{source}\n%% phone"), light, colors);
     let file = cache().join(format!("{key}.png"));
@@ -425,15 +439,15 @@ pub fn for_phone(source: &str, light: bool, colors: &Value) -> Result<(Vec<u8>, 
         }
     };
     if png.len() > PHONE_BYTES {
-        return Err("This diagram is too big to send to the phone.".into());
+        return Err(anyhow::Error::msg("This diagram is too big to send to the phone."));
     }
-    let (w, h) = png_size(&png).ok_or("The picture was empty.")?;
+    let (w, h) = png_size(&png).ok_or_else(|| anyhow::Error::msg("The picture was empty."))?;
     Ok((png, w / 2, h / 2))
 }
 
 /// The phone's reply for a diagram: `{ png (base64), width, height, boxes }`,
 /// a flowchart's boxes (see `boxes`) to tap; Err as `for_phone`'s.
-pub fn phone_reply(source: &str, light: bool, colors: &Value) -> Result<Value, String> {
+pub fn phone_reply(source: &str, light: bool, colors: &Value) -> anyhow::Result<Value> {
     use base64::Engine as _;
     let (png, w, h) = for_phone(source, light, colors)?;
     let flowchart = source.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("%%")).is_some_and(|l| l.starts_with("flowchart") || l.starts_with("graph"));
@@ -457,7 +471,7 @@ pub fn draw_for_phone(args: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            println!("{}", serde_json::json!({ "error": e }));
+            println!("{}", serde_json::json!({ "error": format!("{e:#}") }));
             1
         }
     }
@@ -552,8 +566,8 @@ mod tests {
         let png = draw_within("flowchart LR\n  A[one] --> B[two] --> C[three] --> D[four] --> E[five] --> F[six] --> G[seven]", false, &Value::Null, (400, 400)).unwrap();
         let (w, h) = png_size(&png).unwrap();
         assert!(w <= 800 && h <= 800 && w > 200, "made to fit, then doubled: {w}x{h}");
-        assert!(draw("flowchart LR\n  A --> ", true, &Value::Null).is_err());
-        assert!(draw("not a diagram at all", true, &Value::Null).is_err());
+        draw("flowchart LR\n  A --> ", true, &Value::Null).unwrap_err();
+        draw("not a diagram at all", true, &Value::Null).unwrap_err();
     }
 }
 

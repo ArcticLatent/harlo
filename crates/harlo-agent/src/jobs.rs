@@ -11,6 +11,8 @@
 //! they started (their process group). Their logs go when the session
 //! ends.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -40,8 +42,7 @@ static GROUPS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 pub fn stop_all() {
     let groups: Vec<i32> = std::mem::take(&mut *GROUPS.lock().unwrap());
     for g in &groups {
-        // SAFETY: signalling process groups this process started.
-        unsafe { libc::killpg(*g, libc::SIGKILL) };
+        crate::sys::signal_group(*g, libc::SIGKILL);
     }
 }
 
@@ -94,12 +95,11 @@ impl Job {
         s.quiet |= quiet;
         drop(s);
         STOPPED.lock().unwrap().push((self.pgid, why));
-        // SAFETY: the job's own process group.
-        unsafe { libc::killpg(self.pgid, libc::SIGTERM) };
+        crate::sys::signal_group(self.pgid, libc::SIGTERM);
         let pgid = self.pgid;
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(1500));
-            unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            crate::sys::signal_group(pgid, libc::SIGKILL);
         });
     }
 
@@ -189,17 +189,17 @@ impl Jobs {
             Ok(c) => c,
             Err(e) => return (format!("Couldn't start {}: {e}", if sandbox.is_some() { "the sandbox (bwrap)" } else { "bash" }), true),
         };
-        let pgid = child.id().map_or(0, |p| p as i32);
+        let pgid = child.id().map_or(0, |p| i32::try_from(p).unwrap_or(i32::MAX));
         GROUPS.lock().unwrap().push(pgid);
         let job = Arc::new(Job { id: id.clone(), command: command.trim().to_owned(), log: log.clone(), started: Instant::now(), pgid, state: Mutex::default() });
-        self.list.lock().unwrap().push(job.clone());
+        self.list.lock().unwrap().push(Arc::clone(&job));
         let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
-        let jobs = self.clone();
+        let jobs = Arc::clone(self);
         tokio::spawn(async move {
             let mut file = tokio::fs::File::create(&job.log).await.ok();
             let keep = |bytes: &[u8], file: &mut Option<tokio::fs::File>| {
                 let mut s = job.state.lock().unwrap();
-                let room = KEEP_BYTES.saturating_sub(s.written) as usize;
+                let room = usize::try_from(KEEP_BYTES.saturating_sub(s.written)).unwrap_or(usize::MAX);
                 let take = bytes.len().min(room);
                 s.written += take as u64;
                 s.tail.extend(bytes);
@@ -208,7 +208,8 @@ impl Jobs {
                 (take > 0 && file.is_some()).then(|| bytes[..take].to_vec())
             };
             let collect = async {
-                let (mut b1, mut b2) = ([0u8; 8192], [0u8; 8192]);
+                // (On the heap: in the future they would make every future awaiting it 16 KB bigger.)
+                let (mut b1, mut b2) = (vec![0u8; 8192], vec![0u8; 8192]);
                 let (mut o_open, mut e_open) = (true, true);
                 while o_open || e_open {
                     let got = tokio::select! {
@@ -227,13 +228,13 @@ impl Jobs {
             let (status, timed_out) = match tokio::time::timeout(Duration::from_secs(secs), collect).await {
                 Ok(s) => (s, false),
                 Err(_) => {
-                    unsafe { libc::killpg(pgid, libc::SIGTERM) };
+                    crate::sys::signal_group(pgid, libc::SIGTERM);
                     tokio::time::sleep(Duration::from_millis(1500)).await;
                     (None, true)
                 }
             };
             // Ended: anything it left goes too.
-            unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            crate::sys::signal_group(pgid, libc::SIGKILL);
             forget(pgid);
             if let Some(f) = file.as_mut() {
                 let _ = f.flush().await;
@@ -286,7 +287,7 @@ impl Jobs {
                 (list.iter().map(|j| j.line()).collect::<Vec<_>>().join("\n"), false)
             }
             "output" => match job() {
-                Ok(j) => (self.output(&j, args["lines"].as_u64().unwrap_or(50) as usize), false),
+                Ok(j) => (self.output(&j, usize::try_from(args["lines"].as_u64().unwrap_or(50)).unwrap_or(usize::MAX)), false),
                 Err(e) => (e, true),
             },
             "wait" => match job() {
@@ -302,7 +303,7 @@ impl Jobs {
                     // (Told here: no notice later.)
                     j.state.lock().unwrap().quiet = true;
                     self.notices.lock().unwrap().retain(|n| !n.contains(&format!("Background job {} ", j.id)));
-                    (self.output(&j, args["lines"].as_u64().unwrap_or(50) as usize), false)
+                    (self.output(&j, usize::try_from(args["lines"].as_u64().unwrap_or(50)).unwrap_or(usize::MAX)), false)
                 }
                 Err(e) => (e, true),
             },
@@ -390,7 +391,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("harlo-agent-jobs-{}", std::process::id()));
         let jobs = Arc::new(Jobs::new(&dir));
         let woken = Arc::new(AtomicUsize::new(0));
-        let w = woken.clone();
+        let w = Arc::clone(&woken);
         jobs.set_wake(Arc::new(move || {
             w.fetch_add(1, Ordering::Relaxed);
         }));

@@ -1,8 +1,9 @@
-//! The shared plan: a session's steps for the task at hand, which the
-//! agent works through and you edit (add, change, remove, reorder, skip)
-//! at any time. With the plan on for a project (its settings), its
-//! sessions get harlo's plan tools (`plan_read`, `plan_set`,
-//! `plan_start`, `plan_done`) through harlo's MCP bridge, for every agent.
+//! The shared plan: a session's steps for the task at hand.
+//!
+//! The agent works through them and you edit (add, change, remove, reorder,
+//! skip) at any time. With the plan on for a project (its settings), its
+//! sessions get harlo's plan tools (`plan_read`, `plan_set`, `plan_start`,
+//! `plan_done`) through harlo's MCP bridge, for every agent.
 //!
 //! A step finished (`plan_done`) is committed on its own (when the
 //! project commits steps): harlo notes which files are modified when the
@@ -13,6 +14,9 @@
 //! changes for you. A finished step can then be reviewed by another
 //! agent.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -96,8 +100,8 @@ impl Plan {
         self.steps.iter().find(|s| s.id == id)
     }
 
-    fn step_mut(&mut self, id: u32) -> Result<&mut Step, String> {
-        self.steps.iter_mut().find(|s| s.id == id).ok_or_else(|| format!("There's no step {id}; plan_read lists them."))
+    fn step_mut(&mut self, id: u32) -> anyhow::Result<&mut Step> {
+        self.steps.iter_mut().find(|s| s.id == id).ok_or_else(|| anyhow::anyhow!("There's no step {id}; plan_read lists them."))
     }
 
     /// What the agent reads (and phones and the dock show).
@@ -132,10 +136,14 @@ impl Plan {
     /// The agent's steps from here on: the ones not started are replaced
     /// (the done, skipped and active ones stay).
     /// (title, detail, alongside the one before.)
-    pub fn set(&mut self, steps: &[(String, String, bool)]) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When no step has a title.
+    pub fn set(&mut self, steps: &[(String, String, bool)]) -> anyhow::Result<()> {
         let steps: Vec<&(String, String, bool)> = steps.iter().filter(|(t, ..)| !t.trim().is_empty()).collect();
         if steps.is_empty() {
-            return Err("Give at least one step with a title.".into());
+            return Err(anyhow::Error::msg("Give at least one step with a title."));
         }
         self.steps.retain(|s| s.status != Status::Pending);
         for (title, detail, alongside) in steps {
@@ -157,6 +165,36 @@ impl Plan {
             }
         }
         stages
+    }
+
+    /// Hands the steps an agent left started back for helpers to take.
+    ///
+    /// A step the agent stopped midway is pending again; helpers' steps
+    /// stay theirs.
+    pub fn release_unassigned(&mut self) {
+        for step in self.steps.iter_mut().filter(|s| s.status == Status::Active && s.helper.is_empty()) {
+            step.status = Status::Pending;
+        }
+    }
+
+    /// How a run ended, as "3 steps done, 1 skipped".
+    pub fn tally(&self) -> String {
+        let count = |status: Status| self.steps.iter().filter(|s| s.status == status).count();
+        let (done, skipped) = (count(Status::Done), count(Status::Skipped));
+        let skipped = if skipped > 0 { format!(", {skipped} skipped") } else { String::new() };
+        format!("{done} step{} done{skipped}", if done == 1 { "" } else { "s" })
+    }
+
+    /// What the plan's own session is told when a run with helpers ends.
+    ///
+    /// It says how the run ended and where the work is, and asks for it to
+    /// be checked and summed up for the user.
+    pub fn finished_message(&self) -> String {
+        format!(
+            "[harlo] Your plan ran with helpers and has finished: {}.{} Read each step's summary with plan_read, check the work fits together, and tell the user what was done and what's still open.",
+            self.tally(),
+            self.where_work_is()
+        )
     }
 
     /// Where a finished run's work is, said to the session's agent: the
@@ -204,32 +242,44 @@ impl Plan {
 
     /// A run gives a step to a helper (`helper`: its session, `branch`: its
     /// worktree's, "" for none). Steps of a stage run at once.
-    pub fn hand_out(&mut self, id: u32, helper: &str, branch: &str) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`. Or it isn't waiting to start.
+    pub fn hand_out(&mut self, id: u32, helper: &str, branch: &str) -> anyhow::Result<()> {
         let step = self.step_mut(id)?;
         if step.status != Status::Pending {
-            return Err(format!("Step {id} isn't waiting to start."));
+            return Err(anyhow::anyhow!("Step {id} isn't waiting to start."));
         }
         step.status = Status::Active;
-        step.helper = helper.to_owned();
-        step.branch = branch.to_owned();
+        helper.clone_into(&mut step.helper);
+        branch.clone_into(&mut step.branch);
         step.summary.clear();
         Ok(())
     }
 
     /// A helper didn't finish its step: it waits to be run again.
-    pub fn put_back(&mut self, id: u32, why: &str) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`.
+    pub fn put_back(&mut self, id: u32, why: &str) -> anyhow::Result<()> {
         let step = self.step_mut(id)?;
         step.status = Status::Pending;
         step.helper.clear();
-        step.summary = why.trim().to_owned();
+        why.trim().clone_into(&mut step.summary);
         Ok(())
     }
 
     /// Starts a step (`snapshot`: the repository now, None outside one).
-    pub fn start(&mut self, id: u32, snapshot: Option<Snapshot>) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`. Or it's already finished.
+    pub fn start(&mut self, id: u32, snapshot: Option<Snapshot>) -> anyhow::Result<()> {
         let step = self.step_mut(id)?;
         if matches!(step.status, Status::Done | Status::Skipped) {
-            return Err(format!("Step {id} is already finished."));
+            return Err(anyhow::anyhow!("Step {id} is already finished."));
         }
         step.status = Status::Active;
         step.start = snapshot;
@@ -242,10 +292,14 @@ impl Plan {
     }
 
     /// Finishes a step (`skipped`: not done, `summary` says why).
-    pub fn finish(&mut self, id: u32, summary: &str, skipped: bool) -> Result<&mut Step, String> {
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`.
+    pub fn finish(&mut self, id: u32, summary: &str, skipped: bool) -> anyhow::Result<&mut Step> {
         let step = self.step_mut(id)?;
         step.status = if skipped { Status::Skipped } else { Status::Done };
-        step.summary = summary.trim().to_owned();
+        summary.trim().clone_into(&mut step.summary);
         Ok(step)
     }
 
@@ -259,10 +313,15 @@ impl Plan {
         id
     }
 
-    pub fn edit(&mut self, id: u32, title: &str, detail: &str) -> Result<(), String> {
+    /// You change a step's title and detail.
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`.
+    pub fn edit(&mut self, id: u32, title: &str, detail: &str) -> anyhow::Result<()> {
         let step = self.step_mut(id)?;
-        step.title = title.trim().to_owned();
-        step.detail = detail.trim().to_owned();
+        title.trim().clone_into(&mut step.title);
+        detail.trim().clone_into(&mut step.detail);
         step.yours = true;
         Ok(())
     }
@@ -274,14 +333,18 @@ impl Plan {
     /// Moves a step up (-1) or down (+1).
     pub fn shift(&mut self, id: u32, by: i32) {
         let Some(i) = self.steps.iter().position(|s| s.id == id) else { return };
-        let j = i as i64 + by as i64;
-        if j >= 0 && (j as usize) < self.steps.len() {
-            self.steps.swap(i, j as usize);
+        let j = i64::try_from(i).unwrap_or(i64::MAX) + i64::from(by);
+        if j >= 0 && usize::try_from(j).unwrap_or(0) < self.steps.len() {
+            self.steps.swap(i, usize::try_from(j).unwrap_or(0));
         }
     }
 
     /// You make a step run at the same time as the one before, or after it.
-    pub fn set_alongside(&mut self, id: u32, alongside: bool) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`.
+    pub fn set_alongside(&mut self, id: u32, alongside: bool) -> anyhow::Result<()> {
         let step = self.step_mut(id)?;
         step.alongside = alongside;
         step.yours = true;
@@ -290,15 +353,23 @@ impl Plan {
 
     /// You choose who does a step in a run with helpers (`agent` "": the
     /// run's helpers).
-    pub fn set_helper(&mut self, id: u32, agent: &str, model: &str) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`.
+    pub fn set_helper(&mut self, id: u32, agent: &str, model: &str) -> anyhow::Result<()> {
         let step = self.step_mut(id)?;
-        step.agent = agent.trim().to_owned();
+        agent.trim().clone_into(&mut step.agent);
         step.model = if step.agent.is_empty() { String::new() } else { model.trim().to_owned() };
         Ok(())
     }
 
     /// You mark a step skipped, or not.
-    pub fn set_skipped(&mut self, id: u32, skipped: bool) -> Result<(), String> {
+    ///
+    /// # Errors
+    ///
+    /// When there's no step `id`.
+    pub fn set_skipped(&mut self, id: u32, skipped: bool) -> anyhow::Result<()> {
         let step = self.step_mut(id)?;
         step.status = if skipped { Status::Skipped } else { Status::Pending };
         step.yours = true;
@@ -308,17 +379,17 @@ impl Plan {
 
 // ---- the repository ----
 
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+fn git(dir: &Path, args: &[&str]) -> anyhow::Result<String> {
     crate::git::run_in(dir, args, None)
 }
 
 /// The repository `folder` is in (here or on its host).
-fn top(folder: &Path) -> Result<PathBuf, String> {
-    crate::git::repo_root(folder).ok_or_else(|| "It isn't in a git repository.".to_owned())
+fn top(folder: &Path) -> anyhow::Result<PathBuf> {
+    crate::git::repo_root(folder).ok_or_else(|| anyhow::Error::msg("It isn't in a git repository."))
 }
 
 /// Modified files (from the repository's root), with their content's hash.
-fn dirty(root: &Path) -> Result<BTreeMap<String, String>, String> {
+fn dirty(root: &Path) -> anyhow::Result<BTreeMap<String, String>> {
     let status = git(root, &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
     let mut paths = Vec::new();
     let mut entries = status.split('\0').filter(|e| !e.is_empty());
@@ -345,7 +416,7 @@ fn dirty(root: &Path) -> Result<BTreeMap<String, String>, String> {
     Ok(paths.iter().map(|(p, _)| (p.clone(), hash_of.get(p.as_str()).copied().unwrap_or_default().to_owned())).collect())
 }
 
-fn git_input(dir: &Path, args: &[&str], input: &[u8]) -> Result<String, String> {
+fn git_input(dir: &Path, args: &[&str], input: &[u8]) -> anyhow::Result<String> {
     crate::git::run_in(dir, args, Some(input))
 }
 
@@ -357,11 +428,16 @@ pub fn snapshot(folder: &Path, now: i64) -> Option<Snapshot> {
 
 /// The files a step changed since `start`, or why they aren't provably its
 /// own.
-pub fn changed_since(folder: &Path, start: &Snapshot) -> Result<Vec<String>, String> {
+///
+/// # Errors
+///
+/// When the folder isn't in a git repository, the branch moved during the step,
+/// or files it changed had changes from before it.
+pub fn changed_since(folder: &Path, start: &Snapshot) -> anyhow::Result<Vec<String>> {
     let root = top(folder)?;
     let head = git(&root, &["rev-parse", "HEAD"]).map(|h| h.trim().to_owned()).unwrap_or_default();
     if head != start.head {
-        return Err("The branch moved during the step (a commit or a checkout), so harlo can't tell its changes apart.".into());
+        return Err(anyhow::Error::msg("The branch moved during the step (a commit or a checkout), so harlo can't tell its changes apart."));
     }
     let now = dirty(&root)?;
     let mut changed = Vec::new();
@@ -380,7 +456,7 @@ pub fn changed_since(folder: &Path, start: &Snapshot) -> Result<Vec<String>, Str
     }
     if !mixed.is_empty() {
         mixed.sort();
-        return Err(format!("{} had changes from before the step, so harlo can't tell the step's own apart.", list_words(&mixed)));
+        return Err(anyhow::anyhow!("{} had changes from before the step, so harlo can't tell the step's own apart.", list_words(&mixed)));
     }
     Ok(changed)
 }
@@ -396,7 +472,12 @@ fn list_words(paths: &[String]) -> String {
 
 /// Commits those files alone (other staged changes stay as they are):
 /// the commit's hash.
-pub fn commit(folder: &Path, files: &[String], subject: &str, body: &str) -> Result<String, String> {
+///
+/// # Errors
+///
+/// When the folder isn't in a git repository, or git refuses the commit (a
+/// hook, nothing to commit).
+pub fn commit(folder: &Path, files: &[String], subject: &str, body: &str) -> anyhow::Result<String> {
     let root = top(folder)?;
     let mut add = vec!["add", "-A", "--"];
     add.extend(files.iter().map(String::as_str));
@@ -412,9 +493,10 @@ pub fn commit(folder: &Path, files: &[String], subject: &str, body: &str) -> Res
 }
 
 /// What harlo tells agents in a project with the plan on.
-/// What the plan's tools are for (`commits`: harlo commits each finished
-/// step; `plan_mode`: a plan asked for in Plan mode goes in the card too,
-/// for agents without a plan flow of their own; Claude Code shows its own).
+///
+/// What the plan's tools are for. `commits`: harlo commits each finished step;
+/// `plan_mode`: a plan asked for in Plan mode goes in the card too, for agents
+/// without a plan flow of their own (Claude Code shows its own).
 pub fn instructions(commits: bool, plan_mode: bool) -> String {
     let committing = if commits {
         "harlo commits each finished step on its own when its changes are provably the step's, so finish one step before starting the next, and don't commit yourself."
@@ -437,22 +519,22 @@ pub fn step_prompt(plan: &Plan, id: u32, merge: &[(String, String)], commit: boo
     let n = plan.steps.iter().position(|s| s.id == id).map_or(0, |i| i + 1);
     let mut text = format!("Do step {n} of {} of a plan: {}", plan.steps.len(), step.title);
     if !step.detail.is_empty() {
-        text.push_str(&format!("\n\n{}", step.detail));
+        let _ = write!(text, "\n\n{}", step.detail);
     }
     if let Some(why) = step.summary.strip_prefix("Not done: ") {
-        text.push_str(&format!("\n\nAn earlier try didn't finish it: {why}. Start from what's in the folder now, and avoid what went wrong."));
+        let _ = write!(text, "\n\nAn earlier try didn't finish it: {why}. Start from what's in the folder now, and avoid what went wrong.");
     }
     let done: Vec<String> = plan.steps.iter().filter(|s| s.status == Status::Done && s.id != id).map(|s| format!("- {}{}", s.title, if s.summary.is_empty() { String::new() } else { format!(": {}", s.summary) })).collect();
     if !done.is_empty() {
-        text.push_str(&format!("\n\nDone already:\n{}", done.join("\n")));
+        let _ = write!(text, "\n\nDone already:\n{}", done.join("\n"));
     }
     let after: Vec<String> = plan.steps.iter().skip(n).filter(|s| s.status == Status::Pending).map(|s| format!("- {}", s.title)).collect();
     if !after.is_empty() {
-        text.push_str(&format!("\n\nOther steps (not yours; leave them):\n{}", after.join("\n")));
+        let _ = write!(text, "\n\nOther steps (not yours; leave them):\n{}", after.join("\n"));
     }
     if !merge.is_empty() {
         let list: Vec<String> = merge.iter().map(|(title, branch)| format!("- {branch} ({title})")).collect();
-        text.push_str(&format!("\n\nEarlier steps were done on these branches: merge them into yours first (git merge), resolving any conflicts:\n{}", list.join("\n")));
+        let _ = write!(text, "\n\nEarlier steps were done on these branches: merge them into yours first (git merge), resolving any conflicts:\n{}", list.join("\n"));
     }
     text.push_str(if worktree {
         "\n\nYou work in a worktree of your own (its own branch, apart from the user's checkout; other steps may run at the same time). When the step works, commit it there, with the step as the message: the steps after yours merge your branch."
@@ -578,7 +660,7 @@ mod tests {
         p.start(5, None).unwrap();
         assert_eq!(p.step(2).unwrap().status, Status::Pending);
         assert!(p.start(1, None).is_err());
-        assert!(p.start(9, None).unwrap_err().contains("no step 9"));
+        assert!(p.start(9, None).unwrap_err().to_string().contains("no step 9"));
         p.set_skipped(2, true).unwrap();
         p.remove(5);
         let v = Plan::parse(&p.to_text()).json();
@@ -665,18 +747,18 @@ mod tests {
         // Changing a file that had changes before: not provably the step's.
         let start = snapshot(&dir, 2).unwrap();
         std::fs::write(dir.join("notes.txt"), "mine, then the agent's\n").unwrap();
-        assert!(changed_since(&dir, &start).unwrap_err().starts_with("notes.txt had changes from before"));
+        assert!(changed_since(&dir, &start).unwrap_err().to_string().starts_with("notes.txt had changes from before"));
         // The branch moved.
         let start = snapshot(&dir, 3).unwrap();
         g(&["commit", "-q", "--allow-empty", "-m", "meanwhile"]);
-        assert!(changed_since(&dir, &start).unwrap_err().contains("branch moved"));
+        assert!(changed_since(&dir, &start).unwrap_err().to_string().contains("branch moved"));
         assert!(snapshot(&std::env::temp_dir().join("harlo-no-repo-here"), 0).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The same on another machine (`HARLO_TEST_SSH`, e.g. "ssh myhost").
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH host"]
     fn commits_a_steps_own_changes_there() {
         let args = crate::remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
         let host = crate::remote::Host { name: "t".into(), ssh: args };
@@ -703,7 +785,22 @@ mod tests {
         assert_eq!(sh("git status --porcelain"), "?? notes.txt");
         let start = snapshot(&dir, 2).unwrap();
         sh("echo 'mine, then the agent' > notes.txt");
-        assert!(changed_since(&dir, &start).unwrap_err().starts_with("notes.txt had changes from before"));
+        assert!(changed_since(&dir, &start).unwrap_err().to_string().starts_with("notes.txt had changes from before"));
         sh(&format!("rm -rf {}", crate::remote::quote(&there)));
+    }
+
+    #[test]
+    fn a_run_ends_with_its_tally() {
+        let mut p = Plan::default();
+        p.set(&[("A".into(), String::new(), false), ("B".into(), String::new(), false), ("C".into(), String::new(), false)]).unwrap();
+        p.hand_out(1, "", "").unwrap();
+        p.hand_out(2, "helper-1", "").unwrap();
+        p.release_unassigned();
+        assert_eq!(steps(&p).iter().map(|s| s.2.clone()).collect::<Vec<_>>(), [Status::Pending, Status::Active, Status::Pending]);
+        assert_eq!(p.tally(), "0 steps done");
+        p.steps[0].status = Status::Done;
+        p.steps[2].status = Status::Skipped;
+        assert_eq!(p.tally(), "1 step done, 1 skipped");
+        assert!(p.finished_message().starts_with("[harlo] Your plan ran with helpers and has finished: 1 step done, 1 skipped. Read"));
     }
 }

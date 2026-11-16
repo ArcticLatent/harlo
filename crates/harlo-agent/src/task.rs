@@ -16,6 +16,9 @@
 //! calls tools. The result's `details.progress` lists them for a saved
 //! session.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -199,10 +202,10 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
     // Two or more that edit: each in a worktree, when the project allows.
     let writers = if tasks.iter().filter(|t| writes(t, ctx)).count() >= 2 {
         let cwd = ctx.cwd.clone();
-        let taken = tokio::task::spawn_blocking(move || crate::isolate::Baseline::take(&cwd)).await.unwrap_or_else(|e| Err(e.to_string()));
+        let taken = tokio::task::spawn_blocking(move || crate::isolate::Baseline::take(&cwd)).await.unwrap_or_else(|e| Err(anyhow::Error::msg(e.to_string())));
         let (base, why) = match taken {
             Ok(b) => (Some(Arc::new(b)), None),
-            Err(why) => (None, Some(why)),
+            Err(why) => (None, Some(format!("{why:#}"))),
         };
         Some(Writers { base, why, turn: tokio::sync::Mutex::new(()) })
     } else {
@@ -214,17 +217,17 @@ async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToke
     if let Some(base) = writers.as_ref().and_then(|w| w.base.as_ref()) {
         for d in &mut done {
             let Some(w) = d.worktree.take() else { continue };
-            let b = base.clone();
+            let b = Arc::clone(base);
             let applied = tokio::task::spawn_blocking(move || b.apply(&w)).await;
             match applied {
                 Ok(crate::isolate::Applied::Nothing) | Err(_) => {}
-                Ok(crate::isolate::Applied::Done(files)) => d.text.push_str(&format!("\n\n(It worked in its own copy; its changes were brought back: {}.)", files.join(", "))),
-                Ok(crate::isolate::Applied::Kept { why, dir, patch, files }) => d.text.push_str(&format!(
+                Ok(crate::isolate::Applied::Done(files)) => _ = write!(d.text, "\n\n(It worked in its own copy; its changes were brought back: {}.)", files.join(", ")),
+                Ok(crate::isolate::Applied::Kept { why, dir, patch, files }) => _ = write!(d.text, 
                     "\n\n(It worked in its own copy. Its changes to {} are NOT in the project: they clash with an earlier task's ({why}). They're in {}{}. Bring them over yourself (read them and make the same changes) before you say the work is done.)",
                     if files.is_empty() { "the files".to_owned() } else { files.join(", ") },
                     dir.display(),
                     if patch.as_os_str().is_empty() { String::new() } else { format!(", as a patch in {}", patch.display()) },
-                )),
+                ),
             }
         }
     }
@@ -240,7 +243,7 @@ fn report(done: &[Done]) -> Outcome {
     let mut total = crate::used::Used::default();
     for d in done {
         let answer = if d.text.trim().is_empty() { "(no answer)" } else { d.text.trim() };
-        text.push_str(&format!("## {} ({})\n{answer}{}\n\n", d.description, d.status, d.note));
+        let _ = write!(text, "## {} ({})\n{answer}{}\n\n", d.description, d.status, d.note);
         total.add(&crate::used::Used::from_details(&d.usage));
     }
     if done.iter().any(|d| d.unguarded) {
@@ -258,24 +261,25 @@ fn report(done: &[Done]) -> Outcome {
     }
 }
 
-async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaphore, stop: &CancellationToken, writers: Option<&Writers>) -> Done {
-    let description = task["description"].as_str().map(str::trim).filter(|d| !d.is_empty()).unwrap_or("task").to_owned();
-    let prompt = task["prompt"].as_str().unwrap_or_default().to_owned();
-    let profile = task["agent"].as_str().and_then(|a| ctx.profiles.iter().find(|p| p.name == a));
-    let (kind, allowed) = match profile {
+/// A task's kind (its profile's name, `general` or `explore`) and its tools.
+fn kind_of(task: &Value, profile: Option<&crate::profiles::Profile>) -> (String, &'static [&'static str]) {
+    match profile {
         Some(p) => (p.name.clone(), p.tools),
         None if task["kind"] == "general" => ("general".to_owned(), GENERAL),
         None => ("explore".to_owned(), EXPLORE),
-    };
-    let writer = writes(task, ctx);
-    // Its model: the task's, its profile's, the subagents', else the session's.
+    }
+}
+
+/// A task's model (the task's, its profile's, the subagents', else the
+/// session's) and effort (another provider's model: its own default, unless
+/// asked).
+fn model_and_effort(task: &Value, profile: Option<&crate::profiles::Profile>, ctx: &Ctx) -> (String, Option<String>) {
     let model = [task["model"].as_str(), profile.map(|p| p.model.as_str()), ctx.task_model.as_deref()]
         .into_iter()
         .flatten()
         .find(|m| !m.is_empty() && crate::providers::resolve(m).is_ok())
         .unwrap_or(&ctx.model)
         .to_owned();
-    // (Another provider's model: its own default effort, unless asked.)
     let same_provider = model.split_once('/').map(|m| m.0) == ctx.model.split_once('/').map(|m| m.0);
     let effort = match task["effort"].as_str().filter(|e| !e.is_empty()) {
         Some("off") => None,
@@ -283,6 +287,60 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         None if same_provider => ctx.effort.clone(),
         None => None,
     };
+    (model, effort)
+}
+
+/// A forked subagent's prompt: what it's for, what it may do, and the task.
+fn fork_prompt(description: &str, prompt: &str, allowed: &[&str], writer: bool) -> String {
+    format!(
+        "<subagent>\nYou're now a subagent started from the conversation above, to do one part of it: {description}. The main agent goes on with the rest. \
+         Your tools are {}{} (others are refused). When you're done, your final message goes back to the main agent as your result: say briefly what you found or did.\n\n{prompt}\n</subagent>",
+        allowed.join(", "),
+        if writer { "" } else { ", and the project is read-only for your commands" },
+    )
+}
+
+/// What a subagent shares with its session (approvals, budget, fallback,
+/// language servers, what it has read), its tools, and its profile's
+/// instructions.
+fn equip(agent: &mut Agent, ctx: &Ctx, allowed: &'static [&'static str], profile: Option<&crate::profiles::Profile>) {
+    agent.gate.clone_from(&ctx.gate);
+    agent.budget.clone_from(&ctx.budget);
+    agent.fallback.clone_from(&ctx.fallback);
+    agent.share_lsp(Arc::clone(&ctx.lsp));
+    agent.allowed = Some(allowed);
+    if let Some(p) = profile.filter(|p| !p.body.is_empty()) {
+        agent.add_instructions(&format!("\n<agent_profile name=\"{}\">\n{}\n</agent_profile>\n", p.name, p.body));
+    }
+    agent.known = ctx.known.clone();
+}
+
+/// How a task's run ended: its status, its answer (or why it failed) and
+/// what it used.
+fn record_end(done: &mut Done, agent: &mut Agent, ended: anyhow::Result<Ended>) {
+    done.status = match &ended {
+        Ok(Ended::Done) => "completed",
+        Ok(Ended::Stopped) => "aborted",
+        Err(_) => "failed",
+    };
+    if let Err(e) = ended {
+        let why = format!("{e:#}");
+        let mut quiet = |_: Shown| {};
+        let _ = agent.failed(&why, &mut quiet);
+        done.text = format!("Failed: {why}");
+    } else {
+        done.text = last_text(agent.messages());
+    }
+    done.usage = agent.totals.details();
+}
+
+async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaphore, stop: &CancellationToken, writers: Option<&Writers>) -> Done {
+    let description = task["description"].as_str().map(str::trim).filter(|d| !d.is_empty()).unwrap_or("task").to_owned();
+    let prompt = task["prompt"].as_str().unwrap_or_default().to_owned();
+    let profile = task["agent"].as_str().and_then(|a| ctx.profiles.iter().find(|p| p.name == a));
+    let (kind, allowed) = kind_of(task, profile);
+    let writer = writes(task, ctx);
+    let (model, effort) = model_and_effort(task, profile, ctx);
     let id = format!("task-{}", hex_id());
     let mut done = Done { id: id.clone(), description: description.clone(), kind: kind.clone(), prompt: prompt.clone(), status: "aborted", text: String::new(), usage: json!({}), worktree: None, note: String::new(), unguarded: false };
     let token = stop.child_token();
@@ -290,7 +348,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     // (Waiting for a free place; stopped while it waits: never started.)
     let permit = tokio::select! {
         biased;
-        _ = token.cancelled() => None,
+        () = token.cancelled() => None,
         p = slots.acquire() => p.ok(),
     };
     if permit.is_none() {
@@ -301,27 +359,29 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     // A writer beside others: in its own worktree; none made, in the
     // project itself, when no other writer is there.
     let mut cwd = ctx.cwd.clone();
-    let mut _turn = None;
+    // Holds the writers' turn, when waited for, until the task ends.
+    #[expect(unused_assignments, reason = "only its drop at the end reads it")]
+    let mut turn_held = None;
     if let Some(w) = writers.filter(|_| writer) {
         let made = match &w.base {
             Some(b) => {
-                let (b, name) = (b.clone(), id.clone());
-                tokio::task::spawn_blocking(move || b.worktree(&name)).await.unwrap_or_else(|e| Err(e.to_string()))
+                let (b, name) = (Arc::clone(b), id.clone());
+                tokio::task::spawn_blocking(move || b.worktree(&name)).await.unwrap_or_else(|e| Err(anyhow::Error::msg(e.to_string())))
             }
-            None => Err(w.why.clone().unwrap_or_default()),
+            None => Err(anyhow::Error::msg(w.why.clone().unwrap_or_default())),
         };
         match made {
             Ok(tree) => {
-                cwd = tree.cwd.clone();
+                cwd.clone_from(&tree.cwd);
                 done.worktree = Some(tree);
             }
             Err(why) => {
-                _turn = tokio::select! {
+                turn_held = tokio::select! {
                     biased;
-                    _ = token.cancelled() => None,
+                    () = token.cancelled() => None,
                     t = w.turn.lock() => Some(t),
                 };
-                if _turn.is_none() {
+                if turn_held.is_none() {
                     ctx.running.lock().unwrap().remove(&id);
                     done.text = "Stopped before it started.".into();
                     return done;
@@ -349,26 +409,13 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     if !writer && !agent.look_only() && allowed.contains(&"bash") {
         done.unguarded = true;
     }
-    agent.gate = ctx.gate.clone();
-    agent.budget = ctx.budget.clone();
-    agent.fallback = ctx.fallback.clone();
-    agent.share_lsp(ctx.lsp.clone());
-    agent.allowed = Some(allowed);
-    if let Some(p) = profile.filter(|p| !p.body.is_empty()) {
-        agent.add_instructions(&format!("\n<agent_profile name=\"{}\">\n{}\n</agent_profile>\n", p.name, p.body));
-    }
+    equip(&mut agent, ctx, allowed, profile);
     agent.cache_key = Some(if fork.is_some() { ctx.cache_key.clone() } else { format!("{}/task", ctx.cache_key) });
     let mut asked = prompt.clone();
     if let Some(f) = fork {
         agent.fixed = Some((f.system.clone(), f.specs.clone()));
-        asked = format!(
-            "<subagent>\nYou're now a subagent started from the conversation above, to do one part of it: {description}. The main agent goes on with the rest. \
-             Your tools are {}{} (others are refused). When you're done, your final message goes back to the main agent as your result: say briefly what you found or did.\n\n{prompt}\n</subagent>",
-            allowed.join(", "),
-            if writer { "" } else { ", and the project is read-only for your commands" },
-        );
+        asked = fork_prompt(&description, &prompt, allowed, writer);
     }
-    agent.known = ctx.known.clone();
     let _ = agent.rename(&description);
     ctx.tell(json!({ "type": "subagent_lifecycle", "payload": {
         "id": id, "agent": kind, "description": description, "assignment": prompt, "status": "running",
@@ -386,20 +433,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         _ => {}
     };
     let ended = agent.run(&asked, &[], &token, &mut show).await;
-    done.status = match &ended {
-        Ok(Ended::Done) => "completed",
-        Ok(Ended::Stopped) => "aborted",
-        Err(_) => "failed",
-    };
-    if let Err(e) = ended {
-        let why = format!("{e:#}");
-        let mut quiet = |_: Shown| {};
-        let _ = agent.failed(&why, &mut quiet);
-        done.text = format!("Failed: {why}");
-    } else {
-        done.text = last_text(agent.messages());
-    }
-    done.usage = agent.totals.details();
+    record_end(&mut done, &mut agent, ended);
     ctx.running.lock().unwrap().remove(&id);
     let shown: String = done.text.chars().take(RESULT_SHOWN).collect();
     ctx.tell(json!({ "type": "subagent_lifecycle", "payload": { "id": id, "status": done.status, "result": shown, "usage": done.usage } }));
@@ -482,7 +516,7 @@ mod tests {
     async fn bad_calls_are_refused() {
         let ctx = Ctx {
             model: "x/y".into(), effort: None, cwd: std::env::temp_dir(), gate: None, parent_file: None, cache_key: "k".into(),
-            notify: None, known: Default::default(), running: Arc::default(), profiles: Vec::new(), task_model: None, budget: None, fallback: None, lsp: Default::default(), fork: None,
+            notify: None, known: crate::agent::Known::default(), running: Arc::default(), profiles: Vec::new(), task_model: None, budget: None, fallback: None, lsp: Arc::default(), fork: None,
         };
         let stop = CancellationToken::new();
         assert!(run(&json!({}), "c", &ctx, &stop).await.failed);

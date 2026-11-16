@@ -29,6 +29,8 @@
 //! A provider without `models` lists what its `/models` says. The file is
 //! read for each request, so a change to it applies to sessions running.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -189,7 +191,7 @@ impl Provider {
             Key::Plan(sign) => Ok(Some(auth::access_token(*sign, force).await?)),
             Key::None => Ok(None),
             Key::Value(k) => Ok(Some(k.clone())),
-            Key::Env(name) => std::env::var(name).map(Some).map_err(|_| anyhow!("{}'s key isn't set: ${name} is empty", self.name)),
+            Key::Env(name) => std::env::var(name).map(Some).ok().ok_or_else(|| anyhow!("{}'s key isn't set: ${name} is empty", self.name)),
         }
     }
 
@@ -302,7 +304,7 @@ fn parse_provider(id: &str, p: &Value) -> Result<Provider> {
             let levels = match &m["levels"] {
                 _ if !efforts.is_empty() => efforts.iter().map(|(l, _)| l.clone()).collect(),
                 Value::Array(l) => l.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
-                _ if m["reasoning"] == true => REASONING_LEVELS.iter().map(|l| l.to_string()).collect(),
+                _ if m["reasoning"] == true => REASONING_LEVELS.iter().map(std::string::ToString::to_string).collect(),
                 _ => Vec::new(),
             };
             let images = m["input"].as_array().map(|i| i.iter().any(|t| t == "image"));
@@ -468,9 +470,9 @@ mod tests {
         let p = parse_provider("x", &json!({ "baseUrl": "https://x/v1", "api": "openai-responses", "apiKey": "${X_KEY}" })).unwrap();
         assert_eq!((p.api, p.key, p.name.as_str()), (Api::Responses, Key::Env("X_KEY".into()), "x"));
         assert_eq!(parse_provider("x", &json!({ "baseUrl": "u", "apiKey": "sk-1" })).unwrap().key, Key::Value("sk-1".into()));
-        assert!(parse_provider("a/b", &json!({ "baseUrl": "u" })).is_err());
-        assert!(parse_provider("a", &json!({})).is_err());
-        assert!(parse_provider("a", &json!({ "baseUrl": "u", "api": "soap" })).is_err());
+        parse_provider("a/b", &json!({ "baseUrl": "u" })).unwrap_err();
+        parse_provider("a", &json!({})).unwrap_err();
+        parse_provider("a", &json!({ "baseUrl": "u", "api": "soap" })).unwrap_err();
     }
 
     #[test]

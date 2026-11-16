@@ -1,5 +1,7 @@
 //! `UsageStats`: usage report across all sessions for the Stats view.
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -55,7 +57,7 @@ impl UsageStats {
         self.as_mut().set_loading(true);
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
-            let days = days.max(0) as u32;
+            let days = u32::try_from(days).unwrap_or(0);
             let mut files = harlo_core::stats::all_sessions();
             // This PC's at once; with other machines' once they're read.
             let show = |files: &[std::sync::Arc<harlo_core::stats::FileStats>], done: bool| {

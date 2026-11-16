@@ -5,6 +5,8 @@
 //! run ends. A change made (an edit or a write) starts the count again: the
 //! same failing test after another fix is trying, not circling.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 

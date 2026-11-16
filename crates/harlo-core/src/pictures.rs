@@ -1,7 +1,10 @@
-//! Pictures in a conversation: ones that came in a message (an image you
-//! pasted, a screenshot a tool returned, one a model made), kept as files
-//! in harlo's cache so they can be shown like any other; and the image
-//! files a message names (a Markdown image, a path an agent wrote to).
+//! Pictures in a conversation, kept as files so they show like any other.
+//!
+//! Ones that came in a message (an image you pasted, a screenshot a tool
+//! returned, one a model made) are kept in harlo's cache; and the image files a
+//! message names (a Markdown image, a path an agent wrote to) are found.
+
+// Rust guideline compliant 2026-10-09
 
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
@@ -181,9 +184,11 @@ pub fn shown(row: &crate::Row, folder: &std::path::Path) -> Vec<String> {
     out
 }
 
-/// Where a picture of a row came from, in words: a project's file by its
-/// path in the project, one kept inline by who gave it ("You sent", "From
-/// Read shot.png", "In a reply"), another file by its path (~ for home).
+/// Where a picture of a row came from, in words.
+///
+/// A project's file by its path in the project, one kept inline by who gave it
+/// ("You sent", "From Read shot.png", "In a reply"), another file by its path
+/// (~ for home).
 pub fn origin(row: &crate::Row, path: &str, folder: &std::path::Path) -> String {
     let p = std::path::Path::new(path);
     if p.starts_with(cache_dir()) {

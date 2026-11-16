@@ -1,8 +1,11 @@
-//! Side-by-side diffs (the diff tab): a file's whole-file diff laid out as
-//! two aligned columns, the old version on the left and the new one on the
-//! right. Removed and added lines next to each other
-//! pair up on one row (the part of the line that changed is marked); the
-//! side with fewer lines gets filler rows, so the two stay level.
+//! Side-by-side diffs (the diff tab), in two aligned columns.
+//!
+//! A file's whole-file diff, the old version on the left and the new one on the
+//! right. Removed and added lines next to each other pair up on one row (the
+//! part of the line that changed is marked); the side with fewer lines gets
+//! filler rows, so the two stay level.
+
+// Rust guideline compliant 2026-10-09
 
 use crate::git::{FileDiff, LineKind};
 
@@ -90,7 +93,7 @@ fn side(text: &mut String, len: &mut u32, first: bool, cell: Option<(&str, u32, 
     let (t, no, kind) = cell.unwrap_or(("", 0, FILLER));
     let c = Cell { kind, no, offset: *len, inline: None };
     text.push_str(t);
-    *len += t.encode_utf16().count() as u32;
+    *len += u32::try_from(t.encode_utf16().count()).unwrap_or(u32::MAX);
     c
 }
 
@@ -105,7 +108,7 @@ fn inline(old: &str, new: &str) -> (Span, Span) {
     if prefix + suffix == 0 {
         return (None, None);
     }
-    let units = |s: &[char]| s.iter().map(|c| c.len_utf16() as u32).sum::<u32>();
+    let units = |s: &[char]| s.iter().map(|c| u32::try_from(c.len_utf16()).unwrap_or(u32::MAX)).sum::<u32>();
     let range = |s: &[char]| {
         let (from, to) = (units(&s[..prefix]), units(&s[..s.len() - suffix]));
         (from < to).then_some((from, to))

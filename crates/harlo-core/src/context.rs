@@ -2,6 +2,9 @@
 //! per-message log, computed from the session's `AgentMessage`s so it works
 //! for saved sessions as well as live ones.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use serde_json::{Value, json};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -117,7 +120,7 @@ const SHOWN_ROWS: usize = 300;
 
 /// The report, built a message at a time (a session keeps one, so its
 /// panels never read the whole conversation again).
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Tally {
     user: usize,
     assistant: usize,
@@ -177,10 +180,10 @@ impl Tally {
                 }
                 self.cost += m["usage"]["cost"]["total"].as_f64().unwrap_or(0.0);
                 if let Some(s) = m["model"].as_str() {
-                    self.model = s.to_owned();
+                    s.clone_into(&mut self.model);
                 }
                 if let Some(s) = m["provider"].as_str() {
-                    self.provider = s.to_owned();
+                    s.clone_into(&mut self.provider);
                 }
                 let (first, calls) = reply_parts(&m["content"]);
                 // Replies that only called tools, one after another (a dozen
@@ -305,12 +308,12 @@ impl Spent {
     /// when some requests' costs aren't known).
     pub fn line(&self, model: &str) -> String {
         let k = |n: u64| if n >= 1000 { format!("{:.1}k", n as f64 / 1000.0) } else { n.to_string() };
-        let cached = if self.input > 0 { format!(" ({}% cached)", self.cached * 100 / self.input) } else { String::new() };
+        let cached = (self.cached * 100).checked_div(self.input).map(|p| format!(" ({p}% cached)")).unwrap_or_default();
         let who = if model.trim().is_empty() { String::new() } else { format!("{}: ", model.trim()) };
         let mut s = format!("{who}{} request{}, {} tokens in{cached}, {} out", self.requests, if self.requests == 1 { "" } else { "s" }, k(self.input), k(self.output));
         match (self.cost > 0.0, self.unpriced > 0) {
-            (true, false) => s.push_str(&format!(", ${:.2}", self.cost)),
-            (true, true) => s.push_str(&format!(", at least ${:.2}", self.cost)),
+            (true, false) => _ = write!(s, ", ${:.2}", self.cost),
+            (true, true) => _ = write!(s, ", at least ${:.2}", self.cost),
             (false, true) => s.push_str(", cost unknown"),
             (false, false) => {}
         }
@@ -337,7 +340,7 @@ fn spent_of(u: &Value) -> Spent {
         cached: read,
         output: u["output"].as_u64().unwrap_or(0),
         cost: if unknown { 0.0 } else { u["cost"]["total"].as_f64().unwrap_or(0.0) },
-        unpriced: unknown as u64,
+        unpriced: u64::from(unknown),
     }
 }
 
@@ -367,7 +370,7 @@ fn entry_spent(e: &Value) -> Spent {
                 cached: u["cached"].as_u64().unwrap_or(0),
                 output: u["output"].as_u64().unwrap_or(0),
                 cost: u["cost"].as_f64().unwrap_or(0.0),
-                unpriced: kinds.contains(&"unknown") as u64,
+                unpriced: u64::from(kinds.contains(&"unknown")),
             }
         }
         Some("compaction" | "harlo_usage") if e["usage"].is_object() => spent_of(&e["usage"]),
@@ -481,7 +484,7 @@ mod tests {
         let file = |msgs: &[Value]| {
             let mut t = format!("{}\n", json!({ "type": "session", "version": 3, "id": "x", "timestamp": "2026-11-07T00:00:00Z", "cwd": "/tmp" }));
             for (i, m) in msgs.iter().enumerate() {
-                t.push_str(&format!("{}\n", json!({ "type": "message", "id": format!("m{i}"), "parentId": if i == 0 { Value::Null } else { json!(format!("m{}", i - 1)) }, "timestamp": "2026-11-07T00:00:00Z", "message": m })));
+                let _ = writeln!(t, "{}", json!({ "type": "message", "id": format!("m{i}"), "parentId": if i == 0 { Value::Null } else { json!(format!("m{}", i - 1)) }, "timestamp": "2026-11-07T00:00:00Z", "message": m }));
             }
             t
         };
@@ -501,7 +504,7 @@ mod tests {
             json!({ "type": "message", "id": "w", "message": { "role": "toolResult", "toolName": "web_search", "content": [], "details": { "usage": { "requests": 1, "input": 2000, "cached": 0, "output": 100, "cost": 0.01, "costKinds": ["priced"] } } } }),
             json!({ "type": "message", "id": "t", "message": { "role": "toolResult", "toolName": "task", "content": [], "details": { "usage": { "requests": 1, "input": 100, "cached": 0, "output": 10 } } } }),
         ] {
-            text.push_str(&format!("{e}\n"));
+            let _ = writeln!(text, "{e}");
         }
         std::fs::write(dir.join("s.jsonl"), text).unwrap();
         let all = spent_in_file(&dir.join("s.jsonl")).unwrap();

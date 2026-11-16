@@ -1,8 +1,11 @@
-//! Harlo's sessions on another machine: harlo puts its agent there (a static
-//! build, so it runs whatever C library the machine has; once per build of
-//! it) and runs it over SSH as the other agents run there. Its sign-in,
-//! settings and sessions are that machine's own, in harlo-agent's folders
-//! there.
+//! Harlo's sessions on another machine.
+//!
+//! harlo puts its agent there (a static build, so it runs whatever C library
+//! the machine has; once per build of it) and runs it over SSH as the other
+//! agents run there. Its sign-in, settings and sessions are that machine's own,
+//! in harlo-agent's folders there.
+
+// Rust guideline compliant 2026-10-09
 
 use anyhow::{Context, Result};
 use harlo_harness::HarnessKind;
@@ -12,8 +15,14 @@ use crate::remote_helper::{ARCHES, Helper};
 
 static AGENT: Helper = Helper::new("harlo-agent", true, "agent", "--version");
 
-/// harlo-agent on `host_name`, put there first if this build of it isn't:
-/// its path there (blocking).
+/// harlo-agent on `host_name`, put there first if this build of it isn't.
+///
+/// Its path there (blocking).
+///
+/// # Errors
+///
+/// When the machine can't be reached, there's no build for its kind, or it
+/// can't be written there.
 pub fn program_on(host_name: &str) -> Result<String> {
     let host = remote::host(host_name).with_context(|| format!("unknown machine {host_name}"))?;
     AGENT.on(&host)
@@ -33,11 +42,15 @@ pub fn not_there(info: &HostInfo) -> Option<String> {
 /// For harlo-harness: the program a session of `kind` runs on `host_name`
 /// (Harlo's: the copy put there; the others': None, that machine's PATH
 /// finds them).
-pub fn remote_program(host_name: &str, kind: HarnessKind) -> Result<Option<String>> {
+///
+/// # Errors
+///
+/// Why Harlo's agent can't be put on that machine.
+pub fn remote_program(host_name: &str, kind: HarnessKind) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
     if kind != HarnessKind::Harlo {
         return Ok(None);
     }
-    program_on(host_name).map(Some).with_context(|| format!("Harlo can't start on {host_name}"))
+    Ok(program_on(host_name).map(Some).with_context(|| format!("Harlo can't start on {host_name}"))?)
 }
 
 #[cfg(test)]
@@ -60,7 +73,7 @@ mod tests {
     /// Its settings, sign-in and sessions there are a scratch folder's (set
     /// through the SSH environment); harlo's cache there gets the copy.
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH host"]
     fn harlo_agent_over_ssh() {
         use std::time::Duration;
         let dir = crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-agent-host-{}", std::process::id())));
@@ -131,7 +144,7 @@ mod tests {
     /// harlo-agent's settings, sign-in and sessions there are a scratch
     /// folder's in its /tmp, removed after; harlo's cache there gets the copy.
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH host"]
     fn harlo_agent_on_a_host() {
         use std::time::Duration;
         let ssh = remote::parse_ssh_command(&std::env::var("HARLO_TEST_HOST").expect("HARLO_TEST_HOST")).unwrap();

@@ -2,6 +2,8 @@
 //! where they publish theirs) against the installed one, and the agent's
 //! own command to update itself.
 
+// Rust guideline compliant 2026-10-09
+
 use std::time::Duration;
 
 /// The npm package each agent is published as.
@@ -58,7 +60,19 @@ pub struct Release {
 impl Release {
     /// From `linux-release.json`, only if it's signed with harlo's key (and
     /// is harlo's: its repository, its tag the version's).
+    ///
+    /// # Errors
+    ///
+    /// When `json` isn't a manifest (a field missing), its signature isn't
+    /// harlo's, or it names another repository or a tag that isn't its
+    /// version's.
     pub fn verified(json: &str) -> anyhow::Result<Self> {
+        Self::verified_by(json, &harlo_update_signing::harlo_public_key())
+    }
+
+    /// As [`Release::verified`], with the signature checked against
+    /// `public_key_b64` instead of harlo's key.
+    fn verified_by(json: &str, public_key_b64: &str) -> anyhow::Result<Self> {
         use anyhow::{Context, bail};
         let v: serde_json::Value = serde_json::from_str(json).context("the release manifest isn't JSON")?;
         let text = |key: &str| v[key].as_str().map(str::to_owned).with_context(|| format!("the release manifest has no {key}"));
@@ -74,7 +88,7 @@ impl Release {
             .collect::<anyhow::Result<Vec<_>>>()?;
         let signature = v["signature"].as_str().context("the release manifest isn't signed")?;
         let payload = harlo_update_signing::signing_payload(&version, &tag, &repository, &assets);
-        harlo_update_signing::verify_with_harlo_key(&payload, signature).context("the release manifest's signature isn't harlo's")?;
+        harlo_update_signing::verify(&payload, signature, public_key_b64).context("the release manifest's signature isn't harlo's")?;
         if repository != REPOSITORY || tag != format!("v{version}") {
             bail!("the release manifest is for {repository} {tag}, not harlo {version}");
         }
@@ -97,6 +111,11 @@ impl Release {
 
 /// harlo's newest release, its manifest's signature checked.
 /// `HARLO_UPDATE_MANIFEST_URL` points elsewhere (the tests' stand-in).
+///
+/// # Errors
+///
+/// When the manifest can't be downloaded or isn't verified (see
+/// [`Release::verified`]).
 pub fn harlo_release() -> anyhow::Result<Release> {
     use anyhow::Context;
     let url = std::env::var("HARLO_UPDATE_MANIFEST_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| MANIFEST.to_owned());
@@ -122,6 +141,10 @@ pub fn harlo_changelog_url(latest: &str) -> String {
 /// What's new since `current`, up to `latest`: CHANGELOG.md at that
 /// release's tag, read with [`changes_since`]. `HARLO_UPDATE_CHANGELOG_URL`
 /// points elsewhere (the tests' stand-in).
+///
+/// # Errors
+///
+/// When the changelog can't be downloaded.
 pub fn harlo_changes(current: &str, latest: &str) -> anyhow::Result<String> {
     use anyhow::Context;
     let url = std::env::var("HARLO_UPDATE_CHANGELOG_URL")
@@ -301,8 +324,10 @@ pub fn elevation() -> Vec<String> {
 }
 
 /// The program to start harlo again: the AppImage (its file), else this
-/// program. A package upgrade replaces it while it runs, after which
-/// Linux names it "<path> (deleted)"; the path itself is the new harlo.
+/// program.
+///
+/// A package upgrade replaces it while it runs, after which Linux names it
+/// "<path> (deleted)"; the path itself is the new harlo.
 pub fn this_program() -> Option<std::path::PathBuf> {
     if let Some(appimage) = std::env::var_os("APPIMAGE").filter(|a| !a.is_empty()) {
         return Some(appimage.into());
@@ -314,6 +339,10 @@ pub fn this_program() -> Option<std::path::PathBuf> {
 
 /// Starts `program` once this process has exited: a waiter outside harlo
 /// (a harlo started while this one runs would only hand over to it).
+///
+/// # Errors
+///
+/// An I/O error when the waiter can't be started.
 pub fn relaunch_after_exit(program: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::process::CommandExt;
     std::process::Command::new("sh")
@@ -328,6 +357,10 @@ pub fn relaunch_after_exit(program: &std::path::Path) -> std::io::Result<()> {
 }
 
 /// Downloads `url` to `dest`: its SHA-256 (hex).
+///
+/// # Errors
+///
+/// When the download fails or `dest` can't be written.
 pub fn download(url: &str, dest: &std::path::Path) -> anyhow::Result<String> {
     use anyhow::Context;
     use sha2::{Digest, Sha256};
@@ -379,7 +412,7 @@ mod tests {
     use super::*;
 
     /// A manifest as the release workflow writes it, signed with a
-    /// throwaway key (`HARLO_UPDATE_PUBLIC_KEY` makes harlo trust it).
+    /// throwaway key (trusted by `Release::verified_by` given its public half).
     fn manifest(version: &str, repository: &str, key: &[u8; 32]) -> String {
         use base64::{Engine, engine::general_purpose::STANDARD};
         use ed25519_dalek::{Signer, SigningKey};
@@ -396,9 +429,9 @@ mod tests {
     fn harlo_releases() {
         use base64::{Engine, engine::general_purpose::STANDARD};
         let test_key = [5u8; 32];
-        // SAFETY: only this test reads HARLO_UPDATE_PUBLIC_KEY.
-        unsafe { std::env::set_var("HARLO_UPDATE_PUBLIC_KEY", STANDARD.encode(ed25519_dalek::SigningKey::from_bytes(&test_key).verifying_key().to_bytes())) };
-        let r = Release::verified(&manifest("1.2.0", "ArcticLatent/harlo", &test_key)).unwrap();
+        let public = STANDARD.encode(ed25519_dalek::SigningKey::from_bytes(&test_key).verifying_key().to_bytes());
+        let verified = |json: &str| Release::verified_by(json, &public);
+        let r = verified(&manifest("1.2.0", "ArcticLatent/harlo", &test_key)).unwrap();
         assert_eq!(r.version, "1.2.0");
         assert_eq!(r.asset(&InstallKind::Deb).unwrap().download_url, "https://x/harlo_1.2.0-1_amd64.deb");
         assert_eq!(r.asset(&InstallKind::Rpm).unwrap().name, "harlo-1.2.0-1.x86_64.rpm");
@@ -406,17 +439,17 @@ mod tests {
         let appimage = r.asset(&InstallKind::AppImage("/a".into())).unwrap();
         assert_eq!((appimage.name.as_str(), appimage.sha256.as_str()), ("harlo-1.2.0-x86_64.AppImage", "ab27"), "sums are lowercased");
         // Signed by another key, or changed after signing: refused.
-        assert!(Release::verified(&manifest("1.2.0", "ArcticLatent/harlo", &[6u8; 32])).is_err());
+        verified(&manifest("1.2.0", "ArcticLatent/harlo", &[6u8; 32])).unwrap_err();
         let changed = manifest("1.2.0", "ArcticLatent/harlo", &test_key).replace("https://x/harlo-1.2.0-x86_64.AppImage", "https://evil/harlo");
-        assert!(Release::verified(&changed).is_err());
+        verified(&changed).unwrap_err();
         // Unsigned: refused.
         let mut unsigned: serde_json::Value = serde_json::from_str(&manifest("1.2.0", "ArcticLatent/harlo", &test_key)).unwrap();
         unsigned.as_object_mut().unwrap().remove("signature");
-        assert!(Release::verified(&unsigned.to_string()).is_err());
+        verified(&unsigned.to_string()).unwrap_err();
         // Signed, but another project's.
-        assert!(Release::verified(&manifest("1.2.0", "someone/else", &test_key)).is_err());
-        // SAFETY: as above.
-        unsafe { std::env::remove_var("HARLO_UPDATE_PUBLIC_KEY") };
+        verified(&manifest("1.2.0", "someone/else", &test_key)).unwrap_err();
+        // Harlo's own key trusts none of them.
+        Release::verified(&manifest("1.2.0", "ArcticLatent/harlo", &test_key)).unwrap_err();
 
         let f = std::path::Path::new("/tmp/h.rpm");
         let pk = vec!["pkexec".to_owned()];

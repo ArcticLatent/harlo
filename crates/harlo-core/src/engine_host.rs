@@ -1,7 +1,10 @@
-//! Model servers on another machine: harlo's `harlo-engines` helper put
-//! there (once per build of it), and its commands run there over SSH
-//! (`harlo-engines` says what each does). Engines, models and servers go in
-//! harlo's folders on that machine, as they would here.
+//! Model servers on another machine, through harlo's `harlo-engines` helper.
+//!
+//! The helper is put there (once per build of it), and its commands run there
+//! over SSH (`harlo-engines` says what each does). Engines, models and servers
+//! go in harlo's folders on that machine, as they would here.
+
+// Rust guideline compliant 2026-10-09
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::Stdio;
@@ -34,6 +37,11 @@ fn host(name: &str) -> Result<Host> {
 }
 
 /// A helper command's output on `host_name` (blocking).
+///
+/// # Errors
+///
+/// When the machine can't be reached, the helper can't be put there, or the
+/// command fails (what it said).
 pub fn run(host_name: &str, args: &[&str], limit: Duration) -> Result<String> {
     let h = host(host_name)?;
     let helper = helper_on(&h)?;
@@ -47,6 +55,11 @@ pub fn run(host_name: &str, args: &[&str], limit: Duration) -> Result<String> {
 
 /// A helper command's output as JSON when harlo has set something up on
 /// `host_name` before (`None`: it hasn't, and nothing's put there).
+///
+/// # Errors
+///
+/// When the machine can't be reached, the helper can't be put there, or the
+/// command fails (what it said). Or its output isn't JSON.
 pub fn json_if_there(host_name: &str, args: &[&str], limit: Duration) -> Result<Option<Value>> {
     if !helper_there(&host(host_name)?)? {
         return Ok(None);
@@ -55,24 +68,35 @@ pub fn json_if_there(host_name: &str, args: &[&str], limit: Duration) -> Result<
 }
 
 /// The same, read as JSON.
+///
+/// # Errors
+///
+/// When the machine can't be reached, the helper can't be put there, or the
+/// command fails (what it said). Or its output isn't JSON.
 pub fn json(host_name: &str, args: &[&str], limit: Duration) -> Result<Value> {
     let text = run(host_name, args, limit)?;
     serde_json::from_str(text.trim()).with_context(|| format!("harlo-engines {} said something unexpected", args.first().unwrap_or(&"")))
 }
 
-/// A setup (or update) there: `request` to it, each line it says to `line`
-/// until it ends (blocking). An error when the machine can't be reached or
-/// the connection drops.
+/// A setup (or update) on `host_name`.
+///
+/// `request` goes to it, and each line it says to `line` until it ends
+/// (blocking).
+///
+/// # Errors
+///
+/// When the machine can't be reached, the helper can't be put there, or the
+/// connection drops.
 pub fn setup(host_name: &str, job: &str, request: &Value, line: &mut dyn FnMut(Value)) -> Result<()> {
     let h = host(host_name)?;
     let helper = helper_on(&h)?;
     let mut cmd = remote::command(&h, &format!("{helper} setup {}", remote::quote(job)));
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().context("running ssh")?;
     {
-        let mut input = child.stdin.take().expect("piped");
+        let mut input = child.stdin.take().context("ssh started without its input")?;
         input.write_all(request.to_string().as_bytes())?;
-    }
-    let stdout = child.stdout.take().expect("piped");
+    };
+    let stdout = child.stdout.take().context("ssh started without its output")?;
     let mut ended = false;
     for l in BufReader::new(stdout).lines() {
         let Ok(l) = l else { break };
@@ -90,6 +114,11 @@ pub fn setup(host_name: &str, job: &str, request: &Value, line: &mut dyn FnMut(V
 }
 
 /// Stops a setup going on there.
+///
+/// # Errors
+///
+/// When the machine can't be reached, the helper can't be put there, or the
+/// command fails (what it said).
 pub fn cancel(host_name: &str, job: &str) -> Result<()> {
     run(host_name, &["cancel", job], Duration::from_secs(30)).map(|_| ())
 }

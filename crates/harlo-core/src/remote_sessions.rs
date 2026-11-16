@@ -1,8 +1,11 @@
-//! Saved sessions on remote hosts, for the sidebar: the Claude and Harlo
-//! session files of a host are listed over SSH and changed ones read in a
-//! batch, reported like local scan results (paths and folders as
-//! `ssh://host/…`): those outside the host's projects go in its Other
-//! sessions, as here.
+//! Saved sessions on remote hosts, for the sidebar.
+//!
+//! The Claude and Harlo session files of a host are listed over SSH and changed
+//! ones read in a batch, reported like local scan results (paths and folders as
+//! `ssh://host/…`): those outside the host's projects go in its Other sessions,
+//! as here.
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -38,7 +41,8 @@ const RECORD: char = '\u{1e}';
 const TAIL: char = '\u{1d}';
 const BATCH: usize = 40;
 
-#[derive(Default)]
+/// Reads the sessions on other machines, a changed file at a time.
+#[derive(Debug, Default)]
 pub struct RemoteScanner {
     /// Each file's (mtime, size) when last read.
     known: HashMap<PathBuf, (i64, u64)>,
@@ -50,6 +54,10 @@ pub struct RemoteScanner {
 
 impl RemoteScanner {
     /// One host: what changed since the last poll among its sessions.
+    ///
+    /// # Errors
+    ///
+    /// When `host` can't be reached.
     pub fn poll(&mut self, host: &Host) -> Result<ScanDelta> {
         let listing = remote::run_ok(host, LIST_SCRIPT, Duration::from_secs(30))?;
         let mut seen: HashMap<PathBuf, (HarnessKind, i64, u64)> = HashMap::new();
@@ -78,7 +86,7 @@ impl RemoteScanner {
             let texts = read_batch(host, chunk.iter().map(|c| c.0.as_path()))?;
             for (path, kind, mtime, size) in chunk {
                 let info = texts.get(path).and_then(|(head, tail)| {
-                    let modified = UNIX_EPOCH + Duration::from_secs((*mtime).max(0) as u64);
+                    let modified = UNIX_EPOCH + Duration::from_secs(u64::try_from((*mtime).max(0)).unwrap_or(0));
                     let mut info = store::session_from_text(*kind, path, *size, modified, head, tail.as_deref())?;
                     info.cwd = remote::join(&host.name, &info.cwd.to_string_lossy());
                     Some(info)
@@ -92,13 +100,13 @@ impl RemoteScanner {
         let changed_paths: HashSet<&PathBuf> = changed.iter().map(|c| &c.0).collect();
         let host_paths: Vec<PathBuf> = self.infos.keys().filter(|p| p.to_string_lossy().starts_with(&prefix)).cloned().collect();
         for path in host_paths {
-            let visible = self.infos.get(&path).is_some_and(|i| i.is_some());
+            let visible = self.infos.get(&path).is_some_and(std::option::Option::is_some);
             match (visible, self.shown.contains(&path)) {
                 (true, false) => {
                     self.shown.insert(path.clone());
-                    delta.upserts.push(self.infos[&path].clone().expect("visible"));
+                    delta.upserts.extend(self.infos.get(&path).cloned().flatten());
                 }
-                (true, true) if changed_paths.contains(&path) => delta.upserts.push(self.infos[&path].clone().expect("visible")),
+                (true, true) if changed_paths.contains(&path) => delta.upserts.extend(self.infos.get(&path).cloned().flatten()),
                 (false, true) => {
                     self.shown.remove(&path);
                     delta.removed.push(path);
@@ -139,7 +147,7 @@ fn files() -> &'static std::sync::Mutex<Listed> {
 
 /// A host's listing replaces what was noted for it (`prefix`: `ssh://host/`).
 fn note_files(prefix: &str, seen: &HashMap<PathBuf, (HarnessKind, i64, u64)>) {
-    let mut files = files().lock().unwrap();
+    let mut files = files().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     files.retain(|p, _| !p.to_string_lossy().starts_with(prefix));
     files.extend(seen.iter().filter(|(_, (k, ..))| *k == HarnessKind::Harlo).map(|(p, v)| (p.clone(), *v)));
 }
@@ -147,7 +155,7 @@ fn note_files(prefix: &str, seen: &HashMap<PathBuf, (HarnessKind, i64, u64)>) {
 /// Harlo's session files on other machines, as last listed:
 /// `(ssh path, agent, modified (seconds), size)`.
 pub fn session_files() -> Vec<(PathBuf, HarnessKind, i64, u64)> {
-    files().lock().unwrap().iter().map(|(p, (k, m, s))| (p.clone(), *k, *m, *s)).collect()
+    files().lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().map(|(p, (k, m, s))| (p.clone(), *k, *m, *s)).collect()
 }
 
 /// Reads session files on a host in one command: each whole when small,
@@ -209,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "needs a real SSH host"]
     fn remote_scan() {
         let args = remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
         let host = Host { name: "t".into(), ssh: args };

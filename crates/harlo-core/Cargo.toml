@@ -1,8 +1,12 @@
 [package]
 name = "harlo-core"
+description = "harlo's logic without Qt: transcripts, Markdown, live sessions, the sidebar and storage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [features]
 default = ["dictation"]
@@ -13,33 +17,38 @@ dictation = ["dep:whisper-rs"]
 [dependencies]
 harlo-harness.workspace = true
 anyhow.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
 tracing.workspace = true
-tokio.workspace = true
-pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
-syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }
+pulldown-cmark = { workspace = true, features = ["html"] }
+syntect = { workspace = true, features = ["default-fancy"] }
 # More languages than syntect bundles (TypeScript, QML, TOML, Kotlin, Dockerfile…).
-two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
-rusqlite = { version = "0.40", features = ["bundled"] }
-ignore = "0.4"
-nucleo-matcher = "0.3"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-alacritty_terminal = "0.26.0"
+two-face = { workspace = true, features = ["syntect-fancy"] }
+rusqlite = { workspace = true, features = ["bundled"] }
+ignore.workspace = true
+nucleo-matcher.workspace = true
+chrono = { workspace = true, features = ["clock", "std"] }
+alacritty_terminal.workspace = true
 # Dictation: whisper.cpp built in (CPU), and model downloads.
-whisper-rs = { version = "0.16", features = ["tracing_backend"], optional = true }
-ureq = { version = "3", features = ["platform-verifier"] }
+whisper-rs = { workspace = true, features = ["tracing_backend"], optional = true }
+ureq = { workspace = true, features = ["platform-verifier"] }
 # harlo's own updates: the download's SHA-256, checked against the release's
 # signed manifest.
-sha2 = "0.10"
-harlo-update-signing = { path = "../harlo-update-signing" }
+sha2.workspace = true
+harlo-update-signing.workspace = true
 # The wiki's reading tools (search, read, linked wikis), native.
-harlo-wiki = { path = "../harlo-wiki" }
+harlo-wiki.workspace = true
 # Phone pairing: NaCl box (X25519 + XSalsa20-Poly1305), as the phone's tweetnacl.
-crypto_box = { version = "0.9", features = ["std"] }
-base64 = "0.22"
-libc = "0.2"
+crypto_box = { workspace = true, features = ["std"] }
+base64.workspace = true
+libc.workspace = true
 
 [dev-dependencies]
+# Tests read fixture wikis only, never the user's linked ones.
+harlo-wiki = { workspace = true, features = ["test-util"] }
 # Signs stand-in release manifests in the update tests.
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+ed25519-dalek = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

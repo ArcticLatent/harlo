@@ -1,7 +1,10 @@
-//! Settings → Providers: whether each agent (Harlo, Claude) is installed,
-//! its version and its models. Checked on demand: Claude's models are a
-//! curated list, Harlo's come from a short RPC run with
-//! no session (no prompt is sent, so nothing is spent).
+//! Settings → Providers: each agent's install, version and models.
+//!
+//! Whether each agent (Harlo, Claude) is installed. Checked on demand: Claude's
+//! models are a curated list, Harlo's come from a short RPC run with no session
+//! (no prompt is sent, so nothing is spent).
+
+// Rust guideline compliant 2026-10-09
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -88,7 +91,7 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
             status.local = m.iter().filter(|(_, _, local)| *local).map(|(id, _, _)| id.clone()).collect();
             status.models = m.into_iter().map(|(id, name, _)| (id, name)).collect();
         }
-        Err(e) => status.error = Some(e),
+        Err(e) => status.error = Some(format!("{e:#}")),
     }
     // Claude's models only when Claude Code is signed in (its own answer;
     // one it can't give leaves them).
@@ -132,13 +135,18 @@ fn claude_signed_out(program: &Path) -> bool {
 }
 
 /// harlo-agent in RPC mode with no session: its model list.
-async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> Result<Vec<(String, String, bool)>, String> {
+async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> anyhow::Result<Vec<(String, String, bool)>> {
     models_of(HarnessConfig { kind, program: Some(program), cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None }).await
 }
 
 /// What an agent offers on a remote host, asked there with no session (it
 /// has its own logins). Each entry: `provider/id`, name, served locally.
-pub async fn host_models(kind: HarnessKind, remote: harlo_harness::RemoteLaunch, cwd: PathBuf) -> Result<Vec<(String, String, bool)>, String> {
+///
+/// # Errors
+///
+/// When the host can't be reached, or the agent there can't be started or
+/// doesn't answer.
+pub async fn host_models(kind: HarnessKind, remote: harlo_harness::RemoteLaunch, cwd: PathBuf) -> anyhow::Result<Vec<(String, String, bool)>> {
     models_of(HarnessConfig { kind, program: None, cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: Some(remote) }).await
 }
 
@@ -153,14 +161,14 @@ fn signed_in(status: &str) -> Option<bool> {
     serde_json::from_str::<Value>(status.trim()).ok()?["loggedIn"].as_bool()
 }
 
-async fn models_of(cfg: HarnessConfig) -> Result<Vec<(String, String, bool)>, String> {
-    let (harness, _events) = Harness::spawn(cfg).map_err(|e| format!("{e:#}"))?;
+async fn models_of(cfg: HarnessConfig) -> anyhow::Result<Vec<(String, String, bool)>> {
+    let (harness, _events) = Harness::spawn(cfg).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     let answer = tokio::time::timeout(Duration::from_secs(25), harness.request(json!({ "type": "get_available_models" }))).await;
     harness.kill();
     let data: Value = match answer {
         Ok(Ok(d)) => d,
-        Ok(Err(e)) => return Err(format!("{e:#}")),
-        Err(_) => return Err("it didn't answer in time".to_owned()),
+        Ok(Err(e)) => return Err(anyhow::anyhow!("{e:#}")),
+        Err(_) => return Err(anyhow::Error::msg("it didn't answer in time")),
     };
     Ok(data["models"]
         .as_array()
@@ -199,7 +207,7 @@ mod this_computer {
     /// `cargo test -p harlo-core providers -- --ignored --nocapture`
     /// (`HARLO_CHECK=harlo:5`: only Harlo, five times).
     #[test]
-    #[ignore]
+    #[ignore = "spends real model plans"]
     fn checks_each() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let only = std::env::var("HARLO_CHECK").unwrap_or_default();

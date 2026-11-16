@@ -2,6 +2,8 @@
 //! `~/.openwiki/wiki-workspaces.json` (or `$OPENWIKI_CONFIG_DIR`), read the
 //! way OpenWiki reads them.
 
+// Rust guideline compliant 2026-10-09
+
 use crate::collate;
 use crate::store::{Error, Result};
 use serde_json::{Map, Value, json};
@@ -38,7 +40,8 @@ impl Workspace {
     }
 }
 
-#[derive(Default)]
+/// The wikis and workspaces linked in `~/.openwiki`.
+#[derive(Debug, Default)]
 pub struct Registry {
     pub wikis: Vec<Wiki>,
     pub workspaces: Vec<Workspace>,
@@ -55,7 +58,7 @@ fn stale() -> Error {
 }
 
 pub fn home_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 /// OpenWiki's home (`$OPENWIKI_CONFIG_DIR`, else `~/.openwiki`).
@@ -96,8 +99,31 @@ fn only_keys(o: &Map<String, Value>, keys: &[&str]) -> bool {
     o.len() == keys.len() && o.keys().all(|k| keys.contains(&k.as_str()))
 }
 
+/// Set by [`ignore_user_registry`]: the registry reads as empty.
+#[cfg(any(test, feature = "test-util"))]
+static IGNORE_REGISTRY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Makes this process read no registry, so tests never see the user's.
+///
+/// Linked wikis come from `~/.openwiki`; tests that search a fixture wiki
+/// call this first. It only ever turns reading off, so tests running at
+/// the same time can all call it.
+#[cfg(any(test, feature = "test-util"))]
+pub fn ignore_user_registry() {
+    IGNORE_REGISTRY.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The registry (empty when there's none).
+///
+/// # Errors
+///
+/// A Workspace [`Error`] when the registry in `~/.openwiki` can't be read or
+/// isn't valid.
 pub fn read_registry() -> Result<Registry> {
+    #[cfg(any(test, feature = "test-util"))]
+    if IGNORE_REGISTRY.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(Registry::default());
+    }
     let path = openwiki_home().join(FILE);
     let meta = match std::fs::symlink_metadata(&path) {
         Ok(m) => m,
@@ -203,12 +229,20 @@ pub fn slug_identifier(value: &str, fallback: &str) -> String {
     if cut.is_empty() { fallback.to_owned() } else { cut }
 }
 
+/// A repository's wiki among the registry's.
+#[derive(Debug)]
 pub struct Context {
     pub registry: Registry,
     pub current: Wiki,
     pub registered: bool,
 }
 
+/// The registry, with the wiki at `repository_root`.
+///
+/// # Errors
+///
+/// A Workspace [`Error`] when `root` doesn't exist or the registry can't be
+/// read.
 pub fn context(repository_root: &Path) -> Result<Context> {
     let root = std::fs::canonicalize(repository_root)
         .ok()
@@ -279,6 +313,11 @@ fn require_wiki(reg: &Registry, id: &str) -> Result<Wiki> {
 }
 
 /// `openwiki_list_workspaces`.
+///
+/// # Errors
+///
+/// A Workspace [`Error`] when `root` doesn't exist or the registry can't be
+/// read, or `wiki_id` isn't a wiki it can reach.
 pub fn list_workspaces(root: &Path, wiki_id: Option<&str>) -> Result<Value> {
     let c = context(root)?;
     let wiki = match wiki_id.filter(|w| !w.is_empty()) {
@@ -297,6 +336,11 @@ pub fn list_workspaces(root: &Path, wiki_id: Option<&str>) -> Result<Value> {
 }
 
 /// `openwiki_list_wikis`.
+///
+/// # Errors
+///
+/// A Workspace [`Error`] when `root` doesn't exist or the registry can't be
+/// read, or `reference` isn't a workspace holding this wiki.
 pub fn list_wikis(root: &Path, reference: &str) -> Result<Value> {
     let c = context(root)?;
     let ws = containing_workspace(&c, reference)?;
@@ -304,12 +348,20 @@ pub fn list_wikis(root: &Path, reference: &str) -> Result<Value> {
     Ok(json!({"workspace": ws.summary(), "wikis": wikis}))
 }
 
+/// A search's wikis, or the answer that asks which workspace to search.
+#[derive(Debug)]
 pub enum Scope {
     Ready { workspace: Option<Workspace>, wikis: Vec<Wiki> },
     Required(Value),
 }
 
 /// Which wikis a search covers.
+///
+/// # Errors
+///
+/// A Workspace [`Error`] when `root` doesn't exist or the registry can't be
+/// read, the requested workspace isn't one this wiki is in, or a wiki of it
+/// isn't there.
 pub fn search_scope(root: &Path, requested: Option<&str>) -> Result<Scope> {
     let c = context(root)?;
     let local = || Scope::Ready { workspace: None, wikis: vec![c.current.clone()] };
@@ -345,6 +397,11 @@ pub fn search_scope(root: &Path, requested: Option<&str>) -> Result<Scope> {
 }
 
 /// The wiki a read reads.
+///
+/// # Errors
+///
+/// A Workspace [`Error`] when `root` doesn't exist or the registry can't be
+/// read, or `wiki_id` isn't a wiki it can reach.
 pub fn readable_wiki(root: &Path, wiki_id: Option<&str>) -> Result<Wiki> {
     let c = context(root)?;
     let id = wiki_id.filter(|w| !w.is_empty());

@@ -1,10 +1,13 @@
 //! Harnesses (Harlo and Claude Code) and the translation of their
 //! protocols into one normalized event vocabulary.
 
+// Rust guideline compliant 2026-10-09
+
 mod demo;
 pub mod branches;
 pub mod claude;
 mod claude_run;
+mod error;
 pub mod event;
 pub mod file_blocks;
 pub mod framing;
@@ -13,28 +16,32 @@ pub mod process;
 pub mod protocol_log;
 pub mod store;
 
+pub use error::Error;
 pub use event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel, Translator};
-pub use process::{Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program};
+pub use process::{Answer, Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program};
 pub use store::SessionInfo;
 
-/// Whether a model's server (its `baseUrl`) is this computer or the local
-/// network, a model you run yourself, rather than a provider's service:
-/// loopback, private and link-local addresses, Tailscale's, and `.local`,
-/// `.lan`, `.home.arpa` and `.ts.net` names.
-/// The thinking level of `available` nearest `want` (helpers are given one
-/// level for every agent; a model names its own): `want` itself when it's
-/// there or nothing's known.
+/// The thinking level of `available` nearest `want`.
+///
+/// Helpers are given one level for every agent, and a model names its own:
+/// `want` itself when it's there or nothing's known; else the nearest, the
+/// higher of two as near.
 pub fn nearest_level(want: &str, available: &[String]) -> String {
     const ORDER: [&str; 8] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "maximum"];
     let rank = |l: &str| ORDER.iter().position(|o| o.eq_ignore_ascii_case(l));
-    let known: Vec<&String> = available.iter().filter(|l| rank(l).is_some()).collect();
+    let known: Vec<(usize, &String)> = available.iter().filter_map(|l| rank(l).map(|r| (r, l))).collect();
     let Some(w) = rank(want) else { return want.to_owned() };
     if known.is_empty() || available.iter().any(|l| l.eq_ignore_ascii_case(want)) {
         return want.to_owned();
     }
-    known.into_iter().min_by_key(|l| (rank(l).unwrap() as i32 - w as i32).abs() * 2 + i32::from(rank(l).unwrap() < w)).map_or_else(|| want.to_owned(), |l| l.to_string())
+    known.into_iter().min_by_key(|&(r, _)| r.abs_diff(w) * 2 + usize::from(r < w)).map_or_else(|| want.to_owned(), |(_, l)| l.clone())
 }
 
+/// Whether a model's server (its `baseUrl`) runs on this computer or network.
+///
+/// A model you run yourself, rather than a provider's service: loopback,
+/// private and link-local addresses, Tailscale's, and `.local`, `.lan`,
+/// `.home.arpa` and `.ts.net` names.
 pub fn is_local_url(url: &str) -> bool {
     use std::net::IpAddr;
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
@@ -95,8 +102,8 @@ pub fn set_remote_start(f: RemoteStart) {
 
 /// The program a session of a kind runs on a remote host when harlo puts
 /// it there itself (Harlo's agent): its path there, or None (that machine's
-/// PATH finds it).
-pub type RemoteProgram = fn(&str, HarnessKind) -> anyhow::Result<Option<String>>;
+/// PATH finds it). Its error says why it can't be put there.
+pub type RemoteProgram = fn(&str, HarnessKind) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>>;
 static REMOTE_PROGRAM: std::sync::OnceLock<RemoteProgram> = std::sync::OnceLock::new();
 
 pub fn set_remote_program(f: RemoteProgram) {
@@ -104,12 +111,12 @@ pub fn set_remote_program(f: RemoteProgram) {
 }
 
 /// The program to run on `host` for `kind` (see [`set_remote_program`]).
-pub(crate) fn remote_program(host: &str, kind: HarnessKind) -> anyhow::Result<std::path::PathBuf> {
+pub(crate) fn remote_program(host: &str, kind: HarnessKind) -> Result<std::path::PathBuf, Error> {
     let there = match REMOTE_PROGRAM.get() {
-        Some(f) => f(host, kind)?,
+        Some(f) => f(host, kind).map_err(|e| Error::new(error::ErrorKind::Start, error::chain(&*e)))?,
         None => None,
     };
-    Ok(there.map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(kind.program_name())))
+    Ok(there.map_or_else(|| std::path::PathBuf::from(kind.program_name()), std::path::PathBuf::from))
 }
 
 /// The bridge an agent runs for harlo's tools, here or on its host, while
@@ -140,7 +147,7 @@ mod tests {
     #[test]
     fn a_thinking_level_maps_to_the_nearest_a_model_has() {
         use super::nearest_level;
-        let v = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let v = |l: &[&str]| l.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
         assert_eq!(nearest_level("high", &v(&["low", "medium", "high"])), "high");
         assert_eq!(nearest_level("high", &v(&["low", "max"])), "max");
         assert_eq!(nearest_level("medium", &v(&["low", "high"])), "high");

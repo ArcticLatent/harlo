@@ -1,7 +1,10 @@
-//! Claude Code as a harness (its stream-json mode): its models, its
-//! session files (`~/.claude/projects/<folder>/<id>.jsonl`) and their
-//! conversation in pi's message shape. The running session is
+//! Claude Code as a harness, in its stream-json mode.
+//!
+//! Its models, its session files (`~/.claude/projects/<folder>/<id>.jsonl`)
+//! and their conversation in pi's message shape. The running session is
 //! `claude_run.rs`.
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -109,12 +112,12 @@ pub fn project_dir_name(cwd: &Path) -> String {
     // Java's String.hashCode, in base 36.
     let mut h: i32 = 0;
     for u in real.to_string_lossy().encode_utf16() {
-        h = h.wrapping_mul(31).wrapping_add(u as i32);
+        h = h.wrapping_mul(31).wrapping_add(i32::from(u));
     }
-    let mut n = (h as i64).unsigned_abs();
+    let mut n = i64::from(h).unsigned_abs();
     let mut digits = Vec::new();
     while n > 0 {
-        digits.push(std::char::from_digit((n % 36) as u32, 36).unwrap());
+        digits.push(char::from(b"0123456789abcdefghijklmnopqrstuvwxyz"[(n % 36) as usize]));
         n /= 36;
     }
     let hash: String = if digits.is_empty() { "0".into() } else { digits.into_iter().rev().collect() };
@@ -340,7 +343,7 @@ pub fn session_from_text(path: &Path, size: u64, modified: SystemTime, head: &st
             cwd = e["cwd"].as_str().map(PathBuf::from);
         }
         if created.is_empty() {
-            created = e["timestamp"].as_str().unwrap_or_default().to_owned();
+            e["timestamp"].as_str().unwrap_or_default().clone_into(&mut created);
         }
         if first.is_empty() && e["type"] == "user" {
             first = user_text(&e).map(|t| crate::file_blocks::title_text(&t).chars().take(100).collect()).unwrap_or_default();
@@ -354,10 +357,10 @@ pub fn session_from_text(path: &Path, size: u64, modified: SystemTime, head: &st
         }
         let Ok(e) = serde_json::from_str::<Value>(line) else { continue };
         if let Some(t) = e["customTitle"].as_str() {
-            custom = t.to_owned();
+            t.clone_into(&mut custom);
         }
         if let Some(t) = e["aiTitle"].as_str() {
-            ai = t.to_owned();
+            t.clone_into(&mut ai);
         }
     }
     if !custom.is_empty() {
@@ -454,10 +457,10 @@ impl HistoryReader {
         let Ok(head) = serde_json::from_str::<LineHead>(line) else { return };
         let subagent = *self.subagent.get_or_insert_with(|| head.sidechain == true && head.agent_id.is_string());
         if let Some(t) = head.custom_title.as_str() {
-            self.custom = t.to_owned();
+            t.clone_into(&mut self.custom);
         }
         if let Some(t) = head.ai_title.as_str() {
-            self.ai = t.to_owned();
+            t.clone_into(&mut self.ai);
         }
         if head.sidechain == true && !subagent {
             return;
@@ -516,10 +519,11 @@ impl HistoryReader {
     }
 }
 
-/// The conversation in a transcript, in pi's message shape (as
-/// `get_messages` returns), oldest first. Subagents' and meta lines are
-/// left out (a subagent's own transcript, all sidechain, is read whole);
-/// one message's per-block lines are joined.
+/// The conversation in a transcript, oldest first.
+///
+/// In pi's message shape, as `get_messages` returns it. Subagents' and meta
+/// lines are left out (a subagent's own transcript, all sidechain, is read
+/// whole); one message's per-block lines are joined.
 pub fn history(text: &str) -> Vec<Value> {
     let mut reader = HistoryReader::default();
     crate::store::for_each_text_line(text, &mut |offset, line| reader.line(offset, line));
@@ -534,6 +538,10 @@ pub fn saved(text: &str) -> crate::store::SavedSession {
 }
 
 /// [`saved`] of a file, holding a line of it at a time.
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read.
 pub fn saved_file(path: &Path) -> std::io::Result<crate::store::SavedSession> {
     let mut reader = HistoryReader::default();
     crate::store::for_each_line(path, 0, &mut |offset, line| reader.line(offset, line))?;
@@ -546,20 +554,24 @@ pub(crate) fn check_at(path: &Path, offset: u64) -> std::io::Result<Vec<u8>> {
     let mut file = std::fs::File::open(path)?;
     let start = offset.saturating_sub(RESUME_CHECK_BYTES);
     file.seek(SeekFrom::Start(start))?;
-    let mut bytes = vec![0; (offset - start) as usize];
+    let mut bytes = vec![0; usize::try_from(offset - start).unwrap_or(usize::MAX)];
     file.read_exact(&mut bytes)?;
     Ok(bytes)
 }
 
 /// The messages of a transcript from where `resume` left off (they only ever
 /// get added to), or all of them if it isn't there any more.
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read.
 pub fn read_part(path: &Path, resume: Option<&Resume>) -> std::io::Result<Part> {
     let resume = resume.filter(|r| check_at(path, r.offset).is_ok_and(|check| check == r.check));
     let (from, first_index) = resume.map_or((0, 0), |r| (r.offset, r.index));
     let mut reader = HistoryReader { resume: (from, 0), ..Default::default() };
     crate::store::for_each_line(path, from, &mut |offset, line| reader.line(offset, line))?;
     let (offset, count) = reader.resume;
-    Ok(Part { messages: reader.out, first_index, resume: Resume { offset, index: first_index + count as i64, check: check_at(path, offset)? } })
+    Ok(Part { messages: reader.out, first_index, resume: Resume { offset, index: first_index + i64::try_from(count).unwrap_or(i64::MAX), check: check_at(path, offset)? } })
 }
 
 /// What's in a transcript's cache: its messages up to `index` (those before
@@ -581,7 +593,7 @@ struct CacheMeta {
 /// Bumped whenever what `HistoryReader` makes of a line changes.
 const CACHE_VERSION: u32 = 2;
 /// A cache not written to for this long goes.
-const CACHE_KEPT: std::time::Duration = std::time::Duration::from_secs(30 * 86400);
+const CACHE_KEPT: std::time::Duration = std::time::Duration::from_hours(720);
 /// One reader or writer of the caches at a time.
 static CACHE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -645,9 +657,15 @@ pub fn cache_dir() -> Option<PathBuf> {
         .map(|d| d.join("harlo/history"))
 }
 
-/// [`saved_file`], quicker for a long transcript: what an earlier read made
-/// of it is kept in the cache, so only what Claude added since is read
-/// (it only adds; a transcript that changed otherwise is read again).
+/// [`saved_file`], quicker for a long transcript.
+///
+/// What an earlier read made of it is kept in the cache, so only what Claude
+/// added since is read (it only adds; a transcript that changed otherwise is
+/// read again).
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read.
 pub fn saved_file_cached(path: &Path) -> std::io::Result<crate::store::SavedSession> {
     match cache_dir() {
         Some(dir) => saved_cached_in(path, &dir, crate::store::BIG_FILE),
@@ -658,14 +676,14 @@ pub fn saved_file_cached(path: &Path) -> std::io::Result<crate::store::SavedSess
 /// A transcript's cache: what it holds, and its messages.
 fn cache_files(dir: &Path, path: &Path) -> (PathBuf, PathBuf) {
     // (A stable name: FNV-1a of the path.)
-    let hash = path.as_os_str().as_encoded_bytes().iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100_0000_01b3));
+    let hash = path.as_os_str().as_encoded_bytes().iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3));
     (dir.join(format!("{hash:016x}.json")), dir.join(format!("{hash:016x}.jsonl")))
 }
 
 /// A deleted transcript's cache goes with it.
 pub fn forget_cached(path: &Path) {
     let Some(dir) = cache_dir() else { return };
-    let _one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = CACHE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (meta, lines) = cache_files(&dir, path);
     let _ = std::fs::remove_file(meta.with_extension("report.json"));
     let _ = std::fs::remove_file(meta.with_extension("rows.json"));
@@ -689,7 +707,7 @@ fn saved_cached_in(path: &Path, dir: &Path, from_size: u64) -> std::io::Result<c
     if std::fs::metadata(path)?.len() < from_size {
         return saved_file(path);
     }
-    let _one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = CACHE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (meta_path, lines_path) = cache_files(dir, path);
     let mut reader = HistoryReader::default();
     let mut cached = (0, 0);
@@ -716,21 +734,32 @@ fn saved_cached_in(path: &Path, dir: &Path, from_size: u64) -> std::io::Result<c
     if settled > cached.0
         && let Err(e) = write_cache(dir, &meta_path, &lines_path, &reader, cached, path, offset)
     {
-        tracing::warn!("caching {}: {e}", path.display());
+        tracing::event!(name: "claude.history.cache.failed", tracing::Level::WARN, file.path = %path.display(), error.message = %e, "caching {{file.path}}: {{error.message}}");
     }
     Ok(reader.saved())
 }
 
-/// The messages [`saved_file_cached`] gives, one at a time and in order,
-/// none held after it's passed on: the cache's, then what Claude added
-/// since, each as soon as nothing more can join it. The cache isn't
-/// written. A cache line that can't be read is an error, not a gap.
+/// Passes on the messages [`saved_file_cached`] gives, one at a time.
+///
+/// In order, none held after it's passed on: the cache's, then what Claude
+/// added since, each as soon as nothing more can join it. The cache isn't
+/// written.
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read, or a line of the cache can't
+/// be (an error, not a gap).
 pub fn each_saved_message(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     each_saved_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, u64::MAX, each)
 }
 
 /// [`each_saved_message`] as the transcript was when it was `end` bytes
 /// long (the cache only when it covers no more than that).
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read, or a line of the cache can't
+/// be (an error, not a gap).
 pub fn each_saved_message_upto(path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     each_saved_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, end, each)
 }
@@ -738,11 +767,11 @@ pub fn each_saved_message_upto(path: &Path, end: u64, each: &mut dyn FnMut(Value
 fn each_saved_in(path: &Path, dir: Option<&Path>, from_size: u64, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     let mut reader = HistoryReader::default();
     let mut from = 0;
-    let _one = dir.filter(|_| std::fs::metadata(path).is_ok_and(|m| m.len() >= from_size)).map(|dir| {
-        let one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let cached = dir.filter(|_| std::fs::metadata(path).is_ok_and(|m| m.len() >= from_size)).map(|dir| {
+        let one = CACHE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         (one, cache_files(dir, path))
     });
-    if let Some((_, (meta_path, lines_path))) = &_one {
+    if let Some((_, (meta_path, lines_path))) = &cached {
         let meta = std::fs::read(meta_path).ok().and_then(|b| serde_json::from_slice::<CacheMeta>(&b).ok()).filter(|m| {
             m.version == CACHE_VERSION && m.path == path && m.offset <= end && check_at(path, m.offset).is_ok_and(|c| c == m.check)
         });
@@ -789,15 +818,25 @@ fn lines_before(path: &Path, bytes: u64) -> std::io::Result<u64> {
     }
 }
 
-/// [`saved_file_cached`], its messages passed on one at a time and in order
-/// rather than held (a long session opened without holding all of it), and
-/// its cache written as that writes it. What it gives back has no messages.
+/// [`saved_file_cached`], its messages passed on one at a time.
+///
+/// In order rather than held (a long session opened without holding all of it),
+/// with its cache written as that writes it. What it gives back has no
+/// messages.
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read.
 pub fn stream_saved_cached(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
     stream_saved_cached_upto(path, u64::MAX, each)
 }
 
 /// [`stream_saved_cached`] as the transcript was when it was `end` bytes
 /// long (what's added meanwhile is left for whoever's adding it).
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read.
 pub fn stream_saved_cached_upto(path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<crate::store::SavedSession> {
     stream_cached_in(path, cache_dir().as_deref(), crate::store::BIG_FILE, end, each)
 }
@@ -825,7 +864,7 @@ fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, end: u64, e
         reader.out.drain(..).for_each(|m| pass(m, &mut model));
         return Ok(streamed(reader, model));
     };
-    let _one = CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = CACHE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (meta_path, lines_path) = cache_files(dir, path);
     let mut reader = HistoryReader::default();
     let (mut cached, mut from) = ((0, 0), 0);
@@ -851,12 +890,12 @@ fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, end: u64, e
     // What's read is written to the cache as it's passed on; at the end it's
     // cut back to what came before the last prompt (what nothing added later
     // changes), as `write_cache` keeps.
-    let mut lines = CacheLines::open(dir, &lines_path, cached.1);
+    let mut lines = Some(CacheLines::open(dir, &lines_path, cached.1));
     let write = |m: &Value, lines: &mut Option<CacheLines>| {
         if let Some(l) = lines.as_mut()
             && let Err(e) = l.add(m)
         {
-            tracing::warn!("caching {}: {e}", path.display());
+            tracing::event!(name: "claude.history.cache.failed", tracing::Level::WARN, file.path = %path.display(), error.message = %e, "caching {{file.path}}: {{error.message}}");
             *lines = None;
         }
     };
@@ -871,7 +910,7 @@ fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, end: u64, e
             }
         }
     })?;
-    let rest: Vec<Value> = reader.out.drain(..).collect();
+    let rest: Vec<Value> = std::mem::take(&mut reader.out);
     reader.drained += rest.len();
     for m in rest {
         write(&m, &mut lines);
@@ -898,7 +937,7 @@ fn stream_cached_in(path: &Path, dir: Option<&Path>, from_size: u64, end: u64, e
             write_meta(&meta_path, &meta)
         });
         if let Err(e) = done {
-            tracing::warn!("caching {}: {e}", path.display());
+            tracing::event!(name: "claude.history.cache.failed", tracing::Level::WARN, file.path = %path.display(), error.message = %e, "caching {{file.path}}: {{error.message}}");
         }
     }
     Ok(streamed(reader, model))
@@ -922,8 +961,8 @@ struct CacheLines {
 }
 
 impl CacheLines {
-    fn open(dir: &Path, lines_path: &Path, from: u64) -> Option<Self> {
-        Some(CacheLines { dir: dir.to_owned(), path: lines_path.to_owned(), out: None, from, bytes: from, ends: Vec::new() })
+    fn open(dir: &Path, lines_path: &Path, from: u64) -> Self {
+        CacheLines { dir: dir.to_owned(), path: lines_path.to_owned(), out: None, from, bytes: from, ends: Vec::new() }
     }
 
     fn add(&mut self, m: &Value) -> std::io::Result<()> {
@@ -950,7 +989,7 @@ impl CacheLines {
     /// Written out, and cut back to `kept` bytes.
     fn finish(self, kept: u64) -> std::io::Result<()> {
         let Some(out) = self.out else { return Ok(()) };
-        let file = out.into_inner().map_err(|e| e.into_error())?;
+        let file = out.into_inner().map_err(std::io::IntoInnerError::into_error)?;
         file.set_len(kept)
     }
 }
@@ -1055,6 +1094,11 @@ pub fn new_uuid() -> String {
 /// A new session with the conversation before the prompt `entry` (as the
 /// SDK's `forkSession`: the lines copied with fresh ids, beside the
 /// original). Returns its id and the prompt's text.
+///
+/// # Errors
+///
+/// An I/O error when the transcript can't be read or the new one written; one
+/// of kind `NotFound` when `entry` isn't a prompt in it.
 pub fn fork_before(path: &Path, entry: &str) -> std::io::Result<(String, String)> {
     let text = std::fs::read_to_string(path)?;
     let Some((id, out, prompt)) = fork_text(&text, entry) else { return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "that message isn't in the session")) };
@@ -1092,11 +1136,12 @@ pub fn fork_text(text: &str, entry: &str) -> Option<(String, String, String)> {
     Some((id, out, prompt?))
 }
 
-/// The subagents a saved session started (as harlo's dock lists them):
+/// The subagents a saved session started, as harlo's dock lists them.
+///
 /// Claude Code keeps each one's transcript in `<session>/subagents/` with a
-/// `.meta.json` naming the Task / Agent call. Nothing runs in a saved
-/// session: the call's result says how it went (an error: failed; a
-/// background launch: the transcript's end decides), else "ended".
+/// `.meta.json` naming the Task / Agent call. Nothing runs in a saved session:
+/// the call's result says how it went (an error: failed; a background launch:
+/// the transcript's end decides), else "ended".
 pub fn subagents(session_file: &Path) -> Vec<Value> {
     let dir = session_file.with_extension("").join("subagents");
     let mut metas = Vec::new();
@@ -1127,6 +1172,7 @@ pub fn subagents(session_file: &Path) -> Vec<Value> {
 
 /// A subagent a transcript's folder records: its `.meta.json`, its
 /// transcript (if any) and whether that ended with Claude's reply.
+#[derive(Debug)]
 pub struct SubagentMeta {
     pub agent_id: String,
     pub meta: Value,
@@ -1134,10 +1180,9 @@ pub struct SubagentMeta {
     pub ended_well: bool,
 }
 
-/// The dock's entries for `metas`, linked to the calls in the parent's
-/// transcript (`text`), in the order they were made.
-/// [`subagents_from`] with the parent's transcript in a file (read a line
-/// at a time).
+/// [`subagents_from`] with the parent's transcript in a file.
+///
+/// The file is read a line at a time.
 pub fn subagents_from_file(path: &Path, metas: Vec<SubagentMeta>) -> Vec<Value> {
     subagents_read(metas, |each| {
         let _ = crate::store::for_each_line(path, 0, each);
@@ -1155,7 +1200,7 @@ fn subagents_read(metas: Vec<SubagentMeta>, lines: impl FnOnce(&mut dyn FnMut(u6
         #[serde(default)]
         message: Value,
     }
-    let call_of = |m: &SubagentMeta| m.meta["toolUseId"].as_str().map(str::to_owned).unwrap_or_else(|| m.agent_id.clone());
+    let call_of = |m: &SubagentMeta| m.meta["toolUseId"].as_str().map_or_else(|| m.agent_id.clone(), str::to_owned);
     let calls: HashSet<String> = metas.iter().map(call_of).collect();
     // The calls' results, and the order they were made in.
     let (mut results, mut order): (HashMap<String, (String, bool)>, Vec<String>) = Default::default();
@@ -1307,7 +1352,7 @@ mod tests {
             std::fs::write(&path, &text).unwrap();
             let next = read_part(&path, Some(&first.resume)).unwrap();
             assert_eq!(next.first_index, first.resume.index);
-            let mut joined = first.messages[..first.resume.index as usize].to_vec();
+            let mut joined = first.messages[..usize::try_from(first.resume.index).unwrap_or(0)].to_vec();
             joined.extend(next.messages);
             assert_eq!(joined, all, "cut at {cut}");
         }
@@ -1342,7 +1387,7 @@ mod tests {
     /// and with its cache damaged.
     #[test]
     fn a_cached_transcript_reads_as_the_whole_file_does() {
-        let text = transcript().replacen("\n", "\n{\"type\":\"custom-title\",\"customTitle\":\"Named\"}\n", 1);
+        let text = transcript().replacen('\n', "\n{\"type\":\"custom-title\",\"customTitle\":\"Named\"}\n", 1);
         let path = temp_file("cached", "");
         let dir = path.parent().unwrap().join("cache");
         let same = |a: &crate::store::SavedSession, b: &crate::store::SavedSession| a.messages == b.messages && a.model == b.model && a.name == b.name;
@@ -1394,7 +1439,7 @@ mod tests {
     /// leaves the same cache behind, step by step as it grows.
     #[test]
     fn a_streamed_open_writes_the_cache_a_whole_one_does() {
-        let text = transcript().replacen("\n", "\n{\"type\":\"custom-title\",\"customTitle\":\"Named\"}\n", 1);
+        let text = transcript().replacen('\n', "\n{\"type\":\"custom-title\",\"customTitle\":\"Named\"}\n", 1);
         let path = temp_file("streamed", "");
         let (whole_dir, streamed_dir) = (path.parent().unwrap().join("whole"), path.parent().unwrap().join("streamed"));
         // (Its meta, and the lines it says are cached: what's past them is
@@ -1410,7 +1455,7 @@ mod tests {
             }
             for (name, bytes) in &mut all {
                 if name.ends_with(".jsonl") {
-                    bytes.truncate(meta.as_ref().map_or(0, |m| m.bytes as usize));
+                    bytes.truncate(meta.as_ref().map_or(0, |m| usize::try_from(m.bytes).unwrap_or(usize::MAX)));
                 }
             }
             all.retain(|(name, bytes)| !name.ends_with(".jsonl") || !bytes.is_empty());

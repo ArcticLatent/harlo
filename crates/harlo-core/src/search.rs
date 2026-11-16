@@ -1,13 +1,17 @@
-//! Full-text search over every session's messages: an SQLite FTS5 index
-//! (`search.db` next to harlo's database), kept up to date from the session
-//! files. Hits name the message's position on the session's current branch,
-//! which is how the transcript keys saved rows (`h<index>`).
+//! Full-text search over every session's messages.
+//!
+//! An SQLite FTS5 index (`search.db` next to harlo's database), kept up to date
+//! from the session files. Hits name the message's position on the session's
+//! current branch, which is how the transcript keys saved rows (`h<index>`).
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::Result;
+use harlo_harness::HarnessKind;
 use harlo_harness::claude::{Part, Resume};
 use harlo_harness::store::{BIG_FILE, after_reading};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -29,6 +33,8 @@ const BIG_FILE_INTERVAL: Duration = Duration::from_secs(60);
 /// How long a file that couldn't be read waits before it's tried again.
 const UNREAD_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The full-text index of every session's messages.
+#[derive(Debug)]
 pub struct SearchIndex {
     conn: Connection,
     /// When each big file was last read.
@@ -41,12 +47,17 @@ pub struct SearchIndex {
 /// A second connection to the index, for searching while it's being
 /// updated (the index is in WAL mode: a search sees what's committed and
 /// never waits for the update).
+#[derive(Debug)]
 pub struct SearchReader {
     conn: Connection,
 }
 
 impl SearchReader {
     /// The index at `path` (open it with [`SearchIndex::open`] first).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the index can't be opened.
     pub fn open(path: &Path) -> Result<SearchReader> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA query_only = 1;")?;
@@ -55,6 +66,10 @@ impl SearchReader {
     }
 
     /// Best matches first.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the index can't be read.
     pub fn search(&self, input: &str, limit: usize) -> Result<Vec<Hit>> {
         // (Tests: a slow disk or a big index.)
         if let Some(ms) = std::env::var("HARLO_TEST_SLOW_SEARCH_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
@@ -75,8 +90,8 @@ pub fn default_path() -> PathBuf {
 
 fn stamp(path: &Path) -> Option<(i64, i64)> {
     let m = std::fs::metadata(path).ok()?;
-    let modified = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis() as i64;
-    Some((modified, m.len() as i64))
+    let modified = i64::try_from(m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis()).unwrap_or(i64::MAX);
+    Some((modified, i64::try_from(m.len()).unwrap_or(i64::MAX)))
 }
 
 /// The searchable text of a message: what the user wrote (without attached
@@ -101,7 +116,7 @@ fn message_text(message: &Value) -> Option<(String, String)> {
         let (_, rest) = crate::attach::split_blocks(&text);
         let (rest, _) = crate::starters::strip(&rest);
         let rest = harlo_harness::file_blocks::strip_ask_first(rest).0;
-        text = harlo_harness::file_blocks::strip_plan(rest).0.to_owned();
+        harlo_harness::file_blocks::strip_plan(rest).0.clone_into(&mut text);
     }
     let text = text.trim().to_owned();
     (!text.is_empty()).then(|| (role.to_owned(), text))
@@ -167,6 +182,12 @@ fn forget(conn: &Connection, path: &str, from: i64) -> rusqlite::Result<()> {
 }
 
 impl SearchIndex {
+    /// Opens the index at `path`, creating it and its tables.
+    ///
+    /// # Errors
+    ///
+    /// An I/O error when its folder can't be made, or a SQLite one when it
+    /// can't be opened or its tables made.
     pub fn open(path: &Path) -> Result<SearchIndex> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -206,6 +227,10 @@ impl SearchIndex {
 
     /// Re-indexes session files that changed since last time and forgets
     /// ones that are gone. Returns how many files were (re)indexed.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the index can't be read or written.
     pub fn update(&mut self, files: &[PathBuf]) -> Result<usize> {
         let stamped: Vec<(PathBuf, i64, i64)> = files.iter().filter_map(|f| stamp(f).map(|(m, s)| (f.clone(), m, s))).collect();
         self.update_batched(&stamped, |f, _| harlo_harness::store::read_messages(f).ok().map(|messages| Part { messages, ..Default::default() }), || {})
@@ -215,6 +240,10 @@ impl SearchIndex {
     /// host's), read by `read` when it changed: it may read on from where a
     /// file was left (it's given that place; what it returns replaces the
     /// messages from its `first_index` on).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the index can't be read or written.
     pub fn update_parts(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Part) -> Result<usize> {
         self.update_batched(files, |p, r| Some(read(p, r)), || {})
     }
@@ -223,6 +252,11 @@ impl SearchIndex {
     /// [`BATCH_TIME`]): `committed` is called after each commit that
     /// changed something. A file `read` couldn't read (None) keeps what it
     /// had and is tried again after [`UNREAD_INTERVAL`].
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the index can't be read or written. What was
+    /// committed before stays.
     pub fn update_batched(&mut self, files: &[(PathBuf, i64, i64)], read: impl Fn(&Path, Option<&Resume>) -> Option<Part>, mut committed: impl FnMut()) -> Result<usize> {
         let wanted: HashSet<&Path> = files.iter().map(|p| p.0.as_path()).collect();
         let known: HashMap<String, (i64, i64)> = {
@@ -254,24 +288,24 @@ impl SearchIndex {
                 since = Instant::now();
             }
             // (A big one that's being written to: it's caught up on later.)
-            if size as u64 >= BIG_FILE {
+            if u64::try_from(size).unwrap_or(0) >= BIG_FILE {
                 if self.big_reads.get(key.as_ref()).is_some_and(|at| at.elapsed() < BIG_FILE_INTERVAL) {
                     continue;
                 }
                 self.big_reads.insert(key.to_string(), Instant::now());
-                biggest = biggest.max(size as u64);
+                biggest = biggest.max(u64::try_from(size).unwrap_or(0));
             }
             if self.unread.get(key.as_ref()).is_some_and(|at| at.elapsed() < UNREAD_INTERVAL) {
                 continue;
             }
             let was_known = known.contains_key(key.as_ref());
-            let resume = if !was_known {
-                None
-            } else {
+            let resume = if was_known {
                 tx.query_row("SELECT resume_offset, resume_index, resume_check FROM files WHERE path = ?1 AND resume_offset > 0", params![key], |r| {
-                    Ok(Resume { offset: r.get::<_, i64>(0)? as u64, index: r.get(1)?, check: r.get::<_, Option<Vec<u8>>>(2)?.unwrap_or_default() })
+                    Ok(Resume { offset: u64::try_from(r.get::<_, i64>(0)?).unwrap_or(0), index: r.get(1)?, check: r.get::<_, Option<Vec<u8>>>(2)?.unwrap_or_default() })
                 })
                 .optional()?
+            } else {
+                None
             };
             // (Not readable now: what it had stays, and its stamp isn't
             // taken, so it's read again.)
@@ -285,7 +319,7 @@ impl SearchIndex {
             }
             for (i, m) in part.messages.iter().enumerate() {
                 if let Some((role, text)) = message_text(m) {
-                    let idx = part.first_index + i as i64;
+                    let idx = part.first_index + i64::try_from(i).unwrap_or(i64::MAX);
                     tx.execute("INSERT INTO messages (text, path, idx, role) VALUES (?1, ?2, ?3, ?4)", params![text, key, idx, role])?;
                     tx.execute("INSERT INTO message_rows (row, path, idx) VALUES (?1, ?2, ?3)", params![tx.last_insert_rowid(), key, idx])?;
                 }
@@ -294,7 +328,7 @@ impl SearchIndex {
                 "INSERT INTO files (path, modified, size, resume_offset, resume_index, resume_check) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(path) DO UPDATE SET modified = excluded.modified, size = excluded.size,
                      resume_offset = excluded.resume_offset, resume_index = excluded.resume_index, resume_check = excluded.resume_check",
-                params![key, modified, size, part.resume.offset as i64, part.resume.index, part.resume.check],
+                params![key, modified, size, i64::try_from(part.resume.offset).unwrap_or(i64::MAX), part.resume.index, part.resume.check],
             )?;
             indexed += 1;
             pending += 1;
@@ -308,6 +342,10 @@ impl SearchIndex {
     }
 
     /// Best matches first.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the index can't be read.
     pub fn search(&self, input: &str, limit: usize) -> Result<Vec<Hit>> {
         search_in(&self.conn, input, limit)
     }
@@ -321,7 +359,7 @@ fn search_in(conn: &Connection, input: &str, limit: usize) -> Result<Vec<Hit>> {
          FROM messages WHERE messages MATCH ?1 ORDER BY bm25(messages) LIMIT ?2",
     )?;
     let hits = stmt
-        .query_map(params![query, limit as i64], |r| {
+        .query_map(params![query, i64::try_from(limit).unwrap_or(i64::MAX)], |r| {
             Ok(Hit {
                 path: PathBuf::from(r.get::<_, String>(0)?),
                 index: r.get(1)?,
@@ -331,6 +369,26 @@ fn search_in(conn: &Connection, input: &str, limit: usize) -> Result<Vec<Hit>> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(hits)
+}
+
+/// What the index needs of a session, or `None` when it can't be read now.
+///
+/// A local session is read on from `resume`: a Claude transcript only grows,
+/// and a Harlo session is read whole again when what was added doesn't go on
+/// from its last entry. A remote one is copied from its host and read whole.
+/// On `None` the index keeps what it had, and tries again.
+pub fn read_session(path: &Path, kind: HarnessKind, resume: Option<&Resume>) -> Option<Part> {
+    if !crate::remote::is_remote(path) {
+        return match kind {
+            HarnessKind::Claude => harlo_harness::claude::read_part(path, resume),
+            _ => harlo_harness::store::read_part(path, resume),
+        }
+        .ok();
+    }
+    crate::remote::host_of(path).and_then(|h| crate::remote::host(&h))?;
+    let copy = crate::remote::local_copy(path).ok()?;
+    let messages = harlo_harness::store::read_saved_for(kind, &copy).ok()?.messages;
+    Some(Part { messages, ..Default::default() })
 }
 
 #[cfg(test)]
@@ -437,7 +495,7 @@ mod tests {
         let path = dir.join("s.jsonl");
         let mut text = line("user", "", "walrus") + &line("assistant", "a", "narwhal") + &line("user", "", "puffin");
         std::fs::write(&path, &text).unwrap();
-        let stamped = |size: usize, at: i64| vec![(path.clone(), at, size as i64)];
+        let stamped = |size: usize, at: i64| vec![(path.clone(), at, i64::try_from(size).unwrap_or(i64::MAX))];
         let mut index = SearchIndex::open(&dir.join("search.db")).unwrap();
         let read_from = std::cell::Cell::new(None);
         let read = |p: &Path, r: Option<&Resume>| {

@@ -4,6 +4,8 @@
 //! line that changed since it was read has another tag, and the edit is
 //! refused with the lines as they are now.
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::Value;
 
 /// Whether reads and edits use anchors.
@@ -16,7 +18,7 @@ pub fn on() -> bool {
 pub fn tag(line: &str, n: usize) -> String {
     let squeezed: String = line.chars().filter(|c| !c.is_whitespace()).collect();
     let seed = if squeezed.chars().any(char::is_alphanumeric) { squeezed } else { format!("{squeezed}#{n}") };
-    let h = seed.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193));
+    let h = seed.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
     let a = (b'A' + (h % 26) as u8) as char;
     let b = (b'A' + ((h / 26) % 26) as u8) as char;
     format!("{a}{b}")
@@ -84,16 +86,16 @@ fn around(lines: &[&str], n: usize) -> String {
 }
 
 /// The file's text with `edits` applied, and what to show of the result.
-pub fn apply(content: &str, edits: &Value) -> Result<(String, String), String> {
+pub fn apply(content: &str, edits: &Value) -> anyhow::Result<(String, String)> {
     let lines: Vec<&str> = content.lines().collect();
-    let list = edits.as_array().filter(|l| !l.is_empty()).ok_or("Give at least one edit: op, pos and lines.")?;
-    let check = |a: &str| -> Result<usize, String> {
-        let (n, t) = anchor(a).ok_or(format!("{a:?} isn't an anchor: give one as read shows it, like 12#QX."))?;
+    let list = edits.as_array().filter(|l| !l.is_empty()).ok_or_else(|| anyhow::Error::msg("Give at least one edit: op, pos and lines."))?;
+    let check = |a: &str| -> anyhow::Result<usize> {
+        let (n, t) = anchor(a).ok_or(format!("{a:?} isn't an anchor: give one as read shows it, like 12#QX.")).map_err(anyhow::Error::msg)?;
         if n > lines.len() {
-            return Err(format!("Line {n} is past the file's end ({} lines).", lines.len()));
+            return Err(anyhow::anyhow!("Line {n} is past the file's end ({} lines).", lines.len()));
         }
         if tag(lines[n - 1], n) != t {
-            return Err(format!("Line {n} changed since you read it (its anchor is now {}). The lines there now:\n{}", annotate(n, lines[n - 1]).split(':').next().unwrap_or_default(), around(&lines, n)));
+            return Err(anyhow::anyhow!("Line {n} changed since you read it (its anchor is now {}). The lines there now:\n{}", annotate(n, lines[n - 1]).split(':').next().unwrap_or_default(), around(&lines, n)));
         }
         Ok(n)
     };
@@ -109,13 +111,13 @@ pub fn apply(content: &str, edits: &Value) -> Result<(String, String), String> {
                     None => pos,
                 };
                 if end < pos {
-                    return Err(format!("end ({end}) is before pos ({pos})."));
+                    return Err(anyhow::anyhow!("end ({end}) is before pos ({pos})."));
                 }
                 changes.push((pos, end, new));
             }
             "prepend" => changes.push((pos, pos - 1, new)),
             "append" => changes.push((pos + 1, pos, new)),
-            other => return Err(format!("op {other:?}: use replace, prepend or append.")),
+            other => return Err(anyhow::anyhow!("op {other:?}: use replace, prepend or append.")),
         }
     }
     changes.sort_by_key(|c| (c.0, c.1));
@@ -123,10 +125,10 @@ pub fn apply(content: &str, edits: &Value) -> Result<(String, String), String> {
         let (a, b) = (&w[0], &w[1]);
         // (Inserts at the same place are fine; replaced ranges may not overlap.)
         if b.0 <= a.1 && a.1 >= a.0 {
-            return Err(format!("Two edits change line {}: make them one.", b.0));
+            return Err(anyhow::anyhow!("Two edits change line {}: make them one.", b.0));
         }
     }
-    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let mut out: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     for (start, end, new) in changes.iter().rev() {
         let (s, removed) = (start - 1, (end + 1).saturating_sub(*start));
         out.splice(s..s + removed, new.iter().cloned());
@@ -135,10 +137,10 @@ pub fn apply(content: &str, edits: &Value) -> Result<(String, String), String> {
     let mut offset: isize = 0;
     let mut view = Vec::new();
     for (start, end, new) in &changes {
-        let at = (*start as isize + offset) as usize;
+        let at = usize::try_from(isize::try_from(*start).unwrap_or(isize::MAX) + offset).unwrap_or(0);
         let (from, to) = (at.saturating_sub(1).max(1), (at + new.len()).min(out.len()));
         view.push((from..=to.max(from)).filter(|i| *i <= out.len()).map(|i| annotate(i, &out[i - 1])).collect::<Vec<_>>().join("\n"));
-        offset += new.len() as isize - (end + 1).saturating_sub(*start) as isize;
+        offset += isize::try_from(new.len()).unwrap_or(isize::MAX) - isize::try_from((end + 1).saturating_sub(*start)).unwrap_or(isize::MAX);
     }
     let mut text = out.join("\n");
     if content.ends_with('\n') || content.is_empty() {
@@ -179,9 +181,9 @@ mod tests {
         assert_eq!(out, "one\nfour\n");
         // A stale anchor: refused, with the lines now.
         let e = apply("one\nTWO\nthree\n", &json!([{ "op": "replace", "pos": a(2, "two"), "lines": ["x"] }])).unwrap_err();
-        assert!(e.starts_with("Line 2 changed since you read it") && e.contains(&annotate(2, "TWO")), "{e}");
+        assert!(e.to_string().starts_with("Line 2 changed since you read it") && e.to_string().contains(&annotate(2, "TWO")), "{e}");
         // Overlaps refused.
         let e = apply(text, &json!([{ "op": "replace", "pos": a(1, "one"), "end": a(3, "three"), "lines": [] }, { "op": "replace", "pos": a(2, "two"), "lines": [] }])).unwrap_err();
-        assert!(e.contains("Two edits change line 2"), "{e}");
+        assert!(e.to_string().contains("Two edits change line 2"), "{e}");
     }
 }

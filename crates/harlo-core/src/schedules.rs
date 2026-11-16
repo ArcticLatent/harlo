@@ -1,6 +1,9 @@
-//! Scheduled prompts: a prompt that starts a new session in a project on
-//! chosen days at a time, every N minutes, or once. They run while harlo
+//! Scheduled prompts that start a new session in a project.
+//!
+//! On chosen days at a time, every N minutes, or once. They run while harlo
 //! does; a run missed while it was closed can be caught up at startup.
+
+// Rust guideline compliant 2026-10-09
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Timelike};
 use serde_json::{Value, json};
@@ -44,7 +47,7 @@ impl Repeat {
     pub fn next_after(&self, after: DateTime<Local>) -> Option<DateTime<Local>> {
         match *self {
             Repeat::Days { days, hour, minute } => {
-                if days & 0x7f == 0 {
+                if days.trailing_zeros() >= 7 {
                     return None;
                 }
                 let time = NaiveTime::from_hms_opt(hour, minute, 0)?;
@@ -59,7 +62,7 @@ impl Repeat {
                     (at > after).then_some(at)
                 })
             }
-            Repeat::Every { minutes } => (minutes > 0).then(|| after + Duration::minutes(minutes as i64)),
+            Repeat::Every { minutes } => (minutes > 0).then(|| after + Duration::minutes(i64::from(minutes))),
             Repeat::Once { at } => {
                 let at = Local.timestamp_opt(at, 0).single()?;
                 (at > after).then_some(at)
@@ -104,8 +107,8 @@ impl Repeat {
     pub fn from_json(v: &Value) -> Option<Repeat> {
         let n = |k: &str| v[k].as_i64();
         Some(match v["kind"].as_str()? {
-            "days" => Repeat::Days { days: n("days")? as u8, hour: n("hour")?.clamp(0, 23) as u32, minute: n("minute")?.clamp(0, 59) as u32 },
-            "every" => Repeat::Every { minutes: n("minutes")?.max(1) as u32 },
+            "days" => Repeat::Days { days: u8::try_from(n("days")?).unwrap_or(0), hour: u32::try_from(n("hour")?.clamp(0, 23)).unwrap_or(0), minute: u32::try_from(n("minute")?.clamp(0, 59)).unwrap_or(0) },
+            "every" => Repeat::Every { minutes: u32::try_from(n("minutes")?.max(1)).unwrap_or(u32::MAX) },
             "once" => Repeat::Once { at: n("at")? },
             _ => return None,
         })
@@ -202,6 +205,68 @@ impl Schedule {
         }
         false
     }
+
+    /// A schedule from the schedule dialog's form, timed from `now`.
+    ///
+    /// `previous` is the schedule it edits, if any: its machine and last run
+    /// are kept. A new one without a project runs on `host`, the machine
+    /// shown when it was made ("" this one). An empty title is the prompt's
+    /// first line, shortened.
+    ///
+    /// # Errors
+    ///
+    /// What to correct, for the dialog: no prompt, a time or date that isn't
+    /// one, no days, an interval under a minute, a time already passed, or
+    /// no choice of when it runs.
+    pub fn from_form(form: &Value, previous: Option<&Schedule>, host: &str, now: DateTime<Local>) -> Result<Schedule, &'static str> {
+        let prompt = form["prompt"].as_str().unwrap_or_default().trim().to_owned();
+        if prompt.is_empty() {
+            return Err("Write the prompt to send.");
+        }
+        let r = &form["repeat"];
+        let repeat = match r["kind"].as_str().unwrap_or_default() {
+            "days" => {
+                let (hour, minute) = parse_time(r["time"].as_str().unwrap_or_default()).ok_or("Use a time like 09:00.")?;
+                let days = u8::try_from(r["days"].as_u64().unwrap_or(0) & 0x7f).unwrap_or(0);
+                if days == 0 {
+                    return Err("Pick at least one day.");
+                }
+                Repeat::Days { days, hour, minute }
+            }
+            "every" => {
+                let minutes = r["minutes"].as_u64().unwrap_or(0);
+                if minutes < 1 {
+                    return Err("Use an interval of at least a minute.");
+                }
+                Repeat::Every { minutes: u32::try_from(minutes).unwrap_or(u32::MAX) }
+            }
+            "once" => {
+                let at = parse_local(r["at"].as_str().unwrap_or_default()).ok_or("Use a date and time like 2026-10-13 09:00.")?;
+                if at <= now.timestamp() {
+                    return Err("That time has passed.");
+                }
+                Repeat::Once { at }
+            }
+            _ => return Err("Choose when it runs."),
+        };
+        let title = form["title"].as_str().unwrap_or_default().trim().to_owned();
+        let mut schedule = Schedule {
+            id: form["id"].as_i64().unwrap_or(0),
+            title: if title.is_empty() { prompt.lines().next().unwrap_or_default().chars().take(48).collect() } else { title },
+            prompt,
+            project_id: form["projectId"].as_i64().unwrap_or(-1),
+            host: previous.map_or_else(|| host.to_owned(), |p| p.host.clone()),
+            harness: form["harness"].as_str().unwrap_or_default().to_owned(),
+            model: form["model"].as_str().unwrap_or_default().trim().to_owned(),
+            repeat,
+            enabled: form["enabled"].as_bool().unwrap_or(true),
+            catch_up: form["catchUp"].as_bool().unwrap_or(true),
+            last_run: previous.and_then(|p| p.last_run),
+            next_run: None,
+        };
+        schedule.reschedule(now);
+        Ok(schedule)
+    }
 }
 
 #[cfg(test)]
@@ -292,5 +357,32 @@ mod tests {
         assert_eq!(parse_time("25:00"), None);
         assert_eq!(parse_local("2026-10-13 09:00"), Some(at(2026, 10, 13, 9, 0).timestamp()));
         assert_eq!(parse_local("tomorrow"), None);
+    }
+
+    #[test]
+    fn the_dialogs_form_becomes_a_schedule() {
+        let now = at(2026, 10, 12, 8, 0);
+        let form = json!({ "prompt": " Review the open PRs\nand say which\n", "projectId": 3, "repeat": { "kind": "days", "time": "09:00", "days": 0x1f } });
+        let s = Schedule::from_form(&form, None, "nas", now).unwrap();
+        assert_eq!((s.title.as_str(), s.prompt.as_str(), s.project_id, s.host.as_str()), ("Review the open PRs", "Review the open PRs\nand say which", 3, "nas"));
+        assert_eq!(s.next_run, Some(at(2026, 10, 12, 9, 0).timestamp()));
+        assert!(s.enabled && s.catch_up);
+
+        let previous = Schedule { host: String::new(), last_run: Some(7), ..s.clone() };
+        let edited = Schedule::from_form(&json!({ "id": 4, "prompt": "p", "title": " T ", "repeat": { "kind": "every", "minutes": 30 } }), Some(&previous), "nas", now).unwrap();
+        assert_eq!((edited.id, edited.title.as_str(), edited.host.as_str(), edited.last_run), (4, "T", "", Some(7)));
+        assert_eq!(edited.repeat, Repeat::Every { minutes: 30 });
+    }
+
+    #[test]
+    fn a_form_says_what_to_correct() {
+        let now = at(2026, 10, 12, 8, 0);
+        let with = |repeat: Value| Schedule::from_form(&json!({ "prompt": "p", "repeat": repeat }), None, "", now).unwrap_err();
+        assert_eq!(Schedule::from_form(&json!({ "prompt": "  " }), None, "", now).unwrap_err(), "Write the prompt to send.");
+        assert_eq!(with(json!({ "kind": "days", "time": "9am", "days": 1 })), "Use a time like 09:00.");
+        assert_eq!(with(json!({ "kind": "days", "time": "09:00", "days": 0x80 })), "Pick at least one day.");
+        assert_eq!(with(json!({ "kind": "every", "minutes": 0 })), "Use an interval of at least a minute.");
+        assert_eq!(with(json!({ "kind": "once", "at": "2026-10-12 07:00" })), "That time has passed.");
+        assert_eq!(with(json!({})), "Choose when it runs.");
     }
 }

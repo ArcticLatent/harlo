@@ -1,6 +1,8 @@
 //! harlo's own state: projects, per-session flags and small settings.
 //! Conversations stay in the harness session files.
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -39,6 +41,79 @@ pub struct WorktreeRecord {
     pub removed: bool,
 }
 
+/// What a look at the projects' worktrees found.
+#[derive(Debug, Default)]
+pub struct WorktreeScan {
+    /// The worktrees there, other than each project's main checkout.
+    pub found: Vec<WorktreeRecord>,
+    /// The remote projects whose worktrees were listed.
+    pub listed: Vec<i64>,
+}
+
+/// Lists the worktrees of `projects` (id, folder), as git has them.
+///
+/// Projects that aren't in a repository, or whose list can't be read, add
+/// nothing. It runs git, here or over SSH, so it blocks.
+pub fn scan_worktrees(projects: Vec<(i64, PathBuf)>) -> WorktreeScan {
+    let mut scan = WorktreeScan::default();
+    for (id, path) in projects {
+        let Some(root) = crate::git::repo_root(&path) else { continue };
+        let Ok(list) = crate::git::list_worktrees(&root) else { continue };
+        if crate::remote::is_remote(&root) {
+            scan.listed.push(id);
+        }
+        for wt in list.into_iter().filter(|wt| !wt.is_main && !wt.prunable) {
+            scan.found.push(WorktreeRecord { path: wt.path, project_id: id, branch: wt.branch, base: String::new(), base_commit: String::new(), removed: false });
+        }
+    }
+    scan
+}
+
+impl WorktreeScan {
+    /// The worktrees found to record: new ones, renamed ones and ones back.
+    pub fn changed<'a>(&'a self, known: &'a [WorktreeRecord]) -> impl Iterator<Item = &'a WorktreeRecord> {
+        self.found.iter().filter(|rec| known.iter().find(|w| w.path == rec.path).is_none_or(|k| k.branch != rec.branch || k.removed))
+    }
+
+    /// The recorded worktrees whose folder has gone.
+    ///
+    /// Another machine's is gone when its project was listed without it; a
+    /// local one when its folder isn't there.
+    pub fn gone<'a>(&'a self, known: &'a [WorktreeRecord]) -> impl Iterator<Item = &'a WorktreeRecord> {
+        known.iter().filter(|w| !w.removed).filter(|w| {
+            if crate::remote::is_remote(&w.path) {
+                self.listed.contains(&w.project_id) && !self.found.iter().any(|f| f.path == w.path)
+            } else {
+                !w.path.exists()
+            }
+        })
+    }
+}
+
+impl WorktreeRecord {
+    /// Its state for the finish dialog, as JSON.
+    ///
+    /// The project's main checkout's branch, and the worktree's commits and
+    /// changes against its base (the main branch when its base is unknown).
+    /// It runs git, so it blocks.
+    pub fn details(&self, project: Option<&Path>, exists: bool) -> serde_json::Value {
+        let main = project.and_then(crate::git::repo_root);
+        let main_branch = main.as_ref().and_then(|m| crate::git::status(m).ok()).map(|s| s.branch).unwrap_or_default();
+        let base = if self.base.is_empty() { main_branch.clone() } else { self.base.clone() };
+        let summary = if exists { crate::git::worktree_summary(&self.path, &base).ok() } else { None }.unwrap_or_default();
+        serde_json::json!({
+            "path": self.path.to_string_lossy(),
+            "branch": self.branch,
+            "base": base,
+            "mainBranch": main_branch,
+            "exists": exists,
+            "dirty": summary.dirty,
+            "ahead": summary.ahead,
+            "behind": summary.behind,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionMeta {
     pub archived: bool,
@@ -62,6 +137,8 @@ pub struct SessionMeta {
     pub parent: String,
 }
 
+/// harlo's own database: projects, sessions' metadata and settings.
+#[derive(Debug)]
 pub struct Db {
     conn: Connection,
 }
@@ -72,6 +149,11 @@ pub fn default_path() -> PathBuf {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_else(|| PathBuf::from("."));
     base.join("harlo").join("harlo.db")
+}
+
+/// Where harlo makes worktrees unless set: `worktrees` beside its database.
+pub fn worktrees_dir() -> PathBuf {
+    default_path().parent().map_or_else(|| PathBuf::from("worktrees"), |p| p.join("worktrees"))
 }
 
 /// Agents harlo no longer runs; what chose them chooses Harlo
@@ -160,6 +242,13 @@ pub struct RunLane {
 }
 
 impl Db {
+    /// Opens the database at `path`, creating it and bringing its tables up to
+    /// date.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the file can't be opened or its tables can't be made
+    /// or migrated.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -168,6 +257,11 @@ impl Db {
         Self::init(conn)
     }
 
+    /// A database in memory, with harlo's tables (for tests).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when its tables can't be made.
     pub fn open_in_memory() -> Result<Self> {
         Self::init(Connection::open_in_memory()?)
     }
@@ -281,6 +375,11 @@ impl Db {
         Ok(())
     }
 
+    /// The projects, in the sidebar's order.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn projects(&self) -> Result<Vec<Project>> {
         let mut stmt = self
             .conn
@@ -302,9 +401,13 @@ impl Db {
     }
 
     /// Adds a project, or returns the existing one for that path.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn add_project(&self, path: &Path, harness: &str) -> Result<Project> {
         let path_str = path.to_string_lossy();
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path_str.to_string());
+        let name = path.file_name().map_or_else(|| path_str.to_string(), |n| n.to_string_lossy().into_owned());
         // (A new project goes first.)
         let position: i64 = self.conn.query_row("SELECT COALESCE(MIN(position), 1) - 1 FROM projects", [], |r| r.get(0))?;
         self.conn.execute(
@@ -320,48 +423,86 @@ impl Db {
     }
 
     /// Puts the projects in this order (those not named keep theirs, after).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_project_order(&self, ids: &[i64]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         let mut all: Vec<i64> = tx.prepare("SELECT id FROM projects ORDER BY position, id")?.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
         all.sort_by_key(|id| ids.iter().position(|x| x == id).unwrap_or(usize::MAX));
         for (i, id) in all.iter().enumerate() {
-            tx.execute("UPDATE projects SET position = ?2 WHERE id = ?1", params![id, i as i64])?;
+            tx.execute("UPDATE projects SET position = ?2 WHERE id = ?1", params![id, i64::try_from(i).unwrap_or(i64::MAX)])?;
         }
         tx.commit()?;
         Ok(())
     }
 
+    /// Removes a project from the list (its files stay).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn remove_project(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM projects WHERE id = ?1", [id])?;
         Ok(())
     }
 
+    /// Records whether a project's sessions are folded away in the sidebar.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_project_collapsed(&self, id: i64, collapsed: bool) -> Result<()> {
         self.conn.execute("UPDATE projects SET collapsed = ?2 WHERE id = ?1", params![id, collapsed])?;
         Ok(())
     }
 
+    /// Sets the agent a project's new sessions start with.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_project_harness(&self, id: i64, harness: &str) -> Result<()> {
         self.conn.execute("UPDATE projects SET harness = ?2 WHERE id = ?1", params![id, harness])?;
         Ok(())
     }
 
+    /// Sets a project's setup command for new worktrees.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_project_setup(&self, id: i64, setup: &str) -> Result<()> {
         self.conn.execute("UPDATE projects SET setup = ?2 WHERE id = ?1", params![id, setup])?;
         Ok(())
     }
 
+    /// Renames a project.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_project_name(&self, id: i64, name: &str) -> Result<()> {
         self.conn.execute("UPDATE projects SET name = ?2 WHERE id = ?1", params![id, name])?;
         Ok(())
     }
 
     /// Its icon and colour (see `Project`).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_project_look(&self, id: i64, icon: &str, color: &str) -> Result<()> {
         self.conn.execute("UPDATE projects SET icon = ?2, color = ?3 WHERE id = ?1", params![id, icon, color])?;
         Ok(())
     }
 
+    /// The worktrees harlo made, removed ones included.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn worktrees(&self) -> Result<Vec<WorktreeRecord>> {
         let mut stmt = self.conn.prepare("SELECT path, project_id, branch, base, removed, base_commit FROM worktrees ORDER BY created_at")?;
         let rows = stmt.query_map([], |r| {
@@ -379,6 +520,10 @@ impl Db {
 
     /// Records a worktree, or refreshes its branch and clears `removed`.
     /// A known base (and start commit) is kept when the new record has none.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn upsert_worktree(&self, w: &WorktreeRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO worktrees (path, project_id, branch, base, removed, base_commit) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -390,11 +535,21 @@ impl Db {
         Ok(())
     }
 
+    /// Marks the worktree at `path` as removed.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn mark_worktree_removed(&self, path: &Path) -> Result<()> {
         self.conn.execute("UPDATE worktrees SET removed = 1 WHERE path = ?1", [path.to_string_lossy()])?;
         Ok(())
     }
 
+    /// What harlo keeps about a session file (empty when nothing).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn session_meta(&self, path: &Path) -> Result<SessionMeta> {
         Ok(self
             .conn
@@ -407,6 +562,11 @@ impl Db {
             .unwrap_or_default())
     }
 
+    /// What harlo keeps about every session file.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn all_session_meta(&self) -> Result<Vec<(PathBuf, SessionMeta)>> {
         let mut stmt = self.conn.prepare("SELECT path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent FROM session_meta")?;
         let rows = stmt.query_map([], |r| {
@@ -418,6 +578,11 @@ impl Db {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Saves what harlo keeps about a session file.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_session_meta(&self, path: &Path, meta: &SessionMeta) -> Result<()> {
         self.conn.execute(
             "INSERT INTO session_meta (path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -427,6 +592,11 @@ impl Db {
         Ok(())
     }
 
+    /// Records a run of several agents, with its lanes.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn add_run(&self, run: &RunRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO runs (id, title, prompt, project_id) VALUES (?1, ?2, ?3, ?4)",
@@ -438,6 +608,11 @@ impl Db {
         Ok(())
     }
 
+    /// Adds or updates one lane of a run.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn upsert_lane(&self, run_id: &str, l: &RunLane) -> Result<()> {
         self.conn.execute(
             "INSERT INTO run_lanes (run_id, idx, harness, model, cwd, branch, session_file) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -448,16 +623,31 @@ impl Db {
         Ok(())
     }
 
+    /// Records the session file of a run's lane.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_lane_file(&self, run_id: &str, idx: i64, file: &Path) -> Result<()> {
         self.conn.execute("UPDATE run_lanes SET session_file = ?3 WHERE run_id = ?1 AND idx = ?2", params![run_id, idx, file.to_string_lossy()])?;
         Ok(())
     }
 
+    /// Marks the lane whose work was kept.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set_run_kept(&self, run_id: &str, idx: i64) -> Result<()> {
         self.conn.execute("UPDATE runs SET kept = ?2 WHERE id = ?1", params![run_id, idx])?;
         Ok(())
     }
 
+    /// Forgets a run and its lanes.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn delete_run(&self, run_id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM run_lanes WHERE run_id = ?1", [run_id])?;
         self.conn.execute("DELETE FROM runs WHERE id = ?1", [run_id])?;
@@ -465,6 +655,10 @@ impl Db {
     }
 
     /// Every run, newest first, with its lanes.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn runs(&self) -> Result<Vec<RunRecord>> {
         let mut stmt = self.conn.prepare("SELECT id, title, prompt, project_id, kept, created_at FROM runs ORDER BY created_at DESC, rowid DESC")?;
         let mut runs: Vec<RunRecord> = stmt
@@ -491,6 +685,10 @@ impl Db {
     }
 
     /// Scheduled prompts, in the order they were made.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn schedules(&self) -> Result<Vec<crate::schedules::Schedule>> {
         let mut stmt = self.conn.prepare("SELECT id, data FROM schedules ORDER BY id")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
@@ -507,6 +705,10 @@ impl Db {
     }
 
     /// Saves a schedule; a new one (`id` 0) gets its id.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn save_schedule(&self, schedule: &mut crate::schedules::Schedule) -> Result<()> {
         let data = schedule.to_json().to_string();
         if schedule.id == 0 {
@@ -518,22 +720,41 @@ impl Db {
         Ok(())
     }
 
+    /// Deletes a schedule.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn delete_schedule(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM schedules WHERE id = ?1", [id])?;
         Ok(())
     }
 
+    /// A setting's value, if it's set.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn get(&self, key: &str) -> Result<Option<String>> {
         Ok(self.conn.query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0)).optional()?)
     }
 
     /// The settings whose keys start with `prefix`: `(key, value)`.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
     pub fn with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
         let mut q = self.conn.prepare("SELECT key, value FROM kv WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key")?;
         let rows = q.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// Sets a setting.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
     pub fn set(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO kv (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
@@ -727,5 +948,24 @@ mod tests {
         assert_eq!(db.all_session_meta().unwrap(), vec![(p.to_path_buf(), settled)]);
         db.set("window", "{}").unwrap();
         assert_eq!(db.get("window").unwrap().as_deref(), Some("{}"));
+    }
+
+
+    #[test]
+    fn a_removed_worktree_keeps_its_branch_and_base() {
+        let w = WorktreeRecord { path: "/nowhere/wt".into(), branch: "fix".into(), base: "main".into(), project_id: 1, base_commit: String::new(), removed: true };
+        let d = w.details(None, false);
+        assert_eq!((d["branch"].as_str(), d["base"].as_str(), d["exists"].as_bool()), (Some("fix"), Some("main"), Some(false)));
+        assert_eq!(d["ahead"], 0);
+    }
+
+    #[test]
+    fn a_scan_records_new_worktrees_and_marks_gone_ones() {
+        let rec = |path: &str, project_id: i64, branch: &str, removed: bool| WorktreeRecord { path: path.into(), project_id, branch: branch.into(), base: String::new(), base_commit: String::new(), removed };
+        let scan = WorktreeScan { found: vec![rec("ssh://nas/wt/a", 1, "a", false), rec("ssh://nas/wt/b", 1, "b2", false), rec("ssh://nas/wt/c", 1, "c", false)], listed: vec![1] };
+        let known = [rec("ssh://nas/wt/b", 1, "b", false), rec("ssh://nas/wt/c", 1, "c", false), rec("ssh://nas/wt/d", 1, "d", false), rec("ssh://pi/wt/e", 2, "e", false), rec("/nowhere/wt/f", 3, "f", false), rec("/nowhere/wt/g", 3, "g", true)];
+        let paths = |list: Vec<&WorktreeRecord>| list.into_iter().map(|w| w.path.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert_eq!(paths(scan.changed(&known).collect()), ["ssh://nas/wt/a", "ssh://nas/wt/b"]);
+        assert_eq!(paths(scan.gone(&known).collect()), ["ssh://nas/wt/d", "/nowhere/wt/f"]);
     }
 }

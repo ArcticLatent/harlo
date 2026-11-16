@@ -4,6 +4,8 @@
 //! same change made again goes through (the user asked for that very file,
 //! or nothing makes it any more).
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::Path;
 
 /// What a package manager keeps up to date, and the manifest it's made

@@ -4,6 +4,9 @@
 //! it started. Long output keeps its start and its end; the whole of it
 //! goes to a file the model can read.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -52,7 +55,7 @@ impl Collected {
             return;
         }
         if self.spill.is_none() && !self.lost {
-            match open_spill(dir).and_then(|(mut f, path)| f.write_all(&self.all).ok().map(|_| (f, path))) {
+            match open_spill(dir).and_then(|(mut f, path)| f.write_all(&self.all).ok().map(|()| (f, path))) {
                 Some(spill) => {
                     // (The end so far, for output only just past the limit.)
                     self.tail.extend(&self.all[self.all.len().saturating_sub(TAIL_BYTES)..]);
@@ -61,16 +64,13 @@ impl Collected {
                 None => self.lost = true,
             }
         }
-        match &mut self.spill {
-            Some((f, _)) => {
-                if !self.broke && f.write_all(b).is_err() {
-                    self.broke = true;
-                }
-                self.tail.extend(b);
-                let over = self.tail.len().saturating_sub(TAIL_BYTES);
-                self.tail.drain(..over);
+        if let Some((f, _)) = &mut self.spill {
+            if !self.broke && f.write_all(b).is_err() {
+                self.broke = true;
             }
-            None => {}
+            self.tail.extend(b);
+            let over = self.tail.len().saturating_sub(TAIL_BYTES);
+            self.tail.drain(..over);
         }
     }
 
@@ -87,7 +87,7 @@ impl Collected {
                 let head_lines: Vec<&str> = head.lines().collect();
                 let count = self.lines + usize::from(!head.is_empty() && !tail.ends_with('\n'));
                 let saved = if self.broke { Saved::Part(path.clone()) } else { Saved::Whole(path.clone()) };
-                cut_view(&head_lines, &tail_lines, false, count, saved, String::new())
+                cut_view(&head_lines, &tail_lines, false, count, &saved, "")
             }
         }
     }
@@ -126,15 +126,12 @@ pub struct Group(Option<i32>);
 impl Group {
     /// The group a spawned command leads (it was started in its own).
     pub fn of(child: &tokio::process::Child) -> Group {
-        Group(child.id().map(|p| p as i32))
+        Group(child.id().map(|p| i32::try_from(p).unwrap_or(i32::MAX)))
     }
 
     fn kill(&mut self, signal: i32) {
         if let Some(pgid) = self.0 {
-            // SAFETY: kill(2) on a process group this command created.
-            unsafe {
-                libc::kill(-pgid, signal);
-            }
+            crate::sys::signal_group(pgid, signal);
         }
     }
 }
@@ -180,13 +177,14 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
         Ok(c) => c,
         Err(e) => return (format!("Couldn't start {}: {e}", if sandbox.is_some() { "the sandbox (bwrap)" } else { "bash" }), true),
     };
-    let mut group = Group(child.id().map(|p| p as i32));
+    let mut group = Group(child.id().map(|p| i32::try_from(p).unwrap_or(i32::MAX)));
     let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
     // Both streams into one, as they come (kept outside the work, so a
     // timeout still has what it printed).
     let mut got = Collected::new();
     let collect = async {
-        let (mut b1, mut b2) = ([0u8; 8192], [0u8; 8192]);
+        // (On the heap: in the future they would make every future awaiting it 16 KB bigger.)
+        let (mut b1, mut b2) = (vec![0u8; 8192], vec![0u8; 8192]);
         let (mut o_open, mut e_open) = (true, true);
         while o_open || e_open {
             tokio::select! {
@@ -207,7 +205,7 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
     };
     let (status, timed_out, by_user) = tokio::select! {
         biased;
-        _ = stopped => {
+        () = stopped => {
             group.kill(libc::SIGTERM);
             tokio::time::sleep(Duration::from_millis(300)).await;
             group.kill(libc::SIGKILL);
@@ -239,7 +237,7 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
     let failed = code != Some(0);
     match code {
         Some(0) => {}
-        Some(c) => shown.push_str(&format!("\n[exit code {c}]")),
+        Some(c) => _ = write!(shown, "\n[exit code {c}]"),
         None => shown.push_str("\n[ended by a signal]"),
     }
     if shown.trim().is_empty() {
@@ -257,7 +255,7 @@ pub fn shorten(text: &str, total: usize, spill_dir: &Path) -> String {
     }
     let saved = save(text, spill_dir).map_or(Saved::Not, Saved::Whole);
     let more = if total > text.len() { format!(" (and {} more bytes not kept)", total - text.len()) } else { String::new() };
-    cut_view(&lines, &lines, true, lines.len(), saved, more)
+    cut_view(&lines, &lines, true, lines.len(), &saved, &more)
 }
 
 /// The start of `head` and the end of `tail` (one text: `same`, so they
@@ -270,7 +268,7 @@ enum Saved {
     Not,
 }
 
-fn cut_view(head_src: &[&str], tail_src: &[&str], same: bool, count: usize, saved: Saved, more: String) -> String {
+fn cut_view(head_src: &[&str], tail_src: &[&str], same: bool, count: usize, saved: &Saved, more: &str) -> String {
     // A quarter for the start, the rest for the end (errors are usually last).
     let (head_lines, head_bytes) = (MAX_LINES / 4, MAX_BYTES / 4);
     let (tail_lines, tail_bytes) = (MAX_LINES - head_lines, MAX_BYTES - head_bytes);
@@ -379,7 +377,7 @@ mod tests {
         let Ok(full) = std::fs::OpenOptions::new().write(true).open("/dev/full") else { return };
         let mut got = Collected::new();
         got.spill = Some((full, "/tmp/output-x.log".into()));
-        got.take(&vec![b'a'; 100][..], Path::new("/tmp"));
+        got.take(&[b'a'; 100], Path::new("/tmp"));
         got.take(b"\n", Path::new("/tmp"));
         let shown = got.shown(Path::new("/tmp"));
         assert!(shown.contains("Only the start of the output is in /tmp/output-x.log") && !shown.contains("The whole output is in"), "{shown}");
@@ -396,6 +394,39 @@ mod tests {
         let saved = std::fs::read(file).unwrap();
         assert!(saved.len() > 20 * 1024 * 1024 && String::from_utf8_lossy(&saved[saved.len() - 64..]).contains("FINAL: test x failed"), "the whole output in the file");
         let _ = std::fs::remove_dir_all(&spill);
+    }
+
+    /// A key in harlo-agent's own environment never reaches a command in the
+    /// sandbox. The key is set on a second run of this test, in a child
+    /// process, so no test changes this process's environment.
+    #[tokio::test]
+    async fn keys_stay_out_of_the_sandbox() {
+        if crate::sandbox::unavailable().is_some() {
+            eprintln!("no sandbox here: skipped");
+            return;
+        }
+        if std::env::var_os("HARLO_TEST_API_KEY").is_none() {
+            let (_, name) = concat!(module_path!(), "::keys_stay_out_of_the_sandbox").split_once("::").unwrap();
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--nocapture"])
+                .env("HARLO_TEST_API_KEY", "k")
+                .output()
+                .unwrap();
+            let said = String::from_utf8_lossy(&child.stdout);
+            assert!(child.status.success() && said.contains("1 passed"), "{said}{}", String::from_utf8_lossy(&child.stderr));
+            return;
+        }
+        let scratch = crate::sandbox::tests::home_outside_tmp("bash-keys");
+        let root = scratch.0.clone();
+        let (home, proj) = (root.join("home"), root.join("home/proj"));
+        std::fs::create_dir_all(&proj).unwrap();
+        let p = crate::sandbox::Policy { on: true, network: false, writable: Vec::new(), hidden: Vec::new(), env: Vec::new() };
+        let sb = Sandbox::new(&p, &proj, &home, &home.join("none"), None);
+        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY][$PAGER]\"", &proj, None, &root, Some(&sb), None).await;
+        assert!(out.contains("[][cat]"), "{out}");
+        // (Outside the sandbox, the command has it: the key really was set.)
+        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY]\"", &proj, None, &root, None, None).await;
+        assert!(out.contains("[k]"), "{out}");
     }
 
     /// In the sandbox (where bubblewrap works here): what it can change and
@@ -421,10 +452,6 @@ mod tests {
         assert!(failed && out.contains("Read-only"), "{out}");
         let (out, _) = run("cat ../.ssh/id; ls -A ../.ssh | wc -l", &proj, None, &root, Some(&sb), None).await;
         assert!(!out.contains("secret-key") && out.ends_with('0'), "{out}");
-        // SAFETY: a variable for this test only (tests in this binary don't read it).
-        unsafe { std::env::set_var("HARLO_TEST_API_KEY", "k") };
-        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY][$PAGER]\"", &proj, None, &root, Some(&sb), None).await;
-        assert!(out.contains("[][cat]"), "{out}");
         let marker = std::env::temp_dir().join(format!("harlo-agent-sb-bg-{}", std::process::id()));
         let (out, failed) = run(&format!("(sleep 3; touch {}) & sleep 30", marker.display()), &proj, Some(1), &root, Some(&sb), None).await;
         assert!(failed && out.contains("stopped after 1 seconds"), "{out}");

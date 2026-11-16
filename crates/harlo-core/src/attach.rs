@@ -1,8 +1,12 @@
-//! Files attached to a prompt, sent the way pi's `@file` arguments are:
-//! each file becomes a `<file name="/abs/path">…</file>` block ahead of the
-//! message text. Text files are inlined, images also go along as image
-//! content, and other files are named so the agent can open them itself.
+//! Files attached to a prompt, as blocks ahead of the message text.
+//!
+//! Each file becomes a `<file name="/abs/path">…</file>` block. Text files are
+//! inlined, images also go along as image content, and other files are named so
+//! the agent can open them itself.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -31,7 +35,7 @@ fn read_inline(path: &Path, size: u64) -> Option<String> {
     if size > INLINE_LIMIT {
         return None;
     }
-    let mut bytes = Vec::with_capacity(size as usize);
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(usize::MAX));
     std::fs::File::open(path).ok()?.take(INLINE_LIMIT + 1).read_to_end(&mut bytes).ok()?;
     if bytes.contains(&0) {
         return None;
@@ -42,8 +46,8 @@ fn read_inline(path: &Path, size: u64) -> Option<String> {
 
 pub(crate) fn human_size(n: u64) -> String {
     match n {
-        n if n >= 1 << 20 => format!("{:.1} MB", n as f64 / (1 << 20) as f64),
-        n if n >= 1 << 10 => format!("{:.0} KB", n as f64 / (1 << 10) as f64),
+        n if n >= 1 << 20 => format!("{:.1} MB", n as f64 / f64::from(1 << 20)),
+        n if n >= 1 << 10 => format!("{:.0} KB", n as f64 / f64::from(1 << 10)),
         n => format!("{n} bytes"),
     }
 }
@@ -66,11 +70,11 @@ pub fn prepare_for(paths: &[PathBuf], host: Option<&str>) -> Prepared {
         let size = match std::fs::metadata(path) {
             Ok(m) if m.is_file() => m.len(),
             Ok(_) => {
-                out.prefix.push_str(&format!("<file name=\"{name}\">(not a regular file)</file>\n"));
+                let _ = writeln!(out.prefix, "<file name=\"{name}\">(not a regular file)</file>");
                 continue;
             }
             Err(e) => {
-                out.prefix.push_str(&format!("<file name=\"{name}\">(could not read: {e})</file>\n"));
+                let _ = writeln!(out.prefix, "<file name=\"{name}\">(could not read: {e})</file>");
                 continue;
             }
         };
@@ -78,30 +82,30 @@ pub fn prepare_for(paths: &[PathBuf], host: Option<&str>) -> Prepared {
             match harlo_harness::image_from_file(path) {
                 Ok(img) => {
                     out.images.push(img);
-                    out.prefix.push_str(&format!("<file name=\"{name}\"></file>\n"));
+                    let _ = writeln!(out.prefix, "<file name=\"{name}\"></file>");
                 }
-                Err(e) => out.prefix.push_str(&format!("<file name=\"{name}\">(could not read: {e:#})</file>\n")),
+                Err(e) => _ = writeln!(out.prefix, "<file name=\"{name}\">(could not read: {e:#})</file>"),
             }
             continue;
         }
         if size == 0 {
-            out.prefix.push_str(&format!("<file name=\"{name}\">(empty file)</file>\n"));
+            let _ = writeln!(out.prefix, "<file name=\"{name}\">(empty file)</file>");
         } else if let Some(text) = read_inline(path, size) {
-            out.prefix.push_str(&format!("<file name=\"{name}\">\n{text}\n</file>\n"));
+            let _ = write!(out.prefix, "<file name=\"{name}\">\n{text}\n</file>\n");
         } else {
             let why = if size > INLINE_LIMIT { "too large to include" } else { "binary" };
             match host {
-                None => out.prefix.push_str(&format!(
-                    "<file name=\"{name}\">({why}, {}; not included here; read it from disk if needed)</file>\n",
+                None => _ = writeln!(out.prefix, 
+                    "<file name=\"{name}\">({why}, {}; not included here; read it from disk if needed)</file>",
                     human_size(size)
-                )),
+                ),
                 // (The agent there can't see this machine's files.)
                 Some(h) => match copy_to(h, path, size) {
-                    Ok(there) => out.prefix.push_str(&format!(
-                        "<file name=\"{there}\">({why}, {}; not included here; read it from disk if needed)</file>\n",
+                    Ok(there) => _ = writeln!(out.prefix, 
+                        "<file name=\"{there}\">({why}, {}; not included here; read it from disk if needed)</file>",
                         human_size(size)
-                    )),
-                    Err(e) => out.prefix.push_str(&format!("<file name=\"{name}\">({why}, {}; couldn't copy it to {h}: {e})</file>\n", human_size(size))),
+                    ),
+                    Err(e) => _ = writeln!(out.prefix, "<file name=\"{name}\">({why}, {}; couldn't copy it to {h}: {e})</file>", human_size(size)),
                 },
             }
         }
@@ -111,22 +115,22 @@ pub fn prepare_for(paths: &[PathBuf], host: Option<&str>) -> Prepared {
 
 /// Copies a file to another machine's `~/.cache/harlo/attachments` (blocking):
 /// its path there.
-fn copy_to(host: &str, path: &Path, size: u64) -> Result<String, String> {
+fn copy_to(host: &str, path: &Path, size: u64) -> anyhow::Result<String> {
     if size > COPY_LIMIT {
-        return Err(format!("it's over {}", human_size(COPY_LIMIT)));
+        return Err(anyhow::anyhow!("it's over {}", human_size(COPY_LIMIT)));
     }
-    let h = crate::remote::host(host).ok_or_else(|| format!("there's no machine called {host}"))?;
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let h = crate::remote::host(host).ok_or_else(|| anyhow::anyhow!("there's no machine called {host}"))?;
+    let bytes = std::fs::read(path)?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
-    let name = format!("{stamp}-{}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()));
+    let name = format!("{stamp}-{}", path.file_name().map_or_else(|| "file".into(), |n| n.to_string_lossy().into_owned()));
     let script = format!(
         "d=\"$HOME/.cache/harlo/attachments\"; mkdir -p \"$d\" && cat > \"$d\"/{q} && printf '%s/%s' \"$d\" {q}",
         q = crate::remote::quote(&name)
     );
-    let out = crate::remote::run_with_input(&h, &script, Some(&bytes), std::time::Duration::from_secs(600)).map_err(|e| format!("{e:#}"))?;
+    let out = crate::remote::run_with_input(&h, &script, Some(&bytes), std::time::Duration::from_secs(600)).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     let there = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     if !out.status.success() || !there.starts_with('/') {
-        return Err(crate::remote::ssh_error(host, &out));
+        return Err(anyhow::Error::msg(crate::remote::ssh_error(host, &out)));
     }
     Ok(there)
 }

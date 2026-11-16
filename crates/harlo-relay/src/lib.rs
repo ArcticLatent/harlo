@@ -33,6 +33,8 @@
 //! harlo-relay --listen 0.0.0.0:8080      # or HARLO_RELAY_LISTEN
 //! ```
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -135,7 +137,7 @@ struct Relay {
 impl Default for Relay {
     fn default() -> Self {
         Self {
-            config: Config::default(), hosts: Default::default(), generations: Default::default(), per_ip: Default::default(),
+            config: Config::default(), hosts: Mutex::default(), generations: AtomicU64::default(), per_ip: Mutex::default(),
             pushes: Mutex::new((Instant::now(), HashMap::new())),
         }
     }
@@ -157,7 +159,7 @@ impl Relay {
             }
             *n += 1;
         }
-        Some(IpSlot { relay: self.clone(), ip })
+        Some(IpSlot { relay: Arc::clone(self), ip })
     }
 }
 
@@ -180,10 +182,10 @@ struct ClientIp(Option<IpAddr>);
 
 impl FromRequestParts<Arc<Relay>> for ClientIp {
     type Rejection = std::convert::Infallible;
-    async fn from_request_parts(parts: &mut Parts, relay: &Arc<Relay>) -> Result<Self, Self::Rejection> {
+    fn from_request_parts(parts: &mut Parts, state: &Arc<Relay>) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
         let peer = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
-        let forwarded = relay.config.trust_forwarded.then(|| forwarded_ip(&parts.headers)).flatten();
-        Ok(ClientIp(forwarded.or(peer)))
+        let forwarded = state.config.trust_forwarded.then(|| forwarded_ip(&parts.headers)).flatten();
+        std::future::ready(Ok(ClientIp(forwarded.or(peer))))
     }
 }
 
@@ -224,8 +226,8 @@ async fn next_text(stream: &mut futures_util::stream::SplitStream<WebSocket>, id
     loop {
         match tokio::time::timeout(idle, stream.next()).await {
             Ok(Some(Ok(Message::Text(t)))) => return Some(t.to_string()),
-            Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_))) | Ok(None) | Err(_) => return None,
-            Ok(Some(Ok(_))) => continue,
+            Ok(Some(Ok(Message::Close(_)) | Err(_)) | None) | Err(_) => return None,
+            Ok(Some(Ok(_))) => {}
         }
     }
 }
@@ -267,7 +269,7 @@ async fn push(relay: Arc<Relay>, ip: Option<IpAddr>, body: String) -> Response {
     let v: Value = serde_json::from_str(&body).unwrap_or_default();
     let f = match harlo_apns::read_forward(&v) {
         Ok(p) => p,
-        Err(e) => return reply(StatusCode::BAD_REQUEST, json!({ "error": e })),
+        Err(e) => return reply(StatusCode::BAD_REQUEST, json!({ "error": e.to_string() })),
     };
     if !relay.push_allowed(&f.token, ip) {
         return reply(StatusCode::TOO_MANY_REQUESTS, json!({ "error": "too many notifications this minute" }));
@@ -319,8 +321,14 @@ pub fn router_with(config: Config) -> Router {
         .with_state(relay)
 }
 
-/// Serves the relay on `listener` until `shutdown` (with client addresses,
-/// for the per-address limit).
+/// Serves the relay on `listener` until `shutdown`.
+///
+/// Connections are served with their client addresses, for the
+/// per-address limit.
+///
+/// # Errors
+///
+/// An I/O error when serving on `listener` fails.
 pub async fn serve(listener: tokio::net::TcpListener, config: Config, shutdown: impl Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
     axum::serve(listener, router_with(config).into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(shutdown).await
 }
@@ -389,8 +397,8 @@ async fn host(socket: WebSocket, relay: Arc<Relay>, _slot: IpSlot) {
             }
         };
         tokio::select! {
-            _ = writer => {}
-            _ = reader => {}
+            () = writer => {}
+            () = reader => {}
         }
     }
     let mut hosts = relay.hosts.lock().unwrap();
@@ -443,8 +451,8 @@ async fn phone(socket: WebSocket, relay: Arc<Relay>, id: String, _slot: IpSlot) 
         }
     };
     tokio::select! {
-        _ = writer => {}
-        _ = reader => {}
+        () = writer => {}
+        () = reader => {}
     }
     let mut hosts = relay.hosts.lock().unwrap();
     if let Some(h) = hosts.get_mut(&id).filter(|h| h.generation == generation)
@@ -457,7 +465,6 @@ async fn phone(socket: WebSocket, relay: Arc<Relay>, id: String, _slot: IpSlot) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message as M;
 
     async fn start_relay() -> std::net::SocketAddr {
@@ -471,8 +478,8 @@ mod tests {
         loop {
             match tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap() {
                 Some(Ok(M::Text(t))) => return serde_json::from_str(&t).unwrap_or(json!({ "raw": t.to_string() })),
-                Some(Ok(M::Close(f))) => return json!({ "closed": f.map(|f| u16::from(f.code)).unwrap_or(0) }),
-                Some(Ok(_)) => continue,
+                Some(Ok(M::Close(f))) => return json!({ "closed": f.map_or(0, |f| u16::from(f.code)) }),
+                Some(Ok(_)) => {}
                 _ => return Value::Null,
             }
         }
@@ -499,12 +506,12 @@ mod tests {
     #[tokio::test]
     async fn sends_notifications_on() {
         use axum::extract::Path;
-        let seen: Arc<Mutex<Vec<(String, String)>>> = Default::default();
-        let kinds: Arc<Mutex<Vec<(String, String)>>> = Default::default();
+        let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let kinds: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
         let apple = {
-            let (seen, kinds) = (seen.clone(), kinds.clone());
+            let (seen, kinds) = (Arc::clone(&seen), Arc::clone(&kinds));
             axum::Router::new().route("/3/device/{token}", axum::routing::post(move |Path(token): Path<String>, headers: HeaderMap| {
-                let (seen, kinds) = (seen.clone(), kinds.clone());
+                let (seen, kinds) = (Arc::clone(&seen), Arc::clone(&kinds));
                 async move {
                     let header = |h: &str| headers.get(h).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
                     let topic = header("apns-topic");
@@ -532,7 +539,7 @@ mod tests {
         let addr = l.local_addr().unwrap();
         tokio::spawn(serve(l, config, std::future::pending()));
         let relay = harlo_apns::Forwarder::new(&format!("http://{addr}")).unwrap();
-        assert_eq!(relay.available().await, Ok(true));
+        assert!(relay.available().await.unwrap());
 
         let payload = json!({ "aps": { "badge": 1 } });
         let push = |token| harlo_apns::Push { device_token: token, sandbox: true, topic: "ignored", payload: &payload, collapse_id: None, kind: harlo_apns::Kind::Alert };
@@ -559,7 +566,7 @@ mod tests {
         // Without the key.
         let plain = start_relay().await;
         let relay = harlo_apns::Forwarder::new(&format!("http://{plain}")).unwrap();
-        assert_eq!(relay.available().await, Ok(false));
+        assert!(!relay.available().await.unwrap());
         assert!(matches!(relay.send(&push("abcd01")).await, harlo_apns::Sent::Failed(e) if e.contains("doesn't send notifications")));
     }
 
@@ -574,7 +581,7 @@ mod tests {
         let (a, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         let (b, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         // A third from the same address: refused before the upgrade.
-        assert!(tokio_tungstenite::connect_async(format!("ws://{addr}/ws?id=x")).await.is_err());
+        tokio_tungstenite::connect_async(format!("ws://{addr}/ws?id=x")).await.unwrap_err();
         drop((a, b));
         tokio::time::sleep(Duration::from_millis(200)).await;
         let (_, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/host")).await.unwrap();

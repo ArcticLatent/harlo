@@ -1,14 +1,17 @@
-//! A repository's `.openwikiignore`: gitignore-like patterns for paths the
-//! wiki must not read or cite, matched as OpenWiki matches them (the last
+//! A repository's `.openwikiignore`: paths the wiki must not read or cite.
+//!
+//! Gitignore-like patterns, matched as OpenWiki matches them (the last
 //! matching rule wins, `!` re-includes, `/` anchors, a trailing `/` is a
 //! folder).
+
+// Rust guideline compliant 2026-10-09
 
 use crate::jsre::Re;
 use std::path::Path;
 
 pub const FILE: &str = ".openwikiignore";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Rule {
     directory_only: bool,
     matcher: Re,
@@ -89,7 +92,8 @@ fn glob_source(pattern: &str) -> String {
     out
 }
 
-#[derive(Clone)]
+/// The rules of a `.openwikiignore`, in order.
+#[derive(Debug, Clone)]
 pub struct Ignore {
     pub patterns: Vec<String>,
     rules: Vec<Rule>,
@@ -109,6 +113,10 @@ impl Ignore {
     }
 
     /// The repository's, or none (an unreadable one is an error).
+    ///
+    /// # Errors
+    ///
+    /// An I/O error when the file is there but can't be read.
     pub fn load(root: &Path) -> std::io::Result<Ignore> {
         match std::fs::read(root.join(FILE)) {
             Ok(b) => Ok(Ignore::parse(&String::from_utf8_lossy(&b))),

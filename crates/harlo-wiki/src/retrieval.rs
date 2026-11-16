@@ -1,9 +1,12 @@
-//! Search and exact section reads (`openwiki_search`, `openwiki_read`), as
-//! OpenWiki answers them: sections indexed in an in-memory SQLite FTS5
-//! table, ranked by source-path hints, then query-term coverage, then bm25.
-//! (OpenWiki indexes the whole wiki again for every search; here the index
-//! is kept, for the last few wikis searched, and built again only when a
+//! Search and exact section reads (`openwiki_search`, `openwiki_read`).
+//!
+//! They're answered as OpenWiki answers them: sections indexed in an in-memory
+//! SQLite FTS5 table, ranked by source-path hints, then query-term coverage,
+//! then bm25. (OpenWiki indexes the whole wiki again for every search; here the
+//! index is kept, for the last few wikis searched, and built again only when a
 //! page's text changed: the same answers, without re-reading every page.)
+
+// Rust guideline compliant 2026-10-09
 
 use crate::front;
 use crate::jsre::{self, Re};
@@ -76,6 +79,8 @@ pub fn js_lower(s: &str) -> String {
 
 // ---- Sections ----
 
+/// One section of a page: its anchor, heading depth, heading and text.
+#[derive(Debug)]
 pub struct Section {
     pub anchor: String,
     pub depth: usize,
@@ -249,10 +254,10 @@ fn relevant_excerpt(raw: &str, terms: &[String]) -> String {
     if jsre::len16(compact) <= EXCERPT_CHARACTERS {
         return compact.to_owned();
     }
-    let shortened = jsre::slice16(compact, 0, Some(EXCERPT_CHARACTERS as isize + 1));
+    let shortened = jsre::slice16(compact, 0, Some(isize::try_from(EXCERPT_CHARACTERS).unwrap_or(isize::MAX) + 1));
     let cut = match shortened.rfind(' ') {
         Some(b) if b > 0 => &shortened[..b],
-        _ => jsre::slice16(compact, 0, Some(EXCERPT_CHARACTERS as isize)),
+        _ => jsre::slice16(compact, 0, Some(isize::try_from(EXCERPT_CHARACTERS).unwrap_or(isize::MAX))),
     };
     format!("{cut}…")
 }
@@ -307,7 +312,7 @@ fn build_index(pages: Vec<(String, String, u64, usize)>, page_units: Vec<Arc<Vec
                 } else {
                     (normalize_text(&u.title), normalize_text(&u.description), normalize_text(&u.identifiers))
                 };
-                insert.execute(rusqlite::params![i as i64 + 1, t, d, normalize_text(&u.heading), normalize_text(&u.prose), id])?;
+                insert.execute(rusqlite::params![i64::try_from(i).unwrap_or(i64::MAX) + 1, t, d, normalize_text(&u.heading), normalize_text(&u.prose), id])?;
             }
         }
         db.execute_batch("COMMIT")
@@ -334,8 +339,8 @@ fn rank(index: &Index, terms: &[String], paths: &[String], limit: usize, include
         }
         let path_scores: Vec<usize> = if paths.is_empty() { vec![0; units.len()] } else { units.iter().map(|u| path_match_count(u, paths)).collect() };
         ranked.sort_by(|(a, sa), (b, sb)| {
-            let pa = path_scores[*a as usize - 1];
-            let pb = path_scores[*b as usize - 1];
+            let pa = path_scores[usize::try_from(*a).unwrap_or(0) - 1];
+            let pb = path_scores[usize::try_from(*b).unwrap_or(0) - 1];
             pb.cmp(&pa)
                 .then_with(|| coverage.get(b).unwrap_or(&0).cmp(coverage.get(a).unwrap_or(&0)))
                 .then_with(|| sa.partial_cmp(sb).unwrap_or(std::cmp::Ordering::Equal))
@@ -348,7 +353,7 @@ fn rank(index: &Index, terms: &[String], paths: &[String], limit: usize, include
         .into_iter()
         .take(limit)
         .map(|(rowid, _)| {
-            let u = units[rowid as usize - 1];
+            let u = units[usize::try_from(rowid).unwrap_or(0) - 1];
             let heading = if u.heading.is_empty() { String::new() } else { format!("Section: {}", u.heading) };
             let excerpt = relevant_excerpt(&u.prose, terms);
             let content = [u.title.as_str(), heading.as_str(), u.description.as_str(), excerpt.as_str()]
@@ -383,6 +388,8 @@ fn normalize_path_hint(value: &str) -> Result<String> {
     Ok(js_lower(&n))
 }
 
+/// What `openwiki_search` was asked.
+#[derive(Debug)]
 pub struct SearchRequest<'a> {
     pub query: &'a str,
     pub paths: Option<Vec<String>>,
@@ -390,7 +397,6 @@ pub struct SearchRequest<'a> {
     pub workspace: Option<&'a str>,
 }
 
-/// `openwiki_search`.
 type PageKey = (String, String, u64, usize);
 
 /// Each page's sections: an unchanged page's kept ones, the others made on
@@ -399,14 +405,16 @@ fn units_of(pages: &[PageKey], texts: &[String], old: &HashMap<&PageKey, &Arc<Ve
     let mut out: Vec<Option<Arc<Vec<Unit>>>> = pages.iter().map(|k| old.get(k).map(|u| Arc::clone(u))).collect();
     let todo: Vec<usize> = (0..pages.len()).filter(|&i| out[i].is_none()).collect();
     let bytes: usize = todo.iter().map(|&i| texts[i].len()).sum();
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8).min(bytes / (64 << 10) + 1);
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(8).min(bytes / (64 << 10) + 1);
     if threads <= 1 {
         for i in todo {
             out[i] = Some(Arc::new(search_units(&texts[i], &pages[i].1, &pages[i].0).map_err(too_deep)?));
         }
     } else {
         let next = std::sync::atomic::AtomicUsize::new(0);
-        let made: Vec<Vec<(usize, std::result::Result<Vec<Unit>, marked::TooDeep>)>> = std::thread::scope(|s| {
+        /// A page's place in the list and its search units.
+        type Made = (usize, std::result::Result<Vec<Unit>, marked::TooDeep>);
+        let made: Vec<Vec<Made>> = std::thread::scope(|s| {
             let workers: Vec<_> = (0..threads)
                 .map(|_| {
                     s.spawn(|| {
@@ -435,6 +443,13 @@ fn too_deep(_: marked::TooDeep) -> Error {
     Error::Other(format!("Markdown nests more than {} levels deep, or takes too long to read", marked::MAX_NESTING))
 }
 
+/// `openwiki_search`: ranked sections of the wikis in scope.
+///
+/// # Errors
+///
+/// A Retrieval [`Error`] when the request isn't valid, a Workspace one when its
+/// scope can't be settled, another when a page can't be read or nests too deep.
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
     let query = jsre::trim(req.query);
     let limit = req.limit.unwrap_or(DEFAULT_SEARCH_RESULTS as f64);
@@ -448,11 +463,10 @@ pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
     if paths.len() > SOURCE_PATH_HINTS {
         return Err(retrieval(format!("Search accepts at most {SOURCE_PATH_HINTS} source path hints.")));
     }
-    if let Some(w) = req.workspace {
-        if jsre::trim(w).is_empty() || jsre::len16(w) > WORKSPACE_REFERENCE_CHARACTERS {
+    if let Some(w) = req.workspace
+        && (jsre::trim(w).is_empty() || jsre::len16(w) > WORKSPACE_REFERENCE_CHARACTERS) {
             return Err(retrieval("Use a valid workspace ID or name returned by openwiki_list_workspaces."));
         }
-    }
     let scope = workspaces::search_scope(root, req.workspace.map(jsre::trim))?;
     let (workspace, wikis) = match scope {
         Scope::Required(v) => return Ok(v),
@@ -460,7 +474,7 @@ pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
     };
     let wrap = |results: Vec<Value>| -> Value {
         match &workspace {
-            Some(ws) => json!({"results": results, "workspace": ws.summary(), "wikis": wikis.iter().map(|w| w.identity()).collect::<Vec<_>>()}),
+            Some(ws) => json!({"results": results, "workspace": ws.summary(), "wikis": wikis.iter().map(super::workspaces::Wiki::identity).collect::<Vec<_>>()}),
             None => json!({"results": results}),
         }
     };
@@ -472,7 +486,7 @@ pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
     // changed, else one built again (reusing unchanged pages' sections).
     let roots: Vec<std::path::PathBuf> = wikis.iter().map(|w| w.root.clone()).collect();
     let slot: Slot = {
-        let mut all = INDEXES.lock().unwrap_or_else(|e| e.into_inner());
+        let mut all = INDEXES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = match all.iter().position(|(r, _, _)| *r == roots) {
             Some(i) => all.remove(i),
             None => (roots.clone(), 0, Slot::default()),
@@ -496,18 +510,21 @@ pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
     }
     let bytes: usize = texts.iter().map(String::len).sum();
     let results = {
-        let mut held = slot.lock().unwrap_or_else(|e| e.into_inner());
-        if held.as_ref().is_none_or(|index| index.pages != pages) {
-            let made = {
-                let old: HashMap<&(String, String, u64, usize), &Arc<Vec<Unit>>> = held.as_ref().map(|k| k.pages.iter().zip(&k.page_units).collect()).unwrap_or_default();
-                units_of(&pages, &texts, &old).and_then(|page_units| build_index(pages, page_units))
-            };
-            // (One that fails leaves the last one there.)
-            *held = Some(made?);
-            #[cfg(test)]
-            BUILT.lock().unwrap().push(roots.clone());
-        }
-        let index = held.as_ref().expect("built");
+        let mut held = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let index = match &mut *held {
+            Some(index) if index.pages == pages => index,
+            kept => {
+                let made = {
+                    let old: HashMap<&(String, String, u64, usize), &Arc<Vec<Unit>>> = kept.as_ref().map(|k| k.pages.iter().zip(&k.page_units).collect()).unwrap_or_default();
+                    units_of(&pages, &texts, &old).and_then(|page_units| build_index(pages, page_units))
+                };
+                // (One that fails leaves the last one there.)
+                let index = kept.insert(made?);
+                #[cfg(test)]
+                BUILT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(roots.clone());
+                index
+            }
+        };
         let results = if index.page_units.iter().all(|p| p.is_empty()) { Vec::new() } else { rank(index, &terms, &paths, limit as usize, workspace.is_some())? };
         if bytes > KEPT_BYTES {
             *held = None;
@@ -516,7 +533,7 @@ pub fn search(root: &Path, req: &SearchRequest) -> Result<Value> {
     };
     // Its size noted; the oldest scopes go past the limits (a wiki bigger
     // than them isn't kept at all).
-    let mut all = INDEXES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut all = INDEXES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(e) = all.iter_mut().find(|(r, _, s)| *r == roots && Arc::ptr_eq(s, &slot)) {
         e.1 = bytes;
     }
@@ -551,6 +568,8 @@ fn normalize_anchor(value: &str) -> Result<String> {
     Ok(n.to_owned())
 }
 
+/// What `openwiki_read` was asked.
+#[derive(Debug)]
 pub struct ReadRequest<'a> {
     pub page: &'a str,
     pub sections: Vec<String>,
@@ -559,6 +578,12 @@ pub struct ReadRequest<'a> {
 }
 
 /// `openwiki_read`.
+///
+/// # Errors
+///
+/// A Retrieval [`Error`] when the request isn't valid or a section isn't on the
+/// page, a PageMissing one when the page doesn't exist, another when it can't
+/// be read.
 pub fn read(root: &Path, req: &ReadRequest) -> Result<Value> {
     if req.sections.is_empty() {
         return Err(retrieval("Provide at least one section anchor."));
@@ -566,11 +591,10 @@ pub fn read(root: &Path, req: &ReadRequest) -> Result<Value> {
     if req.sections.len() > SECTION_ANCHORS {
         return Err(retrieval(format!("Read accepts at most {SECTION_ANCHORS} section anchors.")));
     }
-    if let Some(w) = req.wiki {
-        if jsre::trim(w).is_empty() || jsre::len16(w) > WIKI_ID_CHARACTERS {
+    if let Some(w) = req.wiki
+        && (jsre::trim(w).is_empty() || jsre::len16(w) > WIKI_ID_CHARACTERS) {
             return Err(retrieval("Use a valid linked wiki ID returned by search."));
         }
-    }
     let wiki = workspaces::readable_wiki(root, req.wiki.map(jsre::trim))?;
     let page = normalize_retrievable_page(req.page)?;
     let requested = req.sections.iter().map(|s| normalize_anchor(s)).collect::<Result<Vec<_>>>()?;
@@ -660,7 +684,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("openwiki")).unwrap();
         // (No linked wikis: not the user's registry.)
-        unsafe { std::env::set_var("OPENWIKI_CONFIG_DIR", root.join("no-registry")) };
+        crate::workspaces::ignore_user_registry();
         let write = |p: &str, t: &str| std::fs::write(root.join("openwiki").join(p), t).unwrap();
         let refs = |q: &str| -> Vec<String> {
             let found = search(&root, &SearchRequest { query: q, paths: None, limit: Some(20.0), workspace: None }).unwrap();
@@ -687,7 +711,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("harlo-wiki-shared-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("openwiki")).unwrap();
-        unsafe { std::env::set_var("OPENWIKI_CONFIG_DIR", root.join("no-registry")) };
+        crate::workspaces::ignore_user_registry();
         for i in 0..300 {
             std::fs::write(root.join(format!("openwiki/p{i}.md")), format!("# Page {i}\n\n## Retry {i}\n\nJobs retry {i} times with backoff, then wait in queue {i}.\n")).unwrap();
         }

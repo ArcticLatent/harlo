@@ -1,5 +1,7 @@
 //! System fonts and the installed font families (Qt's font database).
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod ffi {
     unsafe extern "C++" {
@@ -35,13 +37,13 @@ pub const DEFAULT_UI_FONT: &str = "Geist";
 /// the file-type icons ("Harlo File Icons", FileIcon.qml).
 pub fn load_bundled() {
     if !ffi::add_application_font(&cxx_qt_lib::QString::from(":/qt/qml/harlo/fonts/FileIcons.ttf")) {
-        tracing::warn!("couldn't load the bundled file icons");
+        tracing::event!(name: "app.fonts.icons.failed", tracing::Level::WARN, "couldn't load the bundled file icons");
     }
     for family in ["Geist", "JetBrainsMono"] {
         for w in ["Regular", "Italic", "Medium", "MediumItalic", "SemiBold", "SemiBoldItalic", "Bold", "BoldItalic"] {
             let path = format!(":/qt/qml/harlo/fonts/{family}-{w}.ttf");
             if !ffi::add_application_font(&cxx_qt_lib::QString::from(&path)) {
-                tracing::warn!("couldn't load the bundled font {path}");
+                tracing::event!(name: "app.fonts.load.failed", tracing::Level::WARN, file.path = %path, "couldn't load the bundled font {{file.path}}");
             }
         }
     }

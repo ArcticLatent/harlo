@@ -6,23 +6,69 @@ members = ["crates/*"]
 version = "1.1.1"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/ArcticLatent/harlo"
+# The oldest Rust that builds harlo (let chains, Duration::from_mins).
+rust-version = "1.95"
+# Nothing here goes to crates.io: harlo ships as an app.
+publish = false
 
 [workspace.dependencies]
+# The workspace's own crates.
 harlo-core = { path = "crates/harlo-core" }
 harlo-harness = { path = "crates/harlo-harness" }
 harlo-code = { path = "crates/harlo-code" }
 harlo-relay = { path = "crates/harlo-relay" }
 harlo-apns = { path = "crates/harlo-apns" }
+harlo-wiki = { path = "crates/harlo-wiki" }
+harlo-update-signing = { path = "crates/harlo-update-signing" }
+
+# Every other dependency, its version only: each crate names the features it uses.
 anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }
+serde = "1"
+serde_json = "1"
+tokio = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", default-features = false }
 cxx = "1"
 cxx-qt = "0.10"
-cxx-qt-lib = { version = "0.10", features = ["qt_full"] }
-cxx-qt-build = { version = "0.10", features = ["link_qt_object_files"] }
+cxx-qt-lib = "0.10"
+cxx-qt-build = "0.10"
+alacritty_terminal = "0.26.0"
+axum = { version = "0.8", default-features = false }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false }
+cosmic-text = "0.19"
+crypto_box = "0.9"
+ed25519-dalek = { version = "2", default-features = false }
+fancy-regex = "0.16"
+futures-util = "0.3"
+getrandom = "0.3"
+htmd = "0.5.6"
+httpdate = "1"
+ignore = "0.4"
+image = { version = "0.25", default-features = false }
+indexmap = "2"
+libc = "0.2"
+markup5ever_rcdom = "=0.38.0"
+merman = "0.9.3"
+nucleo-matcher = "0.3"
+pulldown-cmark = { version = "0.13", default-features = false }
+qrcode = { version = "0.14", default-features = false }
+regex = "1"
+reqwest = { version = "0.12", default-features = false }
+ring = "0.17"
+rusqlite = "0.41"
+sha2 = "0.10"
+stacker = "0.1"
+syntect = { version = "5.3", default-features = false }
+tokio-tungstenite = "0.29"
+tokio-util = "0.7"
+ttf-parser = "0.25"
+two-face = { version = "0.5.2", default-features = false }
+unicode-segmentation = "1"
+ureq = "3"
+whisper-rs = "0.16"
+yaml-rust = "0.4"
 
 # Checksums of engine downloads (gigabytes) in a dev build: seconds, not minutes.
 [profile.dev.package.sha2]
@@ -66,3 +112,84 @@ opt-level = 3
 inherits = "release"
 lto = "fat"
 codegen-units = 1
+
+# The lint set of the Rust guidelines (M-STATIC-VERIFICATION). Every crate
+# takes it with `[lints] workspace = true`; an exception in the code is an
+# `#[expect(..., reason = "...")]`, never an `#[allow]`.
+[workspace.lints.rust]
+ambiguous_negative_literals = "warn"
+missing_debug_implementations = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "warn"
+as_pointer_underscore = "warn"
+assertions_on_result_states = "warn"
+clone_on_ref_ptr = "warn"
+deref_by_slicing = "warn"
+disallowed_script_idents = "warn"
+empty_drop = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+fn_to_numeric_cast_any = "warn"
+if_then_some_else_none = "warn"
+map_err_ignore = "warn"
+too_long_first_doc_paragraph = "warn"
+redundant_type_annotations = "warn"
+renamed_function_params = "warn"
+semicolon_outside_block = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
+# May cause issues with structured logging otherwise.
+literal_string_with_formatting_args = "allow"
+# Opted out for good: #[must_use] on every pure function is noise in crates
+# used only by this workspace; product names (OpenWiki, GitHub) aren't code;
+# long literals here are timestamps and sizes; short local names and helper
+# functions after statements are the house style; structs mirroring QML or
+# settings carry many flags.
+must_use_candidate = "allow"
+doc_markdown = "allow"
+unreadable_literal = "allow"
+similar_names = "allow"
+many_single_char_names = "allow"
+items_after_statements = "allow"
+single_match_else = "allow"
+struct_excessive_bools = "allow"
+# Float equality here asks whether a value set from QML changed, where exact
+# is right; and map-then-collect of format! reads plainer than a fold with
+# write!, on paths that aren't hot.
+float_cmp = "allow"
+format_collect = "allow"
+# The file names matched by suffix are ones harlo or OpenWiki write, or must
+# match as OpenWiki's own checks do (case-sensitive).
+case_sensitive_file_extension_comparisons = "allow"
+# Match arms with the same body stay apart where their order or grouping
+# explains the code (a fallback after named cases, icons grouped by tool).
+match_same_arms = "allow"
+# Field names follow the protocol or the thing they hold (OAuth's
+# access_token); the public functions take the standard HashMap, as no
+# caller uses another hasher; counting newlines doesn't need a dependency.
+struct_field_names = "allow"
+implicit_hasher = "allow"
+naive_bytecount = "allow"
+# Two versions of one crate come only from dependencies' own requirements
+# (base64, getrandom, the digest and phf families, html5ever for Mermaid):
+# harlo can't make them one.
+multiple_crate_versions = "allow"
+# Counts, sizes and times turned into floats for fractions, rates and
+# pixels: far below 2^52, where an f64 is exact (f32 for pixels, by design).
+cast_precision_loss = "allow"

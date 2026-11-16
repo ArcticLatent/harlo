@@ -1,8 +1,10 @@
-//! A session's action log: every command it ran and every file it read,
-//! changed or wrote, other tools too, in order, with when and how each
-//! went. Read from the session's messages (tool calls and their results),
-//! so it works for every agent and for saved sessions.
+//! A session's action log: every command it ran and every file it touched.
+//!
+//! Every file it read, changed or wrote, other tools too, in order, with when
+//! and how each went. Read from the session's messages (tool calls and their
+//! results), so it works for every agent and for saved sessions.
 
+// Rust guideline compliant 2026-10-09
 
 use serde_json::{Value, json};
 
@@ -72,7 +74,7 @@ fn text_of(content: &Value) -> String {
 pub const KEPT: usize = 2000;
 
 /// A call waiting for its result (what its result is read with).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Pending {
     /// Its place among all the actions.
     index: usize,
@@ -83,7 +85,7 @@ struct Pending {
 }
 
 /// The log, built a message at a time.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Log {
     /// The latest `KEPT` actions, oldest first.
     actions: std::collections::VecDeque<Value>,
@@ -310,7 +312,7 @@ mod tests {
             messages.push(json!({ "role": "toolResult", "toolCallId": format!("w{i}"), "content": "ok", "isError": i % 100 == 0 }));
         }
         let mut one_by_one = Log::default();
-        messages.iter().for_each(|m| one_by_one.add(m));
+        for m in &messages { one_by_one.add(m); }
         assert_eq!(Log::of(&messages).value(), one_by_one.value());
         assert_eq!(Log::of(&messages).value()["actions"][0]["result"], "+2 −1");
         // A result before the message with its call (as some agents end them).

@@ -1,6 +1,8 @@
 //! Incremental scan of the harness session directories. Each poll stats
 //! every file and re-reads only new or changed ones.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -19,7 +21,8 @@ impl ScanDelta {
     }
 }
 
-#[derive(Default)]
+/// Reads this machine's sessions, a changed file at a time.
+#[derive(Debug, Default)]
 pub struct Scanner {
     known: HashMap<PathBuf, (SystemTime, u64)>,
 }

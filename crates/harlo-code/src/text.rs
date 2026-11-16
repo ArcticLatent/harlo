@@ -1,6 +1,8 @@
 //! The text: its lines, and positions in it as QML counts them (UTF-16 code
 //! units, a line break one).
 
+// Rust guideline compliant 2026-10-09
+
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -21,7 +23,7 @@ pub struct Line {
 
 impl Line {
     pub fn new(text: String) -> Self {
-        let units = utf16_len(&text) as u32;
+        let units = u32::try_from(utf16_len(&text)).unwrap_or(u32::MAX);
         Self { text, units, layout: None, spans: Vec::new(), state: None }
     }
 
@@ -79,6 +81,18 @@ pub struct Text {
     starts: RefCell<(Vec<usize>, usize)>,
 }
 
+impl std::fmt::Debug for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Text").field("lines", &self.lines.len()).finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for Line {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Line").field("text", &self.text).field("units", &self.units).finish_non_exhaustive()
+    }
+}
+
 impl Default for Text {
     fn default() -> Self {
         Self::new("")
@@ -108,9 +122,9 @@ impl Text {
         starts.resize(self.lines.len(), 0);
         let mut at = if *known == 0 { 0 } else { starts[*known - 1] + self.lines[*known - 1].units as usize + 1 };
         let end = (upto + 1).min(self.lines.len());
-        for i in *known..end {
-            starts[i] = at;
-            at += self.lines[i].units as usize + 1;
+        for (start, line) in starts[*known..end].iter_mut().zip(&self.lines[*known..end]) {
+            *start = at;
+            at += line.units as usize + 1;
         }
         *known = end;
     }
@@ -190,17 +204,6 @@ impl Text {
         out
     }
 
-    pub fn to_string(&self) -> String {
-        let mut out = String::with_capacity(self.lines.iter().map(|l| l.text.len() + 1).sum());
-        for (i, l) in self.lines.iter().enumerate() {
-            if i > 0 {
-                out.push('\n');
-            }
-            out.push_str(&l.text);
-        }
-        out
-    }
-
     /// Replaces `a..b` with `with`; returns what was there and how the
     /// lines changed.
     pub fn replace(&mut self, a: usize, b: usize, with: &str) -> (String, Splice) {
@@ -219,6 +222,20 @@ impl Text {
         self.lines.splice(l1..=l2, new);
         self.forget_starts_from(l1);
         (removed, Splice { first: l1, removed: l2 - l1 + 1, added })
+    }
+}
+
+
+/// The whole text, its lines joined by line breaks.
+impl std::fmt::Display for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, l) in self.lines.iter().enumerate() {
+            if i > 0 {
+                f.write_str("\n")?;
+            }
+            f.write_str(&l.text)?;
+        }
+        Ok(())
     }
 }
 

@@ -1,7 +1,10 @@
-//! The repository as a writing run sees it, as OpenWiki sees it: the last
-//! update's record, a hash of the wiki's content, a fingerprint of every
-//! source the wiki may read, what changed since a commit, and whether an
+//! The repository as a writing run sees it, as OpenWiki sees it.
+//!
+//! The last update's record, a hash of the wiki's content, a fingerprint of
+//! every source the wiki may read, what changed since a commit, and whether an
 //! update has nothing to do.
+
+// Rust guideline compliant 2026-10-09
 
 use crate::ignore::{self, Ignore};
 use crate::util;
@@ -100,10 +103,14 @@ pub fn changed_paths(root: &Path, ignore: &Ignore, base: Option<&str>) -> Vec<St
 /// The files a wiki's run sets up beside it (not code it describes).
 const SETUP_FILES: [&str; 4] = ["AGENTS.md", "CLAUDE.md", ".openwikiignore", ".github/workflows/openwiki-update.yml"];
 
-/// harlo: files added between `base` and `head` (the commit checked) or
-/// in the work tree since, past the wiki's, its setup files and ignored
-/// ones, in code-unit order. Err: git couldn't say (so nothing can be
-/// taken as unchanged).
+/// harlo: files added since `base`, committed or in the work tree.
+///
+/// Up to `head` (the commit checked) and in the work tree since, past the
+/// wiki's, its setup files and ignored ones, in code-unit order.
+///
+/// # Errors
+///
+/// git's message when it couldn't say (so nothing can be taken as unchanged).
 pub fn added_paths(root: &Path, ignore: &Ignore, base: &str, head: &str) -> std::result::Result<Vec<String>, String> {
     let mut paths = split_nul(&git_strict(root, &["diff", "--name-only", "-z", "--no-ext-diff", "--diff-filter=A", base, head])?)?;
     paths.extend(split_nul(&git_strict(root, &["diff", "--name-only", "-z", "--no-ext-diff", "--diff-filter=A", head])?)?);
@@ -426,17 +433,17 @@ fn unquote(p: &str) -> String {
             Some(b'f') => bytes.push(12),
             Some(b'v') => bytes.push(11),
             Some(d @ b'0'..=b'7') => {
-                let mut v = (d - b'0') as u32;
+                let mut v = u32::from(d - b'0');
                 for _ in 0..2 {
                     match it.peek() {
                         Some(n @ b'0'..=b'7') => {
-                            v = v * 8 + (*n - b'0') as u32;
+                            v = v * 8 + u32::from(*n - b'0');
                             it.next();
                         }
                         _ => break,
                     }
                 }
-                bytes.push(v as u8);
+                bytes.push(u8::try_from(v).unwrap_or(u8::MAX));
             }
             Some(c) => bytes.push(c),
             None => bytes.push(b'\\'),
@@ -445,12 +452,16 @@ fn unquote(p: &str) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// harlo: source files changed since `base` (committed or in the work
-/// tree) in a way the wiki may need to say more about: a new declaration
-/// (a keyword definition at any depth, or a top-level line declaring a
-/// new name, in any language; tests aside), or `GROWN_LINES` lines or
-/// more added and removed. A small edit to code no fact cites needs no
-/// update; these may. Err: git couldn't say.
+/// harlo: source files changed since `base` in ways the wiki may need to cover.
+///
+/// Committed or in the work tree: a new declaration (a keyword definition at
+/// any depth, or a top-level line declaring a new name, in any language; tests
+/// aside), or `GROWN_LINES` lines or more added and removed. A small edit to
+/// code no fact cites needs no update; these may.
+///
+/// # Errors
+///
+/// git's message when it couldn't say.
 pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Result<Vec<String>, String> {
     // (Prefixes, quoting, colour, external tools and text conversion set
     // here: a user's git settings don't change what's read.)
@@ -536,7 +547,7 @@ pub fn grown_paths(root: &Path, ignore: &Ignore, base: &str) -> std::result::Res
         &["-c", "core.quotePath=false", "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--diff-filter=d", base],
     )?;
     let parsed: HashSet<String> = files.iter().map(|f| f.path.clone()).collect();
-    let missed: Vec<String> = split_nul(&listed).map_err(|e| e.to_string())?.into_iter().map(|p| p.replace('\\', "/")).filter(|p| !parsed.contains(p)).collect();
+    let missed: Vec<String> = split_nul(&listed).map_err(|e| e.clone())?.into_iter().map(|p| p.replace('\\', "/")).filter(|p| !parsed.contains(p)).collect();
     let mut out: Vec<String> = files
         .into_iter()
         .filter(|f| !is_wiki_path(&f.path) && !SETUP_FILES.contains(&f.path.as_str()) && !ignore.ignores(&f.path, false))
@@ -590,11 +601,11 @@ pub fn commit_context(root: &Path, ignore: &Ignore, base: Option<&str>) -> Vec<V
         if !is_object_id(&sha) {
             continue;
         }
-        let subject = util::truncate_points(crate::jsre::trim(&strip_controls(subject)), (SUBJECT_CHARS as i64).min(remaining) as usize);
-        remaining -= crate::jsre::len16(&subject) as i64;
+        let subject = util::truncate_points(crate::jsre::trim(&strip_controls(subject)), usize::try_from(i64::try_from(SUBJECT_CHARS).unwrap_or(i64::MAX).min(remaining)).unwrap_or(0));
+        remaining -= i64::try_from(crate::jsre::len16(&subject)).unwrap_or(i64::MAX);
         let collapsed = collapse_blank_lines(&strip_controls(&body.join("\n")));
-        let body = util::truncate_points(crate::jsre::trim(&collapsed), (BODY_CHARS as i64).min(remaining.max(0)) as usize);
-        remaining -= crate::jsre::len16(&body) as i64;
+        let body = util::truncate_points(crate::jsre::trim(&collapsed), usize::try_from(i64::try_from(BODY_CHARS).unwrap_or(i64::MAX).min(remaining.max(0))).unwrap_or(0));
+        remaining -= i64::try_from(crate::jsre::len16(&body)).unwrap_or(i64::MAX);
         let mut c = Map::new();
         c.insert("sha".into(), sha.into());
         c.insert("subject".into(), subject.into());
@@ -614,7 +625,7 @@ fn collapse_blank_lines(s: &str) -> String {
             continue;
         }
         if run > 0 {
-            out.push_str(if run >= 3 { "\n\n" } else if run == 2 { "\n\n" } else { "\n" });
+            out.push_str(if run >= 2 { "\n\n" } else { "\n" });
             run = 0;
         }
         out.push(c);
@@ -667,6 +678,11 @@ impl LastUpdate {
     }
 }
 
+/// The last update's record, if there is one that can be read.
+///
+/// # Errors
+///
+/// The I/O error's message when the record is there but can't be read.
 pub fn read_last_update(root: &Path) -> Result<Option<LastUpdate>> {
     match std::fs::read(root.join(UPDATE_METADATA_PATH)) {
         Ok(b) => Ok(serde_json::from_slice::<Value>(&b).ok().and_then(|v| LastUpdate::from_json(&v))),
@@ -677,6 +693,10 @@ pub fn read_last_update(root: &Path) -> Result<Option<LastUpdate>> {
 
 /// Records a run's end (or start, as interrupted): `git_head` None takes
 /// the current HEAD, Some(None) leaves it out.
+///
+/// # Errors
+///
+/// The I/O error's message when the record can't be written.
 pub fn write_last_update(root: &Path, command: &str, model: &str, status: &str, language: Option<&str>, git_head: Option<Option<&str>>) -> Result<()> {
     let head = match git_head {
         Some(None) => None,
@@ -695,6 +715,10 @@ pub fn write_last_update(root: &Path, command: &str, model: &str, status: &str, 
 }
 
 /// The wiki's own instructions (openwiki/INSTRUCTIONS.md), when it has any.
+///
+/// # Errors
+///
+/// The I/O error's message when the file is there but can't be read.
 pub fn wiki_goal(root: &Path) -> Result<Option<String>> {
     match std::fs::read(root.join(WIKI_DIR).join(INSTRUCTIONS_FILE)) {
         Ok(b) => {
@@ -711,6 +735,10 @@ pub fn wiki_goal(root: &Path) -> Result<Option<String>> {
 
 /// A hash of the wiki's files, its run records left out (an update that
 /// changes none of them changes nothing).
+///
+/// # Errors
+///
+/// The I/O error's message when a file of the wiki can't be read.
 pub fn content_snapshot(root: &Path) -> Result<String> {
     let mut h = Sha256::new();
     add_dir(&mut h, &root.join(WIKI_DIR), "")?;
@@ -824,6 +852,10 @@ fn is_source_path(p: &str, ignore: &Ignore) -> bool {
 
 /// A fingerprint of every source the wiki may read (HEAD, the work tree's
 /// status, and each visible file's kind, mode and bytes), and HEAD.
+///
+/// # Errors
+///
+/// The message when a visible file can't be read.
 pub fn source_snapshot(root: &Path, ignore: &Ignore) -> Result<Source> {
     if !root.is_absolute() {
         return Err("Repository source fingerprint requires an absolute root.".into());
@@ -956,6 +988,8 @@ fn libc_nofollow() -> i32 {
 
 // ---- Whether an update has anything to do ----
 
+/// Whether an update can be skipped: with the last update's record, or why not.
+#[derive(Debug)]
 pub enum Noop {
     Skip { git_head: String, model: String, language: Option<String> },
     Run(String),
@@ -987,20 +1021,24 @@ fn references_ignored(line: &str, ignore: &Ignore) -> bool {
 /// Whether an update can be skipped: the last one complete at a commit,
 /// the same language, a clean work tree, and no commits since but the
 /// wiki's own or ignored paths.
+///
+/// # Errors
+///
+/// The I/O error's message when the last update's record is there but can't be
+/// read.
 pub fn update_noop(root: &Path, ignore: &Ignore, requested_language: Option<&str>) -> Result<Noop> {
     let Some(last) = read_last_update(root)? else { return Ok(Noop::Run("missing previous update git head".into())) };
     let Some(last_head) = last.git_head.clone() else { return Ok(Noop::Run("missing previous update git head".into())) };
     if last.status == "interrupted" {
         return Ok(Noop::Run("previous update was interrupted".into()));
     }
-    if let Some(req) = requested_language {
-        if crate::lang::primary(Some(req)) != crate::lang::primary(last.language.as_deref()) {
+    if let Some(req) = requested_language
+        && crate::lang::primary(Some(req)) != crate::lang::primary(last.language.as_deref()) {
             return Ok(Noop::Run("output language changed".into()));
         }
-    }
     let Some(head) = git_head(root) else { return Ok(Noop::Run("missing current git head".into())) };
     let status = git_text(root, &["status", "--short", "--untracked-files=all"]);
-    let meaningful = status.split('\n').map(|l| l.trim_end()).filter(|l| !l.is_empty()).filter(|l| !is_metadata_status_line(l)).any(|l| !references_ignored(l, ignore));
+    let meaningful = status.split('\n').map(str::trim_end).filter(|l| !l.is_empty()).filter(|l| !is_metadata_status_line(l)).any(|l| !references_ignored(l, ignore));
     if meaningful {
         return Ok(Noop::Run("worktree has changes".into()));
     }

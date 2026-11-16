@@ -9,6 +9,8 @@
 //! about long documentation pages: the same answers with 77% fewer input
 //! tokens (40k against 174k, two runs each).
 
+// Rust guideline compliant 2026-10-09
+
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
@@ -60,7 +62,7 @@ pub async fn run(url: &str, spill_dir: &Path) -> Outcome {
     }
     let url = match parse(url) {
         Ok(u) => u,
-        Err(why) => return fail(why),
+        Err(why) => return fail(format!("{why:#}")),
     };
     let res = client()
         .get(url.clone())
@@ -91,7 +93,7 @@ pub async fn run(url: &str, spill_dir: &Path) -> Outcome {
             Err(e) => return fail(format!("Fetching {at} broke off: {}", reason(&e))),
         }
     }
-    let moved = if at != url { format!(" (from {url})") } else { String::new() };
+    let moved = if at == url { String::new() } else { format!(" (from {url})") };
     let mime = kind.split(';').next().unwrap_or_default().trim().to_owned();
     if (mime.starts_with("image/") && mime != "image/svg+xml") || (mime.is_empty() && crate::images::mime_of(&body).is_some()) {
         return match crate::images::fit_apart(body).await {
@@ -170,16 +172,16 @@ pub async fn run(url: &str, spill_dir: &Path) -> Outcome {
 }
 
 /// `url` as one to fetch: http or https (a bare host gets https).
-fn parse(url: &str) -> Result<reqwest::Url, String> {
+fn parse(url: &str) -> anyhow::Result<reqwest::Url> {
     let url = url.trim();
     if url.is_empty() {
-        return Err("Give the URL.".into());
+        return Err(anyhow::Error::msg("Give the URL."));
     }
     let full = if url.contains("://") { url.to_owned() } else { format!("https://{url}") };
-    let u = reqwest::Url::parse(&full).map_err(|e| format!("{url} isn't a URL ({e})."))?;
+    let u = reqwest::Url::parse(&full).map_err(|e| anyhow::anyhow!("{url} isn't a URL ({e})."))?;
     match u.scheme() {
         "http" | "https" => Ok(u),
-        other => Err(format!("Only http and https can be fetched, not {other}: for a file, use read.")),
+        other => Err(anyhow::anyhow!("Only http and https can be fetched, not {other}: for a file, use read.")),
     }
 }
 
@@ -260,7 +262,7 @@ fn find(node: &Rc<markup5ever_rcdom::Node>, name: &str) -> Option<Rc<markup5ever
     if let NodeData::Element { name: n, .. } = &node.data
         && &*n.local == name
     {
-        return Some(node.clone());
+        return Some(Rc::clone(node));
     }
     node.children.borrow().iter().find_map(|c| find(c, name))
 }
@@ -394,7 +396,7 @@ mod tests {
                     let n = s.read(&mut buf).await.unwrap_or(0);
                     let req = String::from_utf8_lossy(&buf[..n]);
                     let path = req.split_whitespace().nth(1).unwrap_or("/").to_owned();
-                    let (status, kind, body) = pages.iter().find(|p| p.0 == path).map(|p| (p.1, p.2, p.3.clone())).unwrap_or(("404 Not Found", "text/html", b"<html><body><h1>Gone</h1></body></html>".to_vec()));
+                    let (status, kind, body) = pages.iter().find(|p| p.0 == path).map_or(("404 Not Found", "text/html", b"<html><body><h1>Gone</h1></body></html>".to_vec()), |p| (p.1, p.2, p.3.clone()));
                     let extra = if status.starts_with("301") { "Location: /docs\r\n" } else { "" };
                     let head = format!("HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n", body.len());
                     let _ = s.write_all(head.as_bytes()).await;

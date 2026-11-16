@@ -2,6 +2,8 @@
 //! "Open" runs `on_open`. A notification with the same `tag` as an earlier
 //! one replaces it instead of stacking.
 
+// Rust guideline compliant 2026-10-09
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -50,7 +52,7 @@ pub fn send(tag: &str, title: &str, body: &str, sound: Option<&str>, on_open: im
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                tracing::debug!("notify-send unavailable: {e}");
+                tracing::event!(name: "notify.send.unavailable", tracing::Level::DEBUG, error.message = %e, "notify-send unavailable: {{error.message}}");
                 return;
             }
         };
@@ -98,7 +100,7 @@ const SOUNDS: [(&str, &[u8]); 8] = [
 /// PulseAudio, whichever is there.
 pub fn play_sound(name: &str) {
     let Some(file) = sound_file(name) else {
-        tracing::debug!("no sound {name}");
+        tracing::event!(name: "notify.sound.missing", tracing::Level::DEBUG, sound.name = %name, "no sound {{sound.name}}");
         return;
     };
     std::thread::spawn(move || {
@@ -109,7 +111,7 @@ pub fn play_sound(name: &str) {
             }
         }
         if !quiet(Command::new("canberra-gtk-play").arg("-f").arg(&file)) {
-            tracing::debug!("no player for {}", file.display());
+            tracing::event!(name: "notify.sound.no_player", tracing::Level::DEBUG, file.path = %file.display(), "no player for {{file.path}}");
         }
     });
 }

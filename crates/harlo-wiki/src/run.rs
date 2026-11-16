@@ -1,8 +1,11 @@
-//! Writing a wiki: OpenWiki's resumable page-job lifecycle (begin, plan,
-//! page jobs, finish) with its files kept the way OpenWiki keeps them:
-//! `openwiki/.run.json` for the run, `openwiki/.page-manifest.json` for
-//! which pages cover which source, `.last-update.json` for the last run,
+//! Writing a wiki: OpenWiki's resumable page-job lifecycle.
+//!
+//! Begin, plan, page jobs and finish, with the files kept the way OpenWiki
+//! keeps them: `openwiki/.run.json` for the run, `openwiki/.page-manifest.json`
+//! for which pages cover which source, `.last-update.json` for the last run,
 //! and a managed block in AGENTS.md and CLAUDE.md.
+
+// Rust guideline compliant 2026-10-09
 
 use crate::claims::{self, Op};
 use crate::finish::{self, Snapshot};
@@ -73,9 +76,12 @@ fn any_string(v: &Value) -> bool {
     v.is_string()
 }
 
+/// An object key's name, whether it is required, and its check.
+type KeyCheck<'a> = (&'a str, bool, &'a dyn Fn(&Value) -> Option<Value>);
+
 /// A strict object: only `keys`, each passing its check (optional ones may
 /// be missing); the result in the schema's key order.
-fn object(v: &Value, keys: &[(&str, bool, &dyn Fn(&Value) -> Option<Value>)]) -> Option<Value> {
+fn object(v: &Value, keys: &[KeyCheck<'_>]) -> Option<Value> {
     let o = v.as_object()?;
     if o.keys().any(|k| !keys.iter().any(|(n, _, _)| n == k)) {
         return None;
@@ -283,10 +289,7 @@ fn coverage_error(page: &str) -> Error {
 fn build_entry(root: &Path, page: &str, source: &Checkpoint, completed_by: Option<&str>, run_id: Option<&str>) -> Result<Value> {
     let page = store::normalize_page(page)?;
     let st = Store::new(root);
-    let (persisted, version) = match (claims::load(&st, &page), st.hash_page(&page)) {
-        (Ok(p), Ok(v)) => (p, v),
-        _ => return Err(coverage_error(&page)),
-    };
+    let (Ok(persisted), Ok(version)) = (claims::load(&st, &page), st.hash_page(&page)) else { return Err(coverage_error(&page)) };
     match &persisted {
         Some(p) if p.verification.is_some() && p.page_version == version => {}
         _ => return Err(coverage_error(&page)),
@@ -454,7 +457,7 @@ fn legacy_sections(content: &str) -> Vec<(usize, usize)> {
         offsets.push(running);
         running += l.len();
     }
-    let body = |l: &str| -> String { l.strip_suffix('\n').map(|x| x.strip_suffix('\r').unwrap_or(x)).unwrap_or(l).to_owned() };
+    let body = |l: &str| -> String { l.strip_suffix('\n').map_or(l, |x| x.strip_suffix('\r').unwrap_or(x)).to_owned() };
     let mut out = Vec::new();
     let mut fence: Option<(char, usize)> = None;
     let mut i = 0;
@@ -462,11 +465,10 @@ fn legacy_sections(content: &str) -> Vec<(usize, usize)> {
         let b = body(lines[i]);
         let marker = fence_marker(&b);
         if let Some((ch, len)) = fence {
-            if let Some((c, l, info)) = &marker {
-                if *c == ch && *l >= len && crate::jsre::trim(info).is_empty() {
+            if let Some((c, l, info)) = &marker
+                && *c == ch && *l >= len && crate::jsre::trim(info).is_empty() {
                     fence = None;
                 }
-            }
             i += 1;
             continue;
         }
@@ -518,7 +520,7 @@ fn next_agents_content(path: &Path, snippet: &str, claude: bool) -> Result<Optio
     let sections = legacy_sections(&current);
     let mut without = current.clone();
     let mut sorted = sections.clone();
-    sorted.sort_by(|a, b| b.0.cmp(&a.0));
+    sorted.sort_by_key(|s| std::cmp::Reverse(s.0));
     for (a, b) in sorted {
         without = format!("{}{}", &without[..a], &without[b..]);
     }
@@ -556,11 +558,17 @@ fn same_file(a: &Path, b: &Path) -> bool {
 
 const WORKFLOW: &str = include_str!("openwiki-update.yml");
 
-/// Where `rel` (a path under the repository at `root`) really is, links
-/// followed (a link to a file not made yet too), when that's inside the
-/// repository: a setup file or the wiki's folder leading out of it (a link
-/// to another folder, or a parent folder that's one) is refused, so a run
-/// never writes outside the repository. (OpenWiki writes through them.)
+/// Where `rel`, a path under the repository at `root`, really is.
+///
+/// Links are followed (a link to a file not made yet too) while they stay
+/// inside the repository. A setup file or the wiki's folder leading out of it
+/// (a link to another folder, or a parent folder that's one) is refused, so a
+/// run never writes outside the repository. (OpenWiki writes through them.)
+///
+/// # Errors
+///
+/// A Run [`Error`] (`invalid_state`) when the path leads outside the
+/// repository, another when it can't be resolved.
 pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
     let refused = || Error::Host("invalid_input", format!("Cannot update {rel} because it leads outside the repository (a symbolic link); nothing was changed. Point it inside the repository or remove it, then retry."));
     let real_root = std::fs::canonicalize(root).map_err(|e| other(e.to_string()))?;
@@ -573,7 +581,7 @@ pub fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
             match std::fs::symlink_metadata(&existing) {
                 Ok(_) => break,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    let Some(name) = existing.file_name().map(|n| n.to_owned()) else { return Err(refused()) };
+                    let Some(name) = existing.file_name().map(std::borrow::ToOwned::to_owned) else { return Err(refused()) };
                     if !existing.pop() {
                         return Err(refused());
                     }
@@ -745,7 +753,7 @@ fn title_from_path(page: &str) -> String {
         .join(" ")
 }
 
-fn job(path: &str, title: &str, purpose: &str, seeds: Vec<String>, related: Vec<String>, instructions: Vec<String>) -> Value {
+fn job(path: &str, title: &str, purpose: &str, seeds: &[String], related: &[String], instructions: &[String]) -> Value {
     json!({"id": util::new_id(), "path": path, "title": title, "purpose": purpose, "seedPaths": seeds, "relatedPages": related, "instructions": instructions, "status": "pending"})
 }
 
@@ -804,7 +812,7 @@ fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[
                     continue;
                 }
                 let seeds = unique_sorted(list.iter().flat_map(|i| i.resources.iter().map(|r| evidence_seed(r))).collect::<Result<Vec<_>>>()?);
-                pages.push(job(&page, &title_from_path(&page), "Reconcile stale or unresolved Claims and update this page from current repository evidence while preserving unaffected accurate content.", seeds, vec![], vec![]));
+                pages.push(job(&page, &title_from_path(&page), "Reconcile stale or unresolved Claims and update this page from current repository evidence while preserving unaffected accurate content.", &seeds, &[], &[]));
                 planned.insert(page);
             }
         }
@@ -819,7 +827,7 @@ fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[
             } else {
                 "This page changed since its Claims were verified (edited by hand, say). Check what it says now against current repository evidence, keep what is accurate, correct the rest, and reconcile its complete Claim set."
             };
-            pages.push(job(&page, &title_from_path(&page), purpose, vec![], vec![], vec![]));
+            pages.push(job(&page, &title_from_path(&page), purpose, &[], &[], &[]));
             planned.insert(page);
         }
     } else if defer {
@@ -939,6 +947,8 @@ fn reconcile_claims(session: &mut claims::Session, page_input: &str, input: &Val
 
 // ---- The run ----
 
+/// An active writing run: its state, the files it may touch and its Claims.
+#[derive(Debug)]
 pub struct Run {
     root: PathBuf,
     state: Value,
@@ -1158,6 +1168,8 @@ fn reconcile_manifest_jobs(root: &Path, state: Value, legacy_by: &str) -> Result
 
 // ---- The lifecycle ----
 
+/// What `openwiki_begin` was asked.
+#[derive(Debug)]
 pub struct Begin {
     pub root: PathBuf,
     pub mode: String,
@@ -1167,6 +1179,8 @@ pub struct Begin {
     pub model: String,
 }
 
+/// How a begin ended: nothing to do, or an active run with its answer.
+#[derive(Debug)]
 pub enum Begun {
     Noop(Value),
     Active(Box<Run>, Value),
@@ -1205,15 +1219,21 @@ impl Quiet {
     }
 }
 
-/// harlo: an update done without a model when there's nothing for one to
-/// do: a complete last update at a commit, no run under way, every page
-/// in the manifest, no claim whose cited code changed or went, no file
-/// added since and no source file with a new top-level definition or
-/// `repo::GROWN_LINES` changed lines (either may need saying). Then it's
-/// recorded as begin's no-op records one (claims re-anchored, manifest,
-/// last update at HEAD, the same model), else nothing is written but the
-/// manifest entries begin would seed. Small edits to code the wiki
-/// doesn't cite need no update: no page says anything about them.
+/// harlo: an update done without a model when there's nothing for one to do.
+///
+/// That's a complete last update at a commit, no run under way, every page in
+/// the manifest, no claim whose cited code changed or went, no file added since
+/// and no source file with a new top-level definition or `repo::GROWN_LINES`
+/// changed lines (either may need saying). It's then recorded as begin's no-op
+/// records one (claims re-anchored, manifest, last update at HEAD, the same
+/// model); otherwise nothing is written but the manifest entries begin would
+/// seed. Small edits to code the wiki doesn't cite need no update: no page says
+/// anything about them.
+///
+/// # Errors
+///
+/// An [`Error`] when the wiki's files or the repository can't be read, or the
+/// record can't be written.
 pub fn quiet_update(root: &Path) -> Result<Quiet> {
     let needed = |r: &str| Ok(Quiet::Needed { reason: r.to_owned(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: Vec::new() });
     inside(root, "openwiki")?;
@@ -1247,7 +1267,7 @@ pub fn quiet_update(root: &Path) -> Result<Quiet> {
     #[cfg(test)]
     tests::MID_CHECK.with(|f| {
         if let Some(f) = f.borrow_mut().take() {
-            f()
+            f();
         }
     });
     // (Claims it can't read: a model's run says what's wrong with them.)
@@ -1308,6 +1328,13 @@ pub fn quiet_update(root: &Path) -> Result<Quiet> {
 }
 
 /// `beginRepositoryRun`.
+///
+/// # Errors
+///
+/// An [`Error`] in OpenWiki's families: a Run one (`invalid_input`,
+/// `invalid_state`, `conflict`) when the step doesn't apply to the run as it
+/// is, a Claims one when a page's Claims are refused, another when the wiki's
+/// files can't be read or written.
 pub fn begin(input: &Begin) -> Result<Begun> {
     let requested = match lang::resolve(input.language.as_deref()) {
         lang::Resolved::Unrecognized(m) => return Err(fail("invalid_input", m)),
@@ -1347,9 +1374,9 @@ pub fn begin(input: &Begin) -> Result<Begun> {
             let m = read_manifest(root)?;
             initial.iter().all(|p| m.contains_key(p))
         };
-        if update && !input.force {
-            if let Noop::Skip { git_head, model, language: noop_language } = repo::update_noop(root, &ignore, input.language.as_deref()).map_err(other)? {
-                if rt.issues.is_empty() && complete_coverage && edited.is_empty() {
+        if update && !input.force
+            && let Noop::Skip { git_head, model, language: noop_language } = repo::update_noop(root, &ignore, input.language.as_deref()).map_err(other)?
+                && rt.issues.is_empty() && complete_coverage && edited.is_empty() {
                     let first = repo::source_snapshot(root, &ignore).map_err(other)?;
                     rt.session.finalize(&rt.store, &util::now_iso(), &HashSet::new())?;
                     let stable = repo::source_snapshot(root, &ignore).map_err(other)?;
@@ -1366,8 +1393,6 @@ pub fn begin(input: &Begin) -> Result<Begun> {
                         }
                     }
                 }
-            }
-        }
         let before = repo::content_snapshot(root).map_err(other)?;
         let prepared = finish::prepare(&backend, finish::concept_type(Some(&language))).map_err(|(_, e)| other(e))?;
         let required: Vec<String> = if update && language_changed { initial.clone() } else { edited.clone() };
@@ -1386,7 +1411,7 @@ pub fn begin(input: &Begin) -> Result<Begun> {
             st.insert("targetGitHead".into(), h.clone().into());
         }
         st.insert("actor".into(), json!({"producerActor": input.producer, "metadataModel": input.model}));
-        st.insert("previousLastUpdate".into(), last.as_ref().map(LastUpdate::to_json).unwrap_or(Value::Null));
+        st.insert("previousLastUpdate".into(), last.as_ref().map_or(Value::Null, LastUpdate::to_json));
         if let Some(h) = last.as_ref().and_then(|l| l.git_head.clone()) {
             st.insert("baseGitHead".into(), h.into());
         }
@@ -1406,14 +1431,13 @@ pub fn begin(input: &Begin) -> Result<Begun> {
         let view = run.active_view(false)?;
         Ok(Begun::Active(Box::new(run), view))
     })();
-    if result.is_err() {
-        if let Some(r) = &replacement {
+    if result.is_err()
+        && let Some(r) = &replacement {
             if written {
                 remove_state(root);
             }
             r.rollback();
         }
-    }
     result
 }
 
@@ -1451,19 +1475,18 @@ fn resume(input: &Begin, requested: Option<String>, state: Value) -> Result<Begu
         }
         o.shift_remove("plan");
     } else {
-        if next.get("targetGitHead").is_none() {
-            if let Some(h) = &current.git_head {
+        if next.get("targetGitHead").is_none()
+            && let Some(h) = &current.git_head {
                 next.as_object_mut().unwrap().insert("targetGitHead".into(), h.clone().into());
             }
-        }
         let legacy = state["actor"]["producerActor"].as_str().unwrap_or("").to_owned();
         next = reconcile_manifest_jobs(root, next, &legacy)?;
     }
-    let active = if serde_json::to_string(&next).ok() != serde_json::to_string(&state).ok() {
+    let active = if serde_json::to_string(&next).ok() == serde_json::to_string(&state).ok() {
+        state
+    } else {
         write_state(root, &next)?;
         next
-    } else {
-        state
     };
     let backend = Backend::new(root, ignore.clone());
     let rt = prepare_claims(root, &ignore, &mode, mode == "init")?;
@@ -1474,6 +1497,13 @@ fn resume(input: &Begin, requested: Option<String>, state: Value) -> Result<Begu
 
 impl Run {
     /// `submitRepositoryPlan`.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] in OpenWiki's families: a Run one (`invalid_input`,
+    /// `invalid_state`, `conflict`) when the step doesn't apply to the run as
+    /// it is, a Claims one when a page's Claims are refused, another when the
+    /// wiki's files can't be read or written.
     pub fn submit_plan(&mut self, input: &Value) -> Result<Value> {
         let required = strings(&self.state["requiredRewritePages"]);
         if self.state.get("plan").is_some() {
@@ -1496,6 +1526,13 @@ impl Run {
     }
 
     /// `nextRepositoryPage`.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] in OpenWiki's families: a Run one (`invalid_input`,
+    /// `invalid_state`, `conflict`) when the step doesn't apply to the run as
+    /// it is, a Claims one when a page's Claims are refused, another when the
+    /// wiki's files can't be read or written.
     pub fn next_page(&mut self) -> Result<Value> {
         if self.state.get("plan").is_none() || self.state["phase"] != "generating" {
             return Err(fail("invalid_state", "Submit the OpenWiki plan before requesting page work."));
@@ -1520,6 +1557,13 @@ impl Run {
     }
 
     /// `inspectRepositoryPageClaims`.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] in OpenWiki's families: a Run one (`invalid_input`,
+    /// `invalid_state`, `conflict`) when the step doesn't apply to the run as
+    /// it is, a Claims one when a page's Claims are refused, another when the
+    /// wiki's files can't be read or written.
     pub fn inspect(&mut self, job_id: &str) -> Result<Value> {
         let job = self.pending_job(job_id, "inspected")?;
         let page = s(&job, "path").unwrap_or_default();
@@ -1528,6 +1572,13 @@ impl Run {
     }
 
     /// `submitRepositoryPage`.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] in OpenWiki's families: a Run one (`invalid_input`,
+    /// `invalid_state`, `conflict`) when the step doesn't apply to the run as
+    /// it is, a Claims one when a page's Claims are refused, another when the
+    /// wiki's files can't be read or written.
     pub fn submit_page(&mut self, input: &Value) -> Result<Value> {
         if self.state.get("plan").is_none() || self.state["phase"] != "generating" {
             return Err(fail("invalid_state", "Submit the OpenWiki plan before submitting pages."));
@@ -1658,15 +1709,21 @@ impl Run {
     }
 
     fn delete_page(&mut self, page: &str, what: &str) -> Result<()> {
-        if let Err(e) = self.backend.delete(page) {
-            if !e.contains("not found") {
+        if let Err(e) = self.backend.delete(page)
+            && !e.contains("not found") {
                 return Err(fail("invalid_state", format!("{what} {page}: {e}")));
             }
-        }
         self.claims.session.record_deletion(page)
     }
 
     /// `finishRepositoryRun`.
+    ///
+    /// # Errors
+    ///
+    /// An [`Error`] in OpenWiki's families: a Run one (`invalid_input`,
+    /// `invalid_state`, `conflict`) when the step doesn't apply to the run as
+    /// it is, a Claims one when a page's Claims are refused, another when the
+    /// wiki's files can't be read or written.
     pub fn finish(&mut self) -> Result<Value> {
         let Some(plan) = self.state.get("plan").cloned() else {
             return Err(fail("invalid_state", "OpenWiki cannot finish before a plan is submitted."));
@@ -1684,11 +1741,10 @@ impl Run {
         let run_id = self.run_id();
         let mut actors: HashMap<String, String> = HashMap::new();
         for (page, e) in read_manifest(&self.root)? {
-            if let Some(by) = s(&e, "completedBy").filter(|b| !b.is_empty()) {
-                if s(&e, "completedRunId").as_deref() == Some(run_id.as_str()) {
+            if let Some(by) = s(&e, "completedBy").filter(|b| !b.is_empty())
+                && s(&e, "completedRunId").as_deref() == Some(run_id.as_str()) {
                     actors.insert(page, by);
                 }
-            }
         }
         let st = Store::new(&self.root);
         let initial: HashSet<String> = strings(&self.state["initialPages"]).into_iter().collect();
@@ -1754,6 +1810,7 @@ impl Run {
 // ---- The tools' session ----
 
 /// One host's writing session: at most one active run.
+#[derive(Debug)]
 pub struct Writer {
     host: String,
     active: Option<Box<Run>>,
@@ -1772,6 +1829,12 @@ impl Writer {
     }
 
     /// One writing tool's answer, its input already checked.
+    ///
+    /// # Errors
+    ///
+    /// A Host [`Error`] (`invalid_state`) when no run with the call's `runId`
+    /// is active, else as the step the tool names (see [`Run::submit_plan`] and
+    /// the others).
     pub fn call(&mut self, name: &str, args: &Value) -> Result<Value> {
         let run_id = s(args, "runId").unwrap_or_default();
         match name {
@@ -1811,16 +1874,25 @@ impl Writer {
 }
 
 /// What a host shows for a writing tool's error.
+///
+/// An error OpenWiki doesn't expect shows as a generic failure, as
+/// OpenWiki's do; [`unexpected`] gives its text for the host's log.
 pub fn error_text(e: Error) -> String {
     match e {
         Error::Host(code, m) => format!("{code}: {m}"),
         Error::Run("conflict", m) => format!("conflict: {m}"),
         Error::Run("invalid_input" | "not_found", m) => format!("invalid_input: {m}"),
         Error::Run("invalid_state", m) => format!("invalid_state: {m}"),
-        e => {
-            eprintln!("OpenWiki MCP operation failed: {}", e.message());
-            "OpenWiki MCP operation failed.".into()
-        }
+        _ => "OpenWiki MCP operation failed.".into(),
+    }
+}
+
+/// The text of an error that [`error_text`] shows only as a generic failure.
+#[must_use]
+pub fn unexpected(e: &Error) -> Option<&str> {
+    match e {
+        Error::Host(..) | Error::Run("conflict" | "invalid_input" | "not_found" | "invalid_state", _) => None,
+        e => Some(e.message()),
     }
 }
 
@@ -1834,14 +1906,27 @@ mod tests {
         pub static MID_CHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
     }
 
+    /// Hosts see a generic failure for an error OpenWiki doesn't expect;
+    /// its text is still there for their log.
+    #[test]
+    fn unexpected_errors_keep_their_text_for_the_log() {
+        let disk = Error::Other("disk full".into());
+        assert_eq!(unexpected(&disk), Some("disk full"));
+        assert_eq!(error_text(disk), "OpenWiki MCP operation failed.");
+        let conflict = Error::Run("conflict", "page changed".into());
+        assert_eq!(unexpected(&conflict), None);
+        assert_eq!(error_text(conflict), "conflict: page changed");
+        assert_eq!(unexpected(&Error::Host("invalid_input", "x".into())), None);
+    }
+
     #[test]
     fn titles_and_seeds() {
         assert_eq!(title_from_path("/openwiki/a/retry-logic_v2.md"), "Retry Logic V2");
         assert_eq!(evidence_seed("repo://src/a%20b.rs#L1-L3").unwrap(), "src/a%20b.rs");
-        assert!(seed_path("../x").is_err());
+        seed_path("../x").unwrap_err();
         assert_eq!(plan_page_path("architecture/x.md").unwrap(), "/openwiki/architecture/x.md");
-        assert!(plan_page_path("/openwiki/_draft.md").is_err());
-        assert!(plan_page_path("/openwiki/index.md").is_err());
+        plan_page_path("/openwiki/_draft.md").unwrap_err();
+        plan_page_path("/openwiki/index.md").unwrap_err();
     }
 
     /// Setup files and the wiki's folder that lead outside the repository
@@ -2017,6 +2102,7 @@ mod tests {
     /// landing while it checks, declarations without a keyword it knows,
     /// names git quotes, a user's diff settings, git failing.
     #[test]
+    #[expect(clippy::too_many_lines, reason = "one scenario: each kind of change, checked in turn on the same repository")]
     fn quiet_updates_miss_nothing() {
         let r = std::env::temp_dir().join(format!("harlo-run-quiet2-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&r);

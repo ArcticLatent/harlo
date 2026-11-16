@@ -2,6 +2,8 @@
 //! servers Harlo and Claude read (globally or in a project, here or on a remote
 //! host), and tests them for a status (the harnesses don't report one).
 
+// Rust guideline compliant 2026-10-09
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -159,6 +161,7 @@ fn probe_json(p: &Probe) -> Value {
     })
 }
 
+#[expect(clippy::unused_self, reason = "QML calls these as methods of their object, so they take self")]
 impl Mcp {
     fn bump(mut self: Pin<&mut Self>) {
         let next = self.revision + 1;
@@ -233,17 +236,17 @@ impl Mcp {
     }
 
     pub fn test(self: Pin<&mut Self>, scope: &QString, name: &QString) {
-        self.test_names(scope.to_string(), vec![name.to_string()]);
+        self.test_names(&scope.to_string(), &[name.to_string()]);
     }
 
     pub fn test_all(self: Pin<&mut Self>, scope: &QString) {
         let s = scope.to_string();
         let names: Vec<String> = mcp::load(&Scope::parse(&s)).servers.into_iter().filter(|l| l.form.enabled).map(|l| l.form.name).collect();
-        self.test_names(s, names);
+        self.test_names(&s, &names);
     }
 
-    fn test_names(mut self: Pin<&mut Self>, scope_s: String, names: Vec<String>) {
-        let scope = Scope::parse(&scope_s);
+    fn test_names(mut self: Pin<&mut Self>, scope_s: &str, names: &[String]) {
+        let scope = Scope::parse(scope_s);
         let listing = mcp::load(&scope);
         // Where a stdio server runs: the project, a host's home (over
         // SSH), or here.
@@ -253,8 +256,8 @@ impl Mcp {
             Scope::Global => None,
         };
         for name in names {
-            let Some(server) = listing.servers.iter().find(|s| s.form.name == name) else { continue };
-            let key = (scope_s.clone(), name.clone());
+            let Some(server) = listing.servers.iter().find(|s| s.form.name == *name) else { continue };
+            let key = (scope_s.to_owned(), name.clone());
             if self.status.get(&key).is_some_and(|p| p.state == "testing") {
                 continue;
             }
@@ -326,7 +329,7 @@ impl Mcp {
     }
 
     /// Changes the fields of one's entry in a scope.
-    fn catalog_put(mut self: Pin<&mut Self>, scope: &str, id: &str, fields: Value) {
+    fn catalog_put(mut self: Pin<&mut Self>, scope: &str, id: &str, fields: &Value) {
         let mut this = self.as_mut().rust_mut();
         let entry = this.catalog.entry((scope.to_owned(), id.to_owned())).or_insert_with(|| json!({}));
         if let (Some(e), Some(f)) = (entry.as_object_mut(), fields.as_object()) {
@@ -336,7 +339,7 @@ impl Mcp {
     }
 
     /// Its newest release and stars (`fields`).
-    fn release_put(mut self: Pin<&mut Self>, id: &str, fields: Value) {
+    fn release_put(mut self: Pin<&mut Self>, id: &str, fields: &Value) {
         let mut this = self.as_mut().rust_mut();
         let entry = this.releases.entry(id.to_owned()).or_insert_with(|| json!({}));
         if let (Some(e), Some(f)) = (entry.as_object_mut(), fields.as_object()) {
@@ -358,16 +361,16 @@ impl Mcp {
                 let mut st = mcp_catalog::status(&b, &place);
                 st["loading"] = json!(false);
                 let scope = scope.clone();
-                let _ = thread.queue(move |this| this.catalog_put(&scope, b.id, st));
+                let _ = thread.queue(move |this| this.catalog_put(&scope, b.id, &st));
             }
             if look_up {
                 for b in mcp_catalog::OFFERED {
                     // (Offline, or GitHub's limit: nothing to say.)
                     if let Ok((latest, _)) = mcp_catalog::latest(&b) {
-                        let _ = thread.queue(move |this| this.release_put(b.id, json!({ "latest": latest })));
+                        let _ = thread.queue(move |this| this.release_put(b.id, &json!({ "latest": latest })));
                     }
                     if let Ok(stars) = mcp_catalog::stars(&b) {
-                        let _ = thread.queue(move |this| this.release_put(b.id, json!({ "stars": stars })));
+                        let _ = thread.queue(move |this| this.release_put(b.id, &json!({ "stars": stars })));
                     }
                 }
             }
@@ -377,10 +380,10 @@ impl Mcp {
     /// Runs `work` for one in a scope (in the background, `busy` meanwhile,
     /// with its download's progress), then shows how it is and tests it
     /// when it's on.
-    fn catalog_work(mut self: Pin<&mut Self>, scope: String, id: &str, busy: &str, work: impl FnOnce(&mcp_catalog::Offered, &mcp_catalog::Place, &mut dyn FnMut(u64, u64)) -> Result<String, String> + Send + 'static) {
+    fn catalog_work(mut self: Pin<&mut Self>, scope: String, id: &str, busy: &str, work: impl FnOnce(&mcp_catalog::Offered, &mcp_catalog::Place, &mut dyn FnMut(u64, u64)) -> anyhow::Result<String> + Send + 'static) {
         let Some(b) = mcp_catalog::get(id) else { return };
         let Some(place) = mcp_catalog::Place::of(&Scope::parse(&scope)) else { return };
-        self.as_mut().catalog_put(&scope, b.id, json!({ "busy": busy, "progress": 0.0, "error": "", "message": "" }));
+        self.as_mut().catalog_put(&scope, b.id, &json!({ "busy": busy, "progress": 0.0, "error": "", "message": "" }));
         mcp::use_claude(program(HarnessKind::Claude));
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
@@ -392,7 +395,7 @@ impl Mcp {
                     shown = std::time::Instant::now();
                     let p = done as f64 / total as f64;
                     let scope = progress_scope.clone();
-                    let _ = t.queue(move |this| this.catalog_put(&scope, b.id, json!({ "progress": p })));
+                    let _ = t.queue(move |this| this.catalog_put(&scope, b.id, &json!({ "progress": p })));
                 }
             };
             let result = work(&b, &place, &mut progress);
@@ -400,14 +403,14 @@ impl Mcp {
             st["busy"] = json!("");
             let (message, error) = match result {
                 Ok(m) => (m, String::new()),
-                Err(e) => (String::new(), e),
+                Err(e) => (String::new(), format!("{e:#}")),
             };
             st["message"] = json!(message);
             st["error"] = json!(error);
             let _ = thread.queue(move |mut this| {
                 let test = st["error"] == "" && st["agents"].as_array().is_some_and(|a| !a.is_empty());
                 this.as_mut().rust_mut().status.remove(&(scope.clone(), b.id.to_owned()));
-                this.as_mut().catalog_put(&scope, b.id, st);
+                this.as_mut().catalog_put(&scope, b.id, &st);
                 if test {
                     this.as_mut().test(&QString::from(&scope), &QString::from(b.id));
                 }

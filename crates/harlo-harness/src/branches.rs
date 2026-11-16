@@ -1,7 +1,11 @@
-//! Branches of a session file. Sessions in pi's format are append-only trees
+//! Branches of a session file.
+//!
+//! Sessions in pi's format are append-only trees
 //! of entries (`id` / `parentId`); editing an earlier message starts a new
 //! branch, and the last written entry marks the current one. These read
 //! every branch and can copy one into a new session file.
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -157,6 +161,10 @@ fn user_text(message: &Value) -> Option<String> {
 }
 
 /// Every branch that contains a user message, newest first.
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn branches(path: &Path) -> std::io::Result<Vec<BranchInfo>> {
     Ok(branches_in(&Outline::of_file(path)?))
 }
@@ -193,6 +201,10 @@ fn branches_in(tree: &Outline) -> Vec<BranchInfo> {
 }
 
 /// Entry ids of the user messages on the current branch, in order.
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn current_user_entries(path: &Path) -> std::io::Result<Vec<String>> {
     Ok(current_users(&Outline::of_file(path)?))
 }
@@ -208,6 +220,10 @@ fn current_users(tree: &Outline) -> Vec<String> {
 }
 
 /// The messages from the root to `leaf` (as `read_saved` shows them).
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read.
 pub fn branch_messages(path: &Path, leaf: &str) -> std::io::Result<Vec<Value>> {
     let tree = load(path)?;
     let Some(&i) = tree.index.get(leaf) else { return Ok(Vec::new()) };
@@ -217,11 +233,21 @@ pub fn branch_messages(path: &Path, leaf: &str) -> std::io::Result<Vec<Value>> {
 /// Writes the branch ending at `leaf` as a new session file in the same
 /// folder (header copied, a fresh id, `parentSession` naming the original).
 /// Returns the new file's path.
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read or the new one written; one
+/// of kind `NotFound` when `leaf` isn't an entry of it.
 pub fn write_branch(path: &Path, leaf: &str) -> std::io::Result<PathBuf> {
     write_branch_in(path, leaf, path.parent().unwrap_or(Path::new(".")))
 }
 
 /// Like `write_branch`, into `dir` (a temporary preview, say).
+///
+/// # Errors
+///
+/// An I/O error when the session file can't be read, or `dir` or the new file
+/// can't be made; one of kind `NotFound` when `leaf` isn't an entry of it.
 pub fn write_branch_in(path: &Path, leaf: &str, dir: &Path) -> std::io::Result<PathBuf> {
     let (name, text) = branch_file(&std::fs::read_to_string(path)?, leaf, &path.to_string_lossy())?;
     std::fs::create_dir_all(dir)?;
@@ -232,6 +258,10 @@ pub fn write_branch_in(path: &Path, leaf: &str, dir: &Path) -> std::io::Result<P
 
 /// The branch ending at `leaf` of a session file's text, as a new session
 /// file: its name and text (`original`: the parent session's path).
+///
+/// # Errors
+///
+/// An I/O error of kind `NotFound` when `leaf` isn't an entry of `text`.
 pub fn branch_file(text: &str, leaf: &str, original: &str) -> std::io::Result<(String, String)> {
     let tree = parse(text);
     let Some(&i) = tree.index.get(leaf) else {
@@ -254,7 +284,7 @@ pub(crate) fn chrono_like(secs: u64, millis: u32) -> String {
     let days = secs / 86_400;
     let rem = secs % 86_400;
     // Civil-from-days (Howard Hinnant's algorithm).
-    let z = days as i64 + 719_468;
+    let z = i64::try_from(days).unwrap_or(i64::MAX) + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
@@ -262,7 +292,7 @@ pub(crate) fn chrono_like(secs: u64, millis: u32) -> String {
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 

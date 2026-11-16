@@ -8,6 +8,8 @@
 //! from the first entry on. Each entry is one write; a line cut off by a
 //! crash is skipped when the file is read again.
 
+// Rust guideline compliant 2026-10-09
+
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
@@ -196,7 +198,7 @@ impl Log {
         let (header, entries) = read_entries(path)?;
         // The current branch: from the newest entry back to the root.
         let leaf = entries.last().and_then(|e| e["id"].as_str()).map(str::to_owned);
-        Self::load_branch(path, &header, &entries, leaf)
+        Ok(Self::load_branch(path, &header, &entries, leaf))
     }
 
     /// The session at `path` going on from just before your message
@@ -211,11 +213,11 @@ impl Log {
             .with_context(|| format!("There's no message of yours with the id {entry} in this session"))?;
         let said = user_text(&picked["message"]["content"]);
         let leaf = picked["parentId"].as_str().map(str::to_owned);
-        Ok((Self::load_branch(path, &header, &entries, leaf)?, said))
+        Ok((Self::load_branch(path, &header, &entries, leaf), said))
     }
 
     /// The branch ending at `leaf` (None: none, a new root).
-    fn load_branch(path: &Path, header: &Value, entries: &[Value], leaf: Option<String>) -> Result<Loaded> {
+    fn load_branch(path: &Path, header: &Value, entries: &[Value], leaf: Option<String>) -> Loaded {
         let by_id: std::collections::HashMap<&str, &Value> = entries.iter().filter_map(|e| Some((e["id"].as_str()?, e))).collect();
         let mut branch = Vec::new();
         let mut at = leaf.as_deref();
@@ -263,7 +265,7 @@ impl Log {
                     model = e["modelId"].as_str().map(|m| match e["provider"].as_str().filter(|p| !p.is_empty()) {
                         Some(p) => format!("{p}/{m}"),
                         None => m.to_owned(),
-                    })
+                    });
                 }
                 Some("thinking_level_change") => effort = e["thinkingLevel"].as_str().filter(|l| *l != "off").map(str::to_owned),
                 Some("session_info") => name = e["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned),
@@ -271,7 +273,7 @@ impl Log {
             }
         }
         let log = Log {
-            id: header["id"].as_str().map(str::to_owned).unwrap_or_else(uuid),
+            id: header["id"].as_str().map_or_else(uuid, str::to_owned),
             path: path.to_owned(),
             cwd: header["cwd"].as_str().map(PathBuf::from).unwrap_or_default(),
             file: None,
@@ -279,7 +281,7 @@ impl Log {
             off: false,
             parent: None,
         };
-        Ok(Loaded { log, messages, ids, model, effort, name, files, originals })
+        Loaded { log, messages, ids, files, model, effort, name, originals }
     }
 
     /// Appends `entry` (its `type` and fields), giving it an id, its parent
@@ -385,13 +387,13 @@ fn uuid() -> String {
 }
 
 pub fn now_ms() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// `2026-11-06T21:04:05.123Z`.
 pub fn iso(t: SystemTime) -> String {
     let d = t.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
-    let secs = d.as_secs() as i64;
+    let secs = i64::try_from(d.as_secs()).unwrap_or(i64::MAX);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Days to a civil date (Howard Hinnant's algorithm).
     let z = days + 719_468;
@@ -419,7 +421,7 @@ mod tests {
     #[test]
     fn times_and_folders() {
         assert_eq!(iso(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_762_463_045_123)), "2025-11-06T21:04:05.123Z");
-        assert_eq!(iso(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(951_782_400)), "2000-02-29T00:00:00.000Z");
+        assert_eq!(iso(SystemTime::UNIX_EPOCH + std::time::Duration::from_hours(264384)), "2000-02-29T00:00:00.000Z");
         assert_eq!(dir_for(Path::new("/r"), Path::new("/home/u/my proj")), PathBuf::from("/r/--home-u-my proj--"));
     }
 

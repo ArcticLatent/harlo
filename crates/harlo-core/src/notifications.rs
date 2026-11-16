@@ -1,6 +1,8 @@
 //! Desktop notification settings and templates (Settings → Notifications):
 //! which events notify, and their title / message with `{variables}`.
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::{Value, json};
 
 /// The events, in the order Settings shows them.
@@ -12,8 +14,7 @@ pub const VARIABLES: [&str; 7] = ["project_name", "worktree", "branch", "session
 /// Default (title, message) per event.
 pub fn default_template(event: &str) -> (&'static str, &'static str) {
     match event {
-        "completion" => ("{agent_name} is ready", "{model_name} completed the task"),
-        "subagent" => ("{agent_name} is ready", "{model_name} completed the task"),
+        "completion" | "subagent" => ("{agent_name} is ready", "{model_name} completed the task"),
         "error" => ("Tool error", "{last_message}"),
         "question" => ("Input needed", "{last_message}"),
         _ => ("", ""),
@@ -48,10 +49,12 @@ pub struct Settings {
     pub reset_sound: String,
 }
 
-/// Quiet hours: between `from` and `to` (minutes after midnight, local
-/// time; past midnight when `to` is earlier) harlo shows no notifications
-/// on the desktop, and phones get theirs silently (no sound, the screen
-/// stays dark), except questions and approvals with `asks`.
+/// Quiet hours, when notifications don't show or sound.
+///
+/// Between `from` and `to` (minutes after midnight, local time; past midnight
+/// when `to` is earlier) harlo shows no notifications on the desktop, and
+/// phones get theirs silently (no sound, the screen stays dark), except
+/// questions and approvals with `asks`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Quiet {
     pub on: bool,
@@ -86,7 +89,7 @@ impl Quiet {
     pub fn hushes_now(&self, question: bool) -> bool {
         use chrono::Timelike;
         let now = chrono::Local::now();
-        self.hushes((now.hour() * 60 + now.minute()) as u16, question)
+        self.hushes(u16::try_from(now.hour() * 60 + now.minute()).unwrap_or(u16::MAX), question)
     }
 }
 
@@ -127,7 +130,7 @@ impl Settings {
         s.while_focused = v["whileFocused"].as_bool().unwrap_or(s.while_focused);
         s.sound = v["sound"].as_bool().unwrap_or(s.sound);
         let q = &v["quiet"];
-        let minute = |v: &Value, or: u16| v.as_u64().filter(|m| *m < 24 * 60).map_or(or, |m| m as u16);
+        let minute = |v: &Value, or: u16| v.as_u64().filter(|m| *m < 24 * 60).map_or(or, |m| u16::try_from(m).unwrap_or(u16::MAX));
         s.quiet = Quiet {
             on: q["on"].as_bool().unwrap_or(s.quiet.on),
             from: minute(&q["from"], s.quiet.from),
@@ -135,16 +138,16 @@ impl Settings {
             asks: q["asks"].as_bool().unwrap_or(s.quiet.asks),
         };
         if let Some(sound) = v["resetSound"].as_str().filter(|n| RESET_SOUNDS.iter().any(|(id, _)| id == n)) {
-            s.reset_sound = sound.to_owned();
+            sound.clone_into(&mut s.reset_sound);
         }
         for (name, on, title, message) in &mut s.events {
             let e = &v["events"][name.as_str()];
             *on = e["on"].as_bool().unwrap_or(*on);
             if let Some(t) = e["title"].as_str() {
-                *title = t.to_owned();
+                t.clone_into(title);
             }
             if let Some(m) = e["message"].as_str() {
-                *message = m.to_owned();
+                m.clone_into(message);
             }
         }
         s
@@ -267,8 +270,7 @@ mod tests {
         assert!(lunch.hushes(12 * 60 + 5, true));
         assert!(!Quiet { on: false, ..lunch }.covers(12 * 60), "off");
         assert!(!Quiet { from: 600, to: 600, ..lunch }.covers(600), "an empty span");
-        let mut s = Settings::default();
-        s.quiet = night;
+        let s = Settings { quiet: night, ..Settings::default() };
         assert_eq!(Settings::parse(&s.to_json().to_string()).quiet, night);
         assert_eq!(Settings::parse(r#"{"quiet":{"on":true,"from":5000}}"#).quiet, Quiet { on: true, ..Quiet::default() }, "a bad time: the default");
     }

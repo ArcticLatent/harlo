@@ -19,6 +19,8 @@
 //! *** End Patch
 //! ```
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::Value;
 
 use crate::tools::edit::{not_found, plain};
@@ -90,11 +92,11 @@ pub struct Hunk {
 }
 
 /// The patch's operations, or what's wrong with it (for the model).
-pub fn parse(input: &str) -> Result<Vec<Op>, String> {
+pub fn parse(input: &str) -> anyhow::Result<Vec<Op>> {
     let lines: Vec<&str> = input.lines().map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
     // (A shell heredoc around it, or text before it: from Begin Patch on.)
     let Some(begin) = lines.iter().position(|l| l.trim() == "*** Begin Patch") else {
-        return Err("The patch must start with `*** Begin Patch` (and end with `*** End Patch`).".into());
+        return Err(anyhow::Error::msg("The patch must start with `*** Begin Patch` (and end with `*** End Patch`)."));
     };
     let end = lines.iter().rposition(|l| l.trim() == "*** End Patch").filter(|&e| e > begin).unwrap_or(lines.len());
     let body = &lines[begin + 1..end];
@@ -118,7 +120,7 @@ pub fn parse(input: &str) -> Result<Vec<Op>, String> {
                         content.push('\n');
                     }
                     None if body[i].is_empty() => content.push('\n'),
-                    None => return Err(format!("Line {}: a new file's lines each start with '+' (in {path}).", begin + i + 2)),
+                    None => return Err(anyhow::anyhow!("Line {}: a new file's lines each start with '+' (in {path}).", begin + i + 2)),
                 }
                 i += 1;
             }
@@ -160,21 +162,21 @@ pub fn parse(input: &str) -> Result<Vec<Op>, String> {
                     Some(mark @ (' ' | '-' | '+')) => h.lines.push((mark, l[1..].to_owned())),
                     // (An empty line: a kept empty line, its space dropped.)
                     None => h.lines.push((' ', String::new())),
-                    Some(_) => return Err(format!("Line {}: in a hunk each line starts with ' ', '-' or '+' (in {path}), not: {l}", begin + i + 2)),
+                    Some(_) => return Err(anyhow::anyhow!("Line {}: in a hunk each line starts with ' ', '-' or '+' (in {path}), not: {l}", begin + i + 2)),
                 }
                 i += 1;
             }
             hunks.extend(cur.filter(|h| !h.lines.is_empty()));
             if hunks.is_empty() && move_to.is_none() {
-                return Err(format!("Line {n}: no changes for {path}: give hunks after `*** Update File:`."));
+                return Err(anyhow::anyhow!("Line {n}: no changes for {path}: give hunks after `*** Update File:`."));
             }
             ops.push(Op::Update { path, move_to, hunks });
         } else {
-            return Err(format!("Line {n}: expected `*** Update File: `, `*** Add File: ` or `*** Delete File: `, not: {l}"));
+            return Err(anyhow::anyhow!("Line {n}: expected `*** Update File: `, `*** Add File: ` or `*** Delete File: `, not: {l}"));
         }
     }
     if ops.is_empty() {
-        return Err("The patch changes nothing.".into());
+        return Err(anyhow::Error::msg("The patch changes nothing."));
     }
     Ok(ops)
 }
@@ -200,7 +202,7 @@ fn seek(lines: &[&str], want: &[String], from: usize, at_end: bool) -> Option<us
 }
 
 /// `content` with the hunks applied, and its first changed line (1-based).
-pub fn apply(content: &str, hunks: &[Hunk], path: &str) -> Result<(String, usize), String> {
+pub fn apply(content: &str, hunks: &[Hunk], path: &str) -> anyhow::Result<(String, usize)> {
     let (bom, body) = match content.strip_prefix('\u{feff}') {
         Some(rest) => ("\u{feff}", rest),
         None => ("", content),
@@ -221,7 +223,7 @@ pub fn apply(content: &str, hunks: &[Hunk], path: &str) -> Result<(String, usize
                 Some(s) => at = s + 1,
                 // (Not there: the hunk's own lines may still place it.)
                 None if h.lines.iter().any(|l| l.0 != '+') => {}
-                None => return Err(format!("{which}: its @@ line `{after}` isn't in the file (after line {at}).")),
+                None => return Err(anyhow::anyhow!("{which}: its @@ line `{after}` isn't in the file (after line {at}).")),
             }
         }
         let mut marked = h.lines.clone();
@@ -241,7 +243,7 @@ pub fn apply(content: &str, hunks: &[Hunk], path: &str) -> Result<(String, usize
         let Some(s) = found else {
             // Before where the last hunk ended: out of order.
             if at > 0 && seek(&lines, &old, 0, false).is_some_and(|s| s < at) {
-                return Err(format!("{which} matches only before the hunk ahead of it: give a file's hunks in the order they come in the file."));
+                return Err(anyhow::anyhow!("{which} matches only before the hunk ahead of it: give a file's hunks in the order they come in the file."));
             }
             let want: Vec<&str> = old.iter().map(String::as_str).collect();
             let added: Vec<&str> = marked.iter().filter(|l| l.0 != '-').map(|l| l.1.as_str()).collect();
@@ -250,7 +252,7 @@ pub fn apply(content: &str, hunks: &[Hunk], path: &str) -> Result<(String, usize
                 .replace("but the new text already is", "but its new lines already are")
                 .replace("The old text isn't", "Its kept and removed lines aren't")
                 .replace("the text to replace", "the lines");
-            return Err(format!("{which}: {why}"));
+            return Err(anyhow::anyhow!("{which}: {why}"));
         };
         // Kept lines as the file has them; added ones as given.
         let mut k = s;
@@ -279,7 +281,7 @@ pub fn apply(content: &str, hunks: &[Hunk], path: &str) -> Result<(String, usize
         joined.push('\n');
     }
     if joined == text {
-        return Err(format!("The patch for {path} changes nothing."));
+        return Err(anyhow::anyhow!("The patch for {path} changes nothing."));
     }
     let joined = if crlf { joined.replace('\n', "\r\n") } else { joined };
     Ok((format!("{bom}{joined}"), first))
@@ -317,8 +319,8 @@ mod tests {
             Op::Update { path: "a.txt".into(), move_to: Some("c.txt".into()), hunks: vec![Hunk { after: Some("fn main".into()), lines: vec![(' ', "keep".into()), ('-', "old".into()), ('+', "new".into())], at_end: false }] }
         );
         assert_eq!(ops[2], Op::Delete { path: "d.txt".into() });
-        assert!(parse("*** Update File: a\n-x").unwrap_err().contains("Begin Patch"));
-        assert!(parse("*** Begin Patch\n*** Update File: a\nx\n*** End Patch").unwrap_err().contains("Line 3"));
+        assert!(parse("*** Update File: a\n-x").unwrap_err().to_string().contains("Begin Patch"));
+        assert!(parse("*** Begin Patch\n*** Update File: a\nx\n*** End Patch").unwrap_err().to_string().contains("Line 3"));
         assert_eq!(update("*** Begin Patch\n*** Update File: a\n@@ -3,2 +3,2 @@ impl A\n-x\n+y\n*** End Patch")[0].after.as_deref(), Some("impl A"));
     }
 
@@ -352,11 +354,11 @@ mod tests {
         let f = "fn main() {\n    println!(\"one\");\n    println!(\"two\");\n}\n";
         let h = update("*** Begin Patch\n*** Update File: m.rs\n-    println!(\"three\");\n     println!(\"two\");\n+    x\n*** End Patch");
         let e = apply(f, &h, "m.rs").unwrap_err();
-        assert!(e.starts_with("The hunk for m.rs: Its kept and removed lines aren't in the file. The closest"), "{e}");
-        assert!(e.contains("    3      println!(\"two\");"), "{e}");
+        assert!(e.to_string().starts_with("The hunk for m.rs: Its kept and removed lines aren't in the file. The closest"), "{e}");
+        assert!(e.to_string().contains("    3      println!(\"two\");"), "{e}");
         let h = update("*** Begin Patch\n*** Update File: m.rs\n@@\n-    println!(\"two\");\n+2\n@@\n-    println!(\"one\");\n+1\n*** End Patch");
-        assert!(apply(f, &h, "m.rs").unwrap_err().contains("in the order"), "out of order");
+        assert!(apply(f, &h, "m.rs").unwrap_err().to_string().contains("in the order"), "out of order");
         let h = update("*** Begin Patch\n*** Update File: m.rs\n@@ fn nope()\n+x\n*** End Patch");
-        assert!(apply(f, &h, "m.rs").unwrap_err().contains("`fn nope()` isn't in the file"));
+        assert!(apply(f, &h, "m.rs").unwrap_err().to_string().contains("`fn nope()` isn't in the file"));
     }
 }

@@ -6,8 +6,12 @@
 //! `<harlo-starter id="…">…</harlo-starter>` block, so a resumed session
 //! still shows which starter it began with.
 
+// Rust guideline compliant 2026-10-09
+
 use serde_json::json;
 
+/// A conversation starter: its label, prompt and instructions.
+#[derive(Debug)]
 pub struct Starter {
     pub id: &'static str,
     pub label: &'static str,
@@ -24,7 +28,7 @@ pub const STARTERS: &[Starter] = &[
         label: "Explore the codebase",
         icon: "compass-3",
         prompt: "Give me a high-level tour of this codebase.",
-        instructions: r#"The user wants to get oriented in this codebase — a high-level tour, as if you were onboarding a new contributor. Investigate first, then explain; do not guess from file or symbol names alone.
+        instructions: r"The user wants to get oriented in this codebase — a high-level tour, as if you were onboarding a new contributor. Investigate first, then explain; do not guess from file or symbol names alone.
 
 Explore the actual repository: entry points, the top-level structure, how it is built and run, and the main modules and how they connect. Read enough real code to be accurate.
 
@@ -37,7 +41,7 @@ Then give a clear orientation covering:
 
 Keep it a readable orientation, not an exhaustive file-by-file dump — favor the structure and the mental model over listing everything. Lead with the big picture, then drill down. If the user named a specific area, focus the tour there.
 
-Respond in the same language the user uses."#,
+Respond in the same language the user uses.",
     },
     Starter {
         id: "catch-up",
@@ -96,7 +100,7 @@ Respond in the same language the user uses."#,
         label: "Start feature planning",
         icon: "survey",
         prompt: "I want to start planning a feature.",
-        instructions: r#"The user wants to plan a feature through a guided, back-and-forth conversation. They will describe an idea — often briefly and informally. Your job is to turn that idea into a concrete, validated implementation plan, without guessing.
+        instructions: r"The user wants to plan a feature through a guided, back-and-forth conversation. They will describe an idea — often briefly and informally. Your job is to turn that idea into a concrete, validated implementation plan, without guessing.
 
 Run this as a dialogue, not a one-shot answer.
 
@@ -114,14 +118,14 @@ If you have an `ask` tool, use it only for clarifying decisions that have a smal
 
 6. When everything is settled, produce the final implementation plan: a clear, ordered breakdown of the work, the files and areas affected, the decisions that were made (and why), known risks, and any remaining assumptions flagged explicitly. The plan must reflect the user's actual answers — never fill gaps with guesses.
 
-Respond in the same language the user uses."#,
+Respond in the same language the user uses.",
     },
     Starter {
         id: "debug",
         label: "Debug an issue",
         icon: "bug",
         prompt: "I want to debug an issue.",
-        instructions: r#"The user wants help debugging an issue. Drive this as a focused root-cause investigation — not a plan, and not an immediate fix.
+        instructions: r"The user wants help debugging an issue. Drive this as a focused root-cause investigation — not a plan, and not an immediate fix.
 
 If you have an `ask` tool, use it only for clarifying decisions that have a small set of concrete answer options you already know from the conversation or your investigation — choices like option A/B/C, scope boundaries, or edge-case behavior. Ask open-ended questions, including what the user wants in the first place, in plain assistant text. Never invent speculative options just to fit the ask tool.
 
@@ -137,14 +141,14 @@ If you have an `ask` tool, use it only for clarifying decisions that have a smal
 
 6. Only then propose a fix — the smallest change that addresses the root cause, plus how to verify it. Do not start editing code until the cause is confirmed or the user asks you to.
 
-Respond in the same language the user uses."#,
+Respond in the same language the user uses.",
     },
     Starter {
         id: "review",
         label: "Review my changes",
         icon: "search-eye",
         prompt: "Review the changes made in this workspace.",
-        instructions: r#"Review the changes in this workspace and judge whether they are correct and adequate — not just whether they contain catastrophic bugs.
+        instructions: r"Review the changes in this workspace and judge whether they are correct and adequate — not just whether they contain catastrophic bugs.
 
 The diff is the source of truth. Read the relevant code around the diff too, not only the diff itself, so you understand the change in context.
 
@@ -200,7 +204,7 @@ Output:
 - Then list findings grouped by severity. For each: short title, why it is a real problem, the affected file path, and category (correctness / security / rule violation / adequacy gap).
 - If you find nothing real, say so plainly instead of inventing findings.
 
-Keep the review concise and practical. Respond in the same language the user uses."#,
+Keep the review concise and practical. Respond in the same language the user uses.",
     },
 ];
 

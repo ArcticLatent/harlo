@@ -1,9 +1,13 @@
-//! Git through the `git` CLI, so the user's config, credentials, hooks and
-//! signing all apply. Status uses porcelain v2; diffs are parsed into hunks
-//! so single hunks can be staged, unstaged or reverted with `git apply`.
+//! Git through the `git` CLI.
+//!
+//! The user's config, credentials, hooks and signing all apply. Status uses
+//! porcelain v2; diffs are parsed into hunks so single hunks can be staged,
+//! unstaged or reverted with `git apply`.
 //!
 //! Operations on one repository are serialized: concurrent git commands
 //! race for `index.lock`.
+
+// Rust guideline compliant 2026-10-09
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -102,7 +106,7 @@ fn locks() -> &'static Mutex<HashMap<PathBuf, Arc<Mutex<()>>>> {
 }
 
 fn repo_lock(root: &Path) -> Arc<Mutex<()>> {
-    locks().lock().unwrap().entry(root.to_owned()).or_default().clone()
+    Arc::clone(locks().lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(root.to_owned()).or_default())
 }
 
 /// A git command in a folder: run here, or on the folder's host over SSH
@@ -178,7 +182,11 @@ pub fn output_in(dir: &Path, args: &[&str]) -> String {
 
 /// A git command in `dir` (here or on its host), with `input` on its stdin:
 /// its stdout, else what it said.
-pub fn run_in(dir: &Path, args: &[&str], input: Option<&[u8]>) -> Result<String, String> {
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
+pub fn run_in(dir: &Path, args: &[&str], input: Option<&[u8]>) -> anyhow::Result<String> {
     let mut cmd = git(dir);
     cmd.args(args);
     if let Some(input) = input {
@@ -186,8 +194,8 @@ pub fn run_in(dir: &Path, args: &[&str], input: Option<&[u8]>) -> Result<String,
     }
     match cmd.output() {
         Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).into_owned()),
-        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).trim().to_owned()),
-        Err(e) => Err(e.to_string()),
+        Ok(o) => Err(anyhow::Error::msg(String::from_utf8_lossy(&o.stderr).trim().to_owned())),
+        Err(e) => Err(anyhow::Error::msg(e.to_string())),
     }
 }
 
@@ -216,11 +224,11 @@ fn on_same_host(dir: &Path, printed: &str) -> PathBuf {
     }
 }
 
-fn run(cmd: GitCmd) -> Result<Output> {
+fn run(cmd: &GitCmd) -> Result<Output> {
     cmd.output()
 }
 
-fn run_ok(cmd: GitCmd) -> Result<String> {
+fn run_ok(cmd: &GitCmd) -> Result<String> {
     let out = run(cmd)?;
     if !out.status.success() {
         // Some failures (e.g. "nothing to commit") are reported on stdout.
@@ -234,7 +242,7 @@ fn run_ok(cmd: GitCmd) -> Result<String> {
 
 /// Counts uncommitted changed files for many working directories at once,
 /// running `git status` once per repository. Repository roots are cached.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ChangeCounter {
     roots: HashMap<PathBuf, PathBuf>,
     /// Folders of repositories (not one themselves): what's in them, and
@@ -317,16 +325,18 @@ pub const MAX_NESTED: usize = 60;
 /// top, a home folder or one just under the top (`/`, `/home/me`, `/srv`),
 /// which would mean searching and watching far too much.
 pub fn may_hold_repos(dir: &Path) -> bool {
-    let on_host = crate::remote::split(dir).map(|(_, p)| PathBuf::from(p)).unwrap_or_else(|| dir.to_owned());
+    let on_host = crate::remote::split(dir).map_or_else(|| dir.to_owned(), |(_, p)| PathBuf::from(p));
     let depth = on_host.components().filter(|c| matches!(c, std::path::Component::Normal(_))).count();
     let home = std::env::var_os("HOME").map(PathBuf::from);
     depth > 2 || (depth == 2 && !on_host.starts_with("/home") && !on_host.starts_with("/Users")) && home.as_deref() != Some(on_host.as_path())
 }
 
-/// The git repositories inside `dir` (a folder that isn't one itself, such
-/// as a folder of a team's repositories), here or on its host: their top
-/// folders, by name, at most `MAX_NESTED`, up to `NESTED_DEPTH` levels down.
-/// A repository's own folders (submodules) aren't searched.
+/// The git repositories inside `dir`, here or on its host.
+///
+/// `dir` is a folder that isn't one itself, such as a folder of a team's
+/// repositories. Their top folders, by name, at most `MAX_NESTED`, up to
+/// `NESTED_DEPTH` levels down. A repository's own folders (submodules) aren't
+/// searched.
 pub fn nested_repos(dir: &Path) -> Vec<PathBuf> {
     if !may_hold_repos(dir) {
         return Vec::new();
@@ -394,23 +404,29 @@ pub fn looks_like_repo(dir: &Path) -> bool {
 pub fn repo_root(dir: &Path) -> Option<PathBuf> {
     let mut cmd = git(dir);
     cmd.args(["rev-parse", "--show-toplevel"]);
-    let out = run(cmd).ok()?;
+    let out = run(&cmd).ok()?;
     out.status
         .success()
         .then(|| on_same_host(dir, String::from_utf8_lossy(&out.stdout).trim()))
 }
 
+/// The repository's branch, upstream and changed files.
+///
+/// # Errors
+///
+/// What git said when it fails (`root` isn't a repository, say), or why it
+/// couldn't be run.
 pub fn status(root: &Path) -> Result<GitStatus> {
     let lock = repo_lock(root);
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut cmd = git(root);
     cmd.args(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"]);
-    let out = run_ok(cmd)?;
+    let out = run_ok(&cmd)?;
     let mut st = parse_status(&out);
-    st.root = root.to_owned();
+    root.clone_into(&mut st.root);
     let mut count = git(root);
     count.args(["rev-list", "--walk-reflogs", "--count", "refs/stash", "--"]);
-    st.stashes = run(count).ok().filter(|o| o.status.success()).and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok()).unwrap_or(0);
+    st.stashes = run(&count).ok().filter(|o| o.status.success()).and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok()).unwrap_or(0);
     Ok(st)
 }
 
@@ -425,8 +441,8 @@ fn parse_status(out: &str) -> GitStatus {
             let (key, value) = h.split_once(' ').unwrap_or((h, ""));
             match key {
                 "branch.oid" if value != "(initial)" => st.head = value.chars().take(8).collect(),
-                "branch.head" if value != "(detached)" => st.branch = value.to_owned(),
-                "branch.upstream" => st.upstream = value.to_owned(),
+                "branch.head" if value != "(detached)" => value.clone_into(&mut st.branch),
+                "branch.upstream" => value.clone_into(&mut st.upstream),
                 "branch.ab" => {
                     for part in value.split(' ') {
                         if let Some(n) = part.strip_prefix('+') {
@@ -495,25 +511,33 @@ fn change(xy: &str, path: &str, orig_path: Option<String>, conflicted: bool) -> 
 
 /// Diff of one file: staged (index vs HEAD) or unstaged (worktree vs
 /// index). Untracked files diff against an empty file.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn diff_file(root: &Path, path: &str, staged: bool, untracked: bool) -> Result<FileDiff> {
     diff_with_context(root, path, staged, untracked, 3)
 }
 
 /// A file's diff with the whole file as context: every line, in order (for
 /// the side-by-side view, `crate::splitdiff`).
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn diff_file_full(root: &Path, path: &str, staged: bool, untracked: bool) -> Result<FileDiff> {
     diff_with_context(root, path, staged, untracked, 100_000_000)
 }
 
 fn diff_with_context(root: &Path, path: &str, staged: bool, untracked: bool, context: u32) -> Result<FileDiff> {
     let lock = repo_lock(root);
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut cmd = git(root);
     cmd.args(["-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff"]).arg(format!("-U{context}"));
     if untracked {
         // Exits with 1 when the files differ, which is the normal case.
         cmd.args(["--no-index", "--", "/dev/null", path]);
-        let out = run(cmd)?;
+        let out = run(&cmd)?;
         if out.status.code().unwrap_or(2) > 1 {
             bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
         }
@@ -523,7 +547,7 @@ fn diff_with_context(root: &Path, path: &str, staged: bool, untracked: bool, con
         cmd.arg("--cached");
     }
     cmd.args(["--", path]);
-    let out = run_ok(cmd)?;
+    let out = run_ok(&cmd)?;
     Ok(parse_diff(path, &out))
 }
 
@@ -602,7 +626,7 @@ fn parse_hunk_header(h: &str) -> (u32, u32) {
 
 fn apply_patch(root: &Path, patch: &str, args: &[&str]) -> Result<()> {
     let lock = repo_lock(root);
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut cmd = git(root);
     cmd.arg("apply").args(args).arg("-").input(patch.as_bytes());
     let out = cmd.output().context("running git apply")?;
@@ -613,18 +637,33 @@ fn apply_patch(root: &Path, patch: &str, args: &[&str]) -> Result<()> {
 }
 
 /// Stages one hunk of an unstaged diff.
+///
+/// # Errors
+///
+/// When `index` isn't a hunk of `diff`, or git refuses the patch (the file
+/// changed since).
 pub fn stage_hunk(root: &Path, diff: &FileDiff, index: usize) -> Result<()> {
     let patch = diff.hunk_patch(index).context("no such hunk")?;
     apply_patch(root, &patch, &["--cached"])
 }
 
 /// Unstages one hunk of a staged diff.
+///
+/// # Errors
+///
+/// When `index` isn't a hunk of `diff`, or git refuses the patch (the file
+/// changed since).
 pub fn unstage_hunk(root: &Path, diff: &FileDiff, index: usize) -> Result<()> {
     let patch = diff.hunk_patch(index).context("no such hunk")?;
     apply_patch(root, &patch, &["--cached", "--reverse"])
 }
 
 /// Discards one hunk of an unstaged diff from the working tree.
+///
+/// # Errors
+///
+/// When `index` isn't a hunk of `diff`, or git refuses the patch (the file
+/// changed since).
 pub fn revert_hunk(root: &Path, diff: &FileDiff, index: usize) -> Result<()> {
     let patch = diff.hunk_patch(index).context("no such hunk")?;
     apply_patch(root, &patch, &["--reverse"])
@@ -632,10 +671,10 @@ pub fn revert_hunk(root: &Path, diff: &FileDiff, index: usize) -> Result<()> {
 
 fn locked(root: &Path, args: &[&str]) -> Result<String> {
     let lock = repo_lock(root);
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut cmd = git(root);
     cmd.args(args);
-    run_ok(cmd)
+    run_ok(&cmd)
 }
 
 /// How many commits `base` has that the checkout at `dir` doesn't: how far
@@ -643,28 +682,52 @@ fn locked(root: &Path, args: &[&str]) -> Result<String> {
 pub fn commits_behind(dir: &Path, base: &str) -> Option<u32> {
     let mut cmd = git(dir);
     cmd.args(["rev-list", "--count", &format!("HEAD..{base}"), "--"]);
-    run_ok(cmd).ok()?.trim().parse().ok()
+    run_ok(&cmd).ok()?.trim().parse().ok()
 }
 
+/// Stages a file's changes.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn stage_file(root: &Path, path: &str) -> Result<()> {
     locked(root, &["add", "--", path]).map(drop)
 }
 
+/// Unstages a file's changes, keeping them in the working tree.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn unstage_file(root: &Path, path: &str) -> Result<()> {
     locked(root, &["restore", "--staged", "--", path]).map(drop)
 }
 
 /// Discards unstaged changes to a tracked file. Untracked files are not
 /// touched here; the caller moves them to the trash.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn revert_file(root: &Path, path: &str) -> Result<()> {
     locked(root, &["restore", "--worktree", "--", path]).map(drop)
 }
 
+/// Stages every change, untracked files included.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn stage_all(root: &Path) -> Result<()> {
     locked(root, &["add", "--all"]).map(drop)
 }
 
 /// Commits what is staged. Returns git's summary line.
+///
+/// # Errors
+///
+/// What git said when the commit fails (nothing staged, a hook refused it), or
+/// why it couldn't be run.
 pub fn commit(root: &Path, message: &str) -> Result<String> {
     if message.trim().is_empty() {
         bail!("The commit message is empty.");
@@ -674,13 +737,18 @@ pub fn commit(root: &Path, message: &str) -> Result<String> {
 }
 
 /// Pushes the current branch (setting its upstream on the first push).
+///
+/// # Errors
+///
+/// What git said when the push fails (rejected, no remote, no access), or why
+/// it couldn't be run.
 pub fn push(root: &Path, set_upstream: bool) -> Result<String> {
     let args: &[&str] = if set_upstream { &["push", "--set-upstream", "origin", "HEAD"] } else { &["push"] };
     let lock = repo_lock(root);
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut cmd = git(root);
     cmd.args(args);
-    let out = run(cmd)?;
+    let out = run(&cmd)?;
     let text = String::from_utf8_lossy(&out.stderr).trim().to_owned();
     if !out.status.success() {
         bail!("{text}");
@@ -720,6 +788,13 @@ pub fn request_base(root: &Path) -> Option<RequestBase> {
     Some(RequestBase { remote_url, base, head: head.to_owned(), subjects })
 }
 
+/// Pulls the current branch's upstream, fast-forward only. Returns git's
+/// summary.
+///
+/// # Errors
+///
+/// What git said when the pull fails (diverged, no upstream, no access), or why
+/// it couldn't be run.
 pub fn pull(root: &Path) -> Result<String> {
     let out = locked(root, &["pull", "--ff-only"])?;
     Ok(out.lines().last().unwrap_or("Up to date").to_owned())
@@ -727,6 +802,10 @@ pub fn pull(root: &Path) -> Result<String> {
 
 /// Combined diff of what a commit would contain (staged, or everything
 /// when nothing is staged), for generating a commit message.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn diff_for_message(root: &Path, max_bytes: usize) -> Result<String> {
     let staged = locked(root, &["diff", "--cached", "--no-color", "--no-ext-diff", "--stat", "-p"])?;
     let mut text = if staged.trim().is_empty() {
@@ -766,6 +845,12 @@ pub struct Branches {
     pub current: String,
 }
 
+/// The local and remote branches, with the current one.
+///
+/// # Errors
+///
+/// What git said when it fails (`root` isn't a repository, say), or why it
+/// couldn't be run.
 pub fn branches(root: &Path) -> Result<Branches> {
     let format = "%(refname)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)";
     let out = locked(root, &["for-each-ref", "--sort=-committerdate", &format!("--format={format}"), "refs/heads", "refs/remotes"])?;
@@ -792,9 +877,16 @@ pub fn branches(root: &Path) -> Result<Branches> {
     Ok(b)
 }
 
-/// Switches to `name`: a local branch, a remote one (`origin/x` creates a
-/// tracking `x`), or a new branch from HEAD when `create`. With `stash`,
-/// uncommitted changes (untracked files too) are stashed first.
+/// Switches to the branch `name`.
+///
+/// `name` is a local branch, a remote one (`origin/x` creates a tracking `x`),
+/// or a new branch from HEAD when `create`. With `stash`, uncommitted changes
+/// (untracked files too) are stashed first.
+///
+/// # Errors
+///
+/// What git said when the switch fails (uncommitted changes in the way, a name
+/// taken), or why it couldn't be run.
 pub fn switch_branch(root: &Path, name: &str, create: bool, remote: bool, stash: bool) -> Result<String> {
     if create && !valid_branch_name(root, name) {
         bail!("\"{name}\" is not a valid branch name.");
@@ -824,6 +916,12 @@ pub struct StashEntry {
     pub date: i64,
 }
 
+/// The stash entries, newest first.
+///
+/// # Errors
+///
+/// What git said when it fails (`root` isn't a repository, say), or why it
+/// couldn't be run.
 pub fn stashes(root: &Path) -> Result<Vec<StashEntry>> {
     let out = locked(root, &["stash", "list", "--format=%gd%x00%gs%x00%ct"])?;
     Ok(out
@@ -841,6 +939,10 @@ pub fn stashes(root: &Path) -> Result<Vec<StashEntry>> {
 }
 
 /// Stashes all uncommitted changes, untracked files included.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn stash_push(root: &Path, message: &str) -> Result<String> {
     let mut args = vec!["stash", "push", "--include-untracked"];
     if !message.trim().is_empty() {
@@ -854,12 +956,22 @@ pub fn stash_push(root: &Path, message: &str) -> Result<String> {
 }
 
 /// Applies `stash@{index}`; `pop` also drops it when it applied cleanly.
+///
+/// # Errors
+///
+/// What git said when the stash doesn't apply cleanly or isn't there, or why it
+/// couldn't be run.
 pub fn stash_apply(root: &Path, index: usize, pop: bool) -> Result<String> {
     let entry = format!("stash@{{{index}}}");
     locked(root, &["stash", if pop { "pop" } else { "apply" }, &entry])?;
     Ok(if pop { format!("Restored and dropped {entry}.") } else { format!("Applied {entry}.") })
 }
 
+/// Drops `stash@{index}`.
+///
+/// # Errors
+///
+/// What git said when the stash isn't there, or why it couldn't be run.
 pub fn stash_drop(root: &Path, index: usize) -> Result<String> {
     let entry = format!("stash@{{{index}}}");
     locked(root, &["stash", "drop", &entry])?;
@@ -882,6 +994,11 @@ pub struct Worktree {
 }
 
 /// All worktrees of the repository at `root`, main checkout first.
+///
+/// # Errors
+///
+/// What git said when it fails (`root` isn't a repository, say), or why it
+/// couldn't be run.
 pub fn list_worktrees(root: &Path) -> Result<Vec<Worktree>> {
     let out = locked(root, &["worktree", "list", "--porcelain"])?;
     let mut list = parse_worktrees(&out);
@@ -907,7 +1024,7 @@ fn parse_worktrees(out: &str) -> Vec<Worktree> {
             match key {
                 "worktree" => wt.path = PathBuf::from(value),
                 "HEAD" => wt.head = value.chars().take(8).collect(),
-                "branch" => wt.branch = value.strip_prefix("refs/heads/").unwrap_or(value).to_owned(),
+                "branch" => value.strip_prefix("refs/heads/").unwrap_or(value).clone_into(&mut wt.branch),
                 "locked" => wt.locked = true,
                 "prunable" => wt.prunable = true,
                 _ => {}
@@ -921,6 +1038,11 @@ fn parse_worktrees(out: &str) -> Vec<Worktree> {
 }
 
 /// Local branches, most recently committed first, and the current branch.
+///
+/// # Errors
+///
+/// What git said when it fails (`root` isn't a repository, say), or why it
+/// couldn't be run.
 pub fn local_branches(root: &Path) -> Result<(Vec<String>, String)> {
     let out = locked(root, &["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"])?;
     let current = locked(root, &["branch", "--show-current"])?.trim().to_owned();
@@ -931,7 +1053,7 @@ pub fn local_branches(root: &Path) -> Result<(Vec<String>, String)> {
 pub fn valid_branch_name(root: &Path, name: &str) -> bool {
     let mut cmd = git(root);
     cmd.args(["check-ref-format", "--branch", name]);
-    run(cmd).is_ok_and(|o| o.status.success())
+    run(&cmd).is_ok_and(|o| o.status.success())
 }
 
 /// The branch checked out at `root` (a detached checkout: its commit; ""
@@ -947,6 +1069,11 @@ pub fn head_branch(root: &Path) -> String {
 
 /// Adds a worktree at `path` on `branch`. A missing branch is created from
 /// `base`; an existing one is checked out.
+///
+/// # Errors
+///
+/// What git said when the worktree can't be added (the path is taken, the
+/// branch is checked out elsewhere), or why it couldn't be run.
 pub fn create_worktree(root: &Path, path: &Path, branch: &str, base: &str) -> Result<()> {
     if !valid_branch_name(root, branch) {
         bail!("\"{branch}\" is not a valid branch name.");
@@ -981,7 +1108,7 @@ const TURNS_KEPT: usize = 200;
 const TURNS_DAYS: i64 = 30;
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// Where a working tree's turn snapshots go: `refs/harlo/turns/<key>/`,
@@ -993,7 +1120,7 @@ fn turn_prefix(root: &Path) -> String {
     // (FNV-1a: the same key from one version of harlo to the next; of the
     // real path, however it's reached.)
     let real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let key = real.to_string_lossy().bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
+    let key = real.to_string_lossy().bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
     format!("{TURN_REFS}{key:016x}/")
 }
 
@@ -1030,7 +1157,7 @@ fn snapshot_folder_turn(dir: &Path) -> Option<String> {
                 })
             })
             .collect();
-        handles.into_iter().map(|h| h.join()).filter(|r| matches!(r, Ok(true))).count()
+        handles.into_iter().map(std::thread::ScopedJoinHandle::join).filter(|r| matches!(r, Ok(true))).count()
     });
     (done > 0).then(|| format!("@{ms}"))
 }
@@ -1038,7 +1165,7 @@ fn snapshot_folder_turn(dir: &Path) -> Option<String> {
 /// The repositories a session's folder is about: the one it's in, or (a
 /// folder of repositories) those inside it.
 pub fn folder_repos(dir: &Path) -> Vec<PathBuf> {
-    repo_root(dir).map(|r| vec![r]).unwrap_or_else(|| nested_repos(dir))
+    repo_root(dir).map_or_else(|| nested_repos(dir), |r| vec![r])
 }
 
 /// A folder's turn snapshots, oldest first: its repository's, or (a folder
@@ -1048,7 +1175,7 @@ pub fn folder_turn_snapshots(dir: &Path) -> Vec<(i64, String)> {
         return turn_snapshots(&root);
     }
     let mut times: Vec<i64> = nested_repos(dir).iter().flat_map(|r| turn_snapshots(r).into_iter().map(|(t, _)| t)).collect();
-    times.sort();
+    times.sort_unstable();
     times.dedup();
     times.into_iter().map(|t| (t, format!("@{t}"))).collect()
 }
@@ -1081,6 +1208,10 @@ fn merge_plans(parts: Vec<(String, UndoPlan)>) -> UndoPlan {
 }
 
 /// `undo_plan` for a session's folder (one repository, or several: `@<ms>`).
+///
+/// # Errors
+///
+/// As [`undo_plan`], for any of its repositories.
 pub fn folder_undo_plan(dir: &Path, snapshot: &str) -> Result<UndoPlan> {
     match snapshot.strip_prefix('@') {
         Some(ms) => folder_turn(dir, ms).into_iter().map(|(r, snap, rel)| Ok((rel, undo_plan(&r, &snap)?))).collect::<Result<Vec<_>>>().map(merge_plans),
@@ -1089,6 +1220,10 @@ pub fn folder_undo_plan(dir: &Path, snapshot: &str) -> Result<UndoPlan> {
 }
 
 /// `undo_turn` for a session's folder (one repository, or several).
+///
+/// # Errors
+///
+/// As [`undo_turn`], for any of its repositories.
 pub fn folder_undo_turn(dir: &Path, snapshot: &str) -> Result<UndoPlan> {
     match snapshot.strip_prefix('@') {
         Some(ms) => folder_turn(dir, ms).into_iter().map(|(r, snap, rel)| Ok((rel, undo_turn(&r, &snap)?))).collect::<Result<Vec<_>>>().map(merge_plans),
@@ -1127,13 +1262,15 @@ fn prune_turns(root: &Path) {
     if !gone.is_empty() {
         let mut cmd = git(root);
         cmd.args(["update-ref", "--stdin"]).input(gone.as_bytes());
-        let _ = run(cmd);
+        let _ = run(&cmd);
     }
 }
 
-/// Which snapshot each prompt of a session started from: for each prompt's
-/// time (unix ms, oldest first), the newest snapshot taken in the two
-/// minutes before it (and after the prompt before it); None if none was.
+/// Which snapshot each prompt of a session started from.
+///
+/// For each prompt's time (unix ms, oldest first), the newest snapshot taken
+/// in the two minutes before it (and after the prompt before it); None if
+/// none was.
 pub fn match_turns(snapshots: &[(i64, String)], prompts: &[i64]) -> Vec<Option<String>> {
     let mut previous = i64::MIN;
     prompts
@@ -1169,7 +1306,7 @@ fn worktree_tree(dir: &Path) -> Result<(String, String)> {
     let with_index = |args: &[&str]| {
         let mut cmd = git(dir);
         cmd.env("GIT_INDEX_FILE", &index).args(args);
-        run_ok(cmd)
+        run_ok(&cmd)
     };
     let head = output_in(dir, &["rev-parse", "--verify", "-q", "HEAD"]).trim().to_owned();
     let result = (|| {
@@ -1192,11 +1329,16 @@ fn worktree_tree(dir: &Path) -> Result<(String, String)> {
     Ok((result?, head))
 }
 
+/// What going back to `snapshot` would change: the files and how.
+///
+/// # Errors
+///
+/// What git said when the snapshot or the working tree can't be read.
 pub fn undo_plan(root: &Path, snapshot: &str) -> Result<UndoPlan> {
     let (now, head) = worktree_tree(root)?;
     let mut cmd = git(root);
     cmd.args(["diff", "--name-status", "--no-renames", "-z", snapshot, &now]);
-    let out = run_ok(cmd)?;
+    let out = run_ok(&cmd)?;
     let mut plan = UndoPlan::default();
     let mut parts = out.split('\0').filter(|p| !p.is_empty());
     while let (Some(status), Some(path)) = (parts.next(), parts.next()) {
@@ -1214,9 +1356,14 @@ pub fn undo_plan(root: &Path, snapshot: &str) -> Result<UndoPlan> {
 /// Puts the files back as they were in a snapshot (the index and commits
 /// are left alone). The state before goes to `UNDO_REFS` first, so this can
 /// be undone too. What it did.
+///
+/// # Errors
+///
+/// What git said when the snapshot can't be read or the files can't be put
+/// back; files already put back stay so.
 pub fn undo_turn(root: &Path, snapshot: &str) -> Result<UndoPlan> {
     let lock = repo_lock(root);
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let plan = undo_plan(root, snapshot)?;
     if plan.restore.is_empty() && plan.remove.is_empty() {
         return Ok(plan);
@@ -1227,7 +1374,7 @@ pub fn undo_turn(root: &Path, snapshot: &str) -> Result<UndoPlan> {
         list.push(0);
         let mut cmd = git(root);
         cmd.args(["restore", &format!("--source={snapshot}"), "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"]).input(&list);
-        run_ok(cmd)?;
+        run_ok(&cmd)?;
     }
     // (New since the snapshot: kept in the one just taken, so they go.)
     for path in &plan.remove {
@@ -1246,6 +1393,10 @@ pub fn undo_turn(root: &Path, snapshot: &str) -> Result<UndoPlan> {
 /// Saves everything in a worktree (tracked, staged, unstaged and untracked
 /// but not ignored files) as a commit under `refname`, leaving its real
 /// index, HEAD and branch untouched. Returns the commit id.
+///
+/// # Errors
+///
+/// What git said when it fails, or why it couldn't be run.
 pub fn snapshot_worktree(dir: &Path, refname: &str, message: &str) -> Result<String> {
     // The scratch index lives where the repository is (one each: several
     // repositories are snapshotted at once).
@@ -1256,13 +1407,11 @@ pub fn snapshot_worktree(dir: &Path, refname: &str, message: &str) -> Result<Str
     let with_index = |args: &[&str]| {
         let mut cmd = git(dir);
         cmd.env("GIT_INDEX_FILE", &index).args(args);
-        run_ok(cmd)
+        run_ok(&cmd)
     };
-    let head = run_ok({
-        let mut c = git(dir);
-        c.args(["rev-parse", "--verify", "-q", "HEAD"]);
-        c
-    })
+    let mut rev_parse = git(dir);
+    rev_parse.args(["rev-parse", "--verify", "-q", "HEAD"]);
+    let head = run_ok(&rev_parse)
     .map(|h| h.trim().to_owned())
     .unwrap_or_default();
     let result = (|| {
@@ -1281,10 +1430,10 @@ pub fn snapshot_worktree(dir: &Path, refname: &str, message: &str) -> Result<Str
             .env("GIT_AUTHOR_EMAIL", "harlo@localhost")
             .env("GIT_COMMITTER_NAME", "harlo")
             .env("GIT_COMMITTER_EMAIL", "harlo@localhost");
-        let id = run_ok(commit)?.trim().to_owned();
+        let id = run_ok(&commit)?.trim().to_owned();
         let mut update = git(dir);
         update.args(["update-ref", refname, &id]);
-        run_ok(update)?;
+        run_ok(&update)?;
         Ok(id)
     })();
     match crate::remote::host_of(dir).and_then(|h| crate::remote::host(&h)) {
@@ -1331,6 +1480,11 @@ fn make_dirs(dir: &Path) -> Result<()> {
 
 /// Removes a worktree folder (refusing with uncommitted changes unless
 /// `force`) and prunes stale entries.
+///
+/// # Errors
+///
+/// What git said when the worktree has uncommitted changes (without `force`) or
+/// can't be removed.
 pub fn remove_worktree(root: &Path, path: &Path, force: bool) -> Result<()> {
     let path_s = harlo_harness::on_host(path);
     let mut args = vec!["worktree", "remove"];
@@ -1346,6 +1500,11 @@ pub fn remove_worktree(root: &Path, path: &Path, force: bool) -> Result<()> {
 }
 
 /// Deletes a local branch; without `force`, only if it is merged.
+///
+/// # Errors
+///
+/// What git said when the branch isn't merged (without `force`), is checked
+/// out, or isn't there.
 pub fn delete_branch(root: &Path, branch: &str, force: bool) -> Result<()> {
     locked(root, &["branch", if force { "-D" } else { "-d" }, branch]).map(drop)
 }
@@ -1361,6 +1520,12 @@ pub struct WorktreeSummary {
     pub behind: u32,
 }
 
+/// A worktree's branch, its changes, and how far it is from `base`.
+///
+/// # Errors
+///
+/// What git said when it fails (`root` isn't a repository, say), or why it
+/// couldn't be run.
 pub fn worktree_summary(path: &Path, base: &str) -> Result<WorktreeSummary> {
     let st = status(path)?;
     let mut summary = WorktreeSummary { dirty: st.files.len(), ..Default::default() };
@@ -1376,22 +1541,27 @@ pub fn worktree_summary(path: &Path, base: &str) -> Result<WorktreeSummary> {
 /// Merges `branch` into the branch checked out in `main` (the repository's
 /// main checkout), which must be clean. On conflicts the merge is aborted
 /// and nothing changes.
+///
+/// # Errors
+///
+/// When `main` has uncommitted changes, or what git said when the merge
+/// conflicts (it's aborted) or fails.
 pub fn merge_branch(main: &Path, branch: &str) -> Result<String> {
     let st = status(main)?;
     if !st.files.is_empty() {
         bail!("The main checkout has uncommitted changes; commit or stash them first.");
     }
     let lock = repo_lock(main);
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut cmd = git(main);
     cmd.args(["merge", "--no-ff", "--no-edit", branch]);
-    let out = run(cmd)?;
+    let out = run(&cmd)?;
     if out.status.success() {
         return Ok(format!("Merged {branch} into {}", if st.branch.is_empty() { "HEAD" } else { &st.branch }));
     }
     let mut abort = git(main);
     abort.args(["merge", "--abort"]);
-    let _ = run(abort);
+    let _ = run(&abort);
     let detail = String::from_utf8_lossy(&out.stdout);
     bail!("Merging {branch} hit conflicts, so it was aborted.\n{}", detail.trim());
 }
@@ -1405,12 +1575,18 @@ pub struct Brought {
     pub clashed: Vec<String>,
 }
 
-/// Brings a helper's work in its worktree (`helper`: its commits and its
-/// uncommitted and untracked files) over to the checkout at `here`, as
-/// uncommitted changes: what changed since the worktree started
-/// (`start`, else where it left `base`, else where it left `here`).
-/// Files whose changes don't apply cleanly are left alone and named.
-/// Nothing is staged or committed, in either.
+/// Brings a helper's work over to the checkout at `here`, uncommitted.
+///
+/// That's the work in its worktree (`helper`: its commits and its uncommitted
+/// and untracked files): what changed since the worktree started (`start`, else
+/// where it left `base`, else where it left `here`). Files whose changes don't
+/// apply cleanly are left alone and named. Nothing is staged or committed, in
+/// either.
+///
+/// # Errors
+///
+/// What git said when either checkout can't be read or the changes can't be
+/// written.
 pub fn bring_over(helper: &Path, here: &Path, start: &str, base: &str) -> Result<Brought> {
     let from = repo_root(helper).context("the helper's folder isn't in a git repository")?;
     let to = repo_root(here).context("your folder isn't in a git repository")?;
@@ -1428,7 +1604,7 @@ pub fn bring_over(helper: &Path, here: &Path, start: &str, base: &str) -> Result
     let (tree, _) = worktree_tree(&from)?;
     let mut cmd = git(&from);
     cmd.args(["diff", "--binary", "--full-index", "--no-renames", &start, &tree]);
-    let patch = run_ok(cmd)?;
+    let patch = run_ok(&cmd)?;
     if patch.trim().is_empty() {
         return Ok(Brought::default());
     }
@@ -1530,7 +1706,7 @@ mod tests {
         let main_snap = snapshot_turn(&root).expect("main's");
         std::fs::write(wt.join("primes.py"), "x").unwrap();
         let wt_snap = snapshot_turn(&wt).expect("the worktree's");
-        assert_eq!(turn_snapshots(&root).iter().map(|(_, id)| id.clone()).collect::<Vec<_>>(), [main_snap.clone()]);
+        assert_eq!(turn_snapshots(&root).iter().map(|(_, id)| id.clone()).collect::<Vec<_>>(), std::slice::from_ref(&main_snap));
         assert_eq!(folder_turn_snapshots(&wt).iter().map(|(_, id)| id.clone()).collect::<Vec<_>>(), [wt_snap]);
         assert!(undo_plan(&root, &main_snap).unwrap().restore.is_empty() && undo_plan(&root, &main_snap).unwrap().remove.is_empty());
         // One from before (unkeyed, as the worktree's would have been): not used.
@@ -1656,7 +1832,7 @@ mod tests {
 
         switch_branch(&dir, "topic/new", true, false, false).unwrap();
         assert_eq!(branches(&dir).unwrap().current, "topic/new");
-        assert!(switch_branch(&dir, "bad..name", true, false, false).is_err());
+        switch_branch(&dir, "bad..name", true, false, false).unwrap_err();
     }
 
     #[test]
@@ -1679,7 +1855,7 @@ mod tests {
     #[test]
     fn stashes_apply_pop_and_drop() {
         let dir = repo("stash");
-        assert!(stash_push(&dir, "nothing").is_err());
+        stash_push(&dir, "nothing").unwrap_err();
         std::fs::write(dir.join("a.txt"), "one\n").unwrap();
         stash_push(&dir, "first").unwrap();
         std::fs::write(dir.join("b.txt"), "two\n").unwrap();
@@ -1834,7 +2010,7 @@ mod tests {
         let _ = std::fs::remove_file(dir.join("new.txt"));
         let got = bring_over(&wt, &dir, "", "main").unwrap();
         assert!(got.applied.contains(&"a.txt".to_owned()));
-        assert!(bring_over(&dir, &dir, "", "main").is_err());
+        bring_over(&dir, &dir, "", "main").unwrap_err();
         let _ = std::fs::remove_dir_all(&wt);
     }
 

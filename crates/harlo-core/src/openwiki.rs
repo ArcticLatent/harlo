@@ -1,7 +1,8 @@
-//! A project's wiki, kept by OpenWiki: linked Markdown pages in the
-//! repository's `openwiki/` folder, each fact tied to the code it came from,
-//! so an update redoes only the pages whose code changed. Agents search it
-//! and read just the sections they need.
+//! A project's wiki, kept by OpenWiki.
+//!
+//! Linked Markdown pages in the repository's `openwiki/` folder, each fact tied
+//! to the code it came from, so an update redoes only the pages whose code
+//! changed. Agents search it and read just the sections they need.
 //!
 //! The tools are harlo's own (the harlo-wiki crate, a port of OpenWiki's
 //! (MIT) that answers alike, with the same files): the four that only read
@@ -14,6 +15,9 @@
 //! links between them, how fresh the wiki is (`.last-update.json`, commits
 //! since), a run's progress (`.run.json`), and a plain text search.
 
+// Rust guideline compliant 2026-10-09
+
+use std::fmt::Write as _;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -45,9 +49,10 @@ const PROTOCOL: &str = "2025-06-18";
 
 // ---- What sessions get ----
 
-/// The reading tools a session gets with its project's wiki on: search and
-/// read (a search names a workspace's choices itself when a wiki is linked
-/// to others, so the two listing tools stay unoffered: fewer tokens).
+/// The reading tools a session gets with its project's wiki on.
+///
+/// Search and read: a search names a workspace's choices itself when a wiki is
+/// linked to others, so the two listing tools stay unoffered (fewer tokens).
 pub const OFFERED: [&str; 2] = ["openwiki_search", "openwiki_read"];
 
 /// What a session with them is told.
@@ -84,10 +89,14 @@ pub fn reading_tools() -> Value {
 
 /// A tool's result as harlo answers it: OpenWiki's structured answer (the
 /// same JSON as its text), else its text; its error as an error.
-pub fn answer(result: &Value) -> Result<Value, String> {
+///
+/// # Errors
+///
+/// The tool's error text when it answered with one.
+pub fn answer(result: &Value) -> anyhow::Result<Value> {
     let text: String = result["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
     if result["isError"] == true {
-        return Err(if text.is_empty() { "OpenWiki couldn't do that.".into() } else { text });
+        return Err(anyhow::Error::msg(if text.is_empty() { "OpenWiki couldn't do that.".to_owned() } else { text }));
     }
     if !result["structuredContent"].is_null() {
         return Ok(result["structuredContent"].clone());
@@ -137,11 +146,12 @@ pub fn ignored(root: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// A wiki session's first message: what to do (`mode`: "create",
-/// "update", or "continue" an interrupted run of `run_mode`), the paths
-/// `.openwikiignore` keeps out (`ignored`: OpenWiki's own command line
-/// blocks reading them, but the session reads with its agent's tools, so
-/// it's told), then OpenWiki's own steps (from its skill).
+/// A wiki session's first message: what to do, then OpenWiki's own steps.
+///
+/// `mode` is "create", "update", or "continue" an interrupted run of
+/// `run_mode`. The paths `.openwikiignore` keeps out (`ignored`) are listed:
+/// OpenWiki's own command line blocks reading them, but the session reads with
+/// its agent's tools, so it's told. The steps come from OpenWiki's skill.
 pub fn run_prompt(mode: &str, run_mode: &str, ignored: &[String]) -> String {
     run_prompt_with(mode, run_mode, ignored, None)
 }
@@ -180,7 +190,7 @@ fn change_note(found: &Value) -> String {
         let more = v.len().saturating_sub(max);
         let mut out = v.into_iter().take(max).collect::<Vec<_>>().join(", ");
         if more > 0 {
-            out.push_str(&format!(" and {more} more"));
+            let _ = write!(out, " and {more} more");
         }
         out
     };
@@ -225,6 +235,7 @@ type Waiting = Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>;
 /// A running wiki tool server (harlo's agent on another machine): requests go in on its stdin, answers come back
 /// by id on its stdout (a thread reads them), so sessions can call it at
 /// the same time.
+#[derive(Debug)]
 pub struct Server {
     child: Mutex<Child>,
     stdin: Arc<Mutex<ChildStdin>>,
@@ -241,25 +252,38 @@ pub struct Server {
 impl Server {
     /// Starts `cmd` (a tool server on stdio), initializes it, lists its
     /// tools and checks OpenWiki's are all there.
+    ///
+    /// # Errors
+    ///
+    /// When it can't be started, doesn't answer the handshake in time, or lacks
+    /// one of OpenWiki's tools.
     pub fn start(cmd: Command) -> Result<Server> {
         Server::start_with(cmd, &[&READ_TOOLS[..], &WRITE_TOOLS[..]].concat())
     }
 
     /// The same, checking for the tools `expected`.
+    ///
+    /// # Errors
+    ///
+    /// When it can't be started, doesn't answer the handshake in time, or lacks
+    /// one of `expected`.
     pub fn start_with(mut cmd: Command, expected: &[&str]) -> Result<Server> {
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().context("starting OpenWiki")?;
-        let stdin = Arc::new(Mutex::new(child.stdin.take().expect("piped")));
-        let stdout = child.stdout.take().expect("piped");
-        let stderr = child.stderr.take().expect("piped");
+        let (Some(stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("OpenWiki started without its pipes");
+        };
+        let stdin = Arc::new(Mutex::new(stdin));
         let waiting: Waiting = Arc::default();
         let alive = Arc::new(AtomicBool::new(true));
         let said = Arc::new(Mutex::new(String::new()));
         {
-            let said = said.clone();
+            let said = Arc::clone(&said);
             std::thread::spawn(move || {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    let mut s = said.lock().unwrap();
+                    let mut s = said.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     s.push_str(&line);
                     s.push('\n');
                     if s.len() > 8192 {
@@ -268,10 +292,10 @@ impl Server {
                         s.drain(..cut);
                     }
                 }
-            });
-        }
+            })
+        };
         {
-            let (waiting, alive, stdin) = (waiting.clone(), alive.clone(), stdin.clone());
+            let (waiting, alive, stdin) = (Arc::clone(&waiting), Arc::clone(&alive), Arc::clone(&stdin));
             std::thread::spawn(move || {
                 for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                     let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
@@ -285,24 +309,24 @@ impl Server {
                             } else {
                                 json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "harlo doesn't offer that"}})
                             };
-                            let _ = writeln!(stdin.lock().unwrap(), "{reply}");
+                            let _ = writeln!(stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "{reply}");
                         }
                         continue;
                     }
-                    if let Some(tx) = id.as_u64().and_then(|i| waiting.lock().unwrap().remove(&i)) {
+                    if let Some(tx) = id.as_u64().and_then(|i| waiting.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&i)) {
                         let _ = tx.send(msg);
                     }
                 }
                 alive.store(false, Ordering::SeqCst);
-                waiting.lock().unwrap().clear();
-            });
-        }
+                waiting.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+            })
+        };
         let mut server = Server { child: Mutex::new(child), stdin, waiting, next: AtomicU64::new(1), alive, said, info: String::new(), tools: Vec::new() };
-        let init = server.request("initialize", json!({"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "harlo", "version": env!("CARGO_PKG_VERSION")}}), Duration::from_secs(60))?;
+        let init = server.request("initialize", &json!({"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "harlo", "version": env!("CARGO_PKG_VERSION")}}), Duration::from_secs(60))?;
         let info = &init["serverInfo"];
-        server.info = format!("{} {}", info["name"].as_str().unwrap_or("openwiki"), info["version"].as_str().unwrap_or_default()).trim().to_owned();
+        format!("{} {}", info["name"].as_str().unwrap_or("openwiki"), info["version"].as_str().unwrap_or_default()).trim().clone_into(&mut server.info);
         server.notify("notifications/initialized")?;
-        let listed = server.request("tools/list", json!({}), Duration::from_secs(30))?;
+        let listed = server.request("tools/list", &json!({}), Duration::from_secs(30))?;
         server.tools = listed["tools"].as_array().cloned().unwrap_or_default();
         let missing: Vec<&str> = expected.iter().copied().filter(|n| !server.tools.iter().any(|t| t["name"] == *n)).collect();
         if !missing.is_empty() {
@@ -321,23 +345,23 @@ impl Server {
     }
 
     fn notify(&self, method: &str) -> Result<()> {
-        writeln!(self.stdin.lock().unwrap(), "{}", json!({"jsonrpc": "2.0", "method": method})).context("OpenWiki stopped")
+        writeln!(self.stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "{}", json!({"jsonrpc": "2.0", "method": method})).context("OpenWiki stopped")
     }
 
     /// A request's result (its `error` as an error).
-    fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+    fn request(&self, method: &str, params: &Value, timeout: Duration) -> Result<Value> {
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
-        self.waiting.lock().unwrap().insert(id, tx);
-        let sent = writeln!(self.stdin.lock().unwrap(), "{}", json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        self.waiting.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id, tx);
+        let sent = writeln!(self.stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "{}", json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
         if sent.is_err() || !self.alive() {
-            self.waiting.lock().unwrap().remove(&id);
+            self.waiting.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);
             bail!("OpenWiki stopped{}", self.last_words());
         }
         let msg = match rx.recv_timeout(timeout) {
             Ok(m) => m,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                self.waiting.lock().unwrap().remove(&id);
+                self.waiting.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);
                 bail!("OpenWiki didn't answer {method} in {} s", timeout.as_secs());
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => bail!("OpenWiki stopped{}", self.last_words()),
@@ -349,20 +373,25 @@ impl Server {
     }
 
     /// Calls a tool: its result (`content`, `isError`, …) as OpenWiki gives it.
-    pub fn call(&self, name: &str, args: Value, timeout: Duration) -> Result<Value> {
-        self.request("tools/call", json!({"name": name, "arguments": args}), timeout)
+    ///
+    /// # Errors
+    ///
+    /// When the server has ended, doesn't answer within `timeout`, or answers
+    /// with a protocol error.
+    pub fn call(&self, name: &str, args: &Value, timeout: Duration) -> Result<Value> {
+        self.request("tools/call", &json!({"name": name, "arguments": args}), timeout)
     }
 
     /// What it last said on stderr, for an error (": …", or "").
     fn last_words(&self) -> String {
-        let said = self.said.lock().unwrap();
+        let said = self.said.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         said.lines().rev().find(|l| !l.trim().is_empty()).map(|l| format!(": {}", l.trim())).unwrap_or_default()
     }
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let mut child = self.child.lock().unwrap();
+        let mut child = self.child.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -381,10 +410,10 @@ fn agent_server(host: &str, writing: Option<&str>) -> Result<Arc<Server>> {
         None => format!("reader:{host}"),
     };
     {
-        let mut servers = SERVERS.lock().unwrap();
+        let mut servers = SERVERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         servers.retain(|(_, s)| s.alive());
         if let Some((_, s)) = servers.iter().find(|(k, _)| *k == key) {
-            return Ok(s.clone());
+            return Ok(Arc::clone(s));
         }
     }
     let h = remote::host(host).ok_or_else(|| anyhow::anyhow!("No remote instance named {host}"))?;
@@ -394,11 +423,11 @@ fn agent_server(host: &str, writing: Option<&str>) -> Result<Arc<Server>> {
         None => ("", READ_TOOLS.to_vec()),
     };
     let started = Arc::new(Server::start_with(remote::command(&h, &format!("exec {} wiki{args}", remote::quote_path(&agent))), &expected)?);
-    let mut servers = SERVERS.lock().unwrap();
+    let mut servers = SERVERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((_, s)) = servers.iter().find(|(k, s)| *k == key && s.alive()) {
-        return Ok(s.clone());
+        return Ok(Arc::clone(s));
     }
-    servers.push((key, started.clone()));
+    servers.push((key, Arc::clone(&started)));
     Ok(started)
 }
 
@@ -407,18 +436,22 @@ fn agent_server(host: &str, writing: Option<&str>) -> Result<Arc<Server>> {
 static WRITERS: Mutex<Vec<(String, Arc<Mutex<harlo_wiki::run::Writer>>)>> = Mutex::new(Vec::new());
 
 fn local_writer(dir: &str) -> Arc<Mutex<harlo_wiki::run::Writer>> {
-    let mut writers = WRITERS.lock().unwrap();
+    let mut writers = WRITERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((_, w)) = writers.iter().find(|(k, _)| k == dir) {
-        return w.clone();
+        return Arc::clone(w);
     }
     let w = Arc::new(Mutex::new(harlo_wiki::run::Writer::new("harlo")));
-    writers.push((dir.to_owned(), w.clone()));
+    writers.push((dir.to_owned(), Arc::clone(&w)));
     w
 }
 
 /// Starts the writing server for a repository on another machine (a wiki
 /// session's first step, so a missing agent shows before the session
 /// starts); nothing to start here.
+///
+/// # Errors
+///
+/// When the machine can't be reached or harlo's agent there can't be started.
 pub fn prepare_writer(root: &Path) -> Result<()> {
     match remote::split(root) {
         Some((h, d)) => agent_server(&h, Some(&d)).map(|_| ()),
@@ -426,35 +459,56 @@ pub fn prepare_writer(root: &Path) -> Result<()> {
     }
 }
 
-/// An Update with nothing for a model to redo, recorded without one, on
-/// the repository's machine (`harlo_wiki::run::quiet_update`): `{
-/// recorded: true, commits }`, else `{ recorded: false, reason, stale:
-/// [{ page, files }], added }` and nothing written.
+/// A writing tool's error as agents see it; one OpenWiki doesn't expect goes
+/// to the log too, since agents see only a generic failure.
+fn writer_error(e: harlo_wiki::store::Error) -> String {
+    if let Some(m) = harlo_wiki::run::unexpected(&e) {
+        tracing::event!(name: "wiki.tool.failed", tracing::Level::ERROR, error.message = %m, "OpenWiki MCP operation failed: {{error.message}}");
+    }
+    harlo_wiki::run::error_text(e)
+}
+
+/// An Update with nothing for a model to redo, recorded without one.
+///
+/// It runs on the repository's machine (`harlo_wiki::run::quiet_update`): `{
+/// recorded: true, commits }`, else `{ recorded: false, reason, stale: [{ page,
+/// files }], added }` and nothing written.
+///
+/// # Errors
+///
+/// When the wiki can't be read or the record written; on another machine, also
+/// when the machine can't be reached or harlo's agent there can't be started.
 pub fn quiet_update(root: &Path) -> Result<Value> {
     match remote::split(root) {
         None => {
             let dir = root.to_string_lossy().into_owned();
             // (Not while this machine's writer for it is in a call.)
             let w = local_writer(&dir);
-            let _held = w.lock().unwrap();
-            harlo_wiki::run::quiet_update(root).map(|q| q.to_json()).map_err(|e| anyhow::anyhow!(harlo_wiki::run::error_text(e)))
+            let _held = w.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            harlo_wiki::run::quiet_update(root).map(|q| q.to_json()).map_err(|e| anyhow::anyhow!(writer_error(e)))
         }
         Some((h, d)) => {
             let host = remote::host(&h).ok_or_else(|| anyhow::anyhow!("No remote instance named {h}"))?;
             let agent = crate::agent_host::program_on(&h)?;
             let out = remote::run_ok(&host, &format!("exec {} wiki --quiet-update {} </dev/null", remote::quote_path(&agent), remote::quote_path(&d)), Duration::from_secs(120))?;
-            serde_json::from_str(out.trim()).map_err(|_| anyhow::anyhow!("{h}'s harlo-agent didn't check the wiki"))
+            serde_json::from_str(out.trim()).ok().ok_or_else(|| anyhow::anyhow!("{h}'s harlo-agent didn't check the wiki"))
         }
     }
 }
 
 /// Stops every tool server (harlo quitting).
 pub fn stop_all() {
-    SERVERS.lock().unwrap().clear();
+    SERVERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
 }
 
 /// Calls a wiki tool for the repository at `root` (here or on its host),
 /// `root` filled in (for the tools that take one).
+///
+/// # Errors
+///
+/// When there's no such tool, its input isn't valid, or it fails (its message);
+/// on another machine, also when the machine can't be reached or harlo's agent
+/// there can't be started.
 pub fn call(root: &Path, tool: &str, mut args: Value) -> Result<Value> {
     let (host, dir) = match remote::split(root) {
         Some((h, d)) => (Some(h), d),
@@ -474,15 +528,15 @@ pub fn call(root: &Path, tool: &str, mut args: Value) -> Result<Value> {
     }
     let reading = READ_TOOLS.contains(&tool);
     let answer = match (host, reading) {
-        (None, true) => Ok(harlo_wiki::mcp::result(harlo_wiki::tools::call_reading(tool, &args).unwrap_or_else(|| Err(format!("No tool {tool}"))))),
+        (None, true) => Ok(harlo_wiki::mcp::result(harlo_wiki::tools::call_reading(tool, &args).unwrap_or_else(|| Err(format!("{:#}", anyhow::anyhow!("No tool {tool}")))))),
         (None, false) => {
             let w = local_writer(&dir);
-            let mut w = w.lock().unwrap();
-            Ok(harlo_wiki::mcp::result(harlo_wiki::tools::validate(tool, &args).and_then(|a| w.call(tool, &a).map_err(harlo_wiki::run::error_text))))
+            let mut w = w.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            Ok(harlo_wiki::mcp::result(harlo_wiki::tools::validate(tool, &args).and_then(|a| w.call(tool, &a).map_err(writer_error))))
         }
         // (Writing a page checks its claims against the code: it can take a while.)
-        (Some(h), true) => agent_server(&h, None)?.call(tool, args, Duration::from_secs(90)),
-        (Some(h), false) => agent_server(&h, Some(&dir))?.call(tool, args, Duration::from_secs(600)),
+        (Some(h), true) => agent_server(&h, None)?.call(tool, &args, Duration::from_secs(90)),
+        (Some(h), false) => agent_server(&h, Some(&dir))?.call(tool, &args, Duration::from_secs(600)),
     };
     // A new wiki's first step also writes a GitHub workflow that updates it
     // every day on an API key: not wanted here (updates are yours to
@@ -659,7 +713,7 @@ fn front_fields(front: &str) -> Vec<(String, String)> {
         let Some((k, v)) = line.trim().split_once(':') else { continue };
         let (k, v) = (k.trim().trim_start_matches("- "), v.trim());
         if !indented {
-            parent = k.to_owned();
+            k.clone_into(&mut parent);
         }
         if v.is_empty() {
             continue;
@@ -702,12 +756,16 @@ fn links_of(rel: &str, body: &str) -> Vec<String> {
 }
 
 /// A page's text (`page` in the wiki's folder), here or on its host.
-pub fn read(root: &Path, page: &str) -> Result<String, String> {
+///
+/// # Errors
+///
+/// When the page can't be read; on another machine, when it can't be reached.
+pub fn read(root: &Path, page: &str) -> anyhow::Result<String> {
     let page = page.trim().trim_start_matches("./").trim_start_matches("openwiki/");
     if !page.ends_with(".md") || page.split('/').any(|c| c.is_empty() || c == ".." || c.starts_with('.')) {
-        return Err(format!("{page} isn't a page of the wiki"));
+        return Err(anyhow::anyhow!("{page} isn't a page of the wiki"));
     }
-    read_file(root, &format!("{DIR}/{page}")).ok_or_else(|| format!("The wiki has no page {page}"))
+    read_file(root, &format!("{DIR}/{page}")).ok_or_else(|| anyhow::anyhow!("The wiki has no page {page}"))
 }
 
 /// A small file under `root` (here or on its host).
@@ -792,10 +850,10 @@ pub fn cited_files(root: &Path) -> Vec<String> {
     out
 }
 
-/// The default branch's new code the wiki describes, for an offer to
-/// update it: the branch, its tip, how many of its commits the wiki's
-/// last update hasn't seen (past its own files), and the cited files they
-/// change.
+/// The default branch's new code the wiki describes, for an offer to update it.
+///
+/// The branch, its tip, how many of its commits the wiki's last update hasn't
+/// seen (past its own files), and the cited files they change.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MergeOffer {
     pub branch: String,
@@ -814,12 +872,14 @@ fn default_branch(root: &Path) -> Option<String> {
     ["main", "master"].into_iter().find(|b| !crate::git::output_in(root, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{b}")]).trim().is_empty()).map(str::to_owned)
 }
 
-/// Whether to offer updating the wiki under `root` (on this computer), as
-/// its default branch moves: merged work there changes code the wiki cites
+/// Whether to offer updating the wiki under `root`, as its default branch
+/// moves.
+///
+/// `root` is on this computer. Merged work there changes code the wiki cites
 /// and this checkout has it (so an update here would read it). Returns the
-/// branch's tip, to pass as `seen` next time (an unmoved branch offers
-/// nothing again; "" while this checkout lacks it), and the offer, if any. None while a run is under way or
-/// stopped part way (its Continue shows instead).
+/// branch's tip, to pass as `seen` next time (an unmoved branch offers nothing
+/// again; "" while this checkout lacks it), and the offer, if any. None while a
+/// run is under way or stopped part way (its Continue shows instead).
 pub fn merge_offer(root: &Path, seen: &str) -> (String, Option<MergeOffer>) {
     if remote::split(root).is_some() || !root.join(DIR).is_dir() {
         return (String::new(), None);
@@ -898,7 +958,7 @@ fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value
             let all = words.iter().all(|w| lower.contains(w.as_str()) || heading.to_lowercase().contains(w.as_str()));
             if score > 0 {
                 let line = section.lines().find(|l| words.iter().any(|w| l.to_lowercase().contains(w.as_str()))).unwrap_or_default().trim();
-                let snippet = readable_snippet(line.trim_start_matches(|c| matches!(c, '-' | '*' | '>' | ' ')), &words);
+                let snippet = readable_snippet(line.trim_start_matches(['-', '*', '>', ' ']), &words);
                 hits.push((score + if all { 100 } else { 0 }, json!({"page": format!("{DIR}/{path}"), "section": anchor(heading), "heading": heading, "snippet": snippet})));
             }
         };
@@ -906,7 +966,7 @@ fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value
             let level = line.chars().take_while(|c| *c == '#').count();
             if (1..=4).contains(&level) && line[level..].starts_with(' ') {
                 flush(&heading, &section);
-                heading = line[level..].trim().to_owned();
+                line[level..].trim().clone_into(&mut heading);
                 section.clear();
             } else {
                 section.push_str(line);
@@ -919,12 +979,10 @@ fn search_in(texts: &[(String, String)], query: &str, limit: usize) -> Vec<Value
     hits.into_iter().take(limit).map(|(_, v)| v).collect()
 }
 
-/// A page for reading: what its frontmatter says (`title`, `type`,
-/// `description`, `verified`), then its body as blocks of rich text
-/// (`prose`, `code` highlighted, or `mermaid` with its source), a heading's
-/// block with its anchor.
-/// What OpenWiki recorded of a page's claims (`.claims/<page>.json`), if
-/// any: their evidence is where in the code each one comes from.
+/// What OpenWiki recorded of a page's claims, if any.
+///
+/// Read from `.claims/<page>.json`: their evidence is where in the code each
+/// one comes from.
 pub fn claims(root: &Path, page: &str) -> Option<String> {
     let page = page.trim_start_matches("openwiki/");
     let stem = page.strip_suffix(".md")?;
@@ -934,13 +992,18 @@ pub fn claims(root: &Path, page: &str) -> Option<String> {
     read_file(root, &format!("{DIR}/.claims/{stem}.json"))
 }
 
-/// The code a page is drawn from: the files its frontmatter's `sources`
-/// name and its claims' evidence cites, in that order, each with the line
-/// ranges cited (merged) and how many claims cite it: `[{ path, ranges:
-/// [[from, to]], claims }]`.
+/// A file a page cites: its path, the line ranges cited, and how many
+/// claims cite it.
+type CitedFile = (String, Vec<(u64, u64)>, usize);
+
+/// The code a page is drawn from, with the line ranges cited.
+///
+/// The files its frontmatter's `sources` name and its claims' evidence cites,
+/// in that order, each with the line ranges cited (merged) and how many claims
+/// cite it: `[{ path, ranges: [[from, to]], claims }]`.
 pub fn sources_of(text: &str, claims: Option<&str>) -> Vec<Value> {
-    let mut files: Vec<(String, Vec<(u64, u64)>, usize)> = Vec::new();
-    fn add(files: &mut Vec<(String, Vec<(u64, u64)>, usize)>, resource: &str, claim: bool) {
+    let mut files: Vec<CitedFile> = Vec::new();
+    fn add(files: &mut Vec<CitedFile>, resource: &str, claim: bool) {
         let Some(rest) = resource.trim().trim_matches(|c| c == '"' || c == '\'').strip_prefix("repo://") else { return };
         let (path, frag) = rest.split_once('#').unwrap_or((rest, ""));
         if path.is_empty() {
@@ -999,6 +1062,11 @@ pub fn sources_of(text: &str, claims: Option<&str>) -> Vec<Value> {
         .collect()
 }
 
+/// A page for reading: its frontmatter, then its body as blocks.
+///
+/// What its frontmatter says (`title`, `type`, `description`, `verified`),
+/// then its body as blocks of rich text (`prose`, `code` highlighted, or
+/// `mermaid` with its source), a heading's block with its anchor.
 pub fn page_view(path: &str, text: &str) -> Value {
     let page = describe(path, text);
     let (_, body) = split_front(text);
@@ -1055,10 +1123,11 @@ pub fn search_hits(answer: &Value, query: &str) -> Value {
     json!({ "hits": hits, "workspaces": workspaces })
 }
 
-/// Puts back the code names OpenWiki's excerpts lose (it makes `_` a
-/// space: place_order → "place order"), from each hit's page (read once):
-/// a name with underscores, where the page never writes its spaced form
-/// as plain words.
+/// Puts back the code names OpenWiki's excerpts lose.
+///
+/// It makes `_` a space: place_order → "place order". From each hit's page
+/// (read once): a name with underscores, where the page never writes its spaced
+/// form as plain words.
 pub fn restore_names(found: &mut Value, page_text: impl Fn(&str) -> Option<String>) {
     let mut names: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
     let Some(hits) = found["hits"].as_array_mut() else { return };
@@ -1180,7 +1249,7 @@ fn readable_snippet(text: &str, words: &[String]) -> String {
         used += n;
     }
     // (Near the end: take earlier words to fill the room.)
-    while start > 0 && used + tokens[start - 1].chars().count() + 1 <= ROOM {
+    while start > 0 && used + tokens[start - 1].chars().count() < ROOM {
         start -= 1;
         used += tokens[start].chars().count() + 1;
         out.insert(0, &tokens[start]);
@@ -1231,7 +1300,7 @@ mod tests {
     fn reading_needs_no_openwiki() {
         let (root, _gone) = fixture();
         // (Linked wikis come from OpenWiki's registry: none here, not the user's.)
-        unsafe { std::env::set_var("OPENWIKI_CONFIG_DIR", root.join("no-registry")) };
+        harlo_wiki::workspaces::ignore_user_registry();
         assert!(Command::new("git").arg("-C").arg(&root).args(["init", "-q"]).status().unwrap().success());
         let root = std::fs::canonicalize(&root).unwrap();
         let found = answer(&call(&root, "openwiki_search", json!({"query": "how are failed jobs retried"})).unwrap()).unwrap();
@@ -1240,7 +1309,7 @@ mod tests {
         let read = answer(&call(&root, "openwiki_read", json!({"page": "openwiki/architecture/jobs.md", "sections": ["retry-control"], "root": "/elsewhere"})).unwrap()).unwrap();
         assert!(read.to_string().contains("three times"), "{read}");
         let err = answer(&call(&root, "openwiki_read", json!({"page": "openwiki/gone.md", "sections": ["x"]})).unwrap()).unwrap_err();
-        assert_eq!(err, "invalid_input: The requested OpenWiki page does not exist.");
+        assert_eq!(err.to_string(), "invalid_input: The requested OpenWiki page does not exist.");
         assert!(SERVERS.lock().unwrap().is_empty(), "no server started");
     }
 
@@ -1265,10 +1334,10 @@ mod tests {
     fn reading_pages() {
         let (root, _gone) = fixture();
         assert!(read(&root, "openwiki/architecture/jobs.md").unwrap().contains("Retry control"));
-        assert!(read(&root, "architecture/jobs.md").is_ok());
-        assert!(read(&root, "../Cargo.toml").is_err());
-        assert!(read(&root, ".claims/x.md").is_err());
-        assert!(read(&root, "nope.md").is_err());
+        read(&root, "architecture/jobs.md").unwrap();
+        read(&root, "../Cargo.toml").unwrap_err();
+        read(&root, ".claims/x.md").unwrap_err();
+        read(&root, "nope.md").unwrap_err();
     }
 
     #[test]
@@ -1355,7 +1424,7 @@ mod tests {
         let text = json!({"content": [{"type": "text", "text": "{\"a\":1}"}]});
         assert_eq!(answer(&text).unwrap(), json!({"a": 1}));
         let err = json!({"content": [{"type": "text", "text": "No wiki here."}], "isError": true});
-        assert_eq!(answer(&err).unwrap_err(), "No wiki here.");
+        assert_eq!(answer(&err).unwrap_err().to_string(), "No wiki here.");
         let tools = reading_tools();
         let names: Vec<&str> = tools.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names, OFFERED);
@@ -1458,18 +1527,18 @@ esac; done"#
         let s = Server::start(stand_in(&all)).unwrap();
         assert_eq!(s.info, "openwiki 9.9.9");
         assert_eq!(s.tools.len(), 10);
-        let r = s.call("openwiki_search", json!({"root": "/r", "query": "x"}), Duration::from_secs(10)).unwrap();
+        let r = s.call("openwiki_search", &json!({"root": "/r", "query": "x"}), Duration::from_secs(10)).unwrap();
         assert_eq!(r["structuredContent"]["root"], "/r");
         // (Calls at the same time each get their own answer.)
         let s = Arc::new(s);
         let threads: Vec<_> = (0..8).map(|i| {
-            let s = s.clone();
-            std::thread::spawn(move || s.call("openwiki_read", json!({"page": format!("p{i}")}), Duration::from_secs(10)).unwrap()["structuredContent"]["page"].as_str().unwrap().to_owned())
+            let s = Arc::clone(&s);
+            std::thread::spawn(move || s.call("openwiki_read", &json!({"page": format!("p{i}")}), Duration::from_secs(10)).unwrap()["structuredContent"]["page"].as_str().unwrap().to_owned())
         }).collect();
         for (i, t) in threads.into_iter().enumerate() {
             assert_eq!(t.join().unwrap(), format!("p{i}"));
         }
-        assert!(s.request("nope", json!({}), Duration::from_secs(10)).is_err());
+        s.request("nope", &json!({}), Duration::from_secs(10)).unwrap_err();
     }
 
     /// The writing tools run here, natively: a new wiki's run begins in a

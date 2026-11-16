@@ -2,6 +2,8 @@
 //! the visible lines. No Qt here; harlo-app's CodeView shows the image this
 //! draws and hands it the keys and the mouse.
 
+// Rust guideline compliant 2026-10-09
+
 pub mod doc;
 pub mod fonts;
 pub mod lang;

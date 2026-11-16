@@ -1,5 +1,7 @@
 //! The harlo-relay program; see the library for what it does.
 
+// Rust guideline compliant 2026-10-09
+
 const HELP: &str = "harlo-relay: lets phones reach harlo from anywhere. Serves harlo's phone app and passes on
 its end-to-end encrypted messages. Put HTTPS in front of it (Caddy, a Cloudflare Tunnel).
 

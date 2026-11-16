@@ -1,5 +1,7 @@
 //! Prints every Harlo and Claude Code session found on disk: `cargo run -p harlo-harness --example list_sessions`.
 
+// Rust guideline compliant 2026-10-09
+
 use harlo_harness::{HarnessKind, store};
 
 fn main() {
