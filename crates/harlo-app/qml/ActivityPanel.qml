@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -152,7 +153,6 @@ Rectangle {
         }
 
         ListView {
-            id: list
             objectName: "activityList"
             Layout.fillWidth: true
             Layout.fillHeight: true

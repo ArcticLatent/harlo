@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -224,7 +225,7 @@ Popup {
                 sourceComponent: modelData.kind === "header" ? headerRow : itemRow
                 Component {
                     id: headerRow
-                    Label {
+                    PlainLabel {
                         topPadding: rowLoader.index > 0 ? 10 : 4
                         bottomPadding: 4
                         leftPadding: 10
@@ -264,8 +265,6 @@ Popup {
                                     visible: row.item.kind === "file"
                                     anchors.centerIn: parent
                                     path: visible ? row.item.title : ""
-                                    width: 16
-                                    height: 16
                                 }
                                 Icon {
                                     visible: row.item.kind === "action" || row.item.kind === "project"
@@ -288,7 +287,7 @@ Popup {
                                     font.pixelSize: Theme.px(13)
                                     font.family: row.item.kind === "file" ? Theme.mono : Qt.application.font.family
                                 }
-                                Label {
+                                PlainLabel {
                                     Layout.fillWidth: true
                                     visible: !!row.item.subtitle
                                     text: row.item.subtitle || ""

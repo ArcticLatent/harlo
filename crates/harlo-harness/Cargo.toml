@@ -10,7 +10,6 @@ publish.workspace = true
 
 [dependencies]
 chrono = { workspace = true, features = ["clock", "std"] }
-anyhow.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "signal"] }

@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -122,7 +123,7 @@ GridLayout {
                 Repeater {
                     model: card.modelData.pros
                     RowLayout {
-                        id: point
+                        id: pro
                         required property string modelData
                         required property int index
                         readonly property string html: (card.modelData.prosHtml || [])[index] || ""
@@ -131,8 +132,8 @@ GridLayout {
                         Label { Layout.alignment: Qt.AlignTop; text: "+"; color: Theme.success; font.pixelSize: Theme.px(13); font.weight: Font.Medium }
                         Label {
                             Layout.fillWidth: true
-                            text: cards.shown(point.modelData, point.html)
-                            textFormat: cards.format(point.html)
+                            text: cards.shown(pro.modelData, pro.html)
+                            textFormat: cards.format(pro.html)
                             onLinkActivated: link => cards.openLink(link)
                             color: Theme.text
                             font.pixelSize: Theme.px(13)
@@ -143,7 +144,7 @@ GridLayout {
                 Repeater {
                     model: card.modelData.cons
                     RowLayout {
-                        id: point
+                        id: con
                         required property string modelData
                         required property int index
                         readonly property string html: (card.modelData.consHtml || [])[index] || ""
@@ -152,8 +153,8 @@ GridLayout {
                         Label { Layout.alignment: Qt.AlignTop; text: "−"; color: Theme.error; font.pixelSize: Theme.px(13); font.weight: Font.Medium }
                         Label {
                             Layout.fillWidth: true
-                            text: cards.shown(point.modelData, point.html)
-                            textFormat: cards.format(point.html)
+                            text: cards.shown(con.modelData, con.html)
+                            textFormat: cards.format(con.html)
                             onLinkActivated: link => cards.openLink(link)
                             color: Theme.text
                             font.pixelSize: Theme.px(13)

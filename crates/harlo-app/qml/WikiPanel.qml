@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -264,8 +265,9 @@ Rectangle {
     // larger (a chain of pages reads down a narrow panel, many pages off
     // one read across).
     readonly property string graphSourceDown: graphSource.replace(/^flowchart LR/, "flowchart TB")
+    // (Drawn only while the panel shows: hidden, its picture is let go.)
     function drawGraph(source) {
-        return mode === "graph" && source !== "" && Diagrams.revision >= 0
+        return mode === "graph" && root.visible && source !== "" && Diagrams.revision >= 0
             ? JSON.parse(Diagrams.diagram(source, Theme.isLight, JSON.stringify({ background: String(Theme.canvas), surface: String(Theme.raised), text: String(Theme.foreground),
                                                                                   muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
             : null
@@ -508,7 +510,7 @@ Rectangle {
                 background: Rectangle { radius: 8; color: hit.hovered || hit.activeFocus ? Theme.rowHover : "transparent" }
                 contentItem: ColumnLayout {
                     spacing: 2
-                    Label {
+                    PlainLabel {
                         Layout.fillWidth: true
                         text: hit.modelData.heading || root.titleOf(hit.modelData.page)
                         color: Theme.text
@@ -516,7 +518,7 @@ Rectangle {
                         font.weight: Font.Medium
                         elide: Text.ElideRight
                     }
-                    Label {
+                    PlainLabel {
                         Layout.fillWidth: true
                         text: root.titleOf(hit.modelData.page) + (hit.modelData.wiki ? " · " + hit.modelData.wiki : "")
                         visible: !!hit.modelData.heading
@@ -603,7 +605,7 @@ Rectangle {
                     }
                     // The page's title, its summary as the lede, then what
                     // it is: its kind and when it was checked against the code.
-                    Label {
+                    PlainLabel {
                         objectName: "wikiPageTitle"
                         Layout.fillWidth: true
                         Layout.topMargin: 6
@@ -614,7 +616,7 @@ Rectangle {
                         font.weight: Font.DemiBold
                         wrapMode: Text.Wrap
                     }
-                    Label {
+                    PlainLabel {
                         objectName: "wikiPageLede"
                         Layout.fillWidth: true
                         Layout.topMargin: 6
@@ -1092,7 +1094,7 @@ Rectangle {
                 background: Rectangle { radius: 8; color: row.hovered || row.activeFocus ? Theme.rowHover : "transparent" }
                 contentItem: ColumnLayout {
                     spacing: 2
-                    Label {
+                    PlainLabel {
                         Layout.fillWidth: true
                         text: row.modelData.title
                         color: Theme.text
@@ -1100,7 +1102,7 @@ Rectangle {
                         font.weight: Font.Medium
                         elide: Text.ElideRight
                     }
-                    Label {
+                    PlainLabel {
                         Layout.fillWidth: true
                         visible: text !== ""
                         text: row.modelData.description
@@ -1126,7 +1128,7 @@ Rectangle {
         Item { Layout.fillHeight: true; visible: !list.visible && !hitList.visible && !(root.reading && root.st.exists) }
 
         // ---- how fresh it is, and its runs ----
-        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.hairline; visible: footer.visible }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.hairline; visible: footer.visible }
         ColumnLayout {
             id: footer
             objectName: "wikiFooter"

@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // Context menu in the app's style: a glass card with a soft shadow, quick fade.

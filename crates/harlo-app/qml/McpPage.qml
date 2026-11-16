@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -133,18 +134,6 @@ ColumnLayout {
         border.color: Theme.border
         Label { id: badgeLabel; anchors.centerIn: parent; text: parent.text; color: Theme.muted; font.pixelSize: Theme.px(10.5) }
     }
-    component SectionTitle_: Label {
-        color: Theme.foreground
-        font.bold: true
-        font.pixelSize: Theme.px(13)
-        Layout.topMargin: 16
-    }
-    component Hint_: Label {
-        color: Theme.muted
-        font.pixelSize: Theme.px(12)
-        wrapMode: Text.Wrap
-        Layout.fillWidth: true
-    }
     /// Key / value rows (environment variables, headers); values hidden.
     component PairsEditor_: ColumnLayout {
         id: pe
@@ -157,28 +146,29 @@ ColumnLayout {
         Repeater {
             model: pe.rows
             RowLayout {
+                id: envRow
                 required property var modelData
                 required property int index
                 Layout.fillWidth: true
                 spacing: 6
                 AppTextField {
                     Layout.preferredWidth: 180
-                    text: modelData[0]
+                    text: envRow.modelData[0]
                     placeholderText: pe.keyPlaceholder
                     font.family: Theme.mono
                     font.pixelSize: Theme.px(12)
-                    onEditingFinished: pe.update(index, pe.upperKeys ? text.toUpperCase().replace(/[^A-Z0-9_]/g, "_") : text.trim(), modelData[1])
+                    onEditingFinished: pe.update(envRow.index, pe.upperKeys ? text.toUpperCase().replace(/[^A-Z0-9_]/g, "_") : text.trim(), envRow.modelData[1])
                 }
                 AppTextField {
                     Layout.fillWidth: true
-                    text: modelData[1]
+                    text: envRow.modelData[1]
                     placeholderText: "value"
                     echoMode: page.showSecrets ? TextInput.Normal : TextInput.Password
                     font.family: Theme.mono
                     font.pixelSize: Theme.px(12)
-                    onEditingFinished: pe.update(index, modelData[0], text)
+                    onEditingFinished: pe.update(envRow.index, envRow.modelData[0], text)
                 }
-                FlatButton { text: "×"; outlined: false; accent: Theme.muted; onClicked: pe.edited(pe.rows.filter((_, i) => i !== index)) }
+                FlatButton { text: "×"; outlined: false; accent: Theme.muted; onClicked: pe.edited(pe.rows.filter((_, i) => i !== envRow.index)) }
             }
         }
     }
@@ -232,14 +222,14 @@ ColumnLayout {
         }
         Item { Layout.fillWidth: true }
     }
-    Hint_ {
+    FormNote {
         Layout.topMargin: 6
         text: "In " + page.agents.map(a => page.listing.files ? page.listing.files[a.id] : "").filter(x => x).join(", ") + ". Changes apply to new sessions."
               + (!page.scope.startsWith("host:") && page.scope !== "global" && page.agents.some(a => a.id === "harlo") ? " Harlo starts a project's servers only as saved here." : "")
     }
     Repeater {
         model: page.listing.errors
-        Hint_ { required property string modelData; Layout.topMargin: 6; color: Theme.error; text: modelData }
+        FormNote { required property string modelData; Layout.topMargin: 6; color: Theme.error; text: modelData }
     }
 
     // ---- servers harlo installs with a click (this computer's global ones):
@@ -248,8 +238,8 @@ ColumnLayout {
     readonly property bool showCatalog: page.editing === null && page.scope === page.globalScope
     readonly property var catalog: Mcp.revision >= 0 ? JSON.parse(Mcp.catalogJson(page.scope)) : []
     onShowCatalogChanged: if (showCatalog) Mcp.catalogRefresh(page.scope, false)
-    SectionTitle_ { visible: page.showCatalog; text: "Ready to install" }
-    Hint_ { objectName: "mcpCatalogLede"; visible: page.showCatalog; Layout.topMargin: 2; text: "Turn one on and harlo downloads it from its project's releases and sets it up" + (Workspace.instance !== "" ? " on " + Workspace.instance : "") + " for the agents you tick." }
+    SectionTitle { visible: page.showCatalog; text: "Ready to install" }
+    FormNote { objectName: "mcpCatalogLede"; visible: page.showCatalog; Layout.topMargin: 2; text: "Turn one on and harlo downloads it from its project's releases and sets it up" + (Workspace.instance !== "" ? " on " + Workspace.instance : "") + " for the agents you tick." }
     Repeater {
         model: page.showCatalog ? page.catalog : []
         Rectangle {
@@ -299,7 +289,7 @@ ColumnLayout {
                         ToolTip.text: checked ? "On: new sessions start it. Click to turn it off." : bcard.b.version === "" ? "Off. Click to download it and set it up for the agents ticked." : "Off. Click to set it up for the agents ticked."
                     }
                 }
-                Hint_ { text: bcard.b.about; color: Theme.textMuted }
+                FormNote { text: bcard.b.about; color: Theme.textMuted }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 12
@@ -349,7 +339,7 @@ ColumnLayout {
                         onClicked: Mcp.catalogUpdate(page.scope, bcard.b.id)
                     }
                 }
-                Hint_ {
+                FormNote {
                     objectName: "mcpCatalogNote-" + bcard.b.id
                     readonly property string problem: bcard.b.error || (bcard.b.taken ? "You have another server called " + bcard.b.id + " below: remove it to use harlo's." : "") || (!bcard.on ? bcard.b.nodeError || "" : "")
                     visible: text !== ""
@@ -405,7 +395,7 @@ ColumnLayout {
             }
         }
     }
-    SectionTitle_ { visible: page.showCatalog; text: "Your servers" }
+    SectionTitle { visible: page.showCatalog; text: "Your servers" }
 
     // ---- grid ----------------------------------------------------------------
     GridLayout {
@@ -424,8 +414,9 @@ ColumnLayout {
                 readonly property bool local: modelData.form.transport === "stdio"
                 objectName: "mcpServer-" + modelData.name
                 Layout.fillWidth: true
+                Layout.fillHeight: true
                 Layout.preferredWidth: 1
-                implicitHeight: 96
+                implicitHeight: Math.max(96, cardColumn.implicitHeight + 24)
                 radius: 10
                 color: cardHover.hovered ? Theme.hover : Theme.elevated
                 border.color: Theme.border
@@ -434,6 +425,7 @@ ColumnLayout {
                 // Under the switch, which takes its own clicks.
                 MouseArea { anchors.fill: parent; onClicked: page.openServer(card.modelData) }
                 ColumnLayout {
+                    id: cardColumn
                     anchors.fill: parent
                     anchors.margins: 12
                     spacing: 4
@@ -449,7 +441,7 @@ ColumnLayout {
                             tint: page.statusColor(card.st, card.modelData.form.enabled)
                         }
                     }
-                    Label {
+                    PlainLabel {
                         Layout.fillWidth: true
                         text: card.local ? card.modelData.form.command.join(" ") : card.modelData.form.url
                         color: Theme.muted
@@ -460,12 +452,19 @@ ColumnLayout {
                     Item { Layout.fillHeight: true }
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 5
-                        Label { text: card.local ? "Local server" : "Remote server"; color: Theme.muted; font.pixelSize: Theme.px(11) }
-                        Repeater { model: card.modelData.harnesses; Badge_ { required property string modelData; text: Theme.harnessLabel(modelData) } }
-                        Badge_ { visible: card.modelData.differs; text: "copies differ" }
-                        Badge_ { visible: card.modelData.harloUnapproved === true; text: "not allowed for Harlo" }
-                        Item { Layout.fillWidth: true }
+                        spacing: 8
+                        // (On as many lines as the card's width needs: the
+                        // switch keeps the right edge.)
+                        Flow {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 5
+                            Label { height: 18; verticalAlignment: Text.AlignVCenter; text: card.local ? "Local server" : "Remote server"; color: Theme.muted; font.pixelSize: Theme.px(11) }
+                            Repeater { model: card.modelData.harnesses; Badge_ { required property string modelData; text: Theme.harnessLabel(modelData) } }
+                            Badge_ { visible: card.modelData.differs; text: "copies differ" }
+                            Badge_ { visible: card.modelData.harloUnapproved === true; text: "not allowed for Harlo" }
+                        }
                         AppSwitch {
                             objectName: "mcpToggle-" + card.modelData.name
                             checked: card.modelData.form.enabled
@@ -510,7 +509,7 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: 8
             FlatButton { objectName: "mcpBack"; text: "‹ All servers"; outlined: false; font.pixelSize: Theme.px(12); onClicked: page.editing = null }
-            Label {
+            PlainLabel {
                 Layout.fillWidth: true
                 text: page.editing && page.editing.isNew ? "New MCP server" : detail.f.name
                 color: Theme.foreground
@@ -521,14 +520,14 @@ ColumnLayout {
             Pill_ { visible: text !== "" && page.editing !== null && !page.editing.isNew; text: page.statusText(detail.st, detail.f.enabled); tint: page.statusColor(detail.st, detail.f.enabled) }
             FlatButton { objectName: "mcpImport"; visible: page.editing !== null && page.editing.isNew; text: "Import JSON…"; font.pixelSize: Theme.px(12); onClicked: importDialog.open() }
         }
-        Hint_ { visible: page.editing !== null && page.editing.differs === true; color: Theme.warning; text: "The agents' copies of this server differ; saving writes this version to each." }
-        Hint_ {
+        FormNote { visible: page.editing !== null && page.editing.differs === true; color: Theme.warning; text: "The agents' copies of this server differ; saving writes this version to each." }
+        FormNote {
             visible: page.editing !== null && page.editing.harloUnapproved === true
             color: Theme.warning
             text: "Harlo doesn't start this server yet: it's in the project's file, but wasn't saved here as it is now (a repository can bring one that runs a command). Check it, then save to let Harlo use it."
         }
 
-        SectionTitle_ { text: "Server" }
+        SectionTitle { text: "Server" }
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
@@ -555,13 +554,13 @@ ColumnLayout {
                 }
             }
         }
-        Hint_ {
+        FormNote {
             visible: page.editing !== null && page.editing.harnesses.includes("claude") && !detail.f.enabled
             text: "Claude has no off switch: it keeps the server on."
         }
 
-        SectionTitle_ { text: "How to reach it" }
-        Hint_ { text: "Paste the command that starts it, or the address of a hosted server." }
+        SectionTitle { text: "How to reach it" }
+        FormNote { text: "Paste the command that starts it, or the address of a hosted server." }
         RowLayout {
             spacing: 6
             Repeater {
@@ -599,7 +598,7 @@ ColumnLayout {
             }
             onActiveFocusChanged: if (!activeFocus) commit()
         }
-        Hint_ { visible: detail.local; text: "One argument per line; a whole command pasted on one line is split for you. It runs on " + (page.scope.startsWith("ssh://") ? "the project's host." : page.scope.startsWith("host:") ? page.scope.substring(5) + "." : "this computer.") }
+        FormNote { visible: detail.local; text: "One argument per line; a whole command pasted on one line is split for you. It runs on " + (page.scope.startsWith("ssh://") ? "the project's host." : page.scope.startsWith("host:") ? page.scope.substring(5) + "." : "this computer.") }
         AppTextField {
             objectName: "mcpUrl"
             visible: !detail.local
@@ -611,10 +610,10 @@ ColumnLayout {
             onEditingFinished: page.setField("url", text.trim())
         }
 
-        SectionTitle_ { text: detail.local ? "Environment variables" : "Request headers" }
+        SectionTitle { text: detail.local ? "Environment variables" : "Request headers" }
         RowLayout {
             Layout.fillWidth: true
-            Hint_ { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment; Harlo also runs !command." : "Such as Authorization: Bearer …" }
+            FormNote { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment; Harlo also runs !command." : "Such as Authorization: Bearer …" }
             FlatButton { text: page.showSecrets ? "Hide values" : "Show values"; outlined: false; font.pixelSize: Theme.px(12); onClicked: page.showSecrets = !page.showSecrets }
         }
         PairsEditor_ {
@@ -630,9 +629,9 @@ ColumnLayout {
             font.pixelSize: Theme.px(12)
             onClicked: page.setField(detail.local ? "env" : "headers", (detail.local ? detail.f.env : detail.f.headers).concat([["", ""]]))
         }
-        Hint_ { text: "Stored as plain text in the config files." }
+        FormNote { text: "Stored as plain text in the config files." }
 
-        SectionTitle_ { text: "Advanced" }
+        SectionTitle { text: "Advanced" }
         GridLayout {
             Layout.fillWidth: true
             columns: page.compact ? 1 : 2
@@ -666,12 +665,12 @@ ColumnLayout {
         }
 
         // Status and tools (saved servers).
-        SectionTitle_ { visible: page.editing !== null && !page.editing.isNew; text: "Status" }
+        SectionTitle { visible: page.editing !== null && !page.editing.isNew; text: "Status" }
         RowLayout {
             visible: page.editing !== null && !page.editing.isNew
             Layout.fillWidth: true
             spacing: 8
-            Hint_ {
+            FormNote {
                 text: !detail.st ? "Not tested yet."
                     : detail.st.state === "testing" ? "Testing…"
                     : detail.st.state === "connected" ? "Connected" + (detail.st.server ? " to " + detail.st.server : "") + "."
@@ -691,7 +690,7 @@ ColumnLayout {
         }
         // Which tools only look (Harlo's): those run without asking, side by
         // side, and from its programs.
-        Hint_ {
+        FormNote {
             objectName: "mcpLooksHint"
             visible: detail.marking
             Layout.topMargin: 4
@@ -714,8 +713,9 @@ ColumnLayout {
                 readonly property bool marked: (detail.f.readOnly || []).includes(modelData.name)
                 Layout.fillWidth: true
                 spacing: 8
-                Label { text: toolRow.modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
-                Label { Layout.fillWidth: true; text: toolRow.modelData.description.split("\n")[0]; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
+                // (A long name cut in the middle, at most 60% of the row.)
+                PlainLabel { Layout.maximumWidth: Math.round(detail.width * 0.6); elide: Text.ElideMiddle; text: toolRow.modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
+                PlainLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; text: toolRow.modelData.description.split("\n")[0]; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
                 AppCheckBox {
                     objectName: "mcpLooks-" + toolRow.modelData.name
                     visible: detail.marking
@@ -745,19 +745,18 @@ ColumnLayout {
             onClicked: page.showAllTools = !page.showAllTools
         }
 
-        Hint_ { visible: page.formError !== ""; Layout.topMargin: 10; color: Theme.error; text: page.formError }
+        FormNote { visible: page.formError !== ""; Layout.topMargin: 10; color: Theme.error; text: page.formError }
         // Room for the floating action bar.
         Item { implicitHeight: 64 }
     }
 
     // Save, Cancel, Delete: floating at the bottom of the page.
     Rectangle {
-        id: actionBar
         objectName: "mcpActionBar"
         parent: page.footerHost
         visible: page.editing !== null
-        width: parent ? parent.width : 0
-        height: 58
+        implicitWidth: parent ? parent.width : 0
+        implicitHeight: 58
         color: Theme.background
         Rectangle { width: parent.width; height: 1; color: Theme.border }
         RowLayout {
@@ -812,13 +811,13 @@ ColumnLayout {
         objectName: "mcpImportDialog"
         title: "Import from JSON"
         standardButtons: Dialog.Cancel
-        width: Math.min(560, (Overlay.overlay ? Overlay.overlay.width : 600) - 40)
+        implicitWidth: Math.min(560, (Overlay.overlay ? Overlay.overlay.width : 600) - 40)
         property string error: ""
         onAboutToShow: { importText.text = ""; error = "" }
         ColumnLayout {
             width: parent.width
             spacing: 8
-            Hint_ { text: "Paste an mcpServers snippet from Claude, Cursor, VS Code or another agent." }
+            FormNote { text: "Paste an mcpServers snippet from Claude, Cursor, VS Code or another agent." }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 180
@@ -834,7 +833,7 @@ ColumnLayout {
                     background: Rectangle { radius: 6; color: Theme.background; border.color: Theme.border }
                 }
             }
-            Hint_ { visible: importDialog.error !== ""; color: Theme.error; text: importDialog.error }
+            FormNote { visible: importDialog.error !== ""; color: Theme.error; text: importDialog.error }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }

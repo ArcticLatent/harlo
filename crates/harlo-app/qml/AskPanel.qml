@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -26,11 +27,17 @@ Rectangle {
             selected: !q.multi && q.recommended !== undefined && q.options[q.recommended] ? [q.options[q.recommended].label] : [],
             custom: ""
         }))
-        deadline = request.timeout ? Date.now() + request.timeout : 0
+        now = Date.now()
+        deadline = request.timeout ? now + request.timeout : 0
         previewText = ""
     }
-    onRequestChanged: reset()
+    // A new request starts over; the same one parsed again (the chat shown
+    // after a file tab covered it) keeps what was picked and typed.
+    readonly property string requestId: request.id !== undefined ? String(request.id) : ""
+    onRequestIdChanged: reset()
     Component.onCompleted: reset()
+    // (The clock only ticks while shown: catch up at once when shown again.)
+    onVisibleChanged: if (visible) now = Date.now()
 
     function toggle(qi, label) {
         const q = questions[qi]
@@ -146,7 +153,7 @@ Rectangle {
                             spacing: 8
                             // Its short name, to tell several apart (one
                             // question says it all itself).
-                            Label {
+                            PlainLabel {
                                 visible: !!qBlock.q.header && root.questions.length > 1
                                 text: qBlock.q.header || ""
                                 color: Theme.textMuted
@@ -166,7 +173,7 @@ Rectangle {
                                 font.pixelSize: Theme.px(11)
                             }
                         }
-                        Label {
+                        PlainLabel {
                             Layout.fillWidth: true
                             text: qBlock.q.question
                             color: Theme.foreground
@@ -219,7 +226,7 @@ Rectangle {
                                         Item {
                                             Layout.fillWidth: true
                                             implicitHeight: Math.max(optLabel.implicitHeight, 16)
-                                            Label {
+                                            PlainLabel {
                                                 id: optLabel
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 width: Math.min(implicitWidth, parent.width - (recMark.visible ? recMark.width + 8 : 0))
@@ -240,7 +247,7 @@ Rectangle {
                                                 Label { id: recLabel; anchors.centerIn: parent; text: "Recommended"; color: Theme.success; font.pixelSize: Theme.px(10); font.bold: true }
                                             }
                                         }
-                                        Label {
+                                        PlainLabel {
                                             Layout.fillWidth: true
                                             visible: !!optRow.modelData.description
                                             text: optRow.modelData.description || ""
@@ -274,7 +281,7 @@ Rectangle {
             color: Theme.codeBg
             border.color: Theme.border
             clip: true
-            Label {
+            PlainLabel {
                 id: previewLabel
                 x: 10
                 y: 8

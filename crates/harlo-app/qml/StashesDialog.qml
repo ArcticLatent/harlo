@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -107,7 +108,7 @@ AppDialog {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
-                        Label {
+                        PlainLabel {
                             Layout.fillWidth: true
                             text: stash.modelData.message || "(no message)"
                             color: Theme.foreground

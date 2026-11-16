@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // A labelled control on a composer's bar: a 16 px icon (or a custom lead,

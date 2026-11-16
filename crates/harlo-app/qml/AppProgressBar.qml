@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // A progress bar that reads at a glance: a primary-coloured fill on a
@@ -17,22 +17,26 @@ ProgressBar {
         implicitHeight: bar.implicitHeight
         clip: true
         Rectangle {
+            // (The fraction moves, not the width: a resize applies at once.)
+            property real shown: bar.visualPosition
+            Behavior on shown { NumberAnimation { duration: Theme.motion } }
             visible: !bar.indeterminate
-            width: Math.max(height, bar.visualPosition * parent.width)
+            width: Math.max(height, shown * parent.width)
             height: parent.height
             radius: height / 2
             color: Theme.primary
-            Behavior on width { NumberAnimation { duration: 200 } }
         }
         Rectangle {
             id: sweep
             visible: bar.indeterminate
             width: parent.width * 0.3
+            // (Still, in the middle, with animations off.)
+            x: (bar.availableWidth - width) / 2
             height: parent.height
             radius: height / 2
             color: Theme.primary
             XAnimator on x {
-                running: bar.indeterminate && bar.visible
+                running: bar.indeterminate && bar.visible && Theme.motion > 0
                 from: -sweep.width
                 to: bar.availableWidth
                 duration: 1300

@@ -106,6 +106,9 @@ pub mod qobject {
         #[qproperty(i32, projects_revision, cxx_name = "projectsRevision")]
         /// Bumped when a provider's check finishes (Settings → Providers).
         #[qproperty(i32, providers_revision, cxx_name = "providersRevision")]
+        /// Bumped when `setSetting` changes a value, so bindings on a setting
+        /// follow it.
+        #[qproperty(i32, settings_revision, cxx_name = "settingsRevision")]
         /// Running sessions that are working / waiting for you (tray icon).
         #[qproperty(i32, busy_count, cxx_name = "busyCount")]
         #[qproperty(i32, input_count, cxx_name = "inputCount")]
@@ -292,8 +295,9 @@ pub mod qobject {
         /// A saved setting (see `Settings` in workspace.rs); "" when unset.
         #[qinvokable]
         fn setting(self: &Workspace, key: &QString) -> QString;
+        /// Saves a setting; a changed value bumps `settingsRevision`.
         #[qinvokable]
-        fn set_setting(self: &Workspace, key: &QString, value: &QString);
+        fn set_setting(self: Pin<&mut Workspace>, key: &QString, value: &QString);
         /// Saves a session template (`{ id?, name, harness, model, approval,
         /// worktree, text }`; the same name replaces one):
         /// its id, or "" without a name.
@@ -1064,6 +1068,7 @@ pub struct WorkspaceRust {
     text_scale: f64,
     projects_revision: i32,
     providers_revision: i32,
+    settings_revision: i32,
     /// The last check of each provider (`None`: checking).
     provider_checks: HashMap<String, Option<harlo_core::providers::Status>>,
     /// Which round of checks is current (an earlier round's late results
@@ -4129,11 +4134,17 @@ impl Workspace {
         QString::from(&self.setting_str(&key.to_string()))
     }
 
-    pub fn set_setting(&self, key: &QString, value: &QString) {
+    pub fn set_setting(mut self: Pin<&mut Self>, key: &QString, value: &QString) {
         let (key, value) = (key.to_string(), value.to_string());
-        self.save_setting(&key, value.trim());
+        let value = value.trim();
+        let changed = self.setting_str(&key) != value;
+        self.save_setting(&key, value);
         if key == "debug_protocol" {
-            crate::diagnostics::set_protocol_logging(value.trim() == "1");
+            crate::diagnostics::set_protocol_logging(value == "1");
+        }
+        if changed {
+            let n = self.settings_revision.wrapping_add(1);
+            self.as_mut().set_settings_revision(n);
         }
     }
 

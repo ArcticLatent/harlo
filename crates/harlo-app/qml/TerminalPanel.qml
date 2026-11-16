@@ -1,12 +1,16 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
 // Terminal panel under the chat. Each folder keeps its own shells (tabs),
 // alive while harlo runs: switching sessions switches to that session's
-// terminals. + (Ctrl+Shift+T) opens another shell; `exit` in one that
-// isn't the folder's last closes its tab.
+// terminals. A folder's first shell starts when you ask for it (opening
+// the panel, a click in it, +), not when a session there is shown, so
+// browsing sessions with the panel open leaves no shells behind.
+// + (Ctrl+Shift+T) opens another shell; `exit` in one that isn't the
+// folder's last closes its tab.
 Rectangle {
     id: root
     /// Folder of the active session ("" = home).
@@ -29,10 +33,6 @@ Rectangle {
         next[f] = Object.assign({}, next[f], change)
         folders = next
         syncVisible()
-    }
-    function ensure() {
-        if (visible && !folders[folder])
-            newTab()
     }
     /// Another shell in the current folder, made current.
     /// A new tab that runs `command` once its shell is up.
@@ -94,10 +94,13 @@ Rectangle {
         return n + " · " + (path === "~" || path === "" ? "~" : path.substring(path.lastIndexOf("/") + 1))
     }
 
-    onFolderChanged: { ensure(); syncVisible() }
-    onVisibleChanged: { ensure(); if (visible && current) current.forceActiveFocus() }
-    Component.onCompleted: ensure()
-    function focusTerminal() { Qt.callLater(() => { if (root.current) root.current.forceActiveFocus() }) }
+    onFolderChanged: syncVisible()
+    onVisibleChanged: if (visible && current) current.forceActiveFocus()
+    /// The current folder's shell, focused; started if it has none.
+    function focusTerminal() {
+        if (!current) newTab()
+        else Qt.callLater(() => { if (root.current) root.current.forceActiveFocus() })
+    }
     readonly property bool terminalFocused: current !== null && current.activeFocus
 
     Rectangle { width: parent.width; height: 1; color: Theme.hairline }
@@ -148,7 +151,7 @@ Rectangle {
                             color: tab.active ? Theme.rowSelected : tabHover.hovered ? Theme.rowHover : "transparent"
                             Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                         }
-                        Label {
+                        PlainLabel {
                             id: tabLabel
                             anchors.verticalCenter: parent.verticalCenter
                             x: 12
@@ -179,7 +182,6 @@ Rectangle {
                     }
                 }
                 PanelButton {
-                    id: addButton
                     objectName: "terminalAdd"
                     implicitWidth: 28
                     implicitHeight: 28
@@ -198,6 +200,7 @@ Rectangle {
                 }
                 PanelButton {
                     objectName: "terminalRestart"
+                    visible: root.current !== null
                     implicitWidth: 28
                     implicitHeight: 28
                     iconName: "refresh"
@@ -205,7 +208,6 @@ Rectangle {
                     onClicked: if (root.current) root.current.restart()
                 }
                 PanelButton {
-                    id: closeButton
                     implicitWidth: 26
                     implicitHeight: 26
                     round: true
@@ -221,6 +223,34 @@ Rectangle {
             id: stack
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // No shell in this folder yet: one click starts it.
+            Item {
+                id: startArea
+                objectName: "terminalStartArea"
+                anchors.fill: parent
+                visible: root.current === null
+                TapHandler { onTapped: root.newTab() }
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width - 32, 420)
+                    spacing: 10
+                    Label {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "No shell in " + root.folder.replace(root.home, "~") + " yet."
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.px(13)
+                        elide: Text.ElideMiddle
+                    }
+                    FlatButton {
+                        objectName: "terminalStart"
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Start a shell"
+                        font.pixelSize: Theme.px(12.5)
+                        onClicked: root.newTab()
+                    }
+                }
+            }
         }
     }
     function syncVisible() {

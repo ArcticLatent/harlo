@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -7,6 +8,9 @@ import harlo
 // changed files) with Open and Keep this.
 Rectangle {
     id: root
+    // (Its window shown: not minimized, not in the tray. Polling waits
+    // otherwise; Item.visible doesn't change when the window hides.)
+    readonly property bool windowShown: Window.visibility !== Window.Minimized && Window.visibility !== Window.Hidden
     property string runId: ""
     color: Theme.background
 
@@ -17,7 +21,7 @@ Rectangle {
     }
     onRunIdChanged: refresh()
     onVisibleChanged: if (visible) refresh()
-    Timer { interval: 2000; repeat: true; running: root.visible && root.runId !== ""; onTriggered: root.refresh() }
+    Timer { interval: 2000; repeat: true; running: root.visible && root.windowShown && root.runId !== ""; onTriggered: root.refresh() }
 
     readonly property var lanes: run ? run.lanes : []
     readonly property bool kept: run !== null && run.kept !== null && run.kept !== undefined
@@ -102,7 +106,7 @@ Rectangle {
                 implicitHeight: promptLabel.implicitHeight + 20
                 radius: 8
                 color: Theme.userBubble
-                Label {
+                PlainLabel {
                     id: promptLabel
                     x: 12
                     y: 10

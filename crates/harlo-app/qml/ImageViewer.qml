@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -166,7 +167,6 @@ Item {
     }
 
     Item {
-        id: stage
         parent: root.fillNow ? Overlay.overlay : root
         anchors.fill: parent
         z: root.fillNow ? 1000 : 0
@@ -277,7 +277,7 @@ Item {
                     font.pixelSize: Theme.px(11)
                 }
                 // The picture's name: where it came from, for the chat's.
-                Label {
+                PlainLabel {
                     objectName: "imageThumbName"
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 8; rightMargin: 16; bottomMargin: 10 }
                     text: root.ownList ? root.labelOf(cellItem.modelData) : cellItem.modelData.substring(cellItem.modelData.lastIndexOf("/") + 1)
@@ -347,7 +347,7 @@ Item {
                     onClicked: root.step(1)
                 }
                 // Over the chat: where the picture came from.
-                Label {
+                PlainLabel {
                     objectName: "imageOrigin"
                     Layout.leftMargin: 8
                     Layout.fillWidth: true

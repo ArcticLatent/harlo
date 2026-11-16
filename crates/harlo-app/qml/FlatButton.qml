@@ -1,5 +1,6 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
+import harlo
 
 // The app's button: an outline (ControlSurface), or with
 // `outlined: false` a plain label that shows a hover. `variant` picks the

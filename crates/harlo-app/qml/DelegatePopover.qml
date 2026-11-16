@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -49,10 +50,9 @@ Popup {
     // start there, so its agents and their models are offered.
     readonly property string host: folder.startsWith("ssh://") ? folder.slice(6).split("/")[0] : ""
     // The agents sessions can start with (and their models, once checked).
-    readonly property var providers: {
-        Workspace.providersRevision
-        return JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && (host !== "" ? Theme.offeredOnHost(host, p.id) : p.state !== "missing"))
-    }
+    readonly property var providers: Workspace.providersRevision >= 0
+        ? JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && (host !== "" ? Theme.offeredOnHost(host, p.id) : p.state !== "missing"))
+        : []
     readonly property var agentIds: providers.map(p => p.id)
     // There: each agent's models as it lists them there (asked as the
     // popover opens; absent while it's asked).

@@ -1,5 +1,5 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
 import harlo
 
 // A choice of two or three views side by side (Before | After): the chosen
@@ -8,6 +8,8 @@ import harlo
 Rectangle {
     id: seg
     property var labels: []
+    /// The chosen segment: the owner's, kept by the owner (it moves it in
+    /// onPicked).
     property int current: 0
     /// objectName prefix for the segments ("<prefix><label>").
     property string namePrefix: ""
@@ -44,7 +46,9 @@ Rectangle {
                 font.pixelSize: seg.fontSize
                 accent: checked ? Theme.foreground : Theme.textMuted
                 Accessible.role: Accessible.RadioButton
-                onClicked: { checked = Qt.binding(() => index === seg.current); seg.current = index; seg.picked(index) }
+                // (The owner moves `current` in onPicked: writing it here
+                // would replace the owner's binding with a fixed number.)
+                onClicked: { checked = Qt.binding(() => index === seg.current); seg.picked(index) }
             }
         }
     }

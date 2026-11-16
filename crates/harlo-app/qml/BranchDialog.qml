@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -187,11 +188,15 @@ Popup {
                 }
             }
             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
-            TranscriptView {
+            // (Made only while the dialog is open.)
+            Loader {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                session: previewSession
-                namesFrom: root.liveSession
+                active: root.visible
+                sourceComponent: TranscriptView {
+                    session: previewSession
+                    namesFrom: root.liveSession
+                }
             }
         }
     }

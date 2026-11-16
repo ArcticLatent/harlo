@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // Pictures in a message, a tool call or a reply, as thumbnails: a click (or

@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -13,6 +14,9 @@ import harlo
 // instead (inline: a change's removed lines above its added ones).
 Rectangle {
     id: root
+    // (Its window shown: not minimized, not in the tray. Polling waits
+    // otherwise; Item.visible doesn't change when the window hides.)
+    readonly property bool windowShown: Window.visibility !== Window.Minimized && Window.visibility !== Window.Hidden
     required property string path      // absolute; "" when no diff tab is active
     property bool staged: false
     signal openFile(string path)
@@ -187,7 +191,7 @@ Rectangle {
     Timer {
         interval: root.remote ? 6000 : 2500
         repeat: true
-        running: root.visible && root.path !== "" && !dg.busy
+        running: root.visible && root.windowShown && root.path !== "" && !dg.busy
         onTriggered: dg.refresh(true)
     }
 
@@ -338,7 +342,6 @@ Rectangle {
         showRow(blocks[0].start)
     }
 
-    function topRow() { return Math.floor(rightPane.flick.contentY / lineHeight) }
     function showRow(row) {
         const f = rightPane.flick
         f.contentY = Math.max(0, Math.min(f.contentHeight - f.height, row * lineHeight - f.height / 3))
@@ -391,7 +394,7 @@ Rectangle {
             anchors.leftMargin: 12
             anchors.rightMargin: 8
             spacing: 6
-            FileIcon { path: root.fileName; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+            FileIcon { path: root.fileName }
             Label { text: root.fileName; color: Theme.foreground; font.pixelSize: Theme.px(13); font.bold: true; elide: Text.ElideRight; Layout.minimumWidth: 0; Layout.maximumWidth: implicitWidth }
             Label {
                 Layout.fillWidth: true
@@ -707,8 +710,7 @@ Rectangle {
                 color: Theme.text
                 font.pixelSize: Theme.px(13)
             }
-            Label {
-                id: reviewFor
+            PlainLabel {
                 objectName: "reviewFor"
                 // (Narrow: Send's tooltip says it.)
                 opacity: reviewBar.narrow ? 0 : 1
@@ -988,7 +990,7 @@ Rectangle {
                 border.color: Theme.hairline
                 Rectangle { width: 3; height: parent.height - 12; y: 6; x: 0; radius: 1.5; color: Theme.accent }
                 Icon { x: 12; y: 9; name: "chat-thread"; color: Theme.accent; implicitWidth: 13; implicitHeight: 13 }
-                Label {
+                PlainLabel {
                     id: noteText
                     x: 32
                     y: 7

@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Shapes
 import harlo
 
@@ -9,6 +10,9 @@ import harlo
 // and your avatar.
 Rectangle {
     id: root
+    // (Its window shown: not minimized, not in the tray. Polling waits
+    // otherwise; Item.visible doesn't change when the window hides.)
+    readonly property bool windowShown: Window.visibility !== Window.Minimized && Window.visibility !== Window.Hidden
     property bool sidebarOpen: true
     property bool settingsOpen: false
     signal sidebarToggled()
@@ -213,7 +217,7 @@ Rectangle {
             Component.onCompleted: Accounts.loadServers()
             Connections { target: Accounts; function onRevisionChanged() { serversButton.check() } }
             // Now and then; often while the panel is open.
-            Timer { interval: serversPanel.visible ? 2000 : 15000; repeat: true; running: serversButton.visible; triggeredOnStart: true; onTriggered: serversButton.check() }
+            Timer { interval: serversPanel.visible ? 2000 : 15000; repeat: true; running: serversButton.visible && root.windowShown; triggeredOnStart: true; onTriggered: serversButton.check() }
             Rectangle {
                 objectName: "railServersRunning"
                 visible: serversButton.running > 0
@@ -269,8 +273,9 @@ Rectangle {
                             Column {
                                 anchors.left: dot.right
                                 anchors.leftMargin: 10
-                                anchors.right: rowButton.left
-                                anchors.rightMargin: 8
+                                // (The button hidden, starting say: the words take its room.)
+                                anchors.right: rowButton.visible ? rowButton.left : parent.right
+                                anchors.rightMargin: rowButton.visible ? 8 : 10
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: 1
                                 // The engine (port when there are two), then its models.

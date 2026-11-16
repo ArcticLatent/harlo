@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -11,8 +12,9 @@ Popup {
     property ChatSession parentSession
     property var agent: ({})
     readonly property var live: {
-        // The latest snapshot of this agent from the parent session.
-        const list = parentSession && parentSession.subagentsJson !== "" ? JSON.parse(parentSession.subagentsJson) : []
+        // The latest snapshot of this agent from the parent session (read
+        // while it's open: the list changes a few times a second).
+        const list = root.visible && parentSession && parentSession.subagentsJson !== "" ? JSON.parse(parentSession.subagentsJson) : []
         return list.find(a => a.id === agent.id) || agent
     }
     readonly property bool running: live.status === "running" || live.status === "pending"
@@ -117,10 +119,11 @@ Popup {
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            TranscriptView {
+            // (Made only while the dialog is open.)
+            Loader {
                 anchors.fill: parent
-                session: transcriptSession
-                visible: !!root.agent.sessionFile
+                active: root.visible && !!root.agent.sessionFile
+                sourceComponent: TranscriptView { session: transcriptSession }
             }
             Label {
                 anchors.centerIn: parent

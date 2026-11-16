@@ -147,6 +147,19 @@ QtObject {
     readonly property int hoverMotion: Math.round(motion * 0.7)
     /// A side pane slides open or shut in this long (ms).
     readonly property int paneMotion: Math.round(motion * 1.4)
+    /// Corners, by size: chips and inline code 4, fields and code wells 6,
+    /// buttons and cards 8, docks and toasts 10, dialogs 12.
+    readonly property int radiusXs: 4
+    readonly property int radiusSm: 6
+    readonly property int radiusMd: 8
+    readonly property int radiusLg: 10
+    readonly property int radiusXl: 12
+    /// Under what floats over the window (only that casts a shadow); the
+    /// draft page's composer, on the darker stage, a stronger one.
+    readonly property color shadow: Qt.rgba(0, 0, 0, isLight ? 0.18 : 0.45)
+    readonly property color shadowStrong: Qt.rgba(0, 0, 0, isLight ? 0.4 : 0.75)
+    /// Over what an open drawer covers (a tap there closes it).
+    readonly property color scrim: Qt.rgba(0, 0, 0, 0.25)
     /// Long code lines wrap (code blocks, diffs, file previews).
     readonly property bool wrapCode: look.wrap === true
     /// An agent's avatar colours: a soft fill and its letters, from the theme.
@@ -154,9 +167,6 @@ QtObject {
         const base = ({ claude: "#E5895A", demo: "#A7AAB2" })[id] || "#A7AAB2"
         const col = Qt.color(base)
         return { fill: Qt.rgba(col.r, col.g, col.b, isLight ? 0.16 : 0.2), ink: isLight ? blend(col, Qt.rgba(0, 0, 0, 1), 0.25) : blend(col, Qt.rgba(1, 1, 1, 1), 0.15) }
-    }
-    function agentInitials(id) {
-        return ({ claude: "CL", demo: "DE" })[id] || (id || "?").slice(0, 2).toUpperCase()
     }
     // Project colours (Settings → Projects), from the theme, so they suit
     // every theme. Stored by key.
@@ -229,9 +239,11 @@ QtObject {
         const words = String(k).replace(/[-_]+/g, " ").trim()
         return words.charAt(0).toUpperCase() + words.slice(1)
     }
+    // (Read once per change: each helper's row asks for its model's name.)
+    readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []
     function helperModel(agent, model) {
         if (!model) return ""
-        const p = Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(x => x.id === agent) : null
+        const p = providers.find(x => x.id === agent)
         const i = p ? (p.modelIds || []).indexOf(model) : -1
         if (i >= 0 && p.models[i]) return modelLabel(p.models[i])
         // (Not listed: a Claude id reads as its picker names it, "claude-sonnet-5" → "Sonnet 5".)
@@ -302,7 +314,6 @@ QtObject {
     // code, unless others are chosen in Settings → Appearance.
     readonly property string defaultUiFont: "Geist"
     readonly property string defaultMonoFont: "JetBrains Mono"
-    readonly property string systemUiFont: Workspace.systemFont(false)
     readonly property string uiFont: Workspace.uiFont !== "" ? Workspace.uiFont : defaultUiFont
     readonly property string mono: Workspace.monoFont !== "" ? Workspace.monoFont : defaultMonoFont
 
@@ -320,9 +331,9 @@ QtObject {
 
     // Text sizes scale with Settings → Appearance → Text size; code (`mpx`)
     // with the code font's size too.
-    function px(n) { return Math.round(n * Workspace.textScale) }
+    function px(n: real): real { return Math.round(n * Workspace.textScale) }
     readonly property real monoScale: Math.max(0.7, Math.min(1.6, look.monoScale || 1))
-    function mpx(n) { return Math.round(n * Workspace.textScale * monoScale) }
+    function mpx(n: real): real { return Math.round(n * Workspace.textScale * monoScale) }
 
     function luminance(col) { return 0.2126 * col.r + 0.7152 * col.g + 0.0722 * col.b }
     // Qt rich text wants #RRGGBB (alpha dropped).
@@ -412,7 +423,9 @@ QtObject {
         // text, whatever a style says.) One that opens a reply has no room
         // above it (the reply's name is there).
         const heads = { 1: [21, 24, 8], 2: [19, 22, 6], 3: [17, 18, 4], 4: [16, 16, 2], 5: [14, 14, 2], 6: [14, 14, 2] }
-        html = html.replace(/<h([1-6])(?:\s[^>]*)?>([\s\S]*?)<\/h\1>/g, (all, level, inner, offset) => {
+        // (Each pass only where its tag is: a streaming reply asks again
+        // for every piece.)
+        if (html.indexOf("<h") >= 0) html = html.replace(/<h([1-6])(?:\s[^>]*)?>([\s\S]*?)<\/h\1>/g, (all, level, inner, offset) => {
             const [size, above, below] = heads[level]
             const top = atTop && offset === 0 ? 0 : above
             return '<p style="font-size:' + px(size) + 'px;font-weight:600;margin-top:' + top + 'px;margin-bottom:' + below + 'px;color:'
@@ -421,11 +434,11 @@ QtObject {
         // A rule: a hairline the width of the text (Qt draws <hr> in the
         // text colour, the loudest line in a reply). A one-cell table
         // with a 1px font is one pixel high.
-        html = html.replace(/<hr\s*\/?>/g, '<table class="rule" width="100%" cellspacing="0" cellpadding="0" style="margin-top:14px;margin-bottom:14px;"><tr>'
+        if (html.indexOf("<hr") >= 0) html = html.replace(/<hr\s*\/?>/g, '<table class="rule" width="100%" cellspacing="0" cellpadding="0" style="margin-top:14px;margin-bottom:14px;"><tr>'
             + '<td class="rule" bgcolor="' + rgb(hairline) + '" style="font-size:1px;line-height:100%;">&nbsp;</td></tr></table>')
         // A table's header: a hairline row under it, across its columns.
         // (No frame: Qt keeps room for one, even unstyled.)
-        html = html.replace(/<table border="1"/g, '<table border="0"').replace(/(<thead>\s*<tr>([\s\S]*?)<\/tr>\s*<\/thead>\s*<tbody>)/g, (all, head, cells) =>
+        if (html.indexOf("<table") >= 0) html = html.replace(/<table border="1"/g, '<table border="0"').replace(/(<thead>\s*<tr>([\s\S]*?)<\/tr>\s*<\/thead>\s*<tbody>)/g, (all, head, cells) =>
             all + '<tr><td class="rule" colspan="' + Math.max(1, (cells.match(/<th[\s>]/g) || []).length) + '" bgcolor="' + rgb(hairline)
                 + '" style="font-size:1px;line-height:100%;">&nbsp;</td></tr>')
         // A quote: a rule down its left (Qt draws no side borders, so a

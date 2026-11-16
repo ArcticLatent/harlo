@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // Refresh, as an icon: the same at every section that reads something again.

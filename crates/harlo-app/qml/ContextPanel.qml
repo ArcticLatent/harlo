@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -238,11 +239,12 @@ Rectangle {
                                     ["Cache hit", body.r.last.cacheHit === null ? "–" : body.r.last.cacheHit.toFixed(1) + "%"],
                                 ] : []
                                 Column {
+                                    id: statCell
                                     required property var modelData
                                     Layout.fillWidth: true
                                     spacing: 2
-                                    Label { text: modelData[0]; color: Theme.textMuted; font.pixelSize: Theme.px(11.5) }
-                                    Label { text: modelData[1]; color: Theme.text; font.pixelSize: Theme.px(14); font.weight: Font.Medium }
+                                    Label { text: statCell.modelData[0]; color: Theme.textMuted; font.pixelSize: Theme.px(11.5) }
+                                    Label { text: statCell.modelData[1]; color: Theme.text; font.pixelSize: Theme.px(14); font.weight: Font.Medium }
                                 }
                             }
                         }
@@ -283,10 +285,11 @@ Rectangle {
                         Repeater {
                             model: parent.parent.parts
                             Row {
+                                id: partRow
                                 required property var modelData
                                 spacing: 6
-                                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 7; height: 7; radius: 3.5; color: modelData.color }
-                                Label { text: modelData.label + " " + Math.round(modelData.pct) + "%"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 7; height: 7; radius: 3.5; color: partRow.modelData.color }
+                                Label { text: partRow.modelData.label + " " + Math.round(partRow.modelData.pct) + "%"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
                             }
                         }
                     }
@@ -298,11 +301,12 @@ Rectangle {
                     // The newest 300 are plenty here.
                     model: (body.r.rows || []).slice(0, Math.min(300, root.messagesShown))
                     Item {
+                        id: messageRow
                         required property var modelData
                         required property int index
                         Layout.fillWidth: true
                         implicitHeight: 34
-                        Rectangle { visible: index > 0; width: parent.width; height: 1; color: Theme.hairline }
+                        Rectangle { visible: messageRow.index > 0; width: parent.width; height: 1; color: Theme.hairline }
                         RowLayout {
                             anchors.fill: parent
                             spacing: 8
@@ -311,18 +315,18 @@ Rectangle {
                                 objectName: "contextRowLabel"
                                 textFormat: Text.StyledText
                                 // (Escaped: a reply's "2>&1;" would read as markup.)
-                                text: (modelData.kind === "user" ? "<b>You:</b> " : "") + modelData.label.replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                                color: modelData.kind === "idle" ? Theme.textMuted : modelData.error ? Theme.error : Theme.text
+                                text: (messageRow.modelData.kind === "user" ? "<b>You:</b> " : "") + messageRow.modelData.label.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                                color: messageRow.modelData.kind === "idle" ? Theme.textMuted : messageRow.modelData.error ? Theme.error : Theme.text
                                 elide: Text.ElideRight
                                 font.pixelSize: Theme.px(13)
                             }
                             Label {
-                                visible: modelData.input !== undefined && modelData.input !== null
-                                text: root.fmt(modelData.input) + " / " + root.fmt(modelData.output)
+                                visible: messageRow.modelData.input !== undefined && messageRow.modelData.input !== null
+                                text: root.fmt(messageRow.modelData.input) + " / " + root.fmt(messageRow.modelData.output)
                                 color: Theme.textFaint
                                 font.pixelSize: Theme.px(12)
                             }
-                            Label { text: root.when(modelData.ts); color: Theme.textFaint; font.pixelSize: Theme.px(12) }
+                            Label { text: root.when(messageRow.modelData.ts); color: Theme.textFaint; font.pixelSize: Theme.px(12) }
                         }
                     }
                 }

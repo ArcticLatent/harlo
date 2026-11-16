@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -70,23 +71,24 @@ Popup {
                     Repeater {
                         model: root.steps
                         Rectangle {
+                            id: stepChip
                             required property var modelData
                             required property int index
-                            objectName: "setupStep-" + index
+                            objectName: "setupStep-" + stepChip.index
                             implicitWidth: stepLabel.implicitWidth + 22
                             implicitHeight: 28
                             radius: 14
-                            color: index === root.step ? Theme.accentSoft : "transparent"
-                            border.color: index === root.step ? Theme.accent : Theme.hairline
+                            color: stepChip.index === root.step ? Theme.accentSoft : "transparent"
+                            border.color: stepChip.index === root.step ? Theme.accent : Theme.hairline
                             Label {
                                 id: stepLabel
                                 anchors.centerIn: parent
-                                text: (index < root.step ? "✓ " : (index + 1) + "  ") + modelData.title
-                                color: index === root.step ? Theme.text : Theme.textMuted
+                                text: (stepChip.index < root.step ? "✓ " : (stepChip.index + 1) + "  ") + stepChip.modelData.title
+                                color: stepChip.index === root.step ? Theme.text : Theme.textMuted
                                 font.pixelSize: Theme.px(12)
-                                font.weight: index === root.step ? Font.Medium : Font.Normal
+                                font.weight: stepChip.index === root.step ? Font.Medium : Font.Normal
                             }
-                            TapHandler { onTapped: root.step = index }
+                            TapHandler { onTapped: root.step = stepChip.index }
                             HoverHandler { cursorShape: Qt.PointingHandCursor }
                         }
                     }

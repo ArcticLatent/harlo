@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -71,23 +72,6 @@ Rectangle {
     function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
     function modelName(m) { return m === "unknown" || m === "" ? "Model not recorded" : Theme.modelLabel(m) }
 
-    component SectionTitle: Label {
-        color: Theme.foreground
-        font.weight: Font.DemiBold
-        font.pixelSize: Theme.px(13)
-        Layout.topMargin: 14
-    }
-    component Pill: Button {
-        id: pill
-        property bool selected: false
-        flat: true
-        padding: 6
-        leftPadding: 10
-        rightPadding: 10
-        font.pixelSize: Theme.px(12)
-        contentItem: Label { text: pill.text; color: pill.selected ? Theme.foreground : Theme.muted; font: pill.font; horizontalAlignment: Text.AlignHCenter }
-        background: ControlSurface { control: pill; variant: pill.selected ? "selected" : "outline"; radius: 7 }
-    }
     // A legend's colour.
     component Swatch: Rectangle {
         implicitWidth: 8
@@ -129,7 +113,7 @@ Rectangle {
                         spacing: 6
                         Repeater {
                             model: [[7, "7 days"], [30, "30 days"], [90, "90 days"], [0, "All time"]]
-                            Pill {
+                            ChoicePill {
                                 required property var modelData
                                 text: modelData[1]
                                 selected: root.days === modelData[0]
@@ -138,7 +122,6 @@ Rectangle {
                         }
                     }
                     ComboField {
-                        id: projectBox
                         objectName: "statsProject"
                         // Beside the periods when 150px or more is left there.
                         readonly property real room: filters.width - periods.width - filters.spacing
@@ -356,7 +339,7 @@ Rectangle {
                         Row {
                             id: compBar
                             Layout.fillWidth: true
-                            height: 8
+                            Layout.preferredHeight: 8
                             spacing: 0
                             Repeater {
                                 model: root.tokenKinds
@@ -452,7 +435,7 @@ Rectangle {
                     Item { Layout.fillWidth: true }
                     Repeater {
                         model: [["tokens", "Tokens"], ["cost", "Cost"], ["steps", "Steps"]]
-                        Pill {
+                        ChoicePill {
                             required property var modelData
                             Layout.topMargin: 14
                             text: modelData[1]
@@ -499,10 +482,10 @@ Rectangle {
                             // Natural widths, from hidden twins that are never
                             // cut: a label's width bound to its own implicitWidth
                             // loops once it's cut short.
-                            Label { id: nameTwin; visible: false; text: modelName.text; font: modelName.font }
+                            PlainLabel { id: nameTwin; visible: false; text: modelName.text; font: modelName.font }
                             Label { id: thinkingTwin; visible: false; text: modelThinking.text; font: modelThinking.font }
                             Label { id: providerTwin; visible: false; text: modelData.provider; font: modelThinking.font }
-                            Label {
+                            PlainLabel {
                                 id: modelName
                                 width: Math.max(0, Math.min(Math.ceil(nameTwin.implicitWidth), modelHead.room))
                                 text: root.modelName(modelData.model)

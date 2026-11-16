@@ -1,5 +1,6 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
+import harlo
 
 // A small count bubble for the top-right corner of a button.
 // Place it in the button and anchor it: `anchors.top: parent.top;
@@ -7,8 +8,8 @@ import QtQuick.Controls
 Rectangle {
     property int count: 0
     visible: count > 0
-    height: 16
-    width: Math.max(16, label.implicitWidth + 8)
+    implicitHeight: 16
+    implicitWidth: Math.max(16, label.implicitWidth + 8)
     radius: 8
     color: Theme.primary
     border.color: Theme.background

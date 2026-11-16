@@ -1,4 +1,5 @@
 import QtQuick
+import harlo
 
 // busy/starting pulse; input, unread and live are steady dots.
 Rectangle {

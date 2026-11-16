@@ -391,6 +391,23 @@ const ROLE_IMAGES: i32 = 0x112;
 /// A remote session's file: when it was asked for, and its text once it came.
 type HostFile = (std::time::Instant, Option<Arc<str>>);
 
+/// A local file: its size and modification time when read, and its text
+/// once read (None while it's read, or when it isn't text).
+type LocalFile = ((Option<std::time::SystemTime>, u64), Option<Arc<str>>);
+
+/// A run's JSON, with the rows it was made from.
+type RunJson = (Vec<Arc<Row>>, QString);
+
+/// An edit's numbered lines, with the file text they were numbered from.
+type DiffLines = (Option<Arc<str>>, QString);
+
+/// Local files bigger than this aren't read to number an edit's lines.
+const LOCAL_FILE_MAX: u64 = 4 << 20;
+
+/// Edits whose numbered lines are kept (`diff_lines`); past it, all are let
+/// go and made again as asked.
+const DIFFS_KEPT: usize = 256;
+
 #[derive(Default)]
 pub struct ChatSessionRust {
     key: QString,
@@ -464,6 +481,17 @@ pub struct ChatSessionRust {
     /// Rows far back read whole from their page (see `harlo_core::pages`),
     /// the latest asked for: what the rows in view show.
     wholes: std::cell::RefCell<std::collections::VecDeque<Arc<Row>>>,
+    /// Each run's JSON as last given (`run_json`), with the rows it was
+    /// made from: asked again for every new row, it's made again only when
+    /// one of the run's rows is another.
+    runs: std::cell::RefCell<std::collections::HashMap<u64, RunJson>>,
+    /// Local files edits are numbered from: each as last read, with the
+    /// size and time it was read at (see `local_file`).
+    local_files: std::cell::RefCell<std::collections::HashMap<String, LocalFile>>,
+    /// Edits' numbered lines as last given (`diff_lines`), with the file
+    /// text they were numbered from: a card made again doesn't highlight
+    /// them again.
+    diffs: std::cell::RefCell<std::collections::HashMap<u64, DiffLines>>,
 }
 
 /// What to put back for messages stopped before they went (`held`, oldest
@@ -543,6 +571,42 @@ impl RowIndex {
         }
         ix
     }
+}
+
+/// Runs whose JSON is kept (`run_json`): the run boxes near the view, with
+/// room to spare; past it, all are let go and made again as asked.
+const RUNS_KEPT: usize = 64;
+
+/// The roles whose values differ between two versions of a row (none when
+/// the change is to nothing a view shows).
+fn changed_roles(old: &Row, new: &Row) -> Vec<i32> {
+    let mut roles = Vec::new();
+    let mut add = |differs: bool, role: i32| {
+        if differs {
+            roles.push(role);
+        }
+    };
+    add(old.key != new.key, ROLE_KEY);
+    add(old.kind != new.kind, ROLE_KIND);
+    add(old.html != new.html || old.paged != new.paged, ROLE_HTML);
+    add(old.text != new.text || old.paged != new.paged, ROLE_TEXT);
+    add(old.title != new.title, ROLE_TITLE);
+    add(old.subtitle != new.subtitle, ROLE_SUBTITLE);
+    add(old.state != new.state, ROLE_STATE);
+    add(old.call_id != new.call_id, ROLE_CALL_ID);
+    add(old.group != new.group, ROLE_GROUP);
+    add(old.summary != new.summary, ROLE_SUMMARY);
+    add(old.group_open != new.group_open, ROLE_GROUP_OPEN);
+    add(old.model != new.model, ROLE_MODEL);
+    add(old.section() != new.section(), ROLE_SECTION);
+    add(old.result != new.result, ROLE_RESULT);
+    add(old.diff != new.diff || old.paged != new.paged, ROLE_DIFF);
+    add(old.time != new.time || old.ended != new.ended, ROLE_TOOK);
+    add(old.label != new.label, ROLE_LABEL);
+    add(old.command != new.command || old.paged != new.paged, ROLE_COMMAND);
+    // (Pictures it names show once they exist: looked at again on any change.)
+    add(old.images != new.images || !new.mentions.is_empty() || old.mentions != new.mentions, ROLE_IMAGES);
+    roles
 }
 
 /// Paged rows kept read back, at most, and at most this much of their
@@ -644,6 +708,9 @@ impl ChatSession {
         }
         self.as_mut().rust_mut().generation += 1;
         self.host_files.borrow_mut().clear();
+        self.local_files.borrow_mut().clear();
+        self.diffs.borrow_mut().clear();
+        self.runs.borrow_mut().clear();
         // (Rows read back are this session's: they and their page go.)
         self.wholes.borrow_mut().clear();
         self.as_mut().set_preparing(false);
@@ -1234,9 +1301,19 @@ impl ChatSession {
 
     pub fn run_json(&self, group: &QString) -> QString {
         let group = group.to_string();
-        let rows: Vec<serde_json::Value> = self
-            .run_rows(&group)
-            .into_iter()
+        let run = self.run_rows(&group);
+        let id = hash_of(&group);
+        // (A row naming pictures shows those that exist: made each time.)
+        let cacheable = run.iter().all(|r| r.mentions.is_empty());
+        if cacheable
+            && let Some((rows, json)) = self.runs.borrow().get(&id)
+            && rows.len() == run.len()
+            && rows.iter().zip(&run).all(|(a, b)| Arc::ptr_eq(a, b))
+        {
+            return json.clone();
+        }
+        let rows: Vec<serde_json::Value> = run
+            .iter()
             .map(|r| {
                 let r = &self.whole(r);
                 let took = if r.time > 0 && r.ended >= r.time { r.ended - r.time } else { 0 };
@@ -1247,7 +1324,15 @@ impl ChatSession {
                 })
             })
             .collect();
-        QString::from(&serde_json::Value::from(rows).to_string())
+        let json = QString::from(&serde_json::Value::from(rows).to_string());
+        if cacheable {
+            let mut runs = self.runs.borrow_mut();
+            if runs.len() >= RUNS_KEPT {
+                runs.clear();
+            }
+            runs.insert(id, (run.into_iter().map(Arc::clone).collect(), json.clone()));
+        }
+        json
     }
 
     pub fn diff_lines(&self, path: &QString, diff: &QString, limit: i32, file: &QString) -> QString {
@@ -1261,19 +1346,78 @@ impl ChatSession {
         } else if harlo_core::remote::is_remote(std::path::Path::new(&file)) {
             self.host_file(&file)
         } else {
-            std::fs::metadata(&file).ok().filter(|m| m.is_file() && m.len() < 4 << 20).and_then(|_| std::fs::read_to_string(&file).ok()).map(Arc::from)
+            self.local_file(&file)
         };
-        let numbers = text.map_or_else(|| vec![None; all.len()], |t| harlo_core::listing::diff_numbers(&all, &t));
+        let path = path.to_string();
+        let id = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (&path, &diff, limit, &file).hash(&mut h);
+            h.finish()
+        };
+        if let Some((known, json)) = self.diffs.borrow().get(&id)
+            && match (known, &text) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+        {
+            return json.clone();
+        }
+        let numbers = text.as_ref().map_or_else(|| vec![None; all.len()], |t| harlo_core::listing::diff_numbers(&all, t));
         let lines = &all[..all.len().min(usize::try_from(limit).unwrap_or(0))];
         let texts: Vec<&str> = lines.iter().map(|l| l.get(1..).unwrap_or_default()).collect();
-        let html = harlo_core::markdown::highlight_lines(&path.to_string(), &texts);
+        let html = harlo_core::markdown::highlight_lines(&path, &texts);
         let out: Vec<serde_json::Value> = lines
             .iter()
             .zip(html)
             .zip(&numbers)
             .map(|((l, h), n)| serde_json::json!({ "s": l.get(..1).unwrap_or(" "), "h": h, "n": n.map(|n| n.to_string()).unwrap_or_default() }))
             .collect();
-        QString::from(&serde_json::Value::from(out).to_string())
+        let json = QString::from(&serde_json::Value::from(out).to_string());
+        let mut diffs = self.diffs.borrow_mut();
+        if diffs.len() >= DIFFS_KEPT {
+            diffs.clear();
+        }
+        diffs.insert(id, (text, json.clone()));
+        json
+    }
+
+    /// A local file's text as last read: read again, off the GUI thread,
+    /// once its size or modification time changed.
+    ///
+    /// None until it has been read, or when it isn't a text file under
+    /// [`LOCAL_FILE_MAX`]; `filesRead` says when a read comes in.
+    fn local_file(&self, path: &str) -> Option<Arc<str>> {
+        let meta = std::fs::metadata(path).ok().filter(|m| m.is_file() && m.len() < LOCAL_FILE_MAX)?;
+        let stamp = (meta.modified().ok(), meta.len());
+        let known = self.local_files.borrow().get(path).cloned();
+        if let Some((at, text)) = &known
+            && *at == stamp
+        {
+            return text.clone();
+        }
+        // (Until the new one comes, the old text: its numbers are near.)
+        let old = known.and_then(|(_, t)| t);
+        self.local_files.borrow_mut().insert(path.to_owned(), (stamp, old.clone()));
+        let (thread, generation, path) = (self.qt_thread(), self.generation, path.to_owned());
+        crate::runtime().spawn_blocking(move || {
+            let Ok(text) = std::fs::read_to_string(&path) else { return };
+            let _ = thread.queue(move |mut this| {
+                if this.generation != generation {
+                    return;
+                }
+                let text: Arc<str> = text.into();
+                // (A newer read was asked for meanwhile: that one stands.)
+                if this.local_files.borrow().get(&path).is_none_or(|(at, _)| *at != stamp) {
+                    return;
+                }
+                this.local_files.borrow_mut().insert(path, (stamp, Some(text)));
+                let n = this.files_read + 1;
+                this.as_mut().set_files_read(n);
+            });
+        });
+        old
     }
 
     /// A host's file as last read (None until it has come), asked for
@@ -1713,10 +1857,20 @@ impl ChatSession {
             match change {
                 RowChange::Update { at, row } => {
                     tool_ended |= ended(&row) && !ended(&self.rows[at]);
+                    // (Only the roles that changed: a streaming row's
+                    // delegate doesn't look at all the others again.)
+                    let roles = changed_roles(&self.rows[at], &row);
                     self.as_mut().rust_mut().rows[at] = row;
                     *self.row_index.borrow_mut() = None;
-                    let idx = self.index(i32::try_from(at).unwrap_or(i32::MAX), 0, &root);
-                    self.as_mut().data_changed(&idx, &idx, &QVector::<i32>::default());
+                    if !roles.is_empty() {
+                        let idx = self.index(i32::try_from(at).unwrap_or(i32::MAX), 0, &root);
+                        let mut list = QVector::<i32>::default();
+                        list.reserve(isize::try_from(roles.len()).unwrap_or(0));
+                        for r in roles {
+                            list.append(r);
+                        }
+                        self.as_mut().data_changed(&idx, &idx, &list);
+                    }
                 }
                 RowChange::Remove { at, count } => {
                     let len = self.rows.len();
@@ -1950,5 +2104,20 @@ mod tests {
         assert_eq!(s.row_at("z"), None, "the index is the one built before");
         *s.row_index.borrow_mut() = None;
         assert_eq!((s.row_at("z"), s.row_at("b"), keys(&s, "g1").len()), (Some(0), Some(2), 3));
+    }
+
+    #[test]
+    fn an_update_names_only_the_roles_it_changes() {
+        let old = Row { key: "a".into(), kind: RowKind::Tool, text: "run".into(), state: "running".into(), time: 10, ..Row::default() };
+        assert_eq!(changed_roles(&old, &old.clone()), Vec::<i32>::new(), "nothing changed, nothing to say");
+        let new = Row { text: "run\nok".into(), state: "done".into(), ended: 30, ..old.clone() };
+        assert_eq!(changed_roles(&old, &new), vec![ROLE_TEXT, ROLE_STATE, ROLE_TOOK]);
+        // A notice becoming harlo's moves its place among the turns too.
+        let notice = Row { kind: RowKind::Notice, ..old.clone() };
+        let harlo = Row { title: harlo_core::transcript::FROM_HARLO.into(), ..notice.clone() };
+        assert_eq!(changed_roles(&notice, &harlo), vec![ROLE_TITLE, ROLE_SECTION]);
+        // A row naming pictures has them looked at again on any change.
+        let named = Row { mentions: vec!["shot.png".into()], ..old.clone() };
+        assert_eq!(changed_roles(&named, &Row { result: "ok".into(), ..named.clone() }), vec![ROLE_RESULT, ROLE_IMAGES]);
     }
 }

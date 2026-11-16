@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -213,11 +214,12 @@ RowLayout {
                         Repeater {
                             model: row.modelData.keys
                             RowLayout {
+                                id: keyRow
                                 required property var modelData
                                 required property int index
                                 spacing: 3
-                                Label { visible: index > 0; text: "or"; color: Theme.muted; font.pixelSize: Theme.px(11); Layout.leftMargin: 2; Layout.rightMargin: 2 }
-                                Keys_ { key: modelData }
+                                Label { visible: keyRow.index > 0; text: "or"; color: Theme.muted; font.pixelSize: Theme.px(11); Layout.leftMargin: 2; Layout.rightMargin: 2 }
+                                Keys_ { key: keyRow.modelData }
                             }
                         }
                     }
@@ -256,13 +258,14 @@ RowLayout {
     Repeater {
         model: root.twoColumns ? 2 : 1
         ColumnLayout {
+            id: sectionColumn
             required property int index
             Layout.fillWidth: true
             Layout.preferredWidth: 1
             Layout.alignment: Qt.AlignTop
             spacing: 18
             Repeater {
-                model: root.columns[index]
+                model: root.columns[sectionColumn.index]
                 Section { required property var modelData; data_: modelData }
             }
         }

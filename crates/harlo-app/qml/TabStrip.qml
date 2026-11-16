@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -92,7 +93,7 @@ Rectangle {
                     }
                     FileIcon { visible: tab.isFile || tab.isDiff; path: tab.isFile ? tab.key.substring(5) : tab.diffPath; Layout.preferredWidth: 14; Layout.preferredHeight: 14 }
                     Icon { visible: tab.key.startsWith("view:"); name: tab.key === "view:new" ? "chat-new" : tab.key.startsWith("view:run:") ? "node-tree" : tab.key.substring(5); color: Theme.primary; implicitWidth: 12; implicitHeight: 12 }
-                    Label {
+                    PlainLabel {
                         id: label
                         Layout.fillWidth: true
                         text: (tab.branch !== "" ? "⎇ " : "") + tab.title
@@ -122,7 +123,6 @@ Rectangle {
             TapHandler { acceptedButtons: Qt.MiddleButton; onTapped: root.closeRequested(tab.key) }
             // Drag to reorder: swap with the neighbour once past its middle.
             DragHandler {
-                id: drag
                 target: null
                 yAxis.enabled: false
                 property real startX: 0

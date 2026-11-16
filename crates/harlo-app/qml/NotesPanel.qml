@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -133,7 +134,6 @@ Rectangle {
             Layout.margins: 14
             spacing: 6
             AppTextField {
-                id: todoField
                 objectName: "todoField"
                 Layout.fillWidth: true
                 placeholderText: "Add a todo (Enter)"

@@ -1,9 +1,10 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import harlo
 
 // harlo's window, small, in a theme variant's colours (`colors`:
 // background, foreground, primary, elevated, muted text, sidebar).
 Rectangle {
+    id: mini
     property var colors: []
     readonly property color bg: colors[0] || "#202020"
     readonly property color fg: colors[1] || "#e0e0e0"
@@ -51,7 +52,7 @@ Rectangle {
         width: parent.width * 0.22
         height: 10
         radius: 5
-        color: Qt.rgba(acc.r, acc.g, acc.b, 0.55)
+        color: Qt.rgba(mini.acc.r, mini.acc.g, mini.acc.b, 0.55)
     }
     Rectangle {
         x: parent.width * 0.34

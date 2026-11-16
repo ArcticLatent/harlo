@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -62,10 +63,10 @@ Popup {
 
     background: GlassSurface { radius: 10 }
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 90 }
-        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 90; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Math.round(Theme.motion * 0.55) }
+        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: Math.round(Theme.motion * 0.55); easing.type: Easing.OutCubic }
     }
-    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 70 } }
+    exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Math.round(Theme.motion * 0.45) } }
 
     ColumnLayout {
         anchors.fill: parent
@@ -118,7 +119,7 @@ Popup {
                 readonly property bool header: modelData.kind === "header"
                 width: list.width
                 height: header ? 26 : 32
-                Label {
+                PlainLabel {
                     visible: entry.header
                     x: 8
                     anchors.bottom: parent.bottom
@@ -143,7 +144,7 @@ Popup {
                             implicitWidth: 14
                             implicitHeight: 14
                         }
-                        Label {
+                        PlainLabel {
                             Layout.fillWidth: true
                             text: entry.modelData.kind === "create" ? "Create branch “" + entry.modelData.name + "”" : entry.modelData.name
                             color: Theme.foreground

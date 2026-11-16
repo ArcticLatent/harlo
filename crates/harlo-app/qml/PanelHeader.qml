@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import harlo
 
@@ -21,12 +20,11 @@ Item {
     FontMetrics { id: subMetrics; font.pixelSize: Theme.px(13) }
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hairline }
     ColumnLayout {
-        id: textCol
         x: 18
         width: Math.max(0, closeButton.x - actionRow.width - x - 10)
         anchors.verticalCenter: parent.verticalCenter
         spacing: 3
-        Label {
+        PlainLabel {
             Layout.fillWidth: true
             text: head.title
             color: Theme.text
@@ -35,7 +33,7 @@ Item {
             font.letterSpacing: -0.2
             elide: Text.ElideRight
         }
-        Label {
+        PlainLabel {
             Layout.fillWidth: true
             visible: head.subtitle !== ""
             text: head.subtitle

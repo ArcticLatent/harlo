@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -34,7 +34,7 @@ Rectangle {
         anchors.leftMargin: 8
         anchors.rightMargin: chip.removable ? 4 : 8
         spacing: 6
-        FileIcon { visible: !chip.isSession && !chip.picture; path: chip.name; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+        FileIcon { visible: !chip.isSession && !chip.picture; path: chip.name }
         ImageThumb {
             objectName: "attachmentThumb"
             visible: chip.picture
@@ -46,7 +46,7 @@ Rectangle {
             TapHandler { onTapped: chip.openRequested() }
         }
         Icon { visible: chip.isSession; name: "chat-thread"; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
-        Label {
+        PlainLabel {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             text: chip.name

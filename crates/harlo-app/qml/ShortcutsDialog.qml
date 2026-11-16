@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -149,13 +150,14 @@ Popup {
                                 return out
                             }
                             Item {
+                                id: keyItem
                                 required property var modelData
-                                implicitWidth: modelData.key !== undefined ? cap.implicitWidth : word.implicitWidth
+                                implicitWidth: keyItem.modelData.key !== undefined ? cap.implicitWidth : word.implicitWidth
                                 implicitHeight: 22
                                 width: implicitWidth
                                 height: implicitHeight
-                                KeyCap { id: cap; visible: modelData.key !== undefined; text: modelData.key || ""; anchors.verticalCenter: parent.verticalCenter }
-                                Label { id: word; visible: modelData.word !== undefined; text: modelData.word || ""; color: Theme.textMuted; font.pixelSize: Theme.px(12); anchors.verticalCenter: parent.verticalCenter }
+                                KeyCap { id: cap; visible: keyItem.modelData.key !== undefined; text: keyItem.modelData.key || ""; anchors.verticalCenter: parent.verticalCenter }
+                                Label { id: word; visible: keyItem.modelData.word !== undefined; text: keyItem.modelData.word || ""; color: Theme.textMuted; font.pixelSize: Theme.px(12); anchors.verticalCenter: parent.verticalCenter }
                             }
                         }
                     }

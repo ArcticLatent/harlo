@@ -1,6 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // The themes to choose from: each a small harlo window in its colours, in
@@ -142,10 +143,11 @@ GridLayout {
                 Repeater {
                     model: [0.75, 0.6, 0.7]
                     Row {
+                        id: barRow
                         required property real modelData
                         spacing: 4 * pv.u
                         Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 3.5 * pv.u; height: width; radius: width / 2; color: pv.a(pv.mut, 0.7) }
-                        Rectangle { width: (pv.width * 0.38 - 22 * pv.u) * modelData; height: 3.5 * pv.u; radius: height / 2; color: pv.a(pv.mut, 0.55) }
+                        Rectangle { width: (pv.width * 0.38 - 22 * pv.u) * barRow.modelData; height: 3.5 * pv.u; radius: height / 2; color: pv.a(pv.mut, 0.55) }
                     }
                 }
             }

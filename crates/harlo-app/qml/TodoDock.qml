@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -85,7 +86,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.topMargin: 4
                 spacing: 2
-                Label {
+                PlainLabel {
                     // (Claude's list has one phase, without a name.)
                     visible: (phaseBlock.modelData.name || "") !== ""
                     text: (phaseBlock.modelData.name || "").toUpperCase()
@@ -108,7 +109,7 @@ Rectangle {
                             Icon { anchors.fill: parent; visible: taskRow.m.icon !== ""; name: taskRow.m.icon; color: taskRow.m.color }
                             Rectangle { visible: taskRow.m.icon === ""; anchors.centerIn: parent; width: 10; height: 10; radius: 5; color: "transparent"; border.color: Theme.muted }
                         }
-                        Label {
+                        PlainLabel {
                             Layout.fillWidth: true
                             text: taskRow.modelData.content + (taskRow.modelData.blocker ? "  — " + taskRow.modelData.blocker : "")
                             color: taskRow.modelData.status === "in_progress" ? Theme.foreground : Theme.muted

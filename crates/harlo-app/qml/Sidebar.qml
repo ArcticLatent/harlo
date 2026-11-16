@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Effects
 import QtQuick.Shapes
 import QtQuick.Layouts
@@ -173,7 +174,6 @@ Rectangle {
     function openAddProject() { addProjectDialog.open() }
     // Test hook.
     property alias remoteFolderDialog: remoteFolderDialog
-    property alias addProjectButtonItem: addProjectButton
     function openNewWorktree(projectId, name, harness) { worktreeDialogs.openNew(projectId, name, harness) }
     function openWorktree(key) { worktreeDialogs.openFinish(key) }
 
@@ -279,7 +279,6 @@ Rectangle {
             LogoMark { objectName: "sidebarLogo"; Layout.leftMargin: 2; implicitHeight: Math.round(Theme.px(22)) }
             Item { Layout.fillWidth: true }
             FlatButton {
-                id: addProjectButton
                 objectName: "addProjectButton"
                 // (A narrow sidebar: the sign alone.)
                 text: root.width < 240 ? "+" : "+ Project"
@@ -292,7 +291,6 @@ Rectangle {
 
         // Local, or a host: the machine this window shows.
         InstanceSwitcher {
-            id: instanceSwitcher
             Layout.fillWidth: true
             Layout.leftMargin: 14
             Layout.rightMargin: 14
@@ -526,7 +524,7 @@ Rectangle {
                     offset.y: 6
                     blur: 18
                     spread: -6
-                    color: Qt.rgba(0, 0, 0, Theme.isLight ? 0.16 : 0.45)
+                    color: Theme.shadow
                 }
                 RowLayout {
                     anchors.fill: parent
@@ -694,7 +692,7 @@ Rectangle {
                                 opacity: sessionRow.dim ? 0.4 : 1
                                 Behavior on opacity { NumberAnimation { duration: Theme.hoverMotion } }
                             }
-                            Label {
+                            PlainLabel {
                                 objectName: "sessionTitle"
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
@@ -718,7 +716,6 @@ Rectangle {
                             // isn't its project's folder (a worktree): the
                             // project's own show on its header.
                             ChangesPill {
-                                id: changesPill
                                 changes: sessionRow.changes
                                 tip: " in this session's repository"
                             }
@@ -954,7 +951,7 @@ Rectangle {
             // The project's name as it is written, a step quieter than its
             // sessions' titles but heavier: its icon, weight and the room
             // above set it apart.
-            Label {
+            PlainLabel {
                 objectName: "projectTitle-" + groupRow.title
                 Layout.fillWidth: true
                 // (Narrow: a few letters at least; the count and the

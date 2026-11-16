@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -84,11 +85,11 @@ Rectangle {
                 // Natural widths, from hidden twins that are never cut: a
                 // label's width bound to its own implicitWidth loops once
                 // it's cut short.
-                Label { id: nameTwin; visible: false; text: nameLabel.text; font: nameLabel.font }
-                Label { id: whoTwin; visible: false; text: agentLabel.text; font: agentLabel.font }
+                PlainLabel { id: nameTwin; visible: false; text: nameLabel.text; font: nameLabel.font }
+                PlainLabel { id: whoTwin; visible: false; text: agentLabel.text; font: agentLabel.font }
                 readonly property real nameNatural: Math.ceil(nameTwin.implicitWidth)
                 readonly property real whoNatural: Math.ceil(whoTwin.implicitWidth)
-                Label {
+                PlainLabel {
                     id: nameLabel
                     objectName: "subagentName"
                     // (The name tells helpers apart: it keeps its whole
@@ -102,7 +103,7 @@ Rectangle {
                     elide: Text.ElideRight
                 }
                 // Who it is (a harlo session: its model too), in plain text.
-                Label {
+                PlainLabel {
                     id: agentLabel
                     objectName: "subagentWho"
                     // (Shown while the name fits beside it; narrow, shortened.)
@@ -140,7 +141,6 @@ Rectangle {
                     spacing: 6
                     // What it used so far.
                     Label {
-                        id: usedLabel
                         objectName: "subagentUsed"
                         visible: text !== "" && agentRow.width >= 420
                         text: Theme.usedLabel(agentRow.a.used)
@@ -148,7 +148,6 @@ Rectangle {
                         font.pixelSize: Theme.px(11)
                     }
                     Label {
-                        id: statusLabel
                         objectName: "subagentStatus"
                         // (Finished: the faint dot says it. A harlo session
                         // waiting: on its parent, or on you.)
@@ -178,7 +177,6 @@ Rectangle {
             // Narrow and running: Steer opens the same view, and Cancel
             // must stay in reach.
             // (A harlo session an agent started: opens as its tab.)
-            id: viewButton
             objectName: "subagentView"
             visible: (!!agentRow.a.sessionFile || !!agentRow.a.openKey) && !(agentRow.live && agentRow.width < 380)
             // (A finished helper's View shows on its row's hover or the

@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -74,7 +75,7 @@ AppDialog {
         width: parent.width
         spacing: 6
 
-        FieldName { text: "Folder" }
+        FormLabel { text: "Folder" }
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -106,7 +107,7 @@ AppDialog {
             }
         }
 
-        FieldName { text: "Agent"; Layout.topMargin: 10 }
+        FormLabel { text: "Agent"; Layout.topMargin: 10 }
         Flow {
             Layout.fillWidth: true
             spacing: 6
@@ -131,7 +132,7 @@ AppDialog {
                 }
             }
         }
-        Note { visible: dlg.agents.length === 0; text: "No agent is on: turn one on in Settings → Providers." }
+        FormNote { visible: dlg.agents.length === 0; text: "No agent is on: turn one on in Settings → Providers." }
 
         // The model (not for a host's project: its agent's own).
         ColumnLayout {
@@ -139,7 +140,7 @@ AppDialog {
             Layout.fillWidth: true
             Layout.topMargin: 10
             spacing: 6
-            FieldName { text: "Model" }
+            FormLabel { text: "Model" }
             AppTextField {
                 id: modelFilter
                 objectName: "addProjectModelFilter"
@@ -206,18 +207,16 @@ AppDialog {
                     onClicked: dlg.model = modelData.id
                 }
             }
-            Note {
+            FormNote {
                 visible: dlg.modelChoices.length === 0
                 text: Workspace.providersJson().indexOf('"checking"') >= 0 ? "Reading " + Theme.harnessLabel(dlg.harness) + "'s models…"
                     : Theme.harnessLabel(dlg.harness) + " starts with its own default model; sign it in to a provider in Settings → Providers for more."
             }
         }
-        Note {
+        FormNote {
             Layout.topMargin: 6
             text: "New sessions in this project start with these. You can pick others for a session, or change them in Settings → Projects."
         }
     }
 
-    component Note: Label { color: Theme.muted; font.pixelSize: Theme.px(12); wrapMode: Text.Wrap; Layout.fillWidth: true }
-    component FieldName: Label { color: Theme.foreground; font.pixelSize: Theme.px(13) }
 }

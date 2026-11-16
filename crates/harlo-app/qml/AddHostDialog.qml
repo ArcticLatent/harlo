@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -48,11 +49,11 @@ AppDialog {
     ColumnLayout {
         width: parent.width
         spacing: 8
-        Note { text: "Pick a host from your SSH config, or type the connection yourself." }
+        FormNote { text: "Pick a host from your SSH config, or type the connection yourself." }
         Row {
             spacing: 6
-            Pill { objectName: "remoteTabConfig"; text: "From SSH config"; selected: addHostDialog.tab === "config"; onClicked: addHostDialog.tab = "config" }
-            Pill { objectName: "remoteTabManual"; text: "Type it myself"; selected: addHostDialog.tab === "manual"; onClicked: { addHostDialog.tab = "manual"; addName.forceActiveFocus() } }
+            ChoicePill { objectName: "remoteTabConfig"; text: "From SSH config"; selected: addHostDialog.tab === "config"; onClicked: addHostDialog.tab = "config" }
+            ChoicePill { objectName: "remoteTabManual"; text: "Type it myself"; selected: addHostDialog.tab === "manual"; onClicked: { addHostDialog.tab = "manual"; addName.forceActiveFocus() } }
         }
         // From ~/.ssh/config
         AppTextField {
@@ -61,7 +62,7 @@ AppDialog {
             Layout.fillWidth: true
             placeholderText: "Search hosts"
         }
-        Note {
+        FormNote {
             visible: addHostDialog.tab === "config" && addHostDialog.shown.length === 0
             text: addHostDialog.configHosts.length === 0 ? "No hosts found in ~/.ssh/config. Type the connection yourself instead." : "No host matches this search."
         }
@@ -116,9 +117,9 @@ AppDialog {
             visible: addHostDialog.tab === "manual"
             Layout.fillWidth: true
             spacing: 6
-            FieldName { text: "Name" }
+            FormLabel { Layout.topMargin: 8; text: "Name" }
             AppTextField { id: addName; objectName: "remoteName"; Layout.fillWidth: true; placeholderText: "nas" }
-            FieldName { text: "SSH command" }
+            FormLabel { Layout.topMargin: 8; text: "SSH command" }
             AppTextField {
                 id: addSsh
                 objectName: "remoteSsh"
@@ -134,20 +135,7 @@ AppDialog {
                 FlatButton { objectName: "saveRemoteHost"; text: "Save and connect"; font.pixelSize: Theme.px(12); accent: Theme.primary; onClicked: addHostDialog.addTyped() }
             }
         }
-        Note { visible: addHostDialog.error !== ""; color: Theme.error; text: addHostDialog.error }
+        FormNote { visible: addHostDialog.error !== ""; color: Theme.error; text: addHostDialog.error }
     }
 
-    component Note: Label { color: Theme.muted; font.pixelSize: Theme.px(12); wrapMode: Text.Wrap; Layout.fillWidth: true }
-    component FieldName: Label { color: Theme.foreground; font.pixelSize: Theme.px(13); Layout.topMargin: 8 }
-    component Pill: Button {
-        id: pill
-        property bool selected: false
-        flat: true
-        padding: 5
-        leftPadding: 11
-        rightPadding: 11
-        font.pixelSize: Theme.px(12)
-        contentItem: Label { text: pill.text; color: pill.selected ? Theme.foreground : Theme.muted; font: pill.font }
-        background: ControlSurface { control: pill; variant: pill.selected ? "selected" : "outline"; radius: 7 }
-    }
 }

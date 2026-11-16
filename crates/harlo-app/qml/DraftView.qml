@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQuick.Effects
@@ -414,7 +415,6 @@ Rectangle {
             // Project, where, harness: centred line by line, as the title
             // above and the starters below.
             Flow {
-                id: pickerFlow
                 objectName: "draftPickers"
                 Layout.fillWidth: true
                 spacing: 4
@@ -468,7 +468,6 @@ Rectangle {
                     onClicked: harnessMenu.popup(this, 0, height + 4)
                 }
                 Chip {
-                    id: modelChip
                     objectName: "draftModel"
                     visible: !root.parallel
                     iconName: "sparkling"
@@ -605,15 +604,20 @@ Rectangle {
                 border.color: Theme.border
                 ColumnLayout {
                     id: lanesCol
+                    objectName: "parallelLanes"
                     x: 12
                     y: 10
                     width: parent.width - 24
                     spacing: 6
+                    // (Narrow, under 380 px: the harness buttons show only
+                    // their marks, and the rows wrap or cut their words.)
+                    readonly property bool narrow: width < 380
                     RowLayout {
+                        Layout.fillWidth: true
                         spacing: 8
                         Icon { name: "node-tree"; color: Theme.primary; implicitWidth: 15; implicitHeight: 15 }
                         Label { text: "Run in parallel"; color: Theme.foreground; font.pixelSize: Theme.px(13); font.bold: true }
-                        Label { text: "the same prompt, one session per lane"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; text: "the same prompt, one session per lane"; color: Theme.muted; font.pixelSize: Theme.px(12) }
                     }
                     Repeater {
                         model: root.lanes
@@ -638,20 +642,23 @@ Rectangle {
                                     readonly property bool on: laneRow.modelData.harness === modelData
                                     flat: true
                                     implicitHeight: 26
-                                    leftPadding: 9
-                                    rightPadding: 9
+                                    leftPadding: lanesCol.narrow ? 6 : 9
+                                    rightPadding: lanesCol.narrow ? 6 : 9
                                     onClicked: root.setLane(laneRow.index, "harness", modelData)
+                                    ToolTip.visible: lanesCol.narrow && hovered
+                                    ToolTip.text: Theme.harnessLabel(modelData)
+                                    Accessible.name: Theme.harnessLabel(modelData)
                                     contentItem: Row {
                                         spacing: 5
                                         ProviderMark { anchors.verticalCenter: parent.verticalCenter; provider: hb.modelData; tip: ""; implicitWidth: 12; implicitHeight: 12; color: hb.on ? Theme.foreground : Theme.muted }
-                                        Label { anchors.verticalCenter: parent.verticalCenter; text: Theme.harnessLabel(hb.modelData); color: hb.on ? Theme.foreground : Theme.muted; font.pixelSize: Theme.px(12) }
+                                        Label { visible: !lanesCol.narrow; anchors.verticalCenter: parent.verticalCenter; text: Theme.harnessLabel(hb.modelData); color: hb.on ? Theme.foreground : Theme.muted; font.pixelSize: Theme.px(12) }
                                     }
                                     background: ControlSurface { control: hb; variant: hb.on ? "selected" : "outline"; radius: 7 }
                                 }
                             }
                             AppTextField {
-                                id: modelField
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 60
                                 implicitHeight: 28
                                 text: laneRow.modelData.model
                                 placeholderText: "model (harness default)"
@@ -717,7 +724,7 @@ Rectangle {
                             }
                         }
                     }
-                    RowLayout {
+                    Flow {
                         Layout.fillWidth: true
                         spacing: 10
                         FlatButton {
@@ -732,7 +739,6 @@ Rectangle {
                             checked: root.laneWorktrees
                             onToggled: root.laneWorktrees = checked
                         }
-                        Item { Layout.fillWidth: true }
                     }
                 }
             }
@@ -753,7 +759,7 @@ Rectangle {
                     offset.y: Theme.isLight ? 12 : 14
                     blur: Theme.isLight ? 28 : 32
                     spread: -18
-                    color: Qt.rgba(0, 0, 0, Theme.isLight ? 0.4 : 0.75)
+                    color: Theme.shadowStrong
                 }
                 ColumnLayout {
                     id: box
@@ -841,7 +847,6 @@ Rectangle {
                     // The same bar as the chat's composer: icon buttons on the left,
                     // Send on the right.
                     RowLayout {
-                        id: draftBar
                         Layout.fillWidth: true
                         spacing: 6
                         ComposerIconButton {
@@ -865,7 +870,6 @@ Rectangle {
                         // Delegate: the new session's agent splits the task, or asks
                         // another agent (its first message says how).
                         ComposerIconButton {
-                            id: draftDelegateButton
                             objectName: "draftDelegateButton"
                             visible: Workspace.orchestrationOn && !root.parallel && root.effectiveHarness !== "demo" && root.effectiveHarness !== ""
                             enabled: root.canSend && root.input.text.trim() !== ""
@@ -943,7 +947,6 @@ Rectangle {
 
             // Starters
             Flow {
-                id: starterFlow
                 Layout.fillWidth: true
                 Layout.topMargin: 4
                 spacing: 8
@@ -986,7 +989,6 @@ Rectangle {
 
             // Your templates, and saving the draft as one.
             Flow {
-                id: templateFlow
                 objectName: "draftTemplates"
                 Layout.fillWidth: true
                 Layout.topMargin: 2

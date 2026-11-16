@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -64,10 +65,14 @@ Item {
     implicitHeight: button.implicitHeight
 
     // On a host harlo started on (or switched to): connect it. If the
-    // default host can't be reached at startup, Local instead.
-    property bool startupCheck: Workspace.instance !== ""
+    // default host can't be reached at startup, Local instead. (Taken once
+    // at start: a host picked by hand later doesn't send you back.)
+    property bool startupCheck: false
     property string connectedHosts: ""
-    Component.onCompleted: if (current !== "" && stateOf(current) === "") Remotes.connectHost(current)
+    Component.onCompleted: {
+        startupCheck = Workspace.instance !== ""
+        if (current !== "" && stateOf(current) === "") Remotes.connectHost(current)
+    }
     onCurrentChanged: if (current !== "" && stateOf(current) === "") Remotes.connectHost(current)
     Connections {
         target: Remotes

@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -17,8 +18,18 @@ Rectangle {
 
     property alias browser: browser
     FileBrowser { id: browser }
-    onFolderChanged: { browser.setRoot(folder); countImages() }
-    Component.onCompleted: { browser.setRoot(folder); countImages() }
+    // (Listed only while the panel shows, and caught up when it shows
+    // again: hidden, a session switch doesn't read its folder.)
+    property string rooted: ""
+    function sync() {
+        if (!visible || rooted === folder) return
+        rooted = folder
+        browser.setRoot(folder)
+        countImages()
+    }
+    onFolderChanged: sync()
+    onVisibleChanged: sync()
+    Component.onCompleted: sync()
 
     /// Images in the folder itself.
     property int rootImages: 0
@@ -69,7 +80,6 @@ Rectangle {
         }
 
         ListView {
-            id: tree
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.topMargin: 8
@@ -108,10 +118,8 @@ Rectangle {
                     FileIcon {
                         visible: !node.isDir
                         spec: node.fileIcon
-                        Layout.preferredWidth: 16
-                        Layout.preferredHeight: 16
                     }
-                    Label {
+                    PlainLabel {
                         Layout.fillWidth: true
                         text: node.name
                         color: node.open || node.isDir ? Theme.text : Theme.textMuted

@@ -1,5 +1,6 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
+import harlo
 
 // A small label pill. In a layout it can be narrower than its text, which
 // then elides (give it Layout.fillWidth with Layout.maximumWidth: implicitWidth).

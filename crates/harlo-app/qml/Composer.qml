@@ -1,6 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import harlo
@@ -62,7 +63,8 @@ Rectangle {
     property real micLevel: 0
     /// A problem to show in the bar for a while.
     property string dictationNote: ""
-    readonly property string whisperModel: Workspace.setting("dictation_model") || "base"
+    // (settingsRevision: read again when Settings → Voice picks another.)
+    readonly property string whisperModel: Workspace.settingsRevision >= 0 ? Workspace.setting("dictation_model") || "base" : "base"
     function showNote(t) { dictationNote = t; noteTimer.restart() }
     function toggleDictation() {
         if (recording) { finishDictation(); return }
@@ -151,7 +153,7 @@ Rectangle {
         offset.y: Theme.isLight ? 8 : 10
         blur: Theme.isLight ? 24 : 28
         spread: -16
-        color: Qt.rgba(0, 0, 0, Theme.isLight ? 0.18 : 0.45)
+        color: Theme.shadow
     }
 
     function send(mode) {
@@ -346,9 +348,9 @@ Rectangle {
                             visible: !item.command
                             anchors.fill: parent
                             spacing: 10
-                            FileIcon { visible: item.modelData.kind === "file"; path: visible ? item.modelData.name : ""; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+                            FileIcon { visible: item.modelData.kind === "file"; path: visible ? item.modelData.name : "" }
                             Icon { visible: item.modelData.kind === "session"; name: "chat-thread"; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
-                            Label {
+                            PlainLabel {
                                 text: item.command ? "" : item.modelData.name
                                 color: Theme.foreground
                                 font.family: item.modelData.kind === "file" ? Theme.mono : Qt.application.font.family
@@ -358,7 +360,7 @@ Rectangle {
                                 Layout.fillWidth: item.modelData.kind === "file"
                                 Layout.maximumWidth: item.modelData.kind === "session" ? list.width - 190 : list.width - 46
                             }
-                            Label {
+                            PlainLabel {
                                 Layout.fillWidth: true
                                 visible: item.modelData.kind === "session"
                                 text: item.command ? "" : item.description
@@ -472,7 +474,9 @@ Rectangle {
                     required property int index
                     // The first of each group: its name above it (when there
                     // are local models at all).
-                    readonly property real heading: ListView.view.model[0].local && (index === 0 || ListView.view.model[index - 1].local !== modelData.local) ? 30 : 0
+                    // (Read safely: the list can change before this row goes.)
+                    readonly property var above: mrow.index > 0 ? modelList.model[mrow.index - 1] : null
+                    readonly property real heading: modelList.model.length > 0 && modelList.model[0].local && (mrow.index === 0 || (above !== undefined && above !== null && above.local !== mrow.modelData.local)) ? 30 : 0
                     width: ListView.view.width
                     height: 30 + heading
                     topInset: heading
@@ -756,7 +760,7 @@ Rectangle {
                     height: parent.height
                     radius: 2
                     color: Theme.success
-                    Behavior on width { NumberAnimation { duration: 70 } }
+                    Behavior on width { NumberAnimation { duration: Math.round(Theme.motion * 0.45) } }
                 }
             }
             FlatButton {
@@ -780,7 +784,6 @@ Rectangle {
         }
         // What runs without asking; click cycles.
         ComposerIconButton {
-            id: permissionsButton
             objectName: "permissionsButton"
             visible: root.approvalMode !== "" && !root.dictationActive
             iconName: root.approvalMode === "always-ask" ? "shield-user" : root.approvalMode === "write" ? "shield-star" : "shield-check"
@@ -849,7 +852,7 @@ Rectangle {
             font.pixelSize: Theme.px(11)
             font.features: { "tnum": 1 }
         }
-        Label {
+        PlainLabel {
             Layout.fillWidth: true
             // (Only what's left over: the model's name comes first.)
             Layout.preferredWidth: 0

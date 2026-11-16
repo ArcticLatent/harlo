@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -222,11 +223,11 @@ AppDialog {
             visible: dlg.page === "engine"
             Layout.fillWidth: true
             spacing: 8
-            Note {
+            FormNote {
                 visible: dlg.cat.state !== "failed"
                 text: dlg.cat.hardware ? (dlg.host === "" ? "This computer: " : dlg.host + ": ") + dlg.cat.hardware.summary : "Looking at " + dlg.machine + "…"
             }
-            Note {
+            FormNote {
                 visible: dlg.cat.state === "failed"
                 color: Theme.error
                 text: "Couldn't look at " + dlg.machine + ": " + (dlg.cat.error || "it didn't answer")
@@ -252,9 +253,12 @@ AppDialog {
                                 color: card.modelData.fit === "ok" ? Theme.success : card.modelData.fit === "warn" ? Theme.warning : Theme.muted
                                 font.pixelSize: Theme.px(11.5)
                             }
-                            Item { Layout.fillWidth: true }
-                            Label {
-                                visible: card.modelData.installed !== null
+                            // (At the right; narrow, a long version cut short.)
+                            PlainLabel {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                horizontalAlignment: Text.AlignRight
+                                elide: Text.ElideRight
                                 text: card.modelData.installed ? "Installed" + (card.modelData.installed.version ? " · " + card.modelData.installed.version : "") : ""
                                 color: Theme.muted
                                 font.pixelSize: Theme.px(11.5)
@@ -266,8 +270,8 @@ AppDialog {
                     onClicked: dlg.pick(modelData)
                 }
             }
-            Note { visible: dlg.cat.state === "loading" && (dlg.cat.engines || []).length === 0; text: "Checking the graphics card and what's installed…" }
-            Note { text: "More engines (Avalon, Unsloth) come in later updates." }
+            FormNote { visible: dlg.cat.state === "loading" && (dlg.cat.engines || []).length === 0; text: "Checking the graphics card and what's installed…" }
+            FormNote { text: "More engines (Avalon, Unsloth) come in later updates." }
         }
 
         // ---- 2. the model and settings ----
@@ -287,7 +291,7 @@ AppDialog {
                 ToolTip.text: dlg.engine && dlg.engine.installed ? dlg.engine.installed.program || "" : ""
                 ToolTip.delay: 400
             }
-            Note { visible: dlg.addTo === null && dlg.engine !== null && (dlg.engine.installed === null || !dlg.useInstalled)
+            FormNote { visible: dlg.addTo === null && dlg.engine !== null && (dlg.engine.installed === null || !dlg.useInstalled)
                 text: dlg.engine && dlg.engine.id === "basalt" ? "Basalt has no ready-made builds: harlo downloads its latest release's source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), then gives its server a Python of its own, in harlo's folder."
                     : dlg.ninfer ? "NInfer has no ready-made builds or releases: harlo downloads its latest source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), in harlo's folder."
                     : dlg.wholeRepo ? "harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in harlo's folder: several GB, a few minutes."
@@ -298,9 +302,9 @@ AppDialog {
                 visible: dlg.fromHf || dlg.fixedRepo !== ""
                 Layout.fillWidth: true
                 spacing: 6
-                FieldName { text: dlg.fixedRepo !== "" ? "Qwen3.8-Flash-Next, in the size that fits" : "Model" }
+                FormLabel { text: dlg.fixedRepo !== "" ? "Qwen3.8-Flash-Next, in the size that fits" : "Model" }
                 // (Basalt: one model, its sizes; the memory they count.)
-                Note {
+                FormNote {
                     visible: dlg.fixedRepo !== ""
                     text: "Each size, graphics memory and RAM together: " + dlg.machine + " has " + Math.round(dlg.memoryGb) + " GB (" + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM). The download is the size shown, once."
                 }
@@ -316,7 +320,6 @@ AppDialog {
                     Timer { id: searchTimer; interval: 400; onTriggered: ServerSetup.findModels(modelSearch.text, dlg.engine.id) }
                 }
                 ListView {
-                    id: modelList
                     // (Basalt: no list to pick from.)
                     enabled: dlg.fromHf
                     objectName: "setupModels"
@@ -362,7 +365,7 @@ AppDialog {
                         onClicked: dlg.chooseRepo(modelData)
                     }
                 }
-                Note {
+                FormNote {
                     visible: text !== "" && dlg.fromHf
                     color: dlg.hm.state === "failed" ? Theme.error : Theme.muted
                     text: dlg.hm.state === "failed" ? dlg.hm.error
@@ -372,10 +375,10 @@ AppDialog {
                 }
 
                 // Its sizes (quantizations): smaller is faster and less exact.
-                FieldName { visible: dlg.repo !== "" && !dlg.wholeRepo; Layout.topMargin: 4; text: "Size" }
-                Note { visible: dlg.repo !== "" && !dlg.wholeRepo && dlg.gg.state === "listing"; text: "Listing its files…" }
-                Note { visible: dlg.repo !== "" && dlg.gg.repo === dlg.repo && dlg.gg.state === "failed"; color: Theme.error; text: dlg.gg.error || "" }
-                Note {
+                FormLabel { visible: dlg.repo !== "" && !dlg.wholeRepo; Layout.topMargin: 4; text: "Size" }
+                FormNote { visible: dlg.repo !== "" && !dlg.wholeRepo && dlg.gg.state === "listing"; text: "Listing its files…" }
+                FormNote { visible: dlg.repo !== "" && dlg.gg.repo === dlg.repo && dlg.gg.state === "failed"; color: Theme.error; text: dlg.gg.error || "" }
+                FormNote {
                     visible: dlg.repo !== "" && dlg.gg.repo === dlg.repo && dlg.gg.state === "ready" && dlg.files.length === 0
                     text: (dlg.gg.files || []).length > 0 ? "Its files come in parts, which Ollama can't load: pick another model, or use llama.cpp." : "It has no GGUF files."
                 }
@@ -409,14 +412,14 @@ AppDialog {
                         }
                     }
                 }
-                Note {
+                FormNote {
                     visible: dlg.file !== "" && !dlg.wholeRepo
                     readonly property var f: dlg.files.find(x => x.file === dlg.file)
                     text: !f ? "" : dlg.fixedRepo !== "" ? dlg.fitText(f.fit) + ": " + dlg.gb(f.size) + " to download. The GSQ-RCO sizes are the small ones; the bigger the size, the closer to the full model."
                         : dlg.fitText(f.fit) + ". Q4 and up are close to the full model; Q2 and Q3 lose some quality."
                 }
                 // vLLM: what the repository holds, and what it needs.
-                Note {
+                FormNote {
                     visible: dlg.wholeRepo
                     text: dlg.ninfer ? (dlg.repo === "" ? "NInfer's official models for your card. NVFP4 is the most exact and a little bigger. Flash-Next is much the biggest: its experts stay in RAM (about 63 GB), and it needs that free."
                             : "About " + dlg.gb(dlg.modelSize) + " to download.")
@@ -456,9 +459,9 @@ AppDialog {
                         }
                     }
                 }
-                FieldName { Layout.topMargin: 4; text: dlg.deepseek ? "DeepSeek-V4.1-Flash, in the size that fits" : "Qwen3.8-Flash-Next, in the size that fits" }
+                FormLabel { Layout.topMargin: 4; text: dlg.deepseek ? "DeepSeek-V4.1-Flash, in the size that fits" : "Qwen3.8-Flash-Next, in the size that fits" }
                 // (Strata splits a model between the card and RAM: both count.)
-                Note {
+                FormNote {
                     text: (dlg.deepseek ? "The least memory each needs: graphics memory and RAM together, the rest read from its SSD. " : "Memory each needs: graphics memory and RAM together. ") + (dlg.host === "" ? "This computer" : dlg.host) + " has " + Math.round(dlg.memoryGb) + " GB ("
                         + Math.round(dlg.vramGb) + " GB graphics + " + Math.round(dlg.memoryGb - dlg.vramGb) + " GB RAM)."
                 }
@@ -484,7 +487,7 @@ AppDialog {
                         onClicked: dlg.model = modelData.id
                     }
                 }
-                Note {
+                FormNote {
                     text: dlg.deepseek
                         ? "Strata downloads the model and its DeepSeek engine the first time it starts, then packs them: that first start takes a long time. Its 111 GB n-gram table stays on the disk, read for every word, so keep Strata's models on an NVMe drive. Expect it slower than Qwen: Strata measured 5 to 10 tokens a second on 12 GB cards; it's quicker with a bigger card and more RAM."
                         : "Strata downloads the model the first time it starts (tens of GB) and tunes it for your card: that first start takes a while."
@@ -497,7 +500,7 @@ AppDialog {
                 visible: (dlg.fromHf || dlg.fixedRepo !== "" || dlg.deepseek) && !(dlg.addTo !== null && dlg.engine.id === "ollama")
                 Layout.fillWidth: true
                 spacing: 6
-                FieldName { Layout.topMargin: 4; text: "Context" }
+                FormLabel { Layout.topMargin: 4; text: "Context" }
                 Flow {
                     Layout.fillWidth: true
                     spacing: 6
@@ -524,7 +527,7 @@ AppDialog {
                         }
                     }
                 }
-                Note {
+                FormNote {
                     text: dlg.context === 0
                         ? "How much of the conversation and files the model keeps in mind, in tokens. " + (dlg.wholeRepo
                             ? "vLLM gives it as much as fits on your card next to the model" + (dlg.maxContext ? ", up to its own " + dlg.ctxText(dlg.maxContext) : ", up to the model's own") + "."
@@ -540,7 +543,7 @@ AppDialog {
                 }
             }
 
-            Note {
+            FormNote {
                 visible: dlg.addTo !== null
                 text: !dlg.addTo ? "" : dlg.engine && dlg.engine.id === "llamacpp"
                     ? "It joins the models of this llama.cpp server (at " + dlg.addTo.baseUrl + "). The server keeps one model in graphics memory at a time and switches when a session asks for another (that takes a few seconds)."
@@ -550,9 +553,9 @@ AppDialog {
                 visible: dlg.addTo === null
                 Layout.topMargin: 6
                 spacing: 8
-                FieldName { text: "Name" }
+                FormLabel { text: "Name" }
                 AppTextField { id: nameField; Layout.preferredWidth: 180; placeholderText: "my-server"; font.family: Theme.mono; font.pixelSize: Theme.px(12); onTextEdited: dlg.nameEdited = true }
-                FieldName { text: "Port" }
+                FormLabel { text: "Port" }
                 AppTextField {
                     id: portField
                     Layout.preferredWidth: 80
@@ -561,7 +564,7 @@ AppDialog {
                     onTextChanged: if (!dlg.nameEdited) nameField.text = dlg.defaultName()
                 }
             }
-            Note { visible: dlg.addTo === null; text: dlg.host === "" ? "On this computer only (127.0.0.1)." : "On " + dlg.host + ", for its own agents only (127.0.0.1 there). It keeps running when harlo quits; Stop it in Settings → Model servers." }
+            FormNote { visible: dlg.addTo === null; text: dlg.host === "" ? "On this computer only (127.0.0.1)." : "On " + dlg.host + ", for its own agents only (127.0.0.1 there). It keeps running when harlo quits; Stop it in Settings → Model servers." }
             RowLayout {
                 Layout.topMargin: 6
                 FlatButton { visible: dlg.addTo === null; text: "Back"; outlined: false; font.pixelSize: Theme.px(12); onClicked: dlg.page = "engine" }
@@ -643,12 +646,10 @@ AppDialog {
                 color: Theme.codeBg
                 border.color: Theme.hairline
                 ScrollView {
-                    id: outputScroll
                     anchors.fill: parent
                     anchors.margins: 1
                     clip: true
                     TextArea {
-                        id: outputText
                         readOnly: true
                         selectByMouse: true
                         wrapMode: TextEdit.WrapAnywhere
@@ -671,12 +672,12 @@ AppDialog {
                 visible: dlg.job !== null && dlg.job.state === "done" && !dlg.updating
                 Layout.fillWidth: true
                 spacing: 6
-                Note {
+                FormNote {
                     readonly property var r: dlg.job && dlg.job.result ? dlg.job.result : ({})
                     text: r.baseUrl ? "It answered “" + (r.answer || "") + "” at " + (r.speed || 0).toFixed(0) + " tokens/s" + (r.context ? ", with " + dlg.ctxText(r.context) + " tokens of context" : "") + ". It runs at " + r.baseUrl + "." : ""
                     color: Theme.foreground
                 }
-                FieldName { text: "Use it in" }
+                FormLabel { text: "Use it in" }
                 Row {
                     spacing: 14
                     Repeater {
@@ -689,11 +690,11 @@ AppDialog {
                         }
                     }
                 }
-                Note {
+                FormNote {
                     visible: dlg.host !== "" && dlg.agents.length === 0
                     text: "No Harlo on " + dlg.host + " yet: it runs there, to add to it later in Settings → Model servers."
                 }
-                Note { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
+                FormNote { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             }
             RowLayout {
                 Layout.topMargin: 6
@@ -715,6 +716,4 @@ AppDialog {
         }
     }
 
-    component Note: Label { color: Theme.muted; font.pixelSize: Theme.px(12); wrapMode: Text.Wrap; Layout.fillWidth: true }
-    component FieldName: Label { color: Theme.foreground; font.pixelSize: Theme.px(13) }
 }

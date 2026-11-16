@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // One terminal: a shell in `cwd`, drawn by Rust (TerminalSession) in the

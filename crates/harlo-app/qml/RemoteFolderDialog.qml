@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -113,7 +114,6 @@ AppDialog {
                 font.pixelSize: Theme.px(12)
             }
             ListView {
-                id: folderList
                 anchors.fill: parent
                 anchors.margins: 4
                 clip: true

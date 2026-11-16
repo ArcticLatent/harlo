@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -52,6 +52,10 @@ Popup {
         })
     }
 
+    // (Closed, the picture is let go: a diagram drawn at twice its size or a
+    // full-page mockup isn't kept decoded.)
+    onClosed: viewer.pictures = []
+
     parent: Overlay.overlay
     x: Math.round((parent.width - width) / 2)
     y: Math.round((parent.height - height) / 2)
@@ -83,7 +87,7 @@ Popup {
             width: parent.width - 28
             height: 52
             spacing: 8
-            Label {
+            PlainLabel {
                 Layout.fillWidth: true
                 text: viewer.title
                 color: Theme.foreground

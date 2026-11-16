@@ -59,6 +59,38 @@ const QML_FILES: &[&str] = &[
     "qml/TodoDock.qml",
     "qml/DelegatePopover.qml",
     "qml/DiffView.qml",
+    "qml/ToastStack.qml",
+    "qml/FormNote.qml",
+    "qml/FormLabel.qml",
+    "qml/ChoicePill.qml",
+    "qml/SectionTitle.qml",
+    "qml/CopyButton.qml",
+    "qml/HarnessRequestDock.qml",
+    "qml/ToolCard.qml",
+    "qml/RunNode.qml",
+    "qml/CodeText.qml",
+    "qml/WrapButton.qml",
+    "qml/CodeCopy.qml",
+    "qml/MoreText.qml",
+    "qml/SectionHeader.qml",
+    "qml/AddButton.qml",
+    "qml/EmptyNote.qml",
+    "qml/NeedsPhone.qml",
+    "qml/Rule.qml",
+    "qml/Group.qml",
+    "qml/WikiWriter.qml",
+    "qml/SettingRow.qml",
+    "qml/Choice.qml",
+    "qml/ValueChip.qml",
+    "qml/GeneralPage.qml",
+    "qml/AppearancePage.qml",
+    "qml/NotificationsPage.qml",
+    "qml/SchedulesPage.qml",
+    "qml/ProjectsPage.qml",
+    "qml/RemotePage.qml",
+    "qml/ServersPage.qml",
+    "qml/ProvidersPage.qml",
+    "qml/ToastCard.qml",
     "qml/UpdateToasts.qml",
     "qml/PhoneFirewallToast.qml",
     "qml/WikiOfferToast.qml",
@@ -73,7 +105,9 @@ const QML_FILES: &[&str] = &[
     "qml/PictureViewer.qml",
     "qml/ImageViewer.qml",
     "qml/PictureStrip.qml",
+    "qml/PlainLabel.qml",
     "qml/SegmentedControl.qml",
+    "qml/SelfTests.qml",
     "qml/PlanDock.qml",
     "qml/InstanceSwitcher.qml",
     "qml/SearchDialog.qml",
@@ -154,7 +188,10 @@ fn main() {
     println!("cargo::rerun-if-changed=cpp");
     println!("cargo::rerun-if-changed=assets");
 
+    // (The modules its types come from: with them, qmlcachegen knows the
+    // Rust objects, list models among them, and compiles what reads them.)
     CxxQtBuilder::new_qml_module(QmlModule::new("harlo")
+            .depends(["QtQuick", "QtQml.Models"])
             .qml_file(QmlFile::from("qml/Theme.qml").singleton(true))
             .qml_file(QmlFile::from("qml/Keymap.qml").singleton(true))
             .qml_files(QML_FILES))

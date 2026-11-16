@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -185,7 +186,7 @@ Popup {
                     RowLayout {
                         spacing: 8
                         Item { implicitWidth: 2 }
-                        Label {
+                        PlainLabel {
                             Layout.topMargin: rowLoader.index > 0 ? 8 : 2
                             text: rowLoader.modelData.session.title
                             color: Theme.foreground
@@ -263,7 +264,7 @@ Popup {
                             anchors.rightMargin: 10
                             spacing: 10
                             ProviderMark { provider: rowLoader.modelData.session.harness; tip: ""; implicitWidth: 14; implicitHeight: 14; color: Theme.textMuted }
-                            Label {
+                            PlainLabel {
                                 text: rowLoader.modelData.session.title
                                 color: Theme.text
                                 font.pixelSize: Theme.px(12.5)

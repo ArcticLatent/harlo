@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import harlo
 
 // A button's background: a soft fill a step off the page with a faint

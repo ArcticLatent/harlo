@@ -1,6 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
+import QtQuick.Controls.Basic
 import harlo
 
 // Vertical icon bar at the window's right edge; picks the side panel.
@@ -71,7 +71,6 @@ Rectangle {
     }
 
     Item {
-        id: termButton
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 10
         anchors.horizontalCenter: parent.horizontalCenter

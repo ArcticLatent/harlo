@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -135,9 +135,11 @@ Rectangle {
             }
         }
 
-        // Not signed in: its tool's sign-in, or a token.
-        RowLayout {
+        // Not signed in: its tool's sign-in, or a token. (On as many lines
+        // as the card's width needs.)
+        Flow {
             visible: !card.signedIn && !card.running && card.st.state === "ready"
+            Layout.fillWidth: true
             spacing: 8
             FlatButton {
                 objectName: "gitHostSignIn-" + card.service
@@ -159,7 +161,6 @@ Rectangle {
                 font.pixelSize: Theme.px(12)
                 onClicked: card.tokenOpen = !card.tokenOpen
             }
-            Item { Layout.fillWidth: true }
             Button {
                 visible: card.tokenOpen && !card.cliMissing
                 flat: true
@@ -209,7 +210,8 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 6
                 Label { text: "Enter this code on " + (card.st.host || "the page") + ", then approve git there:"; color: Theme.text; font.pixelSize: Theme.px(12.5); Layout.fillWidth: true; wrapMode: Text.Wrap }
-                RowLayout {
+                Flow {
+                    Layout.fillWidth: true
                     spacing: 10
                     Label {
                         objectName: "gitHostCode-" + card.service

@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // Dialog footer button. Accept/Yes/Apply roles are filled with the accent

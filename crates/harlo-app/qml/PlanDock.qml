@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -128,7 +129,6 @@ Rectangle {
             // Running with helpers (or paused, waiting for you); what they
             // used is in its tooltip.
             Label {
-                id: runChip
                 objectName: "planRunChip"
                 visible: !!root.run
                 text: "· " + (root.paused ? "paused" : root.width >= 480 ? "running with helpers" : "running")
@@ -233,7 +233,7 @@ Rectangle {
                                     Icon { name: "layout-column"; color: Theme.info; implicitWidth: 11; implicitHeight: 11 }
                                     Label { text: "With the step before"; color: Theme.info; font.pixelSize: Theme.px(10.5) }
                                 }
-                                Label {
+                                PlainLabel {
                                     Layout.fillWidth: true
                                     text: stepRow.modelData.title + (stepRow.modelData.editedByUser ? "  ·  yours" : "")
                                     color: stepRow.modelData.status === "active" ? Theme.foreground : Theme.muted
@@ -241,7 +241,7 @@ Rectangle {
                                     font.strikeout: stepRow.modelData.status === "skipped"
                                     wrapMode: Text.Wrap
                                 }
-                                Label {
+                                PlainLabel {
                                     id: stepText
                                     Layout.fillWidth: true
                                     visible: text !== ""

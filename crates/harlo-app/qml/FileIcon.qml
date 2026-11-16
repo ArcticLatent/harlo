@@ -1,9 +1,10 @@
 import QtQuick
+import QtQuick.Layouts
 import harlo
 
 // The file-type icon for `path` (a file name or path): the type's glyph in
 // the bundled "Harlo File Icons" font, in its colour, filling a 16-pixel box
-// (or the box it's given).
+// (or the box it's given; in a layout too, without saying so).
 Text {
     objectName: "fileIcon"
     property string path
@@ -12,6 +13,8 @@ Text {
     property string spec: path !== "" ? Workspace.fileIcon(path) : ""
     width: 16
     height: 16
+    Layout.preferredWidth: 16
+    Layout.preferredHeight: 16
     text: spec.substring(7)
     color: spec !== "" ? Theme.fileTint(spec.substring(0, 7)) : "transparent"
     font.family: "Harlo File Icons"

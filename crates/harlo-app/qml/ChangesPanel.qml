@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -7,6 +8,9 @@ import harlo
 // shows its changes side by side in the diff tab) and a commit box.
 Rectangle {
     id: root
+    // (Its window shown: not minimized, not in the tray. Polling waits
+    // otherwise; Item.visible doesn't change when the window hides.)
+    readonly property bool windowShown: Window.visibility !== Window.Minimized && Window.visibility !== Window.Hidden
     required property GitPanel git
     /// Harness of the active session; commit messages are written with it.
     property string harness: ""
@@ -65,6 +69,30 @@ Rectangle {
 
     readonly property var stagedEntries: entries(true)
     readonly property var unstagedEntries: entries(false)
+    // The list's rows, kept by key and changed in place as git's status
+    // changes: a new array would make every row again and scroll to the top.
+    ListModel { id: fileRows; objectName: "changesRows" }
+    function syncRows() {
+        const row = (key, header, count, f) => ({ key: key, header: header, count: count, path: f ? f.path : "", name: f ? f.name : "",
+                                                  dir: f ? f.dir : "", code: f ? f.code : "", staged: f ? f.staged : false })
+        const want = (stagedEntries.length ? [row("h:Staged", "Staged", stagedEntries.length, null)] : [])
+            .concat(stagedEntries.map(f => row("s:" + f.path, "", 0, f)))
+            .concat(unstagedEntries.length ? [row("h:Changes", "Changes", unstagedEntries.length, null)] : [])
+            .concat(unstagedEntries.map(f => row("u:" + f.path, "", 0, f)))
+        for (let i = 0; i < want.length; i++) {
+            const w = want[i]
+            let j = i
+            while (j < fileRows.count && fileRows.get(j).key !== w.key) j++
+            if (j === fileRows.count) { fileRows.insert(i, w); continue }
+            if (j !== i) fileRows.move(j, i, 1)
+            const m = fileRows.get(i)
+            for (const k in w) if (m[k] !== w[k]) fileRows.setProperty(i, k, w[k])
+        }
+        if (fileRows.count > want.length) fileRows.remove(want.length, fileRows.count - want.length)
+    }
+    onStagedEntriesChanged: Qt.callLater(syncRows)
+    onUnstagedEntriesChanged: Qt.callLater(syncRows)
+    Component.onCompleted: syncRows()
 
     function codeColor(code) {
         switch (code) {
@@ -89,7 +117,7 @@ Rectangle {
             text: "This cannot be undone from harlo. Untracked files are moved to the trash."
             color: Theme.muted
         }
-        onDiscarded: { git.revertFile(path); close() }
+        onDiscarded: { root.git.revertFile(path); close() }
     }
 
     // Switching branches: with uncommitted changes, stash them or bring
@@ -122,7 +150,7 @@ Rectangle {
                 anchors.topMargin: 8
                 spacing: 8
                 DialogButton { text: "Cancel"; onClicked: confirmSwitch.reject() }
-                DialogButton { visible: confirmSwitch.dirty; text: "Bring changes along"; onClicked: { git.switchBranch(confirmSwitch.name, false, confirmSwitch.remote, false); confirmSwitch.close() } }
+                DialogButton { visible: confirmSwitch.dirty; text: "Bring changes along"; onClicked: { root.git.switchBranch(confirmSwitch.name, false, confirmSwitch.remote, false); confirmSwitch.close() } }
                 DialogButton { text: confirmSwitch.dirty ? "Stash and switch" : "Switch"; accent: true; onClicked: confirmSwitch.accept() }
             }
         }
@@ -144,7 +172,7 @@ Rectangle {
                 text: "The agent is working in this folder. Switching changes the files under it."
             }
         }
-        onAccepted: git.switchBranch(name, false, remote, dirty)
+        onAccepted: root.git.switchBranch(name, false, remote, dirty)
     }
     BranchPicker {
         id: picker
@@ -161,9 +189,9 @@ Rectangle {
 
         PanelHeader {
             title: "Changes"
-            subtitle: git.directory.split("/").pop() + (repoList.repos.length > 0 && git.root !== "" ? " / " + git.root.split("/").pop() : "")
+            subtitle: root.git.directory.split("/").pop() + (repoList.repos.length > 0 && root.git.root !== "" ? " / " + root.git.root.split("/").pop() : "")
             onCloseRequested: root.closeRequested()
-            PanelButton { iconName: "refresh"; tip: "Refresh"; onClicked: git.refresh(true) }
+            PanelButton { iconName: "refresh"; tip: "Refresh"; onClicked: root.git.refresh(true) }
         }
 
         // A folder of repositories (not one itself): each, with its branch
@@ -172,20 +200,20 @@ Rectangle {
         ColumnLayout {
             id: repoList
             objectName: "repoList"
-            readonly property var repos: git.reposJson !== "" ? JSON.parse(git.reposJson) : []
+            readonly property var repos: root.git.reposJson !== "" ? JSON.parse(root.git.reposJson) : []
             /// Each one's open pull request (and its checks), by root.
-            readonly property var requests: git.requestsJson !== "" ? JSON.parse(git.requestsJson) : ({})
+            readonly property var requests: root.git.requestsJson !== "" ? JSON.parse(root.git.requestsJson) : ({})
             // Changes, or an open pull request: shown; the rest fold away.
             readonly property var changed: repos.filter(r => r.changes > 0 || !!requests[r.root])
             readonly property var clean: repos.filter(r => r.changes === 0 && !requests[r.root])
-            onReposChanged: if (repos.length > 0 && root.visible) git.loadAllRequests()
+            onReposChanged: if (repos.length > 0 && root.visible) root.git.loadAllRequests()
             // Every repository's pull request: read again now and then; those
             // whose checks run are watched (harlo says when they finish).
             Timer {
                 interval: 60000
                 repeat: true
-                running: root.visible && repoList.repos.length > 0
-                onTriggered: git.loadAllRequests()
+                running: root.visible && root.windowShown && repoList.repos.length > 0
+                onTriggered: root.git.loadAllRequests()
             }
             onRequestsChanged: {
                 for (const r in requests) {
@@ -216,14 +244,14 @@ Rectangle {
                 ItemDelegate {
                     id: repoRow
                     required property var modelData
-                    readonly property bool active: modelData.root === git.root
+                    readonly property bool active: modelData.root === root.git.root
                     objectName: "repo-" + modelData.name
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     implicitHeight: 30
                     leftPadding: 8
                     rightPadding: 8
-                    onClicked: git.selectRepo(modelData.root)
+                    onClicked: root.git.selectRepo(modelData.root)
                     background: Rectangle {
                         radius: 8
                         color: repoRow.active ? Theme.rowSelected : repoRow.hovered ? Theme.rowHover : "transparent"
@@ -232,7 +260,7 @@ Rectangle {
                     contentItem: RowLayout {
                         spacing: 7
                         Icon { name: "git-repository"; color: repoRow.active ? Theme.accent : Theme.textMuted; implicitWidth: 14; implicitHeight: 14 }
-                        Label {
+                        PlainLabel {
                             // (Its name keeps its width; the branch gives way first.)
                             Layout.preferredWidth: implicitWidth
                             Layout.minimumWidth: Math.min(implicitWidth, 90)
@@ -311,18 +339,18 @@ Rectangle {
             Layout.rightMargin: 14
             Layout.topMargin: 10
             Layout.bottomMargin: 4
-            visible: git.isRepo
+            visible: root.git.isRepo
             spacing: 6
             // The branch: icon, name (elides first), ahead/behind, a chevron.
             Rectangle {
                 id: branchChip
                 objectName: "branchChip"
-                readonly property string text: (git.branch !== "" ? git.branch : "detached HEAD") + (git.ahead > 0 ? "  ↑" + git.ahead : "") + (git.behind > 0 ? "  ↓" + git.behind : "")
+                readonly property string text: (root.git.branch !== "" ? root.git.branch : "detached HEAD") + (root.git.ahead > 0 ? "  ↑" + root.git.ahead : "") + (root.git.behind > 0 ? "  ↓" + root.git.behind : "")
                 Layout.fillWidth: true
                 Layout.minimumWidth: 52
                 Layout.preferredWidth: implicitWidth
                 Layout.maximumWidth: implicitWidth
-                visible: git.isRepo
+                visible: root.git.isRepo
                 implicitWidth: branchRow.implicitWidth + 20
                 implicitHeight: 26
                 radius: 8
@@ -336,7 +364,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 5
                     Icon { name: "git-branch"; color: Theme.textMuted; implicitWidth: 14; implicitHeight: 14 }
-                    Label {
+                    PlainLabel {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         text: branchChip.text
@@ -349,12 +377,12 @@ Rectangle {
                 ToolTip.visible: chipHover.hovered
                 ToolTip.text: width < implicitWidth ? text + "\nSwitch branch" : "Switch branch"
                 HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { enabled: !git.busy; onTapped: picker.opened ? picker.close() : picker.open() }
+                TapHandler { enabled: !root.git.busy; onTapped: picker.opened ? picker.close() : picker.open() }
             }
             // Stashes, with how many there are.
             Rectangle {
                 objectName: "stashButton"
-                visible: git.isRepo
+                visible: root.git.isRepo
                 implicitWidth: stashRow.implicitWidth + 12
                 implicitHeight: 26
                 radius: 8
@@ -366,22 +394,22 @@ Rectangle {
                     anchors.centerIn: parent
                     spacing: 4
                     Icon { anchors.verticalCenter: parent.verticalCenter; name: "archive-stack"; color: Theme.textMuted; implicitWidth: 14; implicitHeight: 14 }
-                    Label { anchors.verticalCenter: parent.verticalCenter; visible: git.stashCount > 0; text: git.stashCount; color: Theme.text; font.pixelSize: Theme.px(11.5) }
+                    Label { anchors.verticalCenter: parent.verticalCenter; visible: root.git.stashCount > 0; text: root.git.stashCount; color: Theme.text; font.pixelSize: Theme.px(11.5) }
                 }
                 HoverHandler { id: stashHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler { id: stashTap; onTapped: stashes.open() }
                 ToolTip.visible: stashHover.hovered
-                ToolTip.text: git.stashCount > 0 ? "Stashes (" + git.stashCount + ")" : "Stash changes"
+                ToolTip.text: root.git.stashCount > 0 ? "Stashes (" + root.git.stashCount + ")" : "Stash changes"
             }
             Item { Layout.fillWidth: true }
-            BusyIndicator { running: git.busy; visible: git.busy; implicitWidth: 18; implicitHeight: 18 }
-            FlatButton { text: "Pull"; font.pixelSize: Theme.px(11); visible: git.isRepo && git.upstream !== ""; enabled: !git.busy; onClicked: git.pull() }
+            BusyIndicator { running: root.git.busy; visible: root.git.busy; implicitWidth: 18; implicitHeight: 18 }
+            FlatButton { text: "Pull"; font.pixelSize: Theme.px(11); visible: root.git.isRepo && root.git.upstream !== ""; enabled: !root.git.busy; onClicked: root.git.pull() }
             FlatButton {
-                text: git.upstream === "" ? "Publish" : "Push"
+                text: root.git.upstream === "" ? "Publish" : "Push"
                 font.pixelSize: Theme.px(11)
-                visible: git.isRepo
-                enabled: !git.busy
-                onClicked: git.push()
+                visible: root.git.isRepo
+                enabled: !root.git.busy
+                onClicked: root.git.push()
             }
         }
 
@@ -390,12 +418,12 @@ Rectangle {
         RowLayout {
             id: requestRow
             objectName: "requestRow"
-            readonly property var req: git.requestJson !== "" ? JSON.parse(git.requestJson) : ({ state: "none" })
+            readonly property var req: root.git.requestJson !== "" ? JSON.parse(root.git.requestJson) : ({ state: "none" })
             readonly property bool has: (req.url || "") !== ""
             // (While it's looked up again, as the panel opens: what it
             // knew stays, rather than the row going for a moment.)
             readonly property bool known: req.state === "ready" || req.state === "creating" || req.state === "loading" && (req.label || "") !== ""
-            visible: git.isRepo && git.upstream !== "" && known && req.head !== req.base
+            visible: root.git.isRepo && root.git.upstream !== "" && known && req.head !== req.base
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             Layout.leftMargin: 14
@@ -427,9 +455,9 @@ Rectangle {
             id: checksRow
             objectName: "checksRow"
             readonly property var checks: requestRow.req.checks || null
-            readonly property string state: checks ? checks.state : "none"
+            readonly property string ciState: checks ? checks.state : "none"
             property bool sending: false
-            visible: requestRow.visible && requestRow.has && state !== "none"
+            visible: requestRow.visible && requestRow.has && ciState !== "none"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             Layout.leftMargin: 14
@@ -437,8 +465,8 @@ Rectangle {
             Layout.topMargin: 2
             spacing: 8
             Icon {
-                name: checksRow.state === "passing" ? "checkbox-circle" : checksRow.state === "failing" ? "close-circle" : "loader-4"
-                color: checksRow.state === "passing" ? Theme.success : checksRow.state === "failing" ? Theme.error : Theme.warning
+                name: checksRow.ciState === "passing" ? "checkbox-circle" : checksRow.ciState === "failing" ? "close-circle" : "loader-4"
+                color: checksRow.ciState === "passing" ? Theme.success : checksRow.ciState === "failing" ? Theme.error : Theme.warning
                 implicitWidth: 14
                 implicitHeight: 14
             }
@@ -449,11 +477,11 @@ Rectangle {
                 elide: Text.ElideRight
                 // Short: the panel is narrow (the whole summary on hover).
                 text: !checksRow.checks ? ""
-                    : checksRow.state === "failing" ? "Failed: " + checksRow.checks.failing.map(f => f.name).join(", ")
-                    : checksRow.state === "pending" ? "Checks running · " + checksRow.checks.passed + " of " + (checksRow.checks.passed + checksRow.checks.pending) + " done"
+                    : checksRow.ciState === "failing" ? "Failed: " + checksRow.checks.failing.map(f => f.name).join(", ")
+                    : checksRow.ciState === "pending" ? "Checks running · " + checksRow.checks.passed + " of " + (checksRow.checks.passed + checksRow.checks.pending) + " done"
                     : "Checks passed"
                 ToolTip.delay: 400
-                color: checksRow.state === "failing" ? Theme.error : Theme.textMuted
+                color: checksRow.ciState === "failing" ? Theme.error : Theme.textMuted
                 font.pixelSize: Theme.px(12)
                 ToolTip.visible: summaryHover.hovered
                 ToolTip.text: checksRow.checks ? checksRow.checks.summary : ""
@@ -461,7 +489,7 @@ Rectangle {
             }
             FlatButton {
                 objectName: "ciSend"
-                visible: checksRow.state === "failing"
+                visible: checksRow.ciState === "failing"
                 enabled: root.canSend && !checksRow.sending
                 text: checksRow.sending ? "Reading the logs…" : "Send to the agent"
                 font.pixelSize: Theme.px(11.5)
@@ -469,15 +497,15 @@ Rectangle {
                 ToolTip.visible: hovered
                 ToolTip.delay: 500
                 ToolTip.text: "Send the failed checks, with the end of their logs, to this session's agent to fix"
-                onClicked: { checksRow.sending = true; git.reportFailures() }
+                onClicked: { checksRow.sending = true; root.git.reportFailures() }
             }
         }
         Connections {
-            target: git
+            target: root.git
             function onCiReportChanged() {
-                if (git.ciReport !== "" && checksRow.sending) {
+                if (root.git.ciReport !== "" && checksRow.sending) {
                     checksRow.sending = false
-                    root.sendToAgent(git.ciReport)
+                    root.sendToAgent(root.git.ciReport)
                 }
             }
         }
@@ -486,11 +514,11 @@ Rectangle {
         Timer {
             interval: 20000
             repeat: true
-            running: root.visible && checksRow.state === "pending"
-            onTriggered: git.loadRequest()
+            running: root.visible && root.windowShown && checksRow.ciState === "pending"
+            onTriggered: root.git.loadRequest()
         }
         Connections {
-            target: git
+            target: root.git
             function onRequestJsonChanged() {
                 const r = requestRow.req
                 if (r.state === "ready" && r.url && r.checks && r.checks.state === "pending")
@@ -498,9 +526,9 @@ Rectangle {
             }
         }
         // (Read when the branch or its upstream changes, a moment later.)
-        Timer { id: requestTimer; interval: 500; onTriggered: git.loadRequest() }
+        Timer { id: requestTimer; interval: 500; onTriggered: root.git.loadRequest() }
         Connections {
-            target: git
+            target: root.git
             function onBranchChanged() { requestTimer.restart() }
             function onUpstreamChanged() { requestTimer.restart() }
             function onRootChanged() { requestTimer.restart() }
@@ -509,27 +537,25 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             Layout.margins: 18
-            visible: !git.isRepo && repoList.repos.length === 0
+            visible: !root.git.isRepo && repoList.repos.length === 0
             wrapMode: Text.Wrap
             color: Theme.muted
-            text: git.directory === "" ? "No session selected." : "Not a git repository, and none inside it:\n" + git.directory
+            text: root.git.directory === "" ? "No session selected." : "Not a git repository, and none inside it:\n" + root.git.directory
         }
 
         // File lists
         ListView {
                 id: fileList
+                objectName: "changesFiles"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                visible: git.isRepo
+                visible: root.git.isRepo
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar { }
-                model: (root.stagedEntries.length ? [{ header: "Staged", count: root.stagedEntries.length }] : [])
-                    .concat(root.stagedEntries)
-                    .concat(root.unstagedEntries.length ? [{ header: "Changes", count: root.unstagedEntries.length }] : [])
-                    .concat(root.unstagedEntries)
+                model: fileRows
                 footer: Label {
-                    visible: git.files.length === 0
+                    visible: root.git.files.length === 0
                     width: fileList.width
                     leftPadding: 18
                     topPadding: 12
@@ -538,11 +564,20 @@ Rectangle {
                 }
                 delegate: Loader {
                     id: entry
-                    required property var modelData
+                    // (The row's roles; a header's path is empty. Kept as
+                    // their own properties, they hold their values while a
+                    // removed row goes.)
+                    required property string header
+                    required property int count
+                    required property string path
+                    required property string name
+                    required property string dir
+                    required property string code
+                    required property bool staged
                     width: ListView.view.width
                     // Fixed height: the Loader sizes its item to this.
-                    height: modelData.header !== undefined ? 34 : 30
-                    sourceComponent: modelData.header !== undefined ? sectionHeader : fileRow
+                    height: header !== "" ? 34 : 30
+                    sourceComponent: header !== "" ? sectionHeader : fileRow
                     Component {
                         id: sectionHeader
                         RowLayout {
@@ -552,20 +587,20 @@ Rectangle {
                                 Layout.leftMargin: 18
                                 Layout.alignment: Qt.AlignBottom
                                 bottomPadding: 6
-                                text: entry.modelData.header + " · " + entry.modelData.count
+                                text: entry.header + " · " + entry.count
                                 color: Theme.label
                                 font.pixelSize: Theme.px(12)
                                 font.weight: Font.Medium
                             }
                             Item { Layout.fillWidth: true }
                             FlatButton {
-                                visible: entry.modelData.header === "Changes"
+                                visible: entry.header === "Changes"
                                 Layout.rightMargin: 10
                                 Layout.alignment: Qt.AlignBottom
                                 text: "Stage all"
                                 font.pixelSize: Theme.px(11.5)
                                 outlined: false
-                                onClicked: git.stageAll()
+                                onClicked: root.git.stageAll()
                             }
                         }
                     }
@@ -573,8 +608,7 @@ Rectangle {
                         id: fileRow
                         ItemDelegate {
                             id: row
-                            readonly property var f: entry.modelData
-                            readonly property string diffKey: "diff:" + (f.staged ? "1" : "0") + ":" + git.root + "/" + f.path
+                            readonly property string diffKey: "diff:" + (entry.staged ? "1" : "0") + ":" + root.git.root + "/" + entry.path
                             readonly property bool selected: Workspace.activeKey === diffKey
                             height: 30
                             leftInset: 8
@@ -587,37 +621,37 @@ Rectangle {
                             background: Rectangle { radius: 8; color: row.selected ? Theme.rowSelected : row.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
                             contentItem: RowLayout {
                                 spacing: 8
-                                Label { text: row.f.code; color: root.codeColor(row.f.code); font.family: Theme.mono; font.pixelSize: Theme.mpx(12); Layout.preferredWidth: 12 }
-                                FileIcon { path: row.f.name; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
-                                Label { text: row.f.name; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: row.selected ? Font.Medium : Font.Normal; elide: Text.ElideRight; Layout.maximumWidth: row.width * 0.55 }
-                                Label { text: row.f.dir; color: Theme.textFaint; font.pixelSize: Theme.px(12); elide: Text.ElideLeft; Layout.fillWidth: true }
+                                Label { text: entry.code; color: root.codeColor(entry.code); font.family: Theme.mono; font.pixelSize: Theme.mpx(12); Layout.preferredWidth: 12 }
+                                FileIcon { path: entry.name }
+                                Label { text: entry.name; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: row.selected ? Font.Medium : Font.Normal; elide: Text.ElideRight; Layout.maximumWidth: row.width * 0.55 }
+                                Label { text: entry.dir; color: Theme.textFaint; font.pixelSize: Theme.px(12); elide: Text.ElideLeft; Layout.fillWidth: true }
                                 FlatButton {
-                                    visible: row.hovered && !row.f.staged
+                                    visible: row.hovered && !entry.staged
                                     text: "↺"; font.pixelSize: Theme.px(12); outlined: false; padding: 2; accent: Theme.error
                                     ToolTip.visible: hovered; ToolTip.text: "Discard changes"
-                                    onClicked: { confirmRevert.path = row.f.path; confirmRevert.open() }
+                                    onClicked: { confirmRevert.path = entry.path; confirmRevert.open() }
                                 }
                                 FlatButton {
                                     visible: row.hovered
-                                    text: row.f.staged ? "−" : "+"; font.pixelSize: Theme.px(13); outlined: false; padding: 2
-                                    ToolTip.visible: hovered; ToolTip.text: row.f.staged ? "Unstage" : "Stage"
-                                    onClicked: row.f.staged ? git.unstageFile(row.f.path) : git.stageFile(row.f.path)
+                                    text: entry.staged ? "−" : "+"; font.pixelSize: Theme.px(13); outlined: false; padding: 2
+                                    ToolTip.visible: hovered; ToolTip.text: entry.staged ? "Unstage" : "Stage"
+                                    onClicked: entry.staged ? root.git.unstageFile(entry.path) : root.git.stageFile(entry.path)
                                 }
                             }
-                            onClicked: Workspace.openDiffTab(git.root + "/" + f.path, f.staged)
+                            onClicked: Workspace.openDiffTab(root.git.root + "/" + entry.path, entry.staged)
                         }
                     }
                 }
             }
 
         // Result of the last action
-        Label {
+        PlainLabel {
             Layout.fillWidth: true
             Layout.leftMargin: 18
             Layout.rightMargin: 18
-            visible: git.message !== ""
-            text: git.message
-            color: git.error ? Theme.error : Theme.textMuted
+            visible: root.git.message !== ""
+            text: root.git.message
+            color: root.git.error ? Theme.error : Theme.textMuted
             wrapMode: Text.Wrap
             maximumLineCount: 4
             elide: Text.ElideRight
@@ -628,7 +662,7 @@ Rectangle {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.margins: 14
-            visible: git.isRepo
+            visible: root.git.isRepo
             spacing: 8
             TextArea {
                 id: commitMessage
@@ -637,8 +671,8 @@ Rectangle {
                 Layout.preferredHeight: Math.min(Math.max(implicitHeight, 56), 140)
                 padding: 12
                 rightPadding: 40
-                placeholderText: git.stagedCount + git.unstagedCount === 0 ? "No changes to commit"
-                    : repoList.repos.length > 0 ? "Commit message for " + git.root.split("/").pop() + " (Ctrl+Enter)" : "Commit message (Ctrl+Enter to commit)"
+                placeholderText: root.git.stagedCount + root.git.unstagedCount === 0 ? "No changes to commit"
+                    : repoList.repos.length > 0 ? "Commit message for " + root.git.root.split("/").pop() + " (Ctrl+Enter)" : "Commit message (Ctrl+Enter to commit)"
                 placeholderTextColor: Theme.textFaint
                 color: Theme.text
                 wrapMode: TextEdit.Wrap
@@ -686,24 +720,24 @@ Rectangle {
                 Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
-                    text: git.stagedCount + " staged · " + git.unstagedCount + " unstaged"
+                    text: root.git.stagedCount + " staged · " + root.git.unstagedCount + " unstaged"
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
                 }
                 FlatButton {
                     id: commitButton
                     // Nothing staged: commit everything, as most git UIs do.
-                    readonly property bool all: git.stagedCount === 0 && git.unstagedCount > 0
-                    readonly property bool nothing: git.stagedCount + git.unstagedCount === 0
+                    readonly property bool all: root.git.stagedCount === 0 && root.git.unstagedCount > 0
+                    readonly property bool nothing: root.git.stagedCount + root.git.unstagedCount === 0
                     text: nothing ? "Nothing to commit" : all ? "Commit all" : "Commit"
                     accent: Theme.primary
-                    enabled: !nothing && commitMessage.text.trim() !== "" && !git.busy
+                    enabled: !nothing && commitMessage.text.trim() !== "" && !root.git.busy
                     opacity: enabled ? 1 : 0.45
                     ToolTip.visible: hovered && !enabled && !nothing
                     ToolTip.text: "Write a commit message first"
                     onClicked: {
                         root.committing = true
-                        all ? git.commitAll(commitMessage.text.trim()) : git.commit(commitMessage.text.trim())
+                        all ? root.git.commitAll(commitMessage.text.trim()) : root.git.commit(commitMessage.text.trim())
                     }
                 }
             }

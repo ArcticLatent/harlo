@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -90,7 +90,7 @@ AppDialog {
             color: Theme.warning
             font.pixelSize: Theme.px(12.5)
         }
-        Label {
+        PlainLabel {
             objectName: "undoResult"
             visible: dlg.plan.state === "done" || dlg.plan.state === "failed"
             Layout.fillWidth: true

@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -30,7 +30,7 @@ Item {
             columnSpacing: 8
             rowSpacing: 6
             visible: caption.text !== "" || beforeAfter.visible
-            Label {
+            PlainLabel {
                 id: caption
                 objectName: "mockupCaption"
                 Layout.fillWidth: true
@@ -62,7 +62,6 @@ Item {
             wrapMode: Text.Wrap
         }
         Rectangle {
-            id: frame
             objectName: "mockupPicture"
             visible: view.ready
             readonly property real fit: view.ready ? Math.min(1, col.width / Math.max(1, view.pic.width)) : 1

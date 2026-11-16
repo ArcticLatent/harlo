@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // The prompt navigator: one tick per message you sent,
@@ -155,7 +156,7 @@ Item {
         Item {
             width: parent.width
             y: -rail.start * rail.pitch
-            Behavior on y { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+            Behavior on y { NumberAnimation { duration: Math.round(Theme.motion * 1.9); easing.type: Easing.OutCubic } }
             // Only the ticks around the window are made (a long session
             // has thousands of prompts, and each tick's bindings ran as
             // the one in view changed): three windows' worth, moved a whole
@@ -177,8 +178,8 @@ Item {
                         width: rail.tickWidth(parent.at)
                         color: Theme.foreground
                         opacity: (parent.at === rail.activeIndex ? 1 : parent.at === rail.highlighted ? 0.8 : 0.3) * rail.edgeFade(parent.at)
-                        Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                        Behavior on width { NumberAnimation { duration: Math.round(Theme.motion * 1.25); easing.type: Easing.OutCubic } }
+                        Behavior on opacity { NumberAnimation { duration: Math.round(Theme.motion * 1.25) } }
                     }
                 }
             }
@@ -253,7 +254,7 @@ Item {
             Item {
                 width: parent.width
                 y: -panel.offset
-                Behavior on y { enabled: !panel.snap; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                Behavior on y { enabled: !panel.snap; NumberAnimation { duration: Math.round(Theme.motion * 1.25); easing.type: Easing.OutCubic } }
                 Repeater {
                     model: panel.visible ? rail.count : 0
                     Item {

@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -73,8 +74,8 @@ AppDialog {
     ColumnLayout {
         width: parent.width
         spacing: 6
-        Note { text: "Any OpenAI-compatible server: Ollama, LM Studio, llama.cpp, vLLM, SGLang, or a company gateway. Its models show in harlo's model lists (under Local when the server is on this computer or your network) and in the agents themselves." }
-        FieldName { text: "Address" }
+        FormNote { text: "Any OpenAI-compatible server: Ollama, LM Studio, llama.cpp, vLLM, SGLang, or a company gateway. Its models show in harlo's model lists (under Local when the server is on this computer or your network) and in the agents themselves." }
+        FormLabel { Layout.topMargin: 8; text: "Address" }
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -96,7 +97,7 @@ AppDialog {
                 onClicked: dlg.findModels()
             }
         }
-        FieldName { text: "Key" }
+        FormLabel { Layout.topMargin: 8; text: "Key" }
         AppTextField {
             id: key
             objectName: "modelServerKey"
@@ -106,7 +107,7 @@ AppDialog {
             font.pixelSize: Theme.px(12)
             onAccepted: dlg.findModels()
         }
-        Note {
+        FormNote {
             visible: dlg.search.state === "failed"
             color: Theme.error
             text: dlg.search.error || ""
@@ -116,8 +117,8 @@ AppDialog {
             visible: dlg.found
             Layout.fillWidth: true
             spacing: 6
-            FieldName { text: dlg.search.models.length === 0 ? "Models" : "Models (" + dlg.pickedCount + " of " + dlg.search.models.length + ")" }
-            Note { visible: dlg.search.models.length === 0; text: "The server answered but lists no models. Load or pull one there, then find models again." }
+            FormLabel { Layout.topMargin: 8; text: dlg.search.models.length === 0 ? "Models" : "Models (" + dlg.pickedCount + " of " + dlg.search.models.length + ")" }
+            FormNote { visible: dlg.search.models.length === 0; text: "The server answered but lists no models. Load or pull one there, then find models again." }
             ListView {
                 objectName: "modelServerModels"
                 visible: dlg.search.models.length > 0
@@ -128,28 +129,29 @@ AppDialog {
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar { }
                 delegate: RowLayout {
+                    id: modelRow
                     required property var modelData
                     width: ListView.view.width
                     spacing: 8
                     AppCheckBox {
                         Layout.fillWidth: true
-                        text: modelData.id
-                        checked: dlg.picked[modelData.id] !== false
+                        text: modelRow.modelData.id
+                        checked: dlg.picked[modelRow.modelData.id] !== false
                         onToggled: {
                             const p = Object.assign({}, dlg.picked)
-                            p[modelData.id] = checked
+                            p[modelRow.modelData.id] = checked
                             dlg.picked = p
                         }
                     }
                     Label {
-                        visible: !!modelData.context
-                        text: modelData.context ? dlg.contextText(modelData.context) : ""
+                        visible: !!modelRow.modelData.context
+                        text: modelRow.modelData.context ? dlg.contextText(modelRow.modelData.context) : ""
                         color: Theme.muted
                         font.pixelSize: Theme.px(11.5)
                     }
                 }
             }
-            FieldName { text: "Name" }
+            FormLabel { Layout.topMargin: 8; text: "Name" }
             AppTextField {
                 id: name
                 objectName: "modelServerName"
@@ -158,7 +160,7 @@ AppDialog {
                 font.family: Theme.mono
                 font.pixelSize: Theme.px(12)
             }
-            FieldName { text: "For" }
+            FormLabel { Layout.topMargin: 8; text: "For" }
             Row {
                 spacing: 14
                 Repeater {
@@ -183,9 +185,9 @@ AppDialog {
                     function onFoundChanged() { if (dlg.found) free.checked = dlg.localAddress(dlg.search.baseUrl) && key.text.trim() === "" }
                 }
             }
-            Note { text: free.checked ? "Its sessions cost nothing extra." : "Without a price its sessions' cost isn't known, so spending limits can't count it: give it one in Model servers." }
-            Note { text: "Models show as " + (name.text.trim() || "name") + "/<model>, saved in each agent's own config." }
-            Note { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
+            FormNote { text: free.checked ? "Its sessions cost nothing extra." : "Without a price its sessions' cost isn't known, so spending limits can't count it: give it one in Model servers." }
+            FormNote { text: "Models show as " + (name.text.trim() || "name") + "/<model>, saved in each agent's own config." }
+            FormNote { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             RowLayout {
                 Layout.topMargin: 6
                 Item { Layout.fillWidth: true }
@@ -201,6 +203,4 @@ AppDialog {
         }
     }
 
-    component Note: Label { color: Theme.muted; font.pixelSize: Theme.px(12); wrapMode: Text.Wrap; Layout.fillWidth: true }
-    component FieldName: Label { color: Theme.foreground; font.pixelSize: Theme.px(13); Layout.topMargin: 8 }
 }

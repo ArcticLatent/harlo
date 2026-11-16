@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import harlo
 
 // On/off switch in the app's colours.
@@ -23,7 +23,7 @@ Switch {
             y: 3
             x: sw.checked ? parent.width - width - 3 : 3
             color: sw.checked ? Theme.textOnPrimary : Theme.muted
-            Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+            Behavior on x { NumberAnimation { duration: Theme.hoverMotion; easing.type: Easing.OutCubic } }
         }
     }
 }

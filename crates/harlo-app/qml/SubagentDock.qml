@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -12,9 +13,13 @@ Rectangle {
     property ChatSession session
     signal viewRequested(var agent, bool steer)
 
-    // Its agent's own subagents, and the harlo sessions it started (orchestration).
-    readonly property var agents: (session && session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : [])
+    // Its agent's own subagents (`subagents`, the session's as the transcript
+    // has read them), and the harlo sessions it started (orchestration).
+    property var subagents: []
+    readonly property var agents: subagents
         .concat(session && session.key !== "" && Workspace.orchestrationRevision >= 0 ? JSON.parse(Workspace.orchestratedJson(session.key)) : [])
+    // Open, in order: those that need you or run first.
+    readonly property var shown: expanded ? agents.map((a, i) => ({ a: a, i: i })).sort((x, y) => rank(x.a.status) - rank(y.a.status) || x.i - y.i).map(x => x.a) : []
     // What the harlo sessions it started used, together.
     readonly property string used: Theme.usedLabel(Theme.usedTotal(agents.map(a => a.used || null)))
     readonly property int running: agents.filter(a => a.status === "running" || a.status === "pending").length
@@ -60,7 +65,7 @@ Rectangle {
                 font.pixelSize: Theme.px(12)
                 font.bold: true
             }
-            Label {
+            PlainLabel {
                 visible: root.session && root.session.subagentMessage !== ""
                 text: root.session ? root.session.subagentMessage : ""
                 color: Theme.muted
@@ -124,13 +129,14 @@ Rectangle {
                 id: rows
                 width: list.width
                 spacing: 6
+                // (By place: the list is read again a few times a second
+                // while they run, and its rows stay as they are, updated.)
                 Repeater {
-                    model: root.expanded ? root.agents.map((a, i) => ({ a: a, i: i }))
-                        .sort((x, y) => root.rank(x.a.status) - root.rank(y.a.status) || x.i - y.i).map(x => x.a) : []
+                    model: root.shown.length
                     SubagentRow {
-                        required property var modelData
+                        required property int index
                         width: rows.width
-                        a: modelData
+                        a: root.shown[index] || ({})
                         session: root.session
                         onViewRequested: (agent, steer) => root.viewRequested(agent, steer)
                     }

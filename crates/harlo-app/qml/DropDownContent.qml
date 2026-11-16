@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -16,10 +16,13 @@ Rectangle {
     color: Theme.background
     border.color: Theme.border
 
-    ChatSession { id: session }
-    readonly property string key: Workspace.activeKey.startsWith("view:") || Workspace.activeKey.startsWith("file:") ? "" : Workspace.activeKey
-    onKeyChanged: session.bind(key)
-    Component.onCompleted: session.bind(key)
+    ChatSession { id: activeSession }
+    // (Bound only while its window shows: hidden, it lets the session go
+    // instead of keeping a second copy of every session switched to.)
+    readonly property bool shown: Window.window !== null && Window.window.visible
+    readonly property string key: !shown || Workspace.activeKey.startsWith("view:") || Workspace.activeKey.startsWith("file:") ? "" : Workspace.activeKey
+    onKeyChanged: activeSession.bind(key)
+    Component.onCompleted: activeSession.bind(key)
     function focusInput() { if (root.key !== "") composer.focusInput(); else quickField.forceActiveFocus() }
 
     Keys.onEscapePressed: root.hideRequested()
@@ -40,15 +43,15 @@ Rectangle {
                 anchors.rightMargin: 6
                 spacing: 8
                 Image { source: "qrc:/qt/qml/harlo/icons/app/harlo.svg"; sourceSize: Qt.size(18, 18) }
-                Label {
+                PlainLabel {
                     Layout.fillWidth: true
-                    text: root.key !== "" ? (session.title || "New session") : "harlo"
+                    text: root.key !== "" ? (activeSession.title || "New session") : "harlo"
                     color: Theme.foreground
                     font.pixelSize: Theme.px(13)
                     font.bold: true
                     elide: Text.ElideRight
                 }
-                Chip { visible: session.status !== ""; text: session.status === "offline" ? "saved" : session.status; fg: Theme.statusColor(session.status) }
+                Chip { visible: activeSession.status !== ""; text: activeSession.status === "offline" ? "saved" : activeSession.status; fg: Theme.statusColor(activeSession.status) }
                 FlatButton {
                     visible: root.pinnable
                     objectName: "keepOnTop"
@@ -82,17 +85,17 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.key !== ""
-            session: session
+            session: activeSession
         }
         Composer {
             id: composer
             Layout.fillWidth: true
             Layout.margins: 10
             visible: root.key !== ""
-            session: session
+            session: activeSession
             onSubmitted: (text, mode) => {
-                const busy = session.status === "busy"
-                session.send(text, busy ? (mode === "steer" ? "steer" : "followUp") : "normal")
+                const busy = activeSession.status === "busy"
+                activeSession.send(text, busy ? (mode === "steer" ? "steer" : "followUp") : "normal")
                 composer.text = ""
                 transcript.scrollToEnd()
             }

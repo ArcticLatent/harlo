@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -12,9 +13,19 @@ import harlo
 // with its partner.
 Rectangle {
     id: root
+    // (Its window shown: not minimized, not in the tray. Polling waits
+    // otherwise; Item.visible doesn't change when the window hides.)
+    readonly property bool windowShown: Window.visibility !== Window.Minimized && Window.visibility !== Window.Hidden
     required property string path      // absolute; "" when no file tab is active
     required property var drafts       // { path: true } of files with unsaved edits
-    signal draftsEdited()
+    // (A new map each time: the one passed in may be a copy of the owner's.)
+    signal draftsEdited(var drafts)
+    function markDraft(p: string, dirty: bool) {
+        const d = Object.assign({}, root.drafts)
+        if (dirty) d[p] = true
+        else delete d[p]
+        root.draftsEdited(d)
+    }
     signal saved(string path)
     color: Theme.background
 
@@ -74,7 +85,7 @@ Rectangle {
     Timer {
         interval: 1500
         repeat: true
-        running: root.visible && root.current && file.state === "text" && !root.isImage
+        running: root.visible && root.windowShown && root.current && file.state === "text" && !root.isImage
         onTriggered: {
             const disk = file.diskState()
             if (disk === "same") {
@@ -100,7 +111,7 @@ Rectangle {
         interval: 1500
         repeat: true
         // (A remote image is a copy; it isn't watched.)
-        running: root.visible && root.isImage && root.path !== "" && !root.remote
+        running: root.visible && root.windowShown && root.isImage && root.path !== "" && !root.remote
         onTriggered: {
             const stamp = Workspace.fileStamp(root.path)
             root.imageGone = stamp === ""
@@ -138,8 +149,7 @@ Rectangle {
         function onSavedTo(path) {
             if (root.editor && root.editor.path === path) root.editor.markSaved()
             else CodeDrafts.markSaved(path)
-            delete root.drafts[path]
-            root.draftsEdited()
+            root.markDraft(path, false)
             root.saved(path)
         }
     }
@@ -147,7 +157,7 @@ Rectangle {
 
     // For `--selftest`.
     readonly property string language: editorLoader.item ? editorLoader.item.language : ""
-    readonly property string state: file.state
+    readonly property string fileState: file.state
     /// The text is all in (a long file comes in a slice at a time).
     readonly property bool loaded: editorLoader.item ? editorLoader.item.ready : false
     readonly property bool diskBarVisible: diskNotice !== ""
@@ -355,7 +365,6 @@ Rectangle {
         // Find (and replace): a strip under the header, so it covers no
         // text.
         Rectangle {
-            id: findCard
             objectName: "editorFind"
             Layout.fillWidth: true
             visible: root.findOpen && !!root.editor && root.current
@@ -533,8 +542,7 @@ Rectangle {
                     padding: 4
                     accent: Theme.warning
                     onClicked: {
-                        delete root.drafts[root.path]
-                        root.draftsEdited()
+                        root.markDraft(root.path, false)
                         CodeDrafts.discard(root.path)
                         root.reloadKeepingView()
                     }
@@ -553,8 +561,7 @@ Rectangle {
                     font.pixelSize: Theme.px(11)
                     padding: 4
                     onClicked: {
-                        delete root.drafts[root.path]
-                        root.draftsEdited()
+                        root.markDraft(root.path, false)
                         CodeDrafts.discard(root.path)
                         Workspace.closeTab("file:" + root.path)
                     }
@@ -562,8 +569,12 @@ Rectangle {
             }
         }
 
-        Label {
+        PlainLabel {
             id: messageLabel
+            objectName: "fileMessage"
+            // (Filling the width, a long message wraps instead of widening
+            // the editor past its pane.)
+            Layout.fillWidth: true
             Layout.margins: 16
             visible: !root.isImage && root.path !== "" && !(root.current && file.state === "text")
             text: !root.current || file.state === "loading" ? "Loading…" : file.message
@@ -580,7 +591,7 @@ Rectangle {
             sourceComponent: editorComponent
         }
 
-        Label {
+        PlainLabel {
             Layout.fillWidth: true
             Layout.margins: 6
             Layout.leftMargin: 14
@@ -607,7 +618,7 @@ Rectangle {
                 const kept = root.drafts[root.path] !== undefined && editor.restore(root.path)
                 if (!kept) {
                     CodeDrafts.discard(root.path)
-                    if (root.drafts[root.path] !== undefined) { delete root.drafts[root.path]; root.draftsEdited() }
+                    if (root.drafts[root.path] !== undefined) root.markDraft(root.path, false)
                     editor.text = file.text
                 }
                 const view = root.restoreView && root.restoreView.path === root.path ? root.restoreView : null
@@ -700,10 +711,7 @@ Rectangle {
                 Keys.onPressed: event => area.press(event)
                 // Which files have unsaved edits (for the tabs and leaving).
                 onModifiedChanged: {
-                    if (!area.ready || path !== root.path) return
-                    if (modified) root.drafts[path] = true
-                    else delete root.drafts[path]
-                    root.draftsEdited()
+                    if (area.ready && editor.path === root.path) root.markDraft(editor.path, editor.modified)
                 }
                 onTextChanged: if (root.findOpen && area.ready) refind.restart()
                 onContextMenuRequested: (x, y) => editMenu.popup(editor, x, y)

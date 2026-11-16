@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import Qt.labs.qmlmodels
 import harlo
@@ -7,6 +8,9 @@ import harlo
 // The transcript of one session: virtualized rows with one delegate per row kind.
 Item {
     id: root
+    // (Its window shown: not minimized, not in the tray. Polling waits
+    // otherwise; Item.visible doesn't change when the window hides.)
+    readonly property bool windowShown: Window.visibility !== Window.Minimized && Window.visibility !== Window.Hidden
     required property ChatSession session
     // A row added to the transcript fades in.
     component AddFade: NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.paneMotion; easing.type: Easing.OutCubic }
@@ -192,6 +196,7 @@ Item {
     // reply's own: the session may have switched since).
     component AgentHead: Item {
         id: head
+        objectName: "agentHead"
         property string replyModel
         readonly property string shownModel: root.replyModelName(replyModel)
         // Another model than now: its name comes with the agent's list.
@@ -217,6 +222,13 @@ Item {
             // header names that one).
             Label { visible: head.shownModel !== "" && head.shownModel !== root.session.modelName; text: Theme.modelLabel(head.shownModel); color: Theme.textMuted; font.pixelSize: Theme.px(12.5); anchors.baseline: parent.children[1].baseline }
         }
+    }
+    // The agent's head over a reply's first row, made only there (each row
+    // of a reply would otherwise hold a hidden one).
+    component HeadSlot: Loader {
+        id: slot
+        property string replyModel
+        sourceComponent: AgentHead { replyModel: slot.replyModel; visible: true }
     }
     /// How a run of tool calls and thoughts shows: "folded" (its summary
     /// line, as folded by hand), "boxed" (finished: open in a box of its
@@ -301,6 +313,7 @@ Item {
     function boxStep(list, j) {
         if (!list || j < 0 || j >= list.count) return null
         list.pinned = false
+        list.restoreY = -1
         list.positionViewAtIndex(j, ListView.Contain)
         const it = list.itemAtIndex(j)
         const find = x => {
@@ -356,9 +369,13 @@ Item {
             if (f.contentY === undefined || f.contentItem === undefined || f.height <= 0) continue
             const y = item.mapToItem(f.contentItem, 0, 0).y
             if (f.pinned !== undefined) f.pinned = false
+            if (f.restoreY !== undefined) f.restoreY = -1
             if (y < f.contentY + 8) f.contentY = y - 8
             else if (y + item.height > f.contentY + f.height - 8) f.contentY = y + item.height - f.height + 8
-            if (f.objectName === "runBoxScroll") f.contentY = Math.max(f.originY, Math.min(f.contentY, f.originY + f.contentHeight + f.bottomMargin - f.height))
+            if (f.objectName === "runBoxScroll") {
+                f.contentY = Math.max(f.originY, Math.min(f.contentY, f.originY + f.contentHeight + f.bottomMargin - f.height))
+                f.keep()
+            }
         }
     }
     // Into the runs from elsewhere (a key): the last run's line in view, or
@@ -465,41 +482,6 @@ Item {
     }
     // (Under a second: not worth a word.)
     function seconds(ms) { return ms < 1000 ? "" : ms < 10000 ? (ms / 1000).toFixed(1) + "s" : ms < 60000 ? Math.round(ms / 1000) + "s" : Math.floor(ms / 60000) + "m " + Math.round(ms % 60000 / 1000) + "s" }
-    // A step on a run's line: a dot whose colour is how it went (a
-    // thought's is hollow). The ring in the canvas colour cuts the line.
-    component RunNode: Item {
-        id: node
-        property string step: "done"   // done, error, running, asking, thought
-        // (For tests: the old marks' names.)
-        readonly property string name: step === "error" ? "close" : step === "asking" ? "question" : step === "running" ? "loader-4" : "check"
-        implicitWidth: 14
-        implicitHeight: 14
-        Rectangle {
-            anchors.centerIn: parent
-            width: 11
-            height: 11
-            radius: 5.5
-            color: Theme.canvas
-            Rectangle {
-                id: dot
-                anchors.centerIn: parent
-                width: 7
-                height: width
-                radius: width / 2
-                color: node.step === "error" ? Theme.error : node.step === "asking" ? Theme.warning : node.step === "running" ? Theme.primary
-                     : node.step === "thought" ? Theme.canvas : Theme.textFaint
-                border.width: node.step === "thought" ? 1.25 : 0
-                border.color: Theme.textFaint
-                SequentialAnimation on opacity {
-                    running: node.step === "running" && Theme.motion > 0
-                    loops: Animation.Infinite
-                    onRunningChanged: if (!running) dot.opacity = 1
-                    NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
-                    NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
-                }
-            }
-        }
-    }
     // A run's summary line ("Thought, edited 1 file, ran 2 commands"):
     // folds and unfolds the run.
     component RunHeader: Item {
@@ -616,826 +598,6 @@ Item {
             font.pixelSize: Theme.px(13)
         }
     }
-    // Code: one selectable text, its line numbers in a column beside it
-    // (each where its line is, wrapped or not), some lines tinted (added,
-    // removed, a grep match), long lines scrolled sideways (the wheel
-    // sideways, or Shift and the wheel). `lines`: [{ n, h, mark }] (mark:
-    // add, remove, match, context, file); or `html`, a whole <pre>,
-    // numbered 1…N.
-    component CodeText: Item {
-        id: ct
-        property var lines: null
-        property string html: ""
-        // Numbers in their own column; and an edit's +/− (`signs`), after
-        // its numbers when it has them.
-        property bool numbers: true
-        property bool signs: false
-        // A piece of a long block: its first line's number, and the digits
-        // its numbers take at least (the pieces' columns line up).
-        property int firstNumber: 1
-        property int minDigits: 1
-        // A line with a path (`p`) opens its file at that line: its number
-        // is a link, and so is a file's name.
-        signal openAt(string path, int line)
-        property real fontSize: Theme.mpx(12)
-        property bool wrap: Theme.wrapCode
-        property real topPad: 0
-        property real bottomPad: 0
-        // (Numbers: 8 px either side in their column, then 6 px to the code.)
-        // (Whole pixels, so the code beside it starts on one.)
-        readonly property real gutterWidth: numbers ? Math.ceil(probe.implicitWidth) + 22 : signs ? 22 : 10
-        // Unwrapped, some lines go past the right edge.
-        readonly property bool cut: !wrap && codeFlick.contentWidth > codeFlick.width + 1
-        readonly property int count: lines ? lines.length : Math.max(1, starts.length - (edit.getText(Math.max(0, edit.length - 1), edit.length) === "\n" ? 1 : 0))
-        readonly property string selectedText: edit.selectedText
-        implicitHeight: edit.implicitHeight + topPad + bottomPad
-        function number(i) {
-            if (!lines) return String(ct.firstNumber + i)
-            const l = lines[i]
-            if (!l) return ""
-            if (!signs) return l.n
-            const sign = l.mark === "add" ? "+" : l.mark === "remove" ? "−" : ""
-            // (A removed line has no number: its sign under the others'.)
-            return numbers ? (l.n || "") + "\u00a0" + (sign || "\u00a0") : sign
-        }
-        // Wrapped lines: each its own block, hanging from its indentation.
-        FontMetrics { id: monoMetrics; font.family: Theme.mono; font.pixelSize: ct.fontSize }
-        function htmlLines(h) {
-            const inner = h.replace(/^<pre[^>]*>/, "").replace(/<\/pre>\s*$/, "")
-            const out = inner.split("\n")
-            if (out.length > 1 && out[out.length - 1] === "") out.pop()
-            return out
-        }
-        function hanging(lines) {
-            const ch = monoMetrics.advanceWidth(" ")
-            return lines.map(h => {
-                const plain = h.replace(/<[^>]*>/g, "")
-                const lead = /^[ \t]*/.exec(plain)[0].replace(/\t/g, "    ").length
-                const hang = Math.round((lead + 2) * ch)
-                // (Each its own <pre>: a <p> lets the font join "=>" into an arrow.)
-                return "<pre style=\"margin:0; margin-left:" + hang + "px; text-indent:-" + hang + "px; white-space:pre-wrap;\">" + (h === "" ? " " : h) + "</pre>"
-            }).join("")
-        }
-        Label {
-            id: probe
-            visible: false
-            text: ct.lines ? ct.lines.reduce((w, l) => String(l.n).length > w.length ? String(l.n) : w, "0") + (ct.signs ? "\u00a0+" : "") : String(ct.firstNumber + ct.count - 1).padStart(ct.minDigits, "0")
-            font.family: Theme.mono
-            font.pixelSize: ct.fontSize
-        }
-        // Where each line starts in the text, and (once laid out) its top.
-        readonly property var starts: {
-            const t = edit.getText(0, edit.length)
-            const s = [0]
-            for (let i = 0; i < t.length; i++) {
-                const c = t.charCodeAt(i)
-                if (c === 10 || c === 0x2028 || c === 0x2029) s.push(i + 1)
-            }
-            return s
-        }
-        property int laidOut: 0
-        // (Clamped: for a moment after the text changes, the starts can
-        // still be the old text's, and Qt warns of a position past its end.)
-        function lineTop(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(Math.min(starts[i], edit.length)).y : edit.contentHeight }
-        function lineHeight(i) { return laidOut >= 0 ? (i + 1 < starts.length ? lineTop(i + 1) : edit.contentHeight) - lineTop(i) : 0 }
-        // (A wrapped line's first row: where its number goes.)
-        function rowHeight(i) { return laidOut >= 0 && i < starts.length ? edit.positionToRectangle(Math.min(starts[i], edit.length)).height : 0 }
-        // Tints: an added or removed line, a grep match among its context.
-        Repeater {
-            model: ct.lines ? ct.lines.length : 0
-            Rectangle {
-                required property int index
-                readonly property string mark: ct.lines[index].mark || ""
-                visible: mark === "add" || mark === "remove" || mark === "match"
-                y: ct.topPad + ct.lineTop(index)
-                width: ct.width
-                height: ct.lineHeight(index)
-                color: mark === "add" ? Qt.rgba(Theme.diffAdd.r, Theme.diffAdd.g, Theme.diffAdd.b, 0.10)
-                     : mark === "remove" ? Qt.rgba(Theme.diffRemove.r, Theme.diffRemove.g, Theme.diffRemove.b, 0.10)
-                     : Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.07)
-            }
-        }
-        Repeater {
-            model: ct.numbers || ct.signs ? ct.count : 0
-            Label {
-                required property int index
-                readonly property string mark: ct.lines && ct.lines[index] ? ct.lines[index].mark || "" : ""
-                // (Its line's number, without an edit's sign.)
-                readonly property string num: ct.lines && ct.lines[index] ? String(ct.lines[index].n || "") : String(index + 1)
-                readonly property bool opens: !!(ct.lines && ct.lines[index] && ct.lines[index].p) && /^\d+$/.test(num)
-                objectName: opens ? "codeNumber" : ""
-                x: 0
-                y: ct.topPad + ct.lineTop(index)
-                width: ct.gutterWidth - 14
-                height: ct.rowHeight(index)
-                verticalAlignment: Text.AlignVCenter
-                horizontalAlignment: Text.AlignRight
-                text: ct.number(index)
-                color: opens && numberHover.hovered ? Theme.primary : mark === "add" ? Theme.diffAdd : mark === "remove" ? Theme.diffRemove : mark === "match" ? Theme.textMuted : Theme.textFaint
-                font.family: Theme.mono
-                font.pixelSize: ct.fontSize
-                font.underline: opens && numberHover.hovered
-                HoverHandler { id: numberHover; enabled: parent.opens; cursorShape: Qt.PointingHandCursor }
-                TapHandler { enabled: parent.opens; onTapped: ct.openAt(ct.lines[index].p, Number(parent.num)) }
-                Accessible.role: opens ? Accessible.Link : Accessible.StaticText
-                Accessible.name: opens ? "Open " + ct.lines[index].p.split("/").pop() + " at line " + num : text
-                ToolTip.visible: opens && numberHover.hovered
-                ToolTip.text: "Open at line " + num
-                ToolTip.delay: 600
-            }
-        }
-        // The text; the wheel sideways moves it (up and down goes on to the
-        // list around it).
-        MouseArea {
-            x: ct.gutterWidth
-            y: ct.topPad
-            width: ct.width - x
-            height: edit.implicitHeight
-            acceptedButtons: Qt.NoButton
-            onWheel: wheel => {
-                const along = wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : wheel.angleDelta.x !== 0 ? wheel.angleDelta.x / 2.5
-                            : (wheel.modifiers & Qt.ShiftModifier) ? (wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y : wheel.angleDelta.y / 2.5) : 0
-                if (along === 0 || codeFlick.contentWidth <= codeFlick.width) { wheel.accepted = false; return }
-                codeFlick.contentX = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX - along))
-            }
-            Flickable {
-                id: codeFlick
-                objectName: "codeScroll"
-                anchors.fill: parent
-                contentWidth: ct.wrap ? width : edit.implicitWidth + 12
-                contentHeight: height
-                clip: true
-                // (A drag selects; the wheel or the bar scrolls.)
-                interactive: false
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.horizontal: ScrollBar { policy: codeFlick.contentWidth > codeFlick.width ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
-                TextEdit {
-                    id: edit
-                    objectName: "codeText"
-                    width: ct.wrap ? codeFlick.width - 10 : implicitWidth
-                    textFormat: TextEdit.RichText
-                    // (Unwrapped, one <pre>. Wrapped, a block per line, its
-                    // rows after the first under its indentation and 2 more,
-                    // so the rest of a line never reads as a line of its own.)
-                    text: Theme.htmlStyle + (!ct.wrap ? (ct.lines ? "<pre style=\"margin:0;\">" + ct.lines.map(l => l.h === "" ? " " : l.h).join("\n") + "</pre>" : ct.html)
-                                                     : ct.hanging(ct.lines ? ct.lines.map(l => l.h) : ct.htmlLines(ct.html)))
-                    color: Theme.foreground
-                    selectionColor: Theme.selection
-                    selectedTextColor: Theme.foreground
-                    readOnly: true
-                    selectByMouse: true
-                    // (At a space where there is one; a long word breaks anywhere.)
-                    wrapMode: ct.wrap ? TextEdit.Wrap : TextEdit.NoWrap
-                    font.family: Theme.mono
-                    font.pixelSize: ct.fontSize
-                    // (A file's name in it: a link to the file.)
-                    onLinkActivated: link => {
-                        const m = /^harlo-open:(\d+):(.*)$/.exec(link)
-                        if (m) ct.openAt(decodeURIComponent(m[2]), Number(m[1]))
-                    }
-                    HoverHandler { cursorShape: edit.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor }
-                    // (Lines move as the text lays out again: their numbers with
-                    // them. The box can be gone by then, its row scrolled away.)
-                    onContentHeightChanged: Qt.callLater(() => { if (ct) ct.laidOut++ })
-                    onWidthChanged: Qt.callLater(() => { if (ct) ct.laidOut++ })
-                    onTextChanged: Qt.callLater(() => { if (ct) ct.laidOut++ })
-                }
-            }
-            // More to the side: that edge fades out.
-            Rectangle {
-                visible: codeFlick.contentX > 1
-                width: 18
-                height: parent.height
-                gradient: Gradient {
-                    orientation: Gradient.Horizontal
-                    GradientStop { position: 0; color: Theme.codeBg }
-                    GradientStop { position: 1; color: Qt.rgba(Theme.codeBg.r, Theme.codeBg.g, Theme.codeBg.b, 0) }
-                }
-            }
-            Rectangle {
-                objectName: "codeMoreRight"
-                visible: codeFlick.contentX + codeFlick.width < codeFlick.contentWidth - 1
-                x: parent.width - width
-                width: 28
-                height: parent.height
-                gradient: Gradient {
-                    orientation: Gradient.Horizontal
-                    GradientStop { position: 0; color: Qt.rgba(Theme.codeBg.r, Theme.codeBg.g, Theme.codeBg.b, 0) }
-                    GradientStop { position: 1; color: Theme.codeBg }
-                }
-            }
-        }
-    }
-    // Wrap for one box whose lines are cut at the right (Word wrap off), and
-    // "No wrap" to undo it; `key` its row, `code` its CodeText.
-    component WrapButton: FlatButton {
-        property string key
-        property Item code: null
-        readonly property bool on: view.wraps[key] === true
-        objectName: "codeWrap"
-        visible: !Theme.wrapCode && !!code && code.visible && (code.cut || on)
-        text: on ? "No wrap" : "Wrap"
-        font.pixelSize: Theme.px(11)
-        padding: 2
-        onClicked: view.setWrap(key, !on)
-        Accessible.name: on ? "Don't wrap this code" : "Wrap this code's long lines"
-    }
-    // Copy, then "Copied" for a moment.
-    component CopyButton: FlatButton {
-        id: copyButton
-        // The text, or (worked out on the click) a function giving it.
-        property string copyText
-        property var copyFrom: null
-        property bool copied: false
-        objectName: "copyCode"
-        text: copied ? "Copied" : "Copy"
-        font.pixelSize: Theme.px(11)
-        padding: 2
-        onClicked: { clipboardHelper.copyText(copyFrom ? copyFrom() : copyText); copied = true; copiedTimer.restart() }
-        Timer { id: copiedTimer; interval: 1200; onTriggered: copyButton.copied = false }
-    }
-    // A tool call: one line (what it is, what it touched, what it came to)
-    // and, when there's something to see, one well under it: a write's or
-    // an edit's lines, a command's last lines.
-    component ToolCard: ColumnLayout {
-        id: card
-        property string rowKey
-        property string title
-        property string subtitle
-        property string text
-        property string rowState
-        property string callId
-        property string result
-        property string diff
-        property real took
-        property string label
-        property string command
-        /// Its pictures (files, a line each): returned, or ones it names.
-        property string images
-        // Waiting for your approval (the row's own).
-        property bool asking: false
-        // Its run ("" for a call on its own).
-        property string group
-        // Reads after it in its run: only a run's last 3 reads show their
-        // lines at once (the rest open on a click).
-        property int readsAfter: 0
-        readonly property bool isRead: /^(read|view|read_?file)$/i.test(title)
-        property var askLines: []
-        readonly property bool open: view.expanded[rowKey] === true
-        readonly property var agents: callId !== "" ? root.subagents.filter(a => a.parentToolCallId === callId) : []
-        // A write: every line added, numbered; an edit: lines out and in,
-        // numbered where its new lines are in the file now (a local one).
-        readonly property bool preview: diff !== "" && !asking
-        readonly property bool newFile: preview && result.indexOf("−") < 0
-        readonly property int previewLines: 6
-        readonly property int diffCount: diff === "" ? 0 : diff.split("\n").length
-        // (A write's own count: its diff stops at 400 lines.)
-        readonly property int lineCount: newFile && /^\+\d+$/.test(result) ? Number(result.slice(1)) : diffCount
-        // The well's code: a write's lines numbered, an edit's out and in, or
-        // a listing (grep's matches tinted among their context, each file's
-        // lines under its name, a blank line between files).
-        readonly property bool hasContext: !!code && code.lines.some(l => l.c)
-        readonly property var codeLines: {
-            if (preview) {
-                const path = subtitle.replace(/…$/, "")
-                // (Again when a host's file has come: its numbers with it.)
-                void root.session.filesRead
-                return JSON.parse(root.session.diffLines(path, diff, open ? 400 : previewLines, newFile ? "" : absolute(path)))
-                    .map((l, i) => ({ n: newFile ? String(i + 1) : l.n, h: l.h, mark: newFile ? "" : l.s === "+" ? "add" : l.s === "-" ? "remove" : "", p: newFile || l.n !== "" ? absolute(path) : "" }))
-            }
-            if (!code) return []
-            const out = []
-            let file = code.path
-            for (const l of code.lines) {
-                if (l.f !== "") {
-                    file = l.f
-                    if (out.length) out.push({ n: "", h: "", mark: "gap" })
-                    // (Its name: a link to the file, at its first line here.)
-                    const first = code.lines.find((x, i) => i > code.lines.indexOf(l) && x.n !== "")
-                    out.push({ n: "", mark: "file", h: "<a href=\"harlo-open:" + (first ? first.n : 1) + ":" + encodeURIComponent(absolute(l.f)) + "\" style=\"color:"
-                               + Theme.rgb(Theme.textMuted) + "; text-decoration:none;\">" + root.local(l.f).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</a><span style=\"color:" + Theme.rgb(Theme.textFaint) + ";\"> ↗</span>" })
-                } else out.push({ n: l.n, h: l.h, mark: l.c ? "context" : hasContext ? "match" : "", p: file !== "" ? absolute(file) : "" })
-            }
-            return out
-        }
-        // Output that is a file's lines (a printed file, grep -n, a read):
-        // numbered and highlighted like a file, its first lines (where it
-        // starts matters).
-        readonly property var code: {
-            if (preview || asking || text === "" || rowState === "running") return null
-            const j = root.session.codeView(title, command, subtitle.replace(/…$/, ""), text, open ? 400 : previewLines)
-            return j === "" ? null : JSON.parse(j)
-        }
-        readonly property bool shell: command !== "" && !asking
-        readonly property string shownCommand: shell ? root.local(command) : ""
-        // The command in the well when its line doesn't say it all (cut
-        // short there too, when narrow: measured as if no Copy showed, so
-        // hovering doesn't move it).
-        readonly property bool commandCut: shell && label === "" && whatLabel.implicitWidth > whatLabel.width + (callCopy.visible ? callCopy.width + head.spacing : 0) + 0.5
-        readonly property bool commandInWell: shell && (label !== "" || shownCommand.indexOf("\n") >= 0 || shownCommand.length > 90 || commandCut)
-        readonly property var outLines: text === "" ? [] : text.split("\n").filter(l => l.trim() !== "")
-        readonly property int tailLines: 3
-        readonly property var tail: outInWell && shell && !open && !code ? outLines.slice(-tailLines) : []
-        readonly property var tailGutters: root.numbered(tail)
-        // (One line of output that's what the line already says, "48 passed": not again.)
-        readonly property bool echoed: shell && outLines.length === 1 && result !== "" && outLines[0].trim() === result.trim()
-        readonly property bool outInWell: shell ? outLines.length > 0 && rowState !== "running" && !echoed : open && text !== "" && !preview
-        readonly property bool codeShown: !!code && (!isRead || readsAfter < 3 || open)
-        // Kept to its end (a log, a command's last lines): what's left out
-        // came before, so it's said above them.
-        readonly property bool fromEnd: code ? code.earlier === true : shell && !preview
-        // Before its first line shown, when its lines are numbered from 1
-        // on (more than the hidden ones when its start wasn't kept).
-        readonly property int before: {
-            const n = code && code.lines.length ? Number(code.lines[0].n) : NaN
-            return n > 1 && /^\d+$/.test(code.lines[0].n) ? n - 1 : 0
-        }
-        // Opened or folded; kept to its end, its last line stays where it
-        // is on screen (what grows or shrinks is above it).
-        function toggleOpen() {
-            const y = fromEnd ? wellCode.mapToItem(null, 0, wellCode.height).y : NaN
-            view.toggle(rowKey)
-            if (fromEnd) root.holdPlace(wellCode, y)
-        }
-        function absolute(p) { return root.fileAt(p, command) }
-        readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
-        // A listing's whole length: the call's own count ("1200 lines")
-        // when its output was cut, else what's kept.
-        readonly property int fullCount: {
-            if (!code) return 0
-            const m = /^(\d+) lines?$/.exec(result)
-            return m ? Math.max(Number(m[1]), code.total) : code.total
-        }
-        readonly property int hidden: preview ? lineCount - previewLines : code ? fullCount - previewLines : shell ? outLines.length - tailLines : 0
-        // Opened, what still isn't shown (-1: more, how many unknown), and
-        // where its file goes on ({p, n}), for "Open at line n".
-        readonly property int beyond: !open ? 0
-                                    : code ? (code.earlier ? 0 : Math.max(0, fullCount - code.lines.length) || (code.more ? -1 : 0))
-                                    : preview ? Math.max(0, lineCount - 400) : 0
-        readonly property var beyondAt: {
-            if (beyond === 0 || (code && code.path === "")) return null
-            const nums = codeLines.filter(l => /^\d+$/.test(l.n) && l.p)
-            const first = nums[0], last = nums[nums.length - 1]
-            // (Only a file's lines in a row: search results skip about.)
-            if (!last || Number(last.n) - Number(first.n) !== nums.length - 1) return null
-            return { p: last.p, n: Number(last.n) + 1 }
-        }
-        // Its last lines cut short to the well (each one line): opened, all of it.
-        property int cutLines: 0
-        readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || cutLines > 0 || (commandInWell && shownCommand.split("\n").length > 2)
-        // (harlo's tools about a session: its title, not its key.)
-        readonly property bool aboutSession: /^(mcp__harlo__)?(bring_over|send_message|read_session|stop_session)$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
-        readonly property string sessionTitle: aboutSession ? Workspace.sessionTitle(subtitle) : ""
-        readonly property string target: label !== "" ? label : sessionTitle !== "" ? sessionTitle : subtitle !== "" || rowState !== "pending" ? root.local(subtitle) : Theme.toolWriting(title)
-        // Code type only for code: a command, a path, a pattern, a link. A
-        // title, a question or a task's description is prose.
-        // (A wiki step's words, "Quickstart" or "1 page planned", aren't
-        // code; a wiki read's page path is.)
-        readonly property bool codeLike: label === "" && sessionTitle === "" && !/openwiki_(?!read$)/.test(title) && (shell || command !== "" || /^(bash|shell|exec|run_?command|read|edit|multi_?edit|write|apply_?patch|patch|create|ls|find|glob|grep|lsp|web_?fetch|fetch|notebook)/i.test(title) || !/\s/.test(target))
-        readonly property bool isPath: label === "" && !shell && /^[^\s]+$/.test(target) && /[\/.]/.test(target)
-        readonly property real headHeight: headBox.height
-        spacing: 4
-        HoverHandler { id: cardHover }
-        Item {
-            id: headBox
-            objectName: "toolHead"
-            Layout.fillWidth: true
-            implicitHeight: head.implicitHeight + 6
-            readonly property string stepGroup: card.group
-            // The keyboard: a call in a run is reached from the run's line
-            // (Up and Down); one on its own takes Tab. Enter or Space opens
-            // it, Ctrl+C copies its listing.
-            // (Kept while it has the focus: Qt won't take it from the focused
-            // item, and warns; a call joining a run drops it once focus moves.)
-            activeFocusOnTab: activeFocus || (card.group === "" && (card.canOpen || !!card.code || card.preview))
-            Accessible.role: Accessible.Button
-            Accessible.name: root.toolName(card.title) + ", " + card.target + (card.result !== "" ? ", " + card.result.replace(/<[^>]+>/g, "") : "") + (card.canOpen ? (card.open ? ", open" : ", folded") : "")
-            Keys.onPressed: e => {
-                root.clickedStep = null
-                if (card.canOpen && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) { card.toggleOpen(); e.accepted = true }
-                else if (e.key === Qt.Key_C && (e.modifiers & Qt.ControlModifier) && (!!card.code || card.preview)) { callCopy.clicked(); e.accepted = true }
-                else if (e.key === Qt.Key_Escape && card.group === "") { root.leaveRuns(""); e.accepted = true }
-                else e.accepted = (card.group !== "" && root.stepKey(headBox, e.key)) || root.typedOn(e)
-            }
-            // (Hover and focus share a left edge: the step's name.)
-            Rectangle {
-                x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
-                color: headHover.hovered && card.canOpen ? Theme.hover : "transparent"
-            }
-            // (Focused: ringed from its name, the run's line left clear.)
-            Rectangle {
-                visible: root.keyFocus(headBox)
-                x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
-                color: "transparent"; border.width: 1; border.color: Theme.accent
-            }
-            RowLayout {
-                id: head
-                anchors.verticalCenter: parent.verticalCenter
-                width: parent.width
-                spacing: 8
-                RunNode {
-                    objectName: "toolMark"
-                    step: card.asking ? "asking" : card.rowState === "error" || (card.failed && card.rowState === "done") ? "error" : card.rowState === "done" ? "done" : "running"
-                }
-                Label { id: toolNameLabel; text: root.toolName(card.title); color: Theme.text; font.weight: Font.Medium; font.pixelSize: Theme.px(13) }
-                Label {
-                    id: whatLabel
-                    objectName: "toolWhat"
-                    Layout.fillWidth: true
-                    // (Plain, for tests and copying: the words shown.)
-                    readonly property string plain: card.target
-                    textFormat: card.isPath ? Text.StyledText : Text.PlainText
-                    text: card.isPath ? root.pathHtml(card.target) : card.target
-                    color: Theme.textMuted
-                    elide: Text.ElideRight
-                    font.family: card.codeLike ? Theme.mono : Theme.uiFont
-                    font.pixelSize: card.codeLike ? Theme.mpx(12) : Theme.px(13)
-                }
-                // Its lines cut at the right: wrap them (always shown: it's
-                // what says they go on).
-                WrapButton { key: card.rowKey; code: wellCode }
-                Label {
-                    objectName: "toolResult"
-                    visible: text !== ""
-                    textFormat: Text.StyledText
-                    text: {
-                        const faint = s => s === "" ? "" : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + s + "</font>"
-                        let r = card.newFile ? (card.lineCount === 1 ? "1 line" : card.lineCount + " lines")
-                              : card.result.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
-                        if (card.failed && r !== "") r = "<font color='" + Theme.rgb(Theme.error) + "'>" + r + "</font>"
-                        return [r, faint(root.seconds(card.took))].filter(x => x !== "").join("&nbsp;&nbsp;")
-                    }
-                    color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
-                }
-            }
-            // (The line's colour under them, fading in over the words.)
-            Rectangle {
-                id: hoverBg
-                // (From the first one shown: a faded diff before Copy covers nothing.)
-                readonly property real skip: diffButton.visible && diffButton.opacity === 0 && callCopy.visible ? diffButton.width + hoverActions.spacing : 0
-                visible: hoverActions.lit && hoverActions.width > hoverActions.leftPadding
-                x: hoverActions.x + skip
-                width: hoverActions.width - skip
-                height: parent.height
-                readonly property color line: headHover.hovered && card.canOpen ? Qt.tint(Theme.canvas, Theme.hover) : Theme.canvas
-                gradient: Gradient {
-                    orientation: Gradient.Horizontal
-                    GradientStop { position: 0; color: Qt.rgba(hoverBg.line.r, hoverBg.line.g, hoverBg.line.b, 0) }
-                    GradientStop { position: Math.min(0.5, hoverActions.leftPadding / Math.max(1, hoverBg.width)); color: hoverBg.line }
-                    GradientStop { position: 1; color: hoverBg.line }
-                }
-            }
-            // What hovering offers (diff, Copy, Show lines): over the right
-            // end of the call's words, on the line's own colour, never in the
-            // line's layout, so nothing in it moves (or gives up room) on hover.
-            Row {
-                id: hoverActions
-                readonly property bool lit: diffButton.opacity > 0 || callCopy.opacity > 0 || showLinesLabel.opacity > 0
-                anchors.verticalCenter: parent.verticalCenter
-                x: head.x + whatLabel.x + whatLabel.width - width
-                spacing: 6
-                leftPadding: 16
-                FlatButton {
-                    id: diffButton
-                    anchors.verticalCenter: parent.verticalCenter
-                    // An edit or a write: its file's diff, in the Changes panel.
-                    visible: /^(edit|multi_?edit|write|apply_?patch|patch|create)/i.test(card.title) && card.subtitle !== "" && card.rowState !== "error"
-                    opacity: headHover.hovered || activeFocus ? 1 : 0
-                    text: "diff"
-                    font.pixelSize: Theme.px(11)
-                    padding: 2
-                    outlined: false
-                    accent: Theme.info
-                    onClicked: root.openDiff(card.subtitle.replace(/…$/, ""))
-                }
-                // Copy: all of the listing (not just the lines shown), a
-                // write's file, an edit's new lines; on hover (or the keyboard).
-                CopyButton {
-                    id: callCopy
-                    anchors.verticalCenter: parent.verticalCenter
-                    // (A folded read offers its lines instead; Ctrl+C still copies.)
-                    visible: card.codeShown || card.preview
-                    opacity: cardHover.hovered || copied || activeFocus || root.keyFocus(headBox) ? 1 : 0
-                    // (From the call's whole output: the row may keep only part.)
-                    copyFrom: () => card.code ? root.session.codeText(card.title, card.command, card.subtitle.replace(/…$/, ""), root.session.callOutput(card.rowKey))
-                                              : card.diff.split("\n").filter(l => !l.startsWith("-")).map(l => l.slice(1)).join("\n")
-                }
-                // An older read, folded to its line: what a click does.
-                Label {
-                    id: showLinesLabel
-                    objectName: "showLines"
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: card.isRead && !!card.code && !card.codeShown
-                    opacity: headHover.hovered || root.keyFocus(headBox) ? 1 : 0
-                    text: "Show lines"
-                    color: Theme.foreground
-                    font.pixelSize: Theme.px(12)
-                }
-            }
-            HoverHandler { id: headHover; cursorShape: card.canOpen ? Qt.PointingHandCursor : Qt.ArrowCursor }
-            TapHandler { enabled: card.canOpen; onTapped: { root.clickFocus(headBox); card.toggleOpen() } }
-        }
-        // The subagents this call started (the task tool), as a tree.
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.leftMargin: 22
-            visible: card.agents.length > 0
-            spacing: 6
-            Rectangle { Layout.fillHeight: true; Layout.leftMargin: 4; implicitWidth: 2; radius: 1; color: Theme.border }
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 0
-                Repeater {
-                    model: card.agents
-                    SubagentRow {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        a: modelData
-                        session: root.session
-                        onViewRequested: (agent, steer) => root.subagentRequested(agent, steer)
-                    }
-                }
-            }
-        }
-        // The approval: its details (reason, command…) and the answer.
-        // A command that can't be undone says so, and its confirm names
-        // what it does rather than looking like good news.
-        readonly property bool destructive: askLines.some(l => l.startsWith("Reason: this can't be undone"))
-        Label {
-            Layout.fillWidth: true
-            Layout.leftMargin: 22
-            visible: text !== ""
-            text: card.askLines.filter(l => l.startsWith("Reason:")).map(l => {
-                const r = l.slice(7).trim()
-                return r.charAt(0).toUpperCase() + r.slice(1)
-            }).join("\n")
-            // (The card is already the warning; only "can't be undone" is news.)
-            color: card.destructive ? Theme.error : Theme.textMuted
-            font.pixelSize: Theme.px(12)
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-        }
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.leftMargin: 22
-            // (Not the command again when the line above shows it.)
-            readonly property string details: card.askLines.filter(l => !l.startsWith("Reason:") && l !== "Outside the sandbox"
-                && l.replace(/^Command:\s*/, "").trim() !== root.local(card.subtitle).replace(/…$/, "").trim()).join("\n").trim()
-            visible: card.asking && details !== ""
-            implicitHeight: askDetails.implicitHeight + 12
-            radius: 4
-            color: Theme.codeBg
-            Label {
-                id: askDetails
-                x: 8
-                y: 6
-                width: parent.width - 16
-                text: parent.details
-                color: Theme.foreground
-                font.family: Theme.mono
-                font.pixelSize: Theme.mpx(12)
-                wrapMode: Text.WrapAnywhere
-                maximumLineCount: 14
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-            }
-        }
-        // The question, and its answers beside it; under it when they'd
-        // leave it too little room.
-        GridLayout {
-            id: approvalRow
-            Layout.fillWidth: true
-            Layout.leftMargin: 22
-            Layout.topMargin: 2
-            visible: card.asking
-            columns: approvalQ.implicitWidth + approvalButtons.implicitWidth + columnSpacing > width ? 1 : 2
-            columnSpacing: 6
-            rowSpacing: 6
-            Label {
-                id: approvalQ
-                objectName: "approvalQuestion"
-                Layout.fillWidth: true
-                text: root.approvalQuestion(card.title, card.askLines)
-                color: Theme.text
-                font.pixelSize: Theme.px(13)
-                // (The one thing to read before answering: wrapped, never cut.)
-                wrapMode: Text.Wrap
-            }
-            RowLayout {
-            id: approvalButtons
-            Layout.alignment: Qt.AlignRight
-            spacing: 6
-            FlatButton { text: "Deny"; font.pixelSize: Theme.px(12.5); onClicked: root.session.answerValue("Deny") }
-            FlatButton {
-                objectName: "alwaysAllowInline"
-                visible: root.session.requestOptions.indexOf("Always allow") >= 0
-                text: approvalRow.width < 420 ? "Always" : "Always allow"
-                font.pixelSize: Theme.px(12.5)
-                ToolTip.visible: hovered
-                ToolTip.delay: 400
-                ToolTip.text: { try { return "Remember: " + (JSON.parse(root.session.requestJson).alwaysHint || "this") } catch (e) { return "" } }
-                onClicked: root.session.answerValue("Always allow")
-            }
-            FlatButton {
-                objectName: "approveInline"
-                text: card.destructive ? "Run anyway" : "Approve"
-                variant: card.destructive ? "danger" : "primary"
-                accent: card.destructive ? Theme.error : Theme.foreground
-                font.pixelSize: Theme.px(12.5)
-                onClicked: root.session.answerValue("Approve")
-            }
-            }
-        }
-        // The well: a write's or an edit's lines; a command (when its line
-        // doesn't say it) and its last lines; any call's output, opened.
-        Rectangle {
-            id: toolWellBox
-            objectName: card.preview ? "toolPreview" : "toolWell"
-            Layout.fillWidth: true
-            Layout.leftMargin: 22
-            visible: card.preview || card.commandInWell || card.outInWell || card.codeShown
-            // (As tall as it is: a run's box is what scrolls.)
-            implicitHeight: wellCol.implicitHeight + 12
-            radius: 6
-            color: Theme.codeBg
-            // Line numbers on a column of their own, from the code's first
-            // line (under a command, if any) to the well's bottom.
-            readonly property bool gutter: (card.preview && card.codeLines.some(l => l.n !== "")) || (card.codeShown && card.code.lines.some(l => l.n !== ""))
-            readonly property bool hasCode: card.preview || card.codeShown
-            Rectangle {
-                visible: parent.gutter
-                // (Under the command's rule: the column is the code's, not the command's.)
-                y: card.commandInWell ? 6 + cmdLabel.height + 7 : 0
-                width: wellCode.gutterWidth - 6
-                height: parent.height - y
-                color: Theme.codeGutter
-                topLeftRadius: y === 0 ? 6 : 0
-                bottomLeftRadius: 6
-            }
-            Item {
-                id: wellFlick
-                y: 6
-                width: parent.width
-                height: parent.height - 12
-                clip: true
-                Column {
-                    id: wellCol
-                    width: wellFlick.width
-                    spacing: 0
-                    Label {
-                        id: cmdLabel
-                        objectName: "toolCommand"
-                        visible: card.commandInWell
-                        x: 10
-                        width: wellCol.width - 20
-                        text: "<font color='" + Theme.rgb(Theme.textFaint) + "'>$</font> " + card.shownCommand.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
-                        textFormat: Text.StyledText
-                        color: Theme.foreground
-                        // (At a space; a word too long for the line anywhere.)
-                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                        maximumLineCount: card.open ? 400 : 2
-                        elide: Text.ElideRight
-                        font.family: Theme.mono
-                        font.pixelSize: Theme.mpx(12)
-                    }
-                    // The command is the well's header: a rule across the well
-                    // between it and what it printed.
-                    Item {
-                        objectName: "toolCommandRule"
-                        visible: card.commandInWell && (card.outInWell || card.codeShown)
-                        width: wellCol.width
-                        height: 13
-                        Rectangle { y: 6; width: parent.width; height: 1; color: Theme.codeRule }
-                    }
-                    // Kept to its end, folded: its last lines, what came
-                    // before them a click away.
-                    Label {
-                        objectName: "toolEarlierLines"
-                        visible: card.fromEnd && card.hidden > 0 && !card.open
-                        x: toolWellBox.gutter ? wellCode.gutterWidth : 10
-                        bottomPadding: 3
-                        // (Of all before it, when only some were kept.)
-                        text: "↑ " + card.hidden + (card.before > card.hidden ? " of " + card.before : "") + (Math.max(card.hidden, card.before) === 1 ? " earlier line" : " earlier lines")
-                        color: earlierHover.hovered ? Theme.foreground : Theme.muted
-                        font.pixelSize: Theme.px(12)
-                        Accessible.role: Accessible.Button
-                        Accessible.name: "Show " + card.hidden + (card.hidden === 1 ? " earlier line" : " earlier lines")
-                        HoverHandler { id: earlierHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: card.toggleOpen() }
-                    }
-                    // Kept to its end: what came before isn't here.
-                    Label {
-                        objectName: "toolEarlier"
-                        visible: toolWellBox.hasCode && !!card.code && card.code.earlier === true && (card.open || card.hidden <= 0)
-                        x: toolWellBox.gutter ? wellCode.gutterWidth : 10
-                        topPadding: 4
-                        text: "Earlier lines not shown"
-                        color: Theme.textFaint
-                        font.pixelSize: Theme.px(12)
-                    }
-                    CodeText {
-                        id: wellCode
-                        objectName: card.preview ? "previewCode" : "codeView"
-                        visible: toolWellBox.hasCode
-                        width: wellCol.width
-                        lines: visible ? card.codeLines : []
-                        wrap: Theme.wrapCode || view.wraps[card.rowKey] === true
-                        numbers: toolWellBox.gutter
-                        signs: card.preview && !card.newFile
-                        onOpenAt: (p, line) => root.openFileAt(p, line)
-                    }
-                    // A command's last lines (each one shortened to the well), or
-                    // all of a call's output, opened.
-                    Repeater {
-                        model: card.tail
-                        Label {
-                            required property string modelData
-                            required property int index
-                            objectName: "toolTail"
-                            x: 10
-                            width: wellCol.width - 20
-                            readonly property var row: card.tailGutters ? card.tailGutters[index] : null
-                            text: row ? root.numberedHtml(row, true) : modelData
-                            color: Theme.textMuted
-                            elide: Text.ElideRight
-                            onTruncatedChanged: card.cutLines += truncated ? 1 : -1
-                            Component.onDestruction: if (truncated) card.cutLines--
-                            textFormat: row ? Text.StyledText : Text.PlainText
-                            font.family: Theme.mono
-                            font.pixelSize: Theme.mpx(12)
-                        }
-                    }
-                    TextEdit {
-                        visible: card.outInWell && (card.open || !card.shell) && !card.code
-                        x: 10
-                        width: wellCol.width - 20
-                        // (Line numbers at the start of its lines as a gutter.)
-                        readonly property var gutters: visible ? root.numbered(card.text.split("\n")) : null
-                        textFormat: gutters ? TextEdit.RichText : TextEdit.PlainText
-                        text: !visible ? "" : gutters ? "<p style='margin:0;white-space:pre-wrap;'>" + gutters.map(r => root.numberedHtml(r, false)).join("<br>") + "</p>" : card.text
-                        color: Theme.muted
-                        readOnly: true
-                        selectByMouse: true
-                        // (At a space; a path too long for the line anywhere.)
-                        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-                        font.family: Theme.mono
-                        font.pixelSize: Theme.mpx(12)
-                    }
-                    // What's left out, a click away; opened, what's past the
-                    // lines shown, and where the file goes on (a second line
-                    // when narrow).
-                    Flow {
-                        x: toolWellBox.gutter ? wellCode.gutterWidth : 10
-                        width: wellCol.width - x - 10
-                        visible: (card.hidden > 0 && (card.open || !card.fromEnd)) || card.beyond !== 0
-                        spacing: 2
-                        topPadding: 3
-                        Label {
-                            objectName: "toolMoreLines"
-                            visible: card.hidden > 0 && (card.open || !card.fromEnd)
-                            rightPadding: 12
-                            text: card.open ? "↑ Fewer lines" : "↓ " + card.hidden + (card.hidden === 1 ? " more line" : " more lines")
-                            color: moreHover.hovered ? Theme.foreground : Theme.muted
-                            font.pixelSize: Theme.px(12)
-                            HoverHandler { id: moreHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: card.toggleOpen() }
-                        }
-                        Label {
-                            objectName: "toolBeyond"
-                            visible: card.beyond !== 0
-                            rightPadding: 12
-                            text: (card.beyond > 0 ? card.beyond + (card.beyond === 1 ? " more line" : " more lines") : "More lines")
-                                  + (card.beyondAt ? "" : " not shown here")
-                            color: Theme.textFaint
-                            font.pixelSize: Theme.px(12)
-                        }
-                            Label {
-                                objectName: "toolBeyondOpen"
-                                visible: !!card.beyondAt
-                                text: card.beyondAt ? "Open at line " + card.beyondAt.n : ""
-                                color: beyondHover.hovered ? Theme.primary : Theme.muted
-                                font.pixelSize: Theme.px(12)
-                                font.underline: beyondHover.hovered
-                                Accessible.role: Accessible.Link
-                                Accessible.name: text
-                                HoverHandler { id: beyondHover; cursorShape: Qt.PointingHandCursor }
-                                TapHandler { onTapped: root.openFileAt(card.beyondAt.p, card.beyondAt.n) }
-                            }
-                    }
-                }
-            }
-        }
-        PictureStrip {
-            Layout.fillWidth: true
-            Layout.topMargin: 4
-            Layout.bottomMargin: 2
-            side: 96
-            labelOf: p => root.pictureLabel(p)
-            paths: card.images !== "" ? card.images.split("\n") : []
-            onOpenRequested: path => root.showPicture(path)
-        }
-    }
     // A finished run, open: its summary line, then its thoughts and calls
     // in a box of its own height that scrolls (starting at its end, next
     // to the reply).
@@ -1444,8 +606,10 @@ Item {
         property string group
         property string summary
         property bool dflt
-        // (Read again as the list changes: a finished run rarely does.)
-        readonly property var rows: (view.count, summary, JSON.parse(root.session.runJson(group)))
+        // (Asked again as the list changes, parsed only when the run did:
+        // a new list of steps would make all their cards again.)
+        readonly property string runText: (view.count, summary, root.session.runJson(group))
+        readonly property var rows: JSON.parse(runText)
         // (Room for a listing or two; the session stays in view around it.)
         readonly property real maxHeight: Math.max(Theme.px(160), Math.min(Theme.px(560), view.height * 0.6))
         objectName: "runBox"
@@ -1477,19 +641,27 @@ Item {
                 id: boxBar
                 // (Shown while it's used or hovered: the prompt rail is beside it.)
                 policy: boxFlick.contentHeight + 6 > boxFlick.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
-                onPressedChanged: boxFlick.pinned = !pressed && boxFlick.atEnd()
+                onPressedChanged: { boxFlick.pinned = !pressed && boxFlick.atEnd(); boxFlick.restoreY = -1; if (!pressed) boxFlick.keep() }
             }
             // At its end until scrolled by hand, and again once scrolled back
             // there (its cards measure themselves after they're made).
             // (A run of one call opens at its top, its call's line in view.)
-            property bool pinned: (box.rows || []).filter(r => r.kind !== "thinking").length !== 1
+            // (Where it was left is kept by run: made again after scrolling
+            // the transcript away and back, it opens there, not at its end.)
+            readonly property var keptPlace: view.kept[box.group + "|box"]
+            property bool pinned: keptPlace ? keptPlace.pinned : (box.rows || []).filter(r => r.kind !== "thinking").length !== 1
+            property real restoreY: keptPlace && !keptPlace.pinned ? keptPlace.y : -1
             function atEnd() { return atYEnd || contentHeight + 6 <= height }
-            function place() { if (pinned && height > 0) positionViewAtEnd() }
+            function place() {
+                if (pinned && height > 0) positionViewAtEnd()
+                else if (restoreY >= 0 && height > 0 && contentHeight + 6 >= restoreY + height) { contentY = restoreY; restoreY = -1 }
+            }
+            function keep() { view.kept[box.group + "|box"] = { pinned: pinned, y: contentY } }
             onContentHeightChanged: place()
             onHeightChanged: place()
             onCountChanged: place()
-            onMovementStarted: pinned = false
-            onMovementEnded: pinned = atEnd()
+            onMovementStarted: { pinned = false; restoreY = -1 }
+            onMovementEnded: { pinned = atEnd(); keep() }
             // The run's line, from its first step to its last.
             Rectangle {
                 parent: boxFlick.contentItem
@@ -1514,6 +686,7 @@ Item {
                 Component {
                     id: toolCell
                     ToolCard {
+                        transcript: root
                         width: cell.width
                         rowKey: cell.modelData.rowKey
                         title: cell.modelData.title
@@ -1773,6 +946,11 @@ Item {
         // Boxes wrapped by hand (their Wrap), by row key.
         property var wraps: ({})
         function setWrap(key, on) { const w = Object.assign({}, view.wraps); if (on) w[key] = true; else delete w[key]; view.wraps = w }
+        // Choices made inside rows (Code or Diagram, a mockup's before or
+        // after, where a run's box was scrolled to), by key: read when a row
+        // is made again after scrolling away. Changed in place, not
+        // reassigned: only rows being made read it, so nothing else re-runs.
+        property var kept: ({})
         // Runs folded or opened by hand, keyed by run.
         property var runs: ({})
         function toggleRun(group, dflt) { const r = Object.assign({}, view.runs); r[group] = !root.runOpen(group, dflt); view.runs = r }
@@ -1876,6 +1054,7 @@ Item {
             }
             Label {
                 id: workingLabel
+                objectName: "workingLabel"
                 // The run is paused on you: say so rather than "Working…".
                 readonly property bool waiting: root.session.hasRequest
                 // (Not when the request is on screen: its card or the
@@ -1886,9 +1065,12 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: !waiting ? "Working…" : root.session.requestIsApproval ? "Waiting for your approval" : "Waiting for your answer"
                 color: waiting ? Theme.warning : Theme.primary
+                // (Pulsing only while it shows, in a window that's shown;
+                // stopped, it's back at full opacity.)
                 SequentialAnimation on opacity {
-                    running: root.session.status === "busy"
+                    running: workingLabel.visible && root.windowShown
                     loops: Animation.Infinite
+                    onStopped: workingLabel.opacity = 1
                     NumberAnimation { to: 0.35; duration: 700 }
                     NumberAnimation { to: 1; duration: 700 }
                 }
@@ -2011,7 +1193,6 @@ Item {
                             }
                             TextEdit {
                                 font.family: Theme.uiFont
-                                id: userText
                                 width: parent.width
                                 visible: text !== ""
                                 text: userRow.text
@@ -2068,7 +1249,7 @@ Item {
                     // The code block (in a list) just copied: its link says "Copied" a moment.
                     property int copiedBlock: -1
                     Timer { id: blockCopiedTimer; interval: 1200; onTriggered: mdRow.copiedBlock = -1 }
-                    AgentHead { replyModel: mdRow.rowModel; visible: !mdRow.more && root.opensTurn(mdRow.ListView.previousSection); y: mdRow.gap - height - 10 }
+                    HeadSlot { replyModel: mdRow.rowModel; active: !mdRow.more && root.opensTurn(mdRow.ListView.previousSection); y: mdRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: md.implicitHeight + gap
                     TextEdit {
@@ -2111,7 +1292,7 @@ Item {
                     ListView.onAdd: if (Theme.motion > 0) picsRowFade.start()
                     AddFade { id: picsRowFade; target: picsRow }
                     readonly property real gap: root.gapAbove("images", ListView.previousSection)
-                    AgentHead { replyModel: picsRow.rowModel; visible: root.opensTurn(picsRow.ListView.previousSection); y: picsRow.gap - height - 10 }
+                    HeadSlot { replyModel: picsRow.rowModel; active: root.opensTurn(picsRow.ListView.previousSection); y: picsRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: strip.paths.length > 0 ? strip.height + picsRow.gap : 0
                     visible: implicitHeight > 0
@@ -2151,7 +1332,8 @@ Item {
                     readonly property real gap: more ? 0 : root.gapAbove("code", ListView.previousSection)
                     // A Mermaid diagram: drawn (Diagrams), its code a click away.
                     readonly property bool mermaid: title.toLowerCase() === "mermaid"
-                    property bool showCode: false
+                    property bool showCode: view.kept[wrapKey + "|code"] === true
+                    onShowCodeChanged: view.kept[wrapKey + "|code"] = showCode
                     readonly property var diagram: mermaid && Diagrams.revision >= 0
                         ? JSON.parse(Diagrams.diagram(text, Theme.isLight, JSON.stringify({ background: String(Theme.canvas), surface: String(Theme.raised), text: String(Theme.foreground),
                                                                                              muted: String(Theme.muted), accent: String(Theme.primary), font: Theme.uiFont })))
@@ -2166,9 +1348,10 @@ Item {
                     readonly property var mock: kind === "mockup" && Visuals.revision >= 0 && mockTick >= 0 ? JSON.parse(Visuals.mockup(text, root.session.cwd || "")) : null
                     readonly property bool canShow: (options !== null && !options.error) || (mock !== null && !mock.error)
                     readonly property bool visual: canShow && !showCode
-                    property bool showBefore: false
-                    Timer { interval: 2500; repeat: true; running: codeRow.mock !== null && codeRow.visual; onTriggered: codeRow.mockTick++ }
-                    AgentHead { replyModel: codeRow.rowModel; visible: !codeRow.more && root.opensTurn(codeRow.ListView.previousSection); y: codeRow.gap - height - 10 }
+                    property bool showBefore: view.kept[wrapKey + "|before"] === true
+                    onShowBeforeChanged: view.kept[wrapKey + "|before"] = showBefore
+                    Timer { interval: 2500; repeat: true; running: codeRow.mock !== null && codeRow.visual && root.windowShown; onTriggered: codeRow.mockTick++ }
+                    HeadSlot { replyModel: codeRow.rowModel; active: !codeRow.more && root.opensTurn(codeRow.ListView.previousSection); y: codeRow.gap - height - 10 }
                     width: view.width
                     implicitHeight: codeBox.height + gap
                     Rectangle {
@@ -2178,7 +1361,7 @@ Item {
                         width: view.columnWidth
                         objectName: "replyCode"
                         HoverHandler { id: blockHover }
-                        height: codeRule.y + 1 + (codeRow.drawn ? diagramBox.height : codeRow.visual ? visualBox.height : blockCode.height) + (diagramNote.visible ? diagramNote.height : 0)
+                        height: codeRule.y + codeRule.height + (codeRow.drawn ? diagramBox.height : codeRow.visual ? visualBox.height : blockCode.height) + (diagramNote.visible ? diagramNote.height : 0)
                         // (The same well as a tool's code: its header, a rule, the
                         // numbers on their own column.)
                         topLeftRadius: codeRow.more ? 0 : 6
@@ -2212,7 +1395,7 @@ Item {
                                 font.pixelSize: Theme.px(11)
                                 onClicked: codeRow.mermaid ? Diagrams.openInBrowser(codeRow.text, Theme.isLight) : Visuals.openMockup(codeRow.text, root.session.cwd || "", codeRow.showBefore)
                             }
-                            CopyButton {
+                            CodeCopy {
                                 Layout.rightMargin: wrapBlock.visible ? 0 : 6
                                 Layout.preferredHeight: 22
                                 // (On hover, as a tool's: the language stays.)
@@ -2220,9 +1403,9 @@ Item {
                                 copyText: codeRow.text
                             }
                             // (At the edge, so it never stands beside Copy's empty place.)
-                            WrapButton { id: wrapBlock; Layout.rightMargin: 6; Layout.preferredHeight: 22; key: codeRow.wrapKey; code: blockCode }
+                            WrapButton { id: wrapBlock; list: view; Layout.rightMargin: 6; Layout.preferredHeight: 22; key: codeRow.wrapKey; code: blockCode }
                         }
-                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: 1; visible: !codeRow.more; color: codeRow.visual || codeRow.drawn ? Theme.hairline : Theme.codeRule }
+                        Rectangle { id: codeRule; y: codeHeader.height; width: parent.width; height: codeRow.more ? 0 : 1; visible: !codeRow.more; color: codeRow.visual || codeRow.drawn ? Theme.hairline : Theme.codeRule }
                         // Drawing it, or why it isn't drawn.
                         Label {
                             id: diagramNote
@@ -2238,79 +1421,85 @@ Item {
                         }
                         // The picture, fitted to the column (the chat scrolls past
                         // it; clicking it opens it full size).
-                        Item {
+                        // (Made only for a diagram drawn; as are the cards and
+                        // the mockup below: a code row is mostly code.)
+                        Loader {
                             id: diagramBox
-                            objectName: "diagram"
                             anchors.top: codeRule.bottom
-                            visible: codeRow.drawn
+                            active: codeRow.drawn
                             width: parent.width
-                            height: visible ? diagramImage.height + 20 : 0
-                            Image {
-                                id: diagramImage
-                                readonly property real fit: codeRow.drawn ? Math.min(1, (diagramBox.width - 20) / Math.max(1, codeRow.diagram.width)) : 1
-                                x: (diagramBox.width - width) / 2
-                                y: 10
-                                source: codeRow.drawn ? codeRow.diagram.url : ""
-                                width: codeRow.drawn ? Math.round(codeRow.diagram.width * fit) : 0
-                                height: codeRow.drawn ? Math.round(codeRow.diagram.height * fit) : 0
-                                sourceSize.width: width * 2
-                                fillMode: Image.PreserveAspectFit
-                                smooth: true
-                                mipmap: true
-                                asynchronous: true
-                                cache: false
-                                HoverHandler { id: diagramHover; cursorShape: Qt.PointingHandCursor }
-                                TapHandler { onTapped: root.viewDiagram(codeRow.diagram, codeRow.text) }
-                                // (From the keyboard too: Tab to it, Enter or Space.)
-                                activeFocusOnTab: true
-                                Keys.onReturnPressed: root.viewDiagram(codeRow.diagram, codeRow.text)
-                                Keys.onSpacePressed: root.viewDiagram(codeRow.diagram, codeRow.text)
-                                Accessible.role: Accessible.Button
-                                Accessible.name: "Diagram. Open full size"
-                                Rectangle {
-                                    anchors.fill: parent
-                                    anchors.margins: -3
-                                    visible: diagramImage.activeFocus
-                                    color: "transparent"
-                                    border.width: 2
-                                    border.color: Theme.primary
-                                    radius: 4
+                            sourceComponent: Item {
+                                objectName: "diagram"
+                                height: diagramImage.height + 20
+                                Image {
+                                    id: diagramImage
+                                    readonly property real fit: codeRow.drawn ? Math.min(1, (diagramBox.width - 20) / Math.max(1, codeRow.diagram.width)) : 1
+                                    x: (diagramBox.width - width) / 2
+                                    y: 10
+                                    source: codeRow.drawn ? codeRow.diagram.url : ""
+                                    width: codeRow.drawn ? Math.round(codeRow.diagram.width * fit) : 0
+                                    height: codeRow.drawn ? Math.round(codeRow.diagram.height * fit) : 0
+                                    sourceSize.width: width * 2
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                    mipmap: true
+                                    asynchronous: true
+                                    cache: false
+                                    HoverHandler { id: diagramHover; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler { onTapped: root.viewDiagram(codeRow.diagram, codeRow.text) }
+                                    // (From the keyboard too: Tab to it, Enter or Space.)
+                                    activeFocusOnTab: true
+                                    Keys.onReturnPressed: root.viewDiagram(codeRow.diagram, codeRow.text)
+                                    Keys.onSpacePressed: root.viewDiagram(codeRow.diagram, codeRow.text)
+                                    Accessible.role: Accessible.Button
+                                    Accessible.name: "Diagram. Open full size"
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: -3
+                                        visible: diagramImage.activeFocus
+                                        color: "transparent"
+                                        border.width: 2
+                                        border.color: Theme.primary
+                                        radius: 4
+                                    }
+                                    ToolTip.visible: diagramHover.hovered
+                                    ToolTip.text: "Open full size"
+                                    ToolTip.delay: 600
                                 }
-                                ToolTip.visible: diagramHover.hovered
-                                ToolTip.text: "Open full size"
-                                ToolTip.delay: 600
                             }
                         }
                         // The options' cards, or the mockup's picture.
-                        Item {
+                        Loader {
                             id: visualBox
-                            objectName: "replyVisual"
                             anchors.top: codeRule.bottom
-                            visible: codeRow.visual
+                            active: codeRow.visual
                             width: parent.width
-                            height: visible ? (codeRow.options !== null ? optionCards.implicitHeight + 20 : mockupView.implicitHeight) : 0
-                            OptionsCards {
-                                id: optionCards
-                                visible: codeRow.options !== null
-                                x: 10
-                                y: 10
-                                width: parent.width - 20
-                                choices: codeRow.options && codeRow.options.choices ? codeRow.options.choices : []
-                                // (Looked at again as rows come: your answer is one.)
-                                readonly property var after: visible && root.count >= 0 ? JSON.parse(root.session.answerAfter(codeRow.rowKey)) : null
-                                answer: after ? after.text : ""
-                                choosing: after !== null && !after.answered && root.session.status !== "busy" && !root.session.hasRequest
-                                onChosen: name => root.session.send(name, "normal")
-                            }
-                            MockupView {
-                                id: mockupView
-                                objectName: "mockupView"
-                                visible: codeRow.mock !== null
-                                width: parent.width
-                                mock: codeRow.mock && !codeRow.mock.error ? codeRow.mock : null
-                                showBefore: codeRow.showBefore
-                                onOpenRequested: before => root.viewMockup(codeRow.mock, codeRow.text, before)
-                                onBeforeChosen: before => codeRow.showBefore = before
+                            sourceComponent: Item {
+                                objectName: "replyVisual"
+                                height: codeRow.options !== null ? optionCards.implicitHeight + 20 : mockupView.implicitHeight
+                                OptionsCards {
+                                    id: optionCards
+                                    visible: codeRow.options !== null
+                                    x: 10
+                                    y: 10
+                                    width: parent.width - 20
+                                    choices: codeRow.options && codeRow.options.choices ? codeRow.options.choices : []
+                                    // (Looked at again as rows come: your answer is one.)
+                                    readonly property var after: visible && root.count >= 0 ? JSON.parse(root.session.answerAfter(codeRow.rowKey)) : null
+                                    answer: after ? after.text : ""
+                                    choosing: after !== null && !after.answered && root.session.status !== "busy" && !root.session.hasRequest
+                                    onChosen: name => root.session.send(name, "normal")
+                                }
+                                MockupView {
+                                    id: mockupView
+                                    objectName: "mockupView"
+                                    visible: codeRow.mock !== null
+                                    width: parent.width
+                                    mock: codeRow.mock && !codeRow.mock.error ? codeRow.mock : null
+                                    showBefore: codeRow.showBefore
+                                    onOpenRequested: before => root.viewMockup(codeRow.mock, codeRow.text, before)
+                                    onBeforeChosen: before => codeRow.showBefore = before
+                                }
                             }
                         }
                         Rectangle {
@@ -2359,7 +1548,7 @@ Item {
                     readonly property bool boxed: mode === "boxed"
                     readonly property real gap: root.gapAbove("thinking", ListView.previousSection)
                     readonly property real head: summary !== "" ? 30 : 0
-                    AgentHead { replyModel: thinkRow.rowModel; visible: root.opensTurn(thinkRow.ListView.previousSection); y: thinkRow.gap - height - 10 }
+                    HeadSlot { replyModel: thinkRow.rowModel; active: root.opensTurn(thinkRow.ListView.previousSection); y: thinkRow.gap - height - 10 }
                     // A run's line through its rows, open (a box draws its own).
                     Rectangle {
                         readonly property bool first: !root.isActivity(thinkRow.ListView.previousSection)
@@ -2378,14 +1567,14 @@ Item {
                                   : thinkRow.folded ? (head > 0 ? gap + head : 0)
                                   : (thinkLine.item ? thinkLine.item.implicitHeight : 0) + gap + head + 10
                     visible: implicitHeight > 0
-                    RunHeader {
-                        visible: thinkRow.head > 0 && !thinkRow.boxed
+                    // (Made only on a run's first row: the others, or a
+                    // boxed run's, would each hold a hidden one.)
+                    Loader {
+                        active: thinkRow.head > 0 && !thinkRow.boxed
                         x: view.columnX
                         y: thinkRow.gap
                         width: view.columnWidth
-                        group: thinkRow.group
-                        summary: thinkRow.summary
-                        dflt: thinkRow.groupOpen
+                        sourceComponent: RunHeader { group: thinkRow.group; summary: thinkRow.summary; dflt: thinkRow.groupOpen }
                     }
                     Loader {
                         id: thinkBox
@@ -2448,7 +1637,7 @@ Item {
                     readonly property bool boxed: mode === "boxed"
                     readonly property real gap: root.gapAbove("tool", ListView.previousSection)
                     readonly property real head: summary !== "" ? 30 : 0
-                    AgentHead { replyModel: toolRow.rowModel; visible: root.opensTurn(toolRow.ListView.previousSection); y: toolRow.gap - height - 10 }
+                    HeadSlot { replyModel: toolRow.rowModel; active: root.opensTurn(toolRow.ListView.previousSection); y: toolRow.gap - height - 10 }
                     // A run's line through its rows, open (a box draws its own).
                     Rectangle {
                         readonly property bool first: !root.isActivity(toolRow.ListView.previousSection)
@@ -2467,14 +1656,14 @@ Item {
                                   : toolRow.folded ? (head > 0 ? gap + head : 0)
                                   : toolBox.height + gap + head
                     visible: implicitHeight > 0
-                    RunHeader {
-                        visible: toolRow.head > 0 && !toolRow.boxed
+                    // (Made only on a run's first row: the others, or a
+                    // boxed run's, would each hold a hidden one.)
+                    Loader {
+                        active: toolRow.head > 0 && !toolRow.boxed
                         x: view.columnX
                         y: toolRow.gap
                         width: view.columnWidth
-                        group: toolRow.group
-                        summary: toolRow.summary
-                        dflt: toolRow.groupOpen
+                        sourceComponent: RunHeader { group: toolRow.group; summary: toolRow.summary; dflt: toolRow.groupOpen }
                     }
                     Loader {
                         id: toolRunBox
@@ -2503,6 +1692,7 @@ Item {
                             y: toolRow.asking ? 10 : 5
                             width: parent.width - 16
                             sourceComponent: ToolCard {
+                                transcript: root
                                 width: toolCard.width
                                 rowKey: toolRow.rowKey
                                 title: toolRow.title
@@ -2554,132 +1744,136 @@ Item {
                     readonly property bool long: harlo ? text.split("\n").length > 2 || text.length > 200 : text.length > 240 || text.split("\n").length > 3
                     readonly property bool open: harlo ? view.expanded[rowKey] === true : !long || view.expanded[rowKey] === true
                     readonly property real gap: root.gapAbove(harlo ? "harlo" : "notice", ListView.previousSection)
-                    AgentHead { replyModel: noticeRow.rowModel; visible: !noticeRow.harlo && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
+                    HeadSlot { replyModel: noticeRow.rowModel; active: !noticeRow.harlo && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
                     width: view.width
-                    implicitHeight: (harlo ? harloCol.implicitHeight + 6 : background ? bgCol.implicitHeight + 4 : noticeText.implicitHeight + 4) + gap
-                    Column {
-                        id: bgCol
-                        objectName: "backgroundNotice"
-                        visible: noticeRow.background
+                    implicitHeight: (harlo ? harloSlot.height + 6 : background ? bgSlot.height + 4 : noticeText.implicitHeight + 4) + gap
+                    // (Each kind made only for its own notices.)
+                    Loader {
+                        id: bgSlot
+                        active: noticeRow.background
                         x: view.columnX
                         y: noticeRow.gap
                         width: view.columnWidth
-                        spacing: 4
-                        readonly property bool failed: noticeRow.rowState === "error"
-                        readonly property bool open: view.expanded[noticeRow.rowKey] === true
-                        // (The command's first line: the rest, and its last
-                        // lines, a click away.)
-                        readonly property string firstLine: noticeRow.command.split("\n")[0].trim()
-                        readonly property bool more: noticeRow.command.indexOf("\n") >= 0 || noticeRow.result !== ""
-                        Row {
-                            id: bgHead
-                            spacing: 7
-                            width: parent.width
-                            Icon {
-                                name: "terminal-box"
-                                width: Theme.px(14)
-                                height: width
-                                color: bgCol.failed ? Theme.error : Theme.textMuted
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Label {
-                                objectName: "backgroundHeadline"
-                                text: noticeRow.label
-                                color: bgCol.failed ? Theme.error : Theme.textMuted
-                                font.pixelSize: Theme.px(12.5)
-                                font.weight: Font.Medium
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Label {
-                                visible: noticeRow.subtitle !== ""
-                                // (Cut short when the column is narrow.)
-                                width: Math.max(0, Math.min(implicitWidth, bgHead.width - x - (bgMore.visible ? bgMore.width + bgHead.spacing : 0)))
-                                text: noticeRow.subtitle
-                                elide: Text.ElideRight
-                                color: Theme.textFaint
-                                font.pixelSize: Theme.px(12)
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Icon {
-                                id: bgMore
-                                visible: bgCol.more || bgLine.truncated
-                                name: bgCol.open ? "arrow-down-s" : "arrow-right-s"
-                                color: Theme.textFaint
-                                width: Theme.px(14)
-                                height: width
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
-                            HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
-                        }
-                        // The command: one line, cut at the end; opened, all of it.
-                        Item {
-                            width: parent.width
-                            height: bgLine.implicitHeight
-                            visible: !bgCol.open
-                            Label {
-                                id: bgLine
-                                objectName: "backgroundCommand"
-                                x: Theme.px(14) + 7
-                                width: parent.width - x
-                                text: "$ " + bgCol.firstLine + (noticeRow.command.indexOf("\n") >= 0 ? " …" : "")
-                                textFormat: Text.PlainText
-                                color: Theme.textFaint
-                                font.family: Theme.mono
-                                font.pixelSize: Theme.px(12)
-                                elide: Text.ElideRight
-                                maximumLineCount: 1
-                                wrapMode: Text.NoWrap
-                            }
-                            TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
-                            HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
-                            ToolTip.visible: bgHover.hovered && (bgCol.more || bgLine.truncated)
-                            ToolTip.delay: 600
-                            ToolTip.text: "Show the whole command" + (noticeRow.result !== "" ? " and its last lines" : "")
-                            HoverHandler { id: bgHover }
-                        }
-                        Rectangle {
-                            objectName: "backgroundOpen"
-                            visible: bgCol.open
-                            width: parent.width
-                            height: bgOpen.implicitHeight + 16
-                            radius: 6
-                            color: Theme.codeBg
-                            Column {
-                                id: bgOpen
-                                x: 10
-                                y: 8
-                                width: parent.width - 20
-                                spacing: 8
-                                TextEdit {
-                                    width: parent.width
-                                    readOnly: true
-                                    selectByMouse: true
-                                    text: "$ " + noticeRow.command
-                                    textFormat: TextEdit.PlainText
-                                    wrapMode: TextEdit.Wrap
-                                    color: Theme.textMuted
-                                    selectionColor: Theme.selection
-                                    font.family: Theme.mono
-                                    font.pixelSize: Theme.px(12)
+                        sourceComponent: Column {
+                            id: bgCol
+                            objectName: "backgroundNotice"
+                            spacing: 4
+                            readonly property bool failed: noticeRow.rowState === "error"
+                            readonly property bool open: view.expanded[noticeRow.rowKey] === true
+                            // (The command's first line: the rest, and its last
+                            // lines, a click away.)
+                            readonly property string firstLine: noticeRow.command.split("\n")[0].trim()
+                            readonly property bool more: noticeRow.command.indexOf("\n") >= 0 || noticeRow.result !== ""
+                            Row {
+                                id: bgHead
+                                spacing: 7
+                                width: parent.width
+                                Icon {
+                                    name: "terminal-box"
+                                    width: Theme.px(14)
+                                    height: width
+                                    color: bgCol.failed ? Theme.error : Theme.textMuted
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
-                                TextEdit {
-                                    visible: noticeRow.result !== ""
-                                    width: parent.width
-                                    readOnly: true
-                                    selectByMouse: true
-                                    text: noticeRow.result
-                                    textFormat: TextEdit.PlainText
-                                    wrapMode: TextEdit.Wrap
-                                    color: Theme.text
-                                    selectionColor: Theme.selection
+                                PlainLabel {
+                                    objectName: "backgroundHeadline"
+                                    text: noticeRow.label
+                                    color: bgCol.failed ? Theme.error : Theme.textMuted
+                                    font.pixelSize: Theme.px(12.5)
+                                    font.weight: Font.Medium
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                PlainLabel {
+                                    visible: noticeRow.subtitle !== ""
+                                    // (Cut short when the column is narrow.)
+                                    width: Math.max(0, Math.min(implicitWidth, bgHead.width - x - (bgMore.visible ? bgMore.width + bgHead.spacing : 0)))
+                                    text: noticeRow.subtitle
+                                    elide: Text.ElideRight
+                                    color: Theme.textFaint
+                                    font.pixelSize: Theme.px(12)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Icon {
+                                    id: bgMore
+                                    visible: bgCol.more || bgLine.truncated
+                                    name: bgCol.open ? "arrow-down-s" : "arrow-right-s"
+                                    color: Theme.textFaint
+                                    width: Theme.px(14)
+                                    height: width
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
+                                HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
+                            }
+                            // The command: one line, cut at the end; opened, all of it.
+                            Item {
+                                width: parent.width
+                                height: bgLine.implicitHeight
+                                visible: !bgCol.open
+                                Label {
+                                    id: bgLine
+                                    objectName: "backgroundCommand"
+                                    x: Theme.px(14) + 7
+                                    width: parent.width - x
+                                    text: "$ " + bgCol.firstLine + (noticeRow.command.indexOf("\n") >= 0 ? " …" : "")
+                                    textFormat: Text.PlainText
+                                    color: Theme.textFaint
                                     font.family: Theme.mono
                                     font.pixelSize: Theme.px(12)
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                    wrapMode: Text.NoWrap
+                                }
+                                TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
+                                HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
+                                ToolTip.visible: bgHover.hovered && (bgCol.more || bgLine.truncated)
+                                ToolTip.delay: 600
+                                ToolTip.text: "Show the whole command" + (noticeRow.result !== "" ? " and its last lines" : "")
+                                HoverHandler { id: bgHover }
+                            }
+                            Rectangle {
+                                objectName: "backgroundOpen"
+                                visible: bgCol.open
+                                width: parent.width
+                                height: bgOpen.implicitHeight + 16
+                                radius: 6
+                                color: Theme.codeBg
+                                Column {
+                                    id: bgOpen
+                                    x: 10
+                                    y: 8
+                                    width: parent.width - 20
+                                    spacing: 8
+                                    TextEdit {
+                                        width: parent.width
+                                        readOnly: true
+                                        selectByMouse: true
+                                        text: "$ " + noticeRow.command
+                                        textFormat: TextEdit.PlainText
+                                        wrapMode: TextEdit.Wrap
+                                        color: Theme.textMuted
+                                        selectionColor: Theme.selection
+                                        font.family: Theme.mono
+                                        font.pixelSize: Theme.px(12)
+                                    }
+                                    TextEdit {
+                                        visible: noticeRow.result !== ""
+                                        width: parent.width
+                                        readOnly: true
+                                        selectByMouse: true
+                                        text: noticeRow.result
+                                        textFormat: TextEdit.PlainText
+                                        wrapMode: TextEdit.Wrap
+                                        color: Theme.text
+                                        selectionColor: Theme.selection
+                                        font.family: Theme.mono
+                                        font.pixelSize: Theme.px(12)
+                                    }
                                 }
                             }
                         }
                     }
-                    Label {
+                    PlainLabel {
                         id: noticeText
                         visible: !noticeRow.harlo && !noticeRow.background
                         x: view.columnX
@@ -2724,75 +1918,76 @@ Item {
                         ToolTip.text: "Put the folder's files back as they were before this turn (this turn and the ones after it)"
                         onClicked: root.undoRequested(turn)
                     }
-                    Column {
-                        id: harloCol
-                        objectName: "harloMessage"
-                        visible: noticeRow.harlo
+                    Loader {
+                        id: harloSlot
+                        active: noticeRow.harlo
                         x: view.columnX
                         y: noticeRow.gap
                         width: view.columnWidth
-                        spacing: 4
-                        Row {
-                            spacing: 8
-                            Image {
-                                source: "qrc:/qt/qml/harlo/icons/app/harlo.svg"
-                                width: Theme.px(20)
-                                height: width
-                                sourceSize: Qt.size(width * 2, height * 2)
-                                anchors.verticalCenter: parent.verticalCenter
+                        sourceComponent: Column {
+                            objectName: "harloMessage"
+                            spacing: 4
+                            Row {
+                                spacing: 8
+                                Image {
+                                    source: "qrc:/qt/qml/harlo/icons/app/harlo.svg"
+                                    width: Theme.px(20)
+                                    height: width
+                                    sourceSize: Qt.size(width * 2, height * 2)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Label { text: "harlo"; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                                Label { text: "to the agent"; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); anchors.verticalCenter: parent.verticalCenter }
                             }
-                            Label { text: "harlo"; color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-                            Label { text: "to the agent"; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); anchors.verticalCenter: parent.verticalCenter }
-                        }
-                        // What happened, in a line; what harlo told the agent
-                        // (session keys, tool names) a click away.
-                        Label {
-                            id: harloText
-                            objectName: "harloMessageText"
-                            width: parent.width
-                            text: noticeRow.label !== "" ? noticeRow.label : noticeRow.text
-                            wrapMode: Text.Wrap
-                            maximumLineCount: 3
-                            elide: Text.ElideRight
-                            font.pixelSize: Theme.px(13.5)
-                            color: Theme.text
-                            textFormat: Text.PlainText
-                        }
-                        Row {
-                            spacing: 6
-                            topPadding: 2
-                            FlatButton {
-                                objectName: "openHelper"
-                                visible: noticeRow.subtitle !== ""
-                                text: "Open helper"
-                                padding: 4
-                                font.pixelSize: Theme.px(12)
-                                ToolTip.visible: hovered
-                                ToolTip.delay: 400
-                                ToolTip.text: "Show the session this is about"
-                                onClicked: Workspace.open(noticeRow.subtitle)
+                            // What happened, in a line; what harlo told the agent
+                            // (session keys, tool names) a click away.
+                            Label {
+                                objectName: "harloMessageText"
+                                width: parent.width
+                                text: noticeRow.label !== "" ? noticeRow.label : noticeRow.text
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                                font.pixelSize: Theme.px(13.5)
+                                color: Theme.text
+                                textFormat: Text.PlainText
                             }
-                            FlatButton {
-                                objectName: "harloSentToggle"
-                                visible: noticeRow.label !== "" && noticeRow.label !== noticeRow.text
-                                text: noticeRow.open ? "Hide what harlo sent" : "What harlo sent"
-                                outlined: false
-                                padding: 4
-                                accent: Theme.textMuted
-                                font.pixelSize: Theme.px(12)
-                                onClicked: view.toggle(noticeRow.rowKey)
+                            Row {
+                                spacing: 6
+                                topPadding: 2
+                                FlatButton {
+                                    objectName: "openHelper"
+                                    visible: noticeRow.subtitle !== ""
+                                    text: "Open helper"
+                                    padding: 4
+                                    font.pixelSize: Theme.px(12)
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    ToolTip.text: "Show the session this is about"
+                                    onClicked: Workspace.open(noticeRow.subtitle)
+                                }
+                                FlatButton {
+                                    objectName: "harloSentToggle"
+                                    visible: noticeRow.label !== "" && noticeRow.label !== noticeRow.text
+                                    text: noticeRow.open ? "Hide what harlo sent" : "What harlo sent"
+                                    outlined: false
+                                    padding: 4
+                                    accent: Theme.textMuted
+                                    font.pixelSize: Theme.px(12)
+                                    onClicked: view.toggle(noticeRow.rowKey)
+                                }
                             }
-                        }
-                        Label {
-                            objectName: "harloSent"
-                            visible: noticeRow.open && noticeRow.label !== "" && noticeRow.label !== noticeRow.text
-                            width: parent.width
-                            topPadding: 4
-                            text: noticeRow.text
-                            wrapMode: Text.Wrap
-                            font.pixelSize: Theme.px(12.5)
-                            color: Theme.textMuted
-                            textFormat: Text.PlainText
+                            Label {
+                                objectName: "harloSent"
+                                visible: noticeRow.open && noticeRow.label !== "" && noticeRow.label !== noticeRow.text
+                                width: parent.width
+                                topPadding: 4
+                                text: noticeRow.text
+                                wrapMode: Text.Wrap
+                                font.pixelSize: Theme.px(12.5)
+                                color: Theme.textMuted
+                                textFormat: Text.PlainText
+                            }
                         }
                     }
                 }

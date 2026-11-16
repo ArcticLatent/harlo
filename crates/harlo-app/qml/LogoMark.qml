@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Shapes
 import harlo
@@ -16,11 +17,12 @@ Item {
     implicitWidth: Math.round(implicitHeight * box.width / box.height)
 
     component Part: Shape {
+        id: part
         property alias path: svg.path
         property color color
         preferredRendererType: Shape.CurveRenderer
         ShapePath {
-            fillColor: color
+            fillColor: part.color
             strokeColor: "transparent"
             PathSvg { id: svg }
         }

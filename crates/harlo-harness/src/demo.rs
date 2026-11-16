@@ -14,6 +14,11 @@
 //! - A prompt containing `subagents` starts two pretend subagents
 //!   (`get_subagents`, `cancel_subagent`, `steer_subagent` answer for them;
 //!   each has a transcript file).
+//! - A prompt containing `long tool` runs one call of an MCP tool with a
+//!   long plugin-style name (for narrow layouts).
+//! - A prompt containing `long code` answers with a 200-line code block.
+//! - A prompt containing `long run` answers with one finished run of 60
+//!   calls (commands, reads and edits).
 //! - A prompt containing `todos` runs a pretend `todo` tool call (the phases
 //!   come back from `get_state`); `queue demo` fills the message queue
 //!   (`remove_queued_message` / `promote_queued_message` work on it).
@@ -147,12 +152,49 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                             { "content": "Read the build script", "status": "completed" },
                             { "content": "Find the failing test", "status": "in_progress" } ] },
                         { "name": "Fix", "tasks": [
-                            { "content": "Patch the parser", "status": "pending" },
+                            { "content": "Patch the parser's <div> handling", "status": "pending" },
                             { "content": "Run the suite", "status": "blocked", "blocker": "needs the fix first" } ] }
                     ]);
                     let call = format!("todo-{n}");
                     let _ = events.send(HarnessEvent::ToolStart { call_id: call.clone(), name: "todo".into(), args: json!({ "op": "init" }) });
                     let _ = events.send(HarnessEvent::ToolEnd { call_id: call, result: json!({ "content": [{ "type": "text", "text": "4 tasks" }] }), is_error: false });
+                }
+                "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("long tool")) => {
+                    respond(json!({"disposition":"started"}));
+                    let n = seq.fetch_add(1, Ordering::Relaxed);
+                    let _ = events.send(HarnessEvent::MessageEnd { id: format!("u{n}"), message: user_message(cmd["message"].as_str().unwrap_or_default()) });
+                    let (aid, call) = (next_id(&seq), format!("long-{n}"));
+                    let name = "mcp__plugin_qt-development-skills_qt-docs__qt_documentation_search";
+                    let args = json!({ "query": "QML Flow layout" });
+                    let message = json!({
+                        "role": "assistant",
+                        "content": [
+                            { "type": "toolCall", "id": call, "name": name, "arguments": args },
+                            { "type": "text", "text": "Found three pages on Flow." },
+                        ],
+                        "stopReason": "stop",
+                    });
+                    let _ = events.send(HarnessEvent::MessageStart { id: aid.clone(), message: json!({ "role": "assistant", "content": [] }) });
+                    let _ = events.send(HarnessEvent::ToolStart { call_id: call.clone(), name: name.into(), args });
+                    let _ = events.send(HarnessEvent::ToolEnd { call_id: call, result: json!({ "content": [{ "type": "text", "text": "3 results" }] }), is_error: false });
+                    let _ = events.send(HarnessEvent::MessageEnd { id: aid, message });
+                }
+                "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("long run")) => {
+                    respond(json!({"disposition":"started"}));
+                    let n = seq.fetch_add(1, Ordering::Relaxed);
+                    let _ = events.send(HarnessEvent::MessageEnd { id: format!("u{n}"), message: user_message(cmd["message"].as_str().unwrap_or_default()) });
+                    emit_long_run(&events, &seq, n);
+                }
+                "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("long code")) => {
+                    respond(json!({"disposition":"started"}));
+                    let n = seq.fetch_add(1, Ordering::Relaxed);
+                    let _ = events.send(HarnessEvent::MessageEnd { id: format!("u{n}"), message: user_message(cmd["message"].as_str().unwrap_or_default()) });
+                    let code: String = (0..200).map(|i| format!("fn step_{i}(rows: &mut Vec<u32>) {{ rows.push({i}); }}\n")).collect();
+                    let text = format!("Here it is:\n\n```rust\n{code}```\n\nThat's all of it.");
+                    let aid = next_id(&seq);
+                    let message = json!({ "role": "assistant", "content": [{ "type": "text", "text": text }], "stopReason": "stop" });
+                    let _ = events.send(HarnessEvent::MessageStart { id: aid.clone(), message: json!({ "role": "assistant", "content": [] }) });
+                    let _ = events.send(HarnessEvent::MessageEnd { id: aid, message });
                 }
                 "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("queue demo")) => {
                     respond(json!({"disposition":"started"}));
@@ -312,6 +354,30 @@ fn emit_exchange(events: &mpsc::UnboundedSender<HarnessEvent>, seq: &AtomicU64, 
         result: json!({"content":[{"type":"text","text":"total 8\n-rw-r--r-- 1 user user 120 main.rs\n-rw-r--r-- 1 user user  64 lib.rs"}]}),
     });
     let _ = events.send(HarnessEvent::MessageEnd { id: aid, message });
+}
+
+/// Calls in the `long run` reply: enough for a run box that scrolls.
+const LONG_RUN_CALLS: u64 = 60;
+
+/// One finished reply of [`LONG_RUN_CALLS`] calls (commands, reads and edits
+/// in turn, each with a few lines of output), then a line of text.
+fn emit_long_run(events: &mpsc::UnboundedSender<HarnessEvent>, seq: &AtomicU64, n: u64) {
+    let aid = next_id(seq);
+    let _ = events.send(HarnessEvent::MessageStart { id: aid.clone(), message: json!({ "role": "assistant", "content": [] }) });
+    let mut content = Vec::new();
+    for i in 0..LONG_RUN_CALLS {
+        let call = format!("run-{n}-{i}");
+        let (name, args, out) = match i % 3 {
+            0 => ("bash", json!({ "command": format!("cargo test -p step_{i}") }), format!("running 4 tests\ntest a ... ok\ntest b ... ok\ntest c ... ok\ntest d ... ok\ntest result: ok. 4 passed; 0 failed (step {i})")),
+            1 => ("read", json!({ "path": format!("src/step_{i}.rs") }), (0..8).map(|l| format!("fn line_{l}() {{ /* step {i} */ }}\n")).collect()),
+            _ => ("edit", json!({ "path": format!("src/step_{i}.rs"), "oldText": format!("let a = {i};"), "newText": format!("let a = {};\nlet b = {i};", i + 1) }), format!("Edited src/step_{i}.rs")),
+        };
+        content.push(json!({ "type": "toolCall", "id": call, "name": name, "arguments": args }));
+        let _ = events.send(HarnessEvent::ToolStart { call_id: call.clone(), name: name.into(), args });
+        let _ = events.send(HarnessEvent::ToolEnd { call_id: call, result: json!({ "content": [{ "type": "text", "text": out }] }), is_error: false });
+    }
+    content.push(json!({ "type": "text", "text": "All sixty steps are done." }));
+    let _ = events.send(HarnessEvent::MessageEnd { id: aid, message: json!({ "role": "assistant", "content": content, "stopReason": "stop" }) });
 }
 
 /// The approval the demo waits for: request id and where the answer goes.

@@ -1,5 +1,6 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
@@ -247,15 +248,7 @@ AppDialog {
                                 font.pixelSize: Theme.px(22)
                                 font.bold: true
                             }
-                            FlatButton {
-                                id: copyCode
-                                objectName: "signInCopyCode"
-                                property bool copied: false
-                                text: copied ? "Copied" : "Copy"
-                                font.pixelSize: Theme.px(12)
-                                onClicked: { copier.copyText(step.modelData.code); copied = true; copiedAgo.restart() }
-                                Timer { id: copiedAgo; interval: 1500; onTriggered: copyCode.copied = false }
-                            }
+                            CopyButton { objectName: "signInCopyCode"; copyText: step.modelData.code || "" }
                             FlatButton {
                                 visible: (step.modelData.url || "") !== ""
                                 text: "Open the page"
