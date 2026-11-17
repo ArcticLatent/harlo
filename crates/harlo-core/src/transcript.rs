@@ -1388,8 +1388,13 @@ fn wiki_step(name: &str, args: &Value) -> Option<String> {
             _ => String::new(),
         },
         "submit_plan" => {
+            // (Not yet arrived, while the call streams in: nothing, not
+            // "0 pages planned".)
+            if !args["pages"].is_array() {
+                return Some(String::new());
+            }
             let (pages, gone) = (count("pages"), count("deletePages"));
-            let mut s = n(pages, "page planned", "pages planned");
+            let mut s = if pages == 0 { "no pages to change".to_owned() } else { n(pages, "page planned", "pages planned") };
             if gone > 0 {
                 let _ = write!(s, ", {} to remove", n(gone, "page", "pages"));
             }
@@ -2455,6 +2460,8 @@ mod tests {
         let run = "380ad742-68a0-4f95-a5a9-529de7132d1e";
         assert_eq!(wiki_step("mcp__harlo__openwiki_begin", &json!({"mode":"init"})).as_deref(), Some("a new wiki"));
         assert_eq!(wiki_step("openwiki_submit_plan", &json!({"runId":run,"pages":[{"path":"a"},{"path":"b"}],"deletePages":["c"]})).as_deref(), Some("2 pages planned, 1 page to remove"));
+        assert_eq!(wiki_step("openwiki_submit_plan", &json!({"runId":run})).as_deref(), Some(""), "still streaming in");
+        assert_eq!(wiki_step("openwiki_submit_plan", &json!({"runId":run,"pages":[]})).as_deref(), Some("no pages to change"));
         assert_eq!(wiki_step("openwiki_next_page", &json!({"runId":run})).as_deref(), Some(""));
         assert_eq!(wiki_step("openwiki_submit_page", &json!({"runId":run,"jobId":run,"claims":[{"statement":"x"}]})).as_deref(), Some("1 fact tied to the code"));
         assert_eq!(wiki_step("openwiki_search", &json!({"query":"refunds"})), None);

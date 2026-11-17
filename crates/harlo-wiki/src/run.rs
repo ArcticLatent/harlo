@@ -926,15 +926,32 @@ fn reconcile_claims(session: &mut claims::Session, page_input: &str, input: &Val
         let c = target(&mut targeted, &id, "retract")?;
         ops.push(Op::Retract { id: s(&c, "id").unwrap_or_default() });
     }
+    // (Every undecided one at once: naming only the first costs a round
+    // trip, the whole page again, for each of the others.)
+    let mut undecided = Vec::new();
     for c in &existing {
         let id = s(c, "id").unwrap_or_default();
         if targeted.contains(&id) {
             continue;
         }
         if let Some(kind) = c.get("issue").and_then(|i| i["kind"].as_str()) {
-            return Err(fail("invalid_input", format!("Claim {id} is {kind} and requires an explicit confirm, update, or retract decision.")));
+            let statement = s(c, "statement").unwrap_or_default();
+            undecided.push(format!("- {id} ({kind}): \"{statement}\" ({})", ev(c).join(", ")));
+            continue;
         }
         ops.push(Op::Confirm { id });
+    }
+    if !undecided.is_empty() {
+        let n = undecided.len();
+        return Err(fail(
+            "invalid_input",
+            format!(
+                "{n} Claim{} of this page need{} a decision. For each: recheck it, then put its id in `confirmedClaimIds` (its cited lines still hold), send it in `claims` with its id and new evidence, or put its id in `retractedClaimIds` (and take it out of the page). Leaving it out isn't a decision.\n{}",
+                if n == 1 { "" } else { "s" },
+                if n == 1 { "s" } else { "" },
+                undecided.join("\n")
+            ),
+        ));
     }
     let retracted = ops.iter().filter(|o| matches!(o, Op::Retract { .. })).count();
     let added = ops.iter().filter(|o| matches!(o, Op::Add { .. })).count();
@@ -1461,8 +1478,10 @@ fn resume(input: &Begin, requested: Option<String>, state: Value) -> Result<Begu
             p["status"] = "pending".into();
         }
     }
+    let legacy = state["actor"]["producerActor"].as_str().unwrap_or("").to_owned();
+    let mut prepared = None;
+    let mut kept = None;
     if source_changed {
-        next["phase"] = "planning".into();
         next["sourceFingerprint"] = current.fingerprint.clone().into();
         let o = next.as_object_mut().unwrap();
         match &current.git_head {
@@ -1473,13 +1492,21 @@ fn resume(input: &Begin, requested: Option<String>, state: Value) -> Result<Begu
                 o.shift_remove("targetGitHead");
             }
         }
-        o.shift_remove("plan");
+        if next.get("plan").is_some() {
+            // harlo: the plan stands; see keep_plan.
+            let rt = prepare_claims(root, &ignore, &mode, mode == "init")?;
+            let (state, reopened, added) = keep_plan(next, &rt.issues)?;
+            next = reconcile_manifest_jobs(root, state, &legacy)?;
+            prepared = Some(rt);
+            kept = Some((reopened, added));
+        } else {
+            next["phase"] = "planning".into();
+        }
     } else {
         if next.get("targetGitHead").is_none()
             && let Some(h) = &current.git_head {
                 next.as_object_mut().unwrap().insert("targetGitHead".into(), h.clone().into());
             }
-        let legacy = state["actor"]["producerActor"].as_str().unwrap_or("").to_owned();
         next = reconcile_manifest_jobs(root, next, &legacy)?;
     }
     let active = if serde_json::to_string(&next).ok() == serde_json::to_string(&state).ok() {
@@ -1489,10 +1516,73 @@ fn resume(input: &Begin, requested: Option<String>, state: Value) -> Result<Begu
         next
     };
     let backend = Backend::new(root, ignore.clone());
-    let rt = prepare_claims(root, &ignore, &mode, mode == "init")?;
+    let rt = match prepared {
+        Some(rt) => rt,
+        None => prepare_claims(root, &ignore, &mode, mode == "init")?,
+    };
     let mut run = Run { root: root.clone(), state: active, backend, ignore, claims: rt };
-    let view = run.active_view(true)?;
+    let mut view = run.active_view(true)?;
+    if let Some((reopened, added)) = kept {
+        view["sourceChangedDuringRun"] = json!({
+            "note": "The code changed since this run was planned. The plan stands: finished pages whose Claims the change affected are pending again, pages it didn't plan that now have affected Claims were added, and the rest are done. Continue with openwiki_next_page.",
+            "reopenedPages": reopened,
+            "addedPages": added,
+        });
+    }
     Ok(Begun::Active(Box::new(run), view))
+}
+
+/// harlo: a run resumed after its code changed keeps its plan.
+///
+/// The pages it finished whose Claims the change made stale or unresolved
+/// are pending again; pages it didn't plan that now have such Claims are
+/// added (unless the plan deletes them or deferred them); the rest stand.
+/// OpenWiki drops the plan and plans again instead, which in a repository
+/// that's worked on while the update runs means it never finishes, the
+/// pages already written being redone each time.
+///
+/// Returns the state, the pages reopened and the pages added.
+fn keep_plan(mut state: Value, issues: &[claims::Issue]) -> Result<(Value, Vec<String>, Vec<String>)> {
+    let mut by_page: Vec<(String, Vec<String>)> = Vec::new();
+    for i in issues {
+        let page = store::normalize_page(&i.page)?;
+        match by_page.iter_mut().find(|(p, _)| *p == page) {
+            Some((_, r)) => r.extend(i.resources.iter().cloned()),
+            None => by_page.push((page, i.resources.clone())),
+        }
+    }
+    let skip: HashSet<String> = strings(&state["plan"]["deletePages"]).into_iter().chain(strings(&state["plan"]["deferredClaimPages"])).collect();
+    let mut reopened = Vec::new();
+    let mut added = Vec::new();
+    let Some(pages) = state["plan"]["pages"].as_array_mut() else { return Ok((state, reopened, added)) };
+    let mut planned = HashSet::new();
+    for p in pages.iter_mut() {
+        let path = s(p, "path").unwrap_or_default();
+        if p["status"] == "complete" && by_page.iter().any(|(q, _)| *q == path) {
+            p["status"] = "pending".into();
+            if let Some(o) = p.as_object_mut() {
+                o.shift_remove("completedBy");
+            }
+            reopened.push(path.clone());
+        }
+        planned.insert(path);
+    }
+    for (page, resources) in by_page {
+        if planned.contains(&page) || skip.contains(&page) {
+            continue;
+        }
+        let seeds = unique_sorted(resources.iter().filter_map(|r| evidence_seed(r).ok()).collect());
+        pages.push(job(&page, &title_from_path(&page), "The code this page's Claims cite changed while this update ran. Reconcile those Claims from current repository evidence, keeping unaffected accurate content.", &seeds, &[], &[]));
+        added.push(page);
+    }
+    pages.sort_by(|a, b| {
+        let (pa, pb) = (a["path"].as_str().unwrap_or(""), b["path"].as_str().unwrap_or(""));
+        (pa == QUICKSTART).cmp(&(pb == QUICKSTART)).then_with(|| cmp16(pa, pb))
+    });
+    if !reopened.is_empty() || !added.is_empty() {
+        state["phase"] = "generating".into();
+    }
+    Ok((state, reopened, added))
 }
 
 impl Run {
@@ -1993,6 +2083,56 @@ mod tests {
     /// commits to code no page cites, and cited lines that only moved; a
     /// changed cited line or a new file needs a model, and then nothing
     /// is written.
+    #[test]
+    fn a_resumed_run_keeps_its_plan_when_the_code_changed() {
+        let r = std::env::temp_dir().join(format!("harlo-run-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&r);
+        std::fs::create_dir_all(r.join("src")).unwrap();
+        let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&r).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).status().unwrap().success());
+        git(&["init", "-q"]);
+        std::fs::write(r.join("src/a.rs"), "// a\npub const LIMIT: u32 = 100;\n").unwrap();
+        std::fs::write(r.join("src/b.rs"), "pub fn ship() {}\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "code"]);
+        let root = r.to_string_lossy().into_owned();
+        let page = |path: &str, title: &str, body: &str| std::fs::write(r.join(path), format!("---\ntype: guide\ntitle: {title}\ndescription: {title}.\ntags: [a]\n---\n\n# {title}\n\n{body}\n")).unwrap();
+        let mut w = Writer::new("harlo");
+        let begun = w.call("openwiki_begin", &json!({"root": root, "mode": "init"})).unwrap();
+        let run = begun["runId"].as_str().unwrap().to_owned();
+        w.call("openwiki_submit_plan", &json!({"runId": run, "pages": [
+            {"path": "/openwiki/quickstart.md", "title": "Quickstart", "purpose": "Where to start."},
+            {"path": "/openwiki/shipping.md", "title": "Shipping", "purpose": "How it ships."},
+        ]})).unwrap();
+        let next = w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        assert_eq!(next["job"]["path"], "/openwiki/shipping.md");
+        let job = next["job"]["id"].as_str().unwrap().to_owned();
+        page("openwiki/shipping.md", "Shipping", "`ship` ships it.");
+        w.call("openwiki_submit_page", &json!({"runId": run, "jobId": job, "claims": [{"statement": "ship ships it.", "evidence": [{"resource": "repo://src/b.rs#L1-L1"}]}]})).unwrap();
+
+        // Restarted after a change no page cites: the plan stands, its
+        // finished page too.
+        std::fs::write(r.join("src/c.rs"), "fn c() {}\n").unwrap();
+        let mut w = Writer::new("harlo");
+        let again = w.call("openwiki_begin", &json!({"root": root, "mode": "init"})).unwrap();
+        assert_eq!(again["phase"], "generating", "{again}");
+        assert_eq!(again["completedPages"], 1, "{again}");
+        assert_eq!(again["sourceChangedDuringRun"]["reopenedPages"], json!([]), "{again}");
+        let next = w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        assert_eq!(next["job"]["path"], "/openwiki/quickstart.md", "{next}");
+
+        // Restarted after the code a finished page cites changed: that page
+        // is pending again, its Claim to recheck.
+        std::fs::write(r.join("src/b.rs"), "pub fn ship() { launch() }\n").unwrap();
+        let mut w = Writer::new("harlo");
+        let again = w.call("openwiki_begin", &json!({"root": root, "mode": "init"})).unwrap();
+        assert_eq!(again["sourceChangedDuringRun"]["reopenedPages"], json!(["/openwiki/shipping.md"]), "{again}");
+        assert_eq!(again["completedPages"], 0, "{again}");
+        let next = w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        assert_eq!(next["job"]["path"], "/openwiki/shipping.md", "{next}");
+        assert_eq!(next["job"]["claimsRequiringAttention"].as_array().map(Vec::len), Some(1), "{next}");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
     #[test]
     fn quiet_updates() {
         let r = std::env::temp_dir().join(format!("harlo-run-quiet-{}", std::process::id()));

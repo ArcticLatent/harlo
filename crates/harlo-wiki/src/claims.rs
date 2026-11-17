@@ -666,7 +666,9 @@ fn validate_op(op: &Op) -> Result<()> {
 
 type Cache = HashMap<(String, Option<String>), Option<Resolved>>;
 
-fn resolve_all(inputs: &[(String, Option<String>)], resolver: &Resolver, cache: &mut Cache) -> Result<Vec<Evidence>> {
+/// A Claim's evidence resolved, or (`Ok(Err(resource))`) the first resource
+/// that doesn't resolve, for the caller to report with the others.
+fn resolve_all(inputs: &[(String, Option<String>)], resolver: &Resolver, cache: &mut Cache) -> Result<std::result::Result<Vec<Evidence>, String>> {
     let mut out = Vec::new();
     let mut seen_in = HashSet::new();
     let mut seen_out = HashSet::new();
@@ -675,7 +677,7 @@ fn resolve_all(inputs: &[(String, Option<String>)], resolver: &Resolver, cache: 
             return Err(session_err(format!("Claim evidence repeats {resource}")));
         }
         let Some(r) = resolver.cached(cache, resource, previous.as_deref())? else {
-            return Err(session_err(format!("Evidence does not resolve: {resource}")));
+            return Ok(Err(resource.clone()));
         };
         require_canonical(&r.evidence.resource, "Resolved evidence resource")?;
         require_canonical(&r.evidence.version, "Resolved evidence version")?;
@@ -684,7 +686,19 @@ fn resolve_all(inputs: &[(String, Option<String>)], resolver: &Resolver, cache: 
         }
         out.push(r.evidence);
     }
-    Ok(out)
+    Ok(Ok(out))
+}
+
+/// What to do about a Claim whose evidence doesn't resolve, as one line.
+fn unresolved_line(op: &Op, resource: &str) -> String {
+    match op {
+        Op::Confirm { id } => format!(
+            "- {id}: can't be confirmed: the lines {resource} cited changed and can't be found in the current code. Recheck it, then send it in `claims` with this id and evidence where it is now, or put its id in `retractedClaimIds` (and take it out of the page). Leaving it out isn't a decision."
+        ),
+        Op::Update { id, .. } => format!("- {id}: {resource} doesn't point at lines in the current file (check the path, and that the range is inside the file)."),
+        Op::Add { .. } => format!("- a new Claim: {resource} doesn't point at lines in the current file (check the path, and that the range is inside the file)."),
+        Op::Retract { .. } => String::new(),
+    }
 }
 
 /// `applyClaimOperations`: the page's Claims after a batch.
@@ -709,6 +723,7 @@ fn apply(claims: &[Claim], ops: &[Op], resolver: &Resolver, mut new_id: impl FnM
         }
     }
     let mut resolved: HashMap<usize, Vec<Evidence>> = HashMap::new();
+    let mut unresolved = Vec::new();
     for (i, op) in ops.iter().enumerate() {
         let inputs: Vec<(String, Option<String>)> = match op {
             Op::Add { evidence, .. } => evidence.iter().map(|r| (r.clone(), None)).collect(),
@@ -723,7 +738,19 @@ fn apply(claims: &[Claim], ops: &[Op], resolver: &Resolver, mut new_id: impl FnM
             }
             Op::Retract { .. } => continue,
         };
-        resolved.insert(i, resolve_all(&inputs, resolver, &mut cache)?);
+        match resolve_all(&inputs, resolver, &mut cache)? {
+            Ok(evidence) => {
+                resolved.insert(i, evidence);
+            }
+            Err(resource) => unresolved.push(unresolved_line(op, &resource)),
+        }
+    }
+    // Every one at once: a submission that names only the first costs a
+    // round trip (the whole page again) for each of the others.
+    if !unresolved.is_empty() {
+        let n = unresolved.len();
+        let head = if n == 1 { "1 Claim has evidence that does not resolve" } else { "Claims have evidence that does not resolve" };
+        return Err(session_err(format!("{head} ({n}); fix every one, then submit again:\n{}", unresolved.join("\n"))));
     }
     for (i, op) in ops.iter().enumerate() {
         let evidence = || resolved.get(&i).cloned().ok_or_else(|| session_err("Resolved claim evidence is missing."));
@@ -1237,6 +1264,38 @@ mod tests {
         assert_eq!(changed.resource, "repo://a.rs#L3-L4");
         assert_ne!(changed.version, first.version);
         assert!(r.resolve("repo://gone.rs", None).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_claim_whose_evidence_does_not_resolve_is_named_at_once() {
+        let dir = std::env::temp_dir().join(format!("harlo-claims-unresolved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.rs"), "one\ntwo\nthree\nfour\nfive\nsix\n").unwrap();
+        let r = Resolver::new(&dir, Ignore::parse(""));
+        let at = |res: &str| r.resolve(res, None).unwrap().unwrap().evidence;
+        let claims = vec![
+            Claim { id: "c1".into(), statement: "First.".into(), evidence: vec![at("repo://a.rs#L1-L2")] },
+            Claim { id: "c2".into(), statement: "Second.".into(), evidence: vec![at("repo://a.rs#L4-L5")] },
+        ];
+        // Rewritten: neither range can be found again.
+        std::fs::write(dir.join("a.rs"), "alpha\nbeta\ngamma\n").unwrap();
+        let ops = [
+            Op::Confirm { id: "c1".into() },
+            Op::Confirm { id: "c2".into() },
+            Op::Add { statement: "Third.".into(), evidence: vec!["repo://a.rs#L2-L9".into()] },
+        ];
+        let err = apply(&claims, &ops, &r, || Ok("c3".into())).unwrap_err().to_string();
+        assert!(err.contains("(3)") && err.contains("- c1: can't be confirmed") && err.contains("- c2: can't be confirmed"), "{err}");
+        assert!(err.contains("- a new Claim: repo://a.rs#L2-L9"), "{err}");
+        // Updated with evidence where it is now: accepted.
+        let ops = [
+            Op::Update { id: "c1".into(), statement: None, evidence: Some(vec!["repo://a.rs#L1-L2".into()]) },
+            Op::Retract { id: "c2".into() },
+        ];
+        let next = apply(&claims, &ops, &r, || Ok("c3".into())).unwrap();
+        assert_eq!(next.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

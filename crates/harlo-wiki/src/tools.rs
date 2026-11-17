@@ -97,9 +97,13 @@ fn check(schema: &Value, v: Option<&Value>, path: &str, issues: &mut Vec<String>
             }
             let unknown: Vec<String> = o.keys().filter(|k| !props.contains_key(*k)).map(|k| format!("\"{k}\"")).collect();
             issues.extend(inner);
-            if !unknown.is_empty() {
+            // (A stray key on the call itself, such as a model's `"format":
+            // "uuid"` copied from the schema, carries nothing and is dropped:
+            // refusing it cost a whole turn. Inside the arguments one is
+            // still refused: there it's usually a misplaced value.)
+            if !unknown.is_empty() && !path.is_empty() {
                 let m = format!("Unrecognized key{}: {}", if unknown.len() == 1 { "" } else { "s" }, unknown.join(", "));
-                issues.push(if path.is_empty() { m } else { format!("{m} at {path}") });
+                issues.push(format!("{m} at {path}"));
             }
             Value::Object(out)
         }
@@ -301,4 +305,20 @@ pub fn call_reading(name: &str, args: &Value) -> Option<Answer> {
         }
     };
     Some(run().map_err(|e| error_text(op, e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_stray_key_on_the_call_is_dropped_but_one_inside_is_refused() {
+        let plan = json!({"runId": "b6e3bc3c-3b8e-479e-8f1f-8cc8c4f7024d", "format": "uuid", "pages": []});
+        let checked = validate("openwiki_submit_plan", &plan).unwrap();
+        assert!(checked.get("format").is_none(), "{checked}");
+        let inside = json!({"runId": "b6e3bc3c-3b8e-479e-8f1f-8cc8c4f7024d", "pages": [{"path": "/openwiki/a.md", "title": "A", "purpose": "B", "seedPaht": ["x"]}]});
+        let err = validate("openwiki_submit_plan", &inside).unwrap_err();
+        assert!(err.contains("Unrecognized key: \"seedPaht\" at pages[0]"), "{err}");
+    }
 }
