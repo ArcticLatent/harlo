@@ -5,7 +5,7 @@ description: Start building Harlo and find the right wiki guide for agent execut
 tags: [quickstart, navigation, build, architecture]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T20:21:41.902Z
+    at: 2026-11-17T18:09:09.933Z
 sources:
   - id: openwiki-source-651d1fb6c9e49916a916ab51
     resource: repo://Cargo.toml
@@ -13,27 +13,47 @@ sources:
     resource: repo://CONTRIBUTING.md
   - id: openwiki-source-d59b76b96eb4918e43784eab
     resource: repo://crates/harlo-agent/src/skills.rs
+  - id: openwiki-source-83054ef460255774c74ceb4d
+    resource: repo://crates/harlo-app/Cargo.toml
+  - id: openwiki-source-f2c78795e60fd06da08e22f2
+    resource: repo://crates/harlo-app/qml/DiffView.qml
+  - id: openwiki-source-3d15a2a46e8ff623d0c7498e
+    resource: repo://crates/harlo-app/qml/FileEditor.qml
   - id: openwiki-source-9cb86229670695fb5654cb21
     resource: repo://crates/harlo-app/qml/SettingsDialog.qml
+  - id: openwiki-source-42e447a8def7fd12f9ad7f00
+    resource: repo://crates/harlo-app/qml/TranscriptView.qml
+  - id: openwiki-source-e2396ed1ac2421c5f3bd00a3
+    resource: repo://crates/harlo-app/src/code_view.rs
   - id: openwiki-source-22e4ea3417daf80d96080fd6
     resource: repo://crates/harlo-app/src/workspace.rs
+  - id: openwiki-source-b40a189805c9df2ec5c0212b
+    resource: repo://crates/harlo-app/src/workspace/workflows.rs
   - id: openwiki-source-be6e7bfc466a23d5de0a4a6d
     resource: repo://crates/harlo-core/src/agent_host.rs
   - id: openwiki-source-aa0d9221c1e01ca9decebdae
     resource: repo://crates/harlo-core/src/db.rs
+  - id: openwiki-source-4007ae1962c00ddaf5da78d5
+    resource: repo://crates/harlo-core/src/lib.rs
   - id: openwiki-source-4af2dd3e4a0acae243d3b65c
     resource: repo://crates/harlo-core/src/openwiki.rs
+  - id: openwiki-source-219837a34d3f25ea64fc9b95
+    resource: repo://crates/harlo-core/src/plugins.rs
   - id: openwiki-source-4db2ffefa327cd504d9b5a66
     resource: repo://crates/harlo-core/src/session.rs
+  - id: openwiki-source-5c64f648a13e5cdcc6879a6f
+    resource: repo://crates/harlo-core/src/workflow.rs
   - id: openwiki-source-3ef6360b45fa7169c94b35d3
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
   - id: openwiki-source-325d02e6188e2718d48b8686
     resource: repo://crates/harlo-wiki/src/lib.rs
+  - id: openwiki-source-c990f63b0374f4d073e28b9d
+    resource: repo://crates/harlo-wiki/src/repo.rs
   - id: openwiki-source-eb7f694aac7969d92da614ab
     resource: repo://crates/harlo-wiki/src/run.rs
-generated: { by: "harlo", at: "2026-11-15T18:32:57.877Z" }
+generated: { by: "harlo", at: "2026-11-17T18:09:09.933Z" }
 ---
 
 # Quickstart and task routing
@@ -61,18 +81,20 @@ For the phone client library, `swift test --package-path ios/HarloKit` exercises
 | Your task or symptom | Read first | Primary source boundary |
 | --- | --- | --- |
 | Chat state, lost rows, session switching, long saved histories, persistence, Qt threading | [Sessions and desktop](architecture/sessions-and-desktop.md) | Harness events → core session/reducer → app model |
+| Code viewing in chat, file editing, unsaved editor drafts, or Git diff rendering | [Code viewing, editing, and diff rendering](architecture/code-view-and-diffs.md) | Qt/QML workflows → shared Rust code renderer and document model |
 | Session context summaries, bounded action reports, and Markdown export | [Sessions and desktop](architecture/sessions-and-desktop.md) | Shared context report/export → desktop, phone, and action-log views |
 | Finding earlier work before launching helpers | [Prior-session discovery](workflows/plans-and-project-changes.md#finding-prior-work-before-starting-a-helper) | Background history search → workspace-scoped results |
 | Tool execution, approvals, sandbox access, resume, subagents | [Agent execution and safety](concepts/agent-execution-and-safety.md) | `harlo-agent` loop/RPC/tools/sandbox |
 | Install Claude Code plugins from a session, or use plugin-provided skills | [Sessions and desktop](architecture/sessions-and-desktop.md#plugins-and-image-viewing-stay-at-the-app-boundary), then [agent execution and safety](concepts/agent-execution-and-safety.md#skills-from-claude-code-plugins) | Session-host `claude plugin` command → agent skill discovery |
 | Token budgets, broken-stream spend, unknown or partly known costs | [Agent accounting](concepts/agent-execution-and-safety.md#usage-and-provider-capabilities) | Shared request usage and provider pricing |
 | Shared plan edits, helper worktrees, step commits, bring-over clashes | [Plans and project changes](workflows/plans-and-project-changes.md) | Core plan/git plus desktop orchestration |
+| Reusable implementation/check/review sequences, retries, workflow runs and recovery | [User-defined workflows](workflows/user-defined-workflows.md) | Core workflow state machine → workspace persistence and dispatch → session/worktree actions |
 | Remote files/sessions, helper deployment, unavailable local models | [Remote machines and model servers](integrations/remote-machines-and-models.md) | SSH host routing, engine helper, provider configuration |
 | Local proxy billing, free-server flags, missing prices | [Free versus unknown cost](integrations/remote-machines-and-models.md#free-servers-versus-unknown-costs) | Provider configuration → runtime accounting |
 | Pairing, encrypted events, reconnects, lock-screen Live Activities, push or relay deployment | [Phone and relay](integrations/phone-and-relay.md) | Core crypto, desktop server, HarloKit, relay/APNs |
 | Long code blocks, phone clipping, copied code and blank lines | [Phone transcript delivery](integrations/phone-and-relay.md#from-phone-requests-to-shared-sessions) | Transcript pieces → bounded phone frames → Swift rendering |
 | Wiki sessions, generation/resume, separate create/update writers, update offers, remote wiki calls | [OpenWiki integration](integrations/openwiki.md) | Core native tool dispatch → local engine or SSH agent |
-| Ranked wiki search, linked workspaces, model-free update preflight, evidence drift, durable claim state | [Native wiki engine](architecture/wiki-engine.md) | In-memory retrieval → source-change preflight and repository evidence → persisted page queue |
+| Ranked wiki search, linked workspaces, model-free update preflight, evidence drift, durable claim state | [Native wiki engine](architecture/wiki-engine.md) | In-memory retrieval → prioritized source-change and uncovered-code research hints → repository evidence → persisted page queue |
 | Build dependencies, targeted checks (including long-history allocation regressions), packages, signed self-updates | [Testing and releases](operations/testing-and-releases.md) | Contributor guide, focused tests, CI, packaging, update verification |
 
 ## Architecture in one minute
@@ -96,4 +118,4 @@ A useful debugging sequence is: identify the owning process → reproduce with a
 
 Pages are grouped by responsibility and workflow, not by source directory. Use their focused tests as starting points and their provenance as pointers to source. Retrieval can search a question and read only matching sections; a wiki read does not itself regenerate documentation.
 
-The [OpenWiki guide](integrations/openwiki.md) explains session integration and host-owned root selection; the [native engine guide](architecture/wiki-engine.md) explains retrieval scope, evidence resolution, and the durable generation queue. Source changes should be reconciled through an update run, not by hand-editing generated claims, indexes, or run metadata. No application code changes or commits are required to create this wiki.
+The [OpenWiki guide](integrations/openwiki.md) explains session integration and host-owned root selection; the [native engine guide](architecture/wiki-engine.md) explains retrieval scope, evidence resolution, and the durable generation queue. When another condition already requires a model-backed update, its prompt may also name large committed source files that no claim cites, as research context for features an earlier update may have missed; these hints do not trigger an update by themselves. Source changes should be reconciled through an update run, not by hand-editing generated claims, indexes, or run metadata. No application code changes or commits are required to create this wiki.

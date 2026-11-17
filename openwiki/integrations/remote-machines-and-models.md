@@ -5,16 +5,18 @@ description: SSH-backed project paths, per-machine helper deployment and state, 
 tags: [ssh, remote, models, engines, configuration]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T20:21:41.902Z
+    at: 2026-11-17T18:09:09.933Z
 sources:
+  - id: openwiki-source-7bf4111dbead0b378068838a
+    resource: repo://crates/harlo-agent/src/gemini.rs
   - id: openwiki-source-72ec9ac0129b24bc305a0df1
     resource: repo://crates/harlo-agent/src/main.rs
   - id: openwiki-source-f1322101a0183d196da191a3
     resource: repo://crates/harlo-agent/src/providers.rs
   - id: openwiki-source-f3b7ddced6bd0e383fa959d1
     resource: repo://crates/harlo-app/qml/ModelServerDialog.qml
-  - id: openwiki-source-9cb86229670695fb5654cb21
-    resource: repo://crates/harlo-app/qml/SettingsDialog.qml
+  - id: openwiki-source-724eb3f6213db24850796f88
+    resource: repo://crates/harlo-app/qml/ServersPage.qml
   - id: openwiki-source-6f4a8152df109bb50475dc85
     resource: repo://crates/harlo-app/src/accounts.rs
   - id: openwiki-source-be6e7bfc466a23d5de0a4a6d
@@ -37,7 +39,7 @@ sources:
     resource: repo://crates/harlo-core/src/servers.rs
   - id: openwiki-source-4db2ffefa327cd504d9b5a66
     resource: repo://crates/harlo-core/src/session.rs
-generated: { by: "harlo", at: "2026-11-15T18:32:57.877Z" }
+generated: { by: "harlo", at: "2026-11-17T18:09:09.933Z" }
 ---
 
 # Remote machines and model servers
@@ -95,6 +97,10 @@ There are two directions of SSH forwarding:
 Before using an unreachable locally forwarded remote URL, `model_servers::reach` restores the forward, checks again, and if necessary requests `harlo-engines start` on the owning host. That remote start call has a 20-minute bound. Forward failures and helper-reported errors propagate to the caller rather than proving that an endpoint is usable just because a provider entry exists.
 
 Keep the three states separate when debugging: **configured model**, **working SSH forward**, and **ready model process**. A good `/models` response at setup time does not guarantee later reachability.
+
+## Gemini's native provider route
+
+The agent recognizes `google-generative-ai` (and the `gemini` alias) as a provider API distinct from OpenAI-compatible chat and Responses endpoints. Gemini provider discovery requests its `/models` collection, uses `x-goog-api-key` for configured keys, and the agent sends streaming `generateContent` requests. Provider selection and credentials therefore remain part of the agent's provider configuration; this is not the same feature as deploying a managed local inference engine. The wire-level conversation and thought-signature rules are described in [agent execution](../concepts/agent-execution-and-safety.md#native-provider-message-translation).
 
 ## Extension seams and tests
 

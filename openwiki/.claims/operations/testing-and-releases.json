@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:f072b3239e9a61879ae2a54bc7bf652a7304ca884fbee5787e013562dbdd97dd",
+  "pageVersion": "sha256:60e05967eb4db5b7220533b7123d07642c650a13412417f5c58373570cd11e82",
   "claims": [
     {
       "id": "claim_7a207a8ae4594d9ba376628ea349a6b4",
@@ -27,16 +27,12 @@
       "statement": "Update signing uses a domain-separated, NUL-delimited payload with sorted assets and a non-shipped private-key signer, while clients carry the public key and support a test environment override.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L1-L14",
-          "version": "repo-lines-v1:sha256:3b198c1c6b4462830503241e92094893346c875279b793c84ff3c10331ebb5a9:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjNWRiMTQyOTBhYjdiMDE2ZTYyZTY0NWI0NmI0OWM1ZmYxN2M4NGQ2N2ZmOTA1MTUyY2Y1YmY3OWM5YTE1MTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1MGVkMTY4NjBmNjJmZTQxNjdhYWYxYzU4MjkyOTY2MmFhMDY4OGZhM2E5MzIzNGQwZGRlMDM2ZTk1NGJkZDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIyMDA5Y2Q2MWFhZGI2ODIyMmFkOWE5ZmY3NjU5ZTkxZWUxZTA4ZmFlMDMzNmMxZGI4MzcyODRmMDhlNmQ1YjEifQ"
+          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L155-L169",
+          "version": "repo-lines-v1:sha256:f03476eb946b7ed6ed9c7d203b4781004b290d5a693553adf889d1e15db4b372:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFjZjFhOTZiZTM0Y2RmMzQyMzU2ZjMzMDI5ZjUzN2IyOTI1MDc4YzI3ZmJiNTQyMTJkY2M5MmE5MWY5NWQ2NzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdkNjg3MWJjZmE0MWE4ZTlkNTRlYmQ2NThlMzhhZWJlODQzYjU4YTcwMTA1OGZiODNlMjk0MjM2N2NkYWZhYmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzk4ZDZiMGRjNDkyYzUwMTZkZjEwODA1YTNhNTRlYjljMTg0YTVhNjEzN2U3ZjRiZWNmYTBjMjIwNTUwZDAifQ"
         },
         {
-          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L20-L60",
-          "version": "repo-lines-v1:sha256:90331684f111f675fd3ad2aba21748d140609047de10fb546a89703aa5444e65:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2Yjg2NGVmZjEyOTQ2ZTMzZDY5ODE3NzcyYjNmZDkxMjFmZWM0OGIwZGE2MGVjZGI0MzRlOWI0ODdmMTk3MDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkzZWUwYTVmMDNhOGQ3NGIzNDVjNmQ5MWFkZDA2YTUwYzJmNzBhOGMyOGRiMTRmNDBkNDA3Nzg5MWNkZmI2MjUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0NjY5MjViZDIwYTU5MTY0NjM1YzVjYjNhNGY1MmVkN2YxNWUxNmYzNzJiNjBkM2NiMDhjY2Y2YjhkOWYxY2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE4MjI5NmE4MDhmYzZlMzczNjRlMzg2OGQ2Y2IwNGVhOThkODdlZTI4ODM2YjJlNGRmN2M5MmE5OGEzYTYwYjMifQ"
-        },
-        {
-          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L78-L84",
-          "version": "repo-lines-v1:sha256:12f54808ed0a5b77431093c752920b2e988faa0fe908adfabf7fb32e536794b2:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWY4ZjE5MmI5NTA4MzUyZDBiNDQyNWNkOTUyYTQ4MGQxMTA0ZDRhYmVjY2UyMmFlYzM3Y2RlOTBmODI2ZjBmMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDEyY2EzNDVjY2Y3NWJmOWMwODA2YmNlNjk1YmU4ZGU4MDhiNzk5ODQyNTFhN2E1NGQyMDJjZjYxMDFkZDQ1MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmM5ODY5YmFiZTU3OGNjZDA3MTg5MWY2NWRjMWI2MmMzMzM2ZGQ1MjhjZDkzNGY1YjdmOTE2MWZjOGY3NWU3MCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiN2JjOThkNmIwZGM0OTJjNTAxNmRmMTA4MDVhM2E1NGViOWMxODRhNWE2MTM3ZTdmNGJlY2ZhMGMyMjA1NTBkMCJ9"
+          "resource": "repo://crates/harlo-update-signing/src/lib.rs#L24-L67",
+          "version": "repo-lines-v1:sha256:82d651a1368b3b20f3b0d6f2aec1af38ca50a0ed451a88b4652d316910626973:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVmNjFiNjExNDRiMzczZWJiMGE1ZjQwMDg3MWMxOTBkY2IzZjI4YzhjNWQzZTNhY2U5NzcyNmI3OWYyOTgzYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0NjY5MjViZDIwYTU5MTY0NjM1YzVjYjNhNGY1MmVkN2YxNWUxNmYzNzJiNjBkM2NiMDhjY2Y2YjhkOWYxY2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwNjU0YTlkZTE3MmQyYTY1ZDQzYTI5NDA4ODU1YWVmZjk5MGY2MTA0OWU4ZGIyMzM5MzFlNzAwNmJiNTQ5MGYifQ"
         }
       ]
     },
@@ -45,12 +41,12 @@
       "statement": "Core accepts release manifests only after signature verification and repository/tag consistency checks, and desktop installation rejects downloaded packages with mismatched SHA-256.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-app/src/updates.rs#L213-L226",
-          "version": "repo-lines-v1:sha256:adbaff524c86860c859dfb41d704a542c43a969c3ce432f53caad410248ff6a8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxYWE2ZDgwNmRlMmU1MTg5YWVkOWViZTEwNTAyMDJmNWU2NGZhODdmOGI3MjFiMjQ4NmE4OGFhYjI5ZDE1MDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYyNjBhNDJiODU0MTZlMDQzMDI4ZWI4YzM4Y2RlZTc0MzQ4MjM5MDEyY2ZlMWQzNWZjYjE2ODBiMmI4OTAyMGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU2ZWZhNzMwMDQ3MzdmNmM5Y2ExMGQ0YzM5Mjk1ZWU5MDg0NTcwZDI3Y2Y1NjFlNjc4YzNhZjg4Y2IzMzNhNTQifQ"
+          "resource": "repo://crates/harlo-app/src/updates.rs#L205-L228",
+          "version": "repo-lines-v1:sha256:5f881880f4634b15fa1c582abb0ea458e021693dac9b752d1bb580401e9ee046:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1ZjUyYTE4OWQwY2E2NGYzYjJjMWM3YzFlNjBiZjc5MDY5ZTYwYmI1MmQyMGJmMjM0MDMyN2ZkMjc2ZTg0OWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM1Mjk5MDhlZjkwYjJmZWIyZTllOTBjYWU5YzQzMWJhMTA5ZDIyYjljYWJlYTlhYmI4MTE3Y2NkNDFkY2M2MGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU2ZWZhNzMwMDQ3MzdmNmM5Y2ExMGQ0YzM5Mjk1ZWU5MDg0NTcwZDI3Y2Y1NjFlNjc4YzNhZjg4Y2IzMzNhNTQifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/src/updates.rs#L60-L84",
-          "version": "repo-lines-v1:sha256:d3958a56b2f5cfa5375380211093a0701d289dc5a0ea32d4a00d61278d63efbb:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExM2M0MTY5MWRjYjRiZWFlZmI2ZTU5YTEyMDlkYzk4NWMyMzM2ZTU3M2YyMDc5MTc3MTJhMTYzNGUwNDhhNGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAyNWZhZDBiNWNkZThjNTMwYzIwMzkzZGFiZWFjYzAwOTk2MGIxMTY4NTRlOWZkY2ZiNTVmZDFjZjQ4OTJmYTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYTc0NDM3ZWNkN2ViMzJiMzdmZTRkNWM4OGE1MDY3NjhiOGExMGE5MjY2Y2QwMTBiMDIzNzNkNDlmYTNiMzQifQ"
+          "resource": "repo://crates/harlo-core/src/updates.rs#L79-L96",
+          "version": "repo-lines-v1:sha256:af5ce64ce45abc4e4e80e8ab151c53549eb25ddaf283047e2af625076cebfd21:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmODc5YzM2YWNkZTFiMDI4YjFmYzBkNTE1ZTg0YjdjOGEzOTY1ZmRjZTgyNDdmZGM2MjQyYTdkOWZkNDRmMTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU3ZmFiODBiZjUzZmY3NWMxOTQ1MmNmYTMwN2MzNTZiZDJmNDM3NWVmMGI0YTZjNTMyZGRjZDdlMjc5ODhjMWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVjNTJmOGNhNjBhYWJmYTUwMzRhNmVkNGY2ZjdkZGZmOGVlNGFjOWRjODQ0NDc2YzIzOTI2NDk2ZjdmNjQ0MzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY1OTFiZWNiOTY5NTJiMTdmNDAxMWQ0ZTEwMjJmM2Y0OTc2YzI3ZThmYjM1OGMzZmY1MzllOGZhZWZhZWU5MTQifQ"
         }
       ]
     },
@@ -83,8 +79,8 @@
       "statement": "The headless tests workflow runs locked agent/core tests on Ubuntu 24.04 with stable Rust and a 45-minute timeout, triggered by main pushes, pull requests and manual dispatch while ignoring changes confined to iOS, site, wiki or Markdown for push/PR events.",
       "evidence": [
         {
-          "resource": "repo://.github/workflows/tests.yml#L5-L38",
-          "version": "repo-lines-v1:sha256:862d46dc47f831e014a14b4a025cb87217a84f090de75b0c77672982aa82588a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwODIyYjNmOTc5NDMzMjlmNjViNTE1OWI0ODAyYTNkMGQzZTBiMjg1YmMwYTYwNGE0NzhjOTcxY2JjNzZlNTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNiMGJiMDU1MWE4NzgyYjkyMzdkMzM4OTg4YWY1YWY5MjI1YTliZjZiN2Y0OTU4Y2FkNDM0ZTViMTM2YjA3NjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZlYWE3Y2I4ZDU4ODhlODY4MTJlMDk0OWMwOTAxY2IxMDUzOWQ0NGRhMjg5NmVhOWQ3YmM5N2NkZTc5NTMzZWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://.github/workflows/tests.yml#L1-L45",
+          "version": "repo-lines-v1:sha256:49ac3905ae96c768e9486620c5ccfead5c3ff6f46cd5b0c50832006742ae3c22:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4NmFiMTMzN2ZkNGZmYTg4MWVmOTEwZjk4Nzg0MTU1NzNmYjg5MzYxNDE3M2VlZmJhNThiODY0NjYxZTZlMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlZWU5ZTZlZTEyNThjMGFkZTMxYzE3MjdmZjUzZjZhNDFiMTVjNDg0ZGYwYmM3ODVmOGY4MThlY2U1ZTllNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwZGU4OGVlNTU3NDY3ZDZkYjlkOWRmYTBhYjA0MzAwOWNjZDgzN2IyNTdjOTMyN2RiMmNmZjVjMTM3ZDA2ODkifQ"
         }
       ]
     },
@@ -93,7 +89,7 @@
       "statement": "The Rust CI runner installs bubblewrap and disables the Ubuntu AppArmor unprivileged-user-namespace restriction so tests can exercise actual sandbox execution.",
       "evidence": [
         {
-          "resource": "repo://.github/workflows/tests.yml#L28-L34",
+          "resource": "repo://.github/workflows/tests.yml#L32-L38",
           "version": "repo-lines-v1:sha256:bb5374379429b9c9e546e315ceb5969ee5d97e692af33ad977a1dbf9ae1a9062:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZDQwMGVjZjU4MWMyOWYxYzg5MWI2N2RmYzQ0YjMzMWJiOTg4NzRlYTYwZDQ1MzEzOGJhYmZmYmY0NjE3NDkxZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYzU4ZTQ1NDVlNWI2NjRhNzdiMDM1OTFiNTc1ZmVhZjU3N2E4YzVhNjE0NWY0ODdlYzBiMDU4ZWNlZjQ1Mjc1NCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODYxOTJjZTc5M2RkMjhjOTU5OGM1ZTBlM2UyZGI2MzE1MjcwOTkzY2YwM2E5NGJhNzU3NzE0Y2ExZDk4MjE4OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMmJiODI1YmQzZmVjNTEwNDRjMGZmN2U2OGMzODdkNzZhMGMyMTEzOGFiOTE2Njg1YmRkZjkyNTMwZGUyMGYwZSJ9"
         }
       ]
@@ -103,12 +99,16 @@
       "statement": "Focused agent tests cover independent input/output usage normalization with missing-input budget estimates and attempt accounting that preserves reported spend on stop, releases held budget, and avoids an extra charge from an empty snapshot.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/agent.rs#L2666-L2704",
-          "version": "repo-lines-v1:sha256:116200b92e9429b6c1619bc1d886c29587af35beb47956b557ca2f9af30fd348:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNkOTA4YzhkYjhiNTZjYjFmNTM0MmFjMGI3ZjQ2ODlmODZjMWI4Y2ZkMWM0MTk1NDU4YTdkZTgyN2Q5MDU3MTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjViMWEwMmM1MWZmZTkyNzM5MWNjMWE3NTQ2ZjIzOGRkYjBkMTExYzIxYTI0ZTdjYTYwN2EwNDQ0NzRkNzBjYTYifQ"
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L2782-L2824",
+          "version": "repo-lines-v1:sha256:11240b848954e5d09a117d4cf7dbe2dfe2ac61272cfdb744162a89b65197349c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiOTU3OWVjODE2NGEzYmJmMTk1M2Q3ZjA3YmFiMDBiMmRhNTFjNmI1MzRjZDhjNzZkMWFhZGE5ZmEwYzZmMTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3YjZiZGIyOGY2N2JiOWRjYTYyM2RkNTBjODU2MGQxMjc3NGFlYjIzZDFkNWE2ODA2N2U1NmZmNTUzZDM0OGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEwOTIxODQ2MDQ5YTQzMDYyMmU3NWY1NWQ2ZmFjM2MwMDk4ZDkwNTNiZDQxZmU4Nzk3NjQ0MmVlMTFmZTVlY2EifQ"
         },
         {
-          "resource": "repo://crates/harlo-agent/src/chat.rs#L610-L622",
-          "version": "repo-lines-v1:sha256:81154013a095dcb59d74499f232a8e957334c2be1c7100a1060944a2f474047a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkMzkyMTQ3NDg3ZTVjODJmYmU1YzNlYzQ2NmYwOTlhNjRhZjg2NDMwYmI4ZDExMGM5YmZlZWZhZDFkN2RlNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3Yjg3MTgwMmIxZjA3NTQzZmEzMTY2ZWQ1ZGEyZGZjOTI3NmRhNzA4ZjQwNTAzMDMyMWZhYjY2NDRiYWRmZjIifQ"
+          "resource": "repo://crates/harlo-agent/src/agent.rs#L361-L415",
+          "version": "repo-lines-v1:sha256:ffb47c4c81e25f1eb44dbea2b7736803c7ccaa63a8ab62d40c51ca824f079040:eyJzZWxlY3RlZExpbmVDb3VudCI6NTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjNzQ4ODk4NjQ1ZDgzY2FmYjRkNjM2ODFhZTc2MjYyZDFlNTM2Njc3ZjU2MGZkYjgxYWRjZDc3MWY3YWUwY2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1NzJkNzQ0YzMwMDc0OTE3ZDQ4ZjAzNzgxOTFjODg1M2Q1ZmQ4ZjFkNjM2NDc5NGIwODE0NWE4MjYwYzIxYjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU5Y2M5ZWU0Njc4ZjY1NTgxZTY3MmNhZDgzMGQyOWY3YWQyMWZiMWY2MTVkNmJlZjI5MjJjZTJkZDMwZTI5NjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ1ODNhYWNlYmVhNjQ0ZTNjMDdkZTU5YTlhMzEwMjY4MTlkOTRmZjI5ZWVjMjhjYWQwNmZmMGQ1OTcwODVjMjYifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-agent/src/chat.rs#L695-L724",
+          "version": "repo-lines-v1:sha256:74553ac71b23654db7c8cc72e93656001cd4d8501db09687328dede1882ee778:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiZTlkN2VjZjE0NmVhZWNiMGNlN2Q0YjdiOTZkMjlkMGM4NzkwYmRjNjQ4Y2E0ZDUzNTYzYWIyZTRiM2M1YzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjOTE5OGM0MzFkNmJiZTk3NTRkZjk4N2JiZjFhZTg2MTg2OWJhNjc2NjI2MGQyZjJmZDYzMzU3ZWU4NTRjYjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYzExYjVjMDcxYjhkNjkyMDg2NDkwYjFiMzAxZTZlY2E0ODBhYzdlZDk1MWY5N2FjNjAxOTYyOWFmYzE0YjkifQ"
         }
       ]
     },
@@ -117,20 +117,20 @@
       "statement": "The native wiki engine has focused crate-level tests for parser failure isolation, concurrent retrieval caching, and repository-contained setup writes, while core's OpenWiki tests exercise the desktop adapter boundary.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1118-L1148",
-          "version": "repo-lines-v1:sha256:2af8e20328c1499f5a8026b77ac258dba2bbe451fab63a55fc97a8706cab8bec:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5YzEzNTkwNjY1NjMyM2QxYzVlYTQxNjU0ZWU2NmFmYjU4NWFjZGNmYWVhY2ExMjFkNWUzMGJmMTkzZWVkZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmYzEzOGJkYTE0YjA2MjU3NGYzZjlhOTRhZjlkMDFhMTBiMmUwNzJkNDQ5Njg3N2ZiMDE1ZDQ5ODZhMTIxMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYzNmIzN2ZlYWMzNGFlOTRhM2E1MDRkNjZkNTc5NzdhMjFmZmI1ZDk3Y2VkOWIxY2UwMWU2ZjkyMWM3YTRkZDcifQ"
+          "resource": "repo://crates/harlo-core/src/openwiki.rs#L1131-L1161",
+          "version": "repo-lines-v1:sha256:a09071c7db5dbe25c2908ca6e769acbe71ae38084d62ab531f4aeff24f816d66:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI5MmI3MzMyZTNjZWFkNjk1ZTBiYzY1MzAzZjFlMDVjOGJkMTU2YzBmZjdiNDlhNjUwNzZmYTFjYWRjZjU0MmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4NTkyODAwMDE4MzRjZWExNDMwNzlhZGE5OTQwOTk0ODlhMGQ4ZDdhYzg4NDY4YmY2YmU3MWY5NmM3NzEzOTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUyMThkNWRhNmJmNGM1MWFkM2JkOTFiYmRjM2QxMTBkNDAwN2Q3M2RiYmJkNTVmMmQxZDM1NzQyNzhkMmI4NDYifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/marked.rs#L1330-L1338",
-          "version": "repo-lines-v1:sha256:c0fb83d5d4d6c91d3c708cd24f7a5246d98a6441876d21497f3118bc4a726a63:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZWIwMGFjZTQ0NzU5YTI3MzZhNGM0NzI0YjQwM2VhNDdlOWUzMWU4MGUwODg2MGQyMWEyY2M2NzBkMmRiNmFiMCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjZhYzVlMDU3MzIwNWE5MzI3MDQyMWJkYjdjMGYyNDdlZjRmZWY1MGNiZDgyMDhkNGY2MTRkOTMxZGZhNTU5OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNzlkMGI3MGNkNGRjZDdkNmZhNGRlZTlhNTViZjI5Y2NlYWQ4ZjgxZDljZTk4OWEzODdlODY2ZDZjYmUzYzJhYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2QzYWI3NTZmNGJjMTgyZDRhZWFmMGUwN2M1NTMxNTEwZGQ0MTA2YzNjMDcxNGIxMmNkY2UwZTQ3ZTBiMDQ0ZSJ9"
+          "resource": "repo://crates/harlo-wiki/src/marked.rs#L1350-L1381",
+          "version": "repo-lines-v1:sha256:7a4e31815f8b477294d74b737650065eda76c47726340cf60b8e2117108bbfe3:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiZDUxMWE5YWFjMmM2ZmE2ZTJhMGE0NWZmNTQ2MmNhYTViYWQyMjBjMWVmY2ZlMGU5MTMwNWQ2YzFmZjI2NmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzNzkxNDllODVkZDZjOTc5YjNiODFhOGQxNDdhYTJkMzM3NWZiYjIzM2EzYTI5MmJiNmY1OWFmYTIyZjVkMGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRjNDY4NmI0Y2QyNzUzYzJiYmEzZWI3OWVjY2ZhNGI2OGI0YTRkNzE3ZThjNTJlNGQ4ZjdlMGMyNTBlYjNhNWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU1NTE4N2NiYTc3OTc1ZDU5ZTVjZThlYmEyNzY1OWJkNzYyZmZjZmVhZDg2YmMzNmQ4ZTAzYTBlZTk1MWJjNzMifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/retrieval.rs#L686-L710",
-          "version": "repo-lines-v1:sha256:66d9ad95a39e0fa653518d54d436025eede80bbece8f059d19f72c0378972e44:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2YzQ5M2IyNzVjNDUxYWQ5YjQyZWY2ZmJhZDgyODNjMzJhZGMyOGMyMzRjMGY0NGRlOThkYTNmZjZmYWIwZjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE0ZjMzMTBjOGVjNWZiNDE2YjYwNWJjYmMxNTBjNmFmOTQ3NGMxYzE2MzEwMWU5MmMwZGUzMjkzYmQzOGUyM2UiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImExN2M4YWJiMjUyMDRkMmUwNzc0NTc2NDIyMWI1MmIxNDU4ZDRkMWUwNmFiZGNiZWM1ZjJkM2YzMDljZThhZTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgzNGRiYzk4Y2VmMzBiOGI2MGYxNjQwMjRhMGQ3ZTliNDQ3NDQxYmRmNTc2Njc4NGQ4ZGM1MGJiZjg5NmVmMDgifQ"
+          "resource": "repo://crates/harlo-wiki/src/retrieval.rs#L682-L720",
+          "version": "repo-lines-v1:sha256:0fc54ae2468987446db3ee01f64cd1b9af4aba3161af87a0887ac57bdbf7099e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAzMDhlZTRlMDVjNjQ0MzBkNDdkNTc0NjJmZTQ5MWUxNzBjZDJlMDY4YmE0ZmJjYjEzMWZhZThhMmM5ZTcyYWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA0MWM5NzlmMmI4MmUzY2NiZDhmMTZlZmM1ZDllNWY0NDM2ZGY4ZGM3ZmZhYzgyOTcxNTRiMzQ0M2JiYTc4ZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNmY2I3NjI2MWU5ZWY4ZjJhODExNzZjMmY0YzFlZWM2NDQ4MmQ5ZWMyZWYyYjIyMzhkYTJkMWEyZDZmZGJkMjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzMzcwN2Q5NGM0YTc0MzY4ZmJlZjA0NzY4NmYxMzg4NDdiNGI5ZDVmOTgyMWFkYmYzNzZjYmRiZTk3ZmRmNGIifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1851-L1881",
-          "version": "repo-lines-v1:sha256:6c30386bbea151729a3946156837e38a713d2ab6c687033550f421fec2ccc110:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzYTk1MjU0Zjk1MjdiODBmNGY2MzI5YWMyZjhmM2RmNmI5ZDhmN2EyOWFkZmZjYWViN2UyZDdlMGI0ODAyODkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2NzA2NWQ2NDVkMmE0ODhkNWMzODFiNThkZDQyYjRmOTY4Y2I5NTcyNTZhZWU4OGVhMzE1YzUwZWVhNzRhZjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlYWY4Mzk3MjgwODhlZWYwYjZiZjI3Y2YxZmUwYjY4ZTEzNDFhMDJjZjgwMThkZWU3MWYyNWE3NDQwNzI4YmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAwZmZmZGRlYWE4YTEyMTRhMjFiZTdlMjBjMDcxMDI2ZWFmZTQ5NmZjZTE4NjQ4YmU2NjkxNTViODg5Njg5YjQifQ"
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L2104-L2138",
+          "version": "repo-lines-v1:sha256:3a1b0a34fedf3af632585b00a6044c72ec43d3e0eb1a96fa781e5583610062c2:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUzYTk1MjU0Zjk1MjdiODBmNGY2MzI5YWMyZjhmM2RmNmI5ZDhmN2EyOWFkZmZjYWViN2UyZDdlMGI0ODAyODkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4N2UyYjkzNGRhMzY2MzI4YmNiNTQ1OTRiNDA2MDM4MDFhNThmYmY1NmMyMmE2NDc2N2ExYWI2ZTYxNjMwNjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJlYWY4Mzk3MjgwODhlZWYwYjZiZjI3Y2YxZmUwYjY4ZTEzNDFhMDJjZjgwMThkZWU3MWYyNWE3NDQwNzI4YmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg5OTUxMzYxYzM4MzgxNWIzYzA2MzkwZWYzMTcxYWExNjMwYzJlOTcyZGMxNzA0NmNlZGVjMDc4ZDcwYTNjMzEifQ"
         }
       ]
     },
@@ -139,7 +139,7 @@
       "statement": "Linux release bundling installs the native wiki crate's OpenWiki license notice in the package's license directory.",
       "evidence": [
         {
-          "resource": "repo://packaging/linux/bundle.sh#L61-L64",
+          "resource": "repo://packaging/linux/bundle.sh#L63-L66",
           "version": "repo-lines-v1:sha256:d83769abbde0a834dcb7aee3dba259217e0ccace3539a9c50c129650e2fb71f2:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzdlMzBmZDE2YzJkZmE5MzAyOTQ4MGMwM2Y3ZTM3NWMxZTMzNjIxMWRhOTcwZTFhYjAwYWE5N2I0YTE3YzNmYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiM2I3NjZhYjU0ODJmMjdjNmYwN2Y3Y2VhNjllN2M5MjdiN2EzODM2NWE3OWJjNTIxZDc2NTUzZDc4M2U2NjFmYSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWRlZTM0MTcxNmE1OGRhODcwZWRkYmM2MzEwNjFhY2VhMGExNzBmYzBhMTdkNzcxOTlmM2M2MTVmZDJkNWE1NiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjNmN2YxYmM5MDA0OGQ2OTQ2NDVmMjJjZDM0YzFlMTdmMzI1NGE1NmFkZGRmNjlkZGMzYzg3YjNjNDRlN2VkYiJ9"
         }
       ]
@@ -149,12 +149,12 @@
       "statement": "The `quiet_updates_miss_nothing` lifecycle test covers new-definition detection across several languages, significant edits, test-path exclusions, unusual paths and Git diff settings, Git failures, and a source change arriving during the check; `quiet_updates` exercises moved versus changed cited lines, new files, hand-edited pages, and recording a no-op.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L1912-L2018",
-          "version": "repo-lines-v1:sha256:8f18c40311bb03c9968c5cbea052fa0fd24e11b1285594cfb1939258a67b6b31:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiN2FjNTYwY2ZjMjNhYzA3YmFjYTdhMDNhMWM1ZDM5MjVmZDkyODQ4NmI1NTEyMjUxMDhhM2M5ZTI5MmVjNzllIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MDU2ZTY3YjYxNzJlNjM1ZWQzNzBlM2Q4MDc2YTJjNTFhMWY1MzZiZGNhYWUyYWFiOTQyMzQxMzE0ZjNmMjc4IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5OGY5YTgwZDkyYTg5NDg4M2E3ZGY2ZTRjZjFiY2IzMmQwNWU2YzRiN2FjYmRlNjUxNWE5OGM0MjA1NmNlOWMxIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI3ZmI4OThkZjM4ZmFmNTQ2MDEwNTJhN2Y4NjJjZGEwYjkzZWQxNmM5ZmJiMTFjZGVlMGYxMjIzM2ZmNjc5OWU1In0"
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L2335-L2425",
+          "version": "repo-lines-v1:sha256:7e3a82658205b842eed140ebea4bf2e91992d30ccb12e3122f10a04a5e58c979:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU0ZTg1YTg4OTFiMzIwYTMwZDcwZWJlYWQwZmIxOThmODlmMGYxOWU2ZjQzZjJkNTQwNjAyNGViYjJiOTVkOTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzYjQ2NTRhMmU3ZjQyM2VhN2VjMTkzNTAzNjRhYzRhZWI3YTdiNDQ5YTQ0NTEzMmE0MGRmOTkyMTJkMzdkNmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBhYzdmOGRjYzllYzJmMzkxZDg1NDM0NjNlNTI1MzcwNzE5MzU5MWNiNjM3YTk4ZDc2ZmI3MWM4ZWQ3MGVjMzkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU0NzZmODMzOTMxZDc2NDZlZDk3MjZhY2M1YjIwZjIyODA4NjBmZmVlYjFmZTQxMTY5MzJiMzkzMjYwMWZiNTAifQ"
         },
         {
-          "resource": "repo://crates/harlo-wiki/src/run.rs#L2020-L2149",
-          "version": "repo-lines-v1:sha256:55a6a5990b4df364d6a37fe0693b3c9460194c3f02939a7f94d40b0fbc1a2c37:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxMWE2ZjZhMTliN2NlZDM2MDNmOGE4ODFhZWNhNzM4MzJhNGQ4MjhlNTM5MWNiZDNmNjczNGUxNTI2MDlkMTEyIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3MjMxZDVkMjBlYTU2ZmJkODQyMDRiY2NiNmU0NDBkZmNjZjI3YjBmOTRmOTQyMTM3MTQ0NDBiYmFjNDBmNWIyIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhZDQzY2JhZjYyNDRmMTZiMjRhMDU1ZjQxMDg2Mzk0ZTBiZjc3MGFhZWVkNzM1NTZhNmExZDMyODk3ZDE1OGRlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJkM2JiNGVmMDAwMWViOTkxZWU0MjE0MzQ5YmY3NjE2ZTIxNGNhNjQ1YjEwNDBiODZjZWQzNGZhZWY4NjhkZTY3In0"
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L2425-L2585",
+          "version": "repo-lines-v1:sha256:e188f475c98602ae2706f695ec58208b8e582b16eb77f99fee53cf794bdb8ee7:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJhM2I0NjU0YTJlN2Y0MjNlYTdlYzE5MzUwMzY0YWM0YWViN2E3YjQ0OWE0NDUxMzJhNDBkZjk5MjEyZDM3ZDZmIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1MzY1YzExNDAwOGQ5MWFiZjk4OWViNDQ2ZDE1OTRkYmFkZmQ2NmIwYzkwNTRmZGY5NDYwMjdkOTU5YWE0MDgzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIyODhkNjlmY2IzZWU3N2RkYTI2NTg5M2Y2ZmM2OWJlYjllOTRkOWZhZmMzOGRlN2QyODcxZmI3MzVlMGRiMDM4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJiMGU5YzgyOTg4NTM0Y2NjZmU3NDM2ZDFhZTc3MTNlZGRjZDE0OGQ4NjQ4MmJiMWYxNGZjODgyZmRhNjkyNzc4In0"
         }
       ]
     },
@@ -163,15 +163,15 @@
       "statement": "The core memory integration tests create 64 MiB Harlo and Claude session fixtures and assert under 8 MiB of additional allocations for selected saved-history, branch-outline, Claude-incremental-read, and repeated transcript-row operations; these are operation-level allocation checks, not whole-application resident-memory limits.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/tests/memory.rs#L126-L190",
+          "resource": "repo://crates/harlo-core/tests/memory.rs#L134-L198",
           "version": "repo-lines-v1:sha256:f5308f97927a88020b573cab4f72cf812abb60f3b6e14ace51107eb91af548a2:eyJzZWxlY3RlZExpbmVDb3VudCI6NjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQyY2Q0ZGI0OGEzNTBlOGYwYjQ3OTQ0YzQ2ZTNmZmRiYmExMzJkMjI5MGE5MWQ3MDEyYjU2ZWI0NmM4YWI0ZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MzM4OGEwMGM0YjE0YTM1ZWEwNGI4MzhlMWFmNWM2MjA1NmI2NTE1ZWVjZmJmZDY1MDg3MjhkOGMwOWE0MTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRmYWI3MTBkZGY3ODU5ZTU3NTc2NGE5MTNhMDAyYzc0NTg1ZmZhNzAwMTUxMGNiODgxMWRhODNkMmNmNzRiMzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmOWFkNDYzYmU3MWM1ZjQyMDk0NmFmYmYwN2QwZmU5ZjVmMTFkYTgyZjFlOTQ5MDNjYzMzOTVkOGMxYTBiMzgifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/tests/memory.rs#L208-L232",
+          "resource": "repo://crates/harlo-core/tests/memory.rs#L216-L240",
           "version": "repo-lines-v1:sha256:697447662ce856082415ebe8991a1c446bd00f7fdb98f5a7457bac201ac6d522:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjYjgxMzc2NjlkZWQ5ZDM5ZjhiOWZjZTEzYTk5OGQ3ODljMWU4ZjZmOTUyMWE5NWE2ZTBmYzdkNWZlODE4YmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhhYmFmMDJjZTExOTVmMGNkYzM2ZWU3ZjM0MWVhMjYzYThhYjM2MDJkMGFjOTdlZDg4YmQzZjNkMThmN2U3NjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://crates/harlo-core/tests/memory.rs#L48-L55",
+          "resource": "repo://crates/harlo-core/tests/memory.rs#L56-L63",
           "version": "repo-lines-v1:sha256:98f082b2134986015c073cd5aa78407f6209f35abe859f95debef0d719b03e2b:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjNmMmZjOTkwNjRjMzE1OTRkZTQ5NmYzMGNlNTA3YzA2NmMyNmZhZjZmNzk2MDkzNDZmNWFlZTM5ODhiODZlOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZDE1MmU5ZDQzZGY0NDQ3ZDk0ZTg4ZjgzM2JkM2Y4YTc2OTZhMWY0ZGY2NTgxNDUxZTAwZTIzNmRiNWUwOGZjMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODM1MDA3ODY1N2ZjMjEwNDUwOGMxOGM1ZjE1MDA4YjQ5ZTZkOWVmYmZjYzI5OTBhYjcwODhmMWExMjk0ZjIyZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYzRmN2JmOTA2Mzc5NGMwNDg0ZWIxMTRmYjI2M2ZlNGI0MmE1MDgzOTBiMzgzZjVhZDZiZTA5ZGFkYzFmODU5OCJ9"
         }
       ]
@@ -181,7 +181,7 @@
       "statement": "The Markdown exporter tests compare streamed output with whole-history output and verify that file exports spill text waiting behind late tool results after their memory threshold, including a stress case with a late result.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/export.rs#L605-L700",
+          "resource": "repo://crates/harlo-core/src/export.rs#L644-L739",
           "version": "repo-lines-v1:sha256:fae38a80ddf7fcb2bd359d87834aee6535a847f8bb01c992b617cb746db48bbe:eyJzZWxlY3RlZExpbmVDb3VudCI6OTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiOTk2MzkyM2ExNWM2YjQ1ZjkwNTZhMmFjMWFhMzI0YTQxZTBkNGNlOGVhOTg2NDY4MDUyMTQ0YzgyYjYyZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiN2JhNjU0ZDM0NzE1NDU3MThjMzM3MDc0ODEwNjZiOWNkNDMwYTAyNDdmOTE4OTc0Nzc1ODFjNDVmMGYwMDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzNmU0NmU5NDExMmQ1YTdmMGM5MzMxM2RhMzdiMGQyZTQ0YjhlNDhjZmI1OGE2Y2U4ZTg5YmNiOTg1MTJhYmUifQ"
         }
       ]
@@ -191,8 +191,8 @@
       "statement": "Core session tests ensure that plugin-command interception is limited to messages marked as typed by the user, rather than agent-generated or otherwise untyped messages.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/session.rs#L1990-L2023",
-          "version": "repo-lines-v1:sha256:9439ab79ec7d1076d5ac4c4397cf2bf070e24577d8cfbd61afbd365e14939505:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyYjYzZDEwZDA3OWJlNWQ4MDY0NTFlN2Q5ZGZmODNiYzBlZmE4MGQyOGY5NWQ1MGRjNzFkYTA3YzRhYjQ1ZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxZGRiMDk4NGNiZjQ5MzkzYWIyNWU0NWQ1OGMwMmY1MWIyZTQ0MmI1MWY3YWZhNjcxYjBkNWY0NzZmNzBiNGUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjZTljZGEyYTcyNzFlYWYzYjU0NDUwNjVlZWU0MmE1N2Q3YzJjZmE5NTRiYTdjMTkzOTQ2OTllOTVjN2M4MzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYzEwOWMzNzNjNmI4Mzk2YzFiZjM3NmVhZTExZWZjNWVmY2UwYjk2NDAwYWRmNzkyZDU5NDM1NGM2YTkyZTEifQ"
+          "resource": "repo://crates/harlo-core/src/session.rs#L2110-L2140",
+          "version": "repo-lines-v1:sha256:b9fe9d1e257dcd626e07a774e0d2a1a0747980886cf390ecb81cbe3a0b7b6efb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkNzQ2NzcxMTY1NzI4MjMxZDdlMDQ1YjA1NWJkNjg5NGNmOGE2YjBmZjU3NTA0YzkyZDkyNzFkNDBlMTQ4OGUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZmNjI3YWY0YmEwYTMxNDMzZmI4ZWJiZGVkMzViN2E5YTE5MjE2M2MyMGVlMTg4ZmZlNjQzNzUyYjE3ZGUxMGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBmN2MzYWNlODE5ZGUxNWNjOWRlYmRhNWJmNjVlZmY5YTNlMmE3ZDgyMmZjNTU5YmIyYWJiMTAzNjc1YTVlMWQifQ"
         }
       ]
     },
@@ -201,7 +201,7 @@
       "statement": "Agent skill-discovery tests cover Claude plugin skill installation scope, project-specific enablement overrides, added skill directories, matching-skill deduplication, and explicit `/skill:` expansion.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-agent/src/skills.rs#L266-L299",
+          "resource": "repo://crates/harlo-agent/src/skills.rs#L269-L302",
           "version": "repo-lines-v1:sha256:fe07c159b61fc0a7307394369abc4838f8ac1436dc552fcc9a1157f6ce9c0646:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMwMzhhODcwZTI1OGRhMGU0NTg5MjBiN2ExMzdlZjMwZGU5NWRhZjYyMzdjNTgxNzQ2YTU1NjkyOTZjYTQzZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImExODljMDEyZmMzZDU2ZmU3ZWEwNzU3MGMzZTg1MGE1ODVkZTBjOWY0ODljODcwOTcyOThmZDNiYzk5ZjRiNDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEwMGRiMDQwZjI5MDliZjk3OGZmMGE5NTZhNTVlODNjNjUzNDE4ZGU2YmI2OGY4MDQxZGE5NzZmOGQzZDIyNzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoyLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM3OTRkMDJhODEyMTk0NGQxNzZkMjY1ZTliYjljYzU5ZjZhYjg5MGJjYWRmOGFlZmRlYmRiYmI0ZjJlYTg0NDQifQ"
         }
       ]
@@ -211,22 +211,42 @@
       "statement": "Focused regression tests cover session events arriving while a long saved transcript loads, a Claude prompt appearing before resumed history finishes with history-dependent responses waiting for completion, and harness shutdown killing a process group with descendants that ignore SIGTERM.",
       "evidence": [
         {
-          "resource": "repo://crates/harlo-core/src/session.rs#L2788-L2840",
-          "version": "repo-lines-v1:sha256:3ce922d44c4784f0baf84c404595b20a6c2ebf8d8da5383188f62338233abaea:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ0MGU4YWQ0Yzc5NjEwZDc1ODJiYWUxNGRhNDY2MWU4NjhmYWJkMmI1MTk4ZTI4YzdlMTRlMzQyZDI2NzQ3NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlkYTNhNjlkYTBhMGI0ZTdkMzAyMGJjM2RlMTIzN2NmM2IyNjRjZWY5YjI1M2ExZGRkODA0YjA1NWUzYjgxYmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUxZmZlNDI2NjZiY2M4NzY3N2M5ZjY3YTk0MDM4MTEwNjFhMzEzOTUxYmUwZTcxNzViOWI2N2EzN2ZkNTgzNzEifQ"
+          "resource": "repo://crates/harlo-core/src/session.rs#L2914-L2960",
+          "version": "repo-lines-v1:sha256:425f8919714c754d0c857ee864c9b16f5cef57e6813b7cd3b2aca6324fad7b22:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk0N2UyNzZhZGU3MTBhMjQ1MjY5N2E1MjA0NWU0MjU3ZDJiZTRjMTE1MDljOWJkMGY5NzkyZDRlNDIyZjQxMmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MjJjNDJjZDE5YzZkMDNkODA4YzQ1MjcyMDU1MjgyNWI3ZWExYzViNDkxYjIxODUxMWNhYzc0MTVjZjlkOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYzZjFlM2FiZjU5ODk5N2UwM2E4YzQxYTViMmM4NTkxNWNlMTM5NmIwNjVlYjJlYzQ0ODA3ZThlNWRkZDZmYTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNmZjRkYmVhYWJmM2UxNmI1NGJhOWIzYWI2NTUwNDBlNzI2ODhjN2Q0MGE0ZDNiZTZlZDUwYmI5NTk1OWU0ZGUifQ"
         },
         {
-          "resource": "repo://crates/harlo-harness/src/claude_run.rs#L2170-L2220",
-          "version": "repo-lines-v1:sha256:11f8f352f24be31fd1f2e2360617f1eff223ccc6d677169da70aa03d4c16f5ca:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxY2M0MDY4N2QyNDRlOWRhZjkxY2VkNDY1MjMyNjU2OWE0ZmI2ZGZjODFkMDNmYmU3MjNhNWVhM2NjYmU5ZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyYjVlZGY1OTQ5Y2ZlYTY3ODIyY2Y2OTExMzIzNjNkNjhkNmYxZTE2OWY1ZTBkNGY3YzE0ZTVmYTFlNmQ0ZTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxMzJiMzIxNmRkZjUxYWE0YmU5MDY5NWJjOWYwYWYzMmQ0ZjgzYjU2ZDc0MDQzYWJkOWI5MmU1ZTE1MWJjYzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNlMTYyMDlmN2ZhZjZjNDhkMTliODk0Njg4YmE1YmMwMTExZjhlYWIwOGM2Mzk2NWQyMmIwM2VjNTIxNTIzNTUifQ"
+          "resource": "repo://crates/harlo-harness/src/claude_run.rs#L2364-L2410",
+          "version": "repo-lines-v1:sha256:8ca61660ba26059f331e94f2d2d847535801cb822548d9e57d5635024d5e20d7:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmNDEwMGQzNDk1YWI0ODkxOWQ0Y2U5Mzc0ODhkZTY0OGVkZTIzZWI2NzQzZmM4OWRiNDlhMWM1MTljYTI2YWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjExNGMxM2UzZjFkMzIwY2FhZWJmNjdhMDMzYmVhZjU4ZjdjNTZiNWNmZGNlYWRhYTQ2N2VlOTZjMGE1NzAwZWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkxNDc1ZjU5Mzg3MTc1MmI5MGMwMTk5NDM1YTEzZDA1MTI1OWU3ODdiNTU4NWQ2YzRkYTUyMWYyMmU0MDVlMmEifQ"
         },
         {
-          "resource": "repo://crates/harlo-harness/src/process.rs#L570-L590",
-          "version": "repo-lines-v1:sha256:feb93f9321490d53fee2c5e0e67aad6c3f7e08e6701b7b93b3f9ce633910d47b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI1Y2Y1ZmMyM2YyYTZkMjNjM2VhNTFlNzJmNWU4OTZjNzU1NWZiYWEwNWNkNWIxZWExODJiZjk2MThhOGU4MWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE4ODI3MmMzYjRjZWZiODc2NjNiNmZhYmUxNmJkZTliZDViMzBiMjY1ODgxZjIxZjdkNGJlZWJiNDNkNTU0OWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjNGZmMjdkMzBlY2RhYmFhMWUzMWMxYjkyY2FiOWQzZjAxNTc3Y2Q0MWNjMDUxYWRjZGUwNTA5ZDJmMDRkNWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhlYzk1NjZhMjVmMGM5Y2FhOTE5YWQyMmJlM2FkYWRhMzAyNGFhNTRjZjRkZWIwOGY4OTU5ODgyMjg2OWM2YmUifQ"
+          "resource": "repo://crates/harlo-harness/src/process.rs#L659-L700",
+          "version": "repo-lines-v1:sha256:21f15a5f1460e18ede00950506b7588772cc34f869d0c902d939235f5ad30da6:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyMDI1MWY4NWQ1NzhjOWViY2VjNWY3MGZkYjE1YmZjNDFmYTVkMjMxOGVjYTM1NTk1MzU1YjNlYWYxZjEzN2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjYmU3MTgwYzUwNDE2MTdiNjI0YjZjN2E4ZjM2Mzk5ZjFkMmEzODYyNjBjZWNiMmQ2NWNhMDJkNTEwOTQwODIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJmOWIxZjlhODc0OGNmMWZmYTA1ZjkyZGRmZjA5N2NlMmNiMTMwOGI4ZWNmNmZmZTViNTdlM2VmMDkwMmRmNDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU0YTgyMzJkYTIyZWU0MzA3YzA5ZjgzYzIwNzVlYjJkN2I5YjRkZDVkYWEyM2E3ZTJkMzI4MGE1MDE4NzNlM2UifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1fd7f15dfe35460babdab2b38ded4204",
+      "statement": "Focused tests verify that changed paths are ordered by weighted file size, including zero-weight licenses and images, and that large uncited source is returned only when another condition already requires a model-backed update; the uncovered-source fixture excludes old code, small files, tests, minified code, and pictures.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L2165-L2300",
+          "version": "repo-lines-v1:sha256:77f511944d68a5f3c14f9b2c57c2d4ba53473e2bad960916da6d41565d6d0b1a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTM2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4NTAwYzhkMjg1NDAzYTRjNzE2YzVmNjU2OGNjNWNiMTdhMGE3OWM1Mzk3M2M3MDVjNjIxYjA1NDNlY2IyZmExIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI5Y2UzOGY3YWI1NThiNzc4NTg0YzI3NmZmMmQ4ZDVjOWU0OWJiZjY5MWVjODYyMWY2MWYxODQ4NmY4YWI5YmFiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI5OGY5YTgwZDkyYTg5NDg4M2E3ZGY2ZTRjZjFiY2IzMmQwNWU2YzRiN2FjYmRlNjUxNWE5OGM0MjA1NmNlOWMxIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1MWJkYzY5ZDhiOTAwNTFjMGYzYzkyNDk3YzExOWE3NTY4ODcxMGNkZTk4NTJmYzc2Zjg0MjM2YzFjN2JlYmExIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_899540b2ae264d3a9e57944c2da1aae7",
+      "statement": "The uncovered-path planning regression test checks that every path is either covered by a planned page seed or explicitly left uncovered, and that decided paths are recorded to avoid asking about them again; a separate resume test protects an existing plan from source drift.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-wiki/src/run.rs#L2179-L2292",
+          "version": "repo-lines-v1:sha256:38ecfb6511769946ddad94e7f40c76c0fa0f0681df906a724c41f67809b4edb3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4MTIwNTVlNDZkNjA2NmU3YTY3NDQ2ZjI4MGViOWVmMGE5NTIzNjAyYmQ1MzhiNWNkMjdlZWY1NTc5NTNjZWMyIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI5MmI1ZWRmNTk0OWNmZWE2NzgyMmNmNjkxMTMyMzYzZDY4ZDZmMWUxNjlmNWUwZDRmN2MxNGU1ZmExZTZkNGU1IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhMDBkYjA0MGYyOTA5YmY5NzhmZjBhOTU2YTU1ZTgzYzY1MzQxOGRlNmJiNjhmODA0MWRhOTc2ZjhkM2QyMjcwIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIxODRjZTU1M2YyNDAyMTFmZjU3MmEzMGRkM2E1NzA1Zjg3YjFmODg3NGM4ZmM0MWRiZmNkZGY1OGRkYmFlMDFmIn0"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.9.0",
-    "at": "2026-11-15T20:21:41.902Z"
+    "at": "2026-11-17T18:09:09.933Z"
   }
 }

@@ -5,16 +5,26 @@ description: How agent protocols become shared live sessions, durable conversati
 tags: [architecture, sessions, persistence, desktop]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T20:21:41.902Z
+    at: 2026-11-17T18:09:09.933Z
 sources:
+  - id: openwiki-source-5639ec29205dc64985b84039
+    resource: repo://crates/harlo-app/qml/AppearancePage.qml
   - id: openwiki-source-eda83df6b22941ed75ede295
     resource: repo://crates/harlo-app/qml/ChatView.qml
+  - id: openwiki-source-d21a3d169a37ad8f8a21c000
+    resource: repo://crates/harlo-app/qml/HarnessRequestDock.qml
+  - id: openwiki-source-bde85b06bd8eb4aadec04c0d
+    resource: repo://crates/harlo-app/qml/ProjectsPage.qml
+  - id: openwiki-source-b630047cdd623a4a1799ada0
+    resource: repo://crates/harlo-app/qml/ProvidersPage.qml
+  - id: openwiki-source-04c3d6e74598133eacc8d252
+    resource: repo://crates/harlo-app/qml/ToolCard.qml
+  - id: openwiki-source-15664660a215bdde6df0d2db
+    resource: repo://crates/harlo-app/qml/WorkflowCard.qml
   - id: openwiki-source-941abaef21aa1042a4672f7a
     resource: repo://crates/harlo-app/src/chat_session.rs
   - id: openwiki-source-d0b354972196ec10b88a0e60
     resource: repo://crates/harlo-app/src/image_view.rs
-  - id: openwiki-source-1d40907d1133795813cede65
-    resource: repo://crates/harlo-app/src/main.rs
   - id: openwiki-source-94aedfb131ba76701f9659c4
     resource: repo://crates/harlo-app/src/orchestration.rs
   - id: openwiki-source-22e4ea3417daf80d96080fd6
@@ -29,8 +39,6 @@ sources:
     resource: repo://crates/harlo-core/src/db.rs
   - id: openwiki-source-5af0c90ff6d5f75199de24a2
     resource: repo://crates/harlo-core/src/export.rs
-  - id: openwiki-source-4007ae1962c00ddaf5da78d5
-    resource: repo://crates/harlo-core/src/lib.rs
   - id: openwiki-source-df09a2583df68f85f752b752
     resource: repo://crates/harlo-core/src/markdown.rs
   - id: openwiki-source-0603700f85841a0469cb7cb2
@@ -47,13 +55,15 @@ sources:
     resource: repo://crates/harlo-core/src/transcript.rs
   - id: openwiki-source-322c82102553742bfacf73ab
     resource: repo://crates/harlo-harness/src/claude_run.rs
+  - id: openwiki-source-6e31f80be57ab71be4a5f10f
+    resource: repo://crates/harlo-harness/src/event.rs
   - id: openwiki-source-3ef6360b45fa7169c94b35d3
     resource: repo://crates/harlo-harness/src/lib.rs
   - id: openwiki-source-c0d5ffb66451b26dd04ddd63
     resource: repo://crates/harlo-harness/src/process.rs
   - id: openwiki-source-07a69ae82a0e133d3de748f1
     resource: repo://crates/harlo-harness/src/store.rs
-generated: { by: "harlo", at: "2026-11-15T20:21:41.902Z" }
+generated: { by: "harlo", at: "2026-11-17T18:09:09.933Z" }
 ---
 
 # Sessions, persistence, and desktop presentation
@@ -154,7 +164,17 @@ An indexed file that is still listed but temporarily unreadable is not treated a
 
 Finished wiki sessions use a separate **Wiki** shelf after **Settled**, with independent expansion state. The workspace marks an idle wiki session with the `wiki` settlement reason, deferring settlement while it is the active view or lacks a saved file. Disabled session settling, pinning, and archiving remain respected. This is session organization, not proof that the durable [OpenWiki run](../integrations/openwiki.md) completed successfully.
 
+While an OpenWiki plan-submission call streams, transcript progress stays blank until `pages` arrives as an array. An empty array is then reported as “no pages to change,” rather than as a zero-page plan. This avoids presenting a partial tool payload as a completed plan count.
+
 Approval messages marked as Markdown are rendered through the core Markdown renderer into prose and code blocks. The request body scrolls within a bounded region so long plans do not push the answer controls out of view; ordinary non-Markdown requests retain plain text presentation.
+
+## Workspace and transcript controls
+
+Settings pages are thin views over workspace-owned state rather than alternate stores. The Projects page selects a project and sends edits for its name, icon, and theme-derived color through `Workspace`; its per-project controls also configure which provider new sessions use. The Providers page distinguishes local agents from agents installed on the selected remote instance: remote discovery, installation, updates, and sign-in status belong to that host, while the enabled-agent choice is shared across instances. Appearance settings similarly call workspace theme/look controls, and expose whether glass effects are unavailable under software rendering. These controls change application preferences; they do not change an agent's own login or machine-local provider configuration.
+
+`ToolCard` is the transcript's expandable representation of one tool call. It combines the call/result state with the shared code-view parser: edits and writes show a diff preview, reads and command output can render numbered source, and opening a long output reveals more without discarding its location. A card can expose an approval state, attached images, and subagent associations; it is presentation over transcript/session data, not the tool executor or approval authority.
+
+The task workflow UI is a separate feature from the shared orchestration plan dock. Its settings page edits reusable definitions, while a running `WorkflowCard` observes the workflow run associated with a session and offers run-level pause, resume, stop, and log expansion. Definition edits do not rewrite the copy already captured by an active run; see [user-defined workflows](../workflows/user-defined-workflows.md) for the lifecycle and retry rules.
 
 ## Focused verification
 

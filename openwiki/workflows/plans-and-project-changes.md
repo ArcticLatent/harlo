@@ -5,7 +5,7 @@ description: How session-scoped orchestration tools update shared plans and safe
 tags: [workflow, plans, orchestration, git, worktrees]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T20:21:41.902Z
+    at: 2026-11-17T18:09:09.933Z
 sources:
   - id: openwiki-source-c5e0556ff4a54e3a14503a14
     resource: repo://crates/harlo-app/qml/ChangesPanel.qml
@@ -23,7 +23,9 @@ sources:
     resource: repo://crates/harlo-core/src/orchestration.rs
   - id: openwiki-source-75bcb97e87a29c42db5d4dfd
     resource: repo://crates/harlo-core/src/plan.rs
-generated: { by: "harlo", at: "2026-11-14T05:16:59.652Z" }
+  - id: openwiki-source-e9230964befb2fda179b117c
+    resource: repo://crates/harlo-harness/src/coding_plans.rs
+generated: { by: "harlo", at: "2026-11-17T18:09:09.933Z" }
 ---
 
 # Plans, helpers, and project changes
@@ -84,6 +86,10 @@ Turn undo is separate from step commits: snapshots under `refs/harlo/turns/<work
 `bring_over` transfers a helper worktree's committed, uncommitted, and untracked changes since its start into the current checkout **as uncommitted changes**. It verifies that both checkouts belong to the same Git repository, determines the baseline, and checks patch applicability. Conflicting files are left unchanged and returned in `clashed`; applicable files are reported in `applied`. Nothing is staged or committed by this operation. A helper already working in the same folder has nothing to bring over.
 
 Review clashes from the helper's worktree rather than treating partial application as a complete merge. For SSH-backed checkouts, use the [remote routing layer](../integrations/remote-machines-and-models.md) rather than issuing local filesystem operations on an `ssh://` URI.
+
+## Claude Code subscription plans are a different kind of plan
+
+`harlo-harness::coding_plans` describes third-party Claude Code subscriptions, not the shared task plan above. Harlo keeps a built-in catalog of subscription endpoints, model IDs and Claude model-tier mappings; saved API keys live in `$XDG_CONFIG_HOME/harlo/coding-plans.json` (or `~/.config/harlo/…`) with a user-only directory and file on Unix. Harlo does not send these providers' model requests itself: the Claude Code harness starts `claude` with a temporary settings file containing the plan's Anthropic endpoint, key variable and model mapping. That private file is removed with its guard, and abandoned folders for ended Harlo processes are swept. A credential check is a short non-persistent Claude Code request with a two-minute timeout. Do not confuse these subscription credentials or settings files with the per-session shared-plan state described above.
 
 ## Verification and neighboring workflows
 

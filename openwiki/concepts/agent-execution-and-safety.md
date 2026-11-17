@@ -5,7 +5,7 @@ description: Harlo agent model-loop ordering, resumable history, RPC approvals, 
 tags: [agent, safety, sandbox, rpc, tools]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T20:21:41.902Z
+    at: 2026-11-17T18:09:09.933Z
 sources:
   - id: openwiki-source-0b93973e66ce9fb1db2bd77c
     resource: repo://crates/harlo-agent/src/agent.rs
@@ -13,10 +13,14 @@ sources:
     resource: repo://crates/harlo-agent/src/chat.rs
   - id: openwiki-source-7afaa5ecb5f0234d809b2ace
     resource: repo://crates/harlo-agent/src/compact.rs
+  - id: openwiki-source-7bf4111dbead0b378068838a
+    resource: repo://crates/harlo-agent/src/gemini.rs
   - id: openwiki-source-b51f99006fb5c853445948b7
     resource: repo://crates/harlo-agent/src/isolate.rs
   - id: openwiki-source-6563011f1979331a41458e2d
     resource: repo://crates/harlo-agent/src/mcp.rs
+  - id: openwiki-source-ff93d09039abd12ed2500c37
+    resource: repo://crates/harlo-agent/src/messages.rs
   - id: openwiki-source-ae4a49158d3f1eb8769fdbd5
     resource: repo://crates/harlo-agent/src/program.rs
   - id: openwiki-source-f1322101a0183d196da191a3
@@ -39,11 +43,11 @@ sources:
     resource: repo://crates/harlo-agent/src/tools/mod.rs
   - id: openwiki-source-cc3a6736ec7398d0638b6f38
     resource: repo://crates/harlo-agent/src/used.rs
+  - id: openwiki-source-fe6d0211dc78653f46c6abf5
+    resource: repo://crates/harlo-core/src/tool_calls.rs
   - id: openwiki-source-322c82102553742bfacf73ab
     resource: repo://crates/harlo-harness/src/claude_run.rs
-  - id: openwiki-source-abb0937a4a786473efee240e
-    resource: repo://crates/harlo-harness/src/claude.rs
-generated: { by: "harlo", at: "2026-11-15T20:21:41.902Z" }
+generated: { by: "harlo", at: "2026-11-17T18:09:09.933Z" }
 ---
 
 # Agent execution and safety boundaries
@@ -55,6 +59,12 @@ generated: { by: "harlo", at: "2026-11-15T20:21:41.902Z" }
 The agent repeatedly sends history to a model, executes returned tool calls, records results, and requests another response until the model answers without calls. Models are addressed as `provider/model`: built-in ChatGPT and OpenAI routes use Responses, while configured providers can use chat completions or Responses. Provider configuration is read per request.
 
 The JSONL session log is the source of model history, not merely an activity export. Entries carry IDs, parent IDs and timestamps; resuming reconstructs the active history. A crash-truncated line is skipped when reopening. Compaction records a summary plus retained recent messages without removing the older log entries, and cuts are chosen not to split a tool call from its result.
+
+## Native provider message translation
+
+The native provider adapters translate the shared assistant-history format at the network boundary rather than storing provider-specific request bodies as session history. The Anthropic Messages adapter groups consecutive same-role turns, places tool results in the appropriate user turn, and carries thinking signatures only back to the provider/model that created them; when thinking is disabled it omits those blocks. Gemini similarly rebuilds `contents` and function responses, but retains Gemini thought signatures and call IDs only for their originating provider/model, using Google's placeholder signature for a function call produced by another model. Both adapters represent unsupported images with an explanatory text part rather than silently pretending the model received the image.
+
+Harlo's own tools have another distinct boundary: `harlo-core::tool_calls` computes which tools a session may be offered from caller, project, helper, wiki and plan state. A writing wiki session gets authoring tools, ordinary project sessions may get wiki reading tools only when enabled and present, and plan tools depend on project configuration. The desktop then receives the call and performs application-side effects. This policy layer is separate from the agent's general tool loop and from the approval/sandbox checks on filesystem and shell tools.
 
 ## Usage and provider capabilities
 

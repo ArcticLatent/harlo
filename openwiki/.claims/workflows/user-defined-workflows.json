@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:59030b3d0718c5fbaec19505f787e083b3850d7d5c32dee9d74a0b73fa0819d3",
+  "claims": [
+    {
+      "id": "claim_55232071d284411992e46eaebf3a65c3",
+      "statement": "Workflow definitions must begin with exactly one implementation stage and include at least one later check or review; the core validates stage names and bounds definitions to 12 stages and 10 retries per stage.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L111-L152",
+          "version": "repo-lines-v1:sha256:e587cdaf37e65b1c510e8b6cbe355bec4c90ad36c6a557801d5cd00079814734:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2ODNjNTE5MmY2ZDQxMDVlZTMzMzFkZGZiNTM1YmFhMDA3ZWYyMzVlZjNhNTkxZjYwZDdhMzRjZjQwMWM4OTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBkZTIyNzMzYzlmYTZjZjZjZTUzZjQ2NjI3MDRkZTQ1ZmU4MzAyYjM3ZTUwMDY0ODRjYzE4YzBlNDNiOGZkMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVjMmM3YzRlMjM3NmNkNTQxN2QyZTFlMWNkNDM2MDE1NTRjZmY0ODgzZGE3NzE1OWU4OGJiMGRiZTY3NTAxNzAifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L23-L36",
+          "version": "repo-lines-v1:sha256:26b21a1fbdbb7abffb2d3286e2669a5e6442010915e70b483b6bb916c95128dd:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM2YzE2YjI1YTMzNzFkM2JlMTBmNjBmNzk3MWY1MzA1OTc3YWRjOGI5MWUyMDM1MDBkNTkyYzZiMDg5MWVhMzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRiYTA4YTlkZTY0NDVkOTQ5MDI2YTc0NmI5MTczMGJkOTFmNTNiMjczYzVlMWM0NmRiMTg0NGRlMTUwNGFjNmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjljZjc4ZmUxOGE1MjQ3MzAwODhjMDM0MDIwNzY4OTk3MWUwYWNlMGE3MDViMTllNzU3ODZkOTFhOTVhNDkwODAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_66c6ffdc449a42d98e6579c0540d969c",
+      "statement": "A workflow run stores a resolved copy of its definition, filling blank check commands and reviewer agents from the run's start-time choices, so later definition edits do not change the in-progress run.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L111-L180",
+          "version": "repo-lines-v1:sha256:cd01832bb92ea7a96e954e89fdfec9ffda9e499408171a09b418f88696d44773:eyJzZWxlY3RlZExpbmVDb3VudCI6NzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2ODNjNTE5MmY2ZDQxMDVlZTMzMzFkZGZiNTM1YmFhMDA3ZWYyMzVlZjNhNTkxZjYwZDdhMzRjZjQwMWM4OTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyNjhhMDNhOTc0OWUzZmZiZjU2ZDI2OTAwZmJmMzg3MGIyMDc1OTU2MTcyNWFkZjEzNGJiNGNlZTU4NGFmYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBkZTIyNzMzYzlmYTZjZjZjZTUzZjQ2NjI3MDRkZTQ1ZmU4MzAyYjM3ZTUwMDY0ODRjYzE4YzBlNDNiOGZkMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM4NTRhMjU3ZWNhNDEyNjcwMzZkZTdiZjBhNDVjOTZkNmY3YTBiODU2MjZhNTkwNTVkM2FmMDQzYmM1NDQ0MTIifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L365-L410",
+          "version": "repo-lines-v1:sha256:53afcc62465ae67e2f7945a2bdb00fb927efdabf7746a702ebe6fdf860489914:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxZTU5NDgyYTgxNDFhNmI0OWFiYjFiMzg0OWM5NDMzZGQxMjFjZWMwZTUyYmRjNTY1NjkwNGE0ZTU0NTNlN2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQwYWU3YjI4MzAyZWQzZDdkNDUyOWI3YjQ4MWM1MWNlZjFjNzAwZGZiOGQyZDljZWRhZGNhNDk1NWRjZGI5ZTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ1Y2E1N2FhYTFjZWUwZDNhZGFhOWZlNzJiMzBkY2Q2MmFiMTVhZWIxZjE5ZTU4MDFhYzJhMGIwYWI3NmE0NTQifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L489-L520",
+          "version": "repo-lines-v1:sha256:36be186410e9bfae29e90867625d5273ae7fe6a45fa76cfcf75da8a4201fafd5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE4MmRkMTQ4YWNiNWNmMzA1NTU3NGViNWQ5YmQxODdmYTRiYTE4ZmU2MThkMDYzZTliNDkwOWZmMWYyMTE0MjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxMDY3MjZlNjcyMjExYzEzYTIzODc4ZWY3ZmIyMTgwMzNlNmRjODk2Yjk1ZTFkZGE2YjA3NDI4ZWYzNzIxNTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ3Y2NlYzZhZmE1ZjlkM2Y0OGVmYzA1NGJkMzk0MzNhMzA5NzVlZjVlZWM0ODFlYTg2NWNjMmZhYjEwZDM5Y2UiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA2ODkzNjRhMWM0Y2RhNjMxY2U1ZGQwMzUxNWNhZmU2MDkxNDI4N2U1MGM4NjBhOTEwOWY4ZTgzN2Q1NTVkYWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3918497f1f4346e6a4b919f2414366c8",
+      "statement": "Failed checks and reviews return work to implementation only while the failed stage's retry allowance remains; each fix then proceeds through later stages again, and exhausted retries pause for user action.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L762-L800",
+          "version": "repo-lines-v1:sha256:a2f5e663eadad77b9828b27c19ece5071aaf9e60585bd975359aedb0a55e0f5f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhlOWZiMjEzZjk1MGQ2ZDE1MjYyZGJiYTU1YTUzYTM4YTMwMzgxZjBkMmNjZGU2Zjc4OWQyMTMwYTk5ZWE0Y2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ5MTVkNWJhMjAwNzlkMTM2NTZmZTQxODZiYjllNjM0YzQwNDQ0N2M4YmMyMTc1NTM5YjMyOTYzM2FkMWJlZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ1ODE4MjJhZTRiNDUyZjk3ZDFhZjA4MDlmOGJjM2ZmNmFlY2Y2ZTg5YTIzYTM1ZjAyNmQ2MDEzZWQ5MGMxMTIifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L814-L871",
+          "version": "repo-lines-v1:sha256:62d4d94de8e876fb2fc5d3a88d420a22d467ba28ee4ae97c3f08c6c43e317eee:eyJzZWxlY3RlZExpbmVDb3VudCI6NTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzZDI3YTdhMWFhOThkNWNkYzk5MDYxOWFiN2JkNDljODA4MDdhNjg2ZThlNTBjMmViNTFkNTk1YjcxNzYyMDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlMWI3ZGUwZjQ5ZWRlYTQ2Y2Y2ZmNhYWFjMTE0MGFhMmJlYjkyYmU3ZmQ1MzljYjYxNzNjNzI2NDI3MTM3ZDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImEzNTc4ZjY2ZTVlZjhiYTQzNDliNTljMWU0NjZlMjgzZTg4ZjkyYTRkYTkxZTA0YTkxNDlhY2NiOGJjMzJlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRmZGRmYTY0NDcwYTIxZGM5OWE1ODA4N2Q2M2ExZWIwNWE2MjQ5ZTUyMmI0YmE1Zjc1YmExNGE5ZWU1NGMxZjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2fe2240ed4b2419b85c278063149b6ad",
+      "statement": "Workflow state transitions are persisted before their actions are executed, and stale asynchronous reports/check results are ignored when dispatch sequence or attempt does not match the current wait.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/workspace/workflows.rs#L570-L604",
+          "version": "repo-lines-v1:sha256:7df7ef306d889d07e3628517b2973b0ca34c231ebc136d610fbd8d1cf4524a6a:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0MWY3NDExOGQ1OTk4Y2RjYzZhNDE5N2JjN2QzYjg5ZmE2NDJiYjBhNWI5Y2E5NDk2ZWZhMWQ5MmQzNGE2ZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ3MmE0ZmUyM2RlNzAzMGE5NzgyNzY0ODBiYTZhNzFmNTAyZmFkMzhmMTNiNGE2ODM3NWRlZjkyYmQwZmViNjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyNzA5MTdmYzI4M2U0ZTYwZjliNzdkYWNkNmRjMmIxMGFiNjFkODcxNmYzODliZWVjM2Y3MzhjMmFlNGQ3YTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJmMWQ4MGQ2YzM0NzlmMTJkMDI5MjkwMGZjMGIwYWYwNDY3ZGNkMGYxYmU1ZmQwN2YwOWYwZGExYjQ0NGM2ODcifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L632-L690",
+          "version": "repo-lines-v1:sha256:50f44ed0ff8c65f70d227e0aba1eaff91a723834f3b237fd46d4a8a41318c974:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlNDJiMjY2MGU4MjRlNzFkMTZmZmM3OGU0YTQ3YTMyZjY3YTc5YTIxYzIxYmExYmM4ZmFlYjRjZjY5NGYxNzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1OTk1YWMxYjA1OTIxZTFlZDFjNTFkMzczODFkMzZiNGI2ZjViZDUyNzZiYjA2Zjg1ODJkNGE4MjMzMTM2NmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImVmZWViMTFmYTRlMzY0YjY1OWQ3ODUyNGZkYzQyMzEwN2I3M2IzM2Q3MjBkMjY4MGUyODk1NDg2NmVlYmQwYmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzNTU3NmMyMWQ0NmJkYzJkMGM0Njk0ODk3YTE4ODczOTU1MWRhYzEyNjY4ZTUyYWM4NzU1YzQ1ZTY4MDUzMTUifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L709-L717",
+          "version": "repo-lines-v1:sha256:f60293f2aef1e7eb19dba71ebcc09c2a7773190a3ce7fb49ad92a296f50cf912:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjBjZDA1NDJiZjY1MzM5ZTlmY2ZkODgyODBmZmZiMzQzODlmMjFmZTdjYmMyNDllYjhhMzhjZGI4MzViYjBjMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDg5M2Y0MGUzNzgxZWI4OTZjODJkMDQ2YTA4MDY3YTExZTM1Y2RmMmYxZGZhZjI2ZmVhOTBiOGRiNjY3NjQxMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTZjZDZhOWE3NzVjZjM5MjM3ZWEyZjQwYzgyODBkYTBiZmQ0NzNiZmU0ZWViMTUyNzM3YmRiNWY1MjlhYTg3NyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGIyNWRkZDJkYmQ1Mzk4NDI3MTQ1NmFjNTY4MWZiMWIwMDcyMmNhOTJmZTFhNTU1MGI0ZTdmYzhhN2E1ZTQ5NiJ9"
+        },
+        {
+          "resource": "repo://crates/harlo-core/src/workflow.rs#L762-L770",
+          "version": "repo-lines-v1:sha256:1c0dd4be8d5ebad2928bc68d76215ab94417f999973c16bc125d589f4c50b9e5:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGU5ZmIyMTNmOTUwZDZkMTUyNjJkYmJhNTVhNTNhMzhhMzAzODFmMGQyY2NkZTZmNzg5ZDIxMzBhOTllYTRjZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2Y3ZWU5ODhlYmIzNzRmOTRlNTYxNzY3MTEyMDYxYWVjYzBmNjUwODU3MGU2Zjg2OGZiYTU1ZTY5ZDJjN2U1MyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDkxNWQ1YmEyMDA3OWQxMzY1NmZlNDE4NmJiOWU2MzRjNDA0NDQ3YzhiYzIxNzU1MzliMzI5NjMzYWQxYmVlOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjA4Yzk2YmMwYzQ2ZDAzZTkxMWVkZDVkZTc2MjgwNDM1MmY4MmM2MThhZWU3MTU1YmM0MjM5ZTM2MDMyMTYxMSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_39a6f6942f104c8da7577020c78b58b6",
+      "statement": "The app loads unfinished workflow runs from its database on startup and upgrades their persisted representation before scheduling recovery.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/workspace/workflows.rs#L67-L84",
+          "version": "repo-lines-v1:sha256:b84088406719481fc3705531961ed06c4bb12d98a6a35f184ae17b4d554c261d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM3ZDQ3Y2MzMDk4ZmI5ZjFmZmE2ZGM5ZTA5NTBlZDYyMjUwZDU0MmVlNDA4NmQxZWRmNDYwYjg2M2Q4MWI0ZGEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUzMjM1Y2Y4MDliZmEwYjRhYjEzZWYyZjFkNDJiZWM5ZTE3Mjg1YjY3YTg0NzFhYTJiNWFlNWMzZmI0NmNiNzIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_2a82ea1cbd164576a4bf60fd3a1c9be5",
+      "statement": "A workflow's shell check runs in its worktree, supports remote execution, streams bounded live output, and stops after a 30-minute test limit.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/workspace/workflows.rs#L131-L181",
+          "version": "repo-lines-v1:sha256:0fd28fd529fc0749119be56bd76be70c354e59164590f13444689df44d57a965:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiZGY5OWY0YzQ4ZDgwYmYzMmYyYjExZTBkZDUxMWEzODNmMmRlMTE3YzkxYzE1ODViZTIxYmYzMjNlNzRiYWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBjNTEyNTg1MDA1YjVhYTdiOWZhZTJlMzlmM2E5YThiODc3MTg4Mzg3MzJiOGZiMmUyOTFiMTZlYzIzZTliNGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZhYzA3ZmE1NDAzYWRkODVlYTU1MDgxODllYWE1Y2NhYzNmY2JmNzA2ZTA1OTQxMTdhZDFhOTIzZTRiZjUwYjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE0NWNlOGE4YzBmNjdkMGY0MzAzOThkOTliYjJiZGY4NzdjMTBkMjkwNDI4ZDUxNjA2ZGVhOTE0YWRiZWUyYTEifQ"
+        },
+        {
+          "resource": "repo://crates/harlo-app/src/workspace/workflows.rs#L24-L26",
+          "version": "repo-lines-v1:sha256:a236d0a48c11685ab1c83a82aadc1f49dc29d7e9066d3dcccc91c57f2810b43a:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjVmZGM4ZTdlNzMzZjg3ZWEwNWUxM2Q0ZGQ4ZTFhZTQ5ZTk5Y2FjYWE2ODU0ZmViMjgwMGI1NTVjNmJiNWUyNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzg5NWJkYmNiZGQxYzlmYzJiZDIyOWU5ZjIyMThhZDM4YjBlZDNjNTFmYjhlZjViNGE3ZDlkNGY1ZjE5MDMwZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTEzMzA5ZTYxMDRhZGE0NTVhMjRjNmYxOThiMzlkNjYwM2NmODU0MzZmMjVjMTM4NDkwMTg4M2U1OWQ0MmQ4OSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiY2NjOTNlMjBhZjgxMTcyNmFlZDY1ZTQ0NDQ5ZWU3NWQ0NTk2OGE2NDMxNDZjMWU2NGJkMjUyNGQwNWU2OWVlNiJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_f1629f5140c24916a5457b1c9bb8eb1c",
+      "statement": "User workflow definitions are validated and persisted through workspace operations; deleting a definition does not change the copies held by active runs.",
+      "evidence": [
+        {
+          "resource": "repo://crates/harlo-app/src/workspace/workflows.rs#L324-L376",
+          "version": "repo-lines-v1:sha256:971a825f5607e566dd6d9e8fb2b8f44050ba0f6e3aa6ff65016e6cdf0eab4b20:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwMjk3MmY3ZGU1YTlhMDg2YmFlMmViYTFjOTM0ZGIxNDJjY2VjZTU0MjM0ZDJjYjgzYWI0YTlmYjU5NTI2MWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMjhlODUzNGEwOGMwOTQwOTQ5OGRlODBlNTYyN2U4NzMzYzJmZDk3Zjk1NjZlZGViYzVhMTZiYjhmNDg4ODgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkwNTYwZmEwMDFlZWY0YjYxNjMxZjliYWE3NjgwOGQ2N2U3ZjJiZmZiNTYyNDFlZmFjOGMyNjZlNDA5ZmMxMDcifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.9.0",
+    "at": "2026-11-17T18:09:09.933Z"
+  }
+}

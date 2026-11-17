@@ -5,14 +5,12 @@ description: Device authorization, replay-resistant NaCl channels, session subsc
 tags: [phone, ios, encryption, relay, apns]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T20:21:41.902Z
+    at: 2026-11-17T16:23:44.066Z
 sources:
   - id: openwiki-source-3e5d9e2412052022c04ac0ec
     resource: repo://crates/harlo-apns/src/lib.rs
   - id: openwiki-source-d0b354972196ec10b88a0e60
     resource: repo://crates/harlo-app/src/image_view.rs
-  - id: openwiki-source-1d40907d1133795813cede65
-    resource: repo://crates/harlo-app/src/main.rs
   - id: openwiki-source-9f29fe751f9cc19b273be74f
     resource: repo://crates/harlo-app/src/phone_activity.rs
   - id: openwiki-source-5a140dd0fb2fd61495f082c8
@@ -21,8 +19,6 @@ sources:
     resource: repo://crates/harlo-app/src/phone_push.rs
   - id: openwiki-source-71daf39798f4072df6e58b8d
     resource: repo://crates/harlo-app/src/phone_server.rs
-  - id: openwiki-source-fb73cab443b13627be975e74
-    resource: repo://crates/harlo-app/src/phone.rs
   - id: openwiki-source-9a97dd54ff550316a9b1d806
     resource: repo://crates/harlo-core/src/actions.rs
   - id: openwiki-source-33d58143535fd8586f3e5352
@@ -33,12 +29,16 @@ sources:
     resource: repo://crates/harlo-relay/src/lib.rs
   - id: openwiki-source-23acde496d3c31944280356b
     resource: repo://ios/Harlo/Harlo/ActionLogView.swift
-  - id: openwiki-source-2a9076f4b9c96d8d098111b9
-    resource: repo://ios/Harlo/Harlo/SessionView.swift
-  - id: openwiki-source-d106fff79d94df591057ff07
-    resource: repo://ios/Harlo/Harlo/TranscriptViews.swift
-  - id: openwiki-source-7d63dd608fb68281fc2c1857
-    resource: repo://ios/Harlo/Harlo/WikiViews.swift
+  - id: openwiki-source-fedb45a27e6885ec4135c9f0
+    resource: repo://ios/Harlo/Harlo/BackgroundNotice.swift
+  - id: openwiki-source-a6e8ad914519a4302c698f19
+    resource: repo://ios/Harlo/Harlo/SessionContent.swift
+  - id: openwiki-source-e32821c54edb1e0a0e107eec
+    resource: repo://ios/Harlo/Harlo/WikiSection.swift
+  - id: openwiki-source-de227f94d729d39f8815db60
+    resource: repo://ios/Harlo/Harlo/WikiSheet.swift
+  - id: openwiki-source-5428b07677433f38b2260789
+    resource: repo://ios/Harlo/Harlo/WikiView.swift
   - id: openwiki-source-8c23df65e9f6a257e8c67c14
     resource: repo://ios/HarloKit/Sources/HarloKit/Client.swift
   - id: openwiki-source-d4c9b9a27de9af9dcb466113

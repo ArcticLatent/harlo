@@ -1,8 +1,26 @@
 {
-  "updatedAt": "2026-11-15T20:27:00.748Z",
+  "updatedAt": "2026-11-17T18:16:54.647Z",
   "command": "update",
-  "gitHead": "a2ab2815508580fc9c2b1e45ac6ea6fa0a4051c6",
+  "gitHead": "f86c0dcda5b5a0a0100dcb6c874abd3d856a6581",
   "model": "host-agent/harlo",
   "status": "complete",
-  "language": "en"
+  "language": "en",
+  "uncoveredReviewed": [
+    "crates/harlo-agent/src/gemini.rs",
+    "crates/harlo-agent/src/messages.rs",
+    "crates/harlo-app/qml/AppearancePage.qml",
+    "crates/harlo-app/qml/ProjectsPage.qml",
+    "crates/harlo-app/qml/ProvidersPage.qml",
+    "crates/harlo-app/qml/ToolCard.qml",
+    "crates/harlo-app/qml/WorkflowCard.qml",
+    "crates/harlo-app/qml/WorkflowsPage.qml",
+    "crates/harlo-app/src/workspace/workflows.rs",
+    "crates/harlo-core/src/tool_calls.rs",
+    "crates/harlo-core/src/workflow.rs",
+    "crates/harlo-harness/src/coding_plans.rs",
+    "crates/harlo-wiki/src/jsre.rs",
+    "crates/harlo-wiki/src/lang_data.rs",
+    "crates/harlo-wiki/src/okf.rs",
+    "crates/harlo-wiki/src/tools.rs"
+  ]
 }

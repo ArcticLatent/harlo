@@ -5,7 +5,7 @@ description: Contributor build prerequisites, focused and integration verificati
 tags: [testing, build, packaging, releases, security]
 verified:
   - by: openwiki/0.9.0
-    at: 2026-11-15T20:21:41.902Z
+    at: 2026-11-17T18:09:09.933Z
 sources:
   - id: openwiki-source-4d1d392666be6dfdd7a91a2e
     resource: repo://.github/workflows/release.yml
@@ -51,7 +51,7 @@ sources:
     resource: repo://site/README.md
   - id: openwiki-source-f1c29df965300759d3c1ff56
     resource: repo://wrangler.jsonc
-generated: { by: "harlo", at: "2026-11-15T20:21:41.902Z" }
+generated: { by: "harlo", at: "2026-11-17T18:09:09.933Z" }
 ---
 
 # Testing, packaging, and signed updates
@@ -112,7 +112,9 @@ cargo test -p harlo-wiki
 cargo test -p harlo-core --no-default-features openwiki
 ```
 
-For the model-free update detector specifically, `cargo test -p harlo-wiki quiet_updates_miss_nothing` exercises declaration detection across several languages, significant edits, test-path exclusions, oddly quoted Git paths and diff settings, Git failures, and source changes arriving during the check. `quiet_updates` covers cited-line movement versus changed evidence, new files, manually edited pages, and the no-run recording path. These focused cases validate the detector and local engine; they do not substitute for testing remote wiki calls.
+For the model-free update detector specifically, `cargo test -p harlo-wiki quiet_updates_miss_nothing` exercises declaration detection across several languages, significant edits, test-path exclusions, oddly quoted Git paths and diff settings, Git failures, and source changes arriving during the check. `quiet_updates` covers cited-line movement versus changed evidence, new files, manually edited pages, and the no-run recording path. `changed_files_are_listed_heaviest_first` verifies that larger source files precede smaller ones and that a license and image receive zero weight. `the_largest_code_no_page_cites_is_named_when_a_model_is_needed` verifies that uncovered code is surfaced only when another condition already needs a model-backed update; its fixture checks that older uncited code, small files, tests, vendored/minified code, and a picture do not appear. These focused cases validate the detector and local engine; they do not substitute for testing remote wiki calls.
+
+Update planning has its own regression boundary: `an_update_plan_decides_on_every_uncovered_file_once` proves that omitting uncovered paths or listing only some in `leaveUncovered` is rejected, that seeding a feature folder decides its files together, and that decided paths are recorded so later updates do not repeatedly ask about them. `a_resumed_run_keeps_its_plan_when_the_code_changed` guards the complementary recovery rule: source drift must not silently replace an already-persisted plan.
 
 ## Headless Rust CI
 
