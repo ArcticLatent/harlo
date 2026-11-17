@@ -65,7 +65,9 @@ struct SessionCard: View {
                 Text(detail)
                     .scaledFont(14.5)
                     .foregroundStyle(Color(p.muted))
-                    .lineLimit(stacked ? 2 : 1)
+                    // (With the model first it runs longer: a second line
+                    // rather than cut off.)
+                    .lineLimit(stacked ? 3 : 2)
                 if stacked { state }
             }
             Spacer(minLength: 6)
