@@ -1543,6 +1543,8 @@ final class RecordingTests: XCTestCase {
         (m, s) = try await open("working")
         XCTAssertFalse(s.subagents.isEmpty)
         (m, s) = try await open("aside")
+        // (Its answer comes a moment after the scene opens.)
+        for _ in 0..<250 where s.aside?.done != true { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertEqual(s.aside?.done, true)
         XCTAssertTrue(s.rows.contains { $0.kind == "notice" && $0.text.contains("The background command finished") })
         (m, s) = try await open("plan")
