@@ -788,12 +788,14 @@ func recordWorkflow(_ model: HarloModel, _ rec: Recorder, trigger: String) async
     check(checking, "the check's output comes as it runs (\(s.workflow?.liveCheck?.output.suffix(60) ?? "none"), \(s.workflow?.statusLine ?? ""))")
     await model.loadWorkflows()
     // (Its header's branch: the worktree's, not the first session's.)
+    _ = await model.branches()
     _ = await model.changes()
     rec.scene("workflow-check")
     let done = await waitFor(60) { s.workflow?.state == "done" }
     check(done && s.workflow?.lastCheck?.passed == true && s.workflow?.finishable == true,
           "the run is done, its work to merge (\(s.workflow?.statusLine ?? "none"), \(s.workflow?.log.map(\.text).suffix(3) ?? []))")
     await model.loadWorkflows()
+    _ = await model.branches()
     _ = await model.changes()
     rec.scene("workflow")
 }
