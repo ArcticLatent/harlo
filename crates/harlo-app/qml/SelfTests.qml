@@ -54,6 +54,8 @@ Item {
     // The window's height before a test made it short.
     property real heightWas: 0
     property var workflowNamed: null
+    // The models picked in the workflow dialog.
+    property var workflowModels: ({})
     function shotWindow(name) {
         const path = selftestDir + "/" + name + ".png"
         console.log("selftest:", TestInput.grabWindow(path) ? "saved" : "grab failed", path)
@@ -10090,6 +10092,21 @@ Item {
             sidebar.workflowDialog.testField.text = tests.workflowTests
             tests.check(sidebar.workflowDialog.testField.cursorPosition === 0, "a long test command shows where it starts")
             tests.check(tests.findName("workflowStart").accent, "Start is the dialog's main button")
+            const d = sidebar.workflowDialog
+            tests.check(d.implementerModelBox.currentText === "Default model" && d.reviewerModelBox.currentText === "Default model", "each agent starts on its default model (" + d.implementerModelBox.currentText + ", " + d.reviewerModelBox.currentText + ")") } }
+        // Each role's model: its agent's default, or one of its models
+        // (read when the dialog opens).
+        ScriptAction { script: tests.waitUntil(workflowSteps, () => sidebar.workflowDialog.implementerModels.length > 0 && sidebar.workflowDialog.reviewerModels.length > 0, 30000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            const helper = d.implementerModels.findIndex(m => m.name === "Fake Helper")
+            tests.check(helper >= 0 && d.reviewerModels.length > 0, "the model menus list the agents' models (" + d.implementerModels.map(m => m.name) + " | " + d.reviewerModels.map(m => m.name) + ")")
+            d.implementerModelBox.currentIndex = helper + 1
+            d.implementerModelBox.activated(helper + 1)
+            d.reviewerModelBox.currentIndex = 1
+            d.reviewerModelBox.activated(1)
+            tests.workflowModels = { implementer: d.implementerModel, reviewer: d.reviewerModel }
             tests.shotWindow("clicks-workflow-dialog") } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: tests.clickItem(tests.findName("workflowStart"), "Start") }
@@ -10102,7 +10119,11 @@ Item {
             tests.check(r && r.branch.indexOf("workflow/write-greet-txt") === 0, "it works in a new worktree on its own branch (" + (r ? r.branch : "") + ")")
             tests.check(Workspace.workflowTestCommand(JSON.parse(Workspace.projectsJson())[0].id) === tests.workflowTests, "the project's test command is remembered")
             tests.harloKey = chat.session.key
-            tests.check(Workspace.workflowFor(chat.session.key) !== "", "the implementation session is open, with the run's card") } }
+            tests.check(Workspace.workflowFor(chat.session.key) !== "", "the implementation session is open, with the run's card")
+            tests.check(r && r.implementerModel === tests.workflowModels.implementer && r.reviewerModel === tests.workflowModels.reviewer && r.implementerModel.indexOf("fake-helper") >= 0,
+                        "the run keeps the models picked (" + (r ? r.implementerModel + ", " + r.reviewerModel : "") + ")")
+            tests.check(chat.session.modelId.indexOf("fake-helper") >= 0, "and the implementation session runs on the implementer's (" + chat.session.modelId + ")")
+            tests.check(Workspace.setting("workflow_implementer_" + JSON.parse(Workspace.projectsJson())[0].id) === "harlo\t" + tests.workflowModels.implementer, "remembered for the project's next run") } }
         // The tests fail: back to the same session, as attempt 2.
         ScriptAction { script: tests.waitUntil(workflowSteps, () => tests.workflowLogHas("Tests failed") && tests.workflowRun().attempt === 2, 30000) }
         PauseAnimation { duration: 600 }
@@ -10122,6 +10143,8 @@ Item {
             tests.check(details && lastDot && details.mapToItem(card, 0, 0).y > lastDot.mapToItem(card, 0, 0).y, "the run's details come after its log")
             tests.check(details && !/-[0-9a-f]{6,}( |$)/.test(details.text) && details.text.indexOf("…`") > 0 && details.text.indexOf("cat greet.txt") < 0 && details.ToolTip.text.indexOf("cat greet.txt") > 0,
                         "the details name the branch without its id and cut the long command, whole on hover (" + (details ? details.text : "none") + ")")
+            tests.check(details && details.text.indexOf("Implement: Harlo · Fake Helper") >= 0 && details.text.indexOf("Review: Claude · " + Theme.helperModel("claude", tests.workflowModels.reviewer)) >= 0,
+                        "and each agent's model (" + (details ? details.text : "none") + ")")
             tests.shotWindow("clicks-workflow-test-failed") } }
         // The review asks for changes: back to the same session again.
         ScriptAction { script: tests.waitUntil(workflowSteps, () => tests.workflowLogHas("Review asked for changes"), 40000) }
@@ -10254,6 +10277,18 @@ Item {
         PauseAnimation { duration: 50 }
         ScriptAction { script: Workspace.addProject("ssh://box" + win.argValue("--cwd=")) }
         PauseAnimation { duration: 800 }
+        // The start dialog's model menus list what the agents offer on box.
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.projectsJson())[0]
+            sidebar.workflowDialog.show(p.id, p.name, p.harness)
+            tests.check(sidebar.workflowDialog.host === "box", "the dialog knows the project is on box (" + sidebar.workflowDialog.host + ")") } }
+        ScriptAction { script: tests.waitUntil(workflowRemote, () => sidebar.workflowDialog.implementerModels.length > 0, 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            tests.check(d.implementerModels.some(m => m.name === "Fake Coder") && d.implementerModelBox.currentText === "Default model", "on box, the implementer's models are Harlo's there (" + d.implementerModels.map(m => m.name) + ")")
+            d.close() } }
+        PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const p = JSON.parse(Workspace.projectsJson())[0]
             tests.check(p && p.path === "box:" + win.argValue("--cwd="), "the project is on box (" + (p ? p.path : "none") + ")")
@@ -10617,6 +10652,22 @@ Item {
             tests.check(ed.visible && tests.shown(err) && err.text === "Give the workflow a name.", "a workflow without a name isn't saved, and the editor says why (" + err.text + ")")
             ed.nameField.text = "Careful"
             tests.check(!tests.shown(tests.findName("workflowEditorError")), "the error goes once there's a name")
+            // The implementation gets its own agent and model.
+            const page = tests.findName("workflowsPage", settingsDialog.contentItem)
+            const agentBox = tests.findName("stageAgent", tests.findName("workflowStage0"))
+            const i = page.providers.findIndex(p => p.id === "harlo") + 1
+            agentBox.currentIndex = i
+            agentBox.activated(i) } }
+        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => tests.findName("workflowsPage", settingsDialog.contentItem).modelsOf("harlo").length > 0, 30000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const ed = tests.findName("workflowsPage", settingsDialog.contentItem).editor
+            const modelBox = tests.findName("stageModel", tests.findName("workflowStage0"))
+            const i = modelBox ? modelBox.models.findIndex(m => m.name === "Fake Helper") + 1 : 0
+            tests.check(i > 0, "the implementation's model menu lists its agent's models")
+            modelBox.currentIndex = i
+            modelBox.activated(i)
+            tests.check(ed.stageModel.get(0).harness === "harlo" && ed.stageModel.get(0).agentModel.indexOf("fake-helper") >= 0, "the implementation names its agent and model (" + ed.stageModel.get(0).harness + ", " + ed.stageModel.get(0).agentModel + ")")
             tests.shotPopup(ed, "clicks-workflows-editor")
             tests.clickItem(tests.findName("workflowSave"), "Save") } }
         PauseAnimation { duration: 500 }
@@ -10625,6 +10676,7 @@ Item {
             const mine = flows.find(f => f.name === "Careful")
             tests.check(!tests.findName("workflowsPage", settingsDialog.contentItem).editor.visible && !!mine && mine.stages.map(s => s.name).join(",") === "Implement,Tests,Short,Review", "saved, in order (" + (mine ? mine.stages.map(s => s.name) : "none") + ")")
             tests.check(mine && mine.needsTestCommand && mine.needsReviewer && mine.stages[2].command === "echo counting words; sleep 2; test $(wc -c < greet.txt) -lt 100", "its tests and review are the ones picked at the start; its own check keeps its command")
+            tests.check(mine && mine.stages[0].agent.harness === "harlo" && mine.stages[0].agent.model.indexOf("fake-helper") >= 0, "and its implementation keeps its agent and model")
             tests.check(tests.findText("Careful", settingsDialog.contentItem) !== null, "and listed")
             settingsDialog.close()
             const p = JSON.parse(Workspace.projectsJson())[0]
@@ -10636,6 +10688,7 @@ Item {
         ScriptAction { script: {
             const d = sidebar.workflowDialog
             d.flowBox.currentIndex = d.flows.findIndex(f => f.name === "Careful")
+            d.flowBox.activated(d.flowBox.currentIndex)
             d.taskArea.text = "Write greet.txt greeting the user"
             d.criteriaArea.text = "- greet.txt says hello!"
             d.testField.text = tests.workflowTests } }
@@ -10644,6 +10697,7 @@ Item {
             const d = sidebar.workflowDialog
             tests.check(tests.findText("Implement  →  Tests  →  Short  →  Review", d.contentItem) !== null, "picked, the dialog shows its stages")
             tests.check(tests.shown(d.testField) && tests.shown(d.reviewerBox), "and asks for the tests and the reviewer it needs")
+            tests.check(d.implementerAgent === "harlo" && d.implementerModel.indexOf("fake-helper") >= 0, "and starts with the workflow's own implementer and model (" + d.implementerAgent + ", " + d.implementerModel + ")")
             tests.shotWindow("clicks-workflow-dialog-custom")
             tests.clickItem(tests.findName("workflowStart"), "Start") } }
         PauseAnimation { duration: 300 }

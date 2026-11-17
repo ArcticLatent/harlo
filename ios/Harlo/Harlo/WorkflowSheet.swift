@@ -83,7 +83,7 @@ struct WorkflowSheet: View {
                 Text(s.label).scaledFont(15, s.status == "active" || s.status == "paused" ? .semibold : .regular)
                 Spacer(minLength: 8)
                 let command = s.kind == "check"
-                Text(command ? s.what.trimmingCharacters(in: CharacterSet(charactersIn: "`")) : s.what)
+                Text(command ? s.what.trimmingCharacters(in: CharacterSet(charactersIn: "`")) : s.doer)
                     .scaledFont(command ? 12.5 : 14, design: command ? .monospaced : .default)
                     .foregroundStyle(Color(p.muted))
                     .lineLimit(1)

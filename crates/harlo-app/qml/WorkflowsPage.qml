@@ -24,9 +24,19 @@ ColumnLayout {
     function stageIcon(kind) { return kind === "implement" ? "edit" : kind === "check" ? "terminal-box" : "search-eye" }
     // "`cargo test`", "Claude Code", "the reviewer you pick".
     function stageWhat(s) {
-        if (s.kind === "implement") return qsTr("the agent you pick")
         if (s.kind === "check") return s.command !== "" ? s.command : qsTr("the project's tests")
-        return s.agent.harness !== "" ? agentLabel(s.agent.harness) + (s.agent.model !== "" ? " · " + s.agent.model : "") : qsTr("the reviewer you pick")
+        if (s.agent.harness !== "") return agentLabel(s.agent.harness) + (s.agent.model !== "" ? " · " + modelName(s.agent.harness, s.agent.model) : "")
+        return s.kind === "implement" ? qsTr("the agent you pick") : qsTr("the reviewer you pick")
+    }
+    /// An agent's models on this computer, its local ones first.
+    function modelsOf(agent) {
+        const p = (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []).find(x => x.id === agent)
+        const all = p ? (p.modelIds || []).map((id, i) => ({ id: id, name: (p.models || [])[i] || id, local: (p.localIds || []).indexOf(id) >= 0 })) : []
+        return all.filter(m => m.local).concat(all.filter(m => !m.local))
+    }
+    function modelName(agent, id) {
+        const m = modelsOf(agent).find(x => x.id === id)
+        return Theme.modelLabel(m ? m.name : id)
     }
 
     SectionHeader {
@@ -151,6 +161,8 @@ ColumnLayout {
             ]
             for (const s of stages)
                 stageModel.append({ kind: s.kind, name: s.name, command: s.command, harness: s.agent.harness, agentModel: s.agent.model, reviewFocus: s.focus, tries: s.tries })
+            // (The agents' models, for the model menus.)
+            Workspace.ensureProviders()
             open()
             nameField.forceActiveFocus()
         }
@@ -284,7 +296,8 @@ ColumnLayout {
                                 PlainLabel {
                                     visible: stage.first
                                     Layout.fillWidth: true
-                                    text: qsTr("The agent you pick when you start a run makes the change in a new worktree.")
+                                    text: stage.harness === "" ? qsTr("The agent you pick when you start a run makes the change in a new worktree.")
+                                        : qsTr("This agent makes the change in a new worktree; a run starts with it chosen, and you can pick another there.")
                                     color: Theme.muted
                                     font.pixelSize: Theme.px(12)
                                     wrapMode: Text.Wrap
@@ -299,28 +312,41 @@ ColumnLayout {
                                     text: stage.command
                                     onTextEdited: stageModel.setProperty(stage.index, "command", text)
                                 }
+                                // Its agent and model (a review's, or the
+                                // implementation's): none, the one picked at the start.
                                 RowLayout {
-                                    visible: stage.kind === "review"
+                                    visible: stage.kind !== "check"
                                     Layout.fillWidth: true
                                     spacing: 6
                                     ComboField {
                                         objectName: "stageAgent"
-                                        Layout.preferredWidth: 200
-                                        model: [qsTr("The reviewer you pick")].concat(page.providers.map(p => p.label))
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 1
+                                        model: [stage.first ? qsTr("The agent you pick") : qsTr("The reviewer you pick")].concat(page.providers.map(p => p.label))
                                         marks: [""].concat(page.providers.map(p => p.id))
                                         currentIndex: stage.harness === "" ? 0 : Math.max(0, page.providers.findIndex(p => p.id === stage.harness) + 1)
-                                        onActivated: i => stageModel.setProperty(stage.index, "harness", i === 0 ? "" : page.providers[i - 1].id)
+                                        onActivated: i => {
+                                            stageModel.setProperty(stage.index, "harness", i === 0 ? "" : page.providers[i - 1].id)
+                                            stageModel.setProperty(stage.index, "agentModel", "")
+                                        }
                                     }
-                                    AppTextField {
+                                    ComboField {
+                                        id: stageModelBox
+                                        objectName: "stageModel"
+                                        // Its agent's models; one saved that isn't
+                                        // listed here (another machine's) stays.
+                                        readonly property var models: {
+                                            const all = stage.harness === "" ? [] : page.modelsOf(stage.harness)
+                                            return stage.agentModel !== "" && !all.some(m => m.id === stage.agentModel) ? [{ id: stage.agentModel, name: stage.agentModel }].concat(all) : all
+                                        }
                                         visible: stage.harness !== ""
                                         Layout.fillWidth: true
-                                        font.family: Theme.mono
-                                        font.pixelSize: Theme.px(12)
-                                        placeholderText: qsTr("Model (optional)")
-                                        text: stage.agentModel
-                                        onTextEdited: stageModel.setProperty(stage.index, "agentModel", text)
+                                        Layout.preferredWidth: 1
+                                        model: [qsTr("Default model")].concat(models.map(m => Theme.modelLabel(m.name)))
+                                        currentIndex: Math.max(0, models.findIndex(m => m.id === stage.agentModel) + 1)
+                                        onActivated: i => stageModel.setProperty(stage.index, "agentModel", i === 0 ? "" : models[i - 1].id)
                                     }
-                                    Item { visible: stage.harness === ""; Layout.fillWidth: true }
+                                    Item { visible: stage.harness === ""; Layout.fillWidth: true; Layout.preferredWidth: 1 }
                                 }
                                 AppTextField {
                                     objectName: "stageFocus"

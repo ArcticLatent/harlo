@@ -625,9 +625,11 @@ pub fn update(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) ->
     })
 }
 
-/// What Settings → Tools for agents shows for it there: `{ id, name, about, license,
-/// repo, version ("": not installed), agents, chosen, taken, needs, node,
-/// nodeError }` (`error`: the host couldn't be reached).
+/// What Settings → Tools for agents shows for it there.
+///
+/// `{ id, name, about, license, repo, version ("": not installed), agents,
+/// chosen, taken, needs, node, nodeError }` (`error`: the host couldn't be
+/// reached).
 pub fn status(b: &Offered, place: &Place) -> Value {
     let mut out = json!({ "id": b.id, "name": b.name, "about": b.about, "license": b.license, "repo": b.repo });
     let installed = match installed_at(place, b) {

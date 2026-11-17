@@ -519,12 +519,17 @@ impl Workspace {
                     State::Running if i == run.stage => "active",
                     _ => "todo",
                 };
-                let what = match s.kind {
-                    StageKind::Implement => agents::label(&run.implementer.harness).to_owned(),
-                    StageKind::Check => format!("`{}`", s.command),
-                    StageKind::Review => agents::label(&s.agent.harness).to_owned(),
+                // (An agent's stage: its agent and model, for the model's name.)
+                let agent = match s.kind {
+                    StageKind::Implement => Some(&run.implementer),
+                    StageKind::Check => None,
+                    StageKind::Review => Some(&s.agent),
                 };
-                json!({ "label": s.name, "status": status, "kind": stage_kind_name(s.kind), "what": what })
+                let what = agent.map_or_else(|| format!("`{}`", s.command), |a| agents::label(&a.harness).to_owned());
+                json!({
+                    "label": s.name, "status": status, "kind": stage_kind_name(s.kind), "what": what,
+                    "agent": agent.map(|a| a.harness.as_str()).unwrap_or_default(), "model": agent.map(|a| a.model.as_str()).unwrap_or_default(),
+                })
             })
             .collect();
         let current = run.current();
@@ -557,6 +562,7 @@ impl Workspace {
             "state": state, "why": why, "attempt": run.attempt, "stages": stages,
             "waiting": waiting, "role": role, "branch": run.worktree.as_ref().map(|w| w.branch.clone()).unwrap_or_default(),
             "implementer": agents::label(&run.implementer.harness), "reviewer": agents::label(&run.reviewer.harness),
+            "implementerModel": run.implementer.model, "reviewerModel": run.reviewer.model,
             "testCommand": run.test_command, "lastCheck": check.unwrap_or(Value::Null), "liveCheck": live.unwrap_or(Value::Null), "log": log,
             "host": run.project.host, "merged": run.finish.merged, "published": run.finish.published, "removed": run.finish.removed,
             "base": run.worktree.as_ref().map(|w| w.base.clone()).unwrap_or_default(),

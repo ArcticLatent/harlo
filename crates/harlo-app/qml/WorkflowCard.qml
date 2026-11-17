@@ -370,7 +370,7 @@ Rectangle {
             // run's id off the branch, long commands cut); whole on hover.
             PlainLabel {
                 objectName: "workflowDetails"
-                readonly property var parts: !root.run ? [] : (root.narrow ? [root.run.workflow] : []).concat([qsTr("On %1").arg(root.run.branch || qsTr("its worktree"))]).concat(root.run.stages.map(s => s.label + ": " + s.what))
+                readonly property var parts: !root.run ? [] : (root.narrow ? [root.run.workflow] : []).concat([qsTr("On %1").arg(root.run.branch || qsTr("its worktree"))]).concat(root.run.stages.map(s => s.label + ": " + s.what + (s.model ? " · " + Theme.helperModel(s.agent, s.model) : "")))
                 readonly property string branchShort: root.run && root.run.branch ? root.run.branch.replace(/-[0-9a-f]{6,}$/, "") : ""
                 Layout.fillWidth: true
                 Layout.topMargin: 4

@@ -1197,7 +1197,7 @@ final class PlanTests: XCTestCase {
          "project":"shipyard","createdAt":1763380000,"state":"running","why":"","attempt":2,
          "stages":[{"label":"Implement","status":"done","kind":"implement","what":"Harlo"},
                    {"label":"Tests","status":"active","kind":"check","what":"`cargo test`"},
-                   {"label":"Review","status":"todo","kind":"review","what":"Claude Code"}],
+                   {"label":"Review","status":"todo","kind":"review","what":"Claude Code","agent":"claude","model":"claude-opus-5-5"}],
          "waiting":"Running `cargo test`","role":"implementation","branch":"harlo/add-a-csv-export","base":"main",
          "implementer":"Harlo","reviewer":"Claude Code","testCommand":"cargo test",
          "lastCheck":{"name":"Tests","attempt":1,"passed":false,"exit":101,"seconds":12,"tail":"test export ... FAILED"},
@@ -1208,6 +1208,11 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(run.heading, "Implement and verify · attempt 2")
         XCTAssertEqual(run.stages.map(\.status), ["done", "active", "todo"])
         XCTAssertEqual(run.stages[1].what, "`cargo test`")
+        // A stage's model, when one was picked, named as people say it.
+        XCTAssertEqual(run.stages[0].doer, "Harlo")
+        XCTAssertEqual(run.stages[2].doer, "Claude Code · Opus 5.5")
+        XCTAssertEqual(WorkflowStage.modelName("fake/fake-helper"), "fake-helper")
+        XCTAssertEqual(WorkflowStage.modelName("anthropic/claude-sonnet-5"), "Sonnet 5")
         XCTAssertEqual(run.statusLine, "Running `cargo test`")
         XCTAssertEqual(run.lastCheck?.exit, 101)
         XCTAssertEqual(run.lastCheck?.passed, false)

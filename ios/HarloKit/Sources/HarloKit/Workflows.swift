@@ -10,12 +10,31 @@ public struct WorkflowStage: Equatable, Sendable {
     public var kind: String
     /// Who or what does it: an agent's name, or a check's command in backticks.
     public var what: String
+    /// An agent's stage: the model it runs on ("": the agent's default).
+    public var model: String
 
     public init(_ v: JSON) {
         label = v["label"].text
         status = v["status"].string ?? "todo"
         kind = v["kind"].text
         what = v["what"].text
+        model = v["model"].text
+    }
+
+    /// Who does it, with the model when one was picked: "Claude Code · Opus 5.5".
+    public var doer: String {
+        model.isEmpty ? what : "\(what) · \(Self.modelName(model))"
+    }
+
+    /// A model's id as people say it: the server's name off the front, and a
+    /// Claude id as its picker names it ("claude-opus-5-5" → "Opus 5.5").
+    public static func modelName(_ id: String) -> String {
+        let last = id.split(separator: "/").last.map(String.init) ?? id
+        let parts = last.split(separator: "-").map(String.init)
+        guard parts.count >= 3, parts[0] == "claude", let major = Int(parts[2]) else { return last }
+        let family = parts[1].prefix(1).uppercased() + parts[1].dropFirst()
+        let minor = parts.count > 3 ? Int(parts[3]) : nil
+        return minor.map { "\(family) \(major).\($0)" } ?? "\(family) \(major)"
     }
 }
 
