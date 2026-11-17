@@ -70,6 +70,28 @@ final class HarloUITests: XCTestCase {
         e.tap()
     }
 
+    /// Scrolls the conversation until `text` sits just under the header, for
+    /// a shot of what follows it (a run opened, a card's output): opening
+    /// one doesn't move the conversation, which stays at its end.
+    func showUnderHeader(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        let e = element(text)
+        guard e.waitForExistence(timeout: 8) else {
+            XCTFail("nothing to show: \(text)", file: file, line: line)
+            return
+        }
+        let top = app.frame.height * 0.17
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let x = app.frame.width * 0.5
+        for _ in 0..<6 where abs(e.frame.minY - top) > 30 {
+            let distance = max(-app.frame.height * 0.45, min(app.frame.height * 0.45, top - e.frame.minY))
+            let from = app.frame.height * 0.5 - distance / 2
+            // (Held at the end, so it doesn't fling on.)
+            origin.withOffset(CGVector(dx: x, dy: from))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: x, dy: from + distance)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(e.isHittable, "in view: \(text) (\(e.frame))", file: file, line: line)
+    }
+
     /// Waits for `e` to go (false: still there after `timeout`).
     func gone(_ e: XCUIElement, timeout: Double = 8) -> Bool {
         let done = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: e)
@@ -150,10 +172,14 @@ final class HarloUITests: XCTestCase {
     func test01Dashboard() {
         launch("end")
         see(main)
-        see("Why does the relay drop idle phones?")
         see("Have a subagent look over the README")
         shot("01-dashboard")
         audit("dashboard")
+        // (At the largest text sizes the third is below the fold: the list
+        // makes it once it's scrolled to.)
+        let third = element("Why does the relay drop idle phones?")
+        for _ in 0..<3 where !third.waitForExistence(timeout: 2) { app.swipeUp() }
+        see("Why does the relay drop idle phones?")
     }
 
     func test02SessionAndItsTools() {
@@ -172,11 +198,13 @@ final class HarloUITests: XCTestCase {
         tap("Read 1 file")
         see("Ran command")
         see("Run the tests")
+        showUnderHeader("Read 1 file")
         shot("03-session-run")
         // The command's card opened: the command and the end of its output.
         tapInConversation("Run the tests")
         see("./run-tests.sh")
         see("112 passed; 0 failed")
+        showUnderHeader("Run the tests")
         shot("04-command-output")
     }
 
@@ -226,6 +254,12 @@ final class HarloUITests: XCTestCase {
         // (The background command that ended, as its own row.)
         see("Background command finished")
         see("$ ./build.sh")
+        // The conversation's end in sight above the side question (it
+        // stopped short while the answer came in).
+        let last = element("The release build finished")
+        let bottom = app.otherElements["sessionBottom"]
+        XCTAssertTrue(see("The release build finished") && last.frame.maxY <= bottom.frame.minY + 2,
+                      "the end is above the side question (\(last.frame), \(bottom.frame))")
         shot("11-side-question")
     }
 
@@ -392,6 +426,8 @@ final class HarloUITests: XCTestCase {
         launch("end")
         openMain()
         app.buttons["Session menu"].tap()
+        // (A tap while the session was still settling sometimes didn't open it.)
+        if !element("Changed files").waitForExistence(timeout: 4) { app.buttons["Session menu"].tap() }
         tap("Changed files")
         see("sidebar.rs")
         shot("20-changes")

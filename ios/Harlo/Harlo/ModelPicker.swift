@@ -76,7 +76,7 @@ struct ModelPicker: View {
                             .listRowBackground(Color(p.elevated))
                         }
                     } header: {
-                        Text(providerName).font(Style.mono(11.5, .semibold)).foregroundStyle(Color(p.muted)).textCase(nil)
+                        Text(providerName).scaledFont(13, .semibold).foregroundStyle(Color(p.muted)).textCase(nil)
                     }
                 }
                 // Keys stay on the computer: they're added there.

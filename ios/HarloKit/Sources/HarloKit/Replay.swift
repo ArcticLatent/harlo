@@ -67,8 +67,49 @@ public struct Replay: Sendable {
         text.split(separator: "\n").compactMap { try? JSON.parse(String($0)) }
     }
 
-    public init(recording text: String, scene: String) throws {
-        let all = Self.lines(text)
+    /// Times are milliseconds or seconds since 1970, between 2020 and 2040.
+    static let msTimes: ClosedRange<Int64> = 1_577_836_800_000...2_208_988_800_000
+    static let sTimes: ClosedRange<Int64> = 1_577_836_800...2_208_988_800
+
+    /// How far (in ms) to move the recording's times for its last to be `now`.
+    static func offset(_ text: String, now: Date) -> Int64 {
+        var last: Int64 = 0
+        func scan(_ j: JSON) {
+            switch j {
+            case .int(let v) where msTimes.contains(v): last = max(last, v)
+            case .int(let v) where sTimes.contains(v): last = max(last, v * 1000)
+            case .array(let a): a.forEach(scan)
+            case .object(let o): o.values.forEach(scan)
+            default: break
+            }
+        }
+        lines(text).forEach(scan)
+        return last == 0 ? 0 : Int64(now.timeIntervalSince1970 * 1000) - last
+    }
+
+    /// A line with its events' and answers' times moved by `ms` (what was
+    /// asked stays as it was: answers are found by it).
+    static func moved(by ms: Int64) -> (JSON) -> JSON {
+        func move(_ j: JSON) -> JSON {
+            switch j {
+            case .int(let v) where msTimes.contains(v): .int(v + ms)
+            case .int(let v) where sTimes.contains(v): .int(v + ms / 1000)
+            case .array(let a): .array(a.map(move))
+            case .object(let o): .object(o.mapValues(move))
+            default: j
+            }
+        }
+        return { line in
+            guard ms != 0, case .object(var o) = line else { return line }
+            for k in ["ev", "reply", "ready"] where o[k] != nil { o[k] = move(o[k]!) }
+            return .object(o)
+        }
+    }
+
+    /// `now`: when it's played; its times move with it, the recording's
+    /// last moment becoming now ("2s ago", not the days since recording).
+    public init(recording text: String, scene: String, now: Date = .now) throws {
+        let all = Self.lines(text).map(Self.moved(by: Self.offset(text, now: now)))
         guard let end = all.firstIndex(where: { $0["scene"].string == scene }) else {
             throw Failure.noScene(scene, Self.scenes(in: text))
         }

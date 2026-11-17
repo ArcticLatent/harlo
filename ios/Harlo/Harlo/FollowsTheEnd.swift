@@ -16,6 +16,11 @@ struct FollowsTheEnd: ViewModifier {
     /// or a panel coming in late moved the end out of sight too, and the
     /// session then stopped short of it).
     @State private var yours = false
+    /// Kept at the end: it was there when your finger last left it, or
+    /// following took it there (a send, the session opened). A panel growing in steps (a side
+    /// question's answer) could move the end again before the last move to
+    /// it was laid out, and it stopped short; pinned, it goes on to the end.
+    @State private var pinned = true
 
     struct Where: Equatable {
         var nearEnd: Bool
@@ -37,6 +42,16 @@ struct FollowsTheEnd: ViewModifier {
                          pastEnd: end > 0 && g.visibleRect.minY > end - 40,
                          height: end, top: g.visibleRect.minY)
         } action: { old, now in
+            if yours {
+                pinned = now.atEnd
+            } else if !pinned && atBottom && now.atEnd {
+                // (Taken there, following: a send, the session opened.)
+                pinned = true
+            } else if pinned && !now.atEnd {
+                // (After this layout: moved now, it stops at the old end.)
+                Task { @MainActor in toEnd() }
+                return
+            }
             // At the end and moved from it by anything but you (grown
             // below, a panel taller, laid out late): to the new end,
             // however little it moved (a panel a line taller hid the

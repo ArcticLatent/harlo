@@ -32,18 +32,20 @@ struct AgentTile: View {
             }
             .overlay(alignment: .bottomLeading) {
                 if modelFirst {
-                    Circle()
-                        .fill(Color(ring ?? p.background))
-                        .frame(width: size * 0.46, height: size * 0.46)
-                        .overlay {
-                            Image(AgentTile.known.contains(harness) ? "Mark-" + harness : "Mark-demo")
-                                .resizable()
-                                .renderingMode(.template)
-                                .scaledToFit()
-                                .frame(width: size * 0.28, height: size * 0.28)
-                                .foregroundStyle(Color(p.muted))
-                        }
-                        .offset(x: -size * 0.12, y: size * 0.12)
+                    // The agent as a small badge in its own tile's colours,
+                    // ringed in what's behind so it cuts into the corner.
+                    let tag = p.agentTile(harness)
+                    Image(AgentTile.known.contains(harness) ? "Mark-" + harness : "Mark-demo")
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: size * 0.22, height: size * 0.22)
+                        .foregroundStyle(Color(tag.ink))
+                        .frame(width: size * 0.4, height: size * 0.4)
+                        .background(Color(tag.fill), in: .circle)
+                        .padding(size * 0.05)
+                        .background(Color(ring ?? p.background), in: .circle)
+                        .offset(x: -size * 0.1, y: size * 0.1)
                 }
             }
             .accessibilityElement()

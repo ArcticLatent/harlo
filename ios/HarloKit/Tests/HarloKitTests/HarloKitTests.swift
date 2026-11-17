@@ -1357,6 +1357,23 @@ final class ReplayTests: XCTestCase {
         XCTAssertNotNil(r.answer("diff", [:])["error"].string)
     }
 
+    func testItsTimesAreAsOfNow() throws {
+        // Recorded on 2026-11-17: a session changed then (seconds), a request
+        // asked 2 s before the recording's last moment (ms).
+        let rec = [
+            #"{"call":"sessions","args":{"since":1794890000000},"reply":{"sessions":[{"key":"live:1","modified":1794890000}]}}"#,
+            #"{"ev":{"ev":"request","key":"live:1","request":{"id":"r1","asked":1794889998000,"tokens":18400}}}"#,
+            #"{"scene":"asked"}"#,
+        ].joined(separator: "\n")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let r = try Replay(recording: rec, scene: "asked", now: now)
+        let request = r.events(of: "live:1").first?["request"]
+        XCTAssertEqual(request?["asked"].int, 1_799_999_998_000, "2 s before now, as it was before the recording's end")
+        XCTAssertEqual(request?["tokens"].int, 18400, "numbers that aren't times stay")
+        // What was asked stays as it was, so its answer is still found.
+        XCTAssertEqual(r.answer("sessions", ["since": 1_794_890_000_000])["sessions"][0]["modified"].int, 1_800_000_000)
+    }
+
     func testDiagramsAnswerTheirOwnSource() throws {
         let rec = [
             ##"{"call":"diagram","args":{"source":"flowchart LR\n  a --> b","light":true,"colors":{"background":"#ffffff"}},"reply":{"png":"light-ab"}}"##,

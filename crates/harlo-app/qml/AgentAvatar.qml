@@ -44,23 +44,31 @@ Item {
         provider: avatar.modelFirst ? avatar.maker : ""
         color: avatar.tint.ink
     }
-    // The agent, as a tag on the corner.
+    // The agent, as a small badge in its own colours on the corner, ringed
+    // in what's behind so it cuts into the circle.
     Rectangle {
         objectName: "sessionAgentTag"
         visible: avatar.modelFirst
-        width: Math.round(avatar.width * 0.5)
+        width: Math.round(avatar.width * 0.54)
         height: width
         radius: width / 2
         x: -Math.round(avatar.width * 0.115)
         y: avatar.height - height + Math.round(avatar.width * 0.115)
         color: avatar.ring
-        ProviderMark {
-            anchors.centerIn: parent
-            implicitWidth: Math.round(parent.width * 0.7)
-            implicitHeight: implicitWidth
-            provider: avatar.provider
-            tip: ""
-            color: Theme.textMuted
+        Rectangle {
+            readonly property var agentTint: Theme.agentColor(avatar.provider)
+            anchors.fill: parent
+            anchors.margins: Math.max(1, Math.round(avatar.width * 0.05))
+            radius: width / 2
+            color: agentTint.fill
+            ProviderMark {
+                anchors.centerIn: parent
+                implicitWidth: Math.round(parent.width * 0.62)
+                implicitHeight: implicitWidth
+                provider: avatar.provider
+                tip: ""
+                color: parent.agentTint.ink
+            }
         }
     }
     Rectangle {

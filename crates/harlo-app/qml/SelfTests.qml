@@ -2831,8 +2831,15 @@ Item {
             TestInput.moveTo(at.x, at.y) } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            const tip = tests.findContaining("Sonnet 5 · Claude")
-            tests.check(tip !== null, "hovered, the row says its model and agent (" + (tip ? tip.text : "none") + ")")
+            // Each row says its model and agent under its title (no hover
+            // tip over the rows), whole within the row.
+            const details = tests.findAllNamed("sessionDetail", sidebar, [])
+            const claude = details.find(d => d.text === "Sonnet 5 · Claude")
+            const row = claude ? claude.parent.parent.parent : null
+            const inRow = row && claude.mapToItem(row, 0, claude.height).y <= row.height - 2
+            tests.check(details.length === 2 && claude !== undefined && inRow && details.every(d => d.text !== ""),
+                        "each row says its model and agent under its title (" + details.map(d => d.text) + ")")
+            tests.check(!ToolTip.toolTip.visible, "pointed at, no tip covers the rows")
             tests.shotWindow("clicks-marks")
             const p = JSON.parse(Workspace.projectsJson())[0]
             sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
@@ -5765,7 +5772,8 @@ Item {
             const row = tests.findText("Fix the login redirect loop", sidebar)
             let d = row
             while (d && d.rowKey === undefined) d = d.parent
-            tests.check(d && d.height <= 46 && d.detail.endsWith("/repo") && d.ToolTip.text === d.detail, "the session row is one line, its folder in the hover tip (" + (d ? d.height + " " + d.detail : "none") + ")")
+            const shown = d ? tests.findAllNamed("sessionDetail", d, [])[0] : null
+            tests.check(d && d.height <= 52 && d.detail.endsWith("/repo") && shown && shown.text === d.detail, "the session row is two short lines, its folder under its title (" + (d ? d.height + " " + d.detail : "none") + ")")
             tests.clickItem(row, "the session") } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: {

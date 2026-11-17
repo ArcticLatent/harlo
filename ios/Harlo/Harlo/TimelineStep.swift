@@ -9,6 +9,9 @@ struct TimelineStep: View {
     let row: Row
     var first = false
     var last = false
+    /// Where a thought's mark sits: on its line, which grows with the text
+    /// size (a tool card's mark sits on its card's first line, at 15).
+    @ScaledMetric(relativeTo: .body) private var thoughtTop: CGFloat = 7
 
     var body: some View {
         Group {
@@ -24,7 +27,7 @@ struct TimelineStep: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topLeading) {
             VStack(spacing: 0) {
-                line.frame(height: 15).opacity(first ? 0 : 1)
+                line.frame(height: row.kind == "tool" ? 15 : thoughtTop).opacity(first ? 0 : 1)
                 StepMark(row: row)
                 line.frame(maxHeight: .infinity).opacity(last ? 0 : 1)
             }

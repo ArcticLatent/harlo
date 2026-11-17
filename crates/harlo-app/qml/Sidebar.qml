@@ -649,20 +649,20 @@ Rectangle {
                         // While a project is dragged, the sessions fade (only
                         // the headers take it), its own the most.
                         opacity: list.dragId < 0 ? 1 : list.dragId === projectId ? 0.35 : 0.55
-                        // On hover: whose helper it is, the cwd (other sessions)
-                        // and/or the worktree branch, and why it's settled.
                         // On the Settled shelf: faded, until you point at it.
                         readonly property bool dim: settled !== "" && !active && !hovered
                         // A narrow sidebar: the title keeps its room (no time,
                         // and a helper shows by its indent alone).
                         readonly property bool tight: width < 240
-                        readonly property string detail: [modelName !== "" ? qsTr("%1 · %2").arg(Theme.modelLabel(modelName)).arg(Theme.harnessLabel(harness)) : "", helperOf !== "" ? "Helper of “" + helperOf + "”" : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
+                        // Under its title: its model and agent ("GLM 5.3 ·
+                        // Claude"; the agent alone until the model's known),
+                        // whose helper it is (unless indented under it), the
+                        // worktree branch, the cwd (other sessions) and why
+                        // it's settled.
+                        readonly property string detail: [modelName !== "" ? qsTr("%1 · %2").arg(Theme.modelLabel(modelName)).arg(Theme.harnessLabel(harness)) : Theme.harnessLabel(harness), helperOf !== "" && nest === 0 ? qsTr("Helper of “%1”").arg(helperOf) : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join(" · ")
                         width: ListView.view.width
-                        height: 42
+                        height: 50
                         hoverEnabled: list.dragId < 0
-                        ToolTip.visible: hovered && detail !== ""
-                        ToolTip.text: detail
-                        ToolTip.delay: 700
                         // Rounded, inset from the sidebar's edges.
                         leftInset: 10
                         rightInset: 10
@@ -698,25 +698,28 @@ Rectangle {
                                 opacity: sessionRow.dim ? 0.4 : 1
                                 Behavior on opacity { NumberAnimation { duration: Theme.hoverMotion } }
                             }
-                            PlainLabel {
-                                objectName: "sessionTitle"
+                            ColumnLayout {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 Layout.preferredWidth: 0
-                                text: (sessionRow.pinned ? "★ " : "") + sessionRow.title
-                                color: sessionRow.active || sessionRow.status === "unread" ? Theme.text : sessionRow.dim ? Theme.textFaint : Theme.textMuted
-                                elide: Text.ElideRight
-                                font.pixelSize: Theme.px(14)
-                                font.weight: sessionRow.status === "unread" ? Font.DemiBold : sessionRow.active ? Font.Medium : Font.Normal
-                            }
-                            // In a worktree (its branch is in the hover tip).
-                            Icon {
-                                objectName: "sessionBranchMark"
-                                visible: sessionRow.branch !== ""
-                                name: "git-branch"
-                                color: Theme.info
-                                implicitWidth: 12
-                                implicitHeight: 12
+                                spacing: 1
+                                PlainLabel {
+                                    objectName: "sessionTitle"
+                                    Layout.fillWidth: true
+                                    text: (sessionRow.pinned ? "★ " : "") + sessionRow.title
+                                    color: sessionRow.active || sessionRow.status === "unread" ? Theme.text : sessionRow.dim ? Theme.textFaint : Theme.textMuted
+                                    elide: Text.ElideRight
+                                    font.pixelSize: Theme.px(14)
+                                    font.weight: sessionRow.status === "unread" ? Font.DemiBold : sessionRow.active ? Font.Medium : Font.Normal
+                                }
+                                PlainLabel {
+                                    objectName: "sessionDetail"
+                                    Layout.fillWidth: true
+                                    text: sessionRow.detail
+                                    color: Theme.textFaint
+                                    elide: Text.ElideRight
+                                    font.pixelSize: Theme.px(12)
+                                }
                             }
                             // Uncommitted changes where the session works, when that
                             // isn't its project's folder (a worktree): the
