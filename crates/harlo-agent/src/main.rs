@@ -2,7 +2,7 @@
 //! on a task in the current folder with its tools (`-p`).
 //!
 //! ```text
-//! harlo-agent login [--codex] [--paste]
+//! harlo-agent login [--codex | --openrouter] [--paste]
 //!                              sign in with ChatGPT (in the browser; --paste:
 //!                              or the address the page ended on, pasted)
 //! harlo-agent logout           forget the sign-in here
@@ -35,14 +35,17 @@ mod clock;
 mod compact;
 mod danger;
 mod fetch;
+mod gemini;
 mod generated;
 mod hashline;
 mod images;
 mod isolate;
 mod jobs;
+mod keys;
 mod lsp;
 mod mcp;
 mod mcp_auth;
+mod messages;
 mod outline;
 mod patch;
 mod profiles;
@@ -86,6 +89,15 @@ async fn main() -> ExitCode {
 
 async fn run(args: Vec<String>) -> Result<()> {
     match args.first().map(String::as_str) {
+        Some("login") if args.iter().any(|a| a == "--openrouter") => {
+            let open = |url: &str| {
+                println!("Continue with OpenRouter in your browser. If it doesn't open, visit:\n\n{url}\n");
+                let _ = std::process::Command::new("xdg-open").arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+            };
+            auth::openrouter_sign_in(open, args.iter().any(|a| a == "--paste")).await?;
+            println!("Signed in to OpenRouter: harlo has a key of its own there (models openrouter/…). Its spending shows, and can be limited or revoked, in OpenRouter → Settings → Keys.");
+            Ok(())
+        }
         Some("login") => login(sign_of(&args), args.iter().any(|a| a == "--paste")).await,
         Some("mcp") => mcp_sign(&args[1..]).await,
         // The wiki's tools over stdio (how harlo reads a wiki on this machine).
@@ -123,6 +135,11 @@ async fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
         Some("models") => list_models(&args).await,
+        Some("providers") => {
+            list_presets(&args);
+            Ok(())
+        }
+        Some("key") => key_command(&args[1..]).await,
         Some("lsp-status") => {
             // For harlo's settings: each language's server here.
             println!("{}", lsp::status());
@@ -155,7 +172,7 @@ async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("-p") => print_mode(args).await,
         _ => {
-            println!("harlo-agent login [--codex] | logout [--codex] | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model] [--budget tokens] [--fallback provider/model]");
+            println!("harlo-agent login [--codex | --openrouter] | logout [--codex] | providers | key set|test|remove <provider> | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model] [--budget tokens] [--fallback provider/model]");
             Ok(())
         }
     }
@@ -221,6 +238,86 @@ async fn list_models(args: &[String]) -> Result<()> {
         bail!("No models: sign in (`harlo-agent login`) or set up a provider in {}", auth::config_dir().join("providers.json").display());
     }
     Ok(())
+}
+
+/// `harlo-agent providers`: the built-in ones, and whether each has a key
+/// (for harlo: `--json`).
+fn list_presets(args: &[String]) {
+    let replaced = providers::file_ids();
+    let presets = providers::presets();
+    if args.iter().any(|a| a == "--json") {
+        let price = |p: Option<used::Price>| p.map_or(serde_json::Value::Null, |p| serde_json::json!({ "input": p.input, "output": p.output, "cacheRead": p.cached, "cacheWrite": p.write }));
+        let list: Vec<_> = presets
+            .iter()
+            .map(|pr| {
+                let p = &pr.provider;
+                let models: Vec<_> = p.configured().iter().map(|m| serde_json::json!({ "id": m.id, "name": m.name, "contextWindow": m.context_window, "levels": m.levels, "images": m.images, "price": price(m.price_at(clock::now().unix.try_into().unwrap_or(0))), "maxTokens": m.max_tokens })).collect();
+                serde_json::json!({
+                    "id": p.id, "name": p.name, "api": p.api.name(), "keyOf": pr.key_of,
+                    "baseUrl": p.base_url, "key": p.key_source(), "keyEnv": pr.key_env, "keyPage": pr.key_page, "pricePage": pr.price_page, "note": pr.note,
+                    "replaced": replaced.contains(&p.id), "models": models,
+                })
+            })
+            .collect();
+        println!("{:#}", serde_json::Value::from(list));
+        return;
+    }
+    for pr in &presets {
+        let p = &pr.provider;
+        let key = match p.key_source() {
+            "saved" => "key saved".to_owned(),
+            "environment" => format!("key in ${}", pr.key_env),
+            _ => format!("no key ({})", pr.key_page),
+        };
+        let note = if replaced.contains(&p.id) { " — replaced by providers.json" } else { "" };
+        println!("{}\t{}\t{key}{note}", p.id, p.name);
+    }
+}
+
+/// `harlo-agent key set|test|remove <provider>`: a built-in provider's API
+/// key. `set` reads it from stdin; `test` checks the saved one, or with
+/// `--stdin` one given there (before it's saved); `--json` for harlo.
+async fn key_command(args: &[String]) -> Result<()> {
+    let usage = "Usage: harlo-agent key set|test|remove <provider> [--stdin] [--json]";
+    let (Some(what), Some(id)) = (args.first(), args.get(1)) else { bail!("{usage}") };
+    let Some(preset) = providers::presets().into_iter().find(|p| &p.provider.id == id) else {
+        bail!("No built-in provider {id}: `harlo-agent providers` lists them")
+    };
+    let name = preset.provider.name.clone();
+    let stdin_key = || -> Result<String> {
+        let text = std::io::read_to_string(std::io::stdin()).map_err(|e| anyhow::anyhow!("Can't read the key from stdin: {e}"))?;
+        Ok(text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_owned())
+    };
+    let json = args.iter().any(|a| a == "--json");
+    match what.as_str() {
+        "set" => {
+            keys::set(id, &stdin_key()?)?;
+            println!("Saved {name}'s key.");
+            Ok(())
+        }
+        "remove" => {
+            println!("{}", if keys::remove(id)? { format!("Removed {name}'s key.") } else { format!("No key was saved for {name}.") });
+            Ok(())
+        }
+        "test" => {
+            let key = if args.iter().any(|a| a == "--stdin") { stdin_key()? } else { preset.provider.token(false).await?.unwrap_or_default() };
+            if key.is_empty() {
+                bail!("No key to check for {name}");
+            }
+            let checked = preset.check_key(&key).await;
+            if json {
+                let v = match &checked {
+                    Ok(said) => serde_json::json!({ "ok": true, "message": said }),
+                    Err(e) => serde_json::json!({ "ok": false, "message": format!("{e:#}") }),
+                };
+                println!("{v}");
+                return checked.map(|_| ());
+            }
+            println!("{}", checked?);
+            Ok(())
+        }
+        _ => bail!("{usage}"),
+    }
 }
 
 /// `harlo-agent status`: who is signed in (for harlo: `--json`).

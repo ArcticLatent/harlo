@@ -9,6 +9,7 @@ pub mod agents;
 pub mod attach;
 pub mod autostart;
 pub mod commitmsg;
+pub use harlo_harness::coding_plans;
 pub mod context;
 pub mod db;
 #[cfg(feature = "dictation")]

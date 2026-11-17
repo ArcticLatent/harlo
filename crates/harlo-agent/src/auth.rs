@@ -286,6 +286,49 @@ pub async fn codex_sign_in(open: impl Fn(&str), paste: bool) -> Result<Credentia
     Ok(creds)
 }
 
+/// OpenRouter's site (`HARLO_AGENT_OPENROUTER_URL` sets another, to try
+/// the sign-in against a stand-in).
+fn openrouter_site() -> String {
+    std::env::var("HARLO_AGENT_OPENROUTER_URL").ok().map(|u| u.trim().trim_end_matches('/').to_owned()).filter(|u| !u.is_empty()).unwrap_or_else(|| "https://openrouter.ai".to_owned())
+}
+
+/// Signs in to OpenRouter in the browser (PKCE, the same loopback
+/// callback): it makes an API key for harlo, which is saved as a typed-in
+/// one would be. Returns it.
+///
+/// # Errors
+///
+/// When the port is taken, the user declines, or OpenRouter won't exchange
+/// the code.
+pub async fn openrouter_sign_in(open: impl Fn(&str), paste: bool) -> Result<String> {
+    let verifier = random_token();
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let state = random_token();
+    let callback = format!("http://localhost:{CALLBACK_PORT}{CALLBACK_PATH}");
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
+        .await
+        .map_err(|e| anyhow!("Port {CALLBACK_PORT} is in use ({e}): another app's sign-in is probably waiting there. Finish or cancel it and try again."))?;
+    let site = openrouter_site();
+    let params = [("callback_url", callback.as_str()), ("code_challenge", &challenge), ("code_challenge_method", "S256"), ("state", &state), ("key_label", AGENT_NAME)];
+    let url = reqwest::Url::parse_with_params(&format!("{site}/auth"), &params)?;
+    open(url.as_str());
+    let (code, _) = wait_for_callback(&listener, &state, "OpenRouter", "harlo has an OpenRouter key. You can close this tab.", paste).await?;
+    let resp = reqwest::Client::new()
+        .post(format!("{site}/api/v1/auth/keys"))
+        .json(&serde_json::json!({ "code": code, "code_verifier": verifier, "code_challenge_method": "S256" }))
+        .send()
+        .await
+        .context("reaching OpenRouter")?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    let Some(key) = body["key"].as_str().filter(|k| !k.trim().is_empty() && status.is_success()) else {
+        let said = body["error"]["message"].as_str().or_else(|| body["error"].as_str()).unwrap_or("no key in its answer");
+        bail!("OpenRouter didn't make a key ({status}): {said}");
+    };
+    crate::keys::set("openrouter", key)?;
+    Ok(key.to_owned())
+}
+
 /// The Codex sign-in's tokens: its expiry from `expires_in` (else the
 /// access token's own), its email and account from the ID token (else the
 /// access token, else what was known).

@@ -9,6 +9,8 @@ import harlo
 ColumnLayout {
     id: providersView
     signal signInRequested(string agent, string label)
+    /// Straight to signing `agent` in to `provider` (OpenRouter).
+    signal providerSignInRequested(string agent, string provider, string name)
     spacing: 0
     SectionHeader {
         title: Workspace.instance === "" ? "Agents" : "Agents on " + Workspace.instance
@@ -390,6 +392,58 @@ ColumnLayout {
             Layout.topMargin: 8
             FlatButton { objectName: "providersRefresh"; text: "Check again"; font.pixelSize: Theme.px(12); onClicked: Workspace.refreshProviders() }
         }
+    }
+    Rule { }
+    // Harlo's cloud providers: their keys, here or on the machine shown.
+    SectionHeader {
+        objectName: "cloudModelsHeader"
+        visible: Workspace.instance === "" || cloudOnHost.visible
+        title: Workspace.instance === "" ? qsTr("Cloud models") : qsTr("Cloud models on %1").arg(Workspace.instance)
+        subtitle: Workspace.instance === ""
+            ? qsTr("Harlo can use these providers with an API key of yours; each charges for what Harlo sends and gets. Keys stay in a file only you can read (harlo-agent's keys.json).")
+            : qsTr("Keys for Harlo on %1, kept there in a file only you can read.").arg(Workspace.instance)
+    }
+    CloudProviders {
+        visible: Workspace.instance === ""
+        Layout.fillWidth: true
+        agent: "harlo"
+        onProviderSignInRequested: (agent, provider, name) => providersView.providerSignInRequested(agent, provider, name)
+    }
+    CloudProviders {
+        id: cloudOnHost
+        // (Its agent there answers once the machine is connected.)
+        visible: Workspace.instance !== "" && hostAgents.host !== null && hostAgents.host.state === "connected"
+        Layout.fillWidth: true
+        agent: visible ? "harlo@" + Workspace.instance : "harlo"
+        onProviderSignInRequested: (agent, provider, name) => providersView.providerSignInRequested(agent, provider, name)
+    }
+    Group {
+        visible: Workspace.instance === ""
+        Layout.topMargin: 10
+        SettingRow {
+            title: qsTr("Give SSH machines these keys")
+            detail: qsTr("A Harlo session on another machine gets the keys saved here that the machine has none of, kept there in its own private file.")
+            icon: "server"
+            AppSwitch {
+                objectName: "harloShareKeys"
+                checked: Workspace.setting("harlo_share_keys") !== "0"
+                onToggled: Workspace.setSetting("harlo_share_keys", checked ? "1" : "0")
+            }
+        }
+    }
+    Rule { visible: Workspace.instance === "" }
+    // Subscriptions Claude Code can use instead of Anthropic's models.
+    SectionHeader {
+        objectName: "codingPlansHeader"
+        visible: Workspace.instance === ""
+        title: qsTr("Coding plans for Claude Code")
+        subtitle: qsTr("Subscriptions whose makers support Claude Code. With a key saved, their models are in a Claude Code session's model picker. Keys stay in a file only you can read (harlo's coding-plans.json); a session on another machine gets its plan's key for as long as it runs.")
+    }
+    CloudProviders {
+        objectName: "codingPlans"
+        visible: Workspace.instance === ""
+        Layout.fillWidth: true
+        agent: "claude"
     }
     Rule { }
     SectionHeader {

@@ -640,6 +640,10 @@ Rectangle {
                         // Started by another session's agent: shown under it.
                         required property string helperOf
                         required property int nest
+                        // Its model (as it runs, else as it last ran) and who
+                        // made it: the avatar's logo.
+                        required property string modelName
+                        required property string maker
                         required property int projectId
                         readonly property bool active: rowKey === Workspace.activeKey
                         // While a project is dragged, the sessions fade (only
@@ -652,7 +656,7 @@ Rectangle {
                         // A narrow sidebar: the title keeps its room (no time,
                         // and a helper shows by its indent alone).
                         readonly property bool tight: width < 240
-                        readonly property string detail: [helperOf !== "" ? "Helper of “" + helperOf + "”" : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
+                        readonly property string detail: [modelName !== "" ? qsTr("%1 · %2").arg(Theme.modelLabel(modelName)).arg(Theme.harnessLabel(harness)) : "", helperOf !== "" ? "Helper of “" + helperOf + "”" : "", branch !== "" ? "⎇ " + branch : "", subtitle, settled].filter(t => t !== "").join("  ·  ")
                         width: ListView.view.width
                         height: 42
                         hoverEnabled: list.dragId < 0
@@ -688,6 +692,7 @@ Rectangle {
                             // What runs it, with its status on the corner.
                             AgentAvatar {
                                 provider: sessionRow.harness
+                                maker: sessionRow.maker
                                 badge: sessionRow.status
                                 ring: sessionRow.rowColor
                                 opacity: sessionRow.dim ? 0.4 : 1

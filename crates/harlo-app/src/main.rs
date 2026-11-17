@@ -8,6 +8,7 @@
 mod accounts;
 mod audio;
 mod chat_session;
+mod cloud_keys;
 mod code_view;
 mod image_view;
 mod ci;

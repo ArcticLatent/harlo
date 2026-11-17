@@ -26,6 +26,13 @@ targets:
         buildPhase: resources
       - path: ../../crates/harlo-app/fonts/JetBrainsMono-Bold.ttf
         buildPhase: resources
+      # The model makers' logos' licences (MIT), with them (Maker-* assets).
+      - path: ../../crates/harlo-app/icons/providers/LOBEHUB-LICENSE
+        buildPhase: resources
+      - path: ../../crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE
+        buildPhase: resources
+      - path: ../../crates/harlo-app/icons/providers/OPENCODE-LICENSE
+        buildPhase: resources
     dependencies:
       - package: HarloKit
         product: HarloKit

@@ -286,6 +286,7 @@ pub fn overflowed(error: &anyhow::Error) -> bool {
         "input is too long",
         "string_above_max_length",
         "request too large",
+        "maximum number of tokens",
     ]
     .iter()
     .any(|p| e.contains(p))

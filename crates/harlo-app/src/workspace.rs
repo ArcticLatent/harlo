@@ -403,6 +403,9 @@ pub mod qobject {
         /// A provider's logo as a data URL in `color` (`#rrggbb`), or "".
         #[qinvokable]
         fn provider_logo(self: &Workspace, provider: &QString, color: &QString) -> QString;
+        /// Who made a model (`provider/model`): its logo's id, or "".
+        #[qinvokable]
+        fn model_maker(self: &Workspace, model: &QString) -> QString;
         /// A key press as shortcut text (`Ctrl+Shift+T`), for rebinding.
         #[qinvokable]
         fn key_sequence_text(self: &Workspace, key: i32, modifiers: i32) -> QString;
@@ -953,6 +956,8 @@ const ROLE_COLOR: i32 = 0x10f;
 const ROLE_SETTLED: i32 = 0x110;
 const ROLE_HELPER_OF: i32 = 0x111;
 const ROLE_NEST: i32 = 0x112;
+const ROLE_MODEL_NAME: i32 = 0x113;
+const ROLE_MAKER: i32 = 0x114;
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 /// Remote hosts' session folders are listed this often (over SSH).
@@ -1001,6 +1006,8 @@ struct Changes {
     harlo_calls: Vec<(String, String, serde_json::Value)>,
     /// Claude's limits as it just said (a host's may be another account's).
     limits: Option<serde_json::Value>,
+    /// It's on another model than it was.
+    model_moved: bool,
 }
 
 impl Changes {
@@ -1020,6 +1027,11 @@ impl Changes {
                     c.lane_file.clone_from(&entry.info.session_file);
                     entry.info.name = m.name;
                     entry.info.first_message = m.first_message;
+                    // (Its model: in the sidebar's icon, and kept for when
+                    // it isn't running.)
+                    c.model_moved |= !m.model_id.is_empty() && m.model_id != entry.info.model;
+                    entry.info.model.clone_from(&m.model_id);
+                    entry.info.model_name.clone_from(&m.model);
                     entry.model = m.model;
                     entry.model_id = m.model_id;
                     entry.thinking = m.thinking;
@@ -1635,6 +1647,7 @@ impl Workspace {
                 let get = |k: &str| db.get(&format!("settings.{k}")).ok().flatten().unwrap_or_default();
                 let (family, mode, scale) = (get("theme_family"), get("theme_mode"), get("text_scale"));
                 crate::diagnostics::set_protocol_logging(get("debug_protocol") == "1");
+                harlo_core::agent_host::set_share_keys(get("harlo_share_keys") != "0");
                 let mut this = self.as_mut().rust_mut();
                 this.ignored_repos = ignored_repos;
                 // (Ember was called OpenChamber before 1.0.)
@@ -2261,6 +2274,8 @@ impl Workspace {
             needs_input: false,
             unread: false,
             started_at: SystemTime::now(),
+            model: String::new(),
+            model_name: String::new(),
         };
         self.as_mut().rust_mut().live.insert(key.clone(), LiveEntry { info, sub, requests: Vec::new(), model: String::new(), model_id: String::new(), thinking: String::new() });
         key
@@ -4142,6 +4157,9 @@ impl Workspace {
         if key == "debug_protocol" {
             crate::diagnostics::set_protocol_logging(value == "1");
         }
+        if key == "harlo_share_keys" {
+            harlo_core::agent_host::set_share_keys(value != "0");
+        }
         if changed {
             let n = self.settings_revision.wrapping_add(1);
             self.as_mut().set_settings_revision(n);
@@ -4848,6 +4866,22 @@ impl Workspace {
 
     /// Keeps a session's permission mode and thinking level with its file (a
     /// new session's once it has one).
+    /// Keeps the model a session is on with its file, for its icon when it
+    /// isn't running.
+    fn remember_model(mut self: Pin<&mut Self>, key: &str) {
+        let Some(entry) = self.live.get(key) else { return };
+        let (Some(file), model, name) = (entry.info.session_file.clone(), entry.info.model.clone(), entry.info.model_name.clone()) else { return };
+        let mut meta = self.meta.get(&file).cloned().unwrap_or_default();
+        if model.is_empty() || (meta.model == model && meta.model_name == name) {
+            return;
+        }
+        (meta.model, meta.model_name) = (model, name);
+        if let Some(db) = self.db() {
+            let _ = db.set_session_meta(&file, &meta);
+        }
+        self.as_mut().rust_mut().meta.insert(file, meta);
+    }
+
     fn remember_modes(mut self: Pin<&mut Self>, key: &str) {
         let Some(file) = self.live.get(key).and_then(|e| e.info.session_file.clone()) else { return };
         let Some(modes) = self.modes.get(key).cloned() else { return };
@@ -4921,6 +4955,10 @@ impl Workspace {
         }
         let next = self.modes_revision + 1;
         self.as_mut().set_modes_revision(next);
+    }
+
+    pub fn model_maker(&self, model: &QString) -> QString {
+        QString::from(crate::provider_logos::maker_of(&model.to_string()).unwrap_or_default())
     }
 
     pub fn provider_logo(&self, provider: &QString, color: &QString) -> QString {
@@ -5851,7 +5889,7 @@ impl Workspace {
         let mut this = self.as_mut().rust_mut();
         let Some(entry) = this.live.get_mut(key) else { return };
         let file_before = entry.info.session_file.clone();
-        let Changes { became_idle, became_busy, lane_file, cost, notes, answered, gates, stopped, harlo_calls, limits } = Changes::of(entry, updates);
+        let Changes { became_idle, became_busy, lane_file, cost, notes, answered, gates, stopped, harlo_calls, limits, model_moved } = Changes::of(entry, updates);
         let file_changed = entry.info.session_file != file_before;
         // Whose limits it's using: Claude's sign-in, or Harlo's plan
         // through the Codex sign-in ("codex/…"; the official sign-in, API
@@ -5874,6 +5912,9 @@ impl Workspace {
                     let _ = harlo_core::remote::local_copy(&file);
                 });
             }
+        }
+        if file_changed || model_moved {
+            self.as_mut().remember_model(key);
         }
         if file_changed {
             self.as_mut().remember_modes(key);
@@ -6489,7 +6530,12 @@ impl Workspace {
                 .map(|(q, asked)| { let mut v = crate::phone_server::request_json(q); v["asked"] = json!(asked); v })
                 .collect()
         };
-        crate::phone_bridge::publish_sessions(serde_json::Value::Array(sidebar::phone_list(rows, &parents, requests)));
+        let mut list = sidebar::phone_list(rows, &parents, requests);
+        // (Who made each one's model: its icon.)
+        for s in &mut list {
+            s["maker"] = json!(crate::provider_logos::maker_of(s["model"].as_str().unwrap_or_default()).unwrap_or_default());
+        }
+        crate::phone_bridge::publish_sessions(serde_json::Value::Array(list));
     }
 
     fn rebuild(mut self: Pin<&mut Self>) {
@@ -6617,6 +6663,8 @@ impl Workspace {
             ROLE_SETTLED => s(harlo_core::shelf::why_text(&r.settled)),
             ROLE_HELPER_OF => s(&r.helper_of),
             ROLE_NEST => QVariant::from(&i32::try_from(r.nest).unwrap_or(i32::MAX)),
+            ROLE_MODEL_NAME => s(&r.model_name),
+            ROLE_MAKER => s(crate::provider_logos::maker_of(&r.model).unwrap_or_default()),
             _ => QVariant::default(),
         }
     }
@@ -6643,6 +6691,8 @@ impl Workspace {
             (ROLE_SETTLED, "settled"),
             (ROLE_HELPER_OF, "helperOf"),
             (ROLE_NEST, "nest"),
+            (ROLE_MODEL_NAME, "modelName"),
+            (ROLE_MAKER, "maker"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

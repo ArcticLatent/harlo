@@ -15,9 +15,40 @@ fn alias(id: &str) -> &str {
         "gemini" | "google-gemini-cli" | "google-vertex" | "vertex" => "google",
         "copilot" => "github-copilot",
         "ollama-cloud" => "ollama",
+        "deepseek-anthropic" => "deepseek",
+        // (Coding plans for Claude Code show their maker's.)
+        "minimax" | "minimax-anthropic" | "minimax-plan" => "minimax-coding-plan",
+        "zai" | "glm-coding" => "zai-coding-plan",
+        "moonshot" | "kimi" | "kimi-code" => "kimi-for-coding",
+        "grok" => "xai",
+        "opencode-go" | "opencode-zen" => "opencode",
         "llamacpp" | "llama-cpp" => "llama.cpp",
         other => other,
     }
+}
+
+/// Who made a model (`provider/model`), as a logo id: by the model's name
+/// (Claude through OpenCode is Anthropic's, GLM on a coding plan Z.ai's),
+/// else by its provider (a local server's own logo); None when unknown.
+pub fn maker_of(model: &str) -> Option<&'static str> {
+    let (provider, id) = model.split_once('/').unwrap_or(("", model));
+    let id = id.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| id.contains(w));
+    // (OpenAI's o-series: o3, o4-mini…; its open models, gpt-oss.)
+    let o_series = id.rsplit('/').next().is_some_and(|n| n.len() > 1 && n.starts_with('o') && n[1..].starts_with(|c: char| c.is_ascii_digit()));
+    let by_name = match () {
+        () if has(&["claude", "opus", "sonnet", "haiku", "fable"]) => Some("anthropic"),
+        () if has(&["gpt", "codex"]) || o_series => Some("openai"),
+        () if has(&["glm"]) => Some("zai-coding-plan"),
+        () if has(&["kimi", "moonshot"]) => Some("kimi-for-coding"),
+        () if has(&["deepseek"]) => Some("deepseek"),
+        () if has(&["gemini", "gemma"]) => Some("google"),
+        () if has(&["grok"]) => Some("xai"),
+        () if has(&["minimax"]) => Some("minimax-coding-plan"),
+        () if has(&["mistral", "codestral", "devstral", "magistral"]) => Some("mistral"),
+        () => None,
+    };
+    by_name.and_then(id_for).or_else(|| id_for(provider).filter(|_| !provider.is_empty()))
 }
 
 /// The logo id for a provider ("openai-codex", "anthropic/…"), if any.
@@ -76,6 +107,17 @@ mod tests {
         assert_eq!(id_for("llamacpp/Qwen3-4B"), Some("llama.cpp"));
         assert_eq!(id_for("vllm"), Some("vllm"));
         assert_eq!(id_for("koboldcpp"), None);
+        // Harlo's cloud providers.
+        for (id, logo) in [("xai", "xai"), ("deepseek-anthropic", "deepseek"), ("minimax-anthropic", "minimax-coding-plan"), ("zai", "zai-coding-plan"), ("moonshot", "kimi-for-coding"), ("gemini", "google"), ("fireworks", "fireworks"), ("glm-coding", "zai-coding-plan"), ("kimi-code", "kimi-for-coding"), ("minimax-plan", "minimax-coding-plan"), ("opencode-go", "opencode")] {
+            assert_eq!(id_for(id), Some(logo), "{id}");
+        }
+        // A model's maker: by its name, whoever serves it.
+        for (model, maker) in [("opencode-go/claude-haiku-5-5", Some("anthropic")), ("glm-coding/glm-5.3[1m]", Some("zai-coding-plan")), ("codex/gpt-6.1-sol", Some("openai")),
+                               ("openai/o4-mini", Some("openai")), ("groq/openai/gpt-oss-120b", Some("openai")), ("together/deepseek-ai/DeepSeek-V4.1-Flash", Some("deepseek")),
+                               ("gemini/gemini-4-carbon", Some("google")), ("llamacpp/Qwen3-4B", Some("llama.cpp")), ("anthropic/claude-sonnet-5-5", Some("anthropic")),
+                               ("kimi-code/k3.1-pro", Some("kimi-for-coding")), ("opencode-go/hy4", Some("opencode")), ("koboldcpp/x", None), ("", None)] {
+            assert_eq!(maker_of(model), maker, "{model}");
+        }
         assert_eq!(base64(b"Man"), "TWFu");
         assert_eq!(base64(b"Ma"), "TWE=");
         assert_eq!(base64(b"M"), "TQ==");

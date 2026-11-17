@@ -54,6 +54,18 @@ AppDialog {
         Accounts.start(agent, chosen.id, scope)
         open()
     }
+    /// `agent` signing in to `provider` (OpenRouter), straight to the flow.
+    function openForProvider(id, provider, name) {
+        agent = id
+        agentLabel = Theme.harnessLabel(id.split("@")[0]) + (id.indexOf("@") >= 0 ? " on " + id.split("@")[1] : "")
+        chosen = { id: provider, name: name }
+        method = { id: provider }
+        search = ""
+        openedUrls = ({})
+        page = "flow"
+        Accounts.start(agent, provider, provider)
+        open()
+    }
     function begin(provider, m) {
         chosen = provider
         method = m
@@ -70,6 +82,8 @@ AppDialog {
         }
         if (flow && flow.state === "done") {
             Workspace.refreshProviders()
+            // (A sign-in that saves a key: OpenRouter's.)
+            if (agent.split("@")[0] === "harlo") Accounts.loadCloud(agent)
             if (onHost) signedInOnHost()
         }
     }

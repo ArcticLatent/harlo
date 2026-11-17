@@ -6,6 +6,7 @@
 mod demo;
 pub mod branches;
 pub mod claude;
+pub mod coding_plans;
 mod claude_run;
 mod error;
 pub mod event;

@@ -457,13 +457,17 @@ Rectangle {
                 clip: true
                 highlightMoveDuration: 0
                 // Models served on this computer or the local network first,
-                // under "Local"; then the rest, under "Online".
+                // under "Local"; then the rest, under "Online"; then each
+                // coding plan's (Claude Code on it), under the plan's name.
                 model: {
                     const all = root.session.models
-                        .map(m => { const p = m.split("\t"); return { provider: p[0], id: p[1], name: p[2] || p[1], reasoning: p[3] === "1", local: p[4] === "1" } })
-                        .filter(m => (m.provider + " " + m.id + " " + m.name).toLowerCase().includes(modelFilter.text.toLowerCase()))
-                    return all.filter(m => m.local).concat(all.filter(m => !m.local))
+                        .map(m => { const p = m.split("\t"); return { provider: p[0], id: p[1], name: p[2] || p[1], reasoning: p[3] === "1", local: p[4] === "1", plan: p[5] || "" } })
+                        .filter(m => (m.provider + " " + m.id + " " + m.name + " " + m.plan).toLowerCase().includes(modelFilter.text.toLowerCase()))
+                        .map(m => Object.assign(m, { group: m.local ? qsTr("Local") : m.plan !== "" ? m.plan : qsTr("Online") }))
+                    return all.filter(m => m.local).concat(all.filter(m => !m.local && m.plan === ""), all.filter(m => m.plan !== ""))
                 }
+                /// Whether it has more than one group (then each is headed).
+                readonly property bool grouped: model.length > 0 && model[0].group !== model[model.length - 1].group
                 function pick(i) {
                     const m = model[i]
                     if (m) { root.session.setModel(m.provider, m.id); modelPicker.close() }
@@ -473,10 +477,10 @@ Rectangle {
                     required property var modelData
                     required property int index
                     // The first of each group: its name above it (when there
-                    // are local models at all).
+                    // is more than one group).
                     // (Read safely: the list can change before this row goes.)
                     readonly property var above: mrow.index > 0 ? modelList.model[mrow.index - 1] : null
-                    readonly property real heading: modelList.model.length > 0 && modelList.model[0].local && (mrow.index === 0 || (above !== undefined && above !== null && above.local !== mrow.modelData.local)) ? 30 : 0
+                    readonly property real heading: modelList.grouped && (mrow.index === 0 || (above !== undefined && above !== null && above.group !== mrow.modelData.group)) ? 30 : 0
                     width: ListView.view.width
                     height: 30 + heading
                     topInset: heading
@@ -487,7 +491,7 @@ Rectangle {
                         visible: mrow.heading > 0
                         x: 8
                         y: mrow.heading - height - 3
-                        text: mrow.modelData.local ? "LOCAL" : "ONLINE"
+                        text: mrow.modelData.group.toUpperCase()
                         color: Theme.label
                         font.pixelSize: Theme.px(11)
                         font.weight: Font.Medium

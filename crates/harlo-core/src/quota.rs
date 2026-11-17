@@ -360,10 +360,12 @@ pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, Stri
 }
 
 /// Whose limits a session draws on: Claude's sign-in, or Harlo's ChatGPT
-/// plan; "" for one without plan limits.
+/// plan; "" for one without plan limits (Claude Code on a coding plan, whose
+/// limits harlo can't read).
 pub fn session_provider(harness: &str, model_id: &str) -> String {
     if harness == "claude" {
-        return "Claude".to_owned();
+        let on_plan = model_id.split_once('/').is_some_and(|(p, _)| crate::coding_plans::find(p).is_some());
+        return if on_plan { String::new() } else { "Claude".to_owned() };
     }
     // Harlo: the plan's through the Codex sign-in ("codex/…"), which says
     // its usage; the official sign-in, API keys and other servers say none.
@@ -527,6 +529,7 @@ mod tests {
         assert_eq!((none[0]["windows"][0]["label"].as_str(), none[0]["plan"].as_str()), (Some("5 hours"), Some("pro")));
         assert!(apply_live(&mut none, &json!({ "provider": "openai-codex", "windows": [] })).is_empty());
         assert_eq!((session_provider("harlo", "codex/gpt-6.1-sol"), session_provider("harlo", "chatgpt/gpt-6.1-sol"), session_provider("harlo", "llamacpp/x")), ("openai-codex".into(), String::new(), String::new()));
+        assert_eq!((session_provider("claude", "anthropic/claude-sonnet-5-5"), session_provider("claude", "glm-coding/glm-5.3[1m]")), ("Claude".into(), String::new()), "a coding plan isn't Claude's limits");
         assert_eq!(limit_name("openai-codex", "5 hours"), "ChatGPT's 5-hour limit");
         assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's weekly limit");
     }

@@ -914,6 +914,7 @@ ApplicationWindow {
         onSetupRequested: win.openSetupGuide()
         onPairDeviceRequested: pairDeviceDialog.open()
         onSignInRequested: (agent, label) => signInDialog.openFor(agent, label)
+        onProviderSignInRequested: (agent, provider, name) => signInDialog.openForProvider(agent, provider, name)
         onMcpSignInRequested: (scope, server) => signInDialog.openForMcp(scope, server)
         onTrayToggled: on => win.setTrayEnabled(on)
         onPromptRailToggled: on => chat.transcript.promptRail = on

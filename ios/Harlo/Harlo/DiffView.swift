@@ -16,6 +16,9 @@ struct DiffView: View {
     @AppStorage(CodeWrap.key) private var wrap = true
     @State private var commenting: FileDiff.Line?
     @State private var commentText = ""
+    /// Whether any line has an old number (a new file's have none: no
+    /// column for them).
+    @State private var hasOld = true
 
     var review: [ReviewComment] { model.session?.review ?? [] }
 
@@ -120,6 +123,7 @@ struct DiffView: View {
         }
         .task {
             diff = await model.diff(file.path)
+            hasOld = diff?.hunks.contains { $0.lines.contains { $0.old != nil } } ?? true
             loading = false
         }
     }
@@ -145,9 +149,11 @@ struct DiffView: View {
                 .foregroundStyle(Color(p.primary))
                 .frame(width: 16)
                 .opacity(commented ? 1 : 0)
-            Text(l.old.map { String($0) } ?? "")
-                .frame(width: 34, alignment: .trailing)
-                .foregroundStyle(Color(p.muted).opacity(0.7))
+            if hasOld {
+                Text(l.old.map { String($0) } ?? "")
+                    .frame(width: 34, alignment: .trailing)
+                    .foregroundStyle(Color(p.muted).opacity(0.7))
+            }
             Text(l.new.map { String($0) } ?? "")
                 .frame(width: 34, alignment: .trailing)
                 .foregroundStyle(Color(p.muted).opacity(0.7))

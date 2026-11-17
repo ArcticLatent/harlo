@@ -19,6 +19,29 @@ pub struct Price {
     pub output: f64,
     /// Input the cache served.
     pub cached: f64,
+    /// Input written to the cache (servers that charge for that).
+    pub write: f64,
+    /// The rates for a request with a long input, when they differ.
+    pub long: Option<Long>,
+}
+
+/// The rates a request pays once its input reaches `from` tokens (all of
+/// it, not just the part past `from`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Long {
+    pub from: u64,
+    pub input: f64,
+    pub output: f64,
+    pub cached: f64,
+    pub write: f64,
+}
+
+impl Price {
+    /// One set of rates, whatever the input's length; writing the cache
+    /// costs what input does.
+    pub const fn flat(input: f64, output: f64, cached: f64) -> Self {
+        Self { input, output, cached, write: input, long: None }
+    }
 }
 
 /// What a model's requests cost.
@@ -49,16 +72,36 @@ impl Pricing {
         }
     }
 
-    /// Its dollars: input, cache reads, output (None: unknown).
-    fn charge(&self, u: &Used) -> Option<(f64, f64, f64)> {
+    /// Its dollars (None: unknown).
+    fn charge(&self, u: &Used) -> Option<Charge> {
         match self {
-            Self::Plan | Self::Local => Some((0.0, 0.0, 0.0)),
+            Self::Plan | Self::Local => Some(Charge::default()),
             Self::Priced(p) => {
                 let m = |tokens: u64, rate: f64| tokens as f64 * rate / 1e6;
-                Some((m(u.input.saturating_sub(u.cached), p.input), m(u.cached, p.cached), m(u.output, p.output)))
+                let (input, cached, write, output) = match p.long {
+                    Some(l) if u.requests <= 1 && u.input >= l.from => (l.input, l.cached, l.write, l.output),
+                    _ => (p.input, p.cached, p.write, p.output),
+                };
+                Some(Charge { input: m(u.input.saturating_sub(u.cached + u.written), input), read: m(u.cached, cached), write: m(u.written, write), output: m(u.output, output) })
             }
             Self::Unknown => None,
         }
+    }
+}
+
+/// A request's dollars, by what they paid for.
+#[derive(Clone, Copy, Debug, Default)]
+struct Charge {
+    /// Input neither read from nor written to the cache.
+    input: f64,
+    read: f64,
+    write: f64,
+    output: f64,
+}
+
+impl Charge {
+    fn total(self) -> f64 {
+        self.input + self.read + self.write + self.output
     }
 }
 
@@ -90,6 +133,8 @@ pub struct Used {
     pub input: u64,
     /// Of `input`, those the cache served.
     pub cached: u64,
+    /// Of `input`, those written to the cache (servers that say it apart).
+    pub written: u64,
     pub output: u64,
     /// Dollars, of the requests whose cost is known.
     pub cost: f64,
@@ -107,12 +152,14 @@ pub struct Used {
 
 impl Used {
     /// A reply's usage as the API says it (`input_tokens`,
-    /// `input_tokens_details.cached_tokens`, `output_tokens`).
+    /// `input_tokens_details.cached_tokens`, `output_tokens`; the cache's
+    /// writes as `input_tokens_details.cache_write_tokens`, harlo's).
     pub fn from_api(usage: &Value) -> Self {
         Self {
             requests: 1,
             input: usage["input_tokens"].as_u64().unwrap_or(0),
             cached: usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0),
+            written: usage["input_tokens_details"]["cache_write_tokens"].as_u64().unwrap_or(0),
             output: usage["output_tokens"].as_u64().unwrap_or(0),
             unreported: u64::from(usage["input_tokens"].as_u64().is_none() || usage["output_tokens"].as_u64().is_none()),
             ..Self::default()
@@ -132,15 +179,18 @@ impl Used {
     }
 
     /// A usage as the session log has it (`input` without the cache's,
-    /// `cacheRead`, `output`, `cost.total` with its `costKind`): one
-    /// request. (One logged before costs were known says no kind.)
+    /// `cacheRead`, `cacheWrite`, `output`, `cost.total` with its
+    /// `costKind`): one request. (One logged before costs were known says
+    /// no kind.)
     pub fn from_log(usage: &Value) -> Self {
         let cached = usage["cacheRead"].as_u64().unwrap_or(0);
+        let written = usage["cacheWrite"].as_u64().unwrap_or(0);
         let kinds = kind_of(usage["costKind"].as_str().unwrap_or_default());
         Self {
             requests: 1,
-            input: usage["input"].as_u64().unwrap_or(0) + cached,
+            input: usage["input"].as_u64().unwrap_or(0) + cached + written,
             cached,
+            written,
             output: usage["output"].as_u64().unwrap_or(0),
             cost: if kinds == UNKNOWN { 0.0 } else { usage["cost"]["total"].as_f64().unwrap_or(0.0) },
             kinds,
@@ -155,6 +205,7 @@ impl Used {
             requests: usage["requests"].as_u64().unwrap_or(0),
             input: usage["input"].as_u64().unwrap_or(0),
             cached: usage["cached"].as_u64().unwrap_or(0),
+            written: usage["written"].as_u64().unwrap_or(0),
             output: usage["output"].as_u64().unwrap_or(0),
             cost: usage["cost"].as_f64().unwrap_or(0.0),
             kinds: usage["costKinds"].as_array().into_iter().flatten().filter_map(Value::as_str).fold(0, |k, n| k | kind_of(n)),
@@ -166,6 +217,9 @@ impl Used {
     /// As a tool result's `details.usage`.
     pub fn details(&self) -> Value {
         let mut v = json!({ "requests": self.requests, "input": self.input, "cached": self.cached, "output": self.output, "cost": self.cost, "costKinds": self.kind_names() });
+        if self.written > 0 {
+            v["written"] = json!(self.written);
+        }
         if self.unreported > 0 {
             v["unreported"] = json!(self.unreported);
         }
@@ -187,7 +241,7 @@ impl Used {
     /// With its cost, as `pricing` has it.
     pub fn priced(mut self, pricing: &Pricing) -> Self {
         let pricing = self.pricing(pricing);
-        self.cost = pricing.charge(&self).map_or(0.0, |(i, c, o)| i + c + o);
+        self.cost = pricing.charge(&self).map_or(0.0, Charge::total);
         self.kinds = pricing.kind();
         self
     }
@@ -198,13 +252,13 @@ impl Used {
     pub fn log(&self, api: &Value, pricing: &Pricing) -> Value {
         let pricing = self.pricing(pricing);
         let mut v = json!({
-            "input": self.input.saturating_sub(self.cached), "output": self.output, "cacheRead": self.cached, "cacheWrite": 0,
+            "input": self.input.saturating_sub(self.cached + self.written), "output": self.output, "cacheRead": self.cached, "cacheWrite": self.written,
             "reasoning": api["output_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0),
             "totalTokens": self.input + self.output,
             "costKind": kind_name(pricing.kind()),
         });
-        if let Some((i, c, o)) = pricing.charge(self) {
-            v["cost"] = json!({ "input": i, "output": o, "cacheRead": c, "cacheWrite": 0, "total": i + c + o });
+        if let Some(c) = pricing.charge(self) {
+            v["cost"] = json!({ "input": c.input, "output": c.output, "cacheRead": c.read, "cacheWrite": c.write, "total": c.total() });
         }
         if self.unreported > 0 {
             v["tokensUnknown"] = json!(true);
@@ -234,8 +288,9 @@ impl Used {
         }
     }
 
-    /// What a token budget counts: tokens sent and received, not those the
-    /// cache served, and what servers didn't say, estimated.
+    /// What a token budget counts: tokens sent and received (those written
+    /// to the cache too), not those the cache served, and what servers
+    /// didn't say, estimated.
     pub fn billed(&self) -> u64 {
         self.input.saturating_sub(self.cached) + self.output + self.estimated
     }
@@ -244,6 +299,7 @@ impl Used {
         self.requests += other.requests;
         self.input += other.input;
         self.cached += other.cached;
+        self.written += other.written;
         self.output += other.output;
         self.cost += other.cost;
         self.kinds |= other.kinds;
@@ -266,7 +322,7 @@ mod tests {
         let half = json!({ "input_tokens": 4_000 });
         let h = Used::from_api(&half).estimating(&half, 5_000, 300);
         assert_eq!((h.input, h.output, h.unreported, h.estimated, h.billed()), (4_000, 0, 1, 300, 4_300));
-        let price = Pricing::Priced(Price { input: 2.0, output: 10.0, cached: 0.5 });
+        let price = Pricing::Priced(Price::flat(2.0, 10.0, 0.5));
         let logged = h.priced(&price).log(&half, &price);
         assert_eq!((logged["costKind"].as_str(), logged["tokensEstimated"].as_u64()), (Some("unknown"), Some(300)));
         assert_eq!(Used::from_log(&logged).billed(), 4_300);
@@ -283,7 +339,7 @@ mod tests {
         assert_eq!(u, Used { requests: 1, input: 3000, cached: 2048, output: 120, ..Used::default() });
         assert_eq!(u.billed(), 952 + 120);
         // Logged and read back, or passed in a tool result: the same.
-        let price = Pricing::Priced(Price { input: 2.0, output: 10.0, cached: 0.5 });
+        let price = Pricing::Priced(Price::flat(2.0, 10.0, 0.5));
         let logged = u.log(&api, &price);
         assert_eq!((logged["input"].as_u64(), logged["cacheRead"].as_u64(), logged["reasoning"].as_u64()), (Some(952), Some(2048), Some(40)));
         let u = u.priced(&price);
@@ -294,6 +350,22 @@ mod tests {
         let mut sum = u;
         sum.add(&u);
         assert_eq!((sum.requests, sum.billed(), sum.cost_kind()), (2, 2 * 1072, "priced"));
+    }
+
+    /// Cache writes (Anthropic's) are input of their own, at their own rate.
+    #[test]
+    fn cache_writes_are_priced_apart() {
+        let api = json!({ "input_tokens": 10_000, "input_tokens_details": { "cached_tokens": 6_000, "cache_write_tokens": 3_000 }, "output_tokens": 100 });
+        let u = Used::from_api(&api);
+        assert_eq!((u.input, u.cached, u.written, u.billed()), (10_000, 6_000, 3_000, 4_100));
+        let price = Pricing::Priced(Price { write: 2.5, ..Price::flat(2.0, 10.0, 0.2) });
+        let logged = u.log(&api, &price);
+        assert_eq!((logged["input"].as_u64(), logged["cacheRead"].as_u64(), logged["cacheWrite"].as_u64()), (Some(1_000), Some(6_000), Some(3_000)));
+        let u = u.priced(&price);
+        assert!((u.cost - (1_000.0 * 2.0 + 6_000.0 * 0.2 + 3_000.0 * 2.5 + 100.0 * 10.0) / 1e6).abs() < 1e-12, "{}", u.cost);
+        assert!((logged["cost"]["cacheWrite"].as_f64().unwrap() - 0.0075).abs() < 1e-12);
+        assert_eq!(Used::from_log(&logged), u);
+        assert_eq!(Used::from_details(&u.details()), u);
     }
 
     #[test]
@@ -307,7 +379,7 @@ mod tests {
         assert_eq!(u.log(&json!({}), &Pricing::Plan)["cost"]["total"], 0.0);
         assert_eq!(u.priced(&Pricing::Local).cost_kind(), "local");
         // Priced and unknown together: at least the priced part.
-        let mut sum = u.priced(&Pricing::Priced(Price { input: 1.0, output: 1.0, cached: 1.0 }));
+        let mut sum = u.priced(&Pricing::Priced(Price::flat(1.0, 1.0, 1.0)));
         sum.add(&u.priced(&Pricing::Unknown));
         sum.add(&u.priced(&Pricing::Plan));
         assert_eq!(sum.cost_kind(), "partly");

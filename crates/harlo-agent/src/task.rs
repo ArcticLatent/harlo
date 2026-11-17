@@ -476,7 +476,7 @@ mod tests {
             id: "1".into(), description: "look".into(), kind: "explore".into(), prompt: String::new(), status: "completed",
             text: "Done.".into(), usage: usage.details(), worktree: None, note: String::new(), unguarded: false,
         };
-        let price = crate::used::Pricing::Priced(crate::used::Price { input: 1.0, output: 1.0, cached: 1.0 });
+        let price = crate::used::Pricing::Priced(crate::used::Price::flat(1.0, 1.0, 1.0));
         let one = |input| crate::used::Used::from_api(&json!({ "input_tokens": input, "output_tokens": 10 }));
         let (priced, unknown) = (one(1_000).priced(&price), one(2_000).priced(&crate::used::Pricing::Unknown));
         let out = report(&[done(priced), done(unknown)]);

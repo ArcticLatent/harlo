@@ -170,8 +170,9 @@ impl Shared {
         let reasoning = self.levels(key) != ["off"];
         let m = self.models.lock().unwrap().iter().find(|m| m.key() == key).cloned();
         let (provider, id) = key.split_once('/').unwrap_or((providers::CHATGPT, key));
-        let base = providers::resolve(key).map(|(p, _)| p.base_url).unwrap_or_default();
+        let (base, provider_name) = providers::resolve(key).map(|(p, _)| (p.base_url, p.name)).unwrap_or_default();
         json!({
+            "providerName": provider_name,
             "provider": provider, "id": id, "name": m.as_ref().map_or(id, |m| m.name.as_str()),
             "reasoning": reasoning, "baseUrl": base, "contextWindow": m.as_ref().map_or(0, |m| m.context_window),
             // (Not said: they're sent.)

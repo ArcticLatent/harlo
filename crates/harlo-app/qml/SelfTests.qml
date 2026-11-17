@@ -2814,8 +2814,12 @@ Item {
         ScriptAction { script: tests.sendByKeys("hello there") }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
+            // Claude Code on Claude: Claude's mark; Demo on its Claude
+            // model: the model's maker, Demo as a tag.
             const marks = tests.findAllNamed("sessionProvider", sidebar, []).map(m => m.provider).sort()
-            tests.check(marks.join(",") === "claude,demo", "each session shows its provider's mark (" + marks + ")")
+            const makers = tests.findAllNamed("sessionMaker", sidebar, []).map(m => m.provider)
+            tests.check(marks.join(",") === "claude" && makers.join(",") === "anthropic" && tests.findAllNamed("sessionAgentTag", sidebar, []).length === 1,
+                        "each session shows its model's maker, its agent as a tag, Claude Code on Claude just Claude's mark (" + marks + " | " + makers + ")")
             const p = tests.findName("projectProvider-repo", sidebar)
             // (A narrow sidebar leaves the mark out: the name keeps its room.)
             tests.check(p !== null ? p.provider === "claude" : sidebar.width < Theme.px(240), "the project shows what its new sessions run (" + (p ? p.provider : "narrow: left out") + ")")
@@ -2827,7 +2831,8 @@ Item {
             TestInput.moveTo(at.x, at.y) } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            tests.check(tests.findText("Claude") !== null, "hovered, the mark says which provider")
+            const tip = tests.findContaining("Sonnet 5 · Claude")
+            tests.check(tip !== null, "hovered, the row says its model and agent (" + (tip ? tip.text : "none") + ")")
             tests.shotWindow("clicks-marks")
             const p = JSON.parse(Workspace.projectsJson())[0]
             sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
@@ -2846,7 +2851,41 @@ Item {
             tests.check(marks.indexOf("claude") >= 0 && marks.indexOf("harlo") >= 0, "so does New session's (" + marks + ")")
             tests.shotWindow("clicks-marks-draft")
             TestInput.key(Qt.Key_Escape, 0)
+            // Each agent × maker: the model's maker's logo with the agent as
+            // a tag, except Claude Code on Claude, and no maker known.
+            const makers = ["", "anthropic", "openai", "google", "zai-coding-plan", "kimi-for-coding", "deepseek", "xai", "minimax-coding-plan", "mistral", "opencode"]
+            tests.marksMatrix = []
+            for (const agent of ["harlo", "claude"])
+                for (const m of makers)
+                    tests.marksMatrix.push(avatarProbe.createObject(win.contentItem, { provider: agent, maker: m, x: 10, y: 10 })) } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            const wrong = []
+            for (const a of tests.marksMatrix) {
+                const first = a.maker !== "" && !(a.provider === "claude" && a.maker === "anthropic")
+                // (Its own parts, shown or not.)
+                const part = n => a.children.find(c => c.objectName === n)
+                const logo = part("sessionMaker"), mark = part("sessionProvider"), tag = part("sessionAgentTag")
+                const ok = first ? logo.visible && tag.visible && !mark.visible && logo.url !== "" && logo.children[0].status === Image.Ready
+                                 : mark.visible && !logo.visible && !tag.visible
+                if (!ok) wrong.push(a.provider + "×" + (a.maker || "none"))
+                a.destroy()
+            }
+            tests.check(tests.marksMatrix.length === 22 && wrong.length === 0, "every agent × maker: the maker's logo loaded, the agent as a tag; Claude on Claude or no model: the agent's mark (wrong: " + wrong + ")")
+            tests.marksMatrix = []
+            // A session's model → its maker: by the model's name, else its
+            // provider's logo, else none.
+            const cases = { "openai-codex/gpt-6": "openai", "opencode-go/glm-5.3": "zai-coding-plan", "opencode-go/claude-haiku-5-5": "anthropic",
+                            "opencode-go/hy4": "opencode", "zai-coding-plan/glm-5.3": "zai-coding-plan", "openrouter/moonshotai/kimi-k3": "kimi-for-coding",
+                            "llama.cpp/qwen4-coder": "llama.cpp", "my-server/my-model": "", "": "" }
+            const off = Object.keys(cases).filter(k => Workspace.modelMaker(k) !== cases[k]).map(k => k + "→" + Workspace.modelMaker(k))
+            tests.check(off.length === 0, "each model's maker, from its name or its provider (" + off + ")")
             tests.summary(); Qt.quit() } }
+    }
+    property var marksMatrix: []
+    Component {
+        id: avatarProbe
+        AgentAvatar { width: 26; height: 26 }
     }
 
     // Claude's plan limits (Stage 4), as Claude Code reports them (its
@@ -10177,6 +10216,194 @@ Item {
     // Settings → Providers → Harlo: the subagents' model and the model to go
     // on with, typed in; a new session's subagent runs on the first, and a
     // server that stays busy hands the turn to the second.
+    // Settings → Providers → Cloud models: Harlo's built-in providers, a
+    // key refused then taken (saved for harlo-agent, checked against a
+    // stand-in provider), its models in the picker, then removed; the
+    // switch that gives SSH machines the keys; and a coding plan's key, and
+    // a Claude session on the plan.
+    SequentialAnimation {
+        id: harloCloudSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlocloud"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd="))
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => (JSON.parse(Accounts.cloud("harlo")).list || []).length > 0, 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, st = id => { const l = tests.findName("cloudStatus-" + id, d); return l ? l.text : "(none)" }
+            const ids = JSON.parse(Accounts.cloud("harlo")).list.map(p => p.id)
+            tests.check(ids.length === 16 && ["anthropic", "gemini", "openrouter", "xai", "opencode-go"].every(i => ids.indexOf(i) >= 0), "Cloud models lists Harlo's providers (" + ids.join(", ") + ")")
+            tests.check(st("anthropic") === "No key", "Anthropic has no key yet (" + st("anthropic") + ")")
+            tests.check(st("deepseek-anthropic") === "Uses the DeepSeek key: none yet", "an endpoint sharing another's key says whose (" + st("deepseek-anthropic") + ")")
+            tests.scrollIntoView(tests.findName("cloudProvider-anthropic", d))
+            tests.clickItem(tests.findName("cloudProvider-anthropic", d), "Anthropic's row") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            tests.check(tests.findText("Claude Opus 5.5", d) !== null && tests.findText("$4 / $20", d) === null && tests.findText("Prices ↗", d) !== null, "opened: its models, no prices, a link to its prices")
+            tests.clickItem(tests.findName("cloudKey-anthropic", d), "the key field")
+            TestInput.typeText("sk-ant-wrong")
+            tests.clickItem(tests.findName("cloudSave-anthropic", d), "Save") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const r = (JSON.parse(Accounts.cloud("harlo")).results || {}).anthropic; return r && r.state !== "busy" }, 30000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const r = JSON.parse(Accounts.cloud("harlo")).results.anthropic
+            tests.check(r.state === "error" && r.message.indexOf("refused the key") >= 0 && r.message.indexOf("invalid x-api-key") >= 0, "a wrong key: saved, and the provider's refusal said (" + r.message + ")")
+            const d = settingsDialog.contentItem
+            tests.check(tests.findName("cloudKey-anthropic", d).text === "", "the field empties once it's sent")
+            tests.clickItem(tests.findName("cloudKey-anthropic", d), "the key field")
+            TestInput.typeText("sk-ant-good")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const v = JSON.parse(Accounts.cloud("harlo")); const r = (v.results || {}).anthropic; return r && r.state === "ok" && v.state === "ready" }, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = JSON.parse(Accounts.cloud("harlo")).results.anthropic
+            tests.check(r.message === "Saved; it works: Anthropic took the key", "the right key works (" + r.message + ")")
+            const st = tests.findName("cloudStatus-anthropic", settingsDialog.contentItem)
+            tests.check(st && st.text === "Key saved", "and it says so (" + (st ? st.text : "none") + ")")
+            const saved = TestInput.readFile(win.selftestDir + "/config/harlo-agent/keys.json")
+            tests.check(saved.indexOf("sk-ant-good") >= 0 && saved.indexOf("sk-ant-wrong") < 0, "kept in harlo-agent's keys file, the last one only")
+            const log = TestInput.readFile(win.selftestDir + "/cloud-log.jsonl")
+            tests.check(log.indexOf("/anthropic/models") >= 0, "checked with the provider (the stand-in)")
+            tests.scrollIntoView(tests.findName("cloudProvider-anthropic", settingsDialog.contentItem))
+            tests.shotWindow("clicks-harlo-cloud")
+            settingsDialog.close()
+            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.modelName !== "", 15000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.clickItem(tests.findName("modelButton"), "the model button") }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.models.some(m => m.split("\t")[1] === "claude-opus-5-5"), 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const opus = chat.session.models.find(m => m.split("\t")[1] === "claude-opus-5-5") || ""
+            tests.check(opus.split("\t")[0] === "anthropic", "the picker gets Anthropic's model once its key is saved (" + opus.replace(/\t/g, " | ") + ")")
+            tests.check(tests.findText("$4 / $20") === null, "with no price beside it")
+            TestInput.key(Qt.Key_Escape, 0)
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            tests.scrollIntoView(tests.findName("cloudProvider-anthropic", d))
+            const remove = tests.findName("cloudRemove-anthropic", d)
+            if (!remove || !remove.visible) tests.clickItem(tests.findName("cloudProvider-anthropic", d), "Anthropic's row") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const remove = tests.findName("cloudRemove-anthropic", settingsDialog.contentItem)
+            tests.scrollIntoView(remove)
+            tests.clickItem(remove, "Remove") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const v = JSON.parse(Accounts.cloud("harlo")); const p = (v.list || []).find(p => p.id === "anthropic"); return v.state === "ready" && p && p.key === "none" }, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const st = tests.findName("cloudStatus-anthropic", settingsDialog.contentItem)
+            tests.check(st && st.text === "No key", "removed (" + (st ? st.text : "none") + ")")
+            tests.check(TestInput.readFile(win.selftestDir + "/config/harlo-agent/keys.json").indexOf("sk-ant-good") < 0, "and gone from the file")
+            const share = tests.findName("harloShareKeys", settingsDialog.contentItem)
+            tests.check(share && share.checked, "SSH machines get the keys by default")
+            tests.scrollIntoView(share)
+            tests.clickItem(share, "the SSH keys switch") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(Workspace.setting("harlo_share_keys") === "0", "turned off")
+            // Coding plans for Claude Code: harlo's own list and keys,
+            // checked by one short request of the stand-in claude.
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            const plans = JSON.parse(Accounts.cloud("claude")).list || []
+            tests.check(plans.map(p => p.id).join(",") === "glm-coding,kimi-code,minimax-plan", "the coding plans are listed (" + plans.map(p => p.id) + ")")
+            const glm = tests.findName("cloudProvider-glm-coding", settingsDialog.contentItem)
+            tests.scrollIntoView(glm)
+            tests.clickItem(tests.findName("cloudProvider-glm-coding", settingsDialog.contentItem), "the GLM Coding Plan's row") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            tests.check(tests.findText("GLM 5.3 Flash", d) !== null && tests.findText("Plan ↗", d) !== null, "opened: its models and a link to its plans")
+            const key = tests.findName("cloudKey-glm-coding", d)
+            tests.clickItem(key, "its key field")
+            TestInput.typeText("plan-bad")
+            tests.clickItem(tests.findName("cloudSave-glm-coding", d), "Save") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const r = (JSON.parse(Accounts.cloud("claude")).results || {})["glm-coding"]; return r && r.state !== "busy" }, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const res = tests.findName("cloudResult-glm-coding", settingsDialog.contentItem)
+            tests.check(res && res.text.indexOf("Saved, but the check failed") === 0 && res.text.indexOf("invalid api key") > 0, "a wrong key: saved, and the plan's refusal said (" + (res ? res.text : "none") + ")")
+            tests.clickItem(tests.findName("cloudKey-glm-coding", settingsDialog.contentItem), "its key field")
+            TestInput.typeText("plan-good")
+            tests.clickItem(tests.findName("cloudSave-glm-coding", settingsDialog.contentItem), "Save") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const v = JSON.parse(Accounts.cloud("claude")); const r = (v.results || {})["glm-coding"]; return r && r.state === "ok" && v.state === "ready" }, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            const res = tests.findName("cloudResult-glm-coding", d)
+            tests.check(res && res.text === "Saved; it works: GLM Coding Plan answered through Claude Code.", "the right key works (" + (res ? res.text : "none") + ")")
+            const st = tests.findName("cloudStatus-glm-coding", d)
+            tests.check(st && st.text === "Key saved", "and it says so (" + (st ? st.text : "none") + ")")
+            const file = win.selftestDir + "/config/harlo/coding-plans.json"
+            tests.check(JSON.parse(TestInput.readFile(file))["glm-coding"] === "plan-good", "kept in harlo's coding-plans.json")
+            const log = TestInput.readFile(win.argValue("--cwd=") + "/../home/plan-log.jsonl").trim().split("\n").map(l => JSON.parse(l))
+            const last = log[log.length - 1] || {}
+            tests.check(log.length === 2 && last.baseUrl === "https://api.z.ai/api/anthropic" && last.model === "glm-5.3-flash[1m]" && !last.persist,
+                        "checked through Claude Code on the plan's endpoint, its small model, nothing kept (" + JSON.stringify(last) + ")")
+            const notes = tests.findText("A MiniMax M Plan key (sk-cp-…, from your plan's page) works here too.")
+            tests.check(notes === null || !notes.visible, "MiniMax's note shows only when its row is open")
+            // A Claude session on the plan: picked in the composer, under
+            // the plan's name; claude restarted with the plan's settings
+            // file (the key in it, never on the command line); and back.
+            settingsDialog.close()
+            tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.clickItem(tests.findName("modelButton"), "the model button") }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.models.some(m => m.split("\t")[0] === "glm-coding"), 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.findText("GLM CODING PLAN") !== null, "the plan's models are under its name in the picker")
+            tests.clickItem(tests.findText("GLM 5.3"), "GLM 5.3") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.modelName === "GLM 5.3", 15000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.sendByKeys("hello plan") }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => tests.chatText().indexOf("Hello from fake claude") >= 0, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const text = tests.chatText()
+            tests.check(text.indexOf("model glm-5.3[1m]") >= 0 && text.indexOf("via https://api.z.ai/api/anthropic") >= 0, "claude runs on the plan's endpoint with its model (" + text.slice(-160) + ")")
+            const starts = TestInput.readFile(win.argValue("--cwd=") + "/../home/claude-starts.jsonl").trim().split("\n").map(l => JSON.parse(l))
+            const last = starts[starts.length - 1] || { args: [] }
+            tests.check(last.args.indexOf("--settings") >= 0 && last.key === "plan-good" && !last.args.some(a => a.indexOf("plan-good") >= 0), "with the key in its settings file, not on the command line")
+            // Its icon: the model's maker (Z.ai), Claude Code as a tag.
+            const makers = tests.findAllNamed("sessionMaker", sidebar, []).map(m => m.provider)
+            tests.check(makers.indexOf("zai-coding-plan") >= 0 && tests.findAllNamed("sessionProvider", sidebar, []).every(m => m.provider !== "claude"),
+                        "the session's icon shows its model's maker, Claude Code as a tag (" + makers + ")")
+            tests.shotWindow("clicks-harlo-plan")
+            chat.session.setModel("anthropic", "claude-sonnet-5") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.modelName !== "GLM 5.3", 15000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.sendByKeys("hello again") }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => tests.chatText().split("Hello from fake claude").length === 3, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const text = tests.chatText(), reply = text.slice(text.lastIndexOf("Hello from fake claude"))
+            tests.check(reply.indexOf("model claude-sonnet-5,") >= 0 && reply.indexOf("via ") < 0, "back on Anthropic's model, without the plan (" + reply.slice(0, 120) + ")")
+            const starts = TestInput.readFile(win.argValue("--cwd=") + "/../home/claude-starts.jsonl").trim().split("\n").map(l => JSON.parse(l))
+            const last = starts[starts.length - 1] || { args: [] }
+            tests.check(last.args.indexOf("--settings") < 0 && last.args.some(a => a.startsWith("--resume")), "restarted without the plan, the same conversation (" + starts.length + " starts)")
+            const marks = tests.findAllNamed("sessionProvider", sidebar, []).map(m => m.provider)
+            tests.check(tests.findAllNamed("sessionMaker", sidebar, []).every(m => m.provider !== "zai-coding-plan") && marks.indexOf("claude") >= 0, "on Claude again: Claude's own mark (" + marks + ")")
+            tests.summary(); Qt.quit() } }
+    }
+
     SequentialAnimation {
         id: harloSettingsSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlosettings"

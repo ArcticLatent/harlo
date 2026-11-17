@@ -91,6 +91,8 @@ const QML_FILES: &[&str] = &[
     "qml/RemotePage.qml",
     "qml/ServersPage.qml",
     "qml/ProvidersPage.qml",
+    "qml/CloudProviders.qml",
+    "qml/CloudProviderRow.qml",
     "qml/ToastCard.qml",
     "qml/UpdateToasts.qml",
     "qml/PhoneFirewallToast.qml",

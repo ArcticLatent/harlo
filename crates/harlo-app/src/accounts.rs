@@ -202,6 +202,26 @@ pub mod qobject {
         /// The log of a server harlo starts (its output; "" before one).
         #[qinvokable]
         fn server_log(self: &Accounts, url: &QString) -> QString;
+        /// Reads Harlo's cloud providers and whether each has a key, here
+        /// or on a machine (`agent`: "harlo" or "harlo@host"; `cloud`
+        /// follows).
+        #[qinvokable]
+        fn load_cloud(self: Pin<&mut Accounts>, agent: &QString);
+        /// `{ state: "loading" | "ready", list: [as `harlo-agent providers
+        /// --json`], error, results: { <provider>: { state: "busy" | "ok" |
+        /// "error", message } } }`.
+        #[qinvokable]
+        fn cloud(self: &Accounts, agent: &QString) -> QString;
+        /// Saves a provider's API key, then checks it with the provider
+        /// (`cloud` follows).
+        #[qinvokable]
+        fn save_key(self: Pin<&mut Accounts>, agent: &QString, provider: &QString, key: &QString);
+        /// Checks a provider's saved key with the provider.
+        #[qinvokable]
+        fn test_key(self: Pin<&mut Accounts>, agent: &QString, provider: &QString);
+        /// Forgets a provider's saved key.
+        #[qinvokable]
+        fn remove_key(self: Pin<&mut Accounts>, agent: &QString, provider: &QString);
     }
 }
 
@@ -222,6 +242,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use qobject::Accounts;
+
+use crate::cloud_keys;
 
 #[derive(Default)]
 pub struct AccountsRust {
@@ -245,6 +267,8 @@ pub struct AccountsRust {
     providers: HashMap<String, Value>,
     /// `servers` per agent, as last read (`load_servers`).
     servers: HashMap<String, Value>,
+    /// `cloud` per agent.
+    cloud: HashMap<String, Value>,
 }
 
 /// An agent's program: the path set in Settings → Providers (if it's
@@ -563,6 +587,120 @@ impl Accounts {
 }
 
 impl Accounts {
+    pub fn cloud(&self, agent: &QString) -> QString {
+        let v = self.rust().cloud.get(&agent.to_string()).cloned().unwrap_or_else(|| json!({ "state": "loading", "list": [], "results": {} }));
+        QString::from(&v.to_string())
+    }
+
+    pub fn load_cloud(mut self: Pin<&mut Self>, agent: &QString) {
+        let agent = agent.to_string();
+        // Claude Code's coding plans: harlo's own list and keys.
+        if agent == "claude" {
+            let mut was = self.rust().cloud.get(&agent).cloned().unwrap_or_else(|| json!({ "results": {} }));
+            (was["state"], was["list"], was["error"]) = (json!("ready"), harlo_core::coding_plans::list_json(), json!(""));
+            self.as_mut().rust_mut().cloud.insert(agent, was);
+            self.bump();
+            return;
+        }
+        let Some((k, host)) = target(&agent).filter(|(k, _)| *k == HarnessKind::Harlo) else { return };
+        let mut was = self.rust().cloud.get(&agent).cloned().unwrap_or_else(|| json!({ "list": [], "results": {} }));
+        was["state"] = json!("loading");
+        self.as_mut().rust_mut().cloud.insert(agent.clone(), was);
+        self.as_mut().bump();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let listed = cloud_agent(k, host.as_ref(), cloud_keys::list);
+            let _ = thread.queue(move |mut this| {
+                {
+                    let mut rust = this.as_mut().rust_mut();
+                    let entry = rust.cloud.entry(agent).or_insert_with(|| json!({ "results": {} }));
+                    entry["state"] = json!("ready");
+                    match listed {
+                        Ok(list) => (entry["list"], entry["error"]) = (list, json!("")),
+                        Err(e) => entry["error"] = json!(format!("{e:#}")),
+                    }
+                }
+                this.bump();
+            });
+        });
+    }
+
+    pub fn save_key(self: Pin<&mut Self>, agent: &QString, provider: &QString, key: &QString) {
+        let key = key.to_string().trim().to_owned();
+        if agent.to_string() == "claude" {
+            self.plan_job(provider, "Saving and checking with one short Claude Code request…", move |id| {
+                harlo_core::coding_plans::set_key(id, &key)?;
+                plan_check(id).map(|said| format!("Saved; it works: {said}.")).map_err(|e| anyhow::anyhow!("Saved, but the check failed: {e:#}"))
+            });
+            return;
+        }
+        self.key_job(agent, provider, "Saving and checking…", move |a, id| {
+            cloud_keys::set(a, id, &key)?;
+            // (Saved either way; the check says whether it works.)
+            cloud_keys::test(a, id).map(|said| if said.is_empty() { "Saved; it works.".to_owned() } else { format!("Saved; it works: {said}") })
+                .map_err(|e| anyhow::anyhow!("Saved, but the check failed: {e:#}"))
+        });
+    }
+
+    pub fn test_key(self: Pin<&mut Self>, agent: &QString, provider: &QString) {
+        if agent.to_string() == "claude" {
+            self.plan_job(provider, "Checking with one short Claude Code request…", |id| plan_check(id).map(|said| format!("It works: {said}.")));
+            return;
+        }
+        self.key_job(agent, provider, "Checking…", |a, id| cloud_keys::test(a, id).map(|said| if said.is_empty() { "It works.".to_owned() } else { format!("It works: {said}") }));
+    }
+
+    pub fn remove_key(self: Pin<&mut Self>, agent: &QString, provider: &QString) {
+        if agent.to_string() == "claude" {
+            self.plan_job(provider, "Removing…", |id| harlo_core::coding_plans::remove_key(id).map(|()| "Removed.".to_owned()));
+            return;
+        }
+        self.key_job(agent, provider, "Removing…", |a, id| cloud_keys::remove(a, id).map(|()| "Removed.".to_owned()));
+    }
+
+    /// A change to a coding plan's key in the background (Claude Code's
+    /// plans, kept by harlo): `busy` meanwhile, then what came of it.
+    fn plan_job(mut self: Pin<&mut Self>, plan: &QString, busy: &str, job: impl FnOnce(&str) -> anyhow::Result<String> + Send + 'static) {
+        let plan = plan.to_string();
+        key_result(&mut self.as_mut().rust_mut().cloud, "claude", &plan, json!({ "state": "busy", "message": busy }));
+        self.as_mut().bump();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let outcome = job(&plan);
+            let _ = thread.queue(move |mut this| {
+                let result = match outcome {
+                    Ok(said) => json!({ "state": "ok", "message": said }),
+                    Err(e) => json!({ "state": "error", "message": format!("{e:#}") }),
+                };
+                key_result(&mut this.as_mut().rust_mut().cloud, "claude", &plan, result);
+                this.as_mut().bump();
+                this.load_cloud(&QString::from("claude"));
+            });
+        });
+    }
+
+    /// A change to a provider's key in the background: `busy` meanwhile,
+    /// then what came of it, and the list read again.
+    fn key_job(mut self: Pin<&mut Self>, agent: &QString, provider: &QString, busy: &str, job: impl FnOnce(&cloud_keys::Agent<'_>, &str) -> anyhow::Result<String> + Send + 'static) {
+        let (agent, provider) = (agent.to_string(), provider.to_string());
+        let Some((k, host)) = target(&agent).filter(|(k, _)| *k == HarnessKind::Harlo) else { return };
+        key_result(&mut self.as_mut().rust_mut().cloud, &agent, &provider, json!({ "state": "busy", "message": busy }));
+        self.as_mut().bump();
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let outcome = cloud_agent(k, host.as_ref(), |a| job(a, &provider));
+            let _ = thread.queue(move |mut this| {
+                let result = match outcome {
+                    Ok(said) => json!({ "state": "ok", "message": said }),
+                    Err(e) => json!({ "state": "error", "message": format!("{e:#}") }),
+                };
+                key_result(&mut this.as_mut().rust_mut().cloud, &agent, &provider, result);
+                this.as_mut().bump();
+                this.load_cloud(&QString::from(&agent));
+            });
+        });
+    }
+
     pub fn servers(&self, agent: &QString) -> QString {
         let list = self.rust().servers.get(&agent.to_string()).cloned().unwrap_or_else(|| json!([]));
         QString::from(&list.to_string())
@@ -1498,6 +1636,11 @@ fn providers_of(k: HarnessKind) -> Vec<Value> {
                 "methods": [{ "id": "chatgpt", "type": "login", "label": "Continue with ChatGPT" }],
             }),
             json!({
+                "id": "openrouter", "name": "OpenRouter",
+                "note": "Harlo makes a key of its own in your OpenRouter account and pays from its credits. Its models are listed as openrouter/….",
+                "methods": [{ "id": "openrouter", "type": "login", "label": "Continue with OpenRouter" }],
+            }),
+            json!({
                 "id": "codex", "name": "ChatGPT (Codex sign-in)",
                 "note": "Signs in the way the Codex CLI does, so harlo can show your plan's usage: how much is used and when it resets. Unofficial: OpenAI doesn't document it for other apps. Its models are listed as codex/….",
                 "methods": [{ "id": "codex", "type": "login", "label": "Sign in" }],
@@ -1536,6 +1679,30 @@ fn sign_out(k: HarnessKind, id: &str, host: Option<&Host>) -> anyhow::Result<()>
             }
         }
         HarnessKind::Demo => Err(anyhow::Error::msg("harlo can't sign this agent out.")),
+    }
+}
+
+/// Notes what's happening to `provider`'s key on `agent` (`cloud`'s
+/// `results`).
+fn key_result(cloud: &mut HashMap<String, Value>, agent: &str, provider: &str, result: Value) {
+    let entry = cloud.entry(agent.to_owned()).or_insert_with(|| json!({ "state": "loading", "list": [] }));
+    if !entry["results"].is_object() {
+        entry["results"] = json!({});
+    }
+    entry["results"][provider] = result;
+}
+
+/// Checks a coding plan's key with one short Claude Code request (blocking).
+fn plan_check(plan: &str) -> anyhow::Result<String> {
+    let claude = program(HarnessKind::Claude).ok_or_else(|| anyhow::Error::msg("Claude Code isn't installed."))?;
+    harlo_core::coding_plans::check(plan, &claude)
+}
+
+/// Runs `f` with Harlo's agent here or on `host` (blocking).
+fn cloud_agent<T>(k: HarnessKind, host: Option<&Host>, f: impl FnOnce(&cloud_keys::Agent<'_>) -> anyhow::Result<T>) -> anyhow::Result<T> {
+    match host {
+        Some(h) => f(&cloud_keys::Agent::There(h, harlo_there(h)?)),
+        None => f(&cloud_keys::Agent::Here(&program(k).ok_or_else(|| anyhow::Error::msg("harlo-agent isn't installed."))?)),
     }
 }
 
@@ -1696,9 +1863,13 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, 
         }
         HarnessKind::Harlo => {
             let codex = provider == "codex";
+            let openrouter = provider == "openrouter";
             let mut args = vec!["login"];
             if codex {
                 args.push("--codex");
+            }
+            if openrouter {
+                args.push("--openrouter");
             }
             let cmd = match report.host.clone() {
                 // There: harlo's copy of the agent, its sign-in the machine's
@@ -1707,7 +1878,7 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, 
                 Some(h) => {
                     let program = tokio::task::spawn_blocking(move || {
                         let program = harlo_there(&h)?;
-                        if !codex {
+                        if !codex && !openrouter {
                             share_client_id(&h);
                         }
                         Ok::<_, anyhow::Error>(program)
@@ -1723,6 +1894,9 @@ async fn sign_in(k: HarnessKind, provider: &str, method: &str, report: &Report, 
             let place = report.host.as_ref().map_or(String::new(), |h| format!(" on {}", h.name));
             if codex {
                 return Ok(format!("Harlo is signed in{place} with the Codex sign-in. Its models are listed as codex/…, and harlo shows your plan's usage."));
+            }
+            if openrouter {
+                return Ok(format!("Harlo is signed in to OpenRouter{place}, with a key of its own there. Its models are listed as openrouter/…; OpenRouter → Settings → Keys shows its spending, and can limit or revoke it."));
             }
             Ok(format!("Harlo is signed in{place} with ChatGPT."))
         }

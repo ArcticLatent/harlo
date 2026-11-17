@@ -23,7 +23,7 @@ struct AgentHead: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            AgentTile(harness: session.harness, size: Transcript.tile)
+            AgentTile(harness: session.harness, maker: session.info.maker, size: Transcript.tile)
             Text(Style.harnessLabel(session.harness))
                 .scaledFont(16.5, .semibold)
             if !otherModel.isEmpty {

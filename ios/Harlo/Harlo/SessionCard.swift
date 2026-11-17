@@ -30,7 +30,8 @@ struct SessionCard: View {
     }
 
     var detail: String {
-        var parts = [Style.harnessLabel(session.harness)]
+        // (Its model, when known, before its agent: "GLM 5.3 · Claude".)
+        var parts = [session.modelName.isEmpty ? Style.harnessLabel(session.harness) : session.modelName + " · " + Style.harnessLabel(session.harness)]
         if !nested && !session.helperOf.isEmpty { parts.append("Helper of “\(session.helperOf)”") }
         if showProject && !session.project.isEmpty { parts.append(session.project) }
         // (Grouped by project, the group says its machine.)
@@ -42,7 +43,7 @@ struct SessionCard: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            AgentTile(harness: session.harness, size: 46)
+            AgentTile(harness: session.harness, maker: session.maker, size: 46, ring: p.raised)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if nested {

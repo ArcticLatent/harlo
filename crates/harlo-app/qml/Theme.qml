@@ -164,9 +164,19 @@ QtObject {
     readonly property bool wrapCode: look.wrap === true
     /// An agent's avatar colours: a soft fill and its letters, from the theme.
     function agentColor(id) {
-        const base = ({ claude: "#E5895A", demo: "#A7AAB2" })[id] || "#A7AAB2"
+        return tinted(({ claude: "#E5895A", demo: "#A7AAB2" })[id] || "#A7AAB2")
+    }
+    /// A model maker's badge colours (by its logo id: Workspace.modelMaker);
+    /// a quiet grey for makers in black and white.
+    function makerColor(id) {
+        return tinted(({ anthropic: "#E5895A", "zai-coding-plan": "#6E8BFF", google: "#5B9BF0", deepseek: "#5D7BFF", "minimax-coding-plan": "#F0607A", mistral: "#FA7A2F" })[id] || "#C9CCD3")
+    }
+    function tinted(base) {
         const col = Qt.color(base)
-        return { fill: Qt.rgba(col.r, col.g, col.b, isLight ? 0.16 : 0.2), ink: isLight ? blend(col, Qt.rgba(0, 0, 0, 1), 0.25) : blend(col, Qt.rgba(1, 1, 1, 1), 0.15) }
+        return { fill: Qt.rgba(col.r, col.g, col.b, isLight ? 0.16 : 0.2), ink: isLight ? blend(col, Qt.rgba(0, 0, 0, 1), isGrey(col) ? 0.55 : 0.25) : blend(col, Qt.rgba(1, 1, 1, 1), 0.15) }
+    }
+    function isGrey(col) {
+        return Math.max(col.r, col.g, col.b) - Math.min(col.r, col.g, col.b) < 0.08
     }
     // Project colours (Settings → Projects), from the theme, so they suit
     // every theme. Stored by key.

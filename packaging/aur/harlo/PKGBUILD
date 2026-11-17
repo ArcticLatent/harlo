@@ -72,6 +72,7 @@ package() {
     install -Dm644 crates/harlo-app/fonts/FileIcons-LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/file-icons-LICENSE"
     install -Dm644 crates/harlo-app/icons/REMIXICON-LICENSE "$pkgdir/usr/share/licenses/$pkgname/remixicon-LICENSE"
     install -Dm644 crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE "$pkgdir/usr/share/licenses/$pkgname/provider-logos-LICENSE"
+    install -Dm644 crates/harlo-app/icons/providers/LOBEHUB-LICENSE "$pkgdir/usr/share/licenses/$pkgname/provider-logos-lobehub-LICENSE"
     install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$pkgdir/usr/share/licenses/$pkgname/tweetnacl-LICENSE"
     install -Dm644 crates/harlo-app/assets/mermaid/LICENSE "$pkgdir/usr/share/licenses/$pkgname/mermaid-LICENSE"
     install -Dm644 crates/harlo-app/fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/jetbrains-mono-OFL.txt"

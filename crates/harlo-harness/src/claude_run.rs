@@ -47,6 +47,9 @@ struct Waiting {
 struct State {
     /// What Claude refused this turn with, until the turn's result says it.
     refusal: String,
+    /// It moved between Anthropic and a coding plan mid-turn: `claude`
+    /// restarts on that before the next message.
+    restart_due: bool,
     session_id: String,
     model: String,
     /// "" (Claude's default), "off", or an effort level.
@@ -190,6 +193,9 @@ struct Shared {
     /// Whether the conversation it resumes has been read (true when there's
     /// none to read).
     read: tokio::sync::watch::Sender<bool>,
+    /// A coding plan's settings for the running `claude` (here: removed
+    /// when replaced or dropped; there: removed when `claude` ends).
+    plan_file: Mutex<Option<crate::coding_plans::SettingsFile>>,
 }
 
 /// The host's Claude folder (one quick SSH call).
@@ -386,6 +392,7 @@ pub(crate) fn spawn(cfg: HarnessConfig, program: PathBuf) -> Result<(Harness, mp
         generation: std::sync::atomic::AtomicU64::default(),
         remote_config,
         read: tokio::sync::watch::channel(true).0,
+        plan_file: Mutex::new(None),
     });
     // A resumed session: its conversation so far, read beside Claude's
     // start (a long one takes seconds), so what you send shows at once;
@@ -543,6 +550,8 @@ fn claude_args(shared: &Shared) -> Vec<String> {
     }
     args.extend(["--permission-mode".into(), st.permission_mode.clone()]);
     let model = if st.model.is_empty() { model.unwrap_or_default() } else { st.model.clone() };
+    // (A coding plan's model: `<plan>/<model>`; Claude asks for the model.)
+    let model = crate::coding_plans::of_model(&model).map_or(model, |(_, m)| m.id.clone());
     if !model.is_empty() {
         args.extend(["--model".into(), model]);
     }
@@ -610,7 +619,16 @@ async fn read_stdout(s: Arc<Shared>, stdout: tokio::process::ChildStdout, genera
 /// the process slots (held by the caller).
 fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdin>, child_slot: &mut Option<tokio::process::Child>) -> Result<(), Error> {
     let generation = shared.generation.load(std::sync::atomic::Ordering::SeqCst);
-    let args = claude_args(shared);
+    let mut args = claude_args(shared);
+    // On a coding plan: its endpoint, key and models from a file only you
+    // can read (never on a command line).
+    let plan_cleanup = match plan_settings(shared)? {
+        Some((path, cleanup)) => {
+            args.extend(["--settings".into(), path]);
+            cleanup
+        }
+        None => String::new(),
+    };
 
     // As the SDK runs it.
     let mut env: Vec<(String, String)> = vec![("CLAUDE_CODE_ENTRYPOINT".into(), "sdk-ts".into()), ("CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS".into(), "1".into())];
@@ -618,8 +636,12 @@ fn start(shared: &Arc<Shared>, stdin_slot: &mut Option<tokio::process::ChildStdi
     let mut cmd = match &shared.cfg.remote {
         // On another machine: its PATH finds `claude`.
         Some(r) => {
+            let mut r = r.clone();
+            if !plan_cleanup.is_empty() {
+                r.cleanup = [r.cleanup.as_str(), plan_cleanup.as_str()].into_iter().filter(|c| !c.is_empty()).collect::<Vec<_>>().join("; ");
+            }
             let mut cmd = tokio::process::Command::new("ssh");
-            cmd.args(&r.ssh_args).arg(crate::process::remote_script(r, "claude", &args, &shared.cfg.cwd, &env));
+            cmd.args(&r.ssh_args).arg(crate::process::remote_script(&r, "claude", &args, &shared.cfg.cwd, &env));
             cmd
         }
         None => {
@@ -737,8 +759,48 @@ fn model_id(st: &State) -> String {
 
 fn current_model(st: &State) -> Value {
     let id = model_id(st);
+    if let Some((plan, m)) = crate::coding_plans::of_model(&id) {
+        return json!({ "provider": plan.id, "id": m.id, "name": m.name, "providerName": plan.name });
+    }
     let name = MODELS.iter().find(|m| m.id == id).map_or_else(|| id.clone(), |m| m.label.to_owned());
     if id.is_empty() { Value::Null } else { json!({ "provider": "anthropic", "id": id, "name": name }) }
+}
+
+/// A coding plan's settings for the next `claude`, when its model is on
+/// one: the file's path (here, or on the session's machine) and, there,
+/// what removes it once `claude` ends.
+fn plan_settings(shared: &Arc<Shared>) -> Result<Option<(String, String)>, Error> {
+    let model = {
+        let st = shared.state.lock().unwrap();
+        if st.model.is_empty() { split_args(&shared.cfg.extra_args).0.unwrap_or_default() } else { st.model.clone() }
+    };
+    let Some((plan, m)) = crate::coding_plans::of_model(&model) else {
+        *shared.plan_file.lock().unwrap() = None;
+        return Ok(None);
+    };
+    let key = crate::coding_plans::key(&plan.id)
+        .ok_or_else(|| Error::new(ErrorKind::Start, format!("no key for {}: add it in Settings → Providers → Coding plans for Claude Code", plan.name)))?;
+    let settings = crate::coding_plans::settings(plan, &m.id, &key);
+    match &shared.cfg.remote {
+        // There: a private folder of its own (mktemp's are 0700), the file
+        // written from what's sent, removed when `claude` ends.
+        Some(_) => {
+            let script = r#"d=$(mktemp -d "${TMPDIR:-/tmp}/harlo-plan.XXXXXX") && umask 077 && cat > "$d/settings.json" && printf '%s' "$d""#;
+            let out = shared.on_host(script, Some(&settings.to_string())).ok_or_else(|| Error::new(ErrorKind::Start, format!("couldn't put {}'s settings on the machine", plan.name)))?;
+            let dir = String::from_utf8_lossy(&out).trim().to_owned();
+            if !dir.contains("/harlo-plan.") {
+                return Err(Error::new(ErrorKind::Start, format!("couldn't put {}'s settings on the machine", plan.name)));
+            }
+            Ok(Some((format!("{dir}/settings.json"), format!("rm -rf {}", crate::process::shell_quote(&dir)))))
+        }
+        None => {
+            let base = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_dir()).unwrap_or_else(std::env::temp_dir);
+            let file = crate::coding_plans::write_settings(&base, &settings).map_err(|e| Error::new(ErrorKind::Start, format!("{e:#}")))?;
+            let path = file.path.to_string_lossy().into_owned();
+            *shared.plan_file.lock().unwrap() = Some(file);
+            Ok(Some((path, String::new())))
+        }
+    }
 }
 
 /// Sends a message to Claude and shows it in the conversation. `steer`: into
@@ -806,7 +868,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
         "get_state" => reply(true, state(shared), ""),
         "get_session_stats" => reply(true, stats(shared), ""),
         "get_available_models" => reply(true, models(shared), ""),
-        "set_model" => reply(true, set_model(shared, cmd["modelId"].as_str().unwrap_or_default().to_owned()).await, ""),
+        "set_model" => reply(true, set_model(shared, cmd["provider"].as_str().unwrap_or_default(), cmd["modelId"].as_str().unwrap_or_default()).await, ""),
         "get_available_thinking_levels" => {
             let model = model_id(&shared.state.lock().unwrap());
             reply(true, json!({ "levels": claude::thinking_levels(&model) }), "");
@@ -902,6 +964,11 @@ async fn prompt(shared: &Arc<Shared>, cmd: &Value) -> Value {
         held_changed(shared);
         return json!({ "disposition": "queued" });
     }
+    // (Moved to or from a coding plan mid-turn: on it from this message.)
+    let due = std::mem::take(&mut shared.state.lock().unwrap().restart_due);
+    if due {
+        restart(shared).await;
+    }
     send_message(shared, content, cmd["streamingBehavior"] == "steer").await;
     json!({ "disposition": "started" })
 }
@@ -933,12 +1000,30 @@ fn state(shared: &Arc<Shared>) -> Value {
 }
 
 /// Another model: for the running process too. The model as it is now.
-async fn set_model(shared: &Arc<Shared>, model: String) -> Value {
-    shared.state.lock().unwrap().model.clone_from(&model);
+/// A coding plan's (`provider` is the plan) runs `claude` on the plan, so
+/// moving to or from one restarts it (now, or before the next message when
+/// a turn is under way).
+async fn set_model(shared: &Arc<Shared>, provider: &str, id: &str) -> Value {
+    let model = if crate::coding_plans::find(provider).is_some() { format!("{provider}/{id}") } else { id.to_owned() };
+    let (moved, busy) = {
+        let mut st = shared.state.lock().unwrap();
+        let plan_of = |m: &str| crate::coding_plans::of_model(m).map(|(p, _)| p.id.clone());
+        let moved = plan_of(&model_id(&st)) != plan_of(&model);
+        st.model.clone_from(&model);
+        (moved, st.running)
+    };
     let running = shared.child.lock().await.is_some();
-    if running {
-        // (Its compaction point once it has changed.)
-        let set = shared.control_sent(json!({ "subtype": "set_model", "model": model })).await;
+    if moved && running {
+        if busy {
+            shared.state.lock().unwrap().restart_due = true;
+        } else {
+            restart(shared).await;
+        }
+    } else if running {
+        // (Its compaction point once it has changed. Within a plan, the
+        // plan's own id for it.)
+        let bare = crate::coding_plans::of_model(&model).map_or(model, |(_, m)| m.id.clone());
+        let set = shared.control_sent(json!({ "subtype": "set_model", "model": bare })).await;
         let s = Arc::clone(shared);
         tokio::spawn(async move {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(30), set).await;
@@ -955,7 +1040,9 @@ fn models(shared: &Arc<Shared>) -> Value {
     let version = shared.state.lock().unwrap().version.clone();
     let list: Vec<Value> = claude::models((!version.is_empty()).then_some(version.as_str()), claude::config_dir().filter(|_| shared.cfg.remote.is_none()).map(|d| d.join("settings.json")).as_deref())
         .into_iter()
-        .map(|(id, name)| json!({ "provider": "anthropic", "id": id, "name": name, "reasoning": true }))
+        .map(|(id, name)| json!({ "provider": "anthropic", "providerName": "Anthropic", "id": id, "name": name, "reasoning": true }))
+        // (Then the coding plans with a key: Claude Code on them.)
+        .chain(crate::coding_plans::models_json())
         .collect();
     json!({ "models": list })
 }
@@ -1302,8 +1389,17 @@ fn system(shared: &Arc<Shared>, frame: &Value) {
                 if let Some(id) = frame["session_id"].as_str() {
                     id.clone_into(&mut st.session_id);
                 }
+                // (On a coding plan, Claude tells the plan's id for the
+                // model: it stays the plan's.)
                 if let Some(m) = frame["model"].as_str() {
-                    m.clone_into(&mut st.model);
+                    match crate::coding_plans::of_model(&st.model) {
+                        Some((plan, _)) => {
+                            if plan.models.iter().any(|pm| pm.id == m) {
+                                st.model = format!("{}/{m}", plan.id);
+                            }
+                        }
+                        None => m.clone_into(&mut st.model),
+                    }
                 }
                 if let Some(m) = frame["permissionMode"].as_str() {
                     m.clone_into(&mut st.permission_mode);
@@ -1793,7 +1889,8 @@ fn task_frame(shared: &Arc<Shared>, frame: &Value) {
                 let st = shared.state.lock().unwrap();
                 shared.transcript(&st.session_id).map(|f| f.with_extension("").join("subagents").join(format!("agent-{task}.jsonl")))
             };
-            let mut patch = json!({ "status": "running", "detached": frame["is_backgrounded"] == true });
+            // (One a call waits for, a SendMessage's, isn't sent away.)
+            let mut patch = json!({ "status": "running", "detached": frame["is_backgrounded"] == true && frame["awaited"] != true });
             for (key, from) in [("agent", "subagent_type"), ("task", "prompt")] {
                 if frame[from].as_str().is_some_and(|v| !v.is_empty()) {
                     patch[key] = frame[from].clone();
@@ -1822,7 +1919,7 @@ fn task_frame(shared: &Arc<Shared>, frame: &Value) {
         patch["detached"] = json!(true);
     }
     if let Some(summary) = frame["summary"].as_str() {
-        patch["result"] = json!(summary);
+        patch["result"] = json!(claude::report_text(summary));
     }
     if frame["subtype"] == "task_progress" {
         let u = &frame["usage"];
@@ -1848,7 +1945,8 @@ fn background_task(shared: &Arc<Shared>, task: &str, frame: &Value) {
     if frame["subtype"] == "task_started" && frame["task_type"] == "local_bash" {
         shared.state.lock().unwrap().shells.insert(task.to_owned());
     }
-    let started = frame["subtype"] == "task_started" && frame["is_backgrounded"] == true;
+    // (A call that waits for it, a SendMessage's, has its report.)
+    let started = frame["subtype"] == "task_started" && frame["is_backgrounded"] == true && frame["awaited"] != true;
     if started || frame["patch"]["is_backgrounded"] == true {
         shared.state.lock().unwrap().background.insert(task.to_owned());
         return;
@@ -1856,20 +1954,33 @@ fn background_task(shared: &Arc<Shared>, task: &str, frame: &Value) {
     if frame["subtype"] != "task_notification" {
         return;
     }
-    let (command, detached) = {
+    let (command, detached, agent) = {
         let mut st = shared.state.lock().unwrap();
         let call = st.tasks.get(task).cloned().unwrap_or_default();
         let command = st.shells.remove(task);
-        (command, st.background.remove(task) || st.subagents.get(&call).is_some_and(|e| e["detached"] == true))
+        let agent = st.subagents.get(&call).map(|e| e["name"].as_str().or_else(|| e["agent"].as_str()).unwrap_or_default().to_owned());
+        (command, st.background.remove(task) || st.subagents.get(&call).is_some_and(|e| e["detached"] == true), agent)
     };
     if !detached {
         return;
     }
-    let text = claude::task_text(frame["summary"].as_str(), frame["status"].as_str(), command);
-    let message = json!({ "role": "custom", "customType": "task-notification", "display": true, "content": text });
+    // A subagent's whole report (Claude sends it as the summary): drawn
+    // as it was written, after a line saying whose it is.
+    let report = frame["summary"].as_str().map(claude::report_text).filter(|r| r.contains('\n') || r.chars().count() > REPORT_CHARS);
+    let message = match (agent, report) {
+        (Some(name), Some(report)) => claude::report_message(if name.is_empty() { "A subagent" } else { &name }, &report),
+        _ => {
+            let text = claude::task_text(frame["summary"].as_str(), frame["status"].as_str(), command);
+            json!({ "role": "custom", "customType": "task-notification", "display": true, "content": text })
+        }
+    };
     shared.state.lock().unwrap().keep(&message);
     shared.emit(HarnessEvent::MessageEnd { id: shared.next_id("n"), message });
 }
+
+/// A subagent's summary longer than this (or of more than one line) is its
+/// report, not a sentence about it.
+const REPORT_CHARS: usize = 200;
 
 /// Claude's task states → the dock's.
 fn task_status(s: &str) -> Option<&'static str> {
@@ -2044,8 +2155,30 @@ mod tests {
             generation: std::sync::atomic::AtomicU64::default(),
             remote_config: None,
             read: tokio::sync::watch::channel(true).0,
+            plan_file: Mutex::new(None),
         });
         (shared, rx)
+    }
+
+    /// A coding plan's model is kept with its plan, told as the plan's, and
+    /// asked of Claude by its own id; back on Anthropic's, it's Claude's again.
+    #[tokio::test]
+    async fn a_plans_model_is_kept_with_its_plan() {
+        let (shared, _rx) = shared();
+        let m = set_model(&shared, "glm-coding", "glm-5.3[1m]").await;
+        assert_eq!(shared.state.lock().unwrap().model, "glm-coding/glm-5.3[1m]");
+        assert_eq!(m, json!({ "provider": "glm-coding", "id": "glm-5.3[1m]", "name": "GLM 5.3", "providerName": "GLM Coding Plan" }));
+        let args = claude_args(&shared);
+        let at = args.iter().position(|a| a == "--model").expect("a model is asked for");
+        assert_eq!(args[at + 1], "glm-5.3[1m]", "Claude gets the plan's id for it");
+
+        system(&shared, &json!({ "type": "system", "subtype": "init", "model": "glm-5.3[1m]" }));
+        assert_eq!(shared.state.lock().unwrap().model, "glm-coding/glm-5.3[1m]", "Claude's word for it keeps the plan");
+
+        let m = set_model(&shared, "anthropic", "claude-sonnet-5-5").await;
+        assert_eq!(m["provider"], "anthropic");
+        assert_eq!(shared.state.lock().unwrap().model, "claude-sonnet-5-5");
+        assert!(!shared.state.lock().unwrap().restart_due, "nothing running, nothing to restart");
     }
 
     /// A real recording (Claude Code 2.1.296: a Bash call, then a reply;
@@ -2363,20 +2496,35 @@ mod tests {
             json!({ "subtype": "task_started", "task_id": "a3", "tool_use_id": "t3", "task_type": "local_agent", "subagent_type": "Explore" }),
             json!({ "subtype": "task_updated", "task_id": "a3", "patch": { "is_backgrounded": true } }),
             json!({ "subtype": "task_notification", "task_id": "a3", "tool_use_id": "t3", "status": "completed", "summary": "Found it." }),
+            // One resumed by a SendMessage that waits for it: the call has
+            // its report, no notice.
+            json!({ "subtype": "task_started", "task_id": "a4", "tool_use_id": "t4", "task_type": "local_agent", "subagent_type": "web-fetch", "description": "Docs facts", "is_backgrounded": true, "awaited": true }),
+            json!({ "subtype": "task_notification", "task_id": "a4", "tool_use_id": "t4", "status": "completed", "summary": "All answered.\n\n- a\n- b" }),
+            // One in the background whose summary is its whole report: the
+            // report, without Claude's note.
+            json!({ "subtype": "task_started", "task_id": "a5", "tool_use_id": "t5", "task_type": "local_agent", "subagent_type": "web-fetch", "description": "Docs facts", "is_backgrounded": true }),
+            json!({ "subtype": "task_notification", "task_id": "a5", "tool_use_id": "t5", "status": "completed", "summary": "All answered.\n\n- a\n[Harness note, not part of the agent's report: none.]" }),
         ] {
             incoming(&s, system(frame)).await;
         }
         let mut notices = Vec::new();
+        let mut reports = Vec::new();
         while let Ok(e) = rx.try_recv() {
             if let HarnessEvent::MessageEnd { message, .. } = e
                 && message["role"] == "custom"
             {
+                if message["customType"] == "subagent-report" {
+                    reports.push(message);
+                    continue;
+                }
                 assert_eq!(message["customType"], "task-notification");
                 notices.push(message["content"].as_str().unwrap_or_default().to_owned());
             }
         }
         assert_eq!(notices, ["Background command \"cargo test\" completed (exit code 0)", "A background task failed.", "Background command \"verify.sh changed > /tmp/v.txt\" was stopped", "Found it."]);
-        assert_eq!(s.state.lock().unwrap().messages.iter().filter(|m| m["role"] == "custom").count(), 4, "kept with the messages");
+        assert_eq!(reports, [json!({ "role": "custom", "customType": "subagent-report", "display": true, "name": "Docs facts", "content": "All answered.\n\n- a" })]);
+        assert_eq!(s.state.lock().unwrap().subagents["t5"]["result"], "All answered.\n\n- a", "its card's result without the note too");
+        assert_eq!(s.state.lock().unwrap().messages.iter().filter(|m| m["role"] == "custom").count(), 5, "kept with the messages");
         assert!(s.state.lock().unwrap().background.is_empty() && s.state.lock().unwrap().shells.is_empty(), "ended ones are forgotten");
     }
 

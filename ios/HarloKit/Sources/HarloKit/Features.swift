@@ -330,6 +330,9 @@ public struct ModelChoice: Equatable, Sendable, Identifiable {
     /// The model server it's on, when that's stopped (harlo starts it with
     /// the next message); "" otherwise.
     public var stoppedServer: String
+    /// Its provider as the provider names itself ("Anthropic"); the id
+    /// when it has no other.
+    public var providerName: String
 
     public var id: String { provider + "/" + modelId }
 
@@ -339,6 +342,7 @@ public struct ModelChoice: Equatable, Sendable, Identifiable {
         name = v["name"].string.flatMap { $0.isEmpty ? nil : $0 } ?? v["id"].text
         reasoning = v["reasoning"].bool ?? false
         stoppedServer = v["stoppedServer"].text
+        providerName = v["providerName"].string.flatMap { $0.isEmpty ? nil : $0 } ?? v["provider"].text
     }
 }
 
@@ -378,6 +382,8 @@ public struct SessionInfo: Equatable, Sendable {
     public var model = ""
     /// `provider/id`.
     public var modelId = ""
+    /// Who made the model: a logo's id ("" not known).
+    public var maker = ""
     public var thinking = ""
     public var contextTokens: Int64 = 0
     public var contextWindow: Int64 = 0
@@ -395,6 +401,7 @@ public struct SessionInfo: Equatable, Sendable {
         title = v["title"].text
         model = v["model"].text
         modelId = v["modelId"].text
+        maker = v["maker"].text
         thinking = v["thinking"].text
         contextTokens = v["contextTokens"].int ?? 0
         contextWindow = v["contextWindow"].int ?? 0
@@ -866,6 +873,29 @@ public struct Palette: Codable, Equatable, Sendable {
         default: base = RGBA(0.733, 0.745, 0.776)
         }
         return (isLight ? base.mix(RGBA(1, 1, 1), 0.2) : base, RGBA(0.09, 0.075, 0.11))
+    }
+
+    /// A model maker's tile (by its logo's id), as the desktop tints it; a
+    /// quiet grey for makers in black and white.
+    public func makerTile(_ id: String) -> (fill: RGBA, ink: RGBA) {
+        let base: RGBA
+        switch id {
+        case "anthropic": base = RGBA(0.969, 0.639, 0.471)
+        case "zai-coding-plan": base = RGBA(0.431, 0.545, 1)
+        case "google": base = RGBA(0.357, 0.608, 0.941)
+        case "deepseek": base = RGBA(0.365, 0.482, 1)
+        case "minimax-coding-plan": base = RGBA(0.941, 0.376, 0.478)
+        case "mistral": base = RGBA(0.98, 0.478, 0.184)
+        default: base = RGBA(0.733, 0.745, 0.776)
+        }
+        return (isLight ? base.mix(RGBA(1, 1, 1), 0.2) : base, RGBA(0.09, 0.075, 0.11))
+    }
+
+    /// Whether a session's icon shows its model's maker (with the agent as a
+    /// tag): a maker is known, and it isn't the agent's own (Claude Code on
+    /// Claude shows Claude's mark).
+    public static func modelFirst(harness: String, maker: String) -> Bool {
+        !maker.isEmpty && !(harness == "claude" && maker == "anthropic")
     }
 
     /// Text on a primary-coloured fill.

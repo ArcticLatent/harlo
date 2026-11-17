@@ -18,6 +18,8 @@ Popup {
     signal setupRequested()
     /// Signing an agent in to a model provider.
     signal signInRequested(string agent, string label)
+    /// Straight to signing `agent` in to `provider` (OpenRouter).
+    signal providerSignInRequested(string agent, string provider, string name)
     /// Harlo signing in to an MCP server of `scope`.
     signal mcpSignInRequested(string scope, string server)
     /// MCP sign-in: run this in a terminal.
@@ -1234,6 +1236,7 @@ Popup {
         id: providersPage
         ProvidersPage {
             onSignInRequested: (agent, label) => root.signInRequested(agent, label)
+            onProviderSignInRequested: (agent, provider, name) => root.providerSignInRequested(agent, provider, name)
         }
     }
 }

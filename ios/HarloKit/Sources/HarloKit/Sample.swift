@@ -13,21 +13,22 @@ extension HarloModel {
         m.state = .connected
         let t = Int64(now.timeIntervalSince1970)
         func s(_ key: String, _ title: String, _ project: String, _ harness: String, _ status: String, _ ago: Int64, branch: String = "", pinned: Bool = false,
-               requests: [JSON] = [], host: String = "", settled: String = "") -> SessionSummary {
+               requests: [JSON] = [], host: String = "", settled: String = "", model: String = "", maker: String = "") -> SessionSummary {
             SessionSummary(["key": .string(key), "title": .string(title), "project": .string(project), "harness": .string(harness),
                             "status": .string(status), "modified": .int(t - ago), "branch": .string(branch), "where": "~/Projects/harlo", "pinned": .bool(pinned),
-                            "requests": .array(requests), "host": .string(host), "settled": .string(settled)])
+                            "requests": .array(requests), "host": .string(host), "settled": .string(settled),
+                            "modelName": .string(model), "maker": .string(maker)])
         }
         let approval: JSON = ["id": "r1", "method": "select", "title": "Allow tool: bash", "message": "bash: rm -rf target/debug/incremental",
                               "options": ["Approve", "Deny"], "approval": true, "asked": .int((t - 120) * 1000)]
         let command: JSON = ["id": "r2", "method": "select", "title": "Allow tool: bash", "message": "bash: cargo test -p harlo-relay",
                              "options": ["Approve", "Deny"], "approval": true, "asked": .int((t - 480) * 1000)]
         m.sessions = [
-            s("live:1", "Fix the session list's scrolling", "harlo", "harlo", "busy", 20, pinned: true),
-            s("live:2", "Add photos to the phone composer", "harlo", "claude", "input", 300, branch: "phone-photos", requests: [approval]),
-            s("live:3", "Why does the relay drop idle phones?", "harlo", "harlo", "unread", 3600),
-            s("/s/4", "Release notes for 0.4", "harlo", "harlo", "", 86400 * 2),
-            s("/s/5", "Tidy the README", "website", "claude", "", 86400 * 5),
+            s("live:1", "Fix the session list's scrolling", "harlo", "harlo", "busy", 20, pinned: true, model: "GPT-5", maker: "openai"),
+            s("live:2", "Add photos to the phone composer", "harlo", "claude", "input", 300, branch: "phone-photos", requests: [approval], model: "Sonnet 5", maker: "anthropic"),
+            s("live:3", "Why does the relay drop idle phones?", "harlo", "harlo", "unread", 3600, model: "GLM 5.3", maker: "zai-coding-plan"),
+            s("/s/4", "Release notes for 0.4", "harlo", "harlo", "", 86400 * 2, model: "Kimi K3.1 Pro", maker: "kimi-for-coding"),
+            s("/s/5", "Tidy the README", "website", "claude", "", 86400 * 5, model: "GLM 5.3", maker: "zai-coding-plan"),
             s("/s/6", "Benchmark the markdown renderer", "", "harlo", "", 86400 * 12, host: "nas"),
             s("/s/7", "Split the relay's config", "harlo", "claude", "", 86400 * 3, branch: "relay-config", settled: "Merged"),
         ]
@@ -72,6 +73,7 @@ extension HarloModel {
         info.title = s.title
         info.model = "GPT-5"
         info.modelId = "openai/gpt-5"
+        info.maker = "openai"
         info.thinking = "medium"
         info.contextTokens = 48_200
         info.contextWindow = 200_000
@@ -166,8 +168,8 @@ public struct Samples: Sendable {
                                     "models": [["harness": "harlo", "model": "openai/gpt-5"], ["harness": "claude", "model": "anthropic/claude-sonnet-4-5"]],
                                     "templates": [["id": "t1", "name": "Review a PR", "harness": "claude", "approval": "always-ask", "text": "Review the open pull request: correctness first, then tests."],
                                                   ["id": "t2", "name": "Fix the failing tests", "harness": "harlo", "model": "openai/gpt-5", "approval": "write", "text": "Run the tests and fix what fails."]]]),
-        models: [ModelChoice(["provider": "anthropic", "id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "reasoning": true]),
-                 ModelChoice(["provider": "anthropic", "id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "reasoning": true]),
+        models: [ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "reasoning": true]),
+                 ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "reasoning": true]),
                  ModelChoice(["provider": "openai", "id": "gpt-5", "name": "GPT-5", "reasoning": true]),
                  ModelChoice(["provider": "openai", "id": "gpt-5-mini", "name": "GPT-5 mini", "reasoning": false, "stoppedServer": "ollama"])],
         changes: Changes(["branch": "main", "ahead": 1, "files": [

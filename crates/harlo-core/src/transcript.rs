@@ -611,8 +611,16 @@ impl Transcript {
                     level = NoticeLevel::Warning;
                 }
             }
+        // A subagent's report: a line saying whose, then the report itself
+        // (drawn as Markdown, as the subagent wrote it).
+        let blocks = if message["customType"] == "subagent-report" {
+            let name = message["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("A subagent");
+            vec![Block::Text(format!("Subagent \"{name}\" reported")), Block::Text(text)]
+        } else {
+            vec![Block::Text(text)]
+        };
         if let Some(&pos) = self.by_id.get(id) {
-            self.items[pos].blocks = vec![Block::Text(text)];
+            self.items[pos].blocks = blocks;
             self.items[pos].role = Role::Notice(level);
             self.touch(pos);
             return true;
@@ -621,7 +629,7 @@ impl Transcript {
         self.items.push(Item {
             id: id.to_owned(),
             role: Role::Notice(level),
-            blocks: vec![Block::Text(text)],
+            blocks,
             done: true,
             error: None,
             rev: 0,
@@ -993,6 +1001,14 @@ impl Transcript {
                     }
                 }
                 rows.push(Arc::new(r));
+                // A subagent's report under its line, as text it wrote.
+                if let Some(Block::Text(report)) = item.blocks.get(1).cloned() {
+                    for m in md_rows(&self.md.render(&report)) {
+                        let mut r = row(format!("{id}:r{}", m.mi), m.kind);
+                        (r.html, r.text, r.title) = (m.html, m.code, m.lang);
+                        rows.push(Arc::new(r));
+                    }
+                }
             }
             Role::Assistant | Role::Other => {
                 let blocks = item.blocks.clone();
@@ -2216,6 +2232,19 @@ mod tests {
         assert!(matches!(changes.as_slice(), [ListChange::Insert { at: 0, rows }] if rows.len() == all.len() - first.len()), "{} changes", changes.len());
         assert!(rest[all.len() - first.len()..].iter().zip(&first).all(|(a, b)| Arc::ptr_eq(a, b)), "the same rows");
         assert_eq!(Transcript::default().last_rows(10), Vec::<Arc<Row>>::new());
+    }
+
+    #[test]
+    fn a_subagents_report_reads_as_written() {
+        let mut t = Transcript::default();
+        let report = json!({ "role": "custom", "customType": "subagent-report", "display": true, "name": "web-fetch", "content": "## Found\n\n- one\n- two" });
+        t.apply(&HarnessEvent::MessageEnd { id: "r1".into(), message: report });
+        let rows = t.rows();
+        assert_eq!(rows[0].kind, RowKind::Notice);
+        assert_eq!(rows[0].text, "Subagent \"web-fetch\" reported", "a line saying whose");
+        assert!(rows.len() > 1 && rows[1..].iter().all(|r| r.kind == RowKind::Markdown), "{rows:?}");
+        let html: String = rows[1..].iter().map(|r| r.html.as_str()).collect();
+        assert!(html.contains("<li>") && html.contains("Found") && !html.contains("## "), "drawn as Markdown: {html}");
     }
 
     #[test]

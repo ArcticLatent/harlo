@@ -54,11 +54,17 @@ pub fn limits(headers: &reqwest::header::HeaderMap) -> Vec<Value> {
 
 /// One client for every request, so a session's requests reuse their
 /// connection. A server that doesn't answer the connection in 15 s isn't
-/// waited for, and a connection that died quietly is noticed.
+/// waited for, and a connection that died quietly is noticed. Each says
+/// it's harlo-agent (`harlo-agent/<version>`), as some servers ask.
 pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).tcp_keepalive(Duration::from_secs(30)).build().unwrap_or_default()
+        reqwest::Client::builder()
+            .user_agent(concat!("harlo-agent/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(15))
+            .tcp_keepalive(Duration::from_secs(30))
+            .build()
+            .unwrap_or_default()
     })
 }
 

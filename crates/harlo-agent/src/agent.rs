@@ -23,7 +23,7 @@ use crate::providers::{self, Api};
 use crate::session::{Log, Past, now_ms};
 use crate::used::Used;
 use crate::tools::{self, Tools};
-use crate::{chat, compact, responses, stubs};
+use crate::{chat, compact, gemini, messages, responses, stubs};
 
 /// Rounds of tool calls in one run, at most.
 const MAX_ROUNDS: usize = 200;
@@ -1903,16 +1903,41 @@ async fn send(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), tries: &mut Tr
 async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), seen: &mut Value) -> Result<(Value, Value)> {
     let (provider, model) = providers::resolve(a.model)?;
     let pid = provider.id.clone();
-    let api = if provider.api == Api::Chat { "openai-completions" } else { "openai-responses" };
-    show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": api, "provider": pid, "model": model, "timestamp": now_ms() })));
+    show(Shown::MessageStart(&json!({ "role": "assistant", "content": [], "api": provider.api.name(), "provider": pid, "model": model, "timestamp": now_ms() })));
     let effort = provider.effort(&model, a.effort);
+    // (A provider that asks for the conversation's id with each request.)
+    let session = provider.session_headers(a.session);
+    if provider.api == Api::Gemini {
+        let contents = gemini::contents(a.history, &pid, &model, a.images);
+        let mut body = gemini::request(a.instructions, &contents, a.specs, effort.as_deref(), provider.max_tokens(&model));
+        chat::overlay(&mut body, &provider.extra(&model));
+        if !a.tools && body["tools"].is_array() {
+            body["toolConfig"] = json!({ "functionCallingConfig": { "mode": "NONE" } });
+        }
+        let token = provider.token(false).await?;
+        let to = chat::Endpoint { base: &provider.base_url, key: token.as_deref(), headers: &session };
+        return gemini::stream(to, &body, &pid, &model, |e| show(Shown::Stream(e)), seen).await;
+    }
+    if provider.api == Api::Messages {
+        let history = messages::messages(a.history, &pid, &model, a.images, !messages::thinking_off(effort.as_deref()));
+        let mut body = messages::request(&model, a.instructions, history, a.specs, provider.thinking, effort.as_deref(), provider.max_tokens(&model));
+        chat::overlay(&mut body, &provider.extra(&model));
+        if !a.tools && body["tools"].is_array() {
+            body["tool_choice"] = json!({ "type": "none" });
+        }
+        let token = provider.token(false).await?;
+        let wire = messages::Wire { base: &provider.base_url, key: token.as_deref(), bearer: provider.bearer, claude: provider.thinking == chat::Thinking::Claude, headers: &session };
+        return messages::stream(wire, &body, &pid, &model, |e| show(Shown::Stream(e)), seen).await;
+    }
     if provider.api == Api::Chat {
-        let mut body = chat::request(&model, a.instructions, &chat::messages(a.history, &model, a.images), a.specs, effort.as_deref());
+        let mut body = chat::request(&model, a.instructions, &chat::messages(a.history, &model, a.images, provider.keep_thinking), a.specs, provider.thinking, effort.as_deref());
+        chat::overlay(&mut body, &provider.extra(&model));
         if !a.tools {
             body["tool_choice"] = json!("none");
         }
         let token = provider.token(false).await?;
-        return chat::stream(&provider.base_url, token.as_deref(), &body, &pid, &model, |e| show(Shown::Stream(e)), seen).await;
+        let to = chat::Endpoint { base: &provider.base_url, key: token.as_deref(), headers: &session };
+        return chat::stream(to, &body, &pid, &model, |e| show(Shown::Stream(e)), seen).await;
     }
     let mut input = responses::input(a.history, &pid, &model, a.images);
     if a.trigger {
@@ -1937,7 +1962,8 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), seen: &mu
     let mut force = false;
     loop {
         let token = provider.token(force).await?;
-        let headers = provider.headers();
+        let mut headers = provider.headers();
+        headers.extend(session.iter().cloned());
         let mut items = Vec::new();
         let mut done: Option<(Value, Vec<Value>)> = None;
         let mut blocks = Blocks::default();
@@ -2687,7 +2713,7 @@ mod tests {
         agent.log.path = path.clone();
         agent.budget = Some(Arc::new(Budget { limit: 1_000_000, ..Budget::default() }));
         let api = |input: u64, cached: u64, output: u64| json!({ "input_tokens": input, "input_tokens_details": { "cached_tokens": cached }, "output_tokens": output });
-        let price = crate::used::Pricing::Priced(crate::used::Price { input: 1.0, output: 4.0, cached: 0.1 });
+        let price = crate::used::Pricing::Priced(crate::used::Price::flat(1.0, 4.0, 0.1));
         let mut want = Used::default();
         let mut spend = |agent: &mut Agent, u: &Value| {
             let used = Used::from_api(u).priced(&price);

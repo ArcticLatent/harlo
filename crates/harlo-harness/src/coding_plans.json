@@ -1,0 +1,56 @@
+[
+  {
+    "id": "glm-coding",
+    "name": "GLM Coding Plan",
+    "maker": "zai",
+    "baseUrl": "https://api.z.ai/api/anthropic",
+    "keyVar": "ANTHROPIC_AUTH_TOKEN",
+    "keyPage": "https://z.ai/manage-apikey/apikey-list",
+    "planPage": "https://z.ai/subscribe",
+    "models": [
+      { "id": "glm-5.3[1m]", "name": "GLM 5.3" },
+      { "id": "glm-5.3-flash[1m]", "name": "GLM 5.3 Flash" }
+    ],
+    "tiers": { "opus": "glm-5.3[1m]", "sonnet": "glm-5.3[1m]", "haiku": "glm-5.3-flash[1m]" },
+    "env": {
+      "API_TIMEOUT_MS": "3000000",
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
+      "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1000000",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    }
+  },
+  {
+    "id": "kimi-code",
+    "name": "Kimi Code",
+    "maker": "moonshot",
+    "baseUrl": "https://api.kimi.ai/coding/",
+    "keyVar": "ANTHROPIC_API_KEY",
+    "keyPage": "https://www.kimi.com/code/console",
+    "planPage": "https://www.kimi.com/code",
+    "models": [
+      { "id": "k3.1-pro", "name": "Kimi K3.1 Pro" },
+      { "id": "k3.1-pro-highspeed", "name": "Kimi K3.1 Pro (high speed)" }
+    ],
+    "tiers": { "opus": "k3.1-pro", "sonnet": "k3.1-pro", "haiku": "k3.1-pro", "subagent": "k3.1-pro" },
+    "env": {
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+      "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144"
+    }
+  },
+  {
+    "id": "minimax-plan",
+    "name": "MiniMax M Plan",
+    "maker": "minimax",
+    "baseUrl": "https://api.minimax.io/anthropic",
+    "keyVar": "ANTHROPIC_AUTH_TOKEN",
+    "keyPage": "https://platform.minimax.io/console/plan",
+    "planPage": "https://platform.minimax.io/docs/coding-plan/claude-code",
+    "models": [
+      { "id": "MiniMax-M3.1-Flash[1m]", "name": "MiniMax M3.1 Flash" }
+    ],
+    "tiers": { "opus": "MiniMax-M3.1-Flash[1m]", "sonnet": "MiniMax-M3.1-Flash[1m]", "haiku": "MiniMax-M3.1-Flash[1m]" },
+    "env": {
+      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "524288"
+    }
+  }
+]

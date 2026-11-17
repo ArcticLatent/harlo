@@ -11,8 +11,25 @@ use serde_json::{Value, json};
 
 use crate::responses::{ApiError, Dropped, Events, Failed, client, refusal_text, send};
 
+/// How a server takes a thinking level.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Thinking {
+    /// `reasoning_effort` (OpenAI's name).
+    #[default]
+    Effort,
+    /// `reasoning: { effort }` (OpenRouter's).
+    Reasoning,
+    /// `thinking: { type }`, `disabled` for "none"; otherwise `enabled`,
+    /// with the effort as `reasoning_effort` unless it's "enabled"
+    /// (DeepSeek's, Z.ai's, MiniMax's).
+    Toggle,
+    /// Claude's (Messages API): adaptive thinking, summarized, with its
+    /// history check; as `Effort` on chat completions.
+    Claude,
+}
+
 /// A request's body.
-pub fn request(model: &str, instructions: &str, messages: &[Value], tools: &Value, effort: Option<&str>) -> Value {
+pub fn request(model: &str, instructions: &str, messages: &[Value], tools: &Value, thinking: Thinking, effort: Option<&str>) -> Value {
     let mut all = vec![json!({ "role": "system", "content": instructions })];
     all.extend(messages.iter().cloned());
     let mut body = json!({ "model": model, "messages": all, "stream": true, "stream_options": { "include_usage": true } });
@@ -26,18 +43,39 @@ pub fn request(model: &str, instructions: &str, messages: &[Value], tools: &Valu
         body["tools"] = json!(functions);
         body["tool_choice"] = json!("auto");
     }
-    if let Some(e) = effort {
-        body["reasoning_effort"] = json!(e);
+    match (thinking, effort) {
+        (_, None) => {}
+        (Thinking::Effort | Thinking::Claude, Some(e)) => body["reasoning_effort"] = json!(e),
+        (Thinking::Reasoning, Some(e)) => body["reasoning"] = json!({ "effort": e }),
+        (Thinking::Toggle, Some("none" | "disabled")) => body["thinking"] = json!({ "type": "disabled" }),
+        (Thinking::Toggle, Some(e)) => {
+            body["thinking"] = json!({ "type": "enabled" });
+            if e != "enabled" {
+                body["reasoning_effort"] = json!(e);
+            }
+        }
     }
     body
 }
 
-/// pi's messages as chat messages. Thinking isn't sent back (servers
-/// differ on whether they take it).
+/// `extra` laid over `body`: its objects into body's, the rest replacing.
+pub fn overlay(body: &mut Value, extra: &Value) {
+    let Some(fields) = extra.as_object() else { return };
+    for (k, v) in fields {
+        if v.is_object() && body[k].is_object() {
+            overlay(&mut body[k], v);
+        } else {
+            body[k] = v.clone();
+        }
+    }
+}
+
 /// pi's messages as Chat Completions'. A tool's images follow its round's
 /// results, as the user's; `images` false (`model` doesn't take them): a
-/// note in their place.
-pub fn messages(history: &[Value], model: &str, images: bool) -> Vec<Value> {
+/// note in their place. Thinking goes back as `reasoning_content` only
+/// when `keep_thinking` (servers that ask for it, as DeepSeek does with
+/// tools); others don't take it, and it costs input.
+pub fn messages(history: &[Value], model: &str, images: bool, keep_thinking: bool) -> Vec<Value> {
     let text_of = |content: &Value| -> String {
         match content {
             Value::String(s) => s.clone(),
@@ -90,6 +128,11 @@ pub fn messages(history: &[Value], model: &str, images: bool) -> Vec<Value> {
                     continue;
                 }
                 let mut msg = json!({ "role": "assistant", "content": if text.is_empty() { Value::Null } else { json!(text.join("")) } });
+                // (Only a chat server's own: a Responses model's is its server's.)
+                let thought: String = blocks.iter().filter(|b| b["type"] == "thinking" && b["thinkingSignature"] == "reasoning_content").filter_map(|b| b["thinking"].as_str()).collect();
+                if keep_thinking && !thought.is_empty() {
+                    msg["reasoning_content"] = json!(thought);
+                }
                 if !calls.is_empty() {
                     msg["tool_calls"] = json!(calls);
                 }
@@ -151,12 +194,35 @@ impl Reply {
         }
         let Some(choice) = chunk["choices"].get(0) else { return };
         let d = &choice["delta"];
-        let thinking = d["reasoning_content"].as_str().or_else(|| d["reasoning"].as_str()).filter(|s| !s.is_empty());
-        if let Some(t) = thinking {
-            self.grow(true, t, out);
+        // (OpenRouter's `reasoning_details` say it again: read when the
+        // others don't.)
+        let details = || -> String { d["reasoning_details"].as_array().into_iter().flatten().filter_map(|r| r["text"].as_str().or_else(|| r["summary"].as_str())).collect() };
+        let thinking = d["reasoning_content"].as_str().or_else(|| d["reasoning"].as_str()).map_or_else(details, str::to_owned);
+        if !thinking.is_empty() {
+            self.grow(true, &thinking, out);
         }
-        if let Some(t) = d["content"].as_str().filter(|s| !s.is_empty()) {
-            self.grow(false, t, out);
+        match &d["content"] {
+            Value::String(t) if !t.is_empty() => self.grow(false, t, out),
+            // (Mistral's while it thinks: chunks, thinking or text.)
+            Value::Array(chunks) => {
+                for c in chunks {
+                    match c["type"].as_str() {
+                        Some("thinking") => {
+                            let t: String = c["thinking"].as_array().into_iter().flatten().filter_map(|p| p["text"].as_str()).collect();
+                            if !t.is_empty() {
+                                self.grow(true, &t, out);
+                            }
+                        }
+                        Some("text") => {
+                            if let Some(t) = c["text"].as_str().filter(|t| !t.is_empty()) {
+                                self.grow(false, t, out);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
         }
         for c in d["tool_calls"].as_array().into_iter().flatten() {
             let index = c["index"].as_u64().unwrap_or(0);
@@ -285,13 +351,28 @@ fn failed_usage(chunk: &Value, before: &Value) -> Value {
     if said.is_object() { usage(&said) } else { Value::Null }
 }
 
+/// Where a request goes, and what it carries besides its body.
+#[derive(Clone, Copy, Debug)]
+pub struct Endpoint<'a> {
+    /// Its address, up to the API's own path.
+    pub base: &'a str,
+    /// The key or token (none: the server takes none).
+    pub key: Option<&'a str>,
+    /// The provider's own headers for the request.
+    pub headers: &'a [(&'static str, String)],
+}
+
 /// Sends one request: `on` gets pi's stream events as they come; the
 /// reply is pi's assistant message, with its usage as the Responses API
 /// says it.
-pub async fn stream(base: &str, token: Option<&str>, body: &Value, provider: &str, model: &str, mut on: impl FnMut(&Value), seen: &mut Value) -> Result<(Value, Value)> {
+pub async fn stream(to: Endpoint<'_>, body: &Value, provider: &str, model: &str, mut on: impl FnMut(&Value), seen: &mut Value) -> Result<(Value, Value)> {
+    let base = to.base;
     let mut req = client().post(format!("{base}/chat/completions")).json(body);
-    if let Some(t) = token {
+    if let Some(t) = to.key {
         req = req.bearer_auth(t);
+    }
+    for (k, v) in to.headers {
+        req = req.header(*k, v);
     }
     let resp = send(req, base).await?;
     let status = resp.status();
@@ -455,7 +536,7 @@ mod tests {
         crate::responses::TEST_IDLE.set(Some(std::time::Duration::from_secs(1)));
         let base = stand_in(how).await;
         let started = std::time::Instant::now();
-        let r = stream(&base, None, &json!({}), "stand-in", "m", |_| {}, &mut Value::Null).await;
+        let r = stream(Endpoint { base: &base, key: None, headers: &[] }, &json!({}), "stand-in", "m", |_| {}, &mut Value::Null).await;
         (r, started.elapsed())
     }
 
@@ -551,7 +632,7 @@ mod tests {
         let (_, _, r) = feed(&[json!({ "choices": [{ "index": 0, "delta": { "content": "Done." }, "finish_reason": "stop" }] })]);
         let u = usage(&r.usage);
         assert_eq!(u, json!({}));
-        let price = crate::used::Pricing::Priced(crate::used::Price { input: 1.0, output: 1.0, cached: 1.0 });
+        let price = crate::used::Pricing::Priced(crate::used::Price::flat(1.0, 1.0, 1.0));
         let used = crate::used::Used::from_api(&u).priced(&price);
         assert_eq!((used.requests, used.unreported, used.cost_kind()), (1, 1, "unknown"));
         let logged = used.log(&u, &price);
@@ -638,13 +719,13 @@ mod tests {
             json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "c1|x", "name": "mcp__s__shot", "arguments": {} }] }),
             json!({ "role": "toolResult", "toolCallId": "c1|x", "toolName": "mcp__s__shot", "content": [{ "type": "text", "text": "[image 1: 2×2 JPEG, 1 KB]" }, img.clone(), img.clone()], "isError": false }),
         ];
-        let sent = messages(&history, "m", true);
+        let sent = messages(&history, "m", true, false);
         assert_eq!(sent[0]["content"], json!([{ "type": "text", "text": "look" }, { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,QUJD" } }]));
         assert_eq!(sent[2]["content"], "[image 1: 2×2 JPEG, 1 KB]\n[Its 2 images are shown after this round's results.]");
         assert_eq!(sent[3]["role"], "user");
         assert_eq!(sent[3]["content"].as_array().unwrap().len(), 3);
         assert_eq!(sent[3]["content"][0]["text"], "Images from mcp__s__shot (call c1):");
-        let plain = messages(&history, "m", false);
+        let plain = messages(&history, "m", false, false);
         assert_eq!(plain[0]["content"][1], json!({ "type": "text", "text": "[image: not sent, m doesn't take images]" }));
         assert_eq!(plain.len(), 3);
     }
@@ -658,15 +739,61 @@ mod tests {
             json!({ "role": "custom", "customType": "turn_stopped", "content": "stopped", "display": false }),
             json!({ "role": "assistant", "content": [{ "type": "thinking", "thinking": "only thought" }] }),
         ];
-        assert_eq!(messages(&history, "m", true), vec![
+        assert_eq!(messages(&history, "m", true, false), vec![
             json!({ "role": "user", "content": "hi" }),
             json!({ "role": "assistant", "content": "Reading.", "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "read", "arguments": "{\"path\":\"a\"}" } }] }),
             json!({ "role": "tool", "tool_call_id": "call_1", "content": "A" }),
             json!({ "role": "user", "content": "stopped" }),
         ]);
-        let body = request("m", "be brief", &messages(&history[..1], "m", true), &json!([{ "name": "ls", "description": "list", "parameters": { "type": "object" } }]), None);
+        let body = request("m", "be brief", &messages(&history[..1], "m", true, false), &json!([{ "name": "ls", "description": "list", "parameters": { "type": "object" } }]), Thinking::Effort, None);
         assert_eq!(body["messages"][0], json!({ "role": "system", "content": "be brief" }));
         assert_eq!(body["tools"][0]["function"]["name"], "ls");
         assert!(body.get("reasoning_effort").is_none());
+    }
+
+    /// Servers that ask for their thinking back get it, their own only.
+    #[test]
+    fn thinking_goes_back_when_asked() {
+        let history = vec![
+            json!({ "role": "assistant", "content": [{ "type": "thinking", "thinking": "a", "thinkingSignature": "reasoning_content" }, { "type": "thinking", "thinking": "b", "thinkingSignature": "reasoning_content" }, { "type": "toolCall", "id": "c1", "name": "ls", "arguments": {} }] }),
+            json!({ "role": "assistant", "content": [{ "type": "thinking", "thinking": "theirs", "thinkingSignature": "{\"type\":\"reasoning\"}" }, { "type": "text", "text": "x" }] }),
+        ];
+        let kept = messages(&history, "m", true, true);
+        assert_eq!((kept[0]["reasoning_content"].as_str(), kept[1].get("reasoning_content")), (Some("ab"), None));
+        assert!(messages(&history, "m", true, false)[0].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn thinking_levels_in_each_style() {
+        let at = |t: Thinking, e: Option<&str>| {
+            let b = request("m", "", &[], &json!([]), t, e);
+            (b.get("reasoning_effort").cloned(), b.get("reasoning").cloned(), b.get("thinking").cloned())
+        };
+        assert_eq!(at(Thinking::Effort, Some("high")), (Some(json!("high")), None, None));
+        assert_eq!(at(Thinking::Reasoning, Some("low")), (None, Some(json!({ "effort": "low" })), None));
+        assert_eq!(at(Thinking::Toggle, Some("none")), (None, None, Some(json!({ "type": "disabled" }))));
+        assert_eq!(at(Thinking::Toggle, Some("max")), (Some(json!("max")), None, Some(json!({ "type": "enabled" }))));
+        assert_eq!(at(Thinking::Toggle, Some("enabled")), (None, None, Some(json!({ "type": "enabled" }))));
+        assert_eq!(at(Thinking::Toggle, None), (None, None, None));
+        let mut body = json!({ "thinking": { "type": "enabled" }, "a": 1 });
+        overlay(&mut body, &json!({ "thinking": { "clear_thinking": false }, "reasoning_split": true }));
+        assert_eq!(body, json!({ "thinking": { "type": "enabled", "clear_thinking": false }, "a": 1, "reasoning_split": true }));
+    }
+
+    /// Mistral's thinking chunks and OpenRouter's reasoning details.
+    #[test]
+    fn other_shapes_of_thinking() {
+        let d = |delta: Value| json!({ "choices": [{ "index": 0, "delta": delta }] });
+        let (_, content, _) = feed(&[
+            d(json!({ "content": [{ "type": "thinking", "thinking": [{ "type": "text", "text": "Hm, " }] }] })),
+            d(json!({ "content": [{ "type": "thinking", "thinking": [{ "type": "text", "text": "yes." }] }, { "type": "text", "text": "It's " }] })),
+            d(json!({ "content": "two." })),
+        ]);
+        assert_eq!(content, vec![
+            json!({ "type": "thinking", "thinking": "Hm, yes.", "thinkingSignature": "reasoning_content" }),
+            json!({ "type": "text", "text": "It's two." }),
+        ]);
+        let (_, content, _) = feed(&[d(json!({ "reasoning_details": [{ "type": "reasoning.text", "text": "Plan." }] })), d(json!({ "reasoning": "Once.", "reasoning_details": [{ "type": "reasoning.text", "text": "Once." }] })), d(json!({ "content": "Done." }))]);
+        assert_eq!(content[0]["thinking"], "Plan.Once.");
     }
 }

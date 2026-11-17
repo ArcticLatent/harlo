@@ -215,6 +215,7 @@ Item {
                 implicitHeight: Theme.px(20)
                 anchors.verticalCenter: parent.verticalCenter
                 provider: root.session.harness
+                maker: Workspace.modelMaker(root.session.modelId)
                 ring: Theme.canvas
             }
             Label { text: Theme.harnessLabel(root.session.harness); color: Theme.text; font.pixelSize: Theme.px(13.5); font.weight: Font.DemiBold }

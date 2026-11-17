@@ -15,20 +15,33 @@ struct ModelPicker: View {
     @State private var loading = true
     @State private var search = ""
 
-    var providers: [(String, [ModelChoice])] {
+    /// The models shown, by provider (its id, its name, its models).
+    var providers: [(String, String, [ModelChoice])] {
         let q = search.trimmingCharacters(in: .whitespaces)
-        let shown = models.filter { q.isEmpty || $0.name.localizedStandardContains(q) || $0.id.localizedStandardContains(q) }
-        var out: [(String, [ModelChoice])] = []
+        let shown = models.filter { q.isEmpty || $0.name.localizedStandardContains(q) || $0.id.localizedStandardContains(q) || $0.providerName.localizedStandardContains(q) }
+        var out: [(String, String, [ModelChoice])] = []
         for m in shown {
-            if let i = out.firstIndex(where: { $0.0 == m.provider }) { out[i].1.append(m) } else { out.append((m.provider, [m])) }
+            if let i = out.firstIndex(where: { $0.0 == m.provider }) { out[i].2.append(m) } else { out.append((m.provider, m.providerName, [m])) }
         }
         return out
+    }
+
+    /// Where more models come from: keys added on the computer.
+    var keysNote: LocalizedStringKey? {
+        switch session.harness {
+        case "harlo":
+            return "Other providers' models show here once their key is added in harlo on your computer: Settings → Providers → Cloud models."
+        case "claude":
+            return "A coding plan's models (GLM, Kimi, MiniMax) show here once its key is added in harlo on your computer: Settings → Providers → Coding plans for Claude Code."
+        default:
+            return nil
+        }
     }
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(providers, id: \.0) { provider, list in
+                ForEach(providers, id: \.0) { _, providerName, list in
                     Section {
                         ForEach(list) { m in
                             Button {
@@ -63,7 +76,16 @@ struct ModelPicker: View {
                             .listRowBackground(Color(p.elevated))
                         }
                     } header: {
-                        Text(provider).font(Style.mono(11.5, .semibold)).foregroundStyle(Color(p.muted)).textCase(nil)
+                        Text(providerName).font(Style.mono(11.5, .semibold)).foregroundStyle(Color(p.muted)).textCase(nil)
+                    }
+                }
+                // Keys stay on the computer: they're added there.
+                if !loading, let note = keysNote {
+                    Section {
+                    } footer: {
+                        Text(note)
+                            .scaledFont(12)
+                            .foregroundStyle(Color(p.muted))
                     }
                 }
             }

@@ -186,10 +186,11 @@ struct SessionContent: View {
         // (The conversation gets the room; Back returns to the tabs.)
         .toolbarVisibility(.hidden, for: .tabBar)
         .toolbar {
-            // The agent's tile, the session's name, and the agent · project · branch.
+            // The session's tile (its model's maker, the agent as a tag), its
+            // name, and the agent · project · branch.
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 10) {
-                    AgentTile(harness: session.harness, size: 34)
+                    AgentTile(harness: session.harness, maker: session.info.maker, size: 34)
                         .overlay(alignment: .bottomTrailing) {
                             if session.busy || !session.requests.isEmpty {
                                 StatusDot(status: session.busy ? "busy" : "input")

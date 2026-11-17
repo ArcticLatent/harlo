@@ -135,6 +135,10 @@ pub struct SessionMeta {
     /// A helper: the session file of the session that started it ("" none),
     /// so it's still shown under it after harlo restarts.
     pub parent: String,
+    /// The model it was last on (`provider/model`) and its name, so its
+    /// icon shows its maker when it isn't running ("" not known).
+    pub model: String,
+    pub model_name: String,
 }
 
 /// harlo's own database: projects, sessions' metadata and settings.
@@ -295,6 +299,10 @@ impl Db {
         let has_base_commit: bool = conn.prepare("SELECT 1 FROM pragma_table_info('worktrees') WHERE name = 'base_commit'")?.exists([])?;
         if !has_base_commit {
             conn.execute_batch("ALTER TABLE worktrees ADD COLUMN base_commit TEXT NOT NULL DEFAULT '';")?;
+        }
+        let has_model: bool = conn.prepare("SELECT 1 FROM pragma_table_info('session_meta') WHERE name = 'model'")?.exists([])?;
+        if !has_model {
+            conn.execute_batch("ALTER TABLE session_meta ADD COLUMN model TEXT NOT NULL DEFAULT ''; ALTER TABLE session_meta ADD COLUMN model_name TEXT NOT NULL DEFAULT '';")?;
         }
         let has_parent: bool = conn.prepare("SELECT 1 FROM pragma_table_info('session_meta') WHERE name = 'parent'")?.exists([])?;
         if !has_parent {
@@ -554,9 +562,22 @@ impl Db {
         Ok(self
             .conn
             .query_row(
-                "SELECT archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent FROM session_meta WHERE path = ?1",
+                "SELECT archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent, model, model_name FROM session_meta WHERE path = ?1",
                 [path.to_string_lossy()],
-                |r| Ok(SessionMeta { archived: r.get(0)?, pinned: r.get(1)?, last_viewed_at: r.get(2)?, settled_why: r.get(3)?, settled_at: r.get(4)?, approval: r.get(5)?, thinking: r.get(6)?, parent: r.get(7)? }),
+                |r| {
+                    Ok(SessionMeta {
+                        archived: r.get(0)?,
+                        pinned: r.get(1)?,
+                        last_viewed_at: r.get(2)?,
+                        settled_why: r.get(3)?,
+                        settled_at: r.get(4)?,
+                        approval: r.get(5)?,
+                        thinking: r.get(6)?,
+                        parent: r.get(7)?,
+                        model: r.get(8)?,
+                        model_name: r.get(9)?,
+                    })
+                },
             )
             .optional()?
             .unwrap_or_default())
@@ -568,11 +589,22 @@ impl Db {
     ///
     /// A SQLite error when the database can't be read.
     pub fn all_session_meta(&self) -> Result<Vec<(PathBuf, SessionMeta)>> {
-        let mut stmt = self.conn.prepare("SELECT path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent FROM session_meta")?;
+        let mut stmt = self.conn.prepare("SELECT path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent, model, model_name FROM session_meta")?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 PathBuf::from(r.get::<_, String>(0)?),
-                SessionMeta { archived: r.get(1)?, pinned: r.get(2)?, last_viewed_at: r.get(3)?, settled_why: r.get(4)?, settled_at: r.get(5)?, approval: r.get(6)?, thinking: r.get(7)?, parent: r.get(8)? },
+                SessionMeta {
+                    archived: r.get(1)?,
+                    pinned: r.get(2)?,
+                    last_viewed_at: r.get(3)?,
+                    settled_why: r.get(4)?,
+                    settled_at: r.get(5)?,
+                    approval: r.get(6)?,
+                    thinking: r.get(7)?,
+                    parent: r.get(8)?,
+                    model: r.get(9)?,
+                    model_name: r.get(10)?,
+                },
             ))
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -585,9 +617,9 @@ impl Db {
     /// A SQLite error when the database can't be written.
     pub fn set_session_meta(&self, path: &Path, meta: &SessionMeta) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO session_meta (path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(path) DO UPDATE SET archived = ?2, pinned = ?3, last_viewed_at = ?4, settled_why = ?5, settled_at = ?6, approval = ?7, thinking = ?8, parent = ?9",
-            params![path.to_string_lossy(), meta.archived, meta.pinned, meta.last_viewed_at, meta.settled_why, meta.settled_at, meta.approval, meta.thinking, meta.parent],
+            "INSERT INTO session_meta (path, archived, pinned, last_viewed_at, settled_why, settled_at, approval, thinking, parent, model, model_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(path) DO UPDATE SET archived = ?2, pinned = ?3, last_viewed_at = ?4, settled_why = ?5, settled_at = ?6, approval = ?7, thinking = ?8, parent = ?9, model = ?10, model_name = ?11",
+            params![path.to_string_lossy(), meta.archived, meta.pinned, meta.last_viewed_at, meta.settled_why, meta.settled_at, meta.approval, meta.thinking, meta.parent, meta.model, meta.model_name],
         )?;
         Ok(())
     }
@@ -930,7 +962,7 @@ mod tests {
         conn.execute_batch("CREATE TABLE session_meta (path TEXT PRIMARY KEY, archived INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, last_viewed_at INTEGER NOT NULL DEFAULT 0); INSERT INTO session_meta (path, pinned) VALUES ('/s/a', 1);").unwrap();
         let db = Db::init(conn).unwrap();
         assert_eq!(db.session_meta(Path::new("/s/a")).unwrap(), SessionMeta { pinned: true, ..Default::default() });
-        let modes = SessionMeta { approval: "yolo".into(), thinking: "max".into(), parent: "/s/lead".into(), ..Default::default() };
+        let modes = SessionMeta { approval: "yolo".into(), thinking: "max".into(), parent: "/s/lead".into(), model: "glm-coding/glm-5.3[1m]".into(), model_name: "GLM 5.3".into(), ..Default::default() };
         db.set_session_meta(Path::new("/s/a"), &modes).unwrap();
         assert_eq!(db.session_meta(Path::new("/s/a")).unwrap(), modes, "a session's modes come back");
     }

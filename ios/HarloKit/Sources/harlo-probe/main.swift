@@ -624,8 +624,8 @@ func record(_ link: String, to path: String) async {
 
     // Two other sessions first (older in the list): a Harlo question and
     // Claude Code with a subagent.
-    let other = await start("harlo", "Why does the relay drop idle phones?", model: "tour/tour-coder")
-    check(other != nil, "a short Harlo session")
+    let other = await start("harlo", "Why does the relay drop idle phones?", model: "opencode-go/glm-5.3")
+    check(other != nil && other?.info.maker == "zai-coding-plan", "a short Harlo session on OpenCode Go's GLM 5.3 (\(other?.info.modelId ?? ""), \(other?.info.maker ?? ""))")
     let claude = await start("claude", "Have a subagent look over the README and delegate the review")
     check(claude != nil && claude?.rows.contains { $0.kind == "tool" } == true, "a Claude Code session with tool calls (\(claude?.rows.map(\.kind) ?? []))")
 
@@ -643,7 +643,8 @@ func record(_ link: String, to path: String) async {
     _ = await model.sessionMentions(matching: "")
     _ = await model.file("src/sidebar.rs")
     _ = await model.branches()
-    _ = await model.models()
+    let picker = await model.models()
+    check(picker.contains { $0.provider == "opencode-go" && $0.modelId == "glm-5.3" }, "OpenCode Go's models in the picker (\(Set(picker.map(\.provider))))")
     _ = await model.thinkingLevels()
     _ = await model.actionLog()
     _ = await model.markdown()

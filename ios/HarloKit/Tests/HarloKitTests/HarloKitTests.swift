@@ -962,9 +962,37 @@ final class MachinesTests: XCTestCase {
         XCTAssertFalse(old.needsConnecting(.project(2)))
     }
 
+    func testASessionsIconShowsItsModelsMaker() {
+        let s = SessionSummary(["key": "k", "harness": "claude", "model": "glm-coding/glm-5.3[1m]", "modelName": "GLM 5.3", "maker": "zai-coding-plan"])
+        XCTAssertEqual(s.modelName, "GLM 5.3")
+        XCTAssertEqual(s.maker, "zai-coding-plan")
+        XCTAssertEqual(SessionSummary(["key": "old"]).maker, "", "from a harlo that doesn't say")
+        XCTAssertEqual(SessionInfo(["modelId": "opencode-go/claude-haiku-5-5", "maker": "anthropic"]).maker, "anthropic")
+        // Claude Code on Claude: Claude's own mark; any other maker, or
+        // another agent: the maker, with the agent as a tag.
+        XCTAssertFalse(Palette.modelFirst(harness: "claude", maker: "anthropic"))
+        XCTAssertTrue(Palette.modelFirst(harness: "claude", maker: "zai-coding-plan"))
+        XCTAssertTrue(Palette.modelFirst(harness: "harlo", maker: "anthropic"))
+        XCTAssertFalse(Palette.modelFirst(harness: "harlo", maker: ""))
+    }
+
     func testModelsOnAStoppedServer() {
         XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q", "stoppedServer": "llama.cpp"]).stoppedServer, "llama.cpp")
         XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q"]).stoppedServer, "")
+        // Whose it is, as harlo says it; the id when it doesn't.
+        XCTAssertEqual(ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-opus-5-5"]).providerName, "Anthropic")
+        XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q"]).providerName, "llama")
+        // A coding plan's model (Claude Code on it): under the plan's name,
+        // and its id is the one harlo gives the session on it.
+        let plan = ModelChoice(["provider": "glm-coding", "providerName": "GLM Coding Plan", "id": "glm-5.3[1m]", "name": "GLM 5.3", "reasoning": true])
+        XCTAssertEqual(plan.providerName, "GLM Coding Plan")
+        XCTAssertEqual(plan.id, "glm-coding/glm-5.3[1m]")
+        XCTAssertEqual(plan.modelId, "glm-5.3[1m]")
+        // OpenCode Go's (Harlo's agent on it): under its name, whatever
+        // API each model is asked on.
+        let go = ModelChoice(["provider": "opencode-go", "providerName": "OpenCode Go", "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "reasoning": true])
+        XCTAssertEqual(go.providerName, "OpenCode Go")
+        XCTAssertEqual(go.id, "opencode-go/claude-haiku-5-5")
     }
 
     func testModelServersFromHarlo() {

@@ -30,6 +30,9 @@ pub struct LiveInfo {
     pub needs_input: bool,
     pub unread: bool,
     pub started_at: SystemTime,
+    /// The model it's on (`provider/model`) and its name ("" not known yet).
+    pub model: String,
+    pub model_name: String,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -89,6 +92,10 @@ pub struct SidebarRow {
     /// session's title, and how deep ([`nest_helpers`]).
     pub helper_of: String,
     pub nest: u32,
+    /// A session's model (`provider/model`) and its name: as it runs, else
+    /// as it last ran in harlo ("" not known).
+    pub model: String,
+    pub model_name: String,
 }
 
 /// What the sidebar is built from.
@@ -129,6 +136,8 @@ struct Entry {
     pinned: bool,
     /// On its project's Settled shelf: why.
     settled: String,
+    model: String,
+    model_name: String,
 }
 
 /// A session of a project, whatever the list shows (archived, on a shelf).
@@ -223,6 +232,11 @@ fn entries(input: &SidebarInput<'_>, filter: &str) -> Vec<Entry> {
         // Settled: on the shelf until there's newer work in it (or it's
         // working, waiting on you, or pinned).
         let settled = if !meta.settled_why.is_empty() && !meta.pinned && !active && unix(s.modified) <= meta.settled_at { meta.settled_why.clone() } else { String::new() };
+        // (Its model as it runs, else as it last ran.)
+        let (model, model_name) = match live.filter(|l| !l.model.is_empty()) {
+            Some(l) => (l.model.clone(), l.model_name.clone()),
+            None => (meta.model.clone(), meta.model_name.clone()),
+        };
         entries.push(Entry {
             key,
             path: Some(s.path.clone()),
@@ -236,6 +250,8 @@ fn entries(input: &SidebarInput<'_>, filter: &str) -> Vec<Entry> {
             branch: String::new(),
             owner: None,
             settled,
+            model,
+            model_name,
         });
     }
     // Live sessions whose file is not on disk yet (new, nothing sent).
@@ -264,6 +280,8 @@ fn entries(input: &SidebarInput<'_>, filter: &str) -> Vec<Entry> {
             branch: String::new(),
             owner: None,
             settled: String::new(),
+            model: l.model.clone(),
+            model_name: l.model_name.clone(),
         });
     }
 
@@ -390,6 +408,8 @@ fn push_sessions(rows: &mut Vec<SidebarRow>, sessions: &[&Entry], project_id: i6
             branch: e.branch.clone(),
             cwd: e.cwd.clone(),
             settled: e.settled.clone(),
+            model: e.model.clone(),
+            model_name: e.model_name.clone(),
             ..SidebarRow::default()
         });
     }
@@ -543,6 +563,8 @@ pub fn phone_list(rows: Vec<SidebarRow>, parents: &HashMap<String, String>, requ
                 "requests": requests(&r.key),
                 // A helper: the session that started it (shown under it).
                 "parent": if r.nest > 0 { parents.get(&r.key).cloned() } else { None }, "helperOf": r.helper_of, "nest": r.nest,
+                // Its model (as it runs, else as it last ran): its icon's maker.
+                "model": r.model, "modelName": r.model_name,
             })),
             SidebarKind::More | SidebarKind::Shelf => {}
         }
@@ -617,6 +639,8 @@ mod tests {
             needs_input: false,
             unread: false,
             started_at: SystemTime::now(),
+            model: String::new(),
+            model_name: String::new(),
         };
         let live = [live("live:1", "/w", Some("/s/running")), live("live:2", "/w", None), live("live:3", "/elsewhere", None)];
         let input = SidebarInput { projects: &projects, worktrees: &worktrees, sessions: &sessions, live: &live, meta: &meta, filter: "hidden by a filter", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] };
@@ -694,12 +718,19 @@ mod tests {
             needs_input: false,
             unread: false,
             started_at: SystemTime::now(),
+            model: "glm-coding/glm-5.3[1m]".into(),
+            model_name: "GLM 5.3".into(),
         }];
         let meta = HashMap::new();
         let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &live, meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[1].key.as_str(), rows[1].status.as_str()), ("live:1", "busy"));
         assert_eq!(rows[0].status, "busy", "project shows the most urgent child status");
+        assert_eq!((rows[1].model.as_str(), rows[1].model_name.as_str()), ("glm-coding/glm-5.3[1m]", "GLM 5.3"), "its model, as it runs");
+        // Not running: its model as it last ran.
+        let meta = HashMap::from([(PathBuf::from("/s/a"), SessionMeta { model: "anthropic/claude-opus-5-5".into(), model_name: "Claude Opus 5.5".into(), ..SessionMeta::default() })]);
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
+        assert_eq!(rows[1].model, "anthropic/claude-opus-5-5");
     }
 
     #[test]
@@ -796,6 +827,8 @@ mod tests {
                 needs_input,
                 unread: false,
                 started_at: SystemTime::now(),
+                model: String::new(),
+                model_name: String::new(),
             }];
             build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &live, meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] })
                 .iter()

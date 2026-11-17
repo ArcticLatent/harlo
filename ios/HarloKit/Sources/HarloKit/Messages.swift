@@ -28,6 +28,10 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public var parent: String
     public var helperOf: String
     public var nest: Int
+    /// Its model's name (as it runs, else as it last ran; "" not known),
+    /// and who made it: a logo's id ("anthropic", "zai-coding-plan", …).
+    public var modelName: String
+    public var maker: String
 
     public var id: String { key }
 
@@ -47,6 +51,8 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
         parent = v["parent"].text
         helperOf = v["helperOf"].text
         nest = Int(v["nest"].int ?? 0)
+        modelName = v["modelName"].text
+        maker = v["maker"].text
     }
 
     public static func list(_ v: JSON) -> [SessionSummary] {

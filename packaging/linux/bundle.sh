@@ -57,6 +57,8 @@ install -Dm644 crates/harlo-app/icons/PASEO-NOTICE "$LIC/paseo-NOTICE"
 install -Dm644 crates/harlo-app/sounds/NOTICE "$LIC/sounds-NOTICE"
 install -Dm644 crates/harlo-app/sounds/CC-BY-SA-4.0.txt "$LIC/sounds-CC-BY-SA-4.0.txt"
 install -Dm644 crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE "$LIC/provider-logos-LICENSE"
+install -Dm644 crates/harlo-app/icons/providers/LOBEHUB-LICENSE "$LIC/provider-logos-lobehub-LICENSE"
+install -Dm644 crates/harlo-app/icons/providers/OPENCODE-LICENSE "$LIC/provider-logos-opencode-LICENSE"
 install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$LIC/tweetnacl-LICENSE"
 install -Dm644 crates/harlo-app/assets/mermaid/LICENSE "$LIC/mermaid-LICENSE"
 # (The wiki is ported from OpenWiki, MIT.)

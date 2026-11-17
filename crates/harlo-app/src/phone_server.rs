@@ -447,7 +447,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
     Some(match u {
         SessionUpdate::Status(s) => json!({ "ev": "status", "key": key, "status": s.as_str() }),
         SessionUpdate::Meta(m) => json!({ "ev": "meta", "key": key, "title": if m.name.is_empty() { &m.first_message } else { &m.name }, "model": m.model,
-            "modelId": m.model_id, "thinking": m.thinking, "contextTokens": m.context_tokens, "contextWindow": m.context_window, "cost": m.cost, "costKind": m.cost_kind,
+            "modelId": m.model_id, "maker": crate::provider_logos::maker_of(&m.model_id).unwrap_or_default(), "thinking": m.thinking, "contextTokens": m.context_tokens, "contextWindow": m.context_window, "cost": m.cost, "costKind": m.cost_kind,
             // Where it compacts on its own (0 not known); its plan's limit used up.
             "compactAt": m.compact_at, "limitRefused": m.limit_refused }),
         SessionUpdate::Commands(list) => json!({ "ev": "commands", "key": key,
@@ -750,6 +750,8 @@ async fn session_op(op: &str, msg: &Value, live: &crate::registry::LiveRef) -> V
             };
             let mut models: Vec<Value> = data["models"].as_array().into_iter().flatten().map(|m| json!({
                 "provider": m["provider"], "id": m["id"], "name": m["name"], "reasoning": m["reasoning"].as_bool() == Some(true),
+                // Whose it is, said as its maker says it.
+                "providerName": m["providerName"].as_str().filter(|n| !n.is_empty()).or(m["provider"].as_str()).unwrap_or_default(),
             })).collect();
             // Those on a model server that's stopped (it starts with the next message).
             let of = crate::phone_bridge::call(json!({ "op": "serverOf", "key": msg["key"] })).await;

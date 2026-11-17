@@ -1600,13 +1600,15 @@ impl ChatSession {
                 let reasoning = if m["reasoning"].as_bool() == Some(true) { "1" } else { "0" };
                 // Served on this computer or the local network.
                 let local = if m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url) { "1" } else { "0" };
-                list.append(QString::from(&format!("{}\t{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning, local)));
+                // (A coding plan's model: the plan's name, its group in the picker.)
+                let plan = if m["plan"] == true { s("providerName") } else { String::new() };
+                list.append(QString::from(&format!("{}\t{}\t{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning, local, plan)));
             }
             this.as_mut().set_models(list);
             this.as_mut().set_models_answered(true);
         };
         // Claude on another machine lists its models signed in or not, and
-        // refuses the first message: none to pick there until it's signed in.
+        // refuses the first message: none of its own to pick there until it's signed in.
         let host = (self.harness.to_string() == "claude")
             .then(|| harlo_core::remote::host_of(&PathBuf::from(self.cwd.to_string())).and_then(|h| harlo_core::remote::host(&h)))
             .flatten();
@@ -1617,13 +1619,14 @@ impl ChatSession {
         let (thread, generation) = (self.qt_thread(), self.generation);
         crate::runtime().spawn(async move {
             let signed_in = tokio::task::spawn_blocking(move || harlo_core::providers::claude_signed_in_on(&host)).await.ok().flatten();
-            let _ = thread.queue(move |mut this| {
+            let _ = thread.queue(move |this| {
                 if this.generation != generation {
                     return;
                 }
                 if signed_in == Some(false) {
-                    this.as_mut().set_models(QStringList::default());
-                    this.as_mut().set_models_answered(true);
+                    // (Not signed in there: only its coding plans, which
+                    // need no Claude account.)
+                    answer(this, json!({ "models": harlo_core::coding_plans::models_json() }));
                 } else {
                     this.request_or(json!({ "type": "get_available_models" }), answer, |this| this.set_models_answered(true));
                 }
