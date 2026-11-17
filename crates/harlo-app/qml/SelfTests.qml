@@ -10759,6 +10759,7 @@ Item {
             const card = tests.findName("workflowCard", chat)
             tests.check(tests.shown(tests.findName("workflowMerge", card)) && tests.shown(tests.findName("workflowPublish", card)) && tests.shown(tests.findName("workflowRemove", card)), "done, its card offers Merge, a pull request and Remove worktree")
             tests.check(tests.findName("workflowMerge", card).text === "Merge into " + JSON.parse(Workspace.worktreeInfo(chat.session.key)).base, "Merge names the branch it goes into (" + tests.findName("workflowMerge", card).text + ")")
+            tests.check(tests.shown(tests.findName("undoLatest", chat)), "before it's merged, the last turn's changes can be undone")
             tests.clickItem(tests.findName("workflowPublish", card), "Push for a pull request") } }
         // (The test repository has no remote: the push fails, and says so.)
         ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => tests.workflowLogHas("Pushing failed"), 20000) }
@@ -10773,6 +10774,7 @@ Item {
             tests.check(TestInput.readFile(win.argValue("--cwd=") + "/greet.txt") === "hello!\n", "merged: the project's checkout has the approved change")
             tests.check(r.log.some(e => e.text.indexOf("Merged workflow/") === 0), "the run's log says it was merged")
             tests.check(!tests.shown(tests.findName("workflowMerge", card)) && tests.findText("Merged into " + r.base, card) !== null, "the card says it's merged, and offers no second merge")
+            tests.check(!tests.shown(tests.findName("undoLatest", chat)), "merged, its session no longer offers to undo the last turn's changes")
             tests.shotWindow("clicks-workflow-merged")
             tests.clickItem(tests.findName("workflowRemove", card), "Remove worktree") } }
         PauseAnimation { duration: 400 }
@@ -10890,6 +10892,151 @@ Item {
             tests.shotWindow("clicks-workflow-no-git")
             sidebar.workflowDialog.close()
             tests.summary(); Qt.quit() } }
+    }
+
+    // Workflows run for real (scripts/workflow-check/real.sh; real agents,
+    // it spends tokens): --case-file= says what (kind "new": Add a project's
+    // new folder in --parent=, "existing": the repository at --cwd=), the
+    // task typed in the project's new session, Run as workflow with the
+    // case's criteria and test command, Harlo on --model= with "Run anything
+    // without asking", Start. It watches the run (a status file every 10 s;
+    // a session waiting on you for 90 s, a paused run, 25 min with nothing
+    // new, or --limit= minutes end it), merges a done run from its card and
+    // writes <selftest>/workflow-real.json: a verdict, the run, problems.
+    property var realCase: ({})
+    property var realProblems: []
+    property int realLogSeen: 0
+    property double realLogAt: 0
+    property double realTick: 0
+    property double realAsking: 0
+    property int realShotAttempt: 0
+    property double realUntil: 0
+    function realProblem(text) { tests.log("problem:", text); tests.realProblems = tests.realProblems.concat([text]) }
+    function realFinish(verdict) {
+        const r = tests.workflowRun()
+        TestInput.writeFile(win.selftestDir + "/workflow-real.json", JSON.stringify({ verdict: verdict, case: tests.realCase, problems: tests.realProblems, run: r }, null, 1))
+        tests.log("verdict:", verdict)
+        Qt.quit()
+    }
+    function realProject() { return JSON.parse(Workspace.projectsJson()).find(p => p.path === win.argValue("--cwd=")) }
+    /// The run's end, or a reason it won't: true stops the wait.
+    function realWatch() {
+        const r = tests.workflowRun()
+        if (!r) return Date.now() > tests.realUntil
+        const now = Date.now()
+        if (r.log.length !== tests.realLogSeen) { tests.realLogSeen = r.log.length; tests.realLogAt = now }
+        if (r.state === "done" || r.state === "stopped" || r.state === "failed") return true
+        if (r.state === "paused") { tests.realProblem("paused: " + (r.why || "no reason given")); return true }
+        if (now - tests.realTick < 10000) return false
+        tests.realTick = now
+        TestInput.writeFile(win.selftestDir + "/workflow-status.json", JSON.stringify({ at: new Date().toISOString(), run: r, open: chat.session.key, status: chat.session.status, asking: chat.session.hasRequest }, null, 1))
+        if (r.attempt !== tests.realShotAttempt) { tests.realShotAttempt = r.attempt; tests.shotWindow("4-attempt-" + r.attempt) }
+        // (What it waits on is open, as you'd have it.)
+        const waited = r.session || r.implementation
+        if (waited && Workspace.activeKey !== waited) Workspace.open(waited)
+        if (chat.session.hasRequest) {
+            if (!tests.realAsking) tests.realAsking = now
+            if (now - tests.realAsking > 90000) {
+                tests.shotWindow("x-waiting-on-you")
+                tests.realProblem("a session waits on you: " + chat.session.title + ": " + tests.chatText().slice(-600))
+                return true
+            }
+        } else tests.realAsking = 0
+        if (now - tests.realLogAt > 25 * 60000 && chat.session.status === "idle") {
+            tests.shotWindow("x-stalled")
+            tests.realProblem("nothing new for 25 min (" + r.state + ", waiting on " + (r.waiting || "?") + ")")
+            return true
+        }
+        if (now > tests.realUntil) { tests.shotWindow("x-limit"); tests.realProblem("not done in " + win.argValue("--limit=") + " min"); return true }
+        return false
+    }
+    SequentialAnimation {
+        id: workflowRealSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "workflowreal"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            tests.realCase = JSON.parse(TestInput.readFile(win.argValue("--case-file=")))
+            if (tests.realCase.kind === "new") sidebar.openAddProject()
+            else Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            if (tests.realCase.kind === "new") {
+                tests.clickItem(tests.findName("addProjectNewFolder"), "Or start a new folder…")
+            } else {
+                const p = tests.realProject()
+                if (!p) { tests.realFinish("FAIL the project wasn't added"); return }
+                win.openDraft(p.id)
+            } } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            if (tests.realCase.kind !== "new") return
+            const d = sidebar.addProjectDialog
+            d.newParent = win.argValue("--parent=")
+            d.newFolderName.text = tests.realCase.folder
+            const agent = tests.findName("addProjectAgent-harlo")
+            if (agent) tests.clickItem(agent, "Harlo") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            if (tests.realCase.kind !== "new") return
+            tests.shotPopup(sidebar.addProjectDialog, "1-add-project")
+            tests.clickItem(tests.findName("addProjectAdd"), "Create and add") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const p = tests.realProject()
+            if (!p) { tests.realFinish("FAIL no project at " + win.argValue("--cwd=") + (sidebar.addProjectDialog.problem ? ": " + sidebar.addProjectDialog.problem : "")); return }
+            if (!chat.draftView.visible || !chat.draftView.project || chat.draftView.project.id !== p.id) win.openDraft(p.id)
+            chat.draftView.harness = "harlo"
+            chat.draftView.input.text = tests.realCase.task } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.shotWindow("2-new-session")
+            tests.clickItem(tests.findName("draftWorkflowButton"), "Run as workflow") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            if (!d.visible) { tests.realFinish("FAIL Run as workflow didn't open the start dialog"); return }
+            d.criteriaArea.text = tests.realCase.criteria || ""
+            d.testField.text = tests.realCase.tests || ""
+            d.approvalBox.currentIndex = 2
+            tests.realUntil = Date.now() + 60000 } }
+        ScriptAction { script: tests.waitUntil(workflowRealSteps, () => sidebar.workflowDialog.implementerModels.some(m => m.id === win.argValue("--model=")) || Date.now() > tests.realUntil, 70000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            const i = d.implementerModels.findIndex(m => m.id === win.argValue("--model="))
+            if (i < 0) { tests.realFinish("FAIL the dialog doesn't offer " + win.argValue("--model=") + " (" + d.implementerModels.map(m => m.id).join(", ") + ")"); return }
+            d.implementerModelBox.currentIndex = i + 1
+            d.implementerModelBox.activated(i + 1) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.shotWindow("3-start-dialog")
+            tests.clickItem(tests.findName("workflowStart"), "Start") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            if (d.visible) { tests.shotWindow("x-not-started"); tests.realFinish("FAIL it didn't start: " + d.problem.text); return }
+            tests.realLogAt = Date.now()
+            tests.realUntil = Date.now() + Number(win.argValue("--limit=") || 90) * 60000 } }
+        ScriptAction { script: tests.waitUntil(workflowRealSteps, () => tests.realWatch(), 24 * 3600 * 1000) }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            if (r && r.implementation) Workspace.open(r.implementation) } }
+        PauseAnimation { duration: 2000 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.shotWindow("5-end")
+            if (!r || r.state !== "done") { tests.realFinish("FAIL the run ended " + (r ? r.state : "unstarted") + " on attempt " + (r ? r.attempt : 0)); return }
+            const merge = tests.findName("workflowMerge", chat)
+            if (!tests.shown(merge)) { tests.realFinish("FAIL done, but its card offers no Merge"); return }
+            tests.clickItem(merge, "Merge") } }
+        ScriptAction { script: tests.waitUntil(workflowRealSteps, () => tests.workflowRun().merged || tests.workflowRun().log.some(e => /^Merg\S* failed: /.test(e.text)), 60000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.shotWindow("6-merged")
+            tests.realFinish(r.merged ? "pass: done on attempt " + r.attempt + ", merged into " + r.base : "FAIL done on attempt " + r.attempt + ", but not merged: " + r.log[r.log.length - 1].text) } }
     }
 
     // A plan run reviews each step: Settings → Teamwork has it on; a

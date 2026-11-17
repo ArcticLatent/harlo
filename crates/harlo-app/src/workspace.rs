@@ -6068,6 +6068,11 @@ impl Workspace {
         if became_busy || became_idle {
             self.as_mut().child_progress(key, became_idle, &notes);
         }
+        // A workflow's session asking you something, or answered: its
+        // run's card says so.
+        if (answered || notes.iter().any(|n| matches!(n, Note::Question(..)))) && self.workflows.keys.contains_key(key) {
+            self.as_mut().workflows_changed();
+        }
         // A workflow's session: its report to the run.
         if became_idle {
             self.as_mut().workflow_turn_ended(key, &notes);

@@ -14,6 +14,8 @@ Rectangle {
     readonly property var run: session && session.key !== "" && Workspace.workflowsRevision >= 0 && Workspace.orchestrationRevision >= 0
         ? (s => s === "" ? null : JSON.parse(s))(Workspace.workflowFor(session.key)) : null
     readonly property bool paused: !!run && run.state === "paused"
+    // One of its sessions waits on you (a question or an approval).
+    readonly property bool asking: !!run && !!run.asking
     readonly property bool over: !!run && (run.state === "done" || run.state === "stopped")
     property bool expanded: false
     /// Too narrow for the workflow's name beside Pause and Stop: the
@@ -32,7 +34,7 @@ Rectangle {
     implicitHeight: col.implicitHeight + 16
     radius: 10
     color: Theme.elevated
-    border.color: paused ? Theme.warning : Theme.border
+    border.color: paused || asking ? Theme.warning : Theme.border
 
     function stageColor(status) {
         switch (status) {
@@ -160,7 +162,7 @@ Rectangle {
                 objectName: "workflowState"
                 width: Math.min(implicitWidth, stagesFlow.width)
                 text: root.stateLine()
-                color: root.paused ? Theme.warning : root.run && root.run.state === "done" ? Theme.success : Theme.muted
+                color: root.paused || root.asking ? Theme.warning : root.run && root.run.state === "done" ? Theme.success : Theme.muted
                 font.pixelSize: Theme.px(12)
                 wrapMode: Text.Wrap
             }

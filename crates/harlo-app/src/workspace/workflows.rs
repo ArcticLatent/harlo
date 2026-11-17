@@ -564,7 +564,18 @@ impl Workspace {
             })
             .collect();
         let current = run.current();
+        // (A session of the run waiting on you: that's what holds it up.)
+        let asking = self
+            .workflows
+            .keys
+            .iter()
+            .filter(|(_, s)| s.run == run.id)
+            .find_map(|(k, s)| self.live.get(k).and_then(|e| e.requests.first()).map(|(r, _)| (s.kind, r.question().to_owned())));
         let waiting = match (&run.state, run.wait.as_ref().map(|w| w.kind)) {
+            (State::Running, _) if let Some((kind, question)) = &asking => {
+                let who = if *kind == StageKind::Review { "The review" } else { "The implementation session" };
+                format!("{who} needs you: {}", question.trim_end_matches(['?', '.', ' ']))
+            }
             (State::Running, Some(StageKind::Implement)) => format!("The implementation session is working on attempt {}", run.attempt),
             (State::Running, Some(StageKind::Check)) => format!("Running `{}`", current.map(|s| s.command.as_str()).unwrap_or_default()),
             (State::Running, Some(StageKind::Review)) => {
@@ -591,7 +602,7 @@ impl Workspace {
             "id": run.id, "title": run.title(), "workflow": run.definition.name, "doneText": run.definition.done_text(),
             "project": run.project.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "createdAt": run.created_at,
             "state": state, "why": why, "attempt": run.attempt, "stages": stages,
-            "waiting": waiting, "role": role, "branch": run.worktree.as_ref().map(|w| w.branch.clone()).unwrap_or_default(),
+            "waiting": waiting, "asking": asking.is_some() && matches!(run.state, State::Running), "role": role, "branch": run.worktree.as_ref().map(|w| w.branch.clone()).unwrap_or_default(),
             "implementer": agents::label(&run.implementer.harness), "reviewer": agents::label(&run.reviewer.harness),
             "implementerModel": run.implementer.model, "reviewerModel": run.reviewer.model,
             "testCommand": run.test_command, "lastCheck": check.unwrap_or(Value::Null), "liveCheck": live.unwrap_or(Value::Null), "log": log,
@@ -677,7 +688,7 @@ impl Workspace {
 
     /// Runs or workflows changed: the views (and phones with a run's card
     /// open) read them again.
-    fn workflows_changed(mut self: Pin<&mut Self>) {
+    pub(super) fn workflows_changed(mut self: Pin<&mut Self>) {
         let next = self.workflows_revision + 1;
         self.as_mut().set_workflows_revision(next);
         crate::phone_bridge::workflows_changed();
@@ -797,7 +808,9 @@ impl Workspace {
         if let Some(live) = registry::get(&key) {
             live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
         }
-        if kind == StageKind::Implement && !run.approval.is_empty() {
+        // (The run's permissions, for its reviewers too: a review that runs
+        // the tests mustn't wait on you when you chose not to be asked.)
+        if !run.approval.is_empty() {
             self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&run.approval));
         }
         let first = FirstPrompt { text: prompt, attachments: Vec::new(), server: Some((agent.harness.clone(), agent.model.clone())), by_you: false };
@@ -823,7 +836,7 @@ impl Workspace {
         live.handle.send_raw(json!({ "type": "set_session_name", "name": workflow_title(run, kind) }));
         // (Its approval mode again too: one set just before harlo stopped,
         // before its file was known, wasn't kept.)
-        if kind == StageKind::Implement && !run.approval.is_empty() {
+        if !run.approval.is_empty() {
             self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&run.approval));
         }
         let busy = self.live.get(&key).is_some_and(|e| e.info.status == harlo_core::SessionStatus::Busy);

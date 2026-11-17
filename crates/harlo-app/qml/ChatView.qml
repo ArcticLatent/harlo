@@ -496,6 +496,7 @@ Rectangle {
                 anchors.fill: parent
                 // `root.session`: a bare `session` here would name this property itself.
                 session: root.session
+                undoOff: !!workflowCard.run && (workflowCard.run.merged || workflowCard.run.removed)
                 onOpenDiff: path => root.openDiff(path)
                 onOpenFileAt: (path, line) => { fileEditor.showLine(path, line); root.requestOpenFile(path) }
                 onOpenFile: path => root.requestOpenFile(path)

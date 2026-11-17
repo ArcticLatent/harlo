@@ -38,6 +38,10 @@ Item {
     /// button sits at the end of the turn, under the agent's reply.
     readonly property var undoable: session && session.undoJson !== "" ? JSON.parse(session.undoJson) : ({})
     /// The latest turn's message, when the turn changed files ("" if not).
+    /// No "Undo these changes": a workflow run's session once the run is
+    /// merged or its worktree removed (undoing would only change the
+    /// worktree).
+    property bool undoOff: false
     readonly property string latestUndo: {
         for (const k in undoable) if (undoable[k].next === "" && undoable[k].files > 0) return k
         return ""
@@ -589,7 +593,7 @@ Item {
                     objectName: "thoughtPreview"
                     Layout.fillWidth: true
                     visible: !thought.open
-                    text: thought.text.trim().split("\n")[0].replace(/^[#*_>\s-]+/, "")
+                    text: thought.text.trim().split("\n")[0].replace(/^[#*_>\s-]+/, "").replace(/[*_\s]+$/, "")
                     color: thoughtHover.hovered ? Theme.textMuted : Theme.textFaint
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
@@ -1060,7 +1064,7 @@ Item {
                 id: latestUndoButton
                 objectName: "undoLatest"
                 readonly property var turn: root.latestUndo !== "" ? root.undoable[root.latestUndo] : null
-                visible: root.session.status !== "busy" && turn !== null
+                visible: root.session.status !== "busy" && turn !== null && !root.undoOff
                 x: view.columnX
                 anchors.verticalCenter: parent.verticalCenter
                 text: turn ? "Undo these changes (" + (turn.files === 1 ? "1 file" : turn.files + " files") + ")" : ""
