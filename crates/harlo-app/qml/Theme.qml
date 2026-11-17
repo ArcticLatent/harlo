@@ -164,7 +164,11 @@ QtObject {
     readonly property bool wrapCode: look.wrap === true
     /// An agent's avatar colours: a soft fill and its letters, from the theme.
     function agentColor(id) {
-        return tinted(({ claude: "#E5895A", demo: "#A7AAB2" })[id] || "#A7AAB2")
+        return tinted(agentBase(id))
+    }
+    /// An agent's own colour, solid (its badge on a model's logo).
+    function agentBase(id) {
+        return ({ claude: "#E5895A" })[id] || "#A7AAB2"
     }
     /// A model maker's badge colours (by its logo id: Workspace.modelMaker);
     /// a quiet grey for makers in black and white.

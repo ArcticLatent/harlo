@@ -40,6 +40,9 @@ pub struct SessionInfo {
     pub modified: SystemTime,
     pub size: u64,
     pub parent_session: Option<String>,
+    /// The model it was last on (`provider/model`) as far as the parts of its
+    /// file that were read say; "" when they don't.
+    pub model: String,
 }
 
 impl SessionInfo {
@@ -155,6 +158,7 @@ pub fn session_from_text(kind: HarnessKind, path: &Path, size: u64, modified: Sy
         modified,
         size,
         parent_session: None,
+        model: String::new(),
     };
     let mut have_header = false;
     let mut title_slot = String::new();
@@ -183,6 +187,19 @@ pub fn session_from_text(kind: HarnessKind, path: &Path, size: u64, modified: Sy
             }
             Some("message") if info.first_message.is_empty() && entry["message"]["role"] == "user" => {
                 info.first_message = first_line(&message_text(&entry["message"]["content"]), TITLE_CHARS);
+            }
+            // The latest model: a change to it, or a reply's.
+            Some("model_change") => {
+                let id = entry["modelId"].as_str().or_else(|| entry["model"].as_str()).unwrap_or_default();
+                info.model = match entry["provider"].as_str() {
+                    Some(p) if !p.is_empty() && !id.is_empty() => format!("{p}/{id}"),
+                    _ => id.to_owned(),
+                };
+            }
+            Some("message") if entry["message"]["role"] == "assistant" => {
+                if let (Some(p), Some(id)) = (entry["message"]["provider"].as_str(), entry["message"]["model"].as_str()) {
+                    info.model = format!("{p}/{id}");
+                }
             }
             _ => {}
         }
@@ -684,6 +701,19 @@ pub fn own_file(dir: &Path, ext: &str) -> std::io::Result<(std::path::PathBuf, s
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn a_listed_session_says_its_last_model() {
+        let at = |head: &str, tail: Option<&str>| session_from_text(HarnessKind::Harlo, Path::new("/s.jsonl"), 0, SystemTime::UNIX_EPOCH, head, tail).unwrap().model;
+        let header = r#"{"type":"session","id":"s","cwd":"/w"}"#;
+        let change = r#"{"type":"model_change","provider":"opencode-go","modelId":"glm-5.3"}"#;
+        let reply = r#"{"type":"message","message":{"role":"assistant","provider":"openai-codex","model":"gpt-6","content":[]}}"#;
+        assert_eq!(at(header, None), "", "no reply yet: not known");
+        assert_eq!(at(&format!("{header}\n{change}"), None), "opencode-go/glm-5.3");
+        assert_eq!(at(&format!("{header}\n{change}\n{reply}"), None), "openai-codex/gpt-6", "the latest wins");
+        // (A long file: its end is the later.)
+        assert_eq!(at(&format!("{header}\n{reply}"), Some(change)), "opencode-go/glm-5.3");
+    }
 
     #[test]
     fn a_harlo_session_is_read_on_while_it_goes_on_and_whole_when_it_branches() {

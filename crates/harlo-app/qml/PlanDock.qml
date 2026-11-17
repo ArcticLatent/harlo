@@ -198,10 +198,12 @@ Rectangle {
                     font.pixelSize: Theme.px(12)
                 }
                 PlainLabel {
-                    // (Its own width while it fits; a long title elides.)
+                    // (Its own width while it fits; a long title elides.
+                    // Whole pixels: a text's width is fractional, and a
+                    // layout's rounding down elides it.)
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    Layout.maximumWidth: implicitWidth
+                    Layout.maximumWidth: Math.ceil(implicitWidth)
                     text: root.allDone ? "All done" : root.next ? root.next.title : ""
                     color: root.allDone ? Theme.textMuted : Theme.text
                     font.pixelSize: Theme.px(12.5)
@@ -461,7 +463,7 @@ Rectangle {
                                             Label {
                                                 objectName: "planStepWho-" + stepRow.modelData.id
                                                 Layout.fillWidth: true
-                                                Layout.maximumWidth: implicitWidth
+                                                Layout.maximumWidth: Math.ceil(implicitWidth)
                                                 Layout.minimumWidth: 0
                                                 text: "Done by " + root.agentName(stepRow.modelData.agent || "") + (stepRow.modelData.model ? " · " + root.modelName(stepRow.modelData.agent, stepRow.modelData.model) : "")
                                                 color: Theme.muted

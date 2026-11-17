@@ -432,7 +432,7 @@ Rectangle {
                             // (Short of room, it gives way before the status.)
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
-                            Layout.maximumWidth: implicitWidth
+                            Layout.maximumWidth: Math.ceil(implicitWidth)
                             elide: Text.ElideRight
                             // (Its thinking level; none said when it's off.)
                             text: Theme.modelLabel(session.modelName) + (engine ? " on " + engine : "") + (session.thinking && session.thinking !== "off" ? " · " + session.thinking : "")

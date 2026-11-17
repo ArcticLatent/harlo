@@ -232,10 +232,12 @@ fn entries(input: &SidebarInput<'_>, filter: &str) -> Vec<Entry> {
         // Settled: on the shelf until there's newer work in it (or it's
         // working, waiting on you, or pinned).
         let settled = if !meta.settled_why.is_empty() && !meta.pinned && !active && unix(s.modified) <= meta.settled_at { meta.settled_why.clone() } else { String::new() };
-        // (Its model as it runs, else as it last ran.)
+        // (Its model as it runs, else as it last ran in harlo, else as
+        // its file says: one not opened since harlo began keeping it.)
         let (model, model_name) = match live.filter(|l| !l.model.is_empty()) {
             Some(l) => (l.model.clone(), l.model_name.clone()),
-            None => (meta.model.clone(), meta.model_name.clone()),
+            None if !meta.model.is_empty() => (meta.model.clone(), meta.model_name.clone()),
+            None => (s.model.clone(), s.model.rsplit('/').next().unwrap_or_default().to_owned()),
         };
         entries.push(Entry {
             key,
@@ -608,6 +610,7 @@ mod tests {
             modified: SystemTime::now() - Duration::from_secs(age_secs),
             size: 1,
             parent_session: None,
+            model: String::new(),
         }
     }
 
@@ -729,6 +732,13 @@ mod tests {
         assert_eq!((rows[1].model.as_str(), rows[1].model_name.as_str()), ("glm-coding/glm-5.3[1m]", "GLM 5.3"), "its model, as it runs");
         // Not running: its model as it last ran.
         let meta = HashMap::from([(PathBuf::from("/s/a"), SessionMeta { model: "anthropic/claude-opus-5-5".into(), model_name: "Claude Opus 5.5".into(), ..SessionMeta::default() })]);
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
+        assert_eq!(rows[1].model, "anthropic/claude-opus-5-5");
+        // Not opened since harlo began keeping it: as its file says.
+        let sessions = [SessionInfo { model: "opencode-go/glm-5.3".into(), ..session("/s/a", "/w", "old title", 100) }];
+        let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &HashMap::new(), filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
+        assert_eq!((rows[1].model.as_str(), rows[1].model_name.as_str()), ("opencode-go/glm-5.3", "glm-5.3"));
+        // (What harlo kept is the more exact: a coding plan's id.)
         let rows = build(&SidebarInput { projects: &projects, worktrees: &[], sessions: &sessions, live: &[], meta: &meta, filter: "", show_archived: false, other_collapsed: false, expanded: &[], shelves_open: &[] });
         assert_eq!(rows[1].model, "anthropic/claude-opus-5-5");
     }

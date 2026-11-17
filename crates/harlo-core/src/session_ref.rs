@@ -196,6 +196,7 @@ mod tests {
             modified: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
             size: 1,
             parent_session: None,
+            model: String::new(),
         }
     }
 

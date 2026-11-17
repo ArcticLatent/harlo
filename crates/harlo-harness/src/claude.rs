@@ -448,7 +448,21 @@ pub fn session_from_text(path: &Path, size: u64, modified: SystemTime, head: &st
         modified: last_activity(if tail.is_empty() { head } else { tail }).map_or(modified, |t| t.min(modified)),
         size,
         parent_session: None,
+        model: last_model(head, tail),
     })
+}
+
+/// The model of a transcript's last reply (`anthropic/…`, as a saved
+/// session's), from its end, else its start; "" when neither has one.
+fn last_model(head: &str, tail: &str) -> String {
+    let in_text = |text: &str| {
+        text.lines().rev().filter(|l| l.contains(r#""type":"assistant""#)).find_map(|l| {
+            let e = serde_json::from_str::<Value>(l).ok().filter(|e| e["isSidechain"] != true)?;
+            // (Claude Code's own notes, not a model's reply: "<synthetic>".)
+            e["message"]["model"].as_str().filter(|m| !m.is_empty() && !m.starts_with('<')).map(|m| format!("anthropic/{m}"))
+        })
+    };
+    in_text(tail).or_else(|| in_text(head)).unwrap_or_default()
 }
 
 /// When the conversation last changed: its newest entry's time. Claude Code
@@ -1329,6 +1343,17 @@ mod tests {
         assert_eq!(reply["usage"]["output"], 40, "the reply's last say");
         assert_eq!(context_used(&saved.messages), 20_103);
         assert_eq!(context_used(&saved.messages[..1]), 0);
+    }
+
+    #[test]
+    fn a_listed_transcript_says_its_last_model() {
+        let user = r#"{"type":"user","cwd":"/p","message":{"role":"user","content":"hi"}}"#;
+        let reply = |m: &str| format!(r#"{{"type":"assistant","message":{{"model":"{m}","content":[]}}}}"#);
+        let model = |head: &str, tail: &str| session_from_text(Path::new("/p/s.jsonl"), 0, SystemTime::UNIX_EPOCH, head, tail).unwrap().model;
+        assert_eq!(model(user, ""), "", "no reply yet: not known");
+        assert_eq!(model(&format!("{user}\n{}\n{}", reply("claude-sonnet-5"), reply("glm-5.3")), ""), "anthropic/glm-5.3", "the last reply's");
+        assert_eq!(model(&format!("{user}\n{}", reply("glm-5.3")), &reply("<synthetic>")), "anthropic/glm-5.3", "Claude Code's own notes aren't a model");
+        assert_eq!(model(&format!("{user}\n{}", reply("glm-5.3")), &reply("kimi-k3")), "anthropic/kimi-k3", "the end of a long one first");
     }
 
     #[test]

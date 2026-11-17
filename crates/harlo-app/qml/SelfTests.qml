@@ -2831,14 +2831,12 @@ Item {
             TestInput.moveTo(at.x, at.y) } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            // Each row says its model and agent under its title (no hover
-            // tip over the rows), whole within the row.
-            const details = tests.findAllNamed("sessionDetail", sidebar, [])
-            const claude = details.find(d => d.text === "Sonnet 5 · Claude")
-            const row = claude ? claude.parent.parent.parent : null
-            const inRow = row && claude.mapToItem(row, 0, claude.height).y <= row.height - 2
-            tests.check(details.length === 2 && claude !== undefined && inRow && details.every(d => d.text !== ""),
-                        "each row says its model and agent under its title (" + details.map(d => d.text) + ")")
+            // The rows are one line (the avatar says the model and agent),
+            // and no hover tip covers them.
+            const titles = tests.findAllNamed("sessionTitle", sidebar, [])
+            const rows = titles.map(t => { let r = t; while (r && r.rowKey === undefined) r = r.parent; return r })
+            tests.check(titles.length === 2 && rows.every(r => r && r.height <= 46) && tests.findAllNamed("sessionDetail", sidebar, []).length === 0,
+                        "each session row is one line (" + rows.map(r => r ? r.height : "none") + ")")
             tests.check(!ToolTip.toolTip.visible, "pointed at, no tip covers the rows")
             tests.shotWindow("clicks-marks")
             const p = JSON.parse(Workspace.projectsJson())[0]
@@ -2861,13 +2859,18 @@ Item {
             // Each agent × maker: the model's maker's logo with the agent as
             // a tag, except Claude Code on Claude, and no maker known.
             const makers = ["", "anthropic", "openai", "google", "zai-coding-plan", "kimi-for-coding", "deepseek", "xai", "minimax-coding-plan", "mistral", "opencode"]
+            // (Laid out on a sheet for the shot: a row per agent, the first
+            // with a status on each.)
+            tests.marksSheet = matrixSheet.createObject(win.contentItem, { width: 24 + makers.length * 38, height: 92 })
             tests.marksMatrix = []
-            for (const agent of ["harlo", "claude"])
-                for (const m of makers)
-                    tests.marksMatrix.push(avatarProbe.createObject(win.contentItem, { provider: agent, maker: m, x: 10, y: 10 })) } }
+            for (const [row, agent] of ["harlo", "claude"].entries())
+                for (const [col, m] of makers.entries())
+                    tests.marksMatrix.push(avatarProbe.createObject(win.contentItem, { provider: agent, maker: m, x: 20 + col * 38, y: 20 + row * 42, ring: Theme.background, badge: row === 0 ? "unread" : "" })) } }
         PauseAnimation { duration: 700 }
         ScriptAction { script: {
-            const wrong = []
+            tests.shotWindow("clicks-marks-matrix")
+            tests.marksSheet.destroy()
+            const wrong = [], offCentre = []
             for (const a of tests.marksMatrix) {
                 const first = a.maker !== "" && !(a.provider === "claude" && a.maker === "anthropic")
                 // (Its own parts, shown or not.)
@@ -2876,8 +2879,14 @@ Item {
                 const ok = first ? logo.visible && tag.visible && !mark.visible && logo.url !== "" && logo.children[0].status === Image.Ready
                                  : mark.visible && !logo.visible && !tag.visible
                 if (!ok) wrong.push(a.provider + "×" + (a.maker || "none"))
+                // Each mark centred on whole pixels: the same gap each side.
+                const inner = tag.children[0], small = inner.children[0]
+                for (const [m, box] of [[logo, a], [mark, a], [small, inner]])
+                    if (m.x * 2 + m.width !== box.width || m.y * 2 + m.height !== box.height || m.x !== Math.round(m.x) || m.y !== Math.round(m.y))
+                        offCentre.push(a.provider + "×" + (a.maker || "none") + " " + m.width + " in " + box.width + " at " + m.x + "," + m.y)
                 a.destroy()
             }
+            tests.check(offCentre.length === 0, "every mark sits centred on whole pixels, the agent's in its badge too (" + offCentre.slice(0, 3) + ")")
             tests.check(tests.marksMatrix.length === 22 && wrong.length === 0, "every agent × maker: the maker's logo loaded, the agent as a tag; Claude on Claude or no model: the agent's mark (wrong: " + wrong + ")")
             tests.marksMatrix = []
             // A session's model → its maker: by the model's name, else its
@@ -2890,9 +2899,14 @@ Item {
             tests.summary(); Qt.quit() } }
     }
     property var marksMatrix: []
+    property var marksSheet: null
     Component {
         id: avatarProbe
         AgentAvatar { width: 26; height: 26 }
+    }
+    Component {
+        id: matrixSheet
+        Rectangle { color: Theme.background }
     }
 
     // Claude's plan limits (Stage 4), as Claude Code reports them (its
@@ -5772,8 +5786,11 @@ Item {
             const row = tests.findText("Fix the login redirect loop", sidebar)
             let d = row
             while (d && d.rowKey === undefined) d = d.parent
-            const shown = d ? tests.findAllNamed("sessionDetail", d, [])[0] : null
-            tests.check(d && d.height <= 52 && d.detail.endsWith("/repo") && shown && shown.text === d.detail, "the session row is two short lines, its folder under its title (" + (d ? d.height + " " + d.detail : "none") + ")")
+            tests.check(d && d.height <= 46 && d.ToolTip.text === "", "the session row is one line, with no hover tip (" + (d ? d.height : "none") + ")")
+            // Never opened in harlo: its icon is still its model's, from its file.
+            const logo = d ? tests.findAllNamed("sessionMaker", d, [])[0] : null
+            const tag = d ? tests.findAllNamed("sessionAgentTag", d, [])[0] : null
+            tests.check(logo && logo.visible && logo.provider === "openai" && tag && tag.visible, "a session not opened yet shows its model's logo, Harlo as its badge (" + (logo ? logo.provider : "none") + ")")
             tests.clickItem(row, "the session") } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: {
@@ -10063,7 +10080,8 @@ Item {
             tests.check(tests.findContaining("Helpers · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
             tests.shotWindow("clicks-review-done")
             // A finished plan folds to "All done" (a reopened session too).
-            tests.check(!chat.planDock.expanded && tests.findText("All done", chat.planDock) !== null, "the finished plan folds to All done")
+            const done = tests.findText("All done", chat.planDock)
+            tests.check(!chat.planDock.expanded && done !== null && !done.truncated, "the finished plan folds to All done, whole (" + (done ? done.width + " of " + done.implicitWidth + " px" : "none") + ")")
             tests.clickItem(tests.findName("planToggle", chat.planDock), "the plan's fold") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -10087,6 +10105,8 @@ Item {
                 const t = tests.findText("Write notes.txt", folded), toggle = tests.findName("planToggle", chat.planDock)
                 const gap = toggle.mapToItem(null, 0, 0).x - t.mapToItem(null, t.width, 0).x
                 tests.check(gap >= 0 && gap <= 16, "folded, the next step sits at the right, by the toggle (" + gap.toFixed(1) + " px from it)")
+                // (With room for it: a narrow window elides it.)
+                tests.check(win.width < 900 || !t.truncated, "a short step's title shows whole (" + t.width + " of " + t.implicitWidth + " px)")
             }
             tests.clickItem(tests.findName("planToggle", chat.planDock), "open the plan") } }
         PauseAnimation { duration: 300 }
