@@ -208,7 +208,7 @@ public struct NewSessionChoices: Equatable, Sendable {
     public var models: [(agent: String, model: String)]
     /// The shield's mode each agent starts in, outside a project.
     public var approvals: [String: String]
-    /// Every model each agent offers (as harlo's Settings → Providers reads
+    /// Every model each agent offers (as harlo's Settings → Agents reads
     /// them): `provider/model` and its name.
     public var agentModels: [String: [(id: String, name: String)]]
     /// harlo's other machines (empty from a harlo before 1.2).

@@ -17,7 +17,7 @@ ColumnLayout {
     Group {
         SettingRow {
             title: "Provider"
-            detail: "Automatic picks the first one on in Settings → Providers that's installed."
+            detail: "Automatic picks the first one on in Settings → Agents that's installed."
             icon: "robot-2"
             Flow {
                 spacing: 6
@@ -97,7 +97,7 @@ ColumnLayout {
     Group {
         SettingRow {
             title: "Command"
-            detail: "Shows or hides the drop-down window of the running harlo (it starts harlo if needed)."
+            detail: "Shows or hides the drop-down window of the running Harlo (it starts Harlo if needed)."
             icon: "terminal-box"
             RowLayout {
                 spacing: 6
@@ -114,7 +114,7 @@ ColumnLayout {
         }
     }
     Rule { }
-    SectionHeader { title: "Setup guide"; subtitle: "The guide harlo shows on its first start: the agents, git and the theme. From a terminal: harlo --setup" }
+    SectionHeader { title: "Setup guide"; subtitle: "The guide Harlo shows on its first start: the agents, git and the theme. From a terminal: harlo --setup" }
     Group {
         SettingRow {
             title: "Open the setup guide"
@@ -129,10 +129,10 @@ ColumnLayout {
         SettingRow {
             id: autostartRow
             property string error: ""
-            title: "Start harlo when you log in"
+            title: "Start Harlo when you log in"
             detail: autostartRow.error !== "" ? autostartRow.error
                   : "Starts in the background, in the system tray."
-            more: autostartRow.error !== "" ? "" : "The window opens if there is no tray. Adds harlo to ~/.config/autostart."
+            more: autostartRow.error !== "" ? "" : "The window opens if there is no tray. Adds Harlo to ~/.config/autostart."
             icon: "home"
             AppSwitch {
                 objectName: "autostartSwitch"
@@ -146,7 +146,7 @@ ColumnLayout {
         SettingRow {
             divider: true
             title: "Reopen tabs"
-            detail: "Open the sessions, files and views that were open when harlo last closed."
+            detail: "Open the sessions, files and views that were open when Harlo last closed."
             icon: "time"
             AppSwitch {
                 checked: general.restoreTabs
@@ -156,9 +156,9 @@ ColumnLayout {
         SettingRow {
             divider: true
             title: "Check for updates"
-            detail: "Looks for new versions of harlo and your agents every 6 hours, and offers to update them."
+            detail: "Looks for new versions of Harlo and your agents every 6 hours, and offers to update them."
                     + (Updates.checkStatus !== "" ? "\n" + Updates.checkStatus : "")
-            more: "Also at startup and when a remote host connects. harlo updates itself when it was installed from a package or an AppImage."
+            more: "Also at startup and when a remote host connects. Harlo updates itself when it was installed from a package or an AppImage."
             icon: "refresh"
             RowLayout {
                 spacing: 8
@@ -196,8 +196,8 @@ ColumnLayout {
             readonly property string startedWith: Workspace.graphicsStartedWith()
             readonly property var choices: [["auto", "Automatic"], ["opengl", "OpenGL"], ["vulkan", "Vulkan"], ["software", "Software"]]
             title: "Renderer"
-            detail: "What draws harlo's window. Automatic is OpenGL; Software uses no graphics card (slow, for broken drivers). Now: " + running
-                    + (startedWith === "" ? " (chosen by QSG_RHI_BACKEND or QT_QUICK_BACKEND in harlo's environment)." : ".")
+            detail: "What draws Harlo's window. Automatic is OpenGL; Software uses no graphics card (slow, for broken drivers). Now: " + running
+                    + (startedWith === "" ? " (chosen by QSG_RHI_BACKEND or QT_QUICK_BACKEND in Harlo's environment)." : ".")
             icon: "window"
             Flow {
                 spacing: 6
@@ -219,10 +219,10 @@ ColumnLayout {
             visible: graphicsRow.startedWith !== "" && graphicsRow.chosen !== graphicsRow.startedWith
             divider: true
             title: "Restart to switch"
-            detail: "The renderer is chosen when harlo starts. Restarting stops agents that are running. If harlo can't start with it, it goes back to Automatic by itself."
+            detail: "The renderer is chosen when Harlo starts. Restarting stops agents that are running. If Harlo can't start with it, it goes back to Automatic by itself."
             detailColor: Theme.warning
             icon: "refresh"
-            DialogButton { text: "Restart harlo"; accent: true; onClicked: { Workspace.restartApp(); Qt.quit() } }
+            DialogButton { text: "Restart Harlo"; accent: true; onClicked: { Workspace.restartApp(); Qt.quit() } }
         }
     }
 }

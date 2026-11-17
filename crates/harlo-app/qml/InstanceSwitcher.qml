@@ -90,7 +90,7 @@ Item {
                 root.startupCheck = false
                 const name = root.current
                 Workspace.switchInstance("")
-                Workspace.showNotice("Couldn't reach " + name + " (the instance harlo starts on), so this is Local. Switch back from the instance menu once it's reachable.", true)
+                Workspace.showNotice("Couldn't reach " + name + " (the instance Harlo starts on), so this is Local. Switch back from the instance menu once it's reachable.", true)
             }
         }
     }
@@ -258,7 +258,7 @@ Item {
                             font.pixelSize: Theme.px(15)
                             onClicked: Workspace.setDefaultInstanceTo(row.modelData)
                             ToolTip.visible: hovered
-                            ToolTip.text: Workspace.defaultInstance === row.modelData ? "harlo starts on this one" : "Start harlo on this one"
+                            ToolTip.text: Workspace.defaultInstance === row.modelData ? "Harlo starts on this one" : "Start Harlo on this one"
                         }
                     }
                 }
@@ -284,7 +284,7 @@ Item {
                     font.pixelSize: Theme.px(12)
                     onClicked: { menu.close(); root.manageRequested() }
                     ToolTip.visible: hovered
-                    ToolTip.text: "Settings → Remote Instances: edit hosts, install agents"
+                    ToolTip.text: "Settings → Other machines: edit hosts, install agents"
                 }
             }
         }

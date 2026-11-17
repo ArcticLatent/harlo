@@ -432,7 +432,7 @@ Rectangle {
                     wrapMode: Text.Wrap
                     color: Theme.muted
                     text: noModels.host === ""
-                        ? "No models. " + noModels.agent + " needs a login or an API key: add one in Settings → Providers."
+                        ? "No models. " + noModels.agent + " needs a login (Settings → Agents) or an API key (Settings → Models)."
                         : "No models. " + noModels.agent + " needs its own login or API key on " + noModels.host + "."
                 }
                 RowLayout {

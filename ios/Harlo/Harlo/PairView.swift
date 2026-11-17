@@ -13,7 +13,7 @@ struct PairView: View {
             Spacer()
             HarloLogo(height: 54, wordColor: Color(p.foreground))
                 .padding(.bottom, 6)
-            Text("In harlo on your computer, click the phone button at the bottom of the left rail (or Settings → Devices → Pair a device), then scan the QR code it shows.")
+            Text("In harlo on your computer, click the phone button at the bottom of the left rail (or Settings → Phone → Pair a device), then scan the QR code it shows.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Color(p.muted))
                 .padding(.horizontal, 28)

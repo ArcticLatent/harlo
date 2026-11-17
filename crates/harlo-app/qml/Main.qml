@@ -16,7 +16,7 @@ ApplicationWindow {
     readonly property bool startHidden: Qt.application.arguments.includes("--background") && (selftestDir === "" || argValue("--tray=") === "1" || argValue("--background-runs=") === "1")
         && (Workspace.setting("tray") !== "0" || Workspace.workflowsUnderWay() > 0)
     visible: !startHidden
-    title: chat.hasSession && chat.session.title ? chat.session.title + " — harlo" : "harlo"
+    title: chat.hasSession && chat.session.title ? chat.session.title + " — Harlo" : "harlo"
     color: Theme.background
     // Default text size for controls without their own (scaled in Settings).
     font.pixelSize: Theme.px(13)
@@ -692,7 +692,7 @@ ApplicationWindow {
             { id: "settings", seq: Keymap.seq("settings"), label: "Settings", group: ui, icon: "settings", run: () => settingsDialog.open() },
             { id: "shortcuts", seq: Keymap.seq("shortcuts"), label: "Keyboard shortcuts", group: ui, icon: "keyboard", run: () => shortcutsDialog.open() },
             // (Closing the window keeps harlo in the tray: this quits.)
-            { id: "quit", seq: Keymap.seq("quit"), label: "Quit harlo", group: ui, icon: "close-circle", run: () => win.requestQuit() },
+            { id: "quit", seq: Keymap.seq("quit"), label: "Quit Harlo", group: ui, icon: "close-circle", run: () => win.requestQuit() },
             { seq: "Ctrl+Alt+L", label: "Layout readout", hidden: true, run: () => { layoutInfo.visible = !layoutInfo.visible; console.log("layout:", layoutInfo.text) } },
             { id: "contextPanel", seq: Keymap.seq("contextPanel"), label: "Context panel", group: panels, icon: "pie", run: () => win.togglePanel("context") },
             { id: "activityPanel", seq: Keymap.seq("activityPanel"), label: "Activity panel", group: panels, icon: "list-check-2", run: () => win.togglePanel("activity") },

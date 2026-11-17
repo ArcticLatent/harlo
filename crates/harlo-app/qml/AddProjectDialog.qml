@@ -132,7 +132,7 @@ AppDialog {
                 }
             }
         }
-        FormNote { visible: dlg.agents.length === 0; text: "No agent is on: turn one on in Settings → Providers." }
+        FormNote { visible: dlg.agents.length === 0; text: "No agent is on: turn one on in Settings → Agents." }
 
         // The model (not for a host's project: its agent's own).
         ColumnLayout {
@@ -210,7 +210,7 @@ AppDialog {
             FormNote {
                 visible: dlg.modelChoices.length === 0
                 text: Workspace.providersJson().indexOf('"checking"') >= 0 ? "Reading " + Theme.harnessLabel(dlg.harness) + "'s models…"
-                    : Theme.harnessLabel(dlg.harness) + " starts with its own default model; sign it in to a provider in Settings → Providers for more."
+                    : Theme.harnessLabel(dlg.harness) + " starts with its own default model; a login in Settings → Agents or an API key in Settings → Models gives it more."
             }
         }
         FormNote {

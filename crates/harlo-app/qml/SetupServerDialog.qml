@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Sets up a model server (Settings → Model servers): an engine that suits
+// Sets up a model server (Settings → Local models): an engine that suits
 // this computer, or another machine harlo is connected to, a model, then
 // harlo installs, starts and tests it there, and adds it to the agents chosen
 // (that machine's).
@@ -142,7 +142,7 @@ AppDialog {
         }))
         page = "run"
     }
-    /// Updating an engine (`Settings → Model servers`): this dialog shows how
+    /// Updating an engine (`Settings → Local models`): this dialog shows how
     /// it goes, without the setup's steps and agents.
     readonly property bool updating: job !== null && job.update === true
     readonly property bool updateEnded: updating && job.state !== "running"
@@ -292,10 +292,10 @@ AppDialog {
                 ToolTip.delay: 400
             }
             FormNote { visible: dlg.addTo === null && dlg.engine !== null && (dlg.engine.installed === null || !dlg.useInstalled)
-                text: dlg.engine && dlg.engine.id === "basalt" ? "Basalt has no ready-made builds: harlo downloads its latest release's source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), then gives its server a Python of its own, in harlo's folder."
-                    : dlg.ninfer ? "NInfer has no ready-made builds or releases: harlo downloads its latest source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), in harlo's folder."
-                    : dlg.wholeRepo ? "harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in harlo's folder: several GB, a few minutes."
-                    : "harlo downloads the latest release for " + (dlg.host === "" ? "this computer's" : dlg.host + "'s") + " card, checks it against its published checksum and keeps it in its own folder." }
+                text: dlg.engine && dlg.engine.id === "basalt" ? "Basalt has no ready-made builds: Harlo downloads its latest release's source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), then gives its server a Python of its own, in Harlo's folder."
+                    : dlg.ninfer ? "NInfer has no ready-made builds or releases: Harlo downloads its latest source from GitHub and builds it here with CMake and your CUDA toolkit (several minutes), in Harlo's folder."
+                    : dlg.wholeRepo ? "Harlo installs uv (checked against its published checksum), then a Python of its own with vLLM and PyTorch for your card, in Harlo's folder: several GB, a few minutes."
+                    : "Harlo downloads the latest release for " + (dlg.host === "" ? "this computer's" : dlg.host + "'s") + " card, checks it against its published checksum and keeps it in its own folder." }
 
             // Ollama and llama.cpp: a model from Hugging Face, then its size.
             ColumnLayout {
@@ -564,7 +564,7 @@ AppDialog {
                     onTextChanged: if (!dlg.nameEdited) nameField.text = dlg.defaultName()
                 }
             }
-            FormNote { visible: dlg.addTo === null; text: dlg.host === "" ? "On this computer only (127.0.0.1)." : "On " + dlg.host + ", for its own agents only (127.0.0.1 there). It keeps running when harlo quits; Stop it in Settings → Model servers." }
+            FormNote { visible: dlg.addTo === null; text: dlg.host === "" ? "On this computer only (127.0.0.1)." : "On " + dlg.host + ", for its own agents only (127.0.0.1 there). It keeps running when Harlo quits; Stop it in Settings → Local models." }
             RowLayout {
                 Layout.topMargin: 6
                 FlatButton { visible: dlg.addTo === null; text: "Back"; outlined: false; font.pixelSize: Theme.px(12); onClicked: dlg.page = "engine" }
@@ -692,7 +692,7 @@ AppDialog {
                 }
                 FormNote {
                     visible: dlg.host !== "" && dlg.agents.length === 0
-                    text: "No Harlo on " + dlg.host + " yet: it runs there, to add to it later in Settings → Model servers."
+                    text: "No Harlo on " + dlg.host + " yet: it runs there, to add to it later in Settings → Local models."
                 }
                 FormNote { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             }

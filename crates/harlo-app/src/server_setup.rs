@@ -1,5 +1,5 @@
 //! `ServerSetup` (QML singleton): setting up a model server from harlo
-//! (Settings → Model servers → Set up a model server): this computer's
+//! (Settings → Local models → Set up a model server): this computer's
 //! hardware, the engines that suit it (`harlo_core::engines`), and one
 //! setup at a time in the background: installing the engine (or using the
 //! one installed), getting the model, starting the server, a test message.

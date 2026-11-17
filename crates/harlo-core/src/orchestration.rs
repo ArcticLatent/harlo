@@ -32,7 +32,7 @@ pub fn socket_path() -> PathBuf {
     }
 }
 
-/// When agents start helpers (Settings → Orchestration).
+/// When agents start helpers (Settings → Teamwork).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Starting {
     /// Only when the user asks (or with the Delegate button).
@@ -683,7 +683,7 @@ pub fn run_bridge() {
     }
 }
 
-// The skills earlier versions installed (Settings → Orchestration), each
+// The skills earlier versions installed (Settings → Teamwork), each
 // folder marked as harlo's: removed, since the tools and the Delegate
 // button carry what they said.
 const OLD_SKILLS: [&str; 4] = ["harlo", "harlo-handoff", "harlo-advisor", "harlo-committee"];

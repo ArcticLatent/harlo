@@ -62,6 +62,7 @@ AppDialog {
         DialogButton {
             objectName: "workflowStart"
             text: qsTr("Start")
+            accent: true
             enabled: taskArea.text.trim() !== "" && (!dialog.flow || !dialog.flow.needsTestCommand || testField.text.trim() !== "")
             onClicked: dialog.start()
         }
@@ -128,18 +129,23 @@ AppDialog {
             columnSpacing: 10
             rowSpacing: 8
             Label { visible: testField.visible; text: qsTr("Tests") }
-            AppTextField { id: testField; visible: !dialog.flow || dialog.flow.needsTestCommand; Layout.fillWidth: true; font.family: Theme.mono; placeholderText: qsTr("The command that runs them, e.g. cargo test") }
-            Label { text: qsTr("Implements") }
+            // (Left: back to its start, so a long command shows where it begins.)
+            AppTextField { id: testField; objectName: "workflowTests"; visible: !dialog.flow || dialog.flow.needsTestCommand; Layout.fillWidth: true; font.family: Theme.mono; placeholderText: qsTr("The command that runs them, e.g. cargo test"); onActiveFocusChanged: if (!activeFocus) cursorPosition = 0; onTextChanged: if (!activeFocus) cursorPosition = 0 }
+            Label { text: qsTr("Agent") }
             ComboField { id: implementerBox; Layout.fillWidth: true; model: dialog.providers.map(p => p.label); marks: dialog.providers.map(p => p.id) }
-            Label { text: qsTr("It may") }
+            Label { text: qsTr("Permissions") }
             ComboField { id: approvalBox; Layout.fillWidth: true; model: [qsTr("Ask before every change"), qsTr("Edit files freely, ask before commands"), qsTr("Run anything without asking")] }
-            Label { visible: reviewerBox.visible; text: qsTr("Reviews") }
+            Label { visible: reviewerBox.visible; text: qsTr("Reviewer") }
             ComboField { id: reviewerBox; visible: !dialog.flow || dialog.flow.needsReviewer; Layout.fillWidth: true; model: dialog.providers.map(p => p.label); marks: dialog.providers.map(p => p.id) }
         }
 
-        FormNote {
+        MoreText {
+            objectName: "workflowNote"
             Layout.fillWidth: true
-            text: qsTr("The change is made in a new worktree. After each attempt harlo runs the checks there and the reviews read the diff; a failure, or a review asking for changes, goes back to the same session to fix, and each fix goes through every check and review again.")
+            full: qsTr("It works in a worktree of its own; what fails goes back to the agent until every check and review passes.")
+            more: qsTr("After each attempt Harlo runs the checks in the worktree and the reviews read the diff. A failure, or a review asking for changes, goes back to the same session to fix, and each fix goes through every check and review again.")
+            color: Theme.textMuted
+            font.pixelSize: Theme.px(12)
         }
         PlainLabel {
             id: problem

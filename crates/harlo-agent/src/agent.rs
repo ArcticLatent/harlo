@@ -1087,7 +1087,7 @@ impl Agent {
             self.told_no_images = Some(self.model.clone());
         }
         if let Some(why) = self.tools.sandbox.as_ref().and_then(|sb| sb.broken.as_ref()).filter(|_| !self.told_sandbox) {
-            show(Shown::Notice { level: "warning", text: &format!("Harlo's commands can't run: its sandbox can't start here ({why}). Install bubblewrap, or turn the sandbox off in Settings → Providers → Harlo.") });
+            show(Shown::Notice { level: "warning", text: &format!("Harlo's commands can't run: its sandbox can't start here ({why}). Install bubblewrap, or turn the sandbox off in Settings → Agents → Harlo.") });
             self.told_sandbox = true;
         }
         // (Held until it's counted; each try admitted on its own.)

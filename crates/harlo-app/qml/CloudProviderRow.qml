@@ -4,9 +4,9 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// One of Harlo's cloud providers in Settings → Providers: whether it has a
+// One of an agent's cloud providers in Settings → Models: whether it has a
 // key; opened, the key (saved, checked, removed), where to get one and
-// see its prices, and its models.
+// see its prices, its models, and the API variants that share its key.
 ColumnLayout {
     id: row
     required property var modelData
@@ -17,13 +17,12 @@ ColumnLayout {
     /// What came of the last change to its key: `{ state: "busy" | "ok" |
     /// "error", message }`, or null.
     property var result: null
-    /// The provider whose key this one uses ("" its own).
-    property string ownerName: ""
+    /// The providers that use this one's key over another API.
+    property var variants: []
     signal toggled()
     signal signInRequested()
 
     readonly property string key: modelData.key || "none"
-    readonly property bool shared: (modelData.keyOf || modelData.id) !== modelData.id
     readonly property bool replaced: modelData.replaced === true
     readonly property bool busy: result !== null && result.state === "busy"
     readonly property var models: modelData.models || []
@@ -61,7 +60,6 @@ ColumnLayout {
                 color: Theme.muted
                 font.pixelSize: Theme.px(12.5)
                 text: row.replaced ? qsTr("Set up in providers.json")
-                    : row.shared ? (row.key === "none" ? qsTr("Uses the %1 key: none yet").arg(row.ownerName) : qsTr("Uses the %1 key").arg(row.ownerName))
                     : row.key === "saved" ? qsTr("Key saved")
                     : row.key === "environment" ? qsTr("Key from $%1").arg(row.modelData.keyEnv)
                     : qsTr("No key")
@@ -82,17 +80,16 @@ ColumnLayout {
         Layout.bottomMargin: 14
         spacing: 8
         Label {
-            visible: row.replaced || row.shared
+            visible: row.replaced
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: Theme.muted
             font.pixelSize: Theme.px(12)
-            text: row.replaced ? qsTr("Your providers.json sets up a provider called %1, so Harlo uses that one instead.").arg(row.modelData.id)
-                : qsTr("The same account as %1, over another API: its key is set there.").arg(row.ownerName)
+            text: qsTr("Your providers.json sets up a provider called %1, so Harlo uses that one instead.").arg(row.modelData.id)
         }
         // The key: pasted and saved (then checked with the provider).
         RowLayout {
-            visible: !row.replaced && !row.shared
+            visible: !row.replaced
             Layout.fillWidth: true
             spacing: 8
             AppTextField {
@@ -103,7 +100,6 @@ ColumnLayout {
                 enabled: !row.busy
                 placeholderText: row.key === "saved" ? qsTr("Paste a new key to replace the saved one") : row.agent === "claude" ? qsTr("Paste your plan's key") : qsTr("Paste your API key")
                 Accessible.name: qsTr("%1 API key").arg(row.modelData.name)
-                font.family: Theme.mono
                 font.pixelSize: Theme.px(12)
                 onAccepted: saveButton.clicked()
             }
@@ -126,7 +122,7 @@ ColumnLayout {
             spacing: 8
             FlatButton {
                 objectName: "cloudTest-" + row.modelData.id
-                visible: !row.shared && row.key !== "none"
+                visible: row.key !== "none"
                 enabled: !row.busy
                 text: qsTr("Test")
                 font.pixelSize: Theme.px(12)
@@ -134,7 +130,7 @@ ColumnLayout {
             }
             FlatButton {
                 objectName: "cloudRemove-" + row.modelData.id
-                visible: !row.shared && row.key === "saved"
+                visible: row.key === "saved"
                 enabled: !row.busy
                 text: qsTr("Remove")
                 font.pixelSize: Theme.px(12)
@@ -149,7 +145,7 @@ ColumnLayout {
                 onClicked: row.signInRequested()
             }
             FlatButton {
-                visible: !row.shared && (row.modelData.keyPage || "") !== ""
+                visible: (row.modelData.keyPage || "") !== ""
                 text: qsTr("Get a key ↗")
                 font.pixelSize: Theme.px(12)
                 onClicked: Qt.openUrlExternally(row.modelData.keyPage)
@@ -185,10 +181,19 @@ ColumnLayout {
             font.pixelSize: Theme.px(12)
         }
         Label {
-            visible: row.key === "environment" && !row.shared
+            visible: row.key === "environment"
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            text: qsTr("Read from $%1 in harlo's environment. A key saved here is used instead.").arg(row.modelData.keyEnv)
+            text: qsTr("Read from $%1 in Harlo's environment. A key saved here is used instead.").arg(row.modelData.keyEnv)
+            color: Theme.muted
+            font.pixelSize: Theme.px(12)
+        }
+        Label {
+            objectName: "cloudVariants-" + row.modelData.id
+            visible: row.variants.length > 0
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            text: qsTr("The same key works for %1: its models are in the model picker under that name.").arg(row.variants.map(v => v.name).join(", "))
             color: Theme.muted
             font.pixelSize: Theme.px(12)
         }

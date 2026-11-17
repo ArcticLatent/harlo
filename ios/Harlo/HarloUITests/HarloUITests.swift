@@ -195,6 +195,9 @@ final class HarloUITests: XCTestCase {
         shot("02-session-reply")
         audit("session")
         // The run folded to its summary; opened, each call on its card.
+        // (On the smallest phone the reply pushes it above the screen, and a
+        // plain tap doesn't always scroll it back.)
+        showUnderHeader("Read 1 file")
         tap("Read 1 file")
         see("Ran command")
         see("Run the tests")
@@ -663,6 +666,11 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(line.waitForExistence(timeout: 10), "the run's line above the composer")
         XCTAssertTrue(line.label.contains("Done: Tests passed · Review approved"), line.label)
         shot("31-workflow-line")
+        // The workflow's message to the agent: one line, its words folded.
+        let note = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Sent the task")).firstMatch
+        for _ in 0..<4 where !note.exists { app.swipeDown() }
+        XCTAssertTrue(note.exists, "the workflow's message to the agent as one line")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "call report_done")).firstMatch.exists, "its words folded")
         line.tap()
         see("Done: Tests passed")
         XCTAssertTrue(app.buttons["workflowMerge"].waitForExistence(timeout: 5), "Merge")

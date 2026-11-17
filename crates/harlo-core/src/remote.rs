@@ -1,4 +1,4 @@
-//! Remote machines over SSH (Settings → Remote Instances).
+//! Remote machines over SSH (Settings → Other machines).
 //!
 //! A location on a remote machine is written `ssh://<host>/<absolute path>`
 //! wherever harlo keeps a path (projects, session folders, session files),
@@ -755,7 +755,7 @@ pub fn home_file_peek(host_name: &str, rel: &str) -> Option<String> {
 
 fn host_and_path(path: &Path) -> Result<(Host, String)> {
     let (name, remote) = split(path).with_context(|| format!("{} is not a remote path", path.display()))?;
-    let host = host(&name).with_context(|| format!("unknown remote host {name} (Settings → Remote Instances)"))?;
+    let host = host(&name).with_context(|| format!("unknown remote host {name} (Settings → Other machines)"))?;
     Ok((host, remote))
 }
 

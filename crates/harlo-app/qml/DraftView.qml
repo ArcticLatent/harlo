@@ -510,7 +510,7 @@ Rectangle {
                                        : root.hostModels.error ? "Couldn't read " + Theme.harnessLabel(root.effectiveHarness) + "'s models on " + root.host + ": " + root.hostModels.error
                                        : "No models. " + Theme.harnessLabel(root.effectiveHarness) + " needs its own login or API key on " + root.host + ".")
                                     : Workspace.providersJson().indexOf('"checking"') >= 0 ? "Reading " + Theme.harnessLabel(root.effectiveHarness) + "'s models…"
-                                    : Theme.harnessLabel(root.effectiveHarness) + " has no models to pick here. Sign it in to a provider in Settings → Providers."
+                                    : Theme.harnessLabel(root.effectiveHarness) + " has no models to pick here. Add a login in Settings → Agents, or an API key in Settings → Models."
                                 color: Theme.muted
                                 font.pixelSize: Theme.px(12)
                             }

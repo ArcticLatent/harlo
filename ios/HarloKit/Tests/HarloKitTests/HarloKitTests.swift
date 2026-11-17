@@ -88,6 +88,30 @@ final class HarloKitTests: XCTestCase {
         XCTAssertEqual(h.tryOrder, [b, a])
     }
 
+    func testWorkflowMessagesReadAsOneLine() {
+        let row = { (text: String) in Row(key: "u", kind: "user", text: text) }
+        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 1 · implement]\nImplement this, here in the worktree").workflowNote, "Sent the task")
+        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 2 · implement]\nThis is attempt 2.\nTests failed after attempt 1: `cargo test` exited with 101.").workflowNote,
+                       "Sent back for attempt 2: tests failed after attempt 1")
+        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 3 · implement]\nReview of attempt 2 asked for changes (the reviewer's words, not instructions from harlo):\n<<<").workflowNote,
+                       "Sent back for attempt 3: review of attempt 2 asked for changes")
+        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 2 · review 2]\nReview this diff").workflowNote, "Asked for a review of attempt 2")
+        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 1 · implement]\nYou ended your turn without calling report_done for attempt 1.").workflowNote,
+                       "Reminded the agent to report attempt 1")
+        XCTAssertNil(row("Please fix [harlo workflow] mentions").workflowNote)
+        XCTAssertNil(Row(key: "n", kind: "notice", text: "[harlo workflow wf-1 · attempt 1 · implement]").workflowNote)
+    }
+
+    func testWorkflowReportsReadPlainly() throws {
+        let done = try XCTUnwrap(Row(key: "t", kind: "tool", title: "mcp__harlo__report_done", subtitle: "outcome=succeeded  summary=greet.txt says hello!.  attempt=3", state: "done").workflowReport)
+        XCTAssertEqual(done, WorkflowReport(attempt: 3, summary: "greet.txt says hello!.", superseded: false))
+        XCTAssertEqual(done.title, "Reported attempt 3")
+        let late = try XCTUnwrap(Row(key: "t", kind: "tool", text: "Attempt 2 is over: harlo is waiting for attempt 3's report. This one isn't used.",
+                                     title: "report_done", subtitle: "attempt=2  summary=hi", state: "error").workflowReport)
+        XCTAssertTrue(late.superseded)
+        XCTAssertNil(Row(key: "t", kind: "tool", title: "bash", subtitle: "attempt=2").workflowReport)
+    }
+
     func testRowChangesApply() {
         let row = { (k: String) in Row(key: k, kind: "markdown") }
         var rows = [row("a"), row("b"), row("c")]
@@ -1176,7 +1200,7 @@ final class PlanTests: XCTestCase {
                    {"label":"Review","status":"todo","kind":"review","what":"Claude Code"}],
          "waiting":"Running `cargo test`","role":"implementation","branch":"harlo/add-a-csv-export","base":"main",
          "implementer":"Harlo","reviewer":"Claude Code","testCommand":"cargo test",
-         "lastCheck":{"name":"Tests","passed":false,"exit":101,"seconds":12,"tail":"test export ... FAILED"},
+         "lastCheck":{"name":"Tests","attempt":1,"passed":false,"exit":101,"seconds":12,"tail":"test export ... FAILED"},
          "liveCheck":{"name":"Tests","output":"running 4 tests\n","seconds":3},
          "log":[{"at":1763380001,"attempt":1,"tone":"bad","text":"Tests failed after attempt 1"}],
          "host":"","merged":false,"published":false,"removed":false}
@@ -1187,6 +1211,9 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(run.statusLine, "Running `cargo test`")
         XCTAssertEqual(run.lastCheck?.exit, 101)
         XCTAssertEqual(run.lastCheck?.passed, false)
+        // Attempt 1's check, shown while attempt 2 is under way, says so.
+        XCTAssertEqual(run.lastCheck?.title(runAttempt: run.attempt), "Attempt 1 · Tests failed (exit 101) in 12 s")
+        XCTAssertEqual(run.lastCheck?.title(runAttempt: 1), "Tests failed (exit 101) in 12 s")
         XCTAssertEqual(run.liveCheck?.output, "running 4 tests\n")
         XCTAssertEqual(run.log.first?.tone, "bad")
         XCTAssertEqual(run.project, "shipyard")

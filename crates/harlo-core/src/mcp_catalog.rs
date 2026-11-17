@@ -1,4 +1,4 @@
-//! MCP servers harlo installs with a click (Settings → MCP → Ready to
+//! MCP servers harlo installs with a click (Settings → Tools for agents → Ready to
 //! install): turned on or off, for Harlo and Claude, and updated from their
 //! own releases.
 //!
@@ -216,7 +216,7 @@ pub enum Place {
 }
 
 impl Place {
-    /// The place of a Settings → MCP scope (a project has none).
+    /// The place of a Settings → Tools for agents scope (a project has none).
     pub fn of(scope: &Scope) -> Option<Place> {
         match scope {
             Scope::Global => Some(Place::Here),
@@ -440,7 +440,7 @@ pub fn disable(b: &Offered, place: &Place, kinds: &[HarnessKind]) -> anyhow::Res
 
 /// On harlo's start: the entries of one that's on (here) get a Node again
 /// if theirs is gone or now too old. (A host's are looked at when its
-/// Settings → MCP is.)
+/// Settings → Tools for agents is.)
 pub fn on_start() {
     let place = Place::Here;
     for b in OFFERED {
@@ -625,7 +625,7 @@ pub fn update(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) ->
     })
 }
 
-/// What Settings → MCP shows for it there: `{ id, name, about, license,
+/// What Settings → Tools for agents shows for it there: `{ id, name, about, license,
 /// repo, version ("": not installed), agents, chosen, taken, needs, node,
 /// nodeError }` (`error`: the host couldn't be reached).
 pub fn status(b: &Offered, place: &Place) -> Value {

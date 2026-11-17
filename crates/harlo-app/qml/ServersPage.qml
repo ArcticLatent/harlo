@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Settings → Model servers: local and online servers the agents use.
+// Settings → Local models: local and online servers the agents use.
 ColumnLayout {
     id: srv
     signal openFileRequested(string path)
@@ -144,8 +144,8 @@ ColumnLayout {
             FormNote {
                 visible: !removeServerDialog.finished
                 color: Theme.foreground
-                text: !removeServerDialog.row ? "" : removeServerDialog.row.agents.length === 0 ? "No agent uses it; harlo stops it and forgets how to start it."
-                    : "harlo takes it out of " + removeServerDialog.row.agents.join(", ") + (removeServerDialog.row.agents.length === 1 ? "" : " (each one's own file)")
+                text: !removeServerDialog.row ? "" : removeServerDialog.row.agents.length === 0 ? "No agent uses it; Harlo stops it and forgets how to start it."
+                    : "Harlo takes it out of " + removeServerDialog.row.agents.join(", ") + (removeServerDialog.row.agents.length === 1 ? "" : " (each one's own file)")
                       + (removeServerDialog.row.managed ? ", stops it and forgets how to start it." : ". The server itself keeps running where it is.")
             }
             AppCheckBox {
@@ -208,14 +208,14 @@ ColumnLayout {
     SectionHeader {
         title: "Your servers"
         subtitle: "Models you run yourself or your company serves, for Harlo."
-        more: "They show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models. harlo starts and stops the servers it set up; they stop when harlo quits. Tick an agent to add a server to its config, untick it to take it out."
+        more: "They show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models. Harlo starts and stops the servers it set up; they stop when Harlo quits. Tick an agent to add a server to its config, untick it to take it out."
         AddButton {
             objectName: "setupModelServer"
             visible: srv.agents.length > 0
             text: "Set up a local model…"
             onClicked: setupServer.openOn("")
             ToolTip.visible: hovered
-            ToolTip.text: "harlo installs an engine, downloads a model that fits your graphics card, starts it and adds it to your agents."
+            ToolTip.text: "Harlo installs an engine, downloads a model that fits your graphics card, starts it and adds it to your agents."
             ToolTip.delay: 400
         }
         AddButton {
@@ -224,7 +224,7 @@ ColumnLayout {
             text: "Connect…"
             onClicked: modelServerDialog.open()
             ToolTip.visible: hovered
-            ToolTip.text: "One you run yourself or your company serves (Ollama, LM Studio, vLLM, a gateway…): its address, and harlo finds its models."
+            ToolTip.text: "One you run yourself or your company serves (Ollama, LM Studio, vLLM, a gateway…): its address, and Harlo finds its models."
             ToolTip.delay: 400
         }
     }
@@ -238,7 +238,7 @@ ColumnLayout {
         Label { Layout.fillWidth: true; text: parent.job ? (ServerSetup.host !== "" ? ServerSetup.host + ": " : "") + parent.job.step : ""; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
         FlatButton { text: "Show"; font.pixelSize: Theme.px(12); onClicked: setupServer.open() }
     }
-    Group { visible: srv.agents.length === 0; EmptyNote { text: "Model servers are for Harlo, which isn't installed." } }
+    Group { visible: srv.agents.length === 0; EmptyNote { text: "Local models are for Harlo, which isn't installed." } }
     Group {
         visible: srv.list.length > 0
         Repeater {
@@ -285,7 +285,7 @@ ColumnLayout {
                         color: serverItem.running ? Theme.success : serverItem.st.state === "starting" ? Theme.warning : serverItem.st.state === "failed" ? Theme.error : Theme.muted
                         HoverHandler { id: stateHover }
                         ToolTip.visible: stateHover.hovered
-                        ToolTip.text: ({ running: serverItem.st.harlo ? "Running (started by harlo)" : "Running", starting: "Starting…", failed: "Didn't start", stopped: "Stopped" })[serverItem.st.state] || "Checking…"
+                        ToolTip.text: ({ running: serverItem.st.harlo ? "Running (started by Harlo)" : "Running", starting: "Starting…", failed: "Didn't start", stopped: "Stopped" })[serverItem.st.state] || "Checking…"
                         ToolTip.delay: 300
                     }
                 }
@@ -491,7 +491,7 @@ ColumnLayout {
                                         }
                                         ToolTip.visible: hovered
                                         ToolTip.text: serverItem.modelData.place === "here"
-                                            ? "Its sessions on " + hostRow.modelData + " reach this computer's server through the SSH connection, while harlo is open."
+                                            ? "Its sessions on " + hostRow.modelData + " reach this computer's server through the SSH connection, while Harlo is open."
                                             : "Its sessions on " + hostRow.modelData + " use the same address; it has to reach it from there."
                                         ToolTip.delay: 400
                                     }
@@ -567,10 +567,10 @@ ColumnLayout {
     }
     Group {
         visible: srv.agents.length > 0 && srv.list.length === 0
-        EmptyNote { text: "No model servers yet. Set up a local model: harlo installs an engine, downloads a model that fits your graphics card and starts it. Start and Stop it here or from the left bar." }
+        EmptyNote { text: "No model servers yet. Set up a local model: Harlo installs an engine, downloads a model that fits your graphics card and starts it. Start and Stop it here or from the left bar." }
     }
     Rule { visible: srv.engines.length > 0 }
-    SectionHeader { visible: srv.engines.length > 0; title: "Engines on this computer"; subtitle: "What runs the servers harlo set up here." }
+    SectionHeader { visible: srv.engines.length > 0; title: "Engines on this computer"; subtitle: "What runs the servers Harlo set up here." }
     Group {
         visible: srv.engines.length > 0
         Repeater {
@@ -616,7 +616,7 @@ ColumnLayout {
                             Layout.fillWidth: true
                             elide: Text.ElideRight
                             text: engineItem.newer ? engineItem.version + " → " + engineItem.latest.latest
-                                : !engineItem.updatable ? engineItem.version + " · installed outside harlo"
+                                : !engineItem.updatable ? engineItem.version + " · installed outside Harlo"
                                 : engineItem.latest !== null ? engineItem.version + " · up to date"
                                 : engineItem.version
                             color: engineItem.newer ? Theme.accent : Theme.textMuted
@@ -633,7 +633,7 @@ ColumnLayout {
                         onClicked: setupServer.updateEngine(engineItem.modelData.id)
                         ToolTip.visible: hovered
                         ToolTip.delay: 400
-                        ToolTip.text: (engineItem.built ? "harlo builds the new version here (several minutes)" : "harlo downloads the new version")
+                        ToolTip.text: (engineItem.built ? "Harlo builds the new version here (several minutes)" : "Harlo downloads the new version")
                             + ". Its servers that are running stop and start again, so a message on them now would be cut off."
                     }
                 }
@@ -669,8 +669,8 @@ ColumnLayout {
                     Layout.fillWidth: true
                     text: hostBlock.e.state === "error" ? "Couldn't read its servers: " + hostBlock.e.error
                         : hostBlock.e.state === "loading" && hostBlock.rows.length === 0 ? "Reading its servers…"
-                        : hostBlock.rows.length === 0 ? "harlo can install an engine on " + hostBlock.host + ", download a model that fits it and run it there, for its agents."
-                        : "They run on " + hostBlock.host + " for its agents there, and keep running when harlo quits."
+                        : hostBlock.rows.length === 0 ? "Harlo can install an engine on " + hostBlock.host + ", download a model that fits it and run it there, for its agents."
+                        : "They run on " + hostBlock.host + " for its agents there, and keep running when Harlo quits."
                     color: hostBlock.e.state === "error" ? Theme.error : Theme.muted
                 }
                 FlatButton {
@@ -831,7 +831,7 @@ ColumnLayout {
                                             Accounts.useHostEngine(hostBlock.host, JSON.stringify({ name: hostServer.modelData.name, baseUrl: hostServer.modelData.baseUrl, models: hostServer.modelData.rawModels }), modelData.id, want)
                                         }
                                         ToolTip.visible: hovered
-                                        ToolTip.text: "Its sessions on this computer reach the server on " + hostBlock.host + " through the SSH connection; harlo starts it there first when it's stopped."
+                                        ToolTip.text: "Its sessions on this computer reach the server on " + hostBlock.host + " through the SSH connection; Harlo starts it there first when it's stopped."
                                         ToolTip.delay: 400
                                     }
                                 }
@@ -922,7 +922,7 @@ ColumnLayout {
                             onClicked: setupServer.updateEngine(hostEngine.modelData.id, hostBlock.host)
                             ToolTip.visible: hovered
                             ToolTip.delay: 400
-                            ToolTip.text: "harlo updates it on " + hostBlock.host + ". Its servers there that are running stop and start again, so a message on them now would be cut off."
+                            ToolTip.text: "Harlo updates it on " + hostBlock.host + ". Its servers there that are running stop and start again, so a message on them now would be cut off."
                         }
                     }
                 }
@@ -956,7 +956,7 @@ ColumnLayout {
             spacing: 8
             FormNote {
                 color: Theme.foreground
-                text: !removeHostServerDialog.row ? "" : (removeHostServerDialog.row.agentIds.length > 0 ? "harlo takes it out of its agents there, stops it" : "harlo stops it") + " and forgets how to start it."
+                text: !removeHostServerDialog.row ? "" : (removeHostServerDialog.row.agentIds.length > 0 ? "Harlo takes it out of its agents there, stops it" : "Harlo stops it") + " and forgets how to start it."
             }
             AppCheckBox { id: deleteHostFiles; text: "Also delete its model files on " + removeHostServerDialog.host }
             FormNote { text: "The engine stays there, for its other servers." }

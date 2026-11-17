@@ -16,10 +16,10 @@ AppDialog {
     anchors.centerIn: Overlay.overlay
     width: 460
     footer: AppButtonBox {
-        DialogButton { objectName: "quitRunsQuit"; text: qsTr("Quit"); onClicked: Qt.quit() }
+        DialogButton { objectName: "quitRunsQuit"; text: qsTr("Quit and pause"); onClicked: Qt.quit() }
         DialogButton {
             objectName: "quitRunsKeep"
-            text: qsTr("Keep running without the window")
+            text: dialog.count === 1 ? qsTr("Keep it running") : qsTr("Keep them running")
             accent: true
             onClicked: { dialog.close(); dialog.keepRequested() }
         }
@@ -29,7 +29,7 @@ AppDialog {
         wrapMode: Text.Wrap
         color: Theme.muted
         text: dialog.count === 1
-            ? qsTr("Kept running, harlo goes on with it without its window and quits when it's over; open harlo again to see it. Quit now, and it picks up where it was when harlo next opens.")
-            : qsTr("Kept running, harlo goes on with them without its window and quits when they're over; open harlo again to see them. Quit now, and they pick up where they were when harlo next opens.")
+            ? qsTr("Harlo can close its window and finish the run, then quit. If you quit now, the run pauses and goes on when you next open harlo.")
+            : qsTr("Harlo can close its window and finish the runs, then quit. If you quit now, the runs pause and go on when you next open harlo.")
     }
 }

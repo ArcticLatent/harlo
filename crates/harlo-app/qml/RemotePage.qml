@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Settings → Remote Instances: SSH hosts harlo runs agents on.
+// Settings → Other machines: SSH hosts harlo runs agents on.
 ColumnLayout {
     id: remotes
     property bool compact
@@ -26,7 +26,7 @@ ColumnLayout {
     SectionHeader {
         title: "SSH connections"
         subtitle: "Work on other machines over SSH, each with its own projects and sessions."
-        more: "Switch to one from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. harlo signs in with your SSH keys or agent. Each connected machine shows whether it has Claude Code, installs it for you, and signs Claude in there; harlo brings Harlo itself."
+        more: "Switch to one from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. Harlo signs in with your SSH keys or agent. Each connected machine shows whether it has Claude Code, installs it for you, and signs Claude in there; Harlo brings Harlo itself."
         AddButton { objectName: "addRemoteHost"; text: "Add SSH connection"; enabled: remotes.editing === null; onClicked: addHostDialog.open() }
     }
     // Add: from ~/.ssh/config, or typed (also the instance menu's).

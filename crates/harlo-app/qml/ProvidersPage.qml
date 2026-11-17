@@ -5,7 +5,8 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import harlo
 
-// Settings → Providers: the agents, their programs, sign-ins and models.
+// Settings → Agents: the agents, their programs, sign-ins and models, and
+// how Harlo behaves.
 ColumnLayout {
     id: providersView
     signal signInRequested(string agent, string label)
@@ -13,10 +14,11 @@ ColumnLayout {
     signal providerSignInRequested(string agent, string provider, string name)
     spacing: 0
     SectionHeader {
-        title: Workspace.instance === "" ? "Agents" : "Agents on " + Workspace.instance
+        // (Here: the page's own title says it.)
+        title: Workspace.instance === "" ? "" : "Agents on " + Workspace.instance
         subtitle: Workspace.instance === ""
-            ? "The coding agents harlo runs. Each uses its own login and settings; harlo finds them on PATH and in their usual install folders."
-            : "The coding agents on " + Workspace.instance + ", the instance shown: harlo runs them there, each with its own login and settings on that machine. The switches (which agents harlo offers) are the same for every instance."
+            ? "The coding agents Harlo runs. Each uses its own login and settings; Harlo finds them on PATH and in their usual install folders."
+            : "The coding agents on " + Workspace.instance + ", the instance shown: Harlo runs them there, each with its own login and settings on that machine. The switches (which agents Harlo offers) are the same for every instance."
     }
     // A host's agents (the instance shown is a remote one).
     ColumnLayout {
@@ -58,7 +60,7 @@ ColumnLayout {
                     icon: "harness-" + modelData
                     title: Theme.harnessLabel(modelData)
                     // (Harlo: harlo puts its agent there when it's needed.)
-                    detail: modelData === "harlo" ? (found ? "harlo puts its agent there as sessions start"
+                    detail: modelData === "harlo" ? (found ? "Harlo puts its agent there as sessions start"
                             + (Workspace.setting("harlo_sandbox") === "0" ? "" : h.bwrap === "no" ? " · Sandbox: needs bubblewrap" : h.bwrap === "blocked" ? " · Sandbox: bubblewrap can't run there" : "")
                         : (h.harloWhy || "Not checked yet"))
                         : install && install.state === "running" ? install.message
@@ -196,6 +198,8 @@ ColumnLayout {
                     required property var modelData
                     required property int index
                     readonly property bool expanded: providerList.open === modelData.id
+                    // (Its models listed on demand: a long list otherwise.)
+                    property bool showModels: false
                     // (Signed out: Sign in on the row itself.)
                     readonly property bool signedOut: modelData.enabled && modelData.state === "error" && String(modelData.error || "").startsWith("Not signed in")
                     readonly property string configured: Workspace.providersRevision >= 0 ? Workspace.setting(modelData.id + "_path") : ""
@@ -336,12 +340,13 @@ ColumnLayout {
                                 color: Theme.warning
                                 font.pixelSize: Theme.px(12)
                             }
+                            // (Not knowing isn't an error: Sign in… below either way.)
                             Label {
                                 visible: (acct.st.error || "") !== "" || acct.signOutError !== ""
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
                                 text: acct.signOutError !== "" ? acct.signOutError : (acct.st.error || "")
-                                color: Theme.error
+                                color: acct.signOutError !== "" ? Theme.error : Theme.muted
                                 font.pixelSize: Theme.px(12)
                             }
                             RowLayout {
@@ -361,8 +366,15 @@ ColumnLayout {
                                 }
                             }
                         }
-                        Flow {
+                        FlatButton {
+                            objectName: "providerModels-" + prov.modelData.id
                             visible: prov.modelData.models.length > 0
+                            text: prov.showModels ? qsTr("Hide its models") : prov.modelData.models.length === 1 ? qsTr("Show its model") : qsTr("Show its %1 models").arg(prov.modelData.models.length)
+                            font.pixelSize: Theme.px(12)
+                            onClicked: prov.showModels = !prov.showModels
+                        }
+                        Flow {
+                            visible: prov.showModels
                             Layout.fillWidth: true
                             spacing: 5
                             Repeater {
@@ -379,7 +391,7 @@ ColumnLayout {
                             }
                         }
                         Label {
-                            visible: prov.modelData.models.length > 60
+                            visible: prov.showModels && prov.modelData.models.length > 60
                             text: "… and " + (prov.modelData.models.length - 60) + " more"
                             color: Theme.muted
                             font.pixelSize: Theme.px(11)
@@ -394,58 +406,6 @@ ColumnLayout {
         }
     }
     Rule { }
-    // Harlo's cloud providers: their keys, here or on the machine shown.
-    SectionHeader {
-        objectName: "cloudModelsHeader"
-        visible: Workspace.instance === "" || cloudOnHost.visible
-        title: Workspace.instance === "" ? qsTr("Cloud models") : qsTr("Cloud models on %1").arg(Workspace.instance)
-        subtitle: Workspace.instance === ""
-            ? qsTr("Harlo can use these providers with an API key of yours; each charges for what Harlo sends and gets. Keys stay in a file only you can read (harlo-agent's keys.json).")
-            : qsTr("Keys for Harlo on %1, kept there in a file only you can read.").arg(Workspace.instance)
-    }
-    CloudProviders {
-        visible: Workspace.instance === ""
-        Layout.fillWidth: true
-        agent: "harlo"
-        onProviderSignInRequested: (agent, provider, name) => providersView.providerSignInRequested(agent, provider, name)
-    }
-    CloudProviders {
-        id: cloudOnHost
-        // (Its agent there answers once the machine is connected.)
-        visible: Workspace.instance !== "" && hostAgents.host !== null && hostAgents.host.state === "connected"
-        Layout.fillWidth: true
-        agent: visible ? "harlo@" + Workspace.instance : "harlo"
-        onProviderSignInRequested: (agent, provider, name) => providersView.providerSignInRequested(agent, provider, name)
-    }
-    Group {
-        visible: Workspace.instance === ""
-        Layout.topMargin: 10
-        SettingRow {
-            title: qsTr("Give SSH machines these keys")
-            detail: qsTr("A Harlo session on another machine gets the keys saved here that the machine has none of, kept there in its own private file.")
-            icon: "server"
-            AppSwitch {
-                objectName: "harloShareKeys"
-                checked: Workspace.setting("harlo_share_keys") !== "0"
-                onToggled: Workspace.setSetting("harlo_share_keys", checked ? "1" : "0")
-            }
-        }
-    }
-    Rule { visible: Workspace.instance === "" }
-    // Subscriptions Claude Code can use instead of Anthropic's models.
-    SectionHeader {
-        objectName: "codingPlansHeader"
-        visible: Workspace.instance === ""
-        title: qsTr("Coding plans for Claude Code")
-        subtitle: qsTr("Subscriptions whose makers support Claude Code. With a key saved, their models are in a Claude Code session's model picker. Keys stay in a file only you can read (harlo's coding-plans.json); a session on another machine gets its plan's key for as long as it runs.")
-    }
-    CloudProviders {
-        objectName: "codingPlans"
-        visible: Workspace.instance === ""
-        Layout.fillWidth: true
-        agent: "claude"
-    }
-    Rule { }
     SectionHeader {
         title: "Harlo"
         subtitle: harloModels.ids.length === 0 ? "Its model choices fill in once it's signed in (Sign in… above)." : ""
@@ -454,7 +414,7 @@ ColumnLayout {
         SettingRow {
             title: "Sandbox commands"
             detail: "Harlo's commands can change the project and nothing else, and can't see your keys or sign-ins."
-            more: "The system and your home folder are read-only: commands can change the project, /tmp and tool caches, and can't see SSH and GPG keys, credentials, sign-ins or browser profiles. Harlo's file tools keep to the same. A command that needs more asks you before it runs outside the sandbox. Needs bubblewrap (bwrap) on the machine the session runs on; MCP servers and harlo's tools aren't sandboxed. Applies to Harlo sessions started afterwards."
+            more: "The system and your home folder are read-only: commands can change the project, /tmp and tool caches, and can't see SSH and GPG keys, credentials, sign-ins or browser profiles. Harlo's file tools keep to the same. A command that needs more asks you before it runs outside the sandbox. Needs bubblewrap (bwrap) on the machine the session runs on; MCP servers and Harlo's tools aren't sandboxed. Applies to Harlo sessions started afterwards."
             icon: "shield-check"
             AppSwitch {
                 id: harloSandboxSwitch
@@ -553,27 +513,6 @@ ColumnLayout {
                     Workspace.setSetting("harlo_helper_budget", budgetRow.saved)
                 }
             }
-        }
-    }
-    Rule { }
-    SectionHeader { title: "Diagnostics"; subtitle: "For tracking down problems. harlo.log has this run's messages (the last run's is harlo.log.1); crashes leave a crash-….log with a backtrace." }
-    Group {
-        SettingRow {
-            title: "Log agent traffic"
-            detail: "Writes every message to and from the agents to logs/protocol/."
-            more: "Their error output too, one file per agent process, the last 40 kept. Applies to agents started afterwards; the logs contain your prompts and the agents' answers. Also on with --debug-protocol."
-            icon: "bug"
-            AppSwitch {
-                checked: Workspace.setting("debug_protocol") === "1"
-                onToggled: Workspace.setSetting("debug_protocol", checked ? "1" : "0")
-            }
-        }
-        SettingRow {
-            divider: true
-            title: "Logs folder"
-            detail: Workspace.logsDir()
-            icon: "folder-open"
-            FlatButton { text: "Open"; onClicked: Qt.openUrlExternally("file://" + Workspace.logsDir()) }
         }
     }
     // (Browse… for an agent's program.)

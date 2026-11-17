@@ -111,7 +111,18 @@ ColumnLayout {
         if (fromEnd) card.transcript.holdPlace(wellCode, y)
     }
     function absolute(p) { return card.transcript.fileAt(p, command) }
-    readonly property bool failed: rowState === "error" || /^(exit|failed)|failed$/.test(result)
+    // A workflow's report (harlo's report_done): said in words, its
+    // fields read from the call's line ("outcome=… summary=… attempt=2").
+    readonly property bool report: /^(?:mcp__harlo__|harlo_)?report_done$/.test(title)
+    readonly property var reportArgs: {
+        if (!report) return null
+        const field = k => { const m = new RegExp("(?:^|\\s)" + k + "=(.*?)(?=\\s{2}\\w+=|$)").exec(subtitle); return m ? m[1].trim() : "" }
+        return { attempt: field("attempt"), summary: field("summary"), outcome: field("outcome") }
+    }
+    // A report for an attempt that's over (a later one is under way): not
+    // a failure, just not used.
+    readonly property bool superseded: report && /is over/.test(result + " " + text)
+    readonly property bool failed: !superseded && (rowState === "error" || /^(exit|failed)|failed$/.test(result))
     // A listing's whole length: the call's own count ("1200 lines")
     // when its output was cut, else what's kept.
     readonly property int fullCount: {
@@ -139,7 +150,7 @@ ColumnLayout {
     // (harlo's tools about a session: its title, not its key.)
     readonly property bool aboutSession: /^(mcp__harlo__)?(bring_over|send_message|read_session|stop_session)$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
     readonly property string sessionTitle: aboutSession ? Workspace.sessionTitle(subtitle) : ""
-    readonly property string target: label !== "" ? label : sessionTitle !== "" ? sessionTitle : subtitle !== "" || rowState !== "pending" ? card.transcript.local(subtitle) : Theme.toolWriting(title)
+    readonly property string target: reportArgs && reportArgs.summary !== "" ? reportArgs.summary : label !== "" ? label : sessionTitle !== "" ? sessionTitle : subtitle !== "" || rowState !== "pending" ? card.transcript.local(subtitle) : Theme.toolWriting(title)
     // Code type only for code: a command, a path, a pattern, a link. A
     // title, a question or a task's description is prose.
     // (A wiki step's words, "Quickstart" or "1 page planned", aren't
@@ -188,7 +199,7 @@ ColumnLayout {
             spacing: 8
             RunNode {
                 objectName: "toolMark"
-                step: card.asking ? "asking" : card.rowState === "error" || (card.failed && card.rowState === "done") ? "error" : card.rowState === "done" ? "done" : "running"
+                step: card.asking ? "asking" : card.superseded ? "done" : card.rowState === "error" || (card.failed && card.rowState === "done") ? "error" : card.rowState === "done" ? "done" : "running"
             }
             // (A long name, a plugin's tool say, cut in the middle: the
             // whole of it on hover.)
@@ -196,7 +207,8 @@ ColumnLayout {
                 id: toolNameLabel
                 objectName: "toolName"
                 Layout.maximumWidth: Math.max(80, Math.round(head.width * 0.45))
-                text: card.transcript.toolName(card.title)
+                text: !card.reportArgs ? card.transcript.toolName(card.title)
+                    : card.reportArgs.attempt !== "" ? qsTr("Reported attempt %1").arg(card.reportArgs.attempt) : qsTr("Reported back")
                 elide: Text.ElideMiddle
                 color: Theme.text
                 font.weight: Font.Medium
@@ -230,7 +242,8 @@ ColumnLayout {
                     const faint = s => s === "" ? "" : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + s + "</font>"
                     let r = card.newFile ? (card.lineCount === 1 ? "1 line" : card.lineCount + " lines")
                           : card.result.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
-                    if (card.failed && r !== "") r = "<font color='" + Theme.rgb(Theme.error) + "'>" + r + "</font>"
+                    if (card.superseded) r = faint(qsTr("not used: a later attempt is under way"))
+                    else if (card.failed && r !== "") r = "<font color='" + Theme.rgb(Theme.error) + "'>" + r + "</font>"
                     return [r, faint(card.transcript.seconds(card.took))].filter(x => x !== "").join("&nbsp;&nbsp;")
                 }
                 color: Theme.textMuted

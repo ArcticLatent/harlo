@@ -2,7 +2,7 @@
 //! parts don't already:
 //!
 //! - Installing an agent on this computer, with its official one-line
-//!   installer (as Settings → Providers does on a remote host).
+//!   installer (as Settings → Agents does on a remote host).
 //! - Signing git in to GitHub, GitLab or Forgejo, so pushes and pulls over
 //!   HTTPS work, the git hosting service picked in Settings → Git:
 //!   - GitHub: the GitHub CLI (`gh auth login`, a one-time code to enter on

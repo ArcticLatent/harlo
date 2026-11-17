@@ -1,4 +1,4 @@
-//! Harlo's cloud model providers, for Settings → Providers: the built-in
+//! Harlo's cloud model providers, for Settings → Models: the built-in
 //! ones harlo-agent knows (`providers --json`) and their API keys, kept by
 //! the agent in its private `keys.json` (`key set|test|remove`), here or on
 //! another machine. A key goes to the agent on its input, never in a

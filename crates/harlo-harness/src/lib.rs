@@ -76,7 +76,7 @@ pub fn set_mcp_bridge(harlo: std::path::PathBuf, socket: std::path::PathBuf) {
     let _ = MCP_BRIDGE.set((harlo, socket));
 }
 
-/// Orchestration is on (Settings → Orchestration): sessions get the bridge.
+/// Orchestration is on (Settings → Teamwork): sessions get the bridge.
 static ORCHESTRATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 pub fn set_orchestration(on: bool) {

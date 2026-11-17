@@ -1200,7 +1200,7 @@ Rectangle {
                     ToolTip.visible: hovered
                     ToolTip.text: (footer.run ? "Start a session that finishes this run"
                                    : anyway ? "Start a session that looks over every page anyway"
-                                   : "Bring the wiki in line with the code: harlo checks first, and starts a session only when cited code changed or files were added") + (root.updaterText ? ". " + root.updaterText + "." : "")
+                                   : "Bring the wiki in line with the code: Harlo checks first, and starts a session only when cited code changed or files were added") + (root.updaterText ? ". " + root.updaterText + "." : "")
                     ToolTip.delay: 600
                 }
             }

@@ -188,7 +188,7 @@ Rectangle {
         property string name: ""
         // "first", "last", "only" or "": which moves it has.
         property string place: ""
-        // The providers on (Settings → Providers).
+        // The providers on (Settings → Agents).
         Repeater {
             // (A remote project: the agents its host has.)
             model: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => !projectMenu.path.startsWith("ssh://") || Theme.offeredOnHost(projectMenu.path.substring(6).split("/")[0], p.id))

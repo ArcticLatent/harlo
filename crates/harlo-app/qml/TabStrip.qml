@@ -93,10 +93,12 @@ Rectangle {
                     }
                     FileIcon { visible: tab.isFile || tab.isDiff; path: tab.isFile ? tab.key.substring(5) : tab.diffPath; Layout.preferredWidth: 14; Layout.preferredHeight: 14 }
                     Icon { visible: tab.key.startsWith("view:"); name: tab.key === "view:new" ? "chat-new" : tab.key.startsWith("view:run:") ? "node-tree" : tab.key.substring(5); color: Theme.primary; implicitWidth: 12; implicitHeight: 12 }
+                    // (On a branch of its own: a worktree session.)
+                    Icon { objectName: "tabBranch"; visible: tab.branch !== ""; name: "git-branch"; color: Theme.textMuted; implicitWidth: 12; implicitHeight: 12 }
                     PlainLabel {
                         id: label
                         Layout.fillWidth: true
-                        text: (tab.branch !== "" ? "⎇ " : "") + tab.title
+                        text: tab.title
                         color: tab.active ? Theme.text : Theme.textMuted
                         elide: Text.ElideRight
                         font.pixelSize: Theme.px(13.5)

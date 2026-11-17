@@ -25,7 +25,7 @@ ToastStack {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            text: toast.entry.tailscale ? "Your phone can't reach harlo over Tailscale" : "Your phone can't reach harlo on this network"
+            text: toast.entry.tailscale ? "Your phone can't reach Harlo over Tailscale" : "Your phone can't reach Harlo on this network"
             color: Theme.foreground
             font.pixelSize: Theme.px(13)
             font.weight: Font.DemiBold
@@ -33,7 +33,7 @@ ToastStack {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            text: "This computer's firewall (" + toast.entry.firewall + ") blocks it" + (toast.entry.tailscale ? ", so the harlo app works only at home." : ".")
+            text: "This computer's firewall (" + toast.entry.firewall + ") blocks it" + (toast.entry.tailscale ? ", so the Harlo app works only at home." : ".")
                 + " Allow opens port " + Phone.port + " to " + toast.entry.network + " only, not the internet."
             color: Theme.muted
             font.pixelSize: Theme.px(12)

@@ -372,7 +372,7 @@ public final class HarloModel {
         state = saved == nil ? .unpaired : .connecting
     }
 
-    /// This phone's key, as harlo's Settings → Devices could show it.
+    /// This phone's key, as harlo's Settings → Phone could show it.
     public var fingerprint: String { HarloKit.fingerprint(Base64.encode(identity.publicKey)) }
 
     // ---- the connection ---------------------------------------------------------

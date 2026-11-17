@@ -50,7 +50,7 @@ AppDialog {
         width: 380
         Label {
             Layout.fillWidth: true
-            text: dlg.projectName + "\n\nIts folder and files stay; harlo stops listing it." + (dlg.count > 0 && !dlg.deleting ? " Its sessions move to Other sessions." : "")
+            text: dlg.projectName + "\n\nIts folder and files stay; Harlo stops listing it." + (dlg.count > 0 && !dlg.deleting ? " Its sessions move to Other sessions." : "")
             wrapMode: Text.Wrap
             color: Theme.muted
         }

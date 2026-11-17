@@ -5,7 +5,7 @@
 //! - those in `providers.json` (harlo-agent's config folder): OpenAI-compatible
 //!   servers, local or online, with chat completions (the default) or the
 //!   Responses API. The file is laid out as pi's `models.json`, so harlo's
-//!   Settings → Model servers writes it as it writes pi's:
+//!   Settings → Local models writes it as it writes pi's:
 //!
 //! ```json
 //! { "providers": {
@@ -351,7 +351,7 @@ impl Provider {
             Key::Saved { provider, env } => crate::keys::get(provider)
                 .or_else(|| std::env::var(env).ok().filter(|k| !k.trim().is_empty()))
                 .map(Some)
-                .ok_or_else(|| anyhow!("No key for {}: add one in harlo's Settings → Providers (or set ${env})", self.name)),
+                .ok_or_else(|| anyhow!("No key for {}: add one in harlo's Settings → Models (or set ${env})", self.name)),
         }
     }
 
@@ -982,7 +982,7 @@ mod tests {
         assert_eq!(plan.pricing("gpt", None), Pricing::Plan);
     }
 
-    /// As Settings → Model servers writes it (pi's layout).
+    /// As Settings → Local models writes it (pi's layout).
     #[test]
     fn thinking_level_maps() {
         let p = parse_provider("gpu", &json!({ "baseUrl": "http://gpu:8000/v1", "api": "openai-completions", "apiKey": "none", "models": [

@@ -1,4 +1,4 @@
-//! Model servers harlo set up (Settings → Model servers), on this machine.
+//! Model servers harlo set up (Settings → Local models), on this machine.
 //!
 //! Their start and stop commands and models (harlo's settings), starting them
 //! with their output to a log, waiting until they answer, and stopping them,

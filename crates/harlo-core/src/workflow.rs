@@ -341,6 +341,9 @@ pub struct Outcome {
     /// The check's name ("" in runs before checks were named: the tests).
     #[serde(default)]
     pub name: String,
+    /// The attempt it checked (0 in runs saved before it was kept).
+    #[serde(default)]
+    pub attempt: u32,
 }
 
 impl Outcome {
@@ -767,6 +770,7 @@ fn on_checked(run: &mut Run, seq: u64, attempt: u32, mut outcome: Outcome, now: 
     run.wait = None;
     let (name, command) = run.current().map(|s| (s.name.clone(), s.command.clone())).unwrap_or_default();
     name.clone_into(&mut outcome.name);
+    outcome.attempt = attempt;
     let ended = outcome.ended();
     let passed = outcome.passed();
     let tail = outcome.tail.clone();
@@ -1088,11 +1092,11 @@ mod tests {
     }
 
     fn passed() -> Outcome {
-        Outcome { exit: Some(0), tail: "ok".into(), seconds: 2, error: None, name: String::new() }
+        Outcome { exit: Some(0), tail: "ok".into(), seconds: 2, error: None, name: String::new(), attempt: 0 }
     }
 
     fn failing() -> Outcome {
-        Outcome { exit: Some(101), tail: "test greet ... FAILED\nexpected hello".into(), seconds: 3, error: None, name: String::new() }
+        Outcome { exit: Some(101), tail: "test greet ... FAILED\nexpected hello".into(), seconds: 3, error: None, name: String::new(), attempt: 0 }
     }
 
     #[test]
@@ -1403,7 +1407,7 @@ mod tests {
         let a = step(&mut r, Event::Checked { seq, attempt: 1, outcome: failing() }, 105);
         let Some(Action::Prompt { seq, session, text, .. }) = a.first().cloned() else { panic!("{a:?}") };
         assert!(session == impl_file() && text.contains("Lints failed after attempt 1: `cargo clippy` exited with 101"), "{text}");
-        assert_eq!(r.last_check.as_ref().map(|o| o.name.as_str()), Some("Lints"));
+        assert_eq!(r.last_check.as_ref().map(|o| (o.name.as_str(), o.attempt)), Some(("Lints", 1)));
         // The fix: both checks again, then the reviews in order.
         let a = report(&mut r, seq);
         let Some(Action::RunCheck { seq, name, .. }) = a.first().cloned() else { panic!("{a:?}") };

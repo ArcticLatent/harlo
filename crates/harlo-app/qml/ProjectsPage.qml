@@ -276,7 +276,7 @@ ColumnLayout {
             visible: proj.p !== null
             title: "Wiki and plans"
             subtitle: "Tools that help this project's agents plan and keep track."
-            more: "Every agent gets them, through harlo's tools (Settings → Orchestration). Sessions started afterwards get them."
+            more: "Every agent gets them, through Harlo's tools (Settings → Teamwork). Sessions started afterwards get them."
         }
         Group {
             id: featureGroup
@@ -319,7 +319,7 @@ ColumnLayout {
                 divider: true
                 visible: planRow.on
                 title: "Commit each finished step"
-                detail: "When a step is done, harlo commits its changes with the step as the message."
+                detail: "When a step is done, Harlo commits its changes with the step as the message."
                 more: "Only if they're provably the step's: not when a file it touched already had changes, the branch moved, or another session worked there meanwhile (then it says why and leaves them to you). A finished step can be reviewed by another agent. Off unless you turn it on (or the shared plan) here."
                 icon: "git-commit"
                 AppSwitch {
@@ -458,7 +458,7 @@ ColumnLayout {
             spacing: 10
             FlatButton {
                 objectName: "projectRemove"
-                text: "Remove from harlo"
+                text: "Remove from Harlo"
                 variant: "danger"
                 accent: Theme.error
                 font.pixelSize: Theme.px(12)

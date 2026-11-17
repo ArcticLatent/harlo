@@ -51,6 +51,9 @@ Item {
     }
     /// The whole window, popups and their shadows included.
     property real hoverLineWidth: -1
+    // The window's height before a test made it short.
+    property real heightWas: 0
+    property var workflowNamed: null
     function shotWindow(name) {
         const path = selftestDir + "/" + name + ".png"
         console.log("selftest:", TestInput.grabWindow(path) ? "saved" : "grab failed", path)
@@ -1238,6 +1241,34 @@ Item {
             const offs = [icon, name].filter(it => it.visible).map(it => mid(it) - mid(nav.background))
             tests.log("settings nav row: icon and name", offs.map(d => d.toFixed(2)).join(", "), "px off its highlight's centre")
             tests.check(offs.every(d => Math.abs(d) <= 0.5), "a settings page's row centres its icon and name on its highlight (" + offs.map(d => d.toFixed(1)).join(", ") + " px off)") } }
+        // A short window: the list of pages scrolls to its last one.
+        ScriptAction { script: { tests.heightWas = win.height; win.height = 480 } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const list = tests.findName("settingsNavList", settingsDialog.contentItem)
+            const pages = settingsDialog.shownPages
+            const last = tests.findName("settingsNav-" + pages[pages.length - 1].id, settingsDialog.contentItem)
+            tests.check(list !== null && list.contentHeight > list.height + 1, "in a short window the settings pages are more than fit (" + (list ? list.contentHeight + " in " + list.height : "no list") + ")")
+            list.contentY = list.contentHeight - list.height
+            const y = last.mapToItem(list, 0, 0).y
+            tests.check(y >= 0 && y + last.height <= list.height + 0.5, "the settings page list scrolls to its last page (" + pages[pages.length - 1].title + " at " + y.toFixed(0) + "–" + (y + last.height).toFixed(0) + " of " + list.height.toFixed(0) + ")")
+            // Its scroll bar beside the rows, not over their highlights.
+            const bar = list.ScrollBar.vertical
+            const rowRight = last.mapToItem(null, last.width, 0).x
+            if (bar.policy !== ScrollBar.AlwaysOff)
+                tests.check(bar.mapToItem(null, 0, 0).x >= rowRight, "the settings list's scroll bar is beside its rows (" + bar.mapToItem(null, 0, 0).x.toFixed(0) + " ≥ " + rowRight.toFixed(0) + ")")
+            bar.active = true } }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: { tests.shotWindow("settings-short"); const list = tests.findName("settingsNavList", settingsDialog.contentItem); list.contentY = 0; settingsDialog.openPage("about") } }
+        PauseAnimation { duration: 300 }
+        // A page opened from elsewhere (a link, a search): its row comes into sight.
+        ScriptAction { script: {
+            const list = tests.findName("settingsNavList", settingsDialog.contentItem)
+            const row = tests.findName("settingsNav-about", settingsDialog.contentItem)
+            const y = row.mapToItem(list, 0, 0).y
+            tests.check(y >= 0 && y + row.height <= list.height + 0.5, "the open page's row scrolls into sight (" + y.toFixed(0) + " in " + list.height.toFixed(0) + ")")
+            settingsDialog.openPage("shortcuts")
+            win.height = tests.heightWas } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.clickItem(tests.keyOf("Toggle sidebar", "Ctrl+B"), "Toggle sidebar's Ctrl+B") }
         PauseAnimation { duration: 300 }
@@ -2485,7 +2516,7 @@ Item {
             tests.summary(); Qt.quit() } }
     }
     // Phone access from the desktop: the sidebar's button, the consent
-    // screen, the QR code and link, Settings → Devices. (scripts/
+    // screen, the QR code and link, Settings → Phone. (scripts/
     // phone-e2e.sh tests a phone pairing for real.)
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksphone"
@@ -2534,10 +2565,10 @@ Item {
         // From anywhere, 1: harlo's relay (relay.harlo.run, or --relay=).
         ScriptAction { script: tests.clickItem(tests.findName("pairAddress"), "the address picker") }
         PauseAnimation { duration: 400 }
-        ScriptAction { script: tests.clickText("Anywhere  ·  harlo relay") }
+        ScriptAction { script: tests.clickText("Anywhere  ·  Harlo relay") }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            tests.check(tests.findText("Use harlo's relay?") !== null && tests.findName("pairQr") === null, "harlo's relay asks first")
+            tests.check(tests.findText("Use Harlo's relay?") !== null && tests.findName("pairQr") === null, "harlo's relay asks first")
             tests.shotPopup(pairDeviceDialog, "clicks-phone-relay-consent")
             tests.clickItem(tests.findName("pairRelayOn"), "Use relay") } }
         PauseAnimation { duration: 3000 }
@@ -2565,7 +2596,7 @@ Item {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
-            tests.check(tests.findName("phoneAccess", d).checked && tests.findText("No phones paired yet.", d) !== null, "Settings → Devices: on, no phones yet")
+            tests.check(tests.findName("phoneAccess", d).checked && tests.findText("No phones paired yet.", d) !== null, "Settings → Phone: on, no phones yet")
             tests.check(tests.findName("relaySwitch", d).checked && tests.findName("funnelSwitch", d).checked, "the relay and Funnel show as on")
             tests.shot("clicks-phone-settings") } }
         // (A shot is taken at the next frame: nothing changes before it.)
@@ -3126,7 +3157,7 @@ Item {
             tests.check(JSON.parse(Remotes.hostsJson())[0].state === "connected", "connected")
             settingsDialog.openPage("remote") } }
         PauseAnimation { duration: 600 }
-        // Settings → Remote Instances: the host's agents.
+        // Settings → Other machines: the host's agents.
         ScriptAction { script: {
             const d = settingsDialog.contentItem, h = JSON.parse(Remotes.hostsJson())[0]
             tests.check(tests.findName("hostAgent-box-claude", d) !== null && tests.findText("Claude 2.1.296", d) !== null, "the host's agents are listed, with versions")
@@ -3325,7 +3356,7 @@ Item {
         PauseAnimation { duration: 3000 }
         ScriptAction { script: {
             const t = tests.chatText()
-            tests.check(t.indexOf("(0 tools): Orchestration is turned off in harlo") >= 0, "off: a running agent gets no tools, and calls are refused (" + t.slice(-110) + ")")
+            tests.check(t.indexOf("(0 tools): Teamwork is turned off in harlo") >= 0, "off: a running agent gets no tools, and calls are refused (" + t.slice(-110) + ")")
             Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: tests.sendByKeys("please orchestrate") }
@@ -3739,7 +3770,7 @@ Item {
             q.push(() => {
                 if (!settingsDialog.compact) return
                 const nav = tests.findName("settingsNav", settingsDialog.contentItem)
-                tests.check(settingsDialog.navOpen && nav && nav.width === 236 && tests.findText("Workspace", settingsDialog.contentItem) !== null, "it opens with the pages' names")
+                tests.check(settingsDialog.navOpen && nav && nav.width === 236 && tests.findText("Your projects", settingsDialog.contentItem) !== null, "it opens with the pages' names")
                 tests.shotWindow("set-nav-open")
                 tests.clickItem(tests.findName("settingsNav-git", settingsDialog.contentItem), "Git")
             })
@@ -3785,7 +3816,7 @@ Item {
             q.push(() => {
                 const pg = tests.findName("settingsPage", settingsDialog.contentItem)
                 const flash = tests.findName("settingsSeekFlash", settingsDialog.contentItem)
-                tests.check(settingsDialog.page === "providers" && pg && pg.contentY > 0 && flash && flash.opacity > 0, "searching sandbox lands on its row on Providers (" + settingsDialog.page + ", " + (pg ? pg.contentY : -1) + ")")
+                tests.check(settingsDialog.page === "providers" && pg && flash && flash.opacity > 0 && flash.mapToItem(pg, 0, 0).y >= 0 && flash.mapToItem(pg, 0, 0).y < pg.height, "searching sandbox lands on its row on Agents (" + settingsDialog.page + ", " + (pg ? pg.contentY : -1) + ")")
                 tests.shotWindow("set-seek")
                 tests.setSearch.text = ""
                 settingsDialog.navOpen = false
@@ -4226,7 +4257,7 @@ Item {
         ScriptAction { script: {
             const d = settingsDialog.contentItem
             tests.check(Workspace.setting("graphics") === "vulkan" && tests.findName("graphics-vulkan", d).selected, "Vulkan is saved for the next start")
-            tests.check(tests.findName("graphicsRestartRow", d) !== null && tests.findText("Restart harlo", d) !== null, "and a restart is offered")
+            tests.check(tests.findName("graphicsRestartRow", d) !== null && tests.findText("Restart Harlo", d) !== null, "and a restart is offered")
             tests.shotWindow("clicks-graphics")
             tests.clickItem(tests.findName("graphics-auto", d), "Automatic") } }
         PauseAnimation { duration: 400 }
@@ -4818,7 +4849,7 @@ Item {
     property int bigMade: 0
     property string seeking: ""
 
-    // Settings → Orchestration: the skills earlier versions installed are
+    // Settings → Teamwork: the skills earlier versions installed are
     // gone (a user's own of the same name kept), and the page's switches.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksorchestration"
@@ -4894,7 +4925,7 @@ Item {
             Qt.quit() } }
     }
 
-    // Settings → Providers: each provider's state, its
+    // Settings → Agents: each provider's state, its
     // details, and its switch, which decides what New session offers: a
     // stand-in claude (--fake-claude=) and Harlo, turned off.
     SequentialAnimation {
@@ -4913,7 +4944,13 @@ Item {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
-            tests.check(tests.findText("Version 2.1.296", d) !== null && tests.findText("Opus 4.8", d) !== null, "its details: version and models")
+            const opus = tests.findText("Opus 4.8", d)
+            tests.check(tests.findText("Version 2.1.296", d) !== null && (opus === null || !opus.visible), "its details: version, and its models folded")
+            tests.clickItem(tests.findName("providerModels-claude", d), "Show its 17 models") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, opus = tests.findText("Opus 4.8", d)
+            tests.check(opus !== null && opus.visible, "its models on demand")
             tests.shotWindow("clicks-providers")
             tests.clickItem(tests.findName("providerSwitch-harlo", d), "Harlo's switch") } }
         PauseAnimation { duration: 400 }
@@ -5467,7 +5504,7 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // Accounts (Settings → Providers): signing Claude in from harlo, against
+    // Accounts (Settings → Agents): signing Claude in from harlo, against
     // a stand-in (scripts/fake-signin.py: its link and prompt, the test's
     // code only), and out again.
     SequentialAnimation {
@@ -5519,7 +5556,7 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // iPhone notifications (Settings → Devices): through harlo's relay, and
+    // iPhone notifications (Settings → Phone): through harlo's relay, and
     // the test notification goes to the phone that allowed them (written to
     // a file instead of sent: HARLO_TEST_PUSH_FILE).
     SequentialAnimation {
@@ -5533,7 +5570,7 @@ Item {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
-            tests.check(tests.findText("iPhone notifications", d) !== null && tests.findName("pushTest", d).enabled, "Settings → Devices has iPhone notifications")
+            tests.check(tests.findText("iPhone notifications", d) !== null && tests.findName("pushTest", d).enabled, "Settings → Phone has iPhone notifications")
             tests.check(tests.findText("Your own APNs key", d) === null && tests.findName("relayAddress", d) === null, "no key or relay address to set")
             tests.check(JSON.parse(Phone.devicesJson())[0].push === true, "the phone that allowed them is known")
             tests.check(JSON.parse(Phone.pushJson()).relay === "https://relay.harlo.run", "they go through harlo's relay (" + JSON.parse(Phone.pushJson()).relay + ")") } }
@@ -5906,7 +5943,7 @@ Item {
             tests.check(Phone.running && addresses.length > 0, "phone access runs (" + addresses.map(a => a.label).join(", ") + ")")
             tests.check(addresses.every(a => tests.findName("phoneFirewall-" + a.address) !== null), "a notice for each blocked address")
             const tail = addresses.find(a => String(a.label).startsWith("Tailscale"))
-            if (tail) tests.check(tests.findText("Your phone can't reach harlo over Tailscale") !== null, "the Tailscale one says so")
+            if (tail) tests.check(tests.findText("Your phone can't reach Harlo over Tailscale") !== null, "the Tailscale one says so")
             // (The notices themselves: they sit above the page.)
             tests.grabItem(tests.findName("phoneFirewallToast"), "clicks-phone-firewall-toast")
             tests.clickItem(tests.findName("phoneFirewallAllow"), "Allow") } }
@@ -10051,6 +10088,8 @@ Item {
         ScriptAction { script: {
             tests.check(!tests.findName("workflowStart").enabled, "no test command, no Start")
             sidebar.workflowDialog.testField.text = tests.workflowTests
+            tests.check(sidebar.workflowDialog.testField.cursorPosition === 0, "a long test command shows where it starts")
+            tests.check(tests.findName("workflowStart").accent, "Start is the dialog's main button")
             tests.shotWindow("clicks-workflow-dialog") } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: tests.clickItem(tests.findName("workflowStart"), "Start") }
@@ -10077,6 +10116,12 @@ Item {
             const card = tests.findName("workflowCard", chat)
             tests.check(tests.findContaining("Tests failed", card) !== null && tests.findContaining("back to the implementation session", card) !== null, "opened, the card's log says the tests failed and it went back")
             tests.check(tests.shown(tests.findName("workflowTest", card)) && tests.findContaining("expected hello, got: hi", card) !== null, "and shows the failed tests' output")
+            const dots = tests.findAllNames("workflowLogDot", card)
+            tests.check(dots.length > 0 && dots.filter(d => d.color.a > 0).length === 1, "a dot only on what went wrong (" + dots.filter(d => d.color.a > 0).length + " of " + dots.length + ")")
+            const details = tests.findName("workflowDetails", card), lastDot = dots[dots.length - 1]
+            tests.check(details && lastDot && details.mapToItem(card, 0, 0).y > lastDot.mapToItem(card, 0, 0).y, "the run's details come after its log")
+            tests.check(details && !/-[0-9a-f]{6,}( |$)/.test(details.text) && details.text.indexOf("…`") > 0 && details.text.indexOf("cat greet.txt") < 0 && details.ToolTip.text.indexOf("cat greet.txt") > 0,
+                        "the details name the branch without its id and cut the long command, whole on hover (" + (details ? details.text : "none") + ")")
             tests.shotWindow("clicks-workflow-test-failed") } }
         // The review asks for changes: back to the same session again.
         ScriptAction { script: tests.waitUntil(workflowSteps, () => tests.workflowLogHas("Review asked for changes"), 40000) }
@@ -10085,6 +10130,13 @@ Item {
             const r = tests.workflowRun()
             tests.check(r.attempt === 3 && chat.session.key === tests.harloKey, "a review asking for changes goes back to the same session, as attempt 3 (" + r.attempt + ")")
             tests.check(tests.findContaining("hello! (with the exclamation mark)", tests.findName("workflowCard", chat)) !== null, "the card says what the reviewer asked for")
+            const notes = tests.findAllNames("workflowNote", chat).filter(n => n.visible).map(n => n.text)
+            tests.check(notes.indexOf("Sent back for attempt 3: review of attempt 2 asked for changes") >= 0 && notes.every(n => /^(Sent the task|Sent back for attempt \d: (tests failed after attempt \d|review of attempt \d asked for changes))$/.test(n)),
+                        "the workflow's messages to the agent are one quiet line each (" + notes.join(" | ") + ")")
+            const shownTexts = tests.findAllNames("userText", chat).filter(t => t.visible && t.text.indexOf("report_done") >= 0)
+            tests.check(shownTexts.length === 0, "their instructions stay folded (" + shownTexts.length + " shown)")
+            const checkTitle = tests.findName("workflowCheckTitle", tests.findName("workflowCard", chat))
+            tests.check(checkTitle && checkTitle.text === "Attempt 2 · Tests passed in 0 s", "attempt 2's check names its attempt while attempt 3 is under way (" + (checkTitle ? checkTitle.text : "none") + ")")
             tests.shotWindow("clicks-workflow-review-changes") } }
         ScriptAction { script: tests.waitUntil(workflowSteps, () => !!tests.workflowRun() && tests.workflowRun().state === "done", 40000) }
         PauseAnimation { duration: 600 }
@@ -10111,11 +10163,17 @@ Item {
             tests.check(note.title === "Workflow done", "you're told it's done (" + note.title + ")")
             const card = tests.findName("workflowCard", chat), composer = tests.findName("composerInput")
             tests.check(tests.findText("Done: Tests passed · Review approved", card) !== null, "the card says so")
+            const reports = tests.findAllNames("toolName", chat).filter(n => n.visible).map(n => n.text).filter(t => /^Reported/.test(t))
+            tests.check(reports.indexOf("Reported attempt 3") >= 0, "a report reads as one (" + reports.join(", ") + ")")
+            tests.check(tests.findContaining("not used: a later attempt is under way", chat) !== null, "and a report for an attempt that's over says it wasn't used, not that it failed")
             {
                 const right = card.mapToItem(null, card.width, 0).x
                 const inside = it => it.mapToItem(null, it.width, 0).x <= right + 1
                 const parts = ["workflowStages", "workflowState", "workflowToggle"].map(n => tests.findName(n, card))
                 tests.check(right <= chat.mapToItem(null, chat.width, 0).x + 1 && parts.every(p => p && inside(p)), "the card and its header fit the chat at this width (" + Math.round(card.width) + " px)")
+                const title = tests.findName("workflowTitle", card), state = tests.findName("workflowState", card)
+                tests.check(title && !title.truncated && title.text.indexOf("attempt 3") >= 0 || title && title.text === "Attempt 3", "its title shows the attempt whole (" + (title ? title.text + (title.truncated ? ", cut" : "") : "none") + ")")
+                tests.check(state && !state.truncated, "and the state isn't cut")
             }
             tests.shotWindow("clicks-workflow-done") } }
         // A reviewer's session shows the run's card too.
@@ -10468,7 +10526,7 @@ Item {
         ScriptAction { script: {
             tests.check(tests.findText("A workflow run is under way") !== null && win.visible, "Quit asks first while a run is under way")
             tests.shotWindow("clicks-workflow-quit-ask")
-            tests.clickItem(tests.findName("quitRunsKeep"), "Keep running without the window") } }
+            tests.clickItem(tests.findName("quitRunsKeep"), "Keep it running") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const note = JSON.parse(Workspace.lastNotification || "{}")
@@ -10496,7 +10554,7 @@ Item {
             win.requestQuit()
             tests.summary() } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.clickItem(tests.findName("quitRunsQuit"), "Quit") }
+        ScriptAction { script: tests.clickItem(tests.findName("quitRunsQuit"), "Quit and pause") }
     }
     SequentialAnimation {
         id: workflowBackgroundAgain
@@ -10558,6 +10616,7 @@ Item {
             const err = tests.findName("workflowEditorError")
             tests.check(ed.visible && tests.shown(err) && err.text === "Give the workflow a name.", "a workflow without a name isn't saved, and the editor says why (" + err.text + ")")
             ed.nameField.text = "Careful"
+            tests.check(!tests.shown(tests.findName("workflowEditorError")), "the error goes once there's a name")
             tests.shotPopup(ed, "clicks-workflows-editor")
             tests.clickItem(tests.findName("workflowSave"), "Save") } }
         PauseAnimation { duration: 500 }
@@ -10608,7 +10667,10 @@ Item {
             tests.check(at(1, "Short") < 0, "a failed check stops the attempt: the next check doesn't run")
             const card = tests.findName("workflowCard", chat)
             tests.check(tests.findText("Done: Tests passed · Short passed · Review approved", card) !== null, "the card says what it went through")
-            tests.check(tests.findText("Careful · attempt 3", card) !== null, "and names its workflow")
+            // (Narrow, the title is the attempt; the name is in the details.)
+            const named = c => c.narrow ? tests.findText("Attempt 3", c) !== null && c.run.workflow === "Careful" : tests.findText("Careful · attempt 3", c) !== null
+            tests.workflowNamed = named
+            tests.check(named(card), "and names its workflow")
             tests.check(JSON.stringify(r.stages.map(s => s.label)) === JSON.stringify(["Implement", "Tests", "Short", "Review"]), "its stages are the workflow's (" + r.stages.map(s => s.label) + ")")
             tests.check(!tests.shown(tests.findName("workflowLive", card)) && r.liveCheck === null, "ended, it's gone from the card")
             tests.shotWindow("clicks-workflow-custom-done")
@@ -10617,7 +10679,7 @@ Item {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             tests.check(!JSON.parse(Workspace.workflowDefinitionsJson()).some(f => f.name === "Careful"), "the workflow is deleted")
-            tests.check(tests.workflowRun().stages.length === 4 && tests.findText("Careful · attempt 3", tests.findName("workflowCard", chat)) !== null, "its run keeps its own copy")
+            tests.check(tests.workflowRun().stages.length === 4 && tests.workflowNamed(tests.findName("workflowCard", chat)), "its run keeps its own copy")
             const card = tests.findName("workflowCard", chat)
             tests.check(tests.shown(tests.findName("workflowMerge", card)) && tests.shown(tests.findName("workflowPublish", card)) && tests.shown(tests.findName("workflowRemove", card)), "done, its card offers Merge, a pull request and Remove worktree")
             tests.check(tests.findName("workflowMerge", card).text === "Merge into " + JSON.parse(Workspace.worktreeInfo(chat.session.key)).base, "Merge names the branch it goes into (" + tests.findName("workflowMerge", card).text + ")")
@@ -10651,7 +10713,7 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // A plan run reviews each step: Settings → Orchestration has it on; a
+    // A plan run reviews each step: Settings → Teamwork has it on; a
     // step whose review finds problems goes back to its helper, which fixes
     // it, and a second review lets the run go on; problems that stay pause
     // the run (scripts/fake-harlo-model.py plays helper and reviewer).
@@ -10666,7 +10728,7 @@ Item {
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             const sw = tests.findName("orchReviewSteps", settingsDialog.contentItem)
-            tests.check(sw !== null && sw.checked && tests.findText("Review each step", settingsDialog.contentItem) !== null, "Settings → Orchestration: Review each step, on by default")
+            tests.check(sw !== null && sw.checked && tests.findText("Review each step", settingsDialog.contentItem) !== null, "Settings → Teamwork: Review each step, on by default")
             tests.shotWindow("clicks-review-setting")
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
@@ -10908,10 +10970,10 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // Settings → Providers → Harlo: the subagents' model and the model to go
+    // Settings → Agents → Harlo: the subagents' model and the model to go
     // on with, typed in; a new session's subagent runs on the first, and a
     // server that stays busy hands the turn to the second.
-    // Settings → Providers → Cloud models: Harlo's built-in providers, a
+    // Settings → Models: Harlo's built-in providers, a
     // key refused then taken (saved for harlo-agent, checked against a
     // stand-in provider), its models in the picker, then removed; the
     // switch that gives SSH machines the keys; and a coding plan's key, and
@@ -10923,7 +10985,7 @@ Item {
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.addProject(win.argValue("--cwd="))
-            settingsDialog.openPage("providers") } }
+            settingsDialog.openPage("models") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(harloCloudSteps, () => (JSON.parse(Accounts.cloud("harlo")).list || []).length > 0, 20000) }
         PauseAnimation { duration: 200 }
@@ -10932,7 +10994,22 @@ Item {
             const ids = JSON.parse(Accounts.cloud("harlo")).list.map(p => p.id)
             tests.check(ids.length === 16 && ["anthropic", "gemini", "openrouter", "xai", "opencode-go"].every(i => ids.indexOf(i) >= 0), "Cloud models lists Harlo's providers (" + ids.join(", ") + ")")
             tests.check(st("anthropic") === "No key", "Anthropic has no key yet (" + st("anthropic") + ")")
-            tests.check(st("deepseek-anthropic") === "Uses the DeepSeek key: none yet", "an endpoint sharing another's key says whose (" + st("deepseek-anthropic") + ")")
+            tests.check(tests.findName("cloudProvider-deepseek-anthropic", d) === null, "an API variant sharing another's key has no row of its own")
+            tests.clickItem(tests.findName("cloudProvider-deepseek", d), "DeepSeek's row") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, v = tests.findName("cloudVariants-deepseek", d)
+            tests.check(v !== null && v.text.indexOf("DeepSeek (Anthropic API)") > 0, "it's inside that one's row (" + (v ? v.text : "none") + ")")
+            tests.clickItem(tests.findName("cloudProvider-deepseek", d), "DeepSeek's row")
+            tests.check(tests.findName("cloudAdd", d) === null && tests.findName("cloudSearch", d) !== null, "with no key yet, the providers are listed straight away, with a search")
+            tests.check(tests.findName("cloudProvider-gemini", d) !== null && tests.findName("cloudProvider-mistral", d) === null && tests.findName("cloudMore", d) !== null,
+                        "the common ones first, the rest under More providers")
+            tests.clickItem(tests.findName("cloudSearch", d), "the providers' search")
+            TestInput.typeText("anthro") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, shown = id => { const r = tests.findName("cloudProvider-" + id, d); return r !== null && r.visible }
+            tests.check(shown("anthropic") && !shown("gemini") && !shown("deepseek"), "searching narrows the list to Anthropic")
             tests.scrollIntoView(tests.findName("cloudProvider-anthropic", d))
             tests.clickItem(tests.findName("cloudProvider-anthropic", d), "Anthropic's row") } }
         PauseAnimation { duration: 300 }
@@ -10961,6 +11038,8 @@ Item {
             tests.check(r.message === "Saved; it works: Anthropic took the key", "the right key works (" + r.message + ")")
             const st = tests.findName("cloudStatus-anthropic", settingsDialog.contentItem)
             tests.check(st && st.text === "Key saved", "and it says so (" + (st ? st.text : "none") + ")")
+            const add = tests.findName("cloudAdd", settingsDialog.contentItem), gemini = tests.findName("cloudProvider-gemini", settingsDialog.contentItem)
+            tests.check(add !== null && gemini === null, "with a key, it's listed first and the rest wait behind Add a provider")
             const saved = TestInput.readFile(win.selftestDir + "/config/harlo-agent/keys.json")
             tests.check(saved.indexOf("sk-ant-good") >= 0 && saved.indexOf("sk-ant-wrong") < 0, "kept in harlo-agent's keys file, the last one only")
             const log = TestInput.readFile(win.selftestDir + "/cloud-log.jsonl")
@@ -10981,7 +11060,7 @@ Item {
             tests.check(opus.split("\t")[0] === "anthropic", "the picker gets Anthropic's model once its key is saved (" + opus.replace(/\t/g, " | ") + ")")
             tests.check(tests.findText("$4 / $20") === null, "with no price beside it")
             TestInput.key(Qt.Key_Escape, 0)
-            settingsDialog.openPage("providers") } }
+            settingsDialog.openPage("models") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
@@ -10990,6 +11069,13 @@ Item {
             if (!remove || !remove.visible) tests.clickItem(tests.findName("cloudProvider-anthropic", d), "Anthropic's row") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
+            const share = tests.findName("harloShareKeys", settingsDialog.contentItem)
+            tests.check(share && share.checked, "with a key saved, SSH machines get the keys by default")
+            tests.scrollIntoView(share)
+            tests.clickItem(share, "the SSH keys switch") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(Workspace.setting("harlo_share_keys") === "0", "turned off")
             const remove = tests.findName("cloudRemove-anthropic", settingsDialog.contentItem)
             tests.scrollIntoView(remove)
             tests.clickItem(remove, "Remove") } }
@@ -11000,13 +11086,7 @@ Item {
             const st = tests.findName("cloudStatus-anthropic", settingsDialog.contentItem)
             tests.check(st && st.text === "No key", "removed (" + (st ? st.text : "none") + ")")
             tests.check(TestInput.readFile(win.selftestDir + "/config/harlo-agent/keys.json").indexOf("sk-ant-good") < 0, "and gone from the file")
-            const share = tests.findName("harloShareKeys", settingsDialog.contentItem)
-            tests.check(share && share.checked, "SSH machines get the keys by default")
-            tests.scrollIntoView(share)
-            tests.clickItem(share, "the SSH keys switch") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(Workspace.setting("harlo_share_keys") === "0", "turned off")
+            tests.check(tests.findName("harloShareKeys", settingsDialog.contentItem) === null, "with no key left, the SSH keys switch goes")
             // Coding plans for Claude Code: harlo's own list and keys,
             // checked by one short request of the stand-in claude.
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
@@ -11108,7 +11188,7 @@ Item {
             Workspace.addProject(win.argValue("--cwd="))
             settingsDialog.openPage("lsp") } }
         PauseAnimation { duration: 600 }
-        // Settings → LSP: each language's server, found where it's
+        // Settings → Code intelligence: each language's server, found where it's
         // usually installed too (a stand-in gopls in the home's go/bin).
         ScriptAction { script: tests.waitUntil(harloSettingsSteps, () => Accounts.languageServers !== "" && JSON.parse(Accounts.languageServers).state === "ready", 20000) }
         PauseAnimation { duration: 100 }
@@ -11127,7 +11207,7 @@ Item {
             tests.check((JSON.parse(Accounts.languageServers).list || []).length === 5, "Check again asks again")
             tests.scrollIntoView(tests.findName("harloLanguageServers", settingsDialog.contentItem))
             tests.shotWindow("clicks-harlo-language-servers")
-            tests.check(settingsDialog.current.title === "LSP", "on a page of its own, LSP")
+            tests.check(settingsDialog.current.title === "Code intelligence", "on a page of its own, Code intelligence")
             settingsDialog.openPage("providers") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
@@ -11327,7 +11407,7 @@ Item {
             const b = catalogSteps.offered(), e = catalogSteps.entry() || {}
             tests.check(JSON.stringify(b.agents) === JSON.stringify(["harlo"]) && b.error === "" && b.version === "2.1.7", "downloaded and on for Harlo (" + JSON.stringify(b) + ")")
             const data = win.selftestDir + "/data/harlo/mcp/context-mode"
-            tests.check(JSON.parse(TestInput.readFile(data + "/2.1.7/package.json") || "{}").version === "2.1.7", "in harlo's folder")
+            tests.check(JSON.parse(TestInput.readFile(data + "/2.1.7/package.json") || "{}").version === "2.1.7", "in Harlo's folder")
             tests.check(e.command && e.command.startsWith("/") && e.command.endsWith("/node"), "the entry runs Node by its path (" + e.command + ")")
             tests.check(JSON.stringify(e.args) === JSON.stringify([data + "/current/server.mjs", "--agent", "claude-code"]), "harlo's copy, through current (" + JSON.stringify(e.args) + ")")
             tests.check(JSON.stringify(e.hiddenTools) === JSON.stringify(["ctx_upgrade", "ctx_doctor"]) && e.enabled === true, "its own updating hidden from Harlo (" + JSON.stringify(e) + ")") } }

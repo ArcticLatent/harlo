@@ -40,8 +40,8 @@ ColumnLayout {
         SettingRow {
             visible: notify.cfg.enabled
             divider: true
-            title: "Notify while harlo is focused"
-            detail: "Off: only while harlo is in the background. Never for the session you're looking at."
+            title: "Notify while Harlo is focused"
+            detail: "Off: only while Harlo is in the background. Never for the session you're looking at."
             icon: "window"
             AppSwitch { objectName: "notifyWhileFocused"; checked: notify.cfg.whileFocused; onToggled: notify.setTop("whileFocused", checked) }
         }
@@ -49,7 +49,7 @@ ColumnLayout {
             visible: notify.cfg.enabled
             divider: true
             title: "Play a sound"
-            detail: "harlo's own, the same on any desktop."
+            detail: "Harlo's own, the same on any desktop."
             icon: "volume-up"
             AppSwitch { objectName: "notifySound"; checked: notify.cfg.sound; onToggled: notify.setTop("sound", checked) }
         }

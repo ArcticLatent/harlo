@@ -179,7 +179,7 @@ function showMessage(title, body, action) {
   v.append(c);
 }
 function showUnpaired() {
-  showMessage("Pair this phone", "In harlo on your computer, open Settings → Devices → Pair a device, and scan the QR code with this phone's camera.");
+  showMessage("Pair this phone", "In harlo on your computer, open Settings → Phone → Pair a device, and scan the QR code with this phone's camera.");
 }
 
 function onConnected() {
@@ -254,17 +254,51 @@ function openSession(key, again) {
   });
 }
 
+// A workflow's message to its agent ("[harlo workflow <id> · attempt N ·
+// part]" first): what it's for, in a line; "" for anything else.
+function workflowNote(text) {
+  const m = /^\[harlo workflow \S+ · attempt (\d+) · ([^\]]+)\]\n?/.exec(text || "");
+  if (!m) return "";
+  const attempt = Number(m[1]), body = text.slice(m[0].length);
+  if (m[2].startsWith("review")) return "Asked for a review of attempt " + attempt;
+  if (body.startsWith("You ended your turn without calling report_done")) return "Reminded the agent to report attempt " + attempt;
+  if (attempt === 1) return "Sent the task";
+  const why = (body.split("\n").map(l => l.trim()).find(l => / failed|asked for changes/.test(l)) || "").split(/:| \(/)[0];
+  return why ? "Sent back for attempt " + attempt + ": " + why.charAt(0).toLowerCase() + why.slice(1) : "Sent back for attempt " + attempt;
+}
+
+// A workflow agent's report (report_done): { title, summary, superseded },
+// or null for any other tool.
+function workflowReport(r) {
+  if (!/^(?:mcp__harlo__|harlo_)?report_done$/.test(r.title)) return null;
+  const field = k => { const m = new RegExp("(?:^|\\s)" + k + "=(.*?)(?=\\s{2}\\w+=|$)").exec(r.subtitle || ""); return m ? m[1].trim() : ""; };
+  const attempt = field("attempt");
+  return { title: attempt ? "Reported attempt " + attempt : "Reported back", summary: field("summary"),
+           superseded: r.state === "error" && (r.text || "").includes("This one isn't used.") };
+}
+
 function rowEl(r) {
   const d = document.createElement("div"); d.className = "row " + r.kind;
-  if (r.kind === "user") d.textContent = r.text;
+  const note = r.kind === "user" ? workflowNote(r.text) : "";
+  if (note) {
+    // (harlo's, not yours: folded to its line, the words on a tap.)
+    d.className = "row notice harlo workflow";
+    const det = document.createElement("details"); const sum = document.createElement("summary");
+    const who = document.createElement("span"); who.className = "who"; who.textContent = "workflow";
+    sum.append(who, document.createTextNode(" " + note));
+    const p = document.createElement("div"); p.className = "more"; p.textContent = r.text;
+    det.append(sum, p); d.append(det);
+  } else if (r.kind === "user") d.textContent = r.text;
   else if (r.kind === "markdown") d.innerHTML = sanitize(r.html);
   else if (r.kind === "code") { const pre = document.createElement("pre"); const c = document.createElement("code"); if (r.html) c.innerHTML = sanitize(r.html); else c.textContent = r.text; pre.append(c); d.append(pre); }
   else if (r.kind === "thinking") d.textContent = "💭 " + (r.text.length > 240 ? r.text.slice(0, 240) + "…" : r.text);
   else if (r.kind === "tool") {
     const det = document.createElement("details"); const sum = document.createElement("summary");
-    const n = document.createElement("span"); n.className = "name"; n.textContent = r.title;
-    const a = document.createElement("span"); a.className = "arg"; a.textContent = r.subtitle;
-    const st = document.createElement("span"); st.className = "state " + r.state; st.textContent = r.state === "running" ? "…" : r.state === "error" ? "✕" : "✓";
+    const rep = workflowReport(r);
+    const n = document.createElement("span"); n.className = "name"; n.textContent = rep ? rep.title : r.title;
+    const a = document.createElement("span"); a.className = "arg"; a.textContent = rep && rep.summary ? rep.summary : r.subtitle;
+    const st = document.createElement("span"); st.className = "state " + (rep && rep.superseded ? "done" : r.state);
+    st.textContent = rep && rep.superseded ? "not used" : r.state === "running" ? "…" : r.state === "error" ? "✕" : "✓";
     sum.append(n, a, st); det.append(sum);
     if (r.text) { const pre = document.createElement("pre"); pre.textContent = r.text.length > 6000 ? r.text.slice(0, 6000) + "\n…" : r.text; det.append(pre); }
     d.append(det);

@@ -66,8 +66,8 @@ Group {
         divider: true
         title: "Model"
         detail: writer.provider && writer.provider.state === "checking" ? "Finding " + writer.provider.label + "'s models…"
-              : writer.models.some(m => m.local) ? "Local models, from Model servers, come first: they spend no API money."
-              : "Add a server in Model servers to write it with a local model, spending no API money."
+              : writer.models.some(m => m.local) ? "Local models, from Local models, come first: they spend no API money."
+              : "Add a server in Local models to write it with a local model, spending no API money."
         icon: "sparkling"
         ComboField {
             objectName: writer.objectPrefix + "Model"

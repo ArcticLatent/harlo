@@ -1,4 +1,4 @@
-//! `Remotes` (QML singleton): the SSH hosts of Settings → Remote Instances,
+//! `Remotes` (QML singleton): the SSH hosts of Settings → Other machines,
 //! their connections and what was found on them. Hosts are saved in the
 //! settings ("remote_hosts") and handed to `harlo_core::remote`, which the
 //! rest of the app uses for `ssh://host/…` paths.

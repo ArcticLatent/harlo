@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Signing an agent in to a model provider (Settings → Providers →
+// Signing an agent in to a model provider (Settings → Agents →
 // Accounts): pick what to sign in to, then follow the agent's own sign-in
 // here: the page to open (harlo opens it), a device code, what it asks for
 // (a code from the page). The agent keeps the credential.

@@ -74,7 +74,7 @@ AppDialog {
     ColumnLayout {
         width: parent.width
         spacing: 6
-        FormNote { text: "Any OpenAI-compatible server: Ollama, LM Studio, llama.cpp, vLLM, SGLang, or a company gateway. Its models show in harlo's model lists (under Local when the server is on this computer or your network) and in the agents themselves." }
+        FormNote { text: "Any OpenAI-compatible server: Ollama, LM Studio, llama.cpp, vLLM, SGLang, or a company gateway. Its models show in Harlo's model lists (under Local when the server is on this computer or your network) and in the agents themselves." }
         FormLabel { Layout.topMargin: 8; text: "Address" }
         RowLayout {
             Layout.fillWidth: true
@@ -185,7 +185,7 @@ AppDialog {
                     function onFoundChanged() { if (dlg.found) free.checked = dlg.localAddress(dlg.search.baseUrl) && key.text.trim() === "" }
                 }
             }
-            FormNote { text: free.checked ? "Its sessions cost nothing extra." : "Without a price its sessions' cost isn't known, so spending limits can't count it: give it one in Model servers." }
+            FormNote { text: free.checked ? "Its sessions cost nothing extra." : "Without a price its sessions' cost isn't known, so spending limits can't count it: give it one in Local models." }
             FormNote { text: "Models show as " + (name.text.trim() || "name") + "/<model>, saved in each agent's own config." }
             FormNote { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             RowLayout {

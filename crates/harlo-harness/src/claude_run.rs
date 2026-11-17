@@ -779,7 +779,7 @@ fn plan_settings(shared: &Arc<Shared>) -> Result<Option<(String, String)>, Error
         return Ok(None);
     };
     let key = crate::coding_plans::key(&plan.id)
-        .ok_or_else(|| Error::new(ErrorKind::Start, format!("no key for {}: add it in Settings → Providers → Coding plans for Claude Code", plan.name)))?;
+        .ok_or_else(|| Error::new(ErrorKind::Start, format!("no key for {}: add it in Settings → Models → Coding plans for Claude Code", plan.name)))?;
     let settings = crate::coding_plans::settings(plan, &m.id, &key);
     match &shared.cfg.remote {
         // There: a private folder of its own (mktemp's are 0700), the file

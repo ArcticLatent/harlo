@@ -1,4 +1,4 @@
-//! Setting up a model server (Settings → Model servers → Set up a model server).
+//! Setting up a model server (Settings → Local models → Set up a model server).
 //!
 //! This computer's hardware, the inference engines that suit it, the ones
 //! already installed, and installing one with its first model.

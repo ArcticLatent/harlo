@@ -46,7 +46,7 @@ pub mod qobject {
         #[qproperty(i32, copies_revision, cxx_name = "copiesRevision")]
         /// Bumped when sessions an agent started (orchestration) change.
         #[qproperty(i32, orchestration_revision, cxx_name = "orchestrationRevision")]
-        /// Settings → Orchestration's switch.
+        /// Settings → Teamwork's switch.
         #[qproperty(bool, orchestration_on, cxx_name = "orchestrationOn")]
         /// Bumped when a session's shared plan changes (`planJson`).
         #[qproperty(i32, plans_revision, cxx_name = "plansRevision")]
@@ -108,7 +108,7 @@ pub mod qobject {
         #[qproperty(QString, wiki_offers_json, cxx_name = "wikiOffersJson")]
         /// Bumped when projects change (Settings → Projects follows it).
         #[qproperty(i32, projects_revision, cxx_name = "projectsRevision")]
-        /// Bumped when a provider's check finishes (Settings → Providers).
+        /// Bumped when a provider's check finishes (Settings → Agents).
         #[qproperty(i32, providers_revision, cxx_name = "providersRevision")]
         /// Bumped when `setSetting` changes a value, so bindings on a setting
         /// follow it.
@@ -749,7 +749,7 @@ pub mod qobject {
         /// icon, color, remote }]`.
         #[qinvokable]
         fn projects_json(self: &Workspace) -> QString;
-        /// Settings → Providers: `[{ id, label, enabled, canChat, state
+        /// Settings → Agents: `[{ id, label, enabled, canChat, state
         /// ("checking", "ready", "missing", "error"), path, version,
         /// modelCount, models: [name], error }]`.
         #[qinvokable]
@@ -1834,7 +1834,7 @@ impl Workspace {
             return;
         }
         let harness = match &remote {
-            // Harlo when it can run there (and Settings → Providers has it
+            // Harlo when it can run there (and Settings → Agents has it
             // on), else what the host has; Harlo when nothing's known.
             Some(host) => {
                 let harlo_there = harlo_core::remote::info_of(host).is_none_or(|i| harlo_core::agent_host::not_there(&i).is_none());
@@ -2096,7 +2096,7 @@ impl Workspace {
 
     /// Sessions can start with it: harlo supports it and it's on.
     /// The agents a new session in `dir` can use: on this computer, those
-    /// turned on (Settings → Providers); on a remote host, those also found
+    /// turned on (Settings → Agents); on a remote host, those also found
     /// there (all of them until it's been checked).
     fn agents_at(&self, dir: &Path) -> Vec<&'static str> {
         let host = harlo_core::remote::host_of(dir);
@@ -4586,7 +4586,7 @@ impl Workspace {
             return;
         }
         self.as_mut().rust_mut().limits_asked = Some(std::time::Instant::now());
-        // Each when it's on (Settings → Providers) and there.
+        // Each when it's on (Settings → Agents) and there.
         let claude = self
             .provider_enabled(HarnessKind::Claude)
             .then(|| self.program_for(HarnessKind::Claude).or_else(|| harlo_harness::resolve_program(HarnessKind::Claude)))
@@ -5737,7 +5737,7 @@ impl Workspace {
         {
             return set;
         }
-        // The first one on and installed, in Settings → Providers' order.
+        // The first one on and installed, in Settings → Agents' order.
         let usable: Vec<HarnessKind> = HarnessKind::PROVIDERS.iter().copied().filter(|&k| self.usable_harness(k)).collect();
         usable
             .iter()
@@ -6514,7 +6514,7 @@ impl Workspace {
                                  .filter(|(_, m)| !m.is_empty()).map(|(a, m)| (a, json!(m))).collect::<serde_json::Map<_, _>>() }))
             .collect();
         let models: serde_json::Value = serde_json::from_str(&self.known_models().to_string()).unwrap_or_default();
-        // Every model each agent offers (Settings → Providers reads them).
+        // Every model each agent offers (Settings → Agents reads them).
         let all: serde_json::Map<String, serde_json::Value> = self
             .provider_checks
             .iter()
@@ -7001,7 +7001,7 @@ impl Workspace {
     fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, tool: &str, args: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         use serde_json::json;
         if !self.orchestration_on {
-            return Err(anyhow::Error::msg("Orchestration is turned off in harlo (Settings → Orchestration)."));
+            return Err(anyhow::Error::msg("Teamwork is turned off in harlo (Settings → Teamwork)."));
         }
         // (A session working again: its helpers start again.)
         if let Some(c) = &caller {
@@ -7169,7 +7169,7 @@ impl Workspace {
         use serde_json::json;
         let kind = tool_calls::agent(&call.text("agent"))?;
         if !self.usable_harness(kind) {
-            return Err(anyhow::anyhow!("{} is turned off in harlo (Settings → Providers).", kind.label()));
+            return Err(anyhow::anyhow!("{} is turned off in harlo (Settings → Agents).", kind.label()));
         }
         if call.caller.as_deref().is_some_and(|c| self.helper_depth(c) >= MAX_HELPER_DEPTH) {
             return Err(anyhow::anyhow!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself, or ask your parent (ask_parent)."));
@@ -7295,7 +7295,7 @@ impl Workspace {
             return Err(anyhow::Error::msg("You're a helper: do your task yourself. If it's too big for one session, say so to your parent with ask_parent."));
         }
         if self.agents_starting() != harlo_core::orchestration::Starting::Offer {
-            return Err(anyhow::Error::msg("harlo isn't set to have agents offer splits now (Settings → Orchestration): start helpers only when the user asks."));
+            return Err(anyhow::Error::msg("harlo isn't set to have agents offer splits now (Settings → Teamwork): start helpers only when the user asks."));
         }
         if self.helper_depth(&me) >= MAX_HELPER_DEPTH {
             return Err(anyhow::anyhow!("Helpers go {MAX_HELPER_DEPTH} deep at most, and you're that deep: do this yourself."));
@@ -7318,7 +7318,7 @@ impl Workspace {
             }
             let kind = tool_calls::agent(&h.agent).map_err(|e| anyhow::anyhow!("{e} (for \"{}\")", h.title))?;
             if !self.usable_harness(kind) {
-                return Err(anyhow::anyhow!("{} is turned off in harlo (Settings → Providers): pick another agent for \"{}\".", kind.label(), h.title));
+                return Err(anyhow::anyhow!("{} is turned off in harlo (Settings → Agents): pick another agent for \"{}\".", kind.label(), h.title));
             }
             lines.push((h.title.clone(), kind.label().to_owned(), h.model.clone(), h.worktree.clone()));
             starts.push(json!({ "agent": kind.as_str(), "prompt": h.prompt, "title": h.title, "model": h.model, "thinking": thinking, "worktree": h.worktree }));
@@ -7603,7 +7603,7 @@ impl Workspace {
         harlo_core::orchestration::proposal_answer(Some(&started))
     }
 
-    /// Settings → Orchestration: when agents start helpers.
+    /// Settings → Teamwork: when agents start helpers.
     fn agents_starting(&self) -> harlo_core::orchestration::Starting {
         harlo_core::orchestration::Starting::from_setting(&self.setting_str(ORCH_ON_THEIR_OWN))
     }
@@ -7622,7 +7622,7 @@ impl Workspace {
     pub fn run_plan(mut self: Pin<&mut Self>, key: &QString, agent: &QString, model: &QString) -> QString {
         let key = key.to_string();
         if !self.orchestration_on {
-            return QString::from("Running a plan with helpers needs orchestration (Settings → Orchestration).");
+            return QString::from("Running a plan with helpers needs Teamwork on (Settings → Teamwork).");
         }
         let Some(entry) = self.live.get(&key) else { return QString::from("Open the session first: its plan runs from it.") };
         let status = entry.info.status;

@@ -1,4 +1,4 @@
-//! `Phone` (QML singleton): Settings → Devices and "Pair a device". Runs
+//! `Phone` (QML singleton): Settings → Phone and "Pair a device". Runs
 //! the phone server while phone access is on, makes pairing links and QR
 //! codes, and lists and removes paired devices.
 

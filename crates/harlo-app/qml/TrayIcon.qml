@@ -45,7 +45,7 @@ Item {
             visible: false
             onAboutToShow: tray.sessions = JSON.parse(Workspace.runningSessions())
             Platform.MenuItem {
-                text: root.window && root.window.visible ? "Hide harlo" : "Show harlo"
+                text: root.window && root.window.visible ? "Hide Harlo" : "Show Harlo"
                 onTriggered: root.toggleWindow()
             }
             Platform.MenuItem {
@@ -69,7 +69,7 @@ Item {
             // Running sessions are inserted here.
             Platform.MenuSeparator { }
             Platform.MenuItem {
-                text: "Quit harlo"
+                text: "Quit Harlo"
                 onTriggered: root.quitRequested()
             }
         }

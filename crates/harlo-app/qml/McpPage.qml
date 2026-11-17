@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Settings → MCP: the tool servers your agents (Harlo, Claude)
+// Settings → Tools for agents: the tool servers your agents (Harlo, Claude)
 // can call, globally or in a project. A grid of servers with their status
 // (harlo tests them: the agents don't report one), and a page per server
 // to edit it.
@@ -68,7 +68,7 @@ ColumnLayout {
         e.form[key] = value
         editing = e
     }
-    /// The agents that are on (Settings → Providers) and have MCP servers.
+    /// The agents that are on (Settings → Agents) and have MCP servers.
     readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["claude", "harlo"].includes(p.id))
     /// A new server is for the installed ones (all of them if none is).
     function defaultAgents() {
@@ -252,7 +252,7 @@ ColumnLayout {
             /// The agents ticked: those it's on for, else those chosen last
             /// (none yet: the installed ones).
             readonly property var ticked: on ? b.agents : ((b.chosen || []).length > 0 ? b.chosen : page.defaultAgents())
-            /// Those of them turned on in Settings → Providers (it's set up
+            /// Those of them turned on in Settings → Agents (it's set up
             /// for these).
             readonly property var shown: ticked.filter(a => page.agents.some(x => x.id === a))
             readonly property bool newer: (b.latest || "") !== "" && (b.version || "") !== "" && page.newerVersion(b.latest, b.version)
@@ -341,7 +341,7 @@ ColumnLayout {
                 }
                 FormNote {
                     objectName: "mcpCatalogNote-" + bcard.b.id
-                    readonly property string problem: bcard.b.error || (bcard.b.taken ? "You have another server called " + bcard.b.id + " below: remove it to use harlo's." : "") || (!bcard.on ? bcard.b.nodeError || "" : "")
+                    readonly property string problem: bcard.b.error || (bcard.b.taken ? "You have another server called " + bcard.b.id + " below: remove it to use Harlo's." : "") || (!bcard.on ? bcard.b.nodeError || "" : "")
                     visible: text !== ""
                     text: problem !== "" ? problem : (bcard.b.message || "")
                     color: problem !== "" ? (bcard.b.error ? Theme.error : Theme.warning) : Theme.muted

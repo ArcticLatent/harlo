@@ -196,7 +196,7 @@ fn main() {
     // The agents it started (Claude Code, Harlo's), and what they started:
     // a session's agent outlives harlo otherwise, and carries on with it.
     harlo_harness::process::stop_all();
-    // Model servers harlo started (Settings → Model servers).
+    // Model servers harlo started (Settings → Local models).
     harlo_core::servers::stop_started_servers();
     harlo_core::remote::disconnect_all();
     instance::cleanup();

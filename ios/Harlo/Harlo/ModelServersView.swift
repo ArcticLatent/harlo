@@ -1,7 +1,7 @@
 import HarloKit
 import SwiftUI
 
-/// Settings → Model servers: the ones harlo set up, on its computer and
+/// Settings → Local models: the ones harlo set up, on its computer and
 /// each machine it's connected to, each started or stopped from here.
 struct ModelServersView: View {
     @Environment(HarloModel.self) private var model
@@ -16,7 +16,7 @@ struct ModelServersView: View {
                 if let machines {
                     if machines.allSatisfy({ $0.servers.isEmpty && $0.error.isEmpty }) {
                         Section {
-                            Text("harlo hasn't set up a model server yet. Set one up in harlo's Settings → Model servers on your computer.")
+                            Text("harlo hasn't set up a model server yet. Set one up in harlo's Settings → Local models on your computer.")
                                 .foregroundStyle(Color(p.muted))
                         }
                     }
@@ -44,7 +44,7 @@ struct ModelServersView: View {
             .listRowBackground(Color(p.elevated))
         }
         .screen()
-        .navigationTitle("Model servers")
+        .navigationTitle("Local models")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }

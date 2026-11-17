@@ -16,6 +16,12 @@ Rectangle {
     readonly property bool paused: !!run && run.state === "paused"
     readonly property bool over: !!run && (run.state === "done" || run.state === "stopped")
     property bool expanded: false
+    /// Too narrow for the workflow's name beside Pause and Stop: the
+    /// attempt alone (the name is in the details).
+    readonly property bool narrow: width < 420
+    /// The whole log shown (opened, its newest lines are).
+    property bool wholeLog: false
+    onExpandedChanged: if (!expanded) wholeLog = false
     /// Its branch is being pushed for a pull request: the Changes panel
     /// opens once it is.
     property bool publishing: false
@@ -69,7 +75,8 @@ Rectangle {
             Label {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                text: root.run ? qsTr("%1 · attempt %2").arg(root.run.workflow).arg(root.run.attempt) : ""
+                objectName: "workflowTitle"
+                text: !root.run ? "" : root.narrow ? qsTr("Attempt %1").arg(root.run.attempt) : qsTr("%1 · attempt %2").arg(root.run.workflow).arg(root.run.attempt)
                 color: Theme.foreground
                 font.pixelSize: Theme.px(12)
                 font.bold: true
@@ -155,7 +162,7 @@ Rectangle {
                 text: root.stateLine()
                 color: root.paused ? Theme.warning : root.run && root.run.state === "done" ? Theme.success : Theme.muted
                 font.pixelSize: Theme.px(12)
-                elide: Text.ElideRight
+                wrapMode: Text.Wrap
             }
         }
 
@@ -213,7 +220,7 @@ Rectangle {
             visible: !root.expanded && !!root.run && root.run.log.length > 0 && !root.paused && root.run.state !== "done" && !root.run.liveCheck
             readonly property var entry: root.run && root.run.log.length > 0 ? root.run.log[root.run.log.length - 1] : null
             text: entry ? entry.text : ""
-            color: entry ? root.toneColor(entry.tone) : Theme.muted
+            color: !entry || entry.tone === "info" ? Theme.muted : entry.tone === "good" ? Theme.foreground : root.toneColor(entry.tone)
             font.pixelSize: Theme.px(12)
             elide: Text.ElideRight
             maximumLineCount: 1
@@ -270,14 +277,6 @@ Rectangle {
             visible: root.expanded
             spacing: 6
 
-            PlainLabel {
-                Layout.fillWidth: true
-                text: root.run ? [qsTr("On %1").arg(root.run.branch || qsTr("its worktree"))].concat(root.run.stages.map(s => s.label + ": " + s.what)).join("  ·  ") : ""
-                color: Theme.muted
-                font.pixelSize: Theme.px(11)
-                wrapMode: Text.Wrap
-            }
-
             // The last check's output.
             Rectangle {
                 objectName: "workflowTest"
@@ -295,7 +294,10 @@ Rectangle {
                     spacing: 4
                     PlainLabel {
                         readonly property var t: root.run && root.run.lastCheck ? root.run.lastCheck : null
-                        text: !t ? "" : t.passed ? qsTr("%1 passed in %2 s").arg(t.name).arg(t.seconds) : t.exit === null ? qsTr("%1 couldn't finish").arg(t.name) : qsTr("%1 failed (exit %2) in %3 s").arg(t.name).arg(t.exit).arg(t.seconds)
+                        // An earlier attempt's check says so: the run has moved on.
+                        readonly property string how: !t ? "" : t.passed ? qsTr("%1 passed in %2 s").arg(t.name).arg(t.seconds) : t.exit === null ? qsTr("%1 couldn't finish").arg(t.name) : qsTr("%1 failed (exit %2) in %3 s").arg(t.name).arg(t.exit).arg(t.seconds)
+                        objectName: "workflowCheckTitle"
+                        text: t && t.attempt > 0 && t.attempt !== root.run.attempt ? qsTr("Attempt %1 · %2").arg(t.attempt).arg(how) : how
                         color: t && t.passed ? Theme.success : Theme.error
                         font.pixelSize: Theme.px(11)
                         font.bold: true
@@ -312,21 +314,47 @@ Rectangle {
                 }
             }
 
-            // The run's log, newest last.
+            // The run's log, newest last: its latest lines, the rest on
+            // demand. A dot only where something went wrong; an attempt's
+            // number where it starts.
+            FlatButton {
+                objectName: "workflowWholeLog"
+                readonly property int hidden: root.run ? Math.max(0, root.run.log.length - 6) : 0
+                visible: hidden > 0 && !root.wholeLog
+                text: hidden === 1 ? qsTr("Show 1 earlier line") : qsTr("Show %1 earlier lines").arg(hidden)
+                outlined: false
+                padding: 2
+                accent: Theme.textFaint
+                font.pixelSize: Theme.px(11.5)
+                onClicked: root.wholeLog = true
+            }
             Repeater {
-                model: root.run ? root.run.log.slice(-8) : []
+                id: logLines
+                model: !root.run ? [] : root.wholeLog ? root.run.log : root.run.log.slice(-6)
                 RowLayout {
                     id: entry
                     required property var modelData
+                    required property int index
+                    readonly property bool marked: modelData.tone === "bad" || modelData.tone === "warn"
+                    readonly property bool firstOfAttempt: index === 0 || logLines.model[index - 1].attempt !== modelData.attempt
                     Layout.fillWidth: true
+                    Layout.topMargin: firstOfAttempt && index > 0 ? 4 : 0
                     spacing: 8
-                    Rectangle { Layout.alignment: Qt.AlignTop; Layout.topMargin: 5; implicitWidth: 6; implicitHeight: 6; radius: 3; color: root.toneColor(entry.modelData.tone) }
                     PlainLabel {
                         Layout.preferredWidth: 22
                         Layout.alignment: Qt.AlignTop
-                        text: "#" + entry.modelData.attempt
-                        color: Theme.muted
+                        text: entry.firstOfAttempt ? "#" + entry.modelData.attempt : ""
+                        color: Theme.textFaint
                         font.pixelSize: Theme.px(11)
+                    }
+                    Rectangle {
+                        objectName: "workflowLogDot"
+                        Layout.alignment: Qt.AlignTop
+                        Layout.topMargin: 5
+                        implicitWidth: 6
+                        implicitHeight: 6
+                        radius: 3
+                        color: entry.marked ? root.toneColor(entry.modelData.tone) : "transparent"
                     }
                     PlainLabel {
                         Layout.fillWidth: true
@@ -336,6 +364,27 @@ Rectangle {
                         wrapMode: Text.Wrap
                     }
                 }
+            }
+
+            // Its details: the branch and what each stage is, short (the
+            // run's id off the branch, long commands cut); whole on hover.
+            PlainLabel {
+                objectName: "workflowDetails"
+                readonly property var parts: !root.run ? [] : (root.narrow ? [root.run.workflow] : []).concat([qsTr("On %1").arg(root.run.branch || qsTr("its worktree"))]).concat(root.run.stages.map(s => s.label + ": " + s.what))
+                readonly property string branchShort: root.run && root.run.branch ? root.run.branch.replace(/-[0-9a-f]{6,}$/, "") : ""
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                text: parts.map(p => {
+                    const short = root.run && root.run.branch && p.endsWith(root.run.branch) ? p.slice(0, p.length - root.run.branch.length) + branchShort : p
+                    return short.length > 60 ? short.slice(0, 57).replace(/\s+$/, "") + "…" + (short.indexOf("`") >= 0 ? "`" : "") : short
+                }).join("  ·  ")
+                color: Theme.textFaint
+                font.pixelSize: Theme.px(11)
+                wrapMode: Text.Wrap
+                HoverHandler { id: detailsHover }
+                ToolTip.visible: detailsHover.hovered && text !== parts.join("  ·  ")
+                ToolTip.delay: 500
+                ToolTip.text: parts.join("\n")
             }
         }
     }

@@ -89,7 +89,7 @@ Item {
                 font.pixelSize: Theme.px(12)
                 text: baseBox.count === 0
                     ? "This project is not a git repository."
-                    : "An existing branch is checked out; a new name branches off “" + baseBox.currentText + "”. The worktree lives in harlo's data folder, so your checkout is untouched."
+                    : "An existing branch is checked out; a new name branches off “" + baseBox.currentText + "”. The worktree lives in Harlo's data folder, so your checkout is untouched."
             }
         }
     }

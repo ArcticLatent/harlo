@@ -27,6 +27,8 @@ public struct WorkflowCheck: Equatable, Sendable {
     public var exit: Int64?
     public var seconds: Int64
     public var tail: String
+    /// The attempt it checked (0: a run from before harlo kept it).
+    public var attempt: Int64
 
     public init(_ v: JSON) {
         name = v["name"].string ?? "Tests"
@@ -34,6 +36,21 @@ public struct WorkflowCheck: Equatable, Sendable {
         exit = v["exit"].int
         seconds = v["seconds"].int ?? 0
         tail = v["tail"].text
+        attempt = v["attempt"].int ?? 0
+    }
+
+    /// How it ended, naming its attempt once the run has moved past it:
+    /// "Attempt 2 · Tests passed in 3 s".
+    public func title(runAttempt: Int64) -> String {
+        let how: String
+        if passed {
+            how = "\(name) passed in \(seconds) s"
+        } else if let exit {
+            how = "\(name) failed (exit \(exit)) in \(seconds) s"
+        } else {
+            how = "\(name) couldn't finish"
+        }
+        return attempt > 0 && attempt != runAttempt ? "Attempt \(attempt) · \(how)" : how
     }
 }
 

@@ -153,7 +153,7 @@ struct SettingsView: View {
                         NavigationLink {
                             ModelServersView()
                         } label: {
-                            Label("Model servers", systemImage: "cpu")
+                            Label("Local models", systemImage: "cpu")
                         }
                     } footer: {
                         Text("Start or stop the model servers harlo set up, on your computer and on the machines it's connected to.")
@@ -163,7 +163,7 @@ struct SettingsView: View {
                     LabeledContent("This phone's key", value: model.fingerprint)
                         .font(Style.mono(13))
                 } footer: {
-                    Text("harlo lists this phone in Settings → Devices; removing it there unpairs it.")
+                    Text("harlo lists this phone in Settings → Phone; removing it there unpairs it.")
                 }
                 if !model.demo {
                     Section {

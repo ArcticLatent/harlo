@@ -273,7 +273,7 @@ QtObject {
         return (id || "").split(/[\/:]/)[0]
     }
     /// The model server behind a session's model ("provider/model"), from
-    /// Settings → Model servers: `{ name,
+    /// Settings → Local models: `{ name,
     /// engine ("" for one harlo didn't set up), address (host:port), place
     /// ("here", "network", "online") }`, or null for a provider's own models.
     function serverOf(harness, modelId) {
@@ -300,17 +300,17 @@ QtObject {
         return m ? m[1] + " " + m[2].replace(/_/g, " ") : name
     }
     readonly property var harloTools: ({
-        propose_helpers: "harlo: offer a split",
-        start_session: "harlo: start a session",
-        send_message: "harlo: message a session",
-        read_session: "harlo: read a session",
-        list_sessions: "harlo: list sessions",
-        list_agents: "harlo: list agents",
-        stop_session: "harlo: stop a session",
-        request_approval: "harlo: ask you to approve",
-        report_done: "harlo: report back",
-        ask_parent: "harlo: ask the session that started it",
-        bring_over: "harlo: bring over a helper's changes",
+        propose_helpers: "Harlo: offer a split",
+        start_session: "Harlo: start a session",
+        send_message: "Harlo: message a session",
+        read_session: "Harlo: read a session",
+        list_sessions: "Harlo: list sessions",
+        list_agents: "Harlo: list agents",
+        stop_session: "Harlo: stop a session",
+        request_approval: "Harlo: ask you to approve",
+        report_done: "Harlo: report back",
+        ask_parent: "Harlo: ask the session that started it",
+        bring_over: "Harlo: bring over a helper's changes",
     })
     // What a harlo tool's call is busy with before its arguments are in: the
     // agent writing them (a briefing can take a minute).

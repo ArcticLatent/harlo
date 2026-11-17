@@ -708,7 +708,7 @@ impl Tools {
         let s = |k: &str| args[k].as_str().unwrap_or_default();
         let sandbox = self.sandbox.as_deref();
         if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {
-            return fail(format!("Commands can't run: the sandbox can't start here ({why}). Install bubblewrap, or turn Harlo's sandbox off in Settings → Providers → Harlo."));
+            return fail(format!("Commands can't run: the sandbox can't start here ({why}). Install bubblewrap, or turn Harlo's sandbox off in Settings → Agents → Harlo."));
         }
         let inside = sandbox.filter(|_| args["outside_sandbox"] != true);
         if args["background"] == true {

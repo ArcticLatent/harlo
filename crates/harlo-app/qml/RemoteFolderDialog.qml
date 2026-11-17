@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Picks a folder on a remote host (Settings → Remote Instances) for a new
+// Picks a folder on a remote host (Settings → Other machines) for a new
 // project: starts in the host's home; click a folder to open it.
 AppDialog {
     id: dlg

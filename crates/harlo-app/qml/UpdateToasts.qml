@@ -115,7 +115,7 @@ ToastStack {
             DialogButton {
                 objectName: "updateRestart-" + toast.entry.key
                 visible: toast.entry.agent === "harlo" && toast.entry.state === "done"
-                text: "Restart harlo"
+                text: "Restart Harlo"
                 accent: true
                 implicitHeight: 28
                 font.pixelSize: Theme.px(12)

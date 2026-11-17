@@ -44,7 +44,11 @@ struct RowView: View {
     @ViewBuilder var content: some View {
         switch row.kind {
         case "user":
-            UserBubble(row: row)
+            if let note = row.workflowNote {
+                WorkflowNoteRow(note: note, text: row.text)
+            } else {
+                UserBubble(row: row)
+            }
         case "markdown":
             RichTextView(blocks: RichCache.blocks(row.html))
         // A long code block's later pieces: its first shows it.

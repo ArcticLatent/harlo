@@ -18,7 +18,7 @@ Popup {
     readonly property var steps: [
         { title: "Agents", subtitle: "Install the coding agents you want, sign them in, and pick the one new sessions start with." },
         { title: "Git", subtitle: "Pick where your repositories live and sign git in, so pushing and pulling just work." },
-        { title: "Theme", subtitle: "How harlo looks. Everything here is in Settings → Appearance too." },
+        { title: "Theme", subtitle: "How Harlo looks. Everything here is in Settings → Appearance too." },
     ]
 
     function show() { step = 0; open() }
@@ -97,7 +97,7 @@ Popup {
             ColumnLayout {
                 spacing: 4
                 Label {
-                    text: root.step === 0 ? "Welcome to harlo" : root.steps[root.step].title
+                    text: root.step === 0 ? "Welcome to Harlo" : root.steps[root.step].title
                     color: Theme.text
                     font.pixelSize: Theme.px(22)
                     font.weight: Font.DemiBold
@@ -308,7 +308,7 @@ Popup {
                 Layout.rightMargin: 24
                 Layout.bottomMargin: 20
                 wrapMode: Text.Wrap
-                text: "No default picked: harlo starts the first installed agent. Pick one above to choose its model too."
+                text: "No default picked: Harlo starts the first installed agent. Pick one above to choose its model too."
                 color: Theme.textMuted
                 font.pixelSize: Theme.px(12.5)
             }
@@ -341,7 +341,7 @@ Popup {
                 Layout.rightMargin: 24
                 Layout.bottomMargin: 20
                 wrapMode: Text.Wrap
-                text: "Signing in sets up git for that site only (HTTPS pushes and pulls); SSH remotes keep using your SSH keys. The sign-in stays with the GitHub CLI, glab, or git's credential store; harlo keeps no token."
+                text: "Signing in sets up git for that site only (HTTPS pushes and pulls); SSH remotes keep using your SSH keys. The sign-in stays with the GitHub CLI, glab, or git's credential store; Harlo keeps no token."
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(12)
             }

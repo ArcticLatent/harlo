@@ -221,11 +221,11 @@ impl World {
             Action::RunCheck { seq, attempt, .. } => {
                 let pass = 0.5 + 0.15 * f64::from((*attempt).min(3));
                 let outcome = if self.rng.chance(0.03) {
-                    Outcome { exit: None, tail: String::new(), seconds: 1, error: Some("ssh: connection closed".into()), name: String::new() }
+                    Outcome { exit: None, tail: String::new(), seconds: 1, error: Some("ssh: connection closed".into()), name: String::new(), attempt: 0 }
                 } else if self.rng.chance(pass) {
-                    Outcome { exit: Some(0), tail: "ok".into(), seconds: 2, error: None, name: String::new() }
+                    Outcome { exit: Some(0), tail: "ok".into(), seconds: 2, error: None, name: String::new(), attempt: 0 }
                 } else {
-                    Outcome { exit: Some(1), tail: "1 failed".into(), seconds: 3, error: None, name: String::new() }
+                    Outcome { exit: Some(1), tail: "1 failed".into(), seconds: 3, error: None, name: String::new(), attempt: 0 }
                 };
                 self.queue.push(Item::Tell(Event::Started { seq: *seq }));
                 self.queue.push(Item::Tell(Event::Checked { seq: *seq, attempt: *attempt, outcome }));

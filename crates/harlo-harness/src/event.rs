@@ -20,7 +20,7 @@ pub enum HarnessKind {
 }
 
 impl HarnessKind {
-    /// The providers, in Settings → Providers' order.
+    /// The providers, in Settings → Agents' order.
     pub const PROVIDERS: [HarnessKind; 2] = [Self::Harlo, Self::Claude];
 
     pub fn parse(s: &str) -> Option<Self> {
@@ -50,7 +50,7 @@ impl HarnessKind {
     }
 
     /// harlo can run sessions with it (a provider it only lists is shown in
-    /// Settings → Providers but not offered).
+    /// Settings → Agents but not offered).
     pub fn can_chat(self) -> bool {
         matches!(self, Self::Claude | Self::Harlo | Self::Demo)
     }

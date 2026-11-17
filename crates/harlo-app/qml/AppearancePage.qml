@@ -111,7 +111,7 @@ ColumnLayout {
             // (Without acceleration it can't be drawn: off and
             // disabled, the choice kept for when it can.)
             readonly property bool noGpu: GraphicsInfo.api === GraphicsInfo.Software
-            detail: noGpu ? "Needs graphics acceleration; harlo is drawing in software, so menus and dialogs stay solid."
+            detail: noGpu ? "Needs graphics acceleration; Harlo is drawing in software, so menus and dialogs stay solid."
                 : "Menus, dialogs and the composer show a soft blur of what's behind them."
             icon: "window"
             RowLayout {

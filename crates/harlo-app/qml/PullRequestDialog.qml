@@ -90,7 +90,7 @@ AppDialog {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             text: dlg.req.service === "forgejo" ? "To open it from here, sign in to Forgejo in Settings → Git (a token from the server). Or open it on the site: the page fills in the branches."
-                : "Creating it from harlo needs " + (dlg.req.service === "gitlab" ? "glab" : "the GitHub CLI (gh)") + " (Settings → Git). Its site can still open it."
+                : "Creating it from Harlo needs " + (dlg.req.service === "gitlab" ? "glab" : "the GitHub CLI (gh)") + " (Settings → Git). Its site can still open it."
             color: Theme.textMuted
             font.pixelSize: Theme.px(12.5)
         }

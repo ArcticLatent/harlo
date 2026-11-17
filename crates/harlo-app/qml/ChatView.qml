@@ -852,7 +852,7 @@ Rectangle {
                 Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: spendBanner.why + " harlo holds its messages until you allow more."
+                    text: spendBanner.why + " Harlo holds its messages until you allow more."
                     color: Theme.foreground
                     font.pixelSize: Theme.px(12.5)
                 }
@@ -998,7 +998,7 @@ Rectangle {
                     Workspace.resumeAtReset(session.key, limitLine.resetAt)
                 }
                 ToolTip.visible: hovered
-                ToolTip.text: "When the limit resets, harlo tells " + Theme.harnessLabel(session.harness) + " to continue where it left off. If harlo is closed then, it does so when you next open it, within a day."
+                ToolTip.text: "When the limit resets, Harlo tells " + Theme.harnessLabel(session.harness) + " to continue where it left off. If Harlo is closed then, it does so when you next open it, within a day."
                 ToolTip.delay: 500
             }
             FlatButton {
@@ -1045,7 +1045,7 @@ Rectangle {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 text: loginLine.host === ""
-                    ? Theme.harnessLabel(session.harness) + " has no working login or API key for this model. Add one in Settings → Providers."
+                    ? Theme.harnessLabel(session.harness) + " has no working login or API key for this model. Add a login in Settings → Agents, or an API key in Settings → Models."
                     : Theme.harnessLabel(session.harness) + " has no working login or API key for this model on " + loginLine.host + "."
                 color: Theme.muted
                 font.pixelSize: Theme.px(12)

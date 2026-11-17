@@ -1,4 +1,4 @@
-//! MCP servers for Claude and Harlo (Settings → MCP), globally and per
+//! MCP servers for Claude and Harlo (Settings → Tools for agents), globally and per
 //! project:
 //!
 //! | | global | project |
@@ -64,7 +64,7 @@ pub fn host_home(name: &str) -> PathBuf {
 /// The harnesses harlo manages MCP servers for, in display order.
 pub const HARNESSES: [HarnessKind; 2] = [HarnessKind::Claude, HarnessKind::Harlo];
 
-/// The `claude` that changes Claude's global servers (Settings → Providers
+/// The `claude` that changes Claude's global servers (Settings → Agents
 /// sets it; else the installed one).
 static CLAUDE: Mutex<Option<PathBuf>> = Mutex::new(None);
 

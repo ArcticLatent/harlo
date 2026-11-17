@@ -41,7 +41,7 @@ struct WorkflowSheet: View {
                             Section {
                                 if !t.tail.isEmpty { output(t.tail, empty: "") }
                             } header: {
-                                Text(Self.verdict(t)).textCase(nil)
+                                Text(t.title(runAttempt: run.attempt)).textCase(nil)
                             }
                         }
                         if !run.log.isEmpty {
@@ -110,12 +110,6 @@ struct WorkflowSheet: View {
             .foregroundStyle(Color(shown.isEmpty ? p.muted : p.foreground))
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
-    }
-
-    static func verdict(_ t: WorkflowCheck) -> String {
-        if t.passed { return "\(t.name) passed in \(t.seconds) s" }
-        guard let exit = t.exit else { return "\(t.name) couldn't finish" }
-        return "\(t.name) failed (exit \(exit)) in \(t.seconds) s"
     }
 
     /// Pause, resume and stop while it's on; once it's done (or paused), its

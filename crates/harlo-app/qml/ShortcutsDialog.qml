@@ -58,7 +58,7 @@ Popup {
                         Layout.fillWidth: true
                         spacing: 2
                         Label { Layout.fillWidth: true; text: "Keyboard shortcuts"; color: Theme.foreground; font.pixelSize: Theme.px(16); font.weight: Font.DemiBold }
-                        Label { text: "Get around harlo without leaving the keyboard"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+                        Label { text: "Get around Harlo without leaving the keyboard"; color: Theme.muted; font.pixelSize: Theme.px(12) }
                     }
                     Button {
                         id: closeButton

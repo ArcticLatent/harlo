@@ -35,7 +35,7 @@ pub mod qobject {
     #[auto_cxx_name]
     extern "RustQt" {
         /// Looks for newer versions of the agents installed here (the ones
-        /// on in Settings → Providers).
+        /// on in Settings → Agents).
         #[qinvokable]
         fn check_local(self: Pin<&mut Updates>);
         /// Check now (Settings): asks again (nothing remembered), and says
@@ -251,7 +251,7 @@ fn label(agent: &str) -> String {
     HarnessKind::parse(agent).map_or(agent.to_owned(), |k| k.label().to_owned())
 }
 
-/// The program an agent runs as here (Settings → Providers' path, else the
+/// The program an agent runs as here (Settings → Agents' path, else the
 /// installed one), if it's on.
 fn local_program(agent: &str) -> Option<PathBuf> {
     let kind = HarnessKind::parse(agent)?;

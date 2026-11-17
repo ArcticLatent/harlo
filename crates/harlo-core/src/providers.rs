@@ -1,4 +1,4 @@
-//! Settings → Providers: each agent's install, version and models.
+//! Settings → Agents: each agent's install, version and models.
 //!
 //! Whether each agent (Harlo, Claude) is installed. Checked on demand: Claude's
 //! models are a curated list, Harlo's come from a short RPC run with no session

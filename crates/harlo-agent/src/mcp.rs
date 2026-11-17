@@ -172,7 +172,7 @@ pub fn load(project: &Path) -> (Vec<Config>, Vec<String>) {
             continue;
         }
         if approved[&name].as_str() != Some(&entry_hash(&entry)) {
-            notes.push(format!("The project's MCP server {name} wasn't started: it isn't one you approved for this project, as it is now (it's in {}). To let Harlo start it, open it in harlo's Settings → MCP for this project and save it.", project_file.display()));
+            notes.push(format!("The project's MCP server {name} wasn't started: it isn't one you approved for this project, as it is now (it's in {}). To let Harlo start it, open it in harlo's Settings → Tools for agents for this project and save it.", project_file.display()));
             continue;
         }
         entries.retain(|(n, _)| *n != name);
@@ -897,7 +897,7 @@ async fn signed_in(url: &str, headers: &[(String, String)], force: bool) -> Opti
 /// What a server that wants a sign-in is refused with.
 fn signin_needed(name: &str, url: &str, status: u16, had: bool) -> String {
     let what = if had { "refused the sign-in" } else { "wants you to sign in" };
-    format!("{url} {what} (HTTP {status}): sign in with `harlo-agent mcp login {name}`, or Sign in under harlo's Settings → MCP.")
+    format!("{url} {what} (HTTP {status}): sign in with `harlo-agent mcp login {name}`, or Sign in under harlo's Settings → Tools for agents.")
 }
 
 fn root_cause(e: &(dyn std::error::Error + 'static)) -> String {

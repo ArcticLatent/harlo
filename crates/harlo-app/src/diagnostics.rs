@@ -3,7 +3,7 @@
 //!   run's is kept as `harlo.log.1`.
 //! - `crash-<time>.log`: a panic with its backtrace.
 //! - `protocol/*.jsonl`: harness traffic, when `--debug-protocol` or
-//!   Settings → Providers → "Log harness traffic" is on.
+//!   Settings → About → "Log agent traffic" is on.
 
 // Rust guideline compliant 2026-10-09
 
@@ -51,7 +51,7 @@ fn open_log() -> Option<File> {
     std::fs::OpenOptions::new().create(true).append(true).open(&log).ok()
 }
 
-/// Settings → Providers → "Log harness traffic" (`--debug-protocol` keeps it on).
+/// Settings → About → "Log agent traffic" (`--debug-protocol` keeps it on).
 pub fn set_protocol_logging(on: bool) {
     let on = on || forced_on();
     harlo_harness::protocol_log::set_dir(on.then(|| logs_dir().join("protocol")));

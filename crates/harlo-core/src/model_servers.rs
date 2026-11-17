@@ -1,4 +1,4 @@
-//! Your own model servers (Settings → Model servers).
+//! Your own model servers (Settings → Local models).
 //!
 //! Any OpenAI-compatible server, on this computer or elsewhere (Ollama, LM
 //! Studio, llama.cpp, vLLM, SGLang, a company gateway). harlo asks the server

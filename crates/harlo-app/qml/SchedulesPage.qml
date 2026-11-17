@@ -29,7 +29,7 @@ ColumnLayout {
     SectionHeader {
         title: "Scheduled prompts"
         subtitle: "Send a prompt on a schedule, e.g. every weekday morning."
-        more: "Each run starts a new session in the project; you get the usual notification when it finishes. Schedules run while harlo is running (Settings → General → Start harlo when you log in)."
+        more: "Each run starts a new session in the project; you get the usual notification when it finishes. Schedules run while Harlo is running (Settings → General → Start Harlo when you log in)."
         AddButton { objectName: "newSchedule"; text: "New schedule"; onClicked: editor.openFor(null) }
     }
     Group {
@@ -236,7 +236,7 @@ ColumnLayout {
                 AppTextField { id: onceField; objectName: "scheduleOnce"; Layout.preferredWidth: 160; placeholderText: "2026-10-13 09:00" }
                 Label { text: "(date and time)"; color: Theme.muted; font.pixelSize: Theme.px(11) }
             }
-            AppCheckBox { id: catchUp; text: "If harlo was closed at the time, run it when harlo starts" }
+            AppCheckBox { id: catchUp; text: "If Harlo was closed at the time, run it when Harlo starts" }
             Label {
                 Layout.fillWidth: true
                 visible: editor.error !== ""

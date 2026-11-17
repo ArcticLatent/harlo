@@ -30,9 +30,9 @@ struct ModelPicker: View {
     var keysNote: LocalizedStringKey? {
         switch session.harness {
         case "harlo":
-            return "Other providers' models show here once their key is added in harlo on your computer: Settings → Providers → Cloud models."
+            return "Other providers' models show here once their key is added in harlo on your computer: Settings → Models."
         case "claude":
-            return "A coding plan's models (GLM, Kimi, MiniMax) show here once its key is added in harlo on your computer: Settings → Providers → Coding plans for Claude Code."
+            return "A coding plan's models (GLM, Kimi, MiniMax) show here once its key is added in harlo on your computer: Settings → Models → Coding plans for Claude Code."
         default:
             return nil
         }

@@ -144,7 +144,7 @@ pub fn run(args: &[String], cwd: &Path, host: Option<&crate::remote::Host>, prog
         detail: "Claude Code isn't installed".into(),
         output: format!(
             "Plugins are installed through Claude Code, which isn't {where}. Install it (Settings → General → Open the setup guide{}), then send this again.",
-            if r#where == "on this computer" { "" } else { ", or the machine's row in Settings → Remote Instances" }
+            if r#where == "on this computer" { "" } else { ", or the machine's row in Settings → Other machines" }
         ),
     };
     let out = match host {

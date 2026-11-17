@@ -1579,6 +1579,14 @@ fn set_run(row: &mut Arc<Row>, group: &str, summary: &str, open: bool, run_ms: i
     }
 }
 
+/// A workflow report refused because its attempt is over: not a failure.
+///
+/// harlo's `report_done` refuses a report for an attempt a later one has
+/// replaced, saying "This one isn't used." (see `workflow::check_report`).
+fn superseded_report(row: &Row) -> bool {
+    row.title.ends_with("report_done") && row.text.contains("This one isn't used.")
+}
+
 fn run_summary(run: &[Arc<Row>]) -> String {
     // (verb phrase, singular, plural) in the order they're told.
     const KINDS: [(&str, &str, &str); 8] = [
@@ -1598,7 +1606,7 @@ fn run_summary(run: &[Arc<Row>]) -> String {
             thought = true;
             continue;
         }
-        if r.state == "error" {
+        if r.state == "error" && !superseded_report(r) {
             failed += 1;
         }
         let name = r.title.to_lowercase();
@@ -2493,6 +2501,20 @@ mod tests {
         let run: Vec<_> = rows.iter().filter(|r| !r.group.is_empty()).collect();
         assert_eq!(run.len(), 5, "{rows:?}");
         assert_eq!(run[0].summary, "Thought, read 1 file, edited 1 file, ran 2 commands · 1 failed");
+        // A workflow report for an attempt that's over isn't a failure.
+        let mut t = Transcript::new();
+        t.load_messages(&[
+            json!({"role":"user","content":"go"}),
+            json!({"role":"assistant","content":[
+                {"type":"toolCall","id":"r1","name":"report_done","arguments":{"attempt":2}},
+                {"type":"toolCall","id":"r2","name":"report_done","arguments":{"attempt":3}}]}),
+            json!({"role":"toolResult","toolCallId":"r1","content":[{"type":"text","text":"Attempt 2 is over: harlo is waiting for attempt 3's report. This one isn't used."}],"isError":true}),
+            json!({"role":"toolResult","toolCallId":"r2","content":[{"type":"text","text":"ok"}]}),
+            json!({"role":"assistant","content":[{"type":"text","text":"Done."}]}),
+        ]);
+        let rows = t.rows();
+        let first = rows.iter().find(|r| !r.summary.is_empty()).expect("a run");
+        assert_eq!(first.summary, "Used 2 tools", "{rows:?}");
         assert!(run[1..].iter().all(|r| r.summary.is_empty() && r.group == run[0].key));
         assert!(!run[0].group_open, "a finished run with text after it starts folded");
         // Unchanged rows keep their Arc from one snapshot to the next.

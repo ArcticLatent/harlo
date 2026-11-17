@@ -644,7 +644,7 @@ Rectangle {
                     runMenu.popup()
                 }
                 ToolTip.visible: hovered
-                ToolTip.text: "harlo gives each step to a helper session: in order, and steps marked to run with the one before at the same time, each in a worktree."
+                ToolTip.text: "Harlo gives each step to a helper session: in order, and steps marked to run with the one before at the same time, each in a worktree."
                 ToolTip.delay: 500
                 AppMenu {
                     id: runMenu

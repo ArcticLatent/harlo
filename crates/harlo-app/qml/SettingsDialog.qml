@@ -33,30 +33,33 @@ Popup {
     readonly property Item pageFooter: footerHost
     property string page: "general"
 
+    // Grouped by what people come to do; ids stay as they were (links,
+    // tests and saved state use them).
     readonly property var pages: [
-        { id: "general", title: "General", icon: "settings-3", group: "harlo", keywords: "setup guide welcome first model default harness new session startup reopen restore tabs tray close background drop-down quake yakuake hotkey shortcut graphics renderer gpu vulkan opengl software acceleration" },
-        { id: "appearance", title: "Appearance", icon: "palette", group: "harlo", keywords: "glass blur opacity transparency shadow theme colour color dark light mode font monospace code text size prompt navigator rail jump claude subscription extra usage billing notice" },
-        { id: "notifications", title: "Notifications", icon: "notification-3", group: "harlo", keywords: "notify desktop alert finished input" },
-        { id: "devices", title: "Devices", icon: "smartphone", group: "harlo", keywords: "phone pair device mobile qr tailscale remote access" },
-        { id: "voice", title: "Voice", icon: "mic", group: "harlo", keywords: "voice speech dictation microphone mic whisper transcribe speak" },
-        { id: "shortcuts", title: "Shortcuts", icon: "command", group: "harlo", keywords: "keyboard keys hotkeys" },
-        { id: "usage", title: "Usage", icon: "bar-chart-2", group: "harlo", keywords: "stats statistics tokens cost models tools" },
-        { id: "projects", title: "Projects", icon: "folder-3", group: "workspace", keywords: "project icon colour color name harness setup remove wiki openwiki docs plan steps commit review" },
-        { id: "wiki", title: "Wiki", icon: "book-open", group: "workspace", keywords: "wiki openwiki writer model agent thinking create update continue cheaper cheap cost tokens spend" },
-        { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "workspace", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
-        { id: "git", title: "Git", icon: "git-repository", group: "workspace", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
-        { id: "workflows", title: "Workflows", icon: "list-check-2", group: "workspace", keywords: "workflow workflows implement verify check checks tests review reviewer stages run runs pipeline lint clippy security retry tries fixes" },
-        { id: "schedules", title: "Schedules", icon: "history", group: "workspace", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
-        { id: "mcp", title: "MCP", icon: "node-tree", group: "agents", keywords: "mcp tool servers model context protocol tools stdio http oauth" },
-        { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration handoff advisor committee second opinion delegate subagent agents start sessions mcp tools" },
-        { id: "remote", title: "Remote Instances", icon: "server", group: "agents", keywords: "remote ssh server host machine nas instance connect" },
-        { id: "about", title: "About Harlo", icon: "information", group: "about", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs" },
-        { id: "providers", title: "Providers", icon: "robot-2", group: "agents", keywords: "providers harnesses harlo claude binary path program agent models version enable disable debug log logs protocol crash diagnostics sandbox bubblewrap sign in login log in account accounts api key oauth credentials" },
-        { id: "lsp", title: "LSP", icon: "code-box", group: "agents", keywords: "lsp code intelligence language server servers definition references calls rust-analyzer pyright gopls clangd typescript" },
-        { id: "servers", title: "Model servers", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider providers.json harlo basalt" },
+        { id: "general", title: "General", icon: "settings-3", group: "basics", keywords: "setup guide welcome first model default harness new session startup reopen restore tabs tray close background drop-down quake yakuake hotkey shortcut graphics renderer gpu vulkan opengl software acceleration" },
+        { id: "appearance", title: "Appearance", icon: "palette", group: "basics", keywords: "glass blur opacity transparency shadow theme colour color dark light mode font monospace code text size prompt navigator rail jump claude subscription extra usage billing notice" },
+        { id: "notifications", title: "Notifications", icon: "notification-3", group: "basics", keywords: "notify desktop alert finished input" },
+        { id: "shortcuts", title: "Shortcuts", icon: "command", group: "basics", keywords: "keyboard keys hotkeys" },
+        { id: "voice", title: "Voice", icon: "mic", group: "basics", keywords: "voice speech dictation microphone mic whisper transcribe speak" },
+        { id: "providers", title: "Agents", icon: "robot-2", group: "agents", keywords: "agents providers harnesses harlo claude code binary path program version install update enable disable sign in login log in account accounts oauth credentials sandbox bubblewrap network helpers subagents fallback limit token budget" },
+        { id: "models", title: "Models", icon: "brain-ai-3", group: "agents", keywords: "models cloud providers api key keys anthropic openai gemini openrouter xai deepseek mistral groq cerebras together opencode coding plans glm kimi minimax prices ssh machines share keys" },
+        { id: "servers", title: "Local models", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider providers.json harlo basalt" },
+        { id: "projects", title: "Projects", icon: "folder-3", group: "projects", keywords: "project icon colour color name harness setup remove wiki openwiki docs plan steps commit review" },
+        { id: "git", title: "Git", icon: "git-repository", group: "projects", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
+        { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "projects", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
+        { id: "wiki", title: "Wiki", icon: "book-open", group: "projects", keywords: "wiki openwiki writer model agent thinking create update continue cheaper cheap cost tokens spend" },
+        { id: "workflows", title: "Workflows", icon: "list-check-2", group: "automation", keywords: "workflow workflows implement verify check checks tests review reviewer stages run runs pipeline lint clippy security retry tries fixes" },
+        { id: "schedules", title: "Schedules", icon: "history", group: "automation", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
+        { id: "orchestration", title: "Teamwork", icon: "ai-agent", group: "automation", keywords: "orchestration handoff advisor committee second opinion delegate subagent agents start sessions mcp tools teamwork" },
+        { id: "devices", title: "Phone", icon: "smartphone", group: "connections", keywords: "phone pair device mobile qr tailscale remote access devices" },
+        { id: "remote", title: "Other machines", icon: "terminal-box", group: "connections", keywords: "remote ssh server host machine nas instance connect remote instances other machines" },
+        { id: "mcp", title: "Tools for agents", icon: "node-tree", group: "connections", keywords: "mcp tool servers model context protocol tools stdio http oauth tools for agents" },
+        { id: "lsp", title: "Code intelligence", icon: "code-box", group: "connections", keywords: "lsp code intelligence language server servers definition references calls rust-analyzer pyright gopls clangd typescript" },
+        { id: "usage", title: "Usage", icon: "bar-chart-2", group: "end", keywords: "stats statistics tokens cost models tools" },
+        { id: "about", title: "About Harlo", icon: "information", group: "end", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs diagnostics debug protocol traffic crash" },
     ]
-    // (About goes last, under no heading.)
-    readonly property var groups: [["harlo", "harlo"], ["workspace", "Workspace"], ["agents", "Agents"], ["about", ""]]
+    // (The basics and the end have no heading.)
+    readonly property var groups: [["basics", ""], ["agents", "Agents and models"], ["projects", "Your projects"], ["automation", "Automation"], ["connections", "Connections"], ["end", ""]]
     property string query: ""
     readonly property var shownPages: {
         const q = query.trim().toLowerCase()
@@ -194,75 +197,123 @@ Popup {
                             onAccepted: if (root.shownPages.length > 0) { root.seekTo(root.shownPages[0].id, text.trim()); root.navOpen = false }
                             Icon { x: 10; anchors.verticalCenter: parent.verticalCenter; name: "search"; color: Theme.muted; implicitWidth: 15; implicitHeight: 15 }
                         }
-                        Repeater {
-                            model: root.groups
+                        // (A short window: the pages scroll under the search field.)
+                        Flickable {
+                            id: navFlick
+                            objectName: "settingsNavList"
+                            // (Wide, its scroll bar runs in the margin beside the
+                            // rows, not over their highlights; narrow, there's no
+                            // room for one: the wheel scrolls it.)
+                            readonly property int gutter: root.navWide ? 12 : 0
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.rightMargin: -gutter
+                            contentHeight: navList.implicitHeight
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollBar.vertical: ScrollBar { policy: root.navWide ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
                             ColumnLayout {
-                                id: groupBlock
-                                required property var modelData
-                                readonly property var items: root.shownPages.filter(p => p.group === modelData[0])
-                                visible: items.length > 0
-                                Layout.fillWidth: true
+                                id: navList
+                                width: navFlick.width - navFlick.gutter
                                 spacing: 2
-                                Label {
-                                    visible: root.navWide && groupBlock.modelData[1] !== ""
-                                    text: groupBlock.modelData[1]
-                                    color: Theme.textMuted
-                                    font.pixelSize: Theme.px(12)
-                                    font.weight: Font.DemiBold
-                                    Layout.topMargin: 12
-                                    Layout.bottomMargin: 4
-                                    Layout.leftMargin: 10
-                                }
                                 Repeater {
-                                    model: groupBlock.items
-                                    ItemDelegate {
-                                        id: navItem
+                                    model: root.groups
+                                    ColumnLayout {
+                                        id: groupBlock
                                         required property var modelData
                                         required property int index
-                                        objectName: "settingsNav-" + modelData.id
-                                        readonly property bool current: root.page === modelData.id
+                                        readonly property var items: root.shownPages.filter(p => p.group === modelData[0])
+                                        visible: items.length > 0
                                         Layout.fillWidth: true
-                                        implicitHeight: 36
-                                        // (The style's 12 px above and below would leave
-                                        // the icon and name a 12 px band, and they'd sit
-                                        // low on the highlight.)
-                                        verticalPadding: 0
-                                        leftPadding: root.navWide ? 10 : 12
-                                        rightPadding: root.navWide ? 8 : 0
-                                        Layout.topMargin: !root.navWide && index === 0 ? 8 : 0
-                                        ToolTip.visible: !root.navWide && hovered
-                                        ToolTip.text: modelData.title
-                                        contentItem: RowLayout {
-                                            spacing: 10
-                                            Icon { name: navItem.modelData.icon; color: navItem.current ? Theme.accent : Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
-                                            Label {
-                                                visible: root.navWide
+                                        spacing: 2
+                                        // A group without a heading (or any group, narrow,
+                                        // where there are none): a line above it.
+                                        Rectangle {
+                                            visible: groupBlock.index > 0 && (!root.navWide || groupBlock.modelData[1] === "")
+                                            color: Theme.hairline
+                                            implicitHeight: 1
+                                            Layout.fillWidth: true
+                                            Layout.leftMargin: root.navWide ? 10 : 6
+                                            Layout.rightMargin: root.navWide ? 10 : 6
+                                            Layout.topMargin: 10
+                                            Layout.bottomMargin: 8
+                                        }
+                                        Label {
+                                            visible: root.navWide && groupBlock.modelData[1] !== ""
+                                            text: groupBlock.modelData[1]
+                                            color: Theme.textMuted
+                                            font.pixelSize: Theme.px(12)
+                                            font.weight: Font.DemiBold
+                                            Layout.topMargin: 12
+                                            Layout.bottomMargin: 4
+                                            Layout.leftMargin: 10
+                                        }
+                                        Repeater {
+                                            model: groupBlock.items
+                                            ItemDelegate {
+                                                id: navItem
+                                                required property var modelData
+                                                required property int index
+                                                objectName: "settingsNav-" + modelData.id
+                                                readonly property bool current: root.page === modelData.id
+                                                // The open page's row stays in sight (the list scrolls
+                                                // in a short window).
+                                                function reveal() {
+                                                    const y = mapToItem(navList, 0, 0).y
+                                                    if (y < navFlick.contentY)
+                                                        navFlick.contentY = Math.max(0, y - 8)
+                                                    else if (y + height > navFlick.contentY + navFlick.height)
+                                                        navFlick.contentY = Math.min(navFlick.contentHeight - navFlick.height, y + height - navFlick.height + 8)
+                                                }
+                                                onCurrentChanged: if (current) Qt.callLater(reveal)
+                                                Connections {
+                                                    target: navFlick
+                                                    function onHeightChanged() { if (navItem.current) Qt.callLater(navItem.reveal) }
+                                                }
+                                                Component.onCompleted: if (current) Qt.callLater(reveal)
                                                 Layout.fillWidth: true
-                                                text: navItem.modelData.title
-                                                color: navItem.current ? Theme.text : Theme.textMuted
-                                                font.pixelSize: Theme.px(14)
-                                                font.weight: navItem.current ? Font.Medium : Font.Normal
-                                                elide: Text.ElideRight
+                                                implicitHeight: 36
+                                                // (The style's 12 px above and below would leave
+                                                // the icon and name a 12 px band, and they'd sit
+                                                // low on the highlight.)
+                                                verticalPadding: 0
+                                                leftPadding: root.navWide ? 10 : 12
+                                                rightPadding: root.navWide ? 8 : 0
+                                                Layout.topMargin: !root.navWide && index === 0 ? 8 : 0
+                                                ToolTip.visible: !root.navWide && hovered
+                                                ToolTip.text: modelData.title
+                                                contentItem: RowLayout {
+                                                    spacing: 10
+                                                    Icon { name: navItem.modelData.icon; color: navItem.current ? Theme.accent : Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
+                                                    Label {
+                                                        visible: root.navWide
+                                                        Layout.fillWidth: true
+                                                        text: navItem.modelData.title
+                                                        color: navItem.current ? Theme.text : Theme.textMuted
+                                                        font.pixelSize: Theme.px(14)
+                                                        font.weight: navItem.current ? Font.Medium : Font.Normal
+                                                        elide: Text.ElideRight
+                                                    }
+                                                }
+                                                background: Rectangle { radius: 9; color: navItem.current ? Theme.rowSelected : navItem.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+                                                // (From a search: to the row it matched.)
+                                                onClicked: { if (root.query.trim() !== "") root.seekTo(modelData.id, root.query.trim()); else root.page = modelData.id; root.navOpen = false }
                                             }
                                         }
-                                        background: Rectangle { radius: 9; color: navItem.current ? Theme.rowSelected : navItem.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
-                                        // (From a search: to the row it matched.)
-                                        onClicked: { if (root.query.trim() !== "") root.seekTo(modelData.id, root.query.trim()); else root.page = modelData.id; root.navOpen = false }
                                     }
+                                }
+                                Label {
+                                    visible: root.navWide && root.shownPages.length === 0
+                                    text: "No settings match “" + root.query + "”."
+                                    color: Theme.muted
+                                    font.pixelSize: Theme.px(12)
+                                    wrapMode: Text.Wrap
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 8
+                                    Layout.topMargin: 8
                                 }
                             }
                         }
-                        Label {
-                            visible: root.navWide && root.shownPages.length === 0
-                            text: "No settings match “" + root.query + "”."
-                            color: Theme.muted
-                            font.pixelSize: Theme.px(12)
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 8
-                            Layout.topMargin: 8
-                        }
-                        Item { Layout.fillHeight: true }
                     }
                 }
                 }
@@ -368,7 +419,7 @@ Popup {
                     function save() { Workspace.setSpendLimits(amount(sessionLimit.text), amount(dayLimit.text)) }
                     SectionHeader {
                         title: "Spending limits"
-                        subtitle: "Today so far, since midnight: $" + (spendLimits.spend.today || 0).toFixed(2) + " in harlo's sessions. Past a limit, harlo stops the run until you allow more."
+                        subtitle: "Today so far, since midnight: $" + (spendLimits.spend.today || 0).toFixed(2) + " in Harlo's sessions. Past a limit, Harlo stops the run until you allow more."
                         more: "Costs are what the agents report: Claude Code at the end of each turn, Harlo after each request. Harlo on a ChatGPT plan or on a model server marked free (it runs on your own hardware) costs nothing extra. On a model with no price its cost isn't known, so the limits can't count it: give the server a price in Model servers. Empty: no limit."
                     }
                     // (Sessions open now whose costs the limits can't count.)
@@ -377,7 +428,7 @@ Popup {
                         visible: (spendLimits.spend.unpriced || 0) > 0
                         Layout.bottomMargin: 8
                         text: (spendLimits.spend.unpriced === 1 ? "One session open now runs" : spendLimits.spend.unpriced + " sessions open now run")
-                            + " on a model with no price, so the limits don't count what it costs. Give its server a price in Model servers, or mark it free there if it runs on your own hardware."
+                            + " on a model with no price, so the limits don't count what it costs. Give its server a price in Local models, or mark it free there if it runs on your own hardware."
                     }
                     Group {
                         SettingRow {
@@ -398,7 +449,7 @@ Popup {
                         SettingRow {
                             divider: true
                             title: "Per day"
-                            detail: "All of harlo's sessions together, since midnight."
+                            detail: "All of Harlo's sessions together, since midnight."
                             icon: "time"
                             AppTextField {
                                 id: dayLimit
@@ -481,7 +532,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, workflows: workflowsPage, providers: providersPage, lsp: lspPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, workflows: workflowsPage, providers: providersPage, models: modelsPage, lsp: lspPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -561,7 +612,7 @@ Popup {
                 SettingRow {
                     title: "Updates"
                     detail: (about.fromSource ? "Built from source, so it doesn't update itself: pull and build again for a newer one."
-                                              : "harlo looks for a newer version at startup and every 6 hours, and offers it at the bottom right of the window.")
+                                              : "Harlo looks for a newer version at startup and every 6 hours, and offers it at the bottom right of the window.")
                         + (Updates.checkStatus !== "" ? "\n" + Updates.checkStatus : "")
                     icon: "refresh"
                     FlatButton {
@@ -606,8 +657,26 @@ Popup {
             }
             Rule { }
             SectionHeader {
+                title: "Diagnostics"
+                subtitle: "For tracking down problems. harlo.log has this run's messages (the last run's is harlo.log.1); crashes leave a crash-….log with a backtrace."
+            }
+            Group {
+                SettingRow {
+                    title: "Log agent traffic"
+                    detail: "Writes every message to and from the agents to logs/protocol/."
+                    more: "Their error output too, one file per agent process, the last 40 kept. Applies to agents started afterwards; the logs contain your prompts and the agents' answers. Also on with --debug-protocol."
+                    icon: "file-text"
+                    AppSwitch {
+                        objectName: "debugProtocol"
+                        checked: Workspace.setting("debug_protocol") === "1"
+                        onToggled: Workspace.setSetting("debug_protocol", checked ? "1" : "0")
+                    }
+                }
+            }
+            Rule { }
+            SectionHeader {
                 title: "Licence"
-                subtitle: "harlo is free and open source, under the MIT licence. It's built with Qt (LGPLv3) and includes fonts, icons and logos under their own licences" + (about.fromSource ? "." : ", installed with harlo.")
+                subtitle: "Harlo is free and open source, under the MIT licence. It's built with Qt (LGPLv3) and includes fonts, icons and logos under their own licences" + (about.fromSource ? "." : ", installed with harlo.")
             }
             RowLayout {
                 Layout.topMargin: 10
@@ -625,7 +694,7 @@ Popup {
             SectionHeader {
                 title: "Dictation"
                 subtitle: "Speak into the composer's microphone (" + (Keymap.seq("dictate") || "no shortcut") + "); the text goes into your message."
-                more: "Click it again or press Enter to finish. Speech is recognised on this computer (whisper.cpp, built in); nothing is sent anywhere. The first time, harlo downloads the chosen model."
+                more: "Click it again or press Enter to finish. Speech is recognised on this computer (whisper.cpp, built in); nothing is sent anywhere. The first time, Harlo downloads the chosen model."
             }
             // Re-checked when a model arrives.
             readonly property var models: Dictation.modelsRevision >= 0 ? JSON.parse(Dictation.modelsJson()) : []
@@ -725,7 +794,7 @@ Popup {
                 Layout.topMargin: 28
                 title: "Updating it"
                 subtitle: "Rewrites only the pages whose cited code changed: focused work a cheaper or local model does well."
-                more: "Update first checks, with no model, whether any fact's code changed or files were added; when none did, harlo records the update itself and no session starts. Otherwise a session of this agent updates the pages that need it."
+                more: "Update first checks, with no model, whether any fact's code changed or files were added; when none did, Harlo records the update itself and no session starts. Otherwise a session of this agent updates the pages that need it."
             }
             WikiWriter { op: "update"; objectPrefix: "wikiWriter"; rev: wikiWriters.rev; onSaved: wikiWriters.rev++ }
         }
@@ -753,7 +822,7 @@ Popup {
                 FlatButton { text: "Browse…"; onClicked: worktreeDialog.open() }
                 FlatButton { text: "Reset"; visible: worktreeField.text !== ""; onClicked: { Workspace.setSetting("worktree_dir", ""); worktreeField.text = "" } }
             }
-            FormNote { Layout.topMargin: 6; text: "Empty uses harlo's data folder." }
+            FormNote { Layout.topMargin: 6; text: "Empty uses Harlo's data folder." }
             Rule { }
             SectionHeader { title: "Finished worktree sessions" }
             Group {
@@ -790,7 +859,7 @@ Popup {
             property var ignored: Workspace.ignoredRepoList()
             property string host: Workspace.setting("git_host") || "github"
             Component.onCompleted: Setup.refreshGit()
-            SectionHeader { title: "Git hosting"; subtitle: "Where your repositories live. Signing in sets up git for that site (HTTPS pushes and pulls); SSH remotes keep using your SSH keys. The sign-in stays with the GitHub CLI, glab, or git's credential store; harlo keeps no token." }
+            SectionHeader { title: "Git hosting"; subtitle: "Where your repositories live. Signing in sets up git for that site (HTTPS pushes and pulls); SSH remotes keep using your SSH keys. The sign-in stays with the GitHub CLI, glab, or git's credential store; Harlo keeps no token." }
             Repeater {
                 model: ["github", "gitlab", "forgejo"]
                 GitHostCard {
@@ -808,7 +877,7 @@ Popup {
                 SettingRow {
                     title: "Undo a turn"
                     detail: "Undo under the agent's reply puts the project's files back as they were before that turn."
-                    more: "Before each message, harlo keeps a snapshot of the project's files (in git, off your branches). Earlier turns: Undo from here, on the line before your next message when you point at it; on the phone, long-press the reply. Off: no snapshots, and no Undo. Snapshots older than a month are removed; turn it off for a repository with very large untracked files."
+                    more: "Before each message, Harlo keeps a snapshot of the project's files (in git, off your branches). Earlier turns: Undo from here, on the line before your next message when you point at it; on the phone, long-press the reply. Off: no snapshots, and no Undo. Snapshots older than a month are removed; turn it off for a repository with very large untracked files."
                     icon: "history"
                     AppSwitch {
                         objectName: "undoSnapshotsSwitch"
@@ -884,7 +953,7 @@ Popup {
             id: devs
             spacing: 0
             readonly property var list: Phone.revision >= 0 ? JSON.parse(Phone.devicesJson()) : []
-            SectionHeader { title: "Phone access"; subtitle: "Your sessions on your phone: open them, follow along, send messages, answer questions. Pair a phone by scanning a QR code; everything between it and harlo is end-to-end encrypted." }
+            SectionHeader { title: "Phone access"; subtitle: "Your sessions on your phone: open them, follow along, send messages, answer questions. Pair a phone by scanning a QR code; everything between it and Harlo is end-to-end encrypted." }
             Group {
                 SettingRow {
                     title: "Allow phones to connect"
@@ -912,11 +981,11 @@ Popup {
                 // (Waiting for phone access: dimmed, said once above.)
                 opacity: Phone.enabled ? 1 : 0.6
                 SettingRow {
-                    title: "Connect to harlo's relay"
+                    title: "Connect to Harlo's relay"
                     detail: Phone.relayError !== "" ? Phone.relayError
-                          : Phone.relayState === "online" ? "Connected to " + Phone.relayAddress + ". Paired phones can reach harlo from anywhere."
+                          : Phone.relayState === "online" ? "Connected to " + Phone.relayAddress + ". Paired phones can reach Harlo from anywhere."
                           : Phone.relayState === "connecting" ? "Connecting…"
-                          : "Use your phone away from home without Tailscale or a VPN: harlo and your phones meet at " + Phone.relayAddress + ", which passes on messages it can't read and stores nothing."
+                          : "Use your phone away from home without Tailscale or a VPN: Harlo and your phones meet at " + Phone.relayAddress + ", which passes on messages it can't read and stores nothing."
                     detailColor: Phone.relayError !== "" ? Theme.error : Phone.enabled && Phone.relayState === "online" ? Theme.success : Theme.muted
                     icon: "global"
                     AppSwitch {
@@ -931,7 +1000,7 @@ Popup {
                 SettingRow {
                     divider: true
                     title: "Tailscale Funnel"
-                    detail: !Phone.funnelAvailable && !Phone.funnelOn ? "Needs Tailscale on this computer (not on the phone). Nothing hosted: Tailscale gives harlo a public HTTPS address."
+                    detail: !Phone.funnelAvailable && !Phone.funnelOn ? "Needs Tailscale on this computer (not on the phone). Nothing hosted: Tailscale gives Harlo a public HTTPS address."
                           : Phone.funnelError !== "" ? Phone.funnelError
                           : Phone.funnelState === "online" ? "On at " + Phone.funnelUrl
                           : Phone.funnelState === "approval" ? "Tailscale needs you to allow Funnel for your tailnet (once)."
@@ -959,7 +1028,7 @@ Popup {
             Rule { }
             // The iOS app's push notifications: through harlo's relay (it has
             // the app's APNs key), whether or not harlo is connected to it.
-            SectionHeader { title: "iPhone notifications"; subtitle: "While the harlo app is closed: questions and approvals (Allow or Deny from the lock screen) and finished runs. They always go through harlo's relay to Apple, with or without the switch above; what they say is encrypted for your phone, so the relay and Apple only carry a placeholder." }
+            SectionHeader { title: "iPhone notifications"; subtitle: "While the Harlo app is closed: questions and approvals (Allow or Deny from the lock screen) and finished runs. They always go through Harlo's relay to Apple, with or without the switch above; what they say is encrypted for your phone, so the relay and Apple only carry a placeholder." }
             NeedsPhone { }
             Group {
                 id: pushGroup
@@ -985,7 +1054,7 @@ Popup {
                     detail: Phone.pushNote === "sending" ? "Sending…"
                           : Phone.pushNote !== "" ? Phone.pushNote
                           : pushGroup.cfg.error ? "The last one didn't go: " + pushGroup.cfg.error
-                          : "Sends one through " + Phone.relayAddress + " to every phone that allowed notifications in the harlo app."
+                          : "Sends one through " + Phone.relayAddress + " to every phone that allowed notifications in the Harlo app."
                     detailColor: Phone.pushNote.startsWith("Sent") ? Theme.success
                                : (Phone.pushNote !== "" && Phone.pushNote !== "sending") || (Phone.pushNote === "" && pushGroup.cfg.error) ? Theme.error : Theme.muted
                     icon: "notification-3"
@@ -1046,14 +1115,14 @@ Popup {
             spacing: 0
 
             SectionHeader {
-                title: "Agents drive harlo"
-                subtitle: "Agents in harlo can start sessions with other agents, send them messages, read their replies and stop them. The sessions an agent starts show under its own as its helpers: each one reports back to it when it finishes, can ask it questions, and it's told when one waits for you. Any agent can also ask you to approve a step; only you can answer. harlo hands these tools to each session it starts (Claude Code's on a host need python3 there); outside harlo, agents don't have them."
+                title: "Agents drive Harlo"
+                subtitle: "Agents in Harlo can start sessions with other agents, send them messages, read their replies and stop them. The sessions an agent starts show under its own as its helpers: each one reports back to it when it finishes, can ask it questions, and it's told when one waits for you. Any agent can also ask you to approve a step; only you can answer. Harlo hands these tools to each session it starts (Claude Code's on a host need python3 there); outside Harlo, agents don't have them."
             }
             Group {
                 SettingRow {
-                    title: "Orchestration"
-                    detail: Workspace.orchestrationOn ? "On: agents get harlo's tools, and the composer has the Delegate button (hand off, second opinion, committee, split)."
-                                                      : "Off: agents get no harlo tools, and there's no Delegate button."
+                    title: "Teamwork"
+                    detail: Workspace.orchestrationOn ? "On: agents get Harlo's tools, and the composer has the Delegate button (hand off, second opinion, committee, split)."
+                                                      : "Off: agents get no Harlo tools, and there's no Delegate button."
                     icon: "ai-agent"
                     AppSwitch {
                         objectName: "orchEnabled"
@@ -1070,7 +1139,7 @@ Popup {
                     readonly property int choice: mode === "asked" ? 0 : mode === "1" ? 2 : 1
                     title: "Agents start helpers"
                     detail: ["Only when you ask: for another agent or session, or with the Delegate button. Otherwise they do the work themselves.",
-                             "When you ask, and they offer a split when a task has parts that could be done at the same time: you decide, and harlo starts the helpers if you agree.",
+                             "When you ask, and they offer a split when a task has parts that could be done at the same time: you decide, and Harlo starts the helpers if you agree.",
                              "On their own: when another agent's work would help (a second opinion, parallel work, another model)."][choice]
                         + " For sessions started from now on."
                     icon: "node-tree"
@@ -1129,7 +1198,7 @@ Popup {
             spacing: 0
             SectionHeader {
                 title: "Language servers"
-                subtitle: "The ones installed on this computer; harlo finds them, it doesn't install them."
+                subtitle: "The ones installed on this computer; Harlo finds them, it doesn't install them."
             }
             Group {
                 // The language servers found here (it doesn't install them).
@@ -1235,6 +1304,13 @@ Popup {
                     }
                 }
             }
+        }
+    }
+
+    Component {
+        id: modelsPage
+        ModelsPage {
+            onProviderSignInRequested: (agent, provider, name) => root.providerSignInRequested(agent, provider, name)
         }
     }
 

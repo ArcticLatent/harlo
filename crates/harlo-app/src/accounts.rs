@@ -1,5 +1,5 @@
 //! `Accounts` (QML singleton): signing the agents in to their model
-//! providers from harlo (Settings → Providers → Accounts, the sign-in
+//! providers from harlo (Settings → Agents → Accounts, the sign-in
 //! dialog), with each agent's own sign-in:
 //!
 //! - Claude: Claude Code's `claude auth login` (Anthropic's own flow in the
@@ -271,7 +271,7 @@ pub struct AccountsRust {
     cloud: HashMap<String, Value>,
 }
 
-/// An agent's program: the path set in Settings → Providers (if it's
+/// An agent's program: the path set in Settings → Agents (if it's
 /// there), else the installed one.
 fn program(kind: HarnessKind) -> Option<PathBuf> {
     let set = harlo_core::db::Db::open(&harlo_core::db::default_path()).ok().and_then(|d| d.get(&format!("settings.{}_path", kind.as_str())).ok().flatten()).unwrap_or_default();

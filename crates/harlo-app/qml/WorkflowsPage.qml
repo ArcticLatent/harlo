@@ -188,7 +188,7 @@ ColumnLayout {
         ColumnLayout {
             width: parent.width
             spacing: 8
-            AppTextField { id: nameField; objectName: "workflowName"; Layout.fillWidth: true; placeholderText: qsTr("Name, e.g. Careful change"); onTextEdited: editor.error = "" }
+            AppTextField { id: nameField; objectName: "workflowName"; Layout.fillWidth: true; placeholderText: qsTr("Name, e.g. Careful change"); onTextChanged: editor.error = "" }
             FormLabel { text: qsTr("Stages, in order") }
             ScrollView {
                 id: stagesScroll

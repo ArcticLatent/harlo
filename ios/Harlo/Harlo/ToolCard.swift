@@ -23,6 +23,8 @@ struct ToolCard: View {
     }
 
     var running: Bool { row.state == "running" }
+    /// A workflow's report, said in words.
+    var report: WorkflowReport? { row.workflowReport }
     var symbol: String { Style.toolSymbol(row.title) }
     var canOpen: Bool { !row.text.isEmpty || !row.diff.isEmpty || !shownCommand.isEmpty }
     /// The command, shown opened when its line says what it's for instead.
@@ -40,10 +42,15 @@ struct ToolCard: View {
                 HStack(spacing: 12) {
                     IconSquare(symbol: symbol, size: 38)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(Style.toolWords(row.title, running: running))
+                        Text(report?.title ?? Style.toolWords(row.title, running: running))
                             .scaledFont(16, .medium)
                             .lineLimit(1)
-                        if !row.label.isEmpty {
+                        if let report, !report.summary.isEmpty {
+                            Text(report.summary)
+                                .scaledFont(14)
+                                .foregroundStyle(Color(p.muted))
+                                .lineLimit(2)
+                        } else if !row.label.isEmpty {
                             // What it's for, in the agent's words (the
                             // command itself is in it, opened).
                             Text(row.label)
@@ -130,10 +137,18 @@ struct ToolCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    var failed: Bool { row.result.hasSuffix("failed") || row.result.hasPrefix("exit") || row.state == "error" }
+    var failed: Bool {
+        report?.superseded != true && (row.result.hasSuffix("failed") || row.result.hasPrefix("exit") || row.state == "error")
+    }
 
     @ViewBuilder var trailing: some View {
-        if diffResult {
+        if report?.superseded == true {
+            // (Its attempt is over: a later one is under way.)
+            Text("Not used")
+                .scaledFont(13)
+                .foregroundStyle(Color(p.muted))
+                .fixedSize()
+        } else if diffResult {
             ResultBadge(text: row.result)
         } else if running {
             EmptyView()

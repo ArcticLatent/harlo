@@ -1,6 +1,6 @@
 //! Setting up a model server, on the machine this runs on.
 //!
-//! Settings → Model servers → Set up a model server: installing the engine (or
+//! Settings → Local models → Set up a model server: installing the engine (or
 //! using the one installed), getting the model, starting the server, a test
 //! message; and updating an engine. The app runs it for this computer;
 //! `harlo-engines` runs it on another machine, its reports going back to the

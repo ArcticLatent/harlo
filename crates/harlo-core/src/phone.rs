@@ -1,4 +1,4 @@
-//! Phone access (Settings → Devices, "Pair a device").
+//! Phone access (Settings → Phone, "Pair a device").
 //!
 //! A phone pairs with harlo by scanning a QR code and then reaches harlo's
 //! sessions over an end-to-end encrypted channel, directly (LAN, Tailscale) or

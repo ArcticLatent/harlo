@@ -171,8 +171,8 @@ fn run_check(command: &str, folder: &Path, live: &dyn Fn(String, u64)) -> Outcom
     let result = cmd.and_then(|cmd| stream(cmd, started, live));
     let seconds = started.elapsed().as_secs();
     match result {
-        Ok((exit, output)) => Outcome { exit, tail: workflow::tail(&output, workflow::OUTPUT_LINES), seconds, error: None, name: String::new() },
-        Err(e) => Outcome { exit: None, tail: String::new(), seconds, error: Some(format!("{e:#}")), name: String::new() },
+        Ok((exit, output)) => Outcome { exit, tail: workflow::tail(&output, workflow::OUTPUT_LINES), seconds, error: None, name: String::new(), attempt: 0 },
+        Err(e) => Outcome { exit: None, tail: String::new(), seconds, error: Some(format!("{e:#}")), name: String::new(), attempt: 0 },
     }
 }
 
@@ -233,7 +233,7 @@ impl Workspace {
             return QString::from("That project isn't open in harlo.");
         };
         if !self.orchestration_on {
-            return QString::from("Workflows need orchestration (Settings → Orchestration).");
+            return QString::from("Workflows need Teamwork on (Settings → Teamwork).");
         }
         let Some(definition) = self.workflow_definition(&field("workflow")) else {
             return QString::from("That workflow isn't saved any more: pick another.");
@@ -550,7 +550,7 @@ impl Workspace {
             .get(&run.id)
             .filter(|l| run.state != State::Stopped && run.wait.as_ref().is_some_and(|w| w.seq == l.0 && w.kind == StageKind::Check))
             .map(|l| json!({ "name": current.map(|s| s.name.clone()).unwrap_or_default(), "output": l.1, "seconds": l.2 }));
-        let check = run.last_check.as_ref().map(|t| json!({ "name": t.name, "passed": t.passed(), "exit": t.exit, "seconds": t.seconds, "tail": workflow::tail(&t.tail, 12) }));
+        let check = run.last_check.as_ref().map(|t| json!({ "name": t.name, "attempt": t.attempt, "passed": t.passed(), "exit": t.exit, "seconds": t.seconds, "tail": workflow::tail(&t.tail, 12) }));
         json!({
             "id": run.id, "title": run.title(), "workflow": run.definition.name, "doneText": run.definition.done_text(),
             "project": run.project.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "createdAt": run.created_at,

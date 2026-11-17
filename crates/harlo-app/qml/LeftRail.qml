@@ -21,7 +21,7 @@ Rectangle {
     signal pairDeviceRequested()
     /// The plan meter: open Settings → Usage.
     signal planRequested()
-    /// Settings → Model servers.
+    /// Settings → Local models.
     signal serversRequested()
     implicitWidth: 52
     color: Theme.chrome
@@ -160,7 +160,7 @@ Rectangle {
             ToolTip.visible: meterHover.hovered && !meterMenu.visible
             readonly property string where: host !== "" ? " on " + host : ""
             ToolTip.text: planMeter.none ? "Nothing used on " + planMeter.host + " yet: its limits show once a session there works (Claude's say how much is used)"
-                : planMeter.lastOther !== "" ? planMeter.lastOther + " (used last" + planMeter.where + "): " + (planMeter.lastLocal ? "runs on your own server, no usage limits" : "no usage limits harlo can read") + "\nClick to switch"
+                : planMeter.lastOther !== "" ? planMeter.lastOther + " (used last" + planMeter.where + "): " + (planMeter.lastLocal ? "runs on your own server, no usage limits" : "no usage limits Harlo can read") + "\nClick to switch"
                 : planMeter.shown ? planMeter.shown.provider + planMeter.where + ": " + planMeter.percent(planMeter.shown) + " of the " + planMeter.shown.label + " limit" + (planMeter.shown.reached ? " (limit reached)" : "")
                 + (Workspace.meterPin === planMeter.shown.provider ? " (pinned)" : Workspace.meterLast === planMeter.shown.provider ? " (used last)" : "") + "\nClick to switch" : ""
             ToolTip.delay: 400
@@ -211,7 +211,7 @@ Rectangle {
             function check() { if (list.length > 0) Accounts.checkServers(JSON.stringify(list.map(r => r.baseUrl))) }
             visible: list.length > 0
             iconName: "server"
-            tip: running === 0 ? "Model servers: none running" : running === 1 ? "Model servers: 1 running" : "Model servers: " + running + " running"
+            tip: running === 0 ? "Local models: none running" : running === 1 ? "Local models: 1 running" : "Local models: " + running + " running"
             active: serversPanel.visible
             onClicked: serversPanel.visible ? serversPanel.close() : serversPanel.open()
             Component.onCompleted: Accounts.loadServers()
@@ -315,7 +315,7 @@ Rectangle {
                     AppMenuSeparator { width: serversPanel.availableWidth }
                     AppMenuItem {
                         width: serversPanel.availableWidth
-                        text: "Model servers…"
+                        text: "Local models…"
                         onTriggered: { serversPanel.close(); root.serversRequested() }
                     }
                 }

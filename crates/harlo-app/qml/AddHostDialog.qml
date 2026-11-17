@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Adds an SSH host (Settings → Remote Instances, and the instance menu's
+// Adds an SSH host (Settings → Other machines, and the instance menu's
 // Add instance): one from ~/.ssh/config, or a connection typed in.
 AppDialog {
     id: addHostDialog

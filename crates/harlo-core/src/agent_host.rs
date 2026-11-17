@@ -22,7 +22,7 @@ use crate::remote_helper::{ARCHES, Helper};
 static AGENT: Helper = Helper::new("harlo-agent", true, "agent", "--version");
 
 /// Whether Harlo's sessions on other machines get this computer's provider
-/// keys (Settings → Providers).
+/// keys (Settings → Models).
 static SHARE_KEYS: AtomicBool = AtomicBool::new(true);
 
 /// The keys each machine was last given, by a hash of them (given again

@@ -9,7 +9,7 @@ import harlo
 Window {
     id: mini
     signal openInWindowRequested()
-    title: "harlo — mini chat"
+    title: "Harlo — mini chat"
     width: 440
     height: 600
     minimumWidth: 320

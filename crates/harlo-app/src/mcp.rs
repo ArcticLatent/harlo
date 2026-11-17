@@ -1,4 +1,4 @@
-//! `Mcp` (QML singleton): Settings → MCP. Lists, saves and removes the MCP
+//! `Mcp` (QML singleton): Settings → Tools for agents. Lists, saves and removes the MCP
 //! servers Harlo and Claude read (globally or in a project, here or on a remote
 //! host), and tests them for a status (the harnesses don't report one).
 
@@ -53,7 +53,7 @@ pub mod qobject {
         /// A pasted command line as words (JSON array).
         #[qinvokable]
         fn split_command(self: &Mcp, line: &QString) -> QString;
-        /// The agent is installed (its path in Settings → Providers, else
+        /// The agent is installed (its path in Settings → Agents, else
         /// found): new servers are for the installed ones.
         #[qinvokable]
         fn installed(self: &Mcp, harness: &QString) -> bool;
@@ -147,7 +147,7 @@ fn kind_name(k: HarnessKind) -> &'static str {
     k.as_str()
 }
 
-/// An agent's program: the path set in Settings → Providers (if it's
+/// An agent's program: the path set in Settings → Agents (if it's
 /// there), else the installed one.
 fn program(kind: HarnessKind) -> Option<PathBuf> {
     let set = harlo_core::db::Db::open(&harlo_core::db::default_path()).ok().and_then(|d| d.get(&format!("settings.{}_path", kind.as_str())).ok().flatten()).unwrap_or_default();

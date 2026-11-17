@@ -43,6 +43,20 @@ Item {
         return ""
     }
     /// The turn that ends where your message `userKey` starts ("" if none).
+    // A workflow's message to its agent ("[harlo workflow <id> · attempt N
+    // · part]" first): what it's for, in a line; "" for anything else.
+    function workflowNote(text) {
+        const m = /^\[harlo workflow \S+ · attempt (\d+) · ([^\]]+)\]\n?/.exec(text)
+        if (!m) return ""
+        const attempt = Number(m[1]), body = text.slice(m[0].length)
+        if (m[2].startsWith("review")) return qsTr("Asked for a review of attempt %1").arg(attempt)
+        if (body.startsWith("You ended your turn without calling report_done")) return qsTr("Reminded the agent to report attempt %1").arg(attempt)
+        if (attempt === 1) return qsTr("Sent the task")
+        // (Why it came back: "Tests failed after attempt 1: …".)
+        const why = (body.split("\n").map(l => l.trim()).find(l => / failed|asked for changes/.test(l)) || "").split(/:| \(/)[0]
+        return why !== "" ? qsTr("Sent back for attempt %1: %2").arg(attempt).arg(why.charAt(0).toLowerCase() + why.slice(1))
+                          : qsTr("Sent back for attempt %1").arg(attempt)
+    }
     function undoBefore(userKey) {
         for (const k in undoable) if (undoable[k].next === userKey) return k
         return ""
@@ -1098,6 +1112,10 @@ Item {
                     required property string images
                     // Attached file paths, one per line.
                     readonly property var files: title !== "" ? title.split("\n") : []
+                    // A workflow's message to the agent: a quiet line, its
+                    // words on demand.
+                    readonly property string note: root.workflowNote(text)
+                    property bool showAll: false
                     readonly property real gap: root.gapAbove("user", ListView.previousSection)
                     width: view.width
                     implicitHeight: bubble.height + gap
@@ -1105,7 +1123,7 @@ Item {
                     // Edit & resend, on hover.
                     Row {
                         z: 2
-                        visible: userHover.hovered && ["claude", "harlo"].includes(root.session.harness)
+                        visible: userHover.hovered && userRow.note === "" && ["claude", "harlo"].includes(root.session.harness)
                         anchors.right: bubble.right
                         anchors.rightMargin: 6
                         anchors.top: bubble.top
@@ -1169,15 +1187,50 @@ Item {
                                 // Your avatar (picked from the left rail).
                                 UserAvatar {
                                     objectName: "turnAvatar"
+                                    visible: userRow.note === ""
                                     width: Theme.px(20)
+                                    height: width
+                                }
+                                Icon {
+                                    visible: userRow.note !== ""
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    name: "list-check-2"
+                                    color: Theme.textMuted
+                                    width: Theme.px(15)
                                     height: width
                                 }
                                 Label {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: "You"
-                                    color: Theme.text
-                                    font.pixelSize: Theme.px(13.5)
-                                    font.weight: Font.DemiBold
+                                    text: userRow.note === "" ? "You" : qsTr("Workflow")
+                                    color: userRow.note === "" ? Theme.text : Theme.textMuted
+                                    font.pixelSize: Theme.px(userRow.note === "" ? 13.5 : 12.5)
+                                    font.weight: userRow.note === "" ? Font.DemiBold : Font.Medium
+                                }
+                            }
+                            // (Under the heading: it can take a line of its own when narrow.)
+                            Flow {
+                                visible: userRow.note !== ""
+                                width: parent.width
+                                spacing: 8
+                                Label {
+                                    objectName: "workflowNote"
+                                    width: Math.min(implicitWidth, parent.width)
+                                    // (One line when it fits beside Show message; wrapped when narrow.)
+                                    topPadding: Math.max(0, (noteShow.height - Theme.px(13) * 1.3) / 2)
+                                    text: userRow.note
+                                    wrapMode: Text.Wrap
+                                    color: Theme.textMuted
+                                    font.pixelSize: Theme.px(13)
+                                }
+                                FlatButton {
+                                    id: noteShow
+                                    objectName: "workflowNoteShow"
+                                    text: userRow.showAll ? qsTr("Hide") : qsTr("Show message")
+                                    outlined: false
+                                    padding: 2
+                                    accent: Theme.textFaint
+                                    font.pixelSize: Theme.px(11.5)
+                                    onClicked: userRow.showAll = !userRow.showAll
                                 }
                             }
                             PictureStrip {
@@ -1196,17 +1249,18 @@ Item {
                                 }
                             }
                             TextEdit {
+                                objectName: "userText"
                                 font.family: Theme.uiFont
                                 width: parent.width
-                                visible: text !== ""
+                                visible: text !== "" && (userRow.note === "" || userRow.showAll)
                                 text: userRow.text
-                                color: Theme.text
+                                color: userRow.note === "" ? Theme.text : Theme.textMuted
                                 selectionColor: Theme.selection
                                 selectedTextColor: Theme.foreground
                                 readOnly: true
                                 selectByMouse: true
                                 wrapMode: TextEdit.Wrap
-                                font.pixelSize: Theme.px(15)
+                                font.pixelSize: Theme.px(userRow.note === "" ? 15 : 13)
                             }
                             // Tags: image count, "Ask first".
                             Row {
@@ -1973,7 +2027,7 @@ Item {
                                 FlatButton {
                                     objectName: "harloSentToggle"
                                     visible: noticeRow.label !== "" && noticeRow.label !== noticeRow.text
-                                    text: noticeRow.open ? "Hide what harlo sent" : "What harlo sent"
+                                    text: noticeRow.open ? "Hide what Harlo sent" : "What Harlo sent"
                                     outlined: false
                                     padding: 4
                                     accent: Theme.textMuted

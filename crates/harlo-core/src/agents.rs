@@ -7,7 +7,7 @@ use crypto_box::aead::rand_core::RngCore;
 use harlo_harness::HarnessKind;
 
 /// Harlo's arguments: harlo's tools, and its sandbox when it isn't the
-/// default (`sandbox`, `network`: Settings → Providers → Harlo).
+/// default (`sandbox`, `network`: Settings → Agents → Harlo).
 ///
 /// When orchestration is off, harlo says so and Harlo has no tools.
 /// Other agents get none.
