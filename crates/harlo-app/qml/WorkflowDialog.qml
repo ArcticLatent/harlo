@@ -74,7 +74,17 @@ AppDialog {
     /// host is still asked, a line saying so).
     function modelNames(agent, models) {
         const waiting = host !== "" && agent !== "" && hostModels[agent] === undefined
-        return [waiting ? qsTr("Reading models…") : qsTr("Default model")].concat(models.map(m => Theme.modelLabel(m.name)))
+        const known = defaultModelOf(agent)
+        return [waiting ? qsTr("Reading models…") : known !== "" ? qsTr("Default (%1)").arg(Theme.modelLabel(known)) : qsTr("Default model")]
+            .concat(models.map(m => Theme.modelLabel(m.name)))
+    }
+    /// The model a run's session gets when none is picked, as a new
+    /// session's: the project's for that agent, else (on this computer)
+    /// Settings' default for it; "" the agent's own.
+    function defaultModelOf(agent) {
+        if (agent === "") return ""
+        const own = Workspace.setting("project_model_" + projectId + "_" + agent)
+        return own !== "" || host !== "" ? own : Workspace.setting("default_model_" + agent)
     }
     function pickModel(box, models, model) {
         box.currentIndex = Math.max(0, models.findIndex(m => m.id === model) + 1)
@@ -275,7 +285,7 @@ AppDialog {
             rowSpacing: 8
             Label { visible: testField.visible; text: qsTr("Tests") }
             // (Left: back to its start, so a long command shows where it begins.)
-            AppTextField { id: testField; objectName: "workflowTests"; visible: !dialog.flow || dialog.flow.needsTestCommand; Layout.fillWidth: true; font.family: Theme.mono; placeholderText: qsTr("The command that runs them, e.g. cargo test (none yet: leave it empty)"); onActiveFocusChanged: if (!activeFocus) cursorPosition = 0; onTextChanged: if (!activeFocus) cursorPosition = 0 }
+            AppTextField { id: testField; objectName: "workflowTests"; visible: !dialog.flow || dialog.flow.needsTestCommand; Layout.fillWidth: true; font.family: Theme.mono; placeholderText: qsTr("e.g. cargo test, or leave it empty"); onActiveFocusChanged: if (!activeFocus) cursorPosition = 0; onTextChanged: if (!activeFocus) cursorPosition = 0 }
             Label { text: qsTr("Agent") }
             RowLayout {
                 Layout.fillWidth: true
@@ -299,6 +309,28 @@ AppDialog {
             }
             Label { text: qsTr("Permissions") }
             ComboField { id: approvalBox; Layout.fillWidth: true; model: [qsTr("Ask before every change"), qsTr("Edit files freely, ask before commands"), qsTr("Run anything without asking")] }
+            // What the choice means for a run left alone, and the way to
+            // one that never waits.
+            Item { implicitWidth: 1; implicitHeight: 1 }
+            Label {
+                id: approvalNote
+                objectName: "workflowApprovalNote"
+                readonly property string plain: approvalBox.currentIndex === 2
+                    ? qsTr("Nothing asks. The run works in its own worktree; nothing reaches your branch until you merge it.")
+                    : approvalBox.currentIndex === 0
+                    ? qsTr("Each agent asks before every change and command, and the run waits until you answer.")
+                    : qsTr("Each agent asks before running a command, and the run waits until you answer.")
+                Layout.fillWidth: true
+                Layout.topMargin: -4
+                textFormat: Text.RichText
+                text: plain.replace(/&/g, "&amp;").replace(/</g, "&lt;") + (approvalBox.currentIndex === 2 ? ""
+                    : "&nbsp;&nbsp;<a href=\"yolo\" style=\"color:" + Theme.text + "; text-decoration:" + (hoveredLink !== "" ? "underline" : "none") + "; font-weight:500\">" + qsTr("Run anything instead") + "</a>")
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(12)
+                wrapMode: Text.Wrap
+                onLinkActivated: approvalBox.currentIndex = 2
+                HoverHandler { cursorShape: approvalNote.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor }
+            }
             Label { visible: reviewerRow.visible; text: qsTr("Reviewer") }
             RowLayout {
                 id: reviewerRow
@@ -331,11 +363,17 @@ AppDialog {
             Layout.fillWidth: true
             Layout.topMargin: 2
             spacing: 6
+            MoreText {
+                Layout.fillWidth: true
+                full: qsTr("This folder isn't a git repository yet, and a run needs one.")
+                more: qsTr("Harlo runs git init here and makes an empty first commit; the run works in a worktree branched from it.")
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(12)
+            }
             PlainLabel {
                 Layout.fillWidth: true
-                text: dialog.folderFiles
-                      ? qsTr("This folder isn't a git repository. A run works in a worktree of one: Harlo can run git init here and make an empty first commit, but the run starts from it without the files here. To have them, commit them yourself first.")
-                      : qsTr("This folder isn't a git repository. A run works in a worktree of one: Harlo can run git init here and make an empty first commit.")
+                visible: dialog.folderFiles
+                text: qsTr("The files here won't be in the run unless you commit them first.")
                 color: Theme.warning
                 font.pixelSize: Theme.px(12)
                 wrapMode: Text.Wrap
@@ -356,22 +394,32 @@ AppDialog {
                 }
             }
         }
-        PlainLabel {
+        ColumnLayout {
             objectName: "workflowNoCommits"
             visible: dialog.repoState === "no-commits"
             Layout.fillWidth: true
-            text: dialog.folderFiles
-                  ? qsTr("Nothing is committed here yet: Harlo makes an empty first commit for the run's branch to start from, so the run won't have the files here. To have them, commit them first.")
-                  : qsTr("Nothing is committed here yet: Harlo makes an empty first commit for the run's branch to start from.")
-            color: dialog.folderFiles ? Theme.warning : Theme.textMuted
-            font.pixelSize: Theme.px(12)
-            wrapMode: Text.Wrap
+            spacing: 4
+            MoreText {
+                Layout.fillWidth: true
+                full: qsTr("Nothing is committed here yet: Harlo starts the run from an empty first commit.")
+                more: qsTr("The run's branch needs a commit to start from; Harlo makes one with no files in it.")
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(12)
+            }
+            PlainLabel {
+                Layout.fillWidth: true
+                visible: dialog.folderFiles
+                text: qsTr("The files here won't be in the run unless you commit them first.")
+                color: Theme.warning
+                font.pixelSize: Theme.px(12)
+                wrapMode: Text.Wrap
+            }
         }
         MoreText {
             objectName: "workflowNote"
             Layout.fillWidth: true
-            full: qsTr("It works in a worktree of its own; what fails goes back to the agent until every check and review passes.")
-            more: qsTr("After each attempt Harlo runs the checks in the worktree and the reviews read the diff. A failure, or a review asking for changes, goes back to the same session to fix, and each fix goes through every check and review again.")
+            full: qsTr("The agent works on its own copy of the project; anything that fails goes back to it until every check and review passes.")
+            more: qsTr("The copy is a git worktree on a branch of its own: nothing reaches your branch until you merge it. After each attempt Harlo runs the checks there and the reviews read the diff. A failure, or a review asking for changes, goes back to the same session to fix, and each fix goes through every check and review again.")
             color: Theme.textMuted
             font.pixelSize: Theme.px(12)
         }

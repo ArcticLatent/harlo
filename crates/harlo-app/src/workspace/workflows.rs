@@ -570,11 +570,11 @@ impl Workspace {
             .keys
             .iter()
             .filter(|(_, s)| s.run == run.id)
-            .find_map(|(k, s)| self.live.get(k).and_then(|e| e.requests.first()).map(|(r, _)| (s.kind, r.question().to_owned())));
+            .find_map(|(k, s)| self.live.get(k).and_then(|e| e.requests.first()).map(|(r, _)| (s.kind, k.clone(), needs_you(r))));
         let waiting = match (&run.state, run.wait.as_ref().map(|w| w.kind)) {
-            (State::Running, _) if let Some((kind, question)) = &asking => {
+            (State::Running, _) if let Some((kind, _, what)) = &asking => {
                 let who = if *kind == StageKind::Review { "The review" } else { "The implementation session" };
-                format!("{who} needs you: {}", question.trim_end_matches(['?', '.', ' ']))
+                format!("{who} needs you: {what}")
             }
             (State::Running, Some(StageKind::Implement)) => format!("The implementation session is working on attempt {}", run.attempt),
             (State::Running, Some(StageKind::Check)) => format!("Running `{}`", current.map(|s| s.command.as_str()).unwrap_or_default()),
@@ -602,7 +602,8 @@ impl Workspace {
             "id": run.id, "title": run.title(), "workflow": run.definition.name, "doneText": run.definition.done_text(),
             "project": run.project.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "createdAt": run.created_at,
             "state": state, "why": why, "attempt": run.attempt, "stages": stages,
-            "waiting": waiting, "asking": asking.is_some() && matches!(run.state, State::Running), "role": role, "branch": run.worktree.as_ref().map(|w| w.branch.clone()).unwrap_or_default(),
+            "waiting": waiting, "asking": asking.is_some() && matches!(run.state, State::Running),
+            "askingKey": asking.as_ref().filter(|_| matches!(run.state, State::Running)).map(|(_, k, _)| k.clone()).unwrap_or_default(), "role": role, "branch": run.worktree.as_ref().map(|w| w.branch.clone()).unwrap_or_default(),
             "implementer": agents::label(&run.implementer.harness), "reviewer": agents::label(&run.reviewer.harness),
             "implementerModel": run.implementer.model, "reviewerModel": run.reviewer.model,
             "testCommand": run.test_command, "lastCheck": check.unwrap_or(Value::Null), "liveCheck": live.unwrap_or(Value::Null), "log": log,
@@ -1020,6 +1021,24 @@ fn workflow_title(run: &Run, kind: StageKind) -> String {
     }
 }
 
+/// What a run's session waits on you for, in plain words for the run's card.
+///
+/// An approval names the kind of thing it asks to do, never the command
+/// itself (that's in the session); a question is quoted.
+fn needs_you(request: &harlo_core::UiRequest) -> String {
+    if request.is_approval {
+        let tool = request.title.lines().next().unwrap_or_default().trim_start_matches("Allow tool:").trim();
+        return match tool.to_lowercase().as_str() {
+            "bash" | "shell" | "run_code" => "it asks to run a command".to_owned(),
+            "write" | "edit" | "multiedit" | "apply_patch" | "notebookedit" => "it asks to change a file".to_owned(),
+            "" => "it asks for your approval".to_owned(),
+            _ => format!("it asks to use {tool}"),
+        };
+    }
+    let question = request.question().trim();
+    if question.is_empty() { "it asks you something".to_owned() } else { format!("\u{201c}{question}\u{201d}") }
+}
+
 fn stage_kind_name(kind: StageKind) -> &'static str {
     match kind {
         StageKind::Implement => "implement",
@@ -1040,6 +1059,16 @@ fn tone_name(tone: Tone) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn needs_you_names_the_kind_of_approval_and_quotes_questions() {
+        let approval = |title: &str| harlo_core::UiRequest { title: title.to_owned(), is_approval: true, ..Default::default() };
+        assert_eq!(needs_you(&approval("Allow tool: bash\nOutside the sandbox")), "it asks to run a command");
+        assert_eq!(needs_you(&approval("Allow tool: Edit")), "it asks to change a file");
+        assert_eq!(needs_you(&approval("Allow tool: WebFetch")), "it asks to use WebFetch");
+        let question = harlo_core::UiRequest { method: "input".into(), title: "Which port?".into(), ..Default::default() };
+        assert_eq!(needs_you(&question), "\u{201c}Which port?\u{201d}");
+    }
 
     #[test]
     fn a_project_s_test_command_is_guessed_from_its_files() {

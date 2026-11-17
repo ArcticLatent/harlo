@@ -156,20 +156,23 @@ AppDialog {
             visible: dlg.creating
             Layout.fillWidth: true
             spacing: 8
+            Label { text: "In"; color: Theme.muted; font.pixelSize: Theme.px(12) }
+            // (Cut at its start: the folder it goes in stays whole.)
             Label {
                 Layout.fillWidth: true
-                text: "In " + dlg.newParent
+                Layout.leftMargin: -4
+                text: dlg.newParent
                 color: Theme.muted
                 font.family: Theme.mono
                 font.pixelSize: Theme.px(12)
-                elide: Text.ElideMiddle
+                elide: Text.ElideLeft
             }
             FlatButton { objectName: "addProjectNewWhere"; text: "Change…"; font.pixelSize: Theme.px(12); onClicked: parentDialog.open() }
-            FlatButton { text: "Use an existing folder"; font.pixelSize: Theme.px(12); onClicked: { dlg.creating = false; dlg.problem = "" } }
+            FlatButton { text: "Use an existing folder"; outlined: false; font.pixelSize: Theme.px(12); onClicked: { dlg.creating = false; dlg.problem = "" } }
         }
         FormNote {
             visible: dlg.creating
-            text: "Harlo makes the folder and sets up git in it (a workflow needs a repository)."
+            text: "Harlo makes the folder and sets up git in it, so workflows can run there."
         }
         PlainLabel {
             objectName: "addProjectProblem"

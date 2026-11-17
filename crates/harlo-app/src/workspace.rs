@@ -5988,6 +5988,22 @@ impl Workspace {
         self.deliver("test", "test", "", "Test notification", "This is a test notification from harlo.", sound);
     }
 
+    /// A live session's file became known: what waited on it.
+    fn on_file_known(mut self: Pin<&mut Self>, key: &str) {
+        self.as_mut().workflow_file_known(key);
+        self.as_mut().remember_modes(key);
+        self.as_mut().remember_parent(key);
+        // (Its helpers started before its file was known.)
+        let kids: Vec<String> = self.orch_children.iter().filter(|(_, c)| c.parent == key).map(|(k, _)| k.clone()).collect();
+        for k in kids {
+            self.as_mut().remember_parent(&k);
+        }
+        // (A helper that finished before its file was known.)
+        if self.settle_later.contains(key) && self.active_key.to_string() != key {
+            self.as_mut().settle_helper(key);
+        }
+    }
+
     fn on_live_updates(mut self: Pin<&mut Self>, key: &str, updates: Vec<SessionUpdate>) {
         let active = self.active_key.to_string() == key;
         let mut this = self.as_mut().rust_mut();
@@ -6021,18 +6037,7 @@ impl Workspace {
             self.as_mut().remember_model(key);
         }
         if file_changed {
-            self.as_mut().workflow_file_known(key);
-            self.as_mut().remember_modes(key);
-            self.as_mut().remember_parent(key);
-            // (Its helpers started before its file was known.)
-            let kids: Vec<String> = self.orch_children.iter().filter(|(_, c)| c.parent == key).map(|(k, _)| k.clone()).collect();
-            for k in kids {
-                self.as_mut().remember_parent(&k);
-            }
-            // (A helper that finished before its file was known.)
-            if self.settle_later.contains(key) && self.active_key.to_string() != key {
-                self.as_mut().settle_helper(key);
-            }
+            self.as_mut().on_file_known(key);
         }
         // A wiki run whose turn ended: onto the Wiki shelf (once you've
         // left it, when you're looking at it).

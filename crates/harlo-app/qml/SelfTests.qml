@@ -71,6 +71,8 @@ Item {
         console.log("selftest:", ok ? "PASS" : "FAIL", what)
     }
     function shown(it) { return it && it.visible && it.opacity > 0 && it.width > 0 && it.height > 0 }
+    /// The draft's Run as workflow: labelled when wide, an icon when narrow.
+    function draftWorkflow() { const b = findName("draftWorkflowButton"); return shown(b) ? b : findName("draftWorkflowIcon") }
     /// The first shown item (depth first) whose `text` is `text`, under
     /// `root` (default: the whole window, popups included).
     // The window's content and its popup layer (an ApplicationWindow keeps
@@ -10096,7 +10098,7 @@ Item {
             tests.check(sidebar.workflowDialog.testField.cursorPosition === 0, "a long test command shows where it starts")
             tests.check(tests.findName("workflowStart").accent, "Start is the dialog's main button")
             const d = sidebar.workflowDialog
-            tests.check(d.implementerModelBox.currentText === "Default model" && d.reviewerModelBox.currentText === "Default model", "each agent starts on its default model (" + d.implementerModelBox.currentText + ", " + d.reviewerModelBox.currentText + ")") } }
+            tests.check(d.implementerModelBox.currentIndex === 0 && d.implementerModelBox.currentText.startsWith("Default") && d.reviewerModelBox.currentIndex === 0 && d.reviewerModelBox.currentText.startsWith("Default"), "each agent starts on its default model (" + d.implementerModelBox.currentText + ", " + d.reviewerModelBox.currentText + ")") } }
         // Each role's model: its agent's default, or one of its models
         // (read when the dialog opens).
         ScriptAction { script: tests.waitUntil(workflowSteps, () => sidebar.workflowDialog.implementerModels.length > 0 && sidebar.workflowDialog.reviewerModels.length > 0, 30000) }
@@ -10144,7 +10146,7 @@ Item {
             tests.check(dots.length > 0 && dots.filter(d => d.color.a > 0).length === 1, "a dot only on what went wrong (" + dots.filter(d => d.color.a > 0).length + " of " + dots.length + ")")
             const details = tests.findName("workflowDetails", card), lastDot = dots[dots.length - 1]
             tests.check(details && lastDot && details.mapToItem(card, 0, 0).y > lastDot.mapToItem(card, 0, 0).y, "the run's details come after its log")
-            tests.check(details && !/-[0-9a-f]{6,}( |$)/.test(details.text) && details.text.indexOf("…`") > 0 && details.text.indexOf("cat greet.txt") < 0 && details.ToolTip.text.indexOf("cat greet.txt") > 0,
+            tests.check(details && !/-[0-9a-f]{6,}( |$)/.test(details.text) && details.text.indexOf("…") > 0 && details.text.indexOf("`") < 0 && details.text.indexOf("cat greet.txt") < 0 && details.ToolTip.text.indexOf("cat greet.txt") > 0,
                         "the details name the branch without its id and cut the long command, whole on hover (" + (details ? details.text : "none") + ")")
             tests.check(details && details.text.indexOf("Implement: Harlo · Fake Helper") >= 0 && details.text.indexOf("Review: Claude · " + Theme.helperModel("claude", tests.workflowModels.reviewer)) >= 0,
                         "and each agent's model (" + (details ? details.text : "none") + ")")
@@ -10189,9 +10191,16 @@ Item {
             tests.check(note.title === "Workflow done", "you're told it's done (" + note.title + ")")
             const card = tests.findName("workflowCard", chat), composer = tests.findName("composerInput")
             tests.check(tests.findText("Done: Tests passed · Review approved", card) !== null, "the card says so")
-            const reports = tests.findAllNames("toolName", chat).filter(n => n.visible).map(n => n.text).filter(t => /^Reported/.test(t))
-            tests.check(reports.indexOf("Reported attempt 3") >= 0, "a report reads as one (" + reports.join(", ") + ")")
-            tests.check(tests.findContaining("not used: a later attempt is under way", chat) !== null, "and a report for an attempt that's over says it wasn't used, not that it failed")
+            const reports = tests.findAllNames("toolName", chat).filter(n => n.visible).map(n => n.text).filter(t => /^(Reported )?[Aa]ttempt/.test(t))
+            tests.check(reports.indexOf("Reported attempt 3") >= 0 || reports.indexOf("Attempt 3") >= 0, "a report reads as one (" + reports.join(", ") + ")")
+            {
+                const unused = tests.findContaining("not used", chat)
+                tests.check(unused !== null && unused.objectName === "toolResult", "and a report for an attempt that's over says it wasn't used, not that it failed")
+                // (Narrow too: its summary keeps room beside it.)
+                const what = unused ? Array.from(unused.parent.children).find(c => c.objectName === "toolWhat") : null
+                tests.check(what && what.width >= Math.min(60, what.implicitWidth) && unused.mapToItem(null, unused.width, 0).x <= chat.mapToItem(null, chat.width, 0).x,
+                            "its summary still shows beside it (" + (what ? Math.round(what.width) + " px of " + Math.round(what.implicitWidth) : "none") + ", " + (unused ? unused.text.replace(/<[^>]*>/g, "") : "") + ")")
+            }
             {
                 const right = card.mapToItem(null, card.width, 0).x
                 const inside = it => it.mapToItem(null, it.width, 0).x <= right + 1
@@ -10201,7 +10210,11 @@ Item {
                 tests.check(title && !title.truncated && title.text.indexOf("attempt 3") >= 0 || title && title.text === "Attempt 3", "its title shows the attempt whole (" + (title ? title.text + (title.truncated ? ", cut" : "") : "none") + ")")
                 tests.check(state && !state.truncated, "and the state isn't cut")
             }
-            tests.shotWindow("clicks-workflow-done") } }
+            tests.shotWindow("clicks-workflow-done")
+            // (The card folded, for the reports above it.)
+            tests.findName("workflowCard", chat).expanded = false } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: { chat.transcript.listView.positionViewAtEnd(); tests.shotWindow("clicks-workflow-reports") } }
         // A reviewer's session shows the run's card too.
         ScriptAction { script: {
             const rows = tests.findAllNames("sessionTitle", sidebar).filter(t => t.visible && (t.text || "").indexOf("Review: ") === 0)
@@ -10289,7 +10302,7 @@ Item {
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
             const d = sidebar.workflowDialog
-            tests.check(d.implementerModels.some(m => m.name === "Fake Coder") && d.implementerModelBox.currentText === "Default model", "on box, the implementer's models are Harlo's there (" + d.implementerModels.map(m => m.name) + ")")
+            tests.check(d.implementerModels.some(m => m.name === "Fake Coder") && d.implementerModelBox.currentIndex === 0 && d.implementerModelBox.currentText.startsWith("Default"), "on box, the implementer's models are Harlo's there (" + d.implementerModels.map(m => m.name) + ")")
             d.close() } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -10680,6 +10693,10 @@ Item {
             modelBox.currentIndex = i
             modelBox.activated(i)
             tests.check(ed.stageModel.get(0).harness === "harlo" && ed.stageModel.get(0).agentModel.indexOf("fake-helper") >= 0, "the implementation names its agent and model (" + ed.stageModel.get(0).harness + ", " + ed.stageModel.get(0).agentModel + ")")
+            {
+                const l0 = tests.findName("stageAgentLabel", tests.findName("workflowStage0")), m0 = tests.findName("stageAgent", tests.findName("workflowStage0"))
+                tests.check(tests.shown(l0) && l0.text === "Agent" && m0.mapToItem(null, 0, 0).x > l0.mapToItem(null, l0.width, 0).x, "the implementation's agent menu has a label (" + (l0 ? l0.text : "none") + ")")
+            }
             tests.shotPopup(ed, "clicks-workflows-editor")
             tests.clickItem(tests.findName("workflowSave"), "Save") } }
         PauseAnimation { duration: 500 }
@@ -10697,13 +10714,14 @@ Item {
             chat.draftView.input.text = "Write greet.txt greeting the user" } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const b = tests.findName("draftWorkflowButton")
+            const b = tests.draftWorkflow()
             tests.check(tests.shown(b) && b.enabled, "a new session with a task and a project offers Run as workflow")
+            tests.check(win.width >= 900 ? b.objectName === "draftWorkflowButton" && b.text === "Workflow" : true, "labelled \"Workflow\" when there's room (" + b.objectName + ")")
             const hint = tests.findName("draftStartHint")
             tests.check(!hint || hint.text === "" || hint.contentWidth <= hint.width + 1, "the start hint fits beside the buttons, or isn't there (" + (hint ? hint.text + " " + hint.contentWidth + "/" + hint.width : "") + ")")
             tests.shotWindow("clicks-workflow-draft") } }
         PauseAnimation { duration: 100 }
-        ScriptAction { script: tests.clickItem(tests.findName("draftWorkflowButton"), "Run as workflow") }
+        ScriptAction { script: tests.clickItem(tests.draftWorkflow(), "Run as workflow") }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const d = sidebar.workflowDialog
@@ -10835,7 +10853,8 @@ Item {
             chat.draftView.harness = "harlo"
             chat.draftView.input.text = "Write greet.txt greeting the user" } }
         PauseAnimation { duration: 400 }
-        ScriptAction { script: tests.clickItem(tests.findName("draftWorkflowButton"), "Run as workflow") }
+        // (Ctrl+Shift+Enter in the message box: Run as workflow.)
+        ScriptAction { script: { chat.draftView.input.forceActiveFocus(); TestInput.key(Qt.Key_Return, Qt.ControlModifier | Qt.ShiftModifier) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const d = sidebar.workflowDialog
@@ -10881,7 +10900,7 @@ Item {
             const d = sidebar.workflowDialog
             const note = tests.findName("workflowNoGit")
             tests.check(d.repoState === "no-git" && d.folderFiles && tests.shown(note), "the dialog says it isn't a git repository")
-            tests.check(tests.findContaining("without the files here", d.contentItem) !== null, "and that the run would start without its files")
+            tests.check(tests.findContaining("won't be in the run unless you commit", d.contentItem) !== null, "and that the run would start without its files")
             tests.check(d.criteriaArea.text === "", "the last project's criteria don't carry over")
             tests.check(!tests.findName("workflowStart").enabled, "Start waits until you say to make it one")
             tests.clickItem(tests.findName("workflowMakeRepo"), "Make it a git repository") } }
@@ -10911,6 +10930,9 @@ Item {
     property double realAsking: 0
     property int realShotAttempt: 0
     property double realUntil: 0
+    /// "asks": why the card didn't say the run needs you ("" it did), or
+    /// null before anything asked.
+    property var realAsked: null
     function realProblem(text) { tests.log("problem:", text); tests.realProblems = tests.realProblems.concat([text]) }
     function realFinish(verdict) {
         const r = tests.workflowRun()
@@ -10936,6 +10958,14 @@ Item {
         if (waited && Workspace.activeKey !== waited) Workspace.open(waited)
         if (chat.session.hasRequest) {
             if (!tests.realAsking) tests.realAsking = now
+            // ("asks": the case wants a session asking, its card saying so.)
+            if (tests.realCase.expect === "asks" && now - tests.realAsking > 3000) {
+                const card = tests.findName("workflowCard", chat), state = tests.findName("workflowState", card)
+                tests.shotWindow("4-needs-you")
+                tests.realProblems = []
+                tests.realAsked = state && state.text.indexOf("needs you") >= 0 ? "" : "the card says " + (state ? state.text : "nothing")
+                return true
+            }
             if (now - tests.realAsking > 90000) {
                 tests.shotWindow("x-waiting-on-you")
                 tests.realProblem("a session waits on you: " + chat.session.title + ": " + tests.chatText().slice(-600))
@@ -10991,14 +11021,14 @@ Item {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             tests.shotWindow("2-new-session")
-            tests.clickItem(tests.findName("draftWorkflowButton"), "Run as workflow") } }
+            tests.clickItem(tests.draftWorkflow(), "Run as workflow") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             const d = sidebar.workflowDialog
             if (!d.visible) { tests.realFinish("FAIL Run as workflow didn't open the start dialog"); return }
             d.criteriaArea.text = tests.realCase.criteria || ""
             d.testField.text = tests.realCase.tests || ""
-            d.approvalBox.currentIndex = 2
+            d.approvalBox.currentIndex = tests.realCase.approval === undefined ? 2 : tests.realCase.approval
             tests.realUntil = Date.now() + 60000 } }
         ScriptAction { script: tests.waitUntil(workflowRealSteps, () => sidebar.workflowDialog.implementerModels.some(m => m.id === win.argValue("--model=")) || Date.now() > tests.realUntil, 70000) }
         PauseAnimation { duration: 300 }
@@ -11022,6 +11052,11 @@ Item {
         PauseAnimation { duration: 1000 }
         ScriptAction { script: {
             const r = tests.workflowRun()
+            if (tests.realCase.expect === "asks") {
+                tests.realFinish(tests.realAsked === "" ? "pass: a session asked, the card said the run needs you (" + tests.findName("workflowState", tests.findName("workflowCard", chat)).text + ")"
+                                 : tests.realAsked === null ? "FAIL nothing asked" : "FAIL " + tests.realAsked)
+                return
+            }
             if (r && r.implementation) Workspace.open(r.implementation) } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: {

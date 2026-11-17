@@ -208,7 +208,8 @@ ColumnLayout {
                 objectName: "toolName"
                 Layout.maximumWidth: Math.max(80, Math.round(head.width * 0.45))
                 text: !card.reportArgs ? card.transcript.toolName(card.title)
-                    : card.reportArgs.attempt !== "" ? qsTr("Reported attempt %1").arg(card.reportArgs.attempt) : qsTr("Reported back")
+                    // (Narrow: "Attempt N", so the summary keeps its room.)
+                    : card.reportArgs.attempt !== "" ? (head.width < 460 ? qsTr("Attempt %1") : qsTr("Reported attempt %1")).arg(card.reportArgs.attempt) : qsTr("Reported back")
                 elide: Text.ElideMiddle
                 color: Theme.text
                 font.weight: Font.Medium
@@ -242,12 +243,17 @@ ColumnLayout {
                     const faint = s => s === "" ? "" : "<font color='" + Theme.rgb(Theme.textFaint) + "'>" + s + "</font>"
                     let r = card.newFile ? (card.lineCount === 1 ? "1 line" : card.lineCount + " lines")
                           : card.result.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/^\+(\d+) −(\d+)$/, "<font color='" + Theme.rgb(Theme.diffAdd) + "'>+$1</font> <font color='" + Theme.rgb(Theme.diffRemove) + "'>−$2</font>")
-                    if (card.superseded) r = faint(qsTr("not used: a later attempt is under way"))
+                    // (Narrow: the short form, so the summary keeps its room.)
+                    if (card.superseded) r = faint(head.width < 460 ? qsTr("not used") : qsTr("not used: a later attempt is under way"))
                     else if (card.failed && r !== "") r = "<font color='" + Theme.rgb(Theme.error) + "'>" + r + "</font>"
                     return [r, faint(card.transcript.seconds(card.took))].filter(x => x !== "").join("&nbsp;&nbsp;")
                 }
                 color: Theme.textMuted
                 font.pixelSize: Theme.px(12)
+                HoverHandler { id: resultHover; enabled: card.superseded }
+                ToolTip.visible: card.superseded && resultHover.hovered
+                ToolTip.text: qsTr("Not used: a later attempt is under way")
+                ToolTip.delay: 400
             }
         }
         // (The line's colour under them, fading in over the words.)

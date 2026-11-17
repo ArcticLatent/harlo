@@ -296,8 +296,8 @@ ColumnLayout {
                                 PlainLabel {
                                     visible: stage.first
                                     Layout.fillWidth: true
-                                    text: stage.harness === "" ? qsTr("The agent you pick when you start a run makes the change in a new worktree.")
-                                        : qsTr("This agent makes the change in a new worktree; a run starts with it chosen, and you can pick another there.")
+                                    text: stage.harness === "" ? qsTr("The agent you pick when you start a run makes the change on its own copy of the project.")
+                                        : qsTr("This agent makes the change on its own copy of the project; a run starts with it chosen, and you can pick another there.")
                                     color: Theme.muted
                                     font.pixelSize: Theme.px(12)
                                     wrapMode: Text.Wrap
@@ -318,6 +318,16 @@ ColumnLayout {
                                     visible: stage.kind !== "check"
                                     Layout.fillWidth: true
                                     spacing: 6
+                                    Label {
+                                        id: stageAgentLabel
+                                        objectName: "stageAgentLabel"
+                                        Layout.preferredWidth: stageAgentMetrics.advanceWidth
+                                        text: stage.first ? qsTr("Agent") : qsTr("Reviewer")
+                                        color: Theme.muted
+                                        font.pixelSize: Theme.px(12)
+                                        // (One width for both, so the menus line up.)
+                                        TextMetrics { id: stageAgentMetrics; font: stageAgentLabel.font; text: qsTr("Reviewer") }
+                                    }
                                     ComboField {
                                         objectName: "stageAgent"
                                         Layout.fillWidth: true

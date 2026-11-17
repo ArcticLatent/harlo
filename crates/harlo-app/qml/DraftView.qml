@@ -66,6 +66,11 @@ Rectangle {
     // Run as workflow: the start dialog, with the message as the task and
     // this draft's agent and model as the implementer.
     signal workflowRequested(int projectId, string task, string agent, string model)
+    readonly property bool workflowOffered: !parallel && effectiveHarness !== "demo"
+    readonly property bool canRunWorkflow: workflowOffered && project !== null && input.text.trim() !== ""
+    readonly property string workflowTip: project === null ? qsTr("Run as workflow (Ctrl+Shift+Enter): pick a project first; a run works in a worktree of it")
+        : qsTr("Run as workflow (Ctrl+Shift+Enter): the agent implements the task in a worktree, then checks and reviews go over it until they pass (type the task first)")
+    function runWorkflow() { workflowRequested(projectId, input.text, effectiveHarness, activeModel) }
     /// The workflow started: the draft is done with, as when a session starts.
     function workflowStarted() {
         reset()
@@ -839,6 +844,12 @@ Rectangle {
                                 if (files.length > 0) event.accepted = true
                                 return
                             }
+                            // Ctrl+Shift+Enter: Run as workflow.
+                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier) && (event.modifiers & Qt.ShiftModifier)) {
+                                if (root.canRunWorkflow) root.runWorkflow()
+                                event.accepted = true
+                                return
+                            }
                             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
                                 root.send()
                                 event.accepted = true
@@ -905,15 +916,24 @@ Rectangle {
                                 onDelegated: text => root.send(text)
                             }
                         }
-                        // Run as workflow: implement, check and review in a worktree.
-                        ComposerIconButton {
+                        // Run as workflow: implement, check and review in a
+                        // worktree. Labelled when the bar has room.
+                        ComposerLabelButton {
                             objectName: "draftWorkflowButton"
-                            visible: !root.parallel && root.effectiveHarness !== "demo"
-                            enabled: root.project !== null && root.input.text.trim() !== ""
+                            visible: root.workflowOffered && box.width >= 440
+                            enabled: root.canRunWorkflow
                             iconName: "list-check-2"
-                            tip: root.project === null ? "Run as workflow: pick a project first; a run works in a worktree of it"
-                                : "Run as workflow: the agent implements the task in a worktree, then checks and reviews go over it until they pass (type the task first)"
-                            onClicked: root.workflowRequested(root.projectId, root.input.text, root.effectiveHarness, root.activeModel)
+                            text: qsTr("Workflow")
+                            tip: root.workflowTip
+                            onClicked: root.runWorkflow()
+                        }
+                        ComposerIconButton {
+                            objectName: "draftWorkflowIcon"
+                            visible: root.workflowOffered && box.width < 440
+                            enabled: root.canRunWorkflow
+                            iconName: "list-check-2"
+                            tip: root.workflowTip
+                            onClicked: root.runWorkflow()
                         }
                         ComposerIconButton {
                             objectName: "draftParallelButton"

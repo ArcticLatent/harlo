@@ -39,7 +39,7 @@ Rectangle {
     function stageColor(status) {
         switch (status) {
         case "done": return Theme.success
-        case "active": return Theme.primary
+        case "active": return asking ? Theme.warning : Theme.primary
         case "paused": return Theme.warning
         default: return Theme.muted
         }
@@ -160,11 +160,23 @@ Rectangle {
             }
             Label {
                 objectName: "workflowState"
-                width: Math.min(implicitWidth, stagesFlow.width)
+                width: Math.min(implicitWidth, stagesFlow.width - (openAsking.visible ? openAsking.width + stagesFlow.spacing : 0))
                 text: root.stateLine()
                 color: root.paused || root.asking ? Theme.warning : root.run && root.run.state === "done" ? Theme.success : Theme.muted
                 font.pixelSize: Theme.px(12)
                 wrapMode: Text.Wrap
+            }
+            // The session that asks, when it isn't this one.
+            FlatButton {
+                id: openAsking
+                objectName: "workflowOpenAsking"
+                visible: root.asking && !!root.session && root.run.askingKey !== "" && root.run.askingKey !== root.session.key
+                text: qsTr("Open it")
+                font.pixelSize: Theme.px(12)
+                padding: 3
+                onClicked: Workspace.open(root.run.askingKey)
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Open the session that asks, to answer it")
             }
         }
 
@@ -372,13 +384,13 @@ Rectangle {
             // run's id off the branch, long commands cut); whole on hover.
             PlainLabel {
                 objectName: "workflowDetails"
-                readonly property var parts: !root.run ? [] : (root.narrow ? [root.run.workflow] : []).concat([qsTr("On %1").arg(root.run.branch || qsTr("its worktree"))]).concat(root.run.stages.map(s => s.label + ": " + s.what + (s.model ? " · " + Theme.helperModel(s.agent, s.model) : "")))
+                readonly property var parts: !root.run ? [] : (root.narrow ? [root.run.workflow] : []).concat([qsTr("On %1").arg(root.run.branch || qsTr("its worktree"))]).concat(root.run.stages.map(s => s.label + ": " + s.what.replace(/^`(.*)`$/, "$1") + (s.model ? " · " + Theme.helperModel(s.agent, s.model) : "")))
                 readonly property string branchShort: root.run && root.run.branch ? root.run.branch.replace(/-[0-9a-f]{6,}$/, "") : ""
                 Layout.fillWidth: true
                 Layout.topMargin: 4
                 text: parts.map(p => {
                     const short = root.run && root.run.branch && p.endsWith(root.run.branch) ? p.slice(0, p.length - root.run.branch.length) + branchShort : p
-                    return short.length > 60 ? short.slice(0, 57).replace(/\s+$/, "") + "…" + (short.indexOf("`") >= 0 ? "`" : "") : short
+                    return short.length > 60 ? short.slice(0, 57).replace(/\s+$/, "") + "…" : short
                 }).join("  ·  ")
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(11)
