@@ -29,6 +29,7 @@ struct DashboardView: View {
     @State private var openHelpers: Set<String> = []
     /// The workflow run shown in full.
     @State private var openRun: WorkflowRun?
+    @State private var showRuns = false
 
     /// Runs under way or waiting for you (paused, or done with work not
     /// merged), at most three.
@@ -155,8 +156,10 @@ struct DashboardView: View {
                     Text("Workflow runs")
                         .scaledFont(21, .semibold)
                     Spacer()
-                    NavigationLink {
-                        WorkflowRunsView()
+                    // (A button, not a NavigationLink: in a List row a link
+                    // takes the whole row and adds its own chevron.)
+                    Button {
+                        showRuns = true
                     } label: {
                         Text("View All")
                             .scaledFont(15, .medium)
@@ -267,6 +270,7 @@ struct DashboardView: View {
         .onAppear { model.watchRuns(true) }
         .onDisappear { model.watchRuns(false) }
         .sheet(item: $openRun) { run in WorkflowSheet(id: run.id) }
+        .navigationDestination(isPresented: $showRuns) { WorkflowRunsView() }
         .alert("Rename session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
