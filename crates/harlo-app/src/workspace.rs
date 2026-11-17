@@ -3,6 +3,8 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod workflows;
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -48,6 +50,8 @@ pub mod qobject {
         #[qproperty(bool, orchestration_on, cxx_name = "orchestrationOn")]
         /// Bumped when a session's shared plan changes (`planJson`).
         #[qproperty(i32, plans_revision, cxx_name = "plansRevision")]
+        /// Bumped when a workflow run changes (`workflowFor`).
+        #[qproperty(i32, workflows_revision, cxx_name = "workflowsRevision")]
         /// Bumped whenever scheduled prompts change (views re-read them).
         #[qproperty(i32, schedules_revision, cxx_name = "schedulesRevision")]
         /// Bumped whenever a session's approval or plan mode changes.
@@ -237,6 +241,43 @@ pub mod qobject {
         /// paused run; the problem, if any.
         #[qinvokable]
         fn run_plan(self: Pin<&mut Workspace>, key: &QString, agent: &QString, model: &QString) -> QString;
+        /// Starts a workflow in a project (`form`: `{ workflow, task,
+        /// criteria, testCommand, implementer, implementerModel, reviewer,
+        /// reviewerModel, approval }`); the problem, if any.
+        #[qinvokable]
+        fn start_workflow(self: Pin<&mut Workspace>, project_id: i32, form: &QString) -> QString;
+        /// The test command a project's workflow runs (last used, else guessed).
+        #[qinvokable]
+        fn workflow_test_command(self: &Workspace, project_id: i32) -> QString;
+        /// The workflow last started in a project ("" none yet).
+        #[qinvokable]
+        fn workflow_choice(self: &Workspace, project_id: i32) -> QString;
+        /// The workflows to pick from: the built-in one, then yours.
+        #[qinvokable]
+        fn workflow_definitions_json(self: &Workspace) -> QString;
+        /// Saves one of your workflows (`id` "" a new one): `{ id, error }`.
+        #[qinvokable]
+        fn save_workflow_definition(self: Pin<&mut Workspace>, definition: &QString) -> QString;
+        /// Deletes one of your workflows (runs keep their own copy).
+        #[qinvokable]
+        fn delete_workflow_definition(self: Pin<&mut Workspace>, id: &QString);
+        /// The workflow run a session is part of, as its card shows it ("" none).
+        #[qinvokable]
+        fn workflow_for(self: &Workspace, key: &QString) -> QString;
+        /// Every workflow run, newest first, as their cards show them.
+        #[qinvokable]
+        fn workflows_json(self: &Workspace) -> QString;
+        /// Workflow runs under way (running, not paused): harlo keeps going
+        /// without its window while there are any.
+        #[qinvokable]
+        fn workflows_under_way(self: &Workspace) -> i32;
+        /// The window closed while runs are under way: harlo goes on without
+        /// it, and says so (once).
+        #[qinvokable]
+        fn workflows_backgrounded(self: Pin<&mut Workspace>);
+        /// Pauses, resumes or stops a workflow run (`action`: pause | resume | stop).
+        #[qinvokable]
+        fn workflow_action(self: Pin<&mut Workspace>, id: &QString, action: &QString);
         /// Who a session's helpers are (its project's team, else the same as
         /// it): `{ agent, agentName, model, thinking, team }`, or {}.
         #[qinvokable]
@@ -1146,6 +1187,9 @@ pub struct WorkspaceRust {
     orch_children: HashMap<String, OrchChild>,
     /// Plans running with helpers, by the session whose plan it is.
     plan_runs: HashMap<String, PlanRun>,
+    /// Workflow runs, and the sessions they wait on.
+    workflows: workflows::Workflows,
+    workflows_revision: i32,
     /// Helpers that did their task while you were looking at them (or
     /// before their file was known): settled once you're not.
     settle_later: HashSet<String>,
@@ -1343,6 +1387,7 @@ impl cxx_qt::Initialize for Workspace {
         let thread = self.qt_thread();
         crate::runtime().spawn(async move {
             let mut scanner = Scanner::default();
+            let mut first = true;
             loop {
                 let (s, delta) = tokio::task::spawn_blocking(move || {
                     let delta = scanner.poll();
@@ -1351,7 +1396,18 @@ impl cxx_qt::Initialize for Workspace {
                 .await
                 .expect("scanner task");
                 scanner = s;
-                if !delta.is_empty() && thread.queue(move |this| this.apply_scan(delta)).is_err() {
+                // (The first look: workflow runs on this machine go on.)
+                let listed = std::mem::take(&mut first);
+                if (listed || !delta.is_empty())
+                    && thread
+                        .queue(move |mut this| {
+                            this.as_mut().apply_scan(delta);
+                            if listed {
+                                this.workflows_listed("");
+                            }
+                        })
+                        .is_err()
+                {
                     break;
                 }
                 tokio::time::sleep(SCAN_INTERVAL).await;
@@ -1438,8 +1494,18 @@ impl Workspace {
                             if retry_at.remove(&name).is_some() {
                                 tracing::event!(name: "remote.sessions.reachable", tracing::Level::DEBUG, server.address = %name, "remote sessions on {{server.address}}: reachable again");
                             }
-                            let first = scanned.insert(name);
-                            if (first || !delta.is_empty()) && thread.queue(move |this| this.apply_scan(delta)).is_err() {
+                            let first = scanned.insert(name.clone());
+                            if (first || !delta.is_empty())
+                                && thread
+                                    .queue(move |mut this| {
+                                        this.as_mut().apply_scan(delta);
+                                        // (Its workflow runs go on.)
+                                        if first {
+                                            this.workflows_listed(&name);
+                                        }
+                                    })
+                                    .is_err()
+                            {
                                 return;
                             }
                         }
@@ -1688,6 +1754,7 @@ impl Workspace {
                 this.projects = projects;
                 this.meta = meta;
                 this.other_collapsed = other_collapsed;
+                this.workflows = workflows::Workflows::load(&db);
                 this.db = Some(db);
             }
             Err(e) => {
@@ -3234,7 +3301,7 @@ impl Workspace {
         tool_calls::Caller {
             harness: self.live.get(c).map(|e| e.info.harness.clone()).unwrap_or_default(),
             // (A helper: it reports to its parent, and offers no splits.)
-            helper: self.orch_children.get(c).is_some_and(|ch| ch.notify),
+            helper: self.orch_children.get(c).is_some_and(|ch| ch.notify) || self.serves_workflow(c),
             writing: self.wiki_sessions.contains(c),
             project: self.features_of(c).map(|(cwd, wiki, plan, commits)| tool_calls::Project { cwd, wiki, plan, commits }),
         }
@@ -5917,6 +5984,7 @@ impl Workspace {
             self.as_mut().remember_model(key);
         }
         if file_changed {
+            self.as_mut().workflow_file_known(key);
             self.as_mut().remember_modes(key);
             self.as_mut().remember_parent(key);
             // (Its helpers started before its file was known.)
@@ -5962,6 +6030,10 @@ impl Workspace {
         // parent told when it waits for the user.
         if became_busy || became_idle {
             self.as_mut().child_progress(key, became_idle, &notes);
+        }
+        // A workflow's session: its report to the run.
+        if became_idle {
+            self.as_mut().workflow_turn_ended(key, &notes);
         }
         for note in &notes {
             if let Note::Question(what, request) = note {
@@ -6161,6 +6233,9 @@ impl Workspace {
                 None => fail("The wiki is for a harlo project's sessions."),
             },
             "wikiRun" => self.as_mut().phone_wiki_run(msg),
+            // Workflow runs: a session's run (as its card shows it), every
+            // run, and Pause/Resume/Stop/Merge/Remove from the phone.
+            "workflow" | "workflows" | "workflowAction" => self.as_mut().phone_workflow(msg),
             "theme" => self.phone_theme(),
             // The phone picked your penguin: the left rail's too.
             "setAvatar" => {
@@ -7018,6 +7093,7 @@ impl Workspace {
                 Ok(json!({ "asked": true, "next": "End your turn now: harlo sends you the user's answer as a message." }))
             }
             "propose_helpers" => self.propose_split(&call, helper),
+            "report_done" | "ask_parent" if call.caller.as_deref().is_some_and(|c| self.serves_workflow(c)) => self.workflow_report(&call, tool),
             "report_done" | "ask_parent" => self.tell_parent(&call, tool),
             _ => Err(anyhow::anyhow!("harlo has no tool {tool}.")),
         }

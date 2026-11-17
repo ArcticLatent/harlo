@@ -381,6 +381,7 @@ struct SessionContent: View {
                 case .changes: ChangesView()
                 case .plan: PlanSheet(session: session)
                 case .wiki: WikiSheet(session: session)
+                case .workflow(let id): WorkflowSheet(id: id)
                 case .activity: ActivityView(session: session)
                 case .actions: ActionLogView(session: session)
                 case .share(let url): ShareSheet(items: [url])

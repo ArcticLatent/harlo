@@ -299,6 +299,9 @@ public enum Event: Equatable, Sendable {
     case limits(PlanLimits)
     /// The open session's shared plan changed: ask for it again.
     case plan(key: String)
+    /// A workflow run changed: ask for the open session's (and the list)
+    /// again.
+    case workflow(key: String)
     /// This phone was removed in harlo.
     case revoked
 
@@ -326,6 +329,7 @@ public enum Event: Equatable, Sendable {
             })
         case "limits": self = .limits(PlanLimits(v))
         case "plan": self = .plan(key: key)
+        case "workflow": self = .workflow(key: key)
         case "revoked": self = .revoked
         default: return nil
         }

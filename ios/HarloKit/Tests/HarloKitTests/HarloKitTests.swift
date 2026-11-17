@@ -1167,6 +1167,51 @@ final class PlanTests: XCTestCase {
         XCTAssertNil(plan.steps.first { $0.id == 3 })
     }
 
+    func testAWorkflowRunAsHarloSendsIt() throws {
+        let run = WorkflowRun(try JSON.parse(#"""
+        {"id":"wf-1","title":"Add a CSV export","workflow":"Implement and verify","doneText":"Tests passed · Review approved",
+         "project":"shipyard","createdAt":1763380000,"state":"running","why":"","attempt":2,
+         "stages":[{"label":"Implement","status":"done","kind":"implement","what":"Harlo"},
+                   {"label":"Tests","status":"active","kind":"check","what":"`cargo test`"},
+                   {"label":"Review","status":"todo","kind":"review","what":"Claude Code"}],
+         "waiting":"Running `cargo test`","role":"implementation","branch":"harlo/add-a-csv-export","base":"main",
+         "implementer":"Harlo","reviewer":"Claude Code","testCommand":"cargo test",
+         "lastCheck":{"name":"Tests","passed":false,"exit":101,"seconds":12,"tail":"test export ... FAILED"},
+         "liveCheck":{"name":"Tests","output":"running 4 tests\n","seconds":3},
+         "log":[{"at":1763380001,"attempt":1,"tone":"bad","text":"Tests failed after attempt 1"}],
+         "host":"","merged":false,"published":false,"removed":false}
+        """#))
+        XCTAssertEqual(run.heading, "Implement and verify · attempt 2")
+        XCTAssertEqual(run.stages.map(\.status), ["done", "active", "todo"])
+        XCTAssertEqual(run.stages[1].what, "`cargo test`")
+        XCTAssertEqual(run.statusLine, "Running `cargo test`")
+        XCTAssertEqual(run.lastCheck?.exit, 101)
+        XCTAssertEqual(run.lastCheck?.passed, false)
+        XCTAssertEqual(run.liveCheck?.output, "running 4 tests\n")
+        XCTAssertEqual(run.log.first?.tone, "bad")
+        XCTAssertEqual(run.project, "shipyard")
+        XCTAssertTrue(run.running)
+        XCTAssertFalse(run.finishable)
+        // Paused says why; done says how it ended, and can be finished until
+        // its worktree is removed; a check killed by a signal has no exit.
+        let paused = WorkflowRun(["id": "wf-2", "workflow": "W", "state": "paused", "why": "Tests failed. Resume sends it back to the implementation", "attempt": 1,
+                                  "lastCheck": ["passed": false, "exit": nil], "liveCheck": nil])
+        XCTAssertEqual(paused.heading, "W", "a first attempt isn't counted")
+        XCTAssertEqual(paused.statusLine, "Tests failed. Resume sends it back to the implementation")
+        XCTAssertNil(paused.lastCheck?.exit)
+        XCTAssertEqual(paused.lastCheck?.name, "Tests")
+        XCTAssertNil(paused.liveCheck)
+        var done = WorkflowRun(["id": "wf-3", "workflow": "W", "doneText": "Tests passed", "state": "done", "merged": true])
+        XCTAssertEqual(done.statusLine, "Done: Tests passed")
+        XCTAssertTrue(done.finishable && done.merged)
+        done.removed = true
+        XCTAssertFalse(done.finishable)
+        // Its event, about the open session.
+        XCTAssertEqual(Event(["ev": "workflow", "key": "k"]), .workflow(key: "k"))
+        XCTAssertEqual(Event(["ev": "workflow", "key": "k"])?.sessionKey, "k")
+        XCTAssertEqual(WorkflowAction.allCases.map(\.rawValue), ["pause", "resume", "stop", "merge", "publish", "remove"], "as harlo names them")
+    }
+
     func testWikiPageSources() {
         let page = WikiPageText(["path": "workflows/orders.md", "title": "Orders", "blocks": [],
                                  "sources": [["path": "src/order book.rs", "ranges": [[10, 20], [40, 40], [5, 2]], "claims": 2],
@@ -1459,11 +1504,11 @@ final class RecordingTests: XCTestCase {
         .appendingPathComponent("../../../fixtures/recording.jsonl").standardized, encoding: .utf8)
     static let main = "The session list jumps to the top"
 
-    func open(_ scene: String) async throws -> (HarloModel, OpenSession) {
+    func open(_ scene: String, _ title: String = main) async throws -> (HarloModel, OpenSession) {
         let text = try XCTUnwrap(Self.text, "ios/fixtures/recording.jsonl")
         let m = HarloModel.replaying(try Replay(recording: text, scene: scene))
         for _ in 0..<100 where m.sessions.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
-        let summary = try XCTUnwrap(m.sessions.first { $0.title.hasPrefix(Self.main) }, "\(scene): \(m.sessions.map(\.title))")
+        let summary = try XCTUnwrap(m.sessions.first { $0.title.hasPrefix(title) }, "\(scene): \(m.sessions.map(\.title))")
         m.open(summary)
         let s = try XCTUnwrap(m.session)
         for _ in 0..<100 where s.rows.isEmpty || s.loading { try await Task.sleep(nanoseconds: 20_000_000) }
@@ -1473,7 +1518,7 @@ final class RecordingTests: XCTestCase {
 
     func testEveryScene() async throws {
         let text = try XCTUnwrap(Self.text)
-        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end", "pictures"])
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end", "pictures", "workflow-check", "workflow"])
         let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
 
         var (m, s) = try await open("session")
@@ -1483,6 +1528,11 @@ final class RecordingTests: XCTestCase {
         XCTAssertEqual(tests.command, "./run-tests.sh")
         XCTAssertTrue(tests.shownOutput().hasSuffix("112 passed; 0 failed; 0 ignored; finished in 1.84s"))
         XCTAssertEqual(s.rows.first { $0.kind == "markdown" }?.model, "tour-coder")
+        // No workflow runs yet: none listed, and the session isn't in one.
+        await m.loadWorkflows()
+        XCTAssertTrue(m.hasWorkflows)
+        XCTAssertTrue(m.workflowRuns.isEmpty)
+        XCTAssertNil(s.workflow)
 
         (m, s) = try await open("ask")
         XCTAssertEqual(s.requests.first?.questions.first?.options.count, 2)
@@ -1551,6 +1601,35 @@ final class RecordingTests: XCTestCase {
                 XCTAssertEqual(picture.type, path.hasSuffix(".png") && !thumb ? "image/png" : "image/jpeg", path)
             }
         }
+
+        // A workflow run started on the computer: its implementation
+        // session shows it, its check's output coming in; the list has it.
+        let task = "Keep the session list's place"
+        (m, s) = try await open("workflow-check", task)
+        for _ in 0..<250 where s.workflow == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        let live = try XCTUnwrap(s.workflow)
+        XCTAssertEqual(live.stages.map(\.status), ["done", "active", "todo"])
+        XCTAssertEqual(live.stages.map(\.label), ["Implement", "Tests", "Review"])
+        XCTAssertTrue(live.liveCheck?.output.contains("keeps_place_2") == true, live.liveCheck?.output ?? "no output")
+        XCTAssertEqual(live.statusLine, "Running `./check.sh`")
+        XCTAssertEqual(live.role, "implementation")
+        await m.loadWorkflows()
+        XCTAssertEqual(m.workflowRuns.map(\.state), ["running"])
+        XCTAssertEqual(m.workflowRuns.first?.project, "harlo")
+        // The main session isn't in it.
+        (m, s) = try await open("workflow-check")
+        for _ in 0..<50 { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertNil(s.workflow)
+        // Done: tests passed, the review approved, its work to merge.
+        (m, s) = try await open("workflow", task)
+        for _ in 0..<250 where s.workflow?.state != "done" { try await Task.sleep(nanoseconds: 20_000_000) }
+        let done = try XCTUnwrap(s.workflow)
+        XCTAssertEqual(done.statusLine, "Done: Tests passed · Review approved")
+        XCTAssertTrue(done.finishable && !done.merged && done.base == "main", "\(done.base)")
+        XCTAssertEqual(done.lastCheck?.passed, true)
+        XCTAssertNil(done.liveCheck)
+        XCTAssertTrue(done.log.contains { $0.tone == "good" }, "\(done.log.map(\.text))")
+        XCTAssertEqual(m.workflowRun(done.id)?.id, done.id)
     }
 }
 

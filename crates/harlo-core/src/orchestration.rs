@@ -264,7 +264,8 @@ pub fn helper_tools() -> Value {
             "inputSchema": s(json!({
                 "outcome": { "type": "string", "enum": ["succeeded", "failed"], "description": "failed if the task isn't done: never hide a failure in the summary." },
                 "summary": { "type": "string", "description": "Three sentences: what you did, what you found, what's left." },
-                "files": { "type": "array", "items": { "type": "string" }, "description": "The files you changed (paths), if any." }
+                "files": { "type": "array", "items": { "type": "string" }, "description": "The files you changed (paths), if any." },
+                "attempt": { "type": "integer", "description": "The attempt your message named (\"attempt: N\"), when it named one: a report for an earlier attempt isn't used." }
             }), &["outcome", "summary"]),
         },
         {
@@ -281,6 +282,8 @@ pub struct Report {
     pub succeeded: bool,
     pub summary: String,
     pub files: Vec<String>,
+    /// The attempt it reports, when its message named one (a workflow's).
+    pub attempt: Option<u32>,
 }
 
 impl Report {
@@ -300,7 +303,8 @@ impl Report {
             return Err(anyhow::Error::msg("Give a summary: what you did, what you found, what's left."));
         }
         let files = args["files"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::trim)).filter(|f| !f.is_empty()).map(str::to_owned).collect();
-        Ok(Report { succeeded, summary, files })
+        let attempt = args["attempt"].as_u64().or_else(|| args["attempt"].as_str().and_then(|a| a.trim().parse().ok())).and_then(|a| u32::try_from(a).ok());
+        Ok(Report { succeeded, summary, files, attempt })
     }
 }
 
@@ -939,7 +943,7 @@ mod tests {
     #[test]
     fn harlos_messages_read_plainly() {
         let said = |m: String| said_plainly(m.strip_prefix("[harlo] ").unwrap());
-        let report = Report { succeeded: true, summary: "Wrote helper.txt.\nAnd more.".into(), files: vec![] };
+        let report = Report { succeeded: true, summary: "Wrote helper.txt.\nAnd more.".into(), files: vec![], attempt: None };
         assert_eq!(said(finished_message("Harlo", "Helper", "live:3", Some(&report), None, None, None)), "Helper finished: Wrote helper.txt.");
         let failed = Report { succeeded: false, ..report.clone() };
         assert_eq!(said(finished_message("Claude", "Fix", "k1", Some(&failed), None, None, None)), "Fix couldn't finish: Wrote helper.txt.");
@@ -962,7 +966,10 @@ mod tests {
     fn helpers_report_back() {
         // A report: its outcome, summary and files.
         let r = Report::parse(&json!({ "outcome": "failed", "summary": " Tried. ", "files": ["a.rs", " ", "b.rs"] })).unwrap();
-        assert_eq!(r, Report { succeeded: false, summary: "Tried.".into(), files: vec!["a.rs".into(), "b.rs".into()] });
+        assert_eq!(r, Report { succeeded: false, summary: "Tried.".into(), files: vec!["a.rs".into(), "b.rs".into()], attempt: None });
+        // A workflow's: the attempt it reports (a number, or a numeral).
+        assert_eq!(Report::parse(&json!({ "outcome": "succeeded", "summary": "x", "attempt": 2 })).unwrap().attempt, Some(2));
+        assert_eq!(Report::parse(&json!({ "outcome": "succeeded", "summary": "x", "attempt": " 3" })).unwrap().attempt, Some(3));
         Report::parse(&json!({ "outcome": "done", "summary": "x" })).unwrap_err();
         Report::parse(&json!({ "outcome": "succeeded", "summary": "  " })).unwrap_err();
         let m = finished_message("Claude", "Fix", "k1", Some(&r), Some("ignored"), None, None);

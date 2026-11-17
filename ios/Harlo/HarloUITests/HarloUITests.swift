@@ -629,4 +629,48 @@ final class HarloUITests: XCTestCase {
         XCTAssertEqual(tiles.count, 1, "only your photo is a thumbnail")
         XCTAssertEqual(tiles.firstMatch.label, "Picture: You sent")
     }
+    /// A workflow run: on the dashboard while its check runs, and in full
+    /// with the check's output coming in; done, from its implementation
+    /// session's line, with its work to merge.
+    func test17WorkflowRun() {
+        let task = "Keep the session list's place"
+        launch("workflow-check")
+        see("Workflow runs")
+        let run = app.buttons["workflowRun"]
+        XCTAssertTrue(run.waitForExistence(timeout: 8), "the run on the dashboard")
+        XCTAssertTrue(run.label.contains(task), run.label)
+        shot("29-dashboard-runs")
+        audit("dashboard-runs")
+        run.tap()
+        see("Tests running")
+        XCTAssertTrue(app.descendants(matching: .any)["workflowLiveOutput"].waitForExistence(timeout: 8), "the check's output")
+        see("keeps_place_2")
+        XCTAssertTrue(app.buttons["workflowPause"].exists && app.buttons["workflowStop"].exists, "Pause and Stop while it runs")
+        XCTAssertFalse(app.buttons["workflowMerge"].exists, "nothing to merge yet")
+        shot("30-workflow-check")
+        audit("workflow-check")
+
+        // Done: its implementation session's line opens it.
+        launch("workflow")
+        let session = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ AND identifier != 'workflowRun'", task)).firstMatch
+        XCTAssertTrue(session.waitForExistence(timeout: 8), "its implementation session")
+        session.tap()
+        let line = app.buttons["workflowLine"]
+        XCTAssertTrue(line.waitForExistence(timeout: 10), "the run's line above the composer")
+        XCTAssertTrue(line.label.contains("Done: Tests passed · Review approved"), line.label)
+        shot("31-workflow-line")
+        line.tap()
+        see("Tests passed in")
+        XCTAssertTrue(app.buttons["workflowMerge"].waitForExistence(timeout: 5), "Merge")
+        XCTAssertTrue(app.buttons["workflowMerge"].label.contains("Merge into main"), app.buttons["workflowMerge"].label)
+        XCTAssertTrue(app.buttons["workflowPublish"].exists && app.buttons["workflowRemove"].exists, "Push and Remove")
+        XCTAssertFalse(app.buttons["workflowPause"].exists, "nothing to pause once it's done")
+        shot("32-workflow-done")
+        audit("workflow-done")
+        // Remove asks first.
+        app.buttons["workflowRemove"].tap()
+        see("Remove the run's worktree?")
+        shot("33-workflow-remove")
+    }
 }

@@ -735,6 +735,19 @@ Rectangle {
             visible: plan.enabled && steps.length > 0 && !root.covered
         }
 
+        // The workflow run the session is part of.
+        WorkflowCard {
+            id: workflowCard
+            objectName: "workflowCard"
+            onChangesRequested: if (!root.changesOpen) root.toggleChanges()
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.topMargin: 8
+            session: root.session
+            visible: !!run && !root.covered
+        }
+
         // The agent's todo list.
         TodoDock {
             id: todoDock

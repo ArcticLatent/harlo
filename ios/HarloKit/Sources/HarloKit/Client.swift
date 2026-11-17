@@ -361,6 +361,23 @@ public actor HarloClient {
         try check(await call("wikiRun", ["key": .string(key), "mode": .string(mode)]))
     }
 
+    /// The workflow run a session is part of (nil: none).
+    public func workflow(_ key: String) async throws -> WorkflowRun? {
+        let run = try check(await call("workflow", ["key": .string(key)]))["run"]
+        return run.object == nil ? nil : WorkflowRun(run)
+    }
+
+    /// Every workflow run harlo keeps, newest first.
+    public func workflows() async throws -> [WorkflowRun] {
+        (try check(await call("workflows", [:]))["runs"].array ?? []).map(WorkflowRun.init)
+    }
+
+    /// Pauses, resumes or stops a run, or merges, publishes or removes a
+    /// finished run's work.
+    public func workflowAction(_ id: String, _ action: WorkflowAction) async throws {
+        try check(await call("workflowAction", ["id": .string(id), "action": .string(action.rawValue)]))
+    }
+
     /// A Mermaid diagram drawn by harlo, in these colours (`background`,
     /// `surface`, `text`, `muted`, `accent` as `#rrggbb`).
     public func diagram(_ source: String, light: Bool, colors: [String: String]) async throws -> DiagramPicture {

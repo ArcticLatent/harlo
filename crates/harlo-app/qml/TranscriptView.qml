@@ -1031,6 +1031,9 @@ Item {
         // has stopped the following first, so a row measured then doesn't
         // pull the view back.)
         onContentHeightChanged: if (follow) Qt.callLater(followEnd)
+        // The view itself shorter (a card or panel under it appearing or
+        // growing): the end stays in sight too.
+        onHeightChanged: if (follow) Qt.callLater(followEnd)
 
 
         footer: Item {

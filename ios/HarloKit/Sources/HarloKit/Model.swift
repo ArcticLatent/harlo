@@ -152,6 +152,8 @@ public final class OpenSession {
     public internal(set) var helpers: [Helper] = []
     /// Its repository's wiki (nil: not asked yet).
     public internal(set) var wiki: Wiki?
+    /// The workflow run it's part of (nil: none, or harlo hasn't said).
+    public internal(set) var workflow: WorkflowRun?
     /// Your messages a turn can be undone to (row key → snapshot).
     public internal(set) var undoable: [String: String] = [:]
     /// Its folder is a git repository (or holds some): its changes have
@@ -588,6 +590,9 @@ public final class HarloModel {
             if let s = session { Task { await refreshLimit(s) } }
         case .plan(let key):
             if let s = session, s.liveKey == key { Task { await refreshPlan(s) } }
+        case .workflow(let key):
+            if let s = session, s.liveKey == key { Task { await refreshWorkflow(s) } }
+            if watchingRuns { Task { await loadWorkflows() } }
         case .meta(_, let info):
             // Another model can be another plan's.
             let before = session?.info.modelId
@@ -777,6 +782,7 @@ public final class HarloModel {
             await refreshLimit(s)
             await refreshPlan(s)
             await refreshHelpers(s)
+            await refreshWorkflow(s)
         } catch {
             s.error = Self.describe(error)
             s.loading = false
@@ -907,6 +913,54 @@ public final class HarloModel {
     public func reviewStep(_ step: PlanStep, with agent: String) async -> Bool {
         if demo || samples != nil { return true }
         return await with { c, k in try await c.reviewStep(k, step: step.id, agent: agent) } != nil
+    }
+
+    // ---- workflow runs ------------------------------------------------------------
+
+    /// harlo runs workflows and shows them to the phone.
+    public var hasWorkflows: Bool { features.contains("workflows") }
+
+    /// Every run harlo keeps, newest first (for the Runs list).
+    public internal(set) var workflowRuns: [WorkflowRun] = []
+    /// Views on screen that list runs: while there's one, a change reloads
+    /// the list.
+    @ObservationIgnored var runWatchers = 0
+    var watchingRuns: Bool { runWatchers > 0 }
+
+    /// A view listing runs came (true) or went (false).
+    public func watchRuns(_ on: Bool) {
+        runWatchers = max(0, runWatchers + (on ? 1 : -1))
+    }
+
+    /// A run by its id: the open session's, or one in the list.
+    public func workflowRun(_ id: String) -> WorkflowRun? {
+        if let r = session?.workflow, r.id == id { return r }
+        return workflowRuns.first { $0.id == id }
+    }
+
+    /// The run the open session is part of, from harlo.
+    func refreshWorkflow(_ s: OpenSession) async {
+        guard hasWorkflows, let c = client, !s.liveKey.isEmpty else { return }
+        // (nil is no run: a run that's gone leaves the card; a failed call
+        // keeps it.)
+        guard let run = try? await Optional(c.workflow(s.liveKey)), session === s, run != s.workflow else { return }
+        s.workflow = run
+    }
+
+    /// Every run, from harlo.
+    public func loadWorkflows() async {
+        guard hasWorkflows, let c = client, let runs = try? await c.workflows(), runs != workflowRuns else { return }
+        workflowRuns = runs
+    }
+
+    /// Pauses, resumes or stops a run, or merges, publishes or removes its
+    /// work: true when harlo did (else `alert` says why).
+    @discardableResult
+    public func workflowAction(_ run: WorkflowRun, _ action: WorkflowAction) async -> Bool {
+        guard await with(session: false, { c, _ in try await c.workflowAction(run.id, action) }) != nil else { return false }
+        if let s = session { await refreshWorkflow(s) }
+        if watchingRuns { await loadWorkflows() }
+        return true
     }
 
     /// harlo has the project wiki for the phone.
@@ -1400,7 +1454,7 @@ extension Event {
     public var sessionKey: String? {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
-             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .aside(let k, _), .unsent(let k, _, _), .plan(let k): return k
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .aside(let k, _), .unsent(let k, _, _), .plan(let k), .workflow(let k): return k
         case .sessions, .limits, .revoked: return nil
         }
     }

@@ -1548,7 +1548,9 @@ pub fn worktree_summary(path: &Path, base: &str) -> Result<WorktreeSummary> {
 /// conflicts (it's aborted) or fails.
 pub fn merge_branch(main: &Path, branch: &str) -> Result<String> {
     let st = status(main)?;
-    if !st.files.is_empty() {
+    // (Untracked files don't block it: git refuses by itself when the
+    // merge would overwrite one.)
+    if st.files.iter().any(|f| !f.untracked) {
         bail!("The main checkout has uncommitted changes; commit or stash them first.");
     }
     let lock = repo_lock(main);
@@ -2039,7 +2041,14 @@ mod tests {
 
         // Removing refuses while dirty unless forced; merging brings the commit over.
         assert!(remove_worktree(&dir, &wt_path, false).is_err());
+        // (A file of the main checkout's own, untracked, doesn't stop it; a
+        // changed tracked one does.)
+        std::fs::write(dir.join("notes.md"), "mine\n").unwrap();
+        std::fs::write(dir.join("a.txt"), "edited here\n").unwrap();
+        assert!(merge_branch(&dir, "feature/x").unwrap_err().to_string().contains("uncommitted changes"));
+        sh(&dir, &["checkout", "-q", "--", "a.txt"]);
         assert!(merge_branch(&dir, "feature/x").unwrap().contains("feature/x"));
+        assert_eq!(std::fs::read_to_string(dir.join("notes.md")).unwrap(), "mine\n");
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "rewritten\n");
         remove_worktree(&dir, &wt_path, true).unwrap();
         assert_eq!(list_worktrees(&dir).unwrap().len(), 1);

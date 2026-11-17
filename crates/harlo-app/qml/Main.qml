@@ -11,8 +11,10 @@ ApplicationWindow {
     // The open panes at their narrowest.
     minimumWidth: leftRail.width + rail.width + (sidebar.visible ? 160 : 0) + chatMinWidth + (rightPanel.visible ? 240 : 0)
     minimumHeight: 420
-    // `--background` (start at login): stay in the tray, if there is one.
-    readonly property bool startHidden: Qt.application.arguments.includes("--background") && Workspace.setting("tray") !== "0" && (selftestDir === "" || argValue("--tray=") === "1")
+    // `--background` (start at login): stay in the tray, if there is one,
+    // or without a window while workflow runs left under way go on.
+    readonly property bool startHidden: Qt.application.arguments.includes("--background") && (selftestDir === "" || argValue("--tray=") === "1" || argValue("--background-runs=") === "1")
+        && (Workspace.setting("tray") !== "0" || Workspace.workflowsUnderWay() > 0)
     visible: !startHidden
     title: chat.hasSession && chat.session.title ? chat.session.title + " — harlo" : "harlo"
     color: Theme.background
@@ -109,6 +111,9 @@ ApplicationWindow {
         if (Workspace.setting("close_to_tray") !== "0" && trayLoader.item && trayLoader.item.available) {
             close.accepted = false
             win.hide()
+        } else if (Workspace.workflowsUnderWay() > 0) {
+            close.accepted = false
+            win.keepForRuns()
         }
     }
     Loader {
@@ -124,6 +129,7 @@ ApplicationWindow {
             function onNewSessionRequested() { win.openDraft(-2) }
             function onDropDownRequested() { win.toggleDropDown() }
             function onMiniChatRequested() { win.toggleMiniChat() }
+            function onQuitRequested() { win.requestQuit() }
         }
     }
     // The drop-down window (toggled by `harlo --toggle-dropdown`, e.g. from a
@@ -198,8 +204,41 @@ ApplicationWindow {
     Timer {
         running: win.startHidden
         interval: 3000
-        onTriggered: if (!trayLoader.item || !trayLoader.item.available) { win.show(); win.raise() }
+        onTriggered: {
+            if (trayLoader.item && trayLoader.item.available) return
+            if (Workspace.workflowsUnderWay() > 0) win.keptForRuns = true
+            else { win.show(); win.raise() }
+        }
     }
+    /// Hidden while workflow runs go on (no tray to come back from): harlo
+    /// quits a moment after the last one is over (done, paused or stopped);
+    /// launching it again shows the window.
+    property bool keptForRuns: false
+    // Test hook.
+    property alias runsOverQuit: runsOverQuit
+    onVisibleChanged: if (visible) keptForRuns = false
+    Timer {
+        id: runsOverQuit
+        objectName: "runsOverQuit"
+        interval: 3000
+        running: win.keptForRuns && !win.visible && Workspace.workflowsRevision >= 0 && Workspace.workflowsUnderWay() === 0
+        onTriggered: Qt.quit()
+    }
+    /// Quit (the menu, the tray, the shortcut): asks first while runs are
+    /// under way.
+    function requestQuit() {
+        const n = Workspace.workflowsUnderWay()
+        if (n === 0) { Qt.quit(); return }
+        showMainWindow()
+        quitRunsDialog.count = n
+        quitRunsDialog.open()
+    }
+    function keepForRuns() {
+        keptForRuns = true
+        win.hide()
+        Workspace.workflowsBackgrounded()
+    }
+    QuitRunsDialog { id: quitRunsDialog; onKeepRequested: win.keepForRuns() }
     function setTrayEnabled(on) {
         Workspace.setSetting("tray", on ? "1" : "0")
         trayLoader.active = on && win.selftestDir === ""
@@ -425,6 +464,7 @@ ApplicationWindow {
                     width: sidebarPane.sliding ? sidebarPane.target : sidebarPane.width
                     onManageInstancesRequested: settingsDialog.openPage("remote")
                     onProjectSettingsRequested: projectId => settingsDialog.openProject(projectId)
+                    onSettingsPageRequested: page => settingsDialog.openPage(page)
                     onNewSessionRequested: projectId => win.openDraft(projectId)
                     onExportRequested: (key, title) => win.exportMarkdown(key, title)
                     onSearchMessagesRequested: text => searchDialog.openSearch(text)
@@ -652,7 +692,7 @@ ApplicationWindow {
             { id: "settings", seq: Keymap.seq("settings"), label: "Settings", group: ui, icon: "settings", run: () => settingsDialog.open() },
             { id: "shortcuts", seq: Keymap.seq("shortcuts"), label: "Keyboard shortcuts", group: ui, icon: "keyboard", run: () => shortcutsDialog.open() },
             // (Closing the window keeps harlo in the tray: this quits.)
-            { id: "quit", seq: Keymap.seq("quit"), label: "Quit harlo", group: ui, icon: "close-circle", run: () => Qt.quit() },
+            { id: "quit", seq: Keymap.seq("quit"), label: "Quit harlo", group: ui, icon: "close-circle", run: () => win.requestQuit() },
             { seq: "Ctrl+Alt+L", label: "Layout readout", hidden: true, run: () => { layoutInfo.visible = !layoutInfo.visible; console.log("layout:", layoutInfo.text) } },
             { id: "contextPanel", seq: Keymap.seq("contextPanel"), label: "Context panel", group: panels, icon: "pie", run: () => win.togglePanel("context") },
             { id: "activityPanel", seq: Keymap.seq("activityPanel"), label: "Activity panel", group: panels, icon: "list-check-2", run: () => win.togglePanel("activity") },

@@ -68,6 +68,7 @@ pub mod terminal;
 pub mod tool_calls;
 pub mod tool_facts;
 pub mod transcript;
+pub mod workflow;
 pub mod updates;
 
 pub use session::{Notable, SessionHandle, SessionMetaInfo, SessionSink, SessionStatus, SessionUpdate, SlashCommand, Typed, UiRequest, Unsent};

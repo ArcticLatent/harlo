@@ -22,8 +22,13 @@ struct ActivityBar: View {
     var body: some View {
         let queued = session.queued
         let plan = session.plan.flatMap { $0.shows ? $0 : nil }
-        if plan != nil || todo != nil || running > 0 || !queued.isEmpty {
+        // (A run shows until it's stopped or its worktree is gone.)
+        let run = session.workflow.flatMap { $0.state != "stopped" && !$0.removed ? $0 : nil }
+        if run != nil || plan != nil || todo != nil || running > 0 || !queued.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
+                if let run {
+                    WorkflowLine(run: run) { open(.workflow(run.id)) }
+                }
                 if let plan {
                     PlanLine(plan: plan) { open(.plan) }
                 }

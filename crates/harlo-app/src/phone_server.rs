@@ -476,7 +476,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team", "pictures", "wiki"];
+const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team", "pictures", "wiki", "workflows"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -1089,6 +1089,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
 
     let mut devices = shared.devices_changed.subscribe();
     let mut plans = crate::phone_bridge::watch_plans();
+    let mut flows = crate::phone_bridge::watch_workflows();
     let (updates_tx, mut updates) = mpsc::unbounded_channel::<Vec<SessionUpdate>>();
     let (later_tx, mut later) = mpsc::unbounded_channel::<Value>();
     let mut conn = Conn {
@@ -1100,6 +1101,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
         limits: crate::phone_bridge::watch_limits(),
         wants_limits: false,
         wants_plans: false,
+        wants_workflows: false,
         subagents: Vec::new(),
         window: Window::default(),
         open: None,
@@ -1135,6 +1137,10 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                     Some((key, _)) => vec![json!({ "ev": "plan", "key": key })],
                     None => Vec::new(),
                 }
+            }
+            Ok(()) = flows.changed(), if conn.wants_workflows => {
+                flows.borrow_and_update();
+                vec![json!({ "ev": "workflow", "key": conn.open.as_ref().map(|(k, _)| k.clone()).unwrap_or_default() })]
             }
             Ok(()) = conn.limits.changed(), if conn.wants_limits => {
                 let mut ev = conn.limits.borrow_and_update().clone();
@@ -1176,6 +1182,8 @@ struct Conn {
     wants_limits: bool,
     /// A phone that asked for a plan hears when one changes.
     wants_plans: bool,
+    /// It asked about workflow runs: it's told when they change.
+    wants_workflows: bool,
     /// The open session's subagents, from their frames.
     subagents: Vec<Value>,
     /// The open session's rows the phone has.
@@ -1250,6 +1258,10 @@ impl Conn {
                     Value::Null
                 }
                 "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "theme" | "setAvatar" | "wiki" | "wikiRun" => crate::phone_bridge::call(msg.clone()).await,
+                "workflow" | "workflows" | "workflowAction" => {
+                    self.wants_workflows = true;
+                    crate::phone_bridge::call(msg.clone()).await
+                }
                 "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
                     self.wants_plans = true;
                     crate::phone_bridge::call(msg.clone()).await

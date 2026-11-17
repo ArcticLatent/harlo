@@ -216,6 +216,15 @@ CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     data TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS workflows (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
 ";
 
 /// A multirun: one prompt sent to several lanes (sessions, usually in their
@@ -762,6 +771,88 @@ impl Db {
         Ok(())
     }
 
+    /// The saved workflow runs, oldest first (one that can't be read is left out).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
+    pub fn workflow_runs(&self) -> Result<Vec<crate::workflow::Run>> {
+        let mut stmt = self.conn.prepare("SELECT data FROM workflow_runs ORDER BY rowid")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            match serde_json::from_str(&row?) {
+                Ok(run) => out.push(run),
+                Err(e) => tracing::event!(name: "workflow.run.read.failed", tracing::Level::WARN, error.message = %e, "a saved workflow run can't be read: {{error.message}}"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Saves a workflow run (before what it says to do next is done).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
+    pub fn save_workflow_run(&self, run: &crate::workflow::Run) -> Result<()> {
+        let data = serde_json::to_string(run)?;
+        self.conn.execute(
+            "INSERT INTO workflow_runs (id, data, updated_at) VALUES (?1, ?2, strftime('%s','now')) ON CONFLICT(id) DO UPDATE SET data = ?2, updated_at = strftime('%s','now')",
+            params![run.id, data],
+        )?;
+        Ok(())
+    }
+
+    /// Deletes a workflow run.
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
+    pub fn delete_workflow_run(&self, id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM workflow_runs WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Your saved workflows, in the order made (one that can't be read is
+    /// left out).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be read.
+    pub fn workflows(&self) -> Result<Vec<crate::workflow::Definition>> {
+        let mut stmt = self.conn.prepare("SELECT data FROM workflows ORDER BY rowid")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for row in rows {
+            match serde_json::from_str(&row?) {
+                Ok(flow) => out.push(flow),
+                Err(e) => tracing::event!(name: "workflow.definition.read.failed", tracing::Level::WARN, error.message = %e, "a saved workflow can't be read: {{error.message}}"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Saves a workflow (by its id: a new one, or a change to one).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
+    pub fn save_workflow(&self, flow: &crate::workflow::Definition) -> Result<()> {
+        let data = serde_json::to_string(flow)?;
+        self.conn.execute("INSERT INTO workflows (id, data) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data = ?2", params![flow.id, data])?;
+        Ok(())
+    }
+
+    /// Deletes a saved workflow (runs keep their own copy).
+    ///
+    /// # Errors
+    ///
+    /// A SQLite error when the database can't be written.
+    pub fn delete_workflow(&self, id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM workflows WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
     /// A setting's value, if it's set.
     ///
     /// # Errors
@@ -809,6 +900,38 @@ mod tests {
         db.set("tray", "0").unwrap();
         let got: Vec<String> = db.with_prefix("model_server.").unwrap().into_iter().map(|(k, _)| k).collect();
         assert_eq!(got, ["model_server.http://127.0.0.1:11434/v1", "model_server.http://127.0.0.1:8080/v1"]);
+    }
+
+    #[test]
+    fn stores_workflow_runs() {
+        use crate::workflow::{Agent, Place, Request, new_run};
+        let db = Db::open_in_memory().unwrap();
+        let request = |task: &str| Request { project_id: 1, project: Place::of(Path::new("ssh://nas/app")), task: task.into(), test_command: "make test".into(), implementer: Agent::default(), reviewer: Agent::default(), ..Request::default() };
+        let mut a = new_run("wf-a", request("A"), 10);
+        db.save_workflow_run(&a).unwrap();
+        db.save_workflow_run(&new_run("wf-b", request("B"), 11)).unwrap();
+        a.attempt = 3;
+        db.save_workflow_run(&a).unwrap();
+        let runs = db.workflow_runs().unwrap();
+        assert_eq!(runs.iter().map(|r| (r.id.as_str(), r.attempt)).collect::<Vec<_>>(), [("wf-a", 3), ("wf-b", 1)]);
+        assert_eq!(runs[0].project.host, "nas");
+        db.delete_workflow_run("wf-a").unwrap();
+        assert_eq!(db.workflow_runs().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn stores_workflows() {
+        use crate::workflow::{Stage, implement_and_verify};
+        let db = Db::open_in_memory().unwrap();
+        let mut flow = implement_and_verify();
+        flow.id = "wfd-1".into();
+        flow.name = "Mine".into();
+        db.save_workflow(&flow).unwrap();
+        flow.stages.push(Stage::check("Lints", "cargo clippy", 1));
+        db.save_workflow(&flow).unwrap();
+        assert_eq!(db.workflows().unwrap(), [flow]);
+        db.delete_workflow("wfd-1").unwrap();
+        assert!(db.workflows().unwrap().is_empty());
     }
 
     #[test]

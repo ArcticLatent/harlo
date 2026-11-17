@@ -69,6 +69,21 @@ pub fn watch_plans() -> watch::Receiver<u64> {
     plans().subscribe()
 }
 
+/// Bumped when a workflow run changes (phones with its card open ask for
+/// it again).
+fn workflows() -> &'static watch::Sender<u64> {
+    static W: OnceLock<watch::Sender<u64>> = OnceLock::new();
+    W.get_or_init(|| watch::channel(0).0)
+}
+
+pub fn workflows_changed() {
+    workflows().send_modify(|n| *n += 1);
+}
+
+pub fn watch_workflows() -> watch::Receiver<u64> {
+    workflows().subscribe()
+}
+
 /// Whether a phone server runs (the workspace only builds the list then).
 pub fn active() -> bool {
     sessions().receiver_count() > 0

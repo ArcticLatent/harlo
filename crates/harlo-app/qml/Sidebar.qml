@@ -158,9 +158,11 @@ Rectangle {
 
     RemoveProjectDialog { id: removeProjectDialog }
     WorktreeDialogs { id: worktreeDialogs }
+    WorkflowDialog { id: workflowDialog; onEditRequested: root.settingsPageRequested("workflows") }
     // For the command palette.
     /// Settings → Projects, on this project.
     signal projectSettingsRequested(int projectId)
+    signal settingsPageRequested(string page)
     /// Open the new-session page for a project (-1: home folder).
     signal newSessionRequested(int projectId)
     /// Export a session as Markdown (the window asks where).
@@ -171,6 +173,7 @@ Rectangle {
     property alias renameDialog: renameDialog
     property alias trashDialog: trashDialog
     property alias worktreeDialogs: worktreeDialogs
+    property alias workflowDialog: workflowDialog
     function openAddProject() { addProjectDialog.open() }
     // Test hook.
     property alias remoteFolderDialog: remoteFolderDialog
@@ -197,6 +200,7 @@ Rectangle {
             }
         }
         AppMenuItem { text: "New worktree session…"; onTriggered: worktreeDialogs.openNew(projectMenu.projectId, projectMenu.name, projectMenu.harness) }
+        AppMenuItem { objectName: "projectWorkflow"; text: "Run a workflow…"; onTriggered: workflowDialog.show(projectMenu.projectId, projectMenu.name, projectMenu.harness) }
         AppMenuItem { text: "Worktree setup commands…"; onTriggered: worktreeDialogs.openSetup(projectMenu.projectId, projectMenu.name) }
         AppMenuSeparator { }
         Repeater {

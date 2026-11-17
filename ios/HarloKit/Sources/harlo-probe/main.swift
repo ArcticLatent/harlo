@@ -594,6 +594,9 @@ func record(_ link: String, to path: String) async {
         check(false, "a project to work in (\(model.alert ?? ""))")
         return
     }
+    // (No runs yet: the scenes before the workflow's show none.)
+    await model.loadWorkflows()
+    check(model.hasWorkflows && model.workflowRuns.isEmpty, "harlo has workflows, no runs yet (\(model.workflowRuns.count))")
     let models = choices.models(for: "harlo")
     print("IOS-RECORD agents \(choices.agents.map(\.id)), harlo's models \(models)")
 
@@ -732,6 +735,11 @@ func record(_ link: String, to path: String) async {
         }
         rec.scene("pictures")
     }
+    // A workflow run, started on the computer: its check's output as it
+    // runs, then done with its work to merge.
+    if let trigger = ProcessInfo.processInfo.environment["HARLO_RECORD_WORKFLOW"] {
+        await recordWorkflow(model, rec, trigger: trigger)
+    }
     // The wiki's graph and its page's diagram, light and dark, for
     // ios-record.sh to draw with harlo and add to the recording
     // (HARLO_RECORD_DIAGRAMS): Foundation's WebSocket on Linux cuts a
@@ -748,4 +756,41 @@ func record(_ link: String, to path: String) async {
         check(asked == 8, "the wiki's graph and its page's diagram, across and down, light and dark, to draw (\(asked))")
     }
     Recorder.shared = nil
+}
+
+/// A workflow run in the recording: harlo starts it (the phonehost
+/// scenario, once `trigger` is written); the phone opens its implementation
+/// session and sees its check running, then the run done.
+@MainActor
+func recordWorkflow(_ model: HarloModel, _ rec: Recorder, trigger: String) async {
+    let form: JSON = ["task": "Keep the session list's place when a session finishes", "criteria": "- The list doesn't jump to the top\n- Tests cover it",
+                      "testCommand": "./check.sh", "implementer": "harlo", "implementerModel": "tour/tour-coder", "reviewer": "claude", "approval": "yolo"]
+    model.watchRuns(true)
+    defer { model.watchRuns(false) }
+    _ = await waitFor(20) { model.state == .connected }
+    guard let data = try? form.data(), FileManager.default.createFile(atPath: trigger, contents: data) else {
+        check(false, "the workflow's trigger is written (\(trigger))")
+        return
+    }
+    let started = await waitFor(20) { !model.workflowRuns.isEmpty }
+    check(started, "harlo starts the run (\(model.workflowRuns.map(\.state)))")
+    let implementing = await waitFor(20) { model.sessions.contains { $0.title.contains("Keep the session list's place") } }
+    guard implementing, let row = model.sessions.first(where: { $0.title.contains("Keep the session list's place") }) else {
+        check(false, "its implementation session is listed (\(model.sessions.map(\.title)))")
+        return
+    }
+    model.open(row)
+    guard let s = model.session, await waitFor(10, { !s.liveKey.isEmpty && !s.loading }) else {
+        check(false, "its implementation session opens")
+        return
+    }
+    let checking = await waitFor(40) { (s.workflow?.liveCheck?.output.contains("keeps_place_2") ?? false) }
+    check(checking, "the check's output comes as it runs (\(s.workflow?.liveCheck?.output.suffix(60) ?? "none"), \(s.workflow?.statusLine ?? ""))")
+    await model.loadWorkflows()
+    rec.scene("workflow-check")
+    let done = await waitFor(60) { s.workflow?.state == "done" }
+    check(done && s.workflow?.lastCheck?.passed == true && s.workflow?.finishable == true,
+          "the run is done, its work to merge (\(s.workflow?.statusLine ?? "none"), \(s.workflow?.log.map(\.text).suffix(3) ?? []))")
+    await model.loadWorkflows()
+    rec.scene("workflow")
 }

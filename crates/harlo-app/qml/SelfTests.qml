@@ -5916,6 +5916,25 @@ Item {
             tests.check(left === tests.blockedCount - 1 && Phone.firewallError === "", "Allow opens that address (" + left + " left, " + Phone.firewallError + ")")
             tests.summary(); Qt.quit() } }
     }
+    // (phonehost, --workflow-trigger=<file>: a workflow run starts in the
+    // project once the file is there, for the phone's recording.)
+    TextFile { id: workflowTrigger }
+    Timer {
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "phonehost" && win.argValue("--workflow-trigger=") !== "" && !tests.workflowTriggered
+        interval: 500
+        repeat: true
+        onTriggered: {
+            if (workflowTrigger.state === "text") {
+                tests.workflowTriggered = true
+                const p = JSON.parse(Workspace.projectsJson())[0]
+                const why = Workspace.startWorkflow(p.id, workflowTrigger.text)
+                tests.log("workflow started:", why === "" ? "yes" : why)
+                return
+            }
+            workflowTrigger.load(win.argValue("--workflow-trigger="))
+        }
+    }
+    property bool workflowTriggered: false
     property int blockedCount: 0
     property bool otherAddress: false
     // The real thing, read-only (not in the click suite): plan limits via harlo.
@@ -9981,6 +10000,654 @@ Item {
             tests.check(!p.run && (p.steps || []).every(s => s.status === "done"), "the plan ran to the end (" + (p.run ? p.run.paused : "") + ")")
             tests.check((p.steps || []).every(s => (s.summary || "").indexOf("Reviewed:") >= 0), "each step was reviewed")
             tests.shotWindow("live-plan-done")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // Implement and verify (a workflow): Harlo implements in a worktree,
+    // harlo runs the tests, the stand-in Claude reviews. greet.txt says
+    // "hi" (the tests fail: back to the same session), then "hello" (the
+    // review asks for "hello!": back again, tested again), then "hello!"
+    // (approved). scripts/fake-harlo-model.py and fake-claude.py play them.
+    readonly property string workflowTests: "grep -Ex 'hello!?' greet.txt || { echo \"expected hello, got: $(cat greet.txt)\"; exit 1; }"
+    function workflowRun() { const runs = JSON.parse(Workspace.workflowsJson()); return runs.length ? runs[0] : null }
+    function workflowLogHas(text) { const r = workflowRun(); return !!r && r.log.some(e => e.text.indexOf(text) >= 0) }
+    /// The stand-in claude reviews (never the installed one): false, and
+    /// the scenario ends, when it isn't given.
+    function useFakeClaude() {
+        const fake = win.argValue("--fake-claude=")
+        if (fake === "") { tests.check(false, "the stand-in claude is given (--fake-claude)"); tests.summary(); Qt.quit(); return false }
+        Workspace.setSetting("claude_path", fake)
+        return true
+    }
+    function startWorkflowDirect() {
+        const p = JSON.parse(Workspace.projectsJson())[0]
+        return Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: workflowTests, implementer: "harlo", reviewer: "claude", approval: "write" }))
+    }
+    SequentialAnimation {
+        id: workflowSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflow"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.projectsJson())[0]
+            sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
+            sidebar.projectMenu.popup(sidebar, 120, 160) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: tests.clickItem(tests.findText("Run a workflow…"), "the project menu's Run a workflow…") }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            tests.check(d.visible && d.title.indexOf("Run a workflow in") === 0, "the project menu opens Run a workflow (" + d.title + ")")
+            tests.check(d.flowBox.currentText === "Implement and verify" && tests.findText("Implement  →  Tests  →  Review", d.contentItem) !== null, "it offers Implement and verify first, its stages under it (" + d.flowBox.currentText + ")")
+            tests.check(d.implementerBox.currentText === "Harlo" && d.reviewerBox.currentText === "Claude", "Harlo implements and Claude reviews by default (" + d.implementerBox.currentText + ", " + d.reviewerBox.currentText + ")")
+            tests.check(!tests.findName("workflowStart").enabled, "Start waits for a task and a test command")
+            d.taskArea.text = "Write greet.txt greeting the user"
+            d.criteriaArea.text = "- greet.txt says hello!"
+            d.testField.text = "" } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            tests.check(!tests.findName("workflowStart").enabled, "no test command, no Start")
+            sidebar.workflowDialog.testField.text = tests.workflowTests
+            tests.shotWindow("clicks-workflow-dialog") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.clickItem(tests.findName("workflowStart"), "Start") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(workflowSteps, () => !!tests.workflowRun() && tests.workflowRun().implementation !== "" && tests.shown(tests.findName("workflowCard", chat)), 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(!sidebar.workflowDialog.visible && !!r, "Start closes the dialog and starts the run")
+            tests.check(r && r.branch.indexOf("workflow/write-greet-txt") === 0, "it works in a new worktree on its own branch (" + (r ? r.branch : "") + ")")
+            tests.check(Workspace.workflowTestCommand(JSON.parse(Workspace.projectsJson())[0].id) === tests.workflowTests, "the project's test command is remembered")
+            tests.harloKey = chat.session.key
+            tests.check(Workspace.workflowFor(chat.session.key) !== "", "the implementation session is open, with the run's card") } }
+        // The tests fail: back to the same session, as attempt 2.
+        ScriptAction { script: tests.waitUntil(workflowSteps, () => tests.workflowLogHas("Tests failed") && tests.workflowRun().attempt === 2, 30000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(r.attempt === 2 && r.stages[0].status === "active", "a failed test goes back to the implementation, as attempt 2 (" + r.attempt + ", " + JSON.stringify(r.stages) + ")")
+            tests.check(chat.session.key === tests.harloKey, "the same session, still open")
+            tests.clickItem(tests.findName("workflowToggle", chat), "open the run's card") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const card = tests.findName("workflowCard", chat)
+            tests.check(tests.findContaining("Tests failed", card) !== null && tests.findContaining("back to the implementation session", card) !== null, "opened, the card's log says the tests failed and it went back")
+            tests.check(tests.shown(tests.findName("workflowTest", card)) && tests.findContaining("expected hello, got: hi", card) !== null, "and shows the failed tests' output")
+            tests.shotWindow("clicks-workflow-test-failed") } }
+        // The review asks for changes: back to the same session again.
+        ScriptAction { script: tests.waitUntil(workflowSteps, () => tests.workflowLogHas("Review asked for changes"), 40000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(r.attempt === 3 && chat.session.key === tests.harloKey, "a review asking for changes goes back to the same session, as attempt 3 (" + r.attempt + ")")
+            tests.check(tests.findContaining("hello! (with the exclamation mark)", tests.findName("workflowCard", chat)) !== null, "the card says what the reviewer asked for")
+            tests.shotWindow("clicks-workflow-review-changes") } }
+        ScriptAction { script: tests.waitUntil(workflowSteps, () => !!tests.workflowRun() && tests.workflowRun().state === "done", 40000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            const texts = r.log.map(e => "#" + e.attempt + " " + e.text)
+            tests.log("workflow log:\n" + texts.join("\n"))
+            tests.check(r.state === "done" && r.attempt === 3, "the run is done on attempt 3 (" + r.state + ")")
+            // In order: tests (1 failed, 2 passed), review 2 (changes), the
+            // fix tested before review 3 (approved).
+            const at = (attempt, text) => r.log.findIndex(e => e.attempt === attempt && e.text.indexOf(text) === 0)
+            const order = [at(1, "Tests failed"), at(2, "Tests passed"), at(2, "Review asked for changes"), at(3, "Tests passed"), at(3, "Review approved")]
+            tests.check(order.every((i, n) => i >= 0 && (n === 0 || i > order[n - 1])), "each fix is tested before it's reviewed again (" + order + ")")
+            tests.check(tests.workflowLogHas("Refused a report for attempt 2"), "a report for an earlier attempt is refused, and can't move the run")
+            const tree = JSON.parse(Workspace.worktreeInfo(tests.harloKey)).path
+            tests.check(TestInput.readFile(tree + "/greet.txt") === "hello!\n", "the worktree has the approved change")
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/greet.txt") === "", "the project's own checkout is untouched")
+            // One implementation conversation, all three attempts in it.
+            const reqs = tests.modelRequests()
+            const body = r => JSON.stringify(r.messages || [])
+            tests.check(reqs.some(q => body(q).indexOf("attempt 1 · implement]") >= 0 && body(q).indexOf("attempt 3 · implement]") >= 0), "every attempt went to the same implementation conversation")
+            tests.check(reqs.some(q => body(q).indexOf("Tests failed after attempt 1") >= 0 && body(q).indexOf("expected hello, got: hi") >= 0), "the failed tests' output went back to it")
+            const note = JSON.parse(Workspace.lastNotification || "{}")
+            tests.check(note.title === "Workflow done", "you're told it's done (" + note.title + ")")
+            const card = tests.findName("workflowCard", chat), composer = tests.findName("composerInput")
+            tests.check(tests.findText("Done: Tests passed · Review approved", card) !== null, "the card says so")
+            {
+                const right = card.mapToItem(null, card.width, 0).x
+                const inside = it => it.mapToItem(null, it.width, 0).x <= right + 1
+                const parts = ["workflowStages", "workflowState", "workflowToggle"].map(n => tests.findName(n, card))
+                tests.check(right <= chat.mapToItem(null, chat.width, 0).x + 1 && parts.every(p => p && inside(p)), "the card and its header fit the chat at this width (" + Math.round(card.width) + " px)")
+            }
+            tests.shotWindow("clicks-workflow-done") } }
+        // A reviewer's session shows the run's card too.
+        ScriptAction { script: {
+            const rows = tests.findAllNames("sessionTitle", sidebar).filter(t => t.visible && (t.text || "").indexOf("Review: ") === 0)
+            tests.check(rows.length >= 1, "the reviewers are in the sidebar (" + rows.length + ")")
+            if (rows.length) tests.clickItem(rows[0], "a reviewer's session") } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const card = tests.findName("workflowCard", chat)
+            tests.check(tests.shown(card) && chat.session.key !== tests.harloKey, "its card shows in a reviewer's session")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // Closed while the review is pending (the stand-in reviewer holds), then
+    // opened again: the run reconnects to the same reviewer session.
+    SequentialAnimation {
+        id: workflowRestart
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowrestart"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.check(tests.startWorkflowDirect() === "", "the run starts") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(workflowRestart, () => { const r = tests.workflowRun(); return !!r && r.stages[2].status === "active" && r.session !== "" }, 60000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(r.stages[2].status === "active" && r.session !== "" && r.attempt === 2, "the review of attempt 2 is under way, its session known (" + r.session + ")")
+            tests.log("closing harlo while the review is pending")
+            tests.summary(); Qt.quit() } }
+    }
+    SequentialAnimation {
+        id: workflowRestartAgain
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowrestart-reopened"
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.waitUntil(workflowRestartAgain, () => tests.workflowLogHas("reconnected to its session"), 30000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(tests.workflowLogHas("harlo was opened again during the review of attempt 2: reconnected to its session (from its file)"), "reopened, the run reconnects to the reviewer's session")
+            tests.check(r.state === "running" && r.session !== "", "it waits on that session again (" + r.session + ")")
+            Workspace.open(r.implementation) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            tests.check(tests.shown(tests.findName("workflowCard", chat)), "the implementation session shows the run")
+            const rows = tests.findAllNames("sessionTitle", sidebar).filter(t => t.visible).map(t => t.text)
+            tests.check(rows.some(t => t.indexOf("Review: Write greet.txt") === 0) && !rows.some(t => t.indexOf("[harlo workflow") === 0), "the reconnected reviewer keeps its name (" + rows + ")")
+            tests.shotWindow("clicks-workflow-reopened") } }
+        ScriptAction { script: tests.waitUntil(workflowRestartAgain, () => tests.workflowRun().state === "done", 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.log("workflow log:\n" + r.log.map(e => "#" + e.attempt + " " + e.text).join("\n"))
+            tests.check(r.state === "done" && r.attempt === 3, "it finishes: the review's changes, tested, then approved (" + r.state + ", " + r.attempt + ")")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // On a project on a host (the throwaway SSH server, as "box"): the
+    // worktree made there, Harlo implementing there, the checks run over
+    // SSH with their output coming in, the stand-in claude reviewing there.
+    // harlo is closed while the review of attempt 2 is pending; opened
+    // again, it reconnects to that session on box and the run finishes.
+    readonly property string workflowRemoteTests: "echo checking on the host; sleep 2; " + workflowTests
+    property bool workflowLiveSeen: false
+    property string workflowOpenTried: ""
+    function workflowRemoteHost() { return JSON.parse(Remotes.hostsJson()).find(h => h.name === "box") }
+    SequentialAnimation {
+        id: workflowRemote
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowremote"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (!tests.useFakeClaude()) return
+            tests.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
+            Remotes.connectHost("box") } }
+        ScriptAction { script: tests.waitUntil(workflowRemote, () => (tests.workflowRemoteHost() || {}).state === "connected", 30000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: Workspace.addProject("ssh://box" + win.argValue("--cwd=")) }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.projectsJson())[0]
+            tests.check(p && p.path === "box:" + win.argValue("--cwd="), "the project is on box (" + (p ? p.path : "none") + ")")
+            const why = Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: tests.workflowRemoteTests, implementer: "harlo", reviewer: "claude", approval: "write" }))
+            tests.check(why === "", "the run starts (" + why + ")") } }
+        // A check's output, coming in over SSH as it runs.
+        ScriptAction { script: tests.waitUntil(workflowRemote, () => { const r = tests.workflowRun(); if (r && r.liveCheck && r.liveCheck.output.indexOf("checking on the host") >= 0) tests.workflowLiveSeen = true; return tests.workflowLiveSeen }, 90000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(tests.workflowLiveSeen && r.liveCheck.name === "Tests", "the check's output comes in over SSH as it runs (" + JSON.stringify(r.liveCheck) + ")")
+            tests.check(r.host === "box" && r.worktree.indexOf(win.argValue("--cwd=")) < 0 && r.worktree !== "", "the run is on box, in a worktree of its own (" + r.host + ", " + r.worktree + ")")
+            Workspace.open(r.implementation) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            tests.check(tests.shown(tests.findName("workflowCard", chat)), "the implementation session on box opens, with the run's card")
+            tests.shotWindow("clicks-workflow-remote-check") } }
+        ScriptAction { script: tests.waitUntil(workflowRemote, () => { const r = tests.workflowRun(); return !!r && r.stages[2].status === "active" && r.session !== "" && r.attempt === 2 }, 120000) }
+        PauseAnimation { duration: 2500 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.log("workflow log:\n" + r.log.map(e => "#" + e.attempt + " " + e.text).join("\n"))
+            tests.check(r.stages[2].status === "active" && r.session !== "", "the review of attempt 2 is under way on box (" + r.session + ")")
+            tests.check(tests.workflowLogHas("Tests failed: exited with 1") && tests.workflowLogHas("Attempt 2: back to the implementation session"), "attempt 1's check failed over SSH and went back")
+            tests.log("closing harlo while the review is pending")
+            tests.summary(); Qt.quit() } }
+    }
+    SequentialAnimation {
+        id: workflowRemoteAgain
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowremote-reopened"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(!!r && r.host === "box", "the run is still there, on box")
+            Remotes.connectHost("box") } }
+        ScriptAction { script: tests.waitUntil(workflowRemoteAgain, () => tests.workflowLogHas("reconnected to its session"), 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(tests.workflowLogHas("harlo was opened again during the review of attempt 2: reconnected to its session"), "reopened, the run reconnects to the reviewer's session on box")
+            tests.check(r.state === "running" && r.session !== "", "it waits on that session again (" + r.session + ")") } }
+        ScriptAction { script: tests.waitUntil(workflowRemoteAgain, () => tests.workflowRun().state === "done", 120000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.log("workflow log:\n" + r.log.map(e => "#" + e.attempt + " " + e.text).join("\n"))
+            tests.check(r.state === "done" && r.attempt === 3, "it finishes on box: the review's changes, tested, then approved (" + r.state + ", " + r.attempt + ")")
+            tests.check(TestInput.readFile(r.worktree.replace(/^ssh:\/\/box/, "") + "/greet.txt") === "hello!\n", "box's worktree has the approved change")
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/greet.txt") === "", "the project's own checkout on box is untouched") } }
+        // (Opened again, the window shows this computer: opening box's
+        // session goes there once harlo has box's sessions.)
+        ScriptAction { script: tests.waitUntil(workflowRemoteAgain, () => {
+            const card = tests.findName("workflowCard", chat)
+            if (tests.shown(card)) return true
+            tests.workflowOpenTried = Workspace.open(tests.workflowRun().implementation)
+            return false }, 20000) }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            tests.log("open said:", tests.workflowOpenTried, "instance:", Workspace.instance)
+            tests.check(tests.shown(tests.findName("workflowCard", chat)) && tests.findText("Done: Tests passed · Review approved", tests.findName("workflowCard", chat)) !== null, "its card says it's done")
+            tests.shotWindow("clicks-workflow-remote-done")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // The workflow lab (scripts/workflow-lab.sh): one case of its matrix,
+    // read from --lab-case=<file.json> ({ name, tests, host, quitWhen,
+    // stopWhen, resumes, timeout }). It starts the run (on this computer or
+    // box), watches it, resumes it when it pauses (up to `resumes` times),
+    // and writes what happened to lab-<phase>.json in the test's folder; a
+    // case with a crash point or a quit is opened again (…-reopened) and
+    // watched to its end.
+    property var labState: ({})
+    Timer {
+        running: win.selftestDir !== "" && win.argValue("--scenario=").indexOf("clicksharloworkflowlab") === 0
+        interval: 250
+        repeat: true
+        onTriggered: tests.labTick()
+    }
+    function labEnd(outcome) {
+        const s = tests.labState, r = tests.workflowRun(), reopened = win.argValue("--scenario=").endsWith("-reopened")
+        s.step = "end"
+        const result = { name: s.case.name, phase: reopened ? "reopened" : "first", outcome: outcome, state: r ? r.state : "", attempt: r ? r.attempt : 0,
+                         why: r ? r.why : "", liveSeen: s.liveSeen, seconds: Math.round((Date.now() - s.t0) / 100) / 10, resumes: s.resumes,
+                         events: s.events, log: r ? r.log.map(e => "#" + e.attempt + " " + e.text) : [], lastCheck: r ? r.lastCheck : null }
+        testFile.path = win.selftestDir + "/lab-" + result.phase + ".json"
+        testFile.save(JSON.stringify(result, null, 1))
+        tests.log("lab " + result.phase + ": " + outcome + " (" + result.state + ", attempt " + result.attempt + ", " + result.seconds + " s)")
+        tests.check(true, "the lab case ran (" + outcome + ")")
+        // The run's implementation session in sight (opened again, harlo
+        // shows no session at first).
+        if (r && r.implementation && Workspace.activeKey === "")
+            Workspace.open(r.implementation)
+        labShot.phase = result.phase
+        labShot.start()
+    }
+    Timer {
+        id: labShot
+        property string phase
+        interval: 800
+        onTriggered: { tests.shotWindow("lab-" + phase); tests.summary(); Qt.quit() }
+    }
+    function labTick() {
+        const s = tests.labState
+        if (s.step === "end") return
+        const reopened = win.argValue("--scenario=").endsWith("-reopened"), cwd = win.argValue("--cwd=")
+        if (!s.step) {
+            s.step = "setup"; s.t0 = Date.now(); s.resumes = 0; s.events = []; s.liveSeen = false; s.seen = ""
+            s.case = JSON.parse(TestInput.readFile(win.argValue("--lab-case=")) || "{}")
+            return
+        }
+        const c = s.case, at = () => ((Date.now() - s.t0) / 1000).toFixed(1) + " s"
+        if (Date.now() - s.t0 > (c.timeout || 150) * 1000) return tests.labEnd("timed out at " + s.step)
+        if (s.step === "setup") {
+            if (!reopened && !tests.useFakeClaude()) return
+            if (c.host) {
+                if (!reopened) Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh="))
+                Remotes.connectHost("box"); s.lastConnect = Date.now(); s.step = "connecting"
+            } else {
+                if (!reopened) Workspace.addProject(cwd)
+                s.step = reopened ? "watching" : "start"; s.startAt = Date.now() + 600
+            }
+            return
+        }
+        if (s.step === "connecting") {
+            const h = tests.workflowRemoteHost()
+            if (h && h.state === "connected") {
+                s.events.push(at() + " box connected")
+                if (!reopened) Workspace.addProject("ssh://box" + cwd)
+                s.step = reopened ? "watching" : "start"; s.startAt = Date.now() + 800
+            } else if (Date.now() - s.lastConnect > 3000) {
+                Remotes.connectHost("box"); s.lastConnect = Date.now()
+            }
+            return
+        }
+        if (s.step === "start") {
+            if (Date.now() < s.startAt) return
+            const p = JSON.parse(Workspace.projectsJson())[0]
+            const why = p ? Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: c.tests || tests.workflowTests, implementer: "harlo", reviewer: "claude", approval: "write" })) : "no project"
+            if (why !== "") return tests.labEnd("not started: " + why)
+            s.events.push(at() + " started"); s.step = "watching"
+            return
+        }
+        const r = tests.workflowRun()
+        if (!r) return
+        if (r.liveCheck && r.liveCheck.output) s.liveSeen = true
+        const shape = r.state + " · attempt " + r.attempt + " · " + r.stages.map(x => x.label + " " + x.status).join(", ")
+        if (shape !== s.seen) { s.seen = shape; s.events.push(at() + " " + shape) }
+        const reviewing = r.stages.some(x => x.kind === "review" && x.status === "active") && r.session !== ""
+        if (!reopened && c.quitWhen === "review" && reviewing) {
+            if (!s.quitAt) s.quitAt = Date.now() + 2000
+            if (Date.now() > s.quitAt) return tests.labEnd("quit during the review")
+            return
+        }
+        if (c.stopWhen === "review" && reviewing && !s.stopped) {
+            if (!s.stopAt) s.stopAt = Date.now() + 3000
+            if (Date.now() > s.stopAt) { s.stopped = true; s.events.push(at() + " Stop (the reviewer hangs)"); Workspace.workflowAction(r.id, "stop") }
+            return
+        }
+        if (r.state === "done" || r.state === "stopped") return tests.labEnd(r.state)
+        if (r.state === "paused") {
+            if (!s.pausedAt) { s.pausedAt = Date.now(); s.events.push(at() + " paused: " + r.why); return }
+            // (Waiting for box: it goes on by itself once box answers.)
+            if (r.why.indexOf("couldn't list the sessions") >= 0) {
+                if (Date.now() - (s.lastConnect || 0) > 3000) { Remotes.connectHost("box"); s.lastConnect = Date.now() }
+                return
+            }
+            if (Date.now() - s.pausedAt < 1200) return
+            if (s.resumes >= (c.resumes === undefined ? 3 : c.resumes)) return tests.labEnd("paused")
+            s.resumes++; s.pausedAt = 0; s.events.push(at() + " Resume")
+            Workspace.workflowAction(r.id, "resume")
+            return
+        }
+        s.pausedAt = 0
+    }
+
+    // Stopped dead just after the reviewer's dispatch was saved, before it
+    // started: reopened, harlo can't tell whether it began, so the run
+    // pauses and says why; Resume starts the review.
+    SequentialAnimation {
+        id: workflowCrash
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowcrash"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.startWorkflowDirect() }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(workflowCrash, () => false, 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: { tests.check(false, "harlo stopped at the crash point"); tests.summary(); Qt.quit() } }
+    }
+    SequentialAnimation {
+        id: workflowCrashAgain
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowcrash-reopened"
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.waitUntil(workflowCrashAgain, () => !!tests.workflowRun() && tests.workflowRun().state === "paused", 30000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(r.state === "paused" && r.why.indexOf("can't tell whether it began") >= 0 && r.why.indexOf("Resume starts the review again") >= 0, "the run pauses and says why (" + r.why + ")")
+            tests.check(r.stages[2].status === "paused" && r.attempt === 2, "at attempt 2's review")
+            tests.check(JSON.parse(Workspace.lastNotification || "{}").title === "Workflow paused", "you're told")
+            Workspace.open(r.implementation) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const card = tests.findName("workflowCard", chat)
+            tests.check(tests.shown(card) && tests.shown(tests.findName("workflowWhy", card)) && tests.findName("workflowPause", card).text === "Resume", "its card says why, with Resume")
+            tests.shotWindow("clicks-workflow-crash-paused")
+            tests.clickItem(tests.findName("workflowPause", card), "Resume") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(workflowCrashAgain, () => tests.workflowRun().state === "done", 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(r.state === "done" && tests.workflowLogHas("Resumed."), "resumed, a reviewer starts and the run finishes (" + r.state + ")")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // Stopped dead once the reviewer had started but before harlo kept its
+    // session: reopened, its session is found by its first message and the
+    // run reconnects to it.
+    SequentialAnimation {
+        id: workflowFound
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowfound"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.startWorkflowDirect() }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(workflowFound, () => false, 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: { tests.check(false, "harlo stopped at the crash point"); tests.summary(); Qt.quit() } }
+    }
+    SequentialAnimation {
+        id: workflowFoundAgain
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowfound-reopened"
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.waitUntil(workflowFoundAgain, () => tests.workflowLogHas("reconnected to its session"), 30000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: tests.check(tests.workflowLogHas("harlo was opened again during the review of attempt 2: reconnected to its session (found by its first message)"), "reopened, the reviewer's session is found by its first message") }
+        ScriptAction { script: tests.waitUntil(workflowFoundAgain, () => tests.workflowRun().state === "done", 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.log("workflow log:\n" + r.log.map(e => "#" + e.attempt + " " + e.text).join("\n"))
+            tests.check(r.state === "done", "and the run finishes (" + r.state + ")")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // Runs go on without the window: Quit asks (keep running / quit), the
+    // window closed keeps harlo going (it says so once), and it quits by
+    // itself once the run is over. Then (the -reopened phase) Quit mid-run,
+    // and a start at login (--background) picks the run up, windowless.
+    SequentialAnimation {
+        id: workflowBackgroundSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowbackground"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            tests.check(Workspace.workflowsUnderWay() === 0, "nothing under way yet")
+            tests.check(tests.startWorkflowDirect() === "", "a run starts") } }
+        ScriptAction { script: tests.waitUntil(workflowBackgroundSteps, () => !!tests.workflowRun() && tests.workflowRun().implementation !== "", 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            tests.check(Workspace.workflowsUnderWay() === 1, "one run under way")
+            win.requestQuit() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(tests.findText("A workflow run is under way") !== null && win.visible, "Quit asks first while a run is under way")
+            tests.shotWindow("clicks-workflow-quit-ask")
+            tests.clickItem(tests.findName("quitRunsKeep"), "Keep running without the window") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const note = JSON.parse(Workspace.lastNotification || "{}")
+            tests.check(!win.visible && win.keptForRuns, "kept running: the window goes, harlo stays")
+            tests.check(note.title === "Harlo keeps running" && (note.body || "").indexOf("A workflow run is under way") === 0, "and says so (" + note.title + ": " + note.body + ")")
+            win.showMainWindow() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(win.visible && !win.keptForRuns, "shown again (as a second launch does)")
+            win.close() } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: tests.check(!win.visible && win.keptForRuns, "closing the window while a run is under way keeps harlo going") }
+        ScriptAction { script: tests.waitUntil(workflowBackgroundSteps, () => !!tests.workflowRun() && tests.workflowRun().state === "done", 90000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(win.runsOverQuit.running, "the run over, harlo is about to quit by itself")
+            win.runsOverQuit.stop()
+            win.keptForRuns = false
+            // Another run, left under way by Quit (it picks up next time).
+            win.showMainWindow()
+            tests.check(tests.startWorkflowDirect() === "", "a second run starts") } }
+        ScriptAction { script: tests.waitUntil(workflowBackgroundSteps, () => { const r = tests.workflowRun(); return !!r && r.state === "running" && r.attempt === 2 }, 30000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            win.requestQuit()
+            tests.summary() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.clickItem(tests.findName("quitRunsQuit"), "Quit") }
+    }
+    SequentialAnimation {
+        id: workflowBackgroundAgain
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowbackground-reopened"
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.check(!win.visible, "started at login with a run under way: no window") }
+        PauseAnimation { duration: 3400 }
+        ScriptAction { script: tests.check(!win.visible && win.keptForRuns, "and none comes: harlo goes on with the run") }
+        ScriptAction { script: tests.waitUntil(workflowBackgroundAgain, () => { const r = tests.workflowRun(); return !!r && r.state === "done" }, 90000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.log("workflow log:\n" + r.log.map(e => "#" + e.attempt + " " + e.text).join("\n"))
+            tests.check(r.log.some(e => e.text.indexOf("harlo was opened again during") === 0), "the run picked up where it was")
+            tests.check(r.state === "done" && win.runsOverQuit.running, "it finished, and harlo quits by itself")
+            win.runsOverQuit.stop()
+            tests.summary(); Qt.quit() } }
+    }
+
+    // Settings → Workflows: a workflow of your own (two checks before the
+    // review), made in the editor, then run from the project menu with the
+    // stand-ins: each fix goes through both checks before the review.
+    SequentialAnimation {
+        id: workflowCustomSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowcustom"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd="))
+            settingsDialog.openPage("workflows") } }
+        PauseAnimation { duration: 700 }
+        ScriptAction { script: {
+            tests.check(tests.findText("Built in", settingsDialog.contentItem) !== null && tests.findText("Implement and verify", settingsDialog.contentItem) !== null, "Settings → Workflows lists the built-in one")
+            tests.check(!tests.shown(tests.findName("workflowEdit", settingsDialog.contentItem)) && tests.shown(tests.findName("workflowDuplicate", settingsDialog.contentItem)), "the built-in one can be duplicated, not edited")
+            tests.shotPopup(settingsDialog, "clicks-workflows-settings")
+            tests.clickItem(tests.findName("newWorkflow", settingsDialog.contentItem), "New workflow") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const ed = tests.findName("workflowsPage", settingsDialog.contentItem).editor
+            tests.check(ed && ed.visible && ed.stageModel.count === 3, "the editor opens with an implementation, the tests and a review (" + (ed ? ed.stageModel.count : -1) + ")")
+            tests.clickItem(tests.findName("addCheck"), "Add check") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const ed = tests.findName("workflowsPage", settingsDialog.contentItem).editor
+            const row = tests.findName("workflowStage3")
+            tests.check(ed.stageModel.count === 4 && !!row, "Add check adds a stage at the end")
+            const name = tests.findName("stageName", row), command = tests.findName("stageCommand", row)
+            name.text = "Short"; name.textEdited()
+            command.text = "echo counting words; sleep 2; test $(wc -c < greet.txt) -lt 100"; command.textEdited()
+            tests.clickItem(tests.findName("stageUp", row), "move it up, before the review") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const ed = tests.findName("workflowsPage", settingsDialog.contentItem).editor
+            tests.check(ed.stageModel.get(2).name === "Short" && ed.stageModel.get(3).name === "Review", "it moves up, before the review")
+            tests.clickItem(tests.findName("workflowSave"), "Save without a name") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const ed = tests.findName("workflowsPage", settingsDialog.contentItem).editor
+            const err = tests.findName("workflowEditorError")
+            tests.check(ed.visible && tests.shown(err) && err.text === "Give the workflow a name.", "a workflow without a name isn't saved, and the editor says why (" + err.text + ")")
+            ed.nameField.text = "Careful"
+            tests.shotPopup(ed, "clicks-workflows-editor")
+            tests.clickItem(tests.findName("workflowSave"), "Save") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const flows = JSON.parse(Workspace.workflowDefinitionsJson())
+            const mine = flows.find(f => f.name === "Careful")
+            tests.check(!tests.findName("workflowsPage", settingsDialog.contentItem).editor.visible && !!mine && mine.stages.map(s => s.name).join(",") === "Implement,Tests,Short,Review", "saved, in order (" + (mine ? mine.stages.map(s => s.name) : "none") + ")")
+            tests.check(mine && mine.needsTestCommand && mine.needsReviewer && mine.stages[2].command === "echo counting words; sleep 2; test $(wc -c < greet.txt) -lt 100", "its tests and review are the ones picked at the start; its own check keeps its command")
+            tests.check(tests.findText("Careful", settingsDialog.contentItem) !== null, "and listed")
+            settingsDialog.close()
+            const p = JSON.parse(Workspace.projectsJson())[0]
+            sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
+            sidebar.projectMenu.popup(sidebar, 120, 160) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: tests.clickItem(tests.findText("Run a workflow…"), "the project menu's Run a workflow…") }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            d.flowBox.currentIndex = d.flows.findIndex(f => f.name === "Careful")
+            d.taskArea.text = "Write greet.txt greeting the user"
+            d.criteriaArea.text = "- greet.txt says hello!"
+            d.testField.text = tests.workflowTests } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            tests.check(tests.findText("Implement  →  Tests  →  Short  →  Review", d.contentItem) !== null, "picked, the dialog shows its stages")
+            tests.check(tests.shown(d.testField) && tests.shown(d.reviewerBox), "and asks for the tests and the reviewer it needs")
+            tests.shotWindow("clicks-workflow-dialog-custom")
+            tests.clickItem(tests.findName("workflowStart"), "Start") } }
+        PauseAnimation { duration: 300 }
+        // The Short check takes a moment: its output shows while it runs.
+        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => { const r = tests.workflowRun(); return !!r && !!r.liveCheck && r.liveCheck.output.indexOf("counting words") >= 0 && r.liveCheck.seconds >= 1 }, 60000) }
+        PauseAnimation { duration: 150 }
+        ScriptAction { script: {
+            const card = tests.findName("workflowCard", chat)
+            const out = tests.findName("workflowLiveOutput", card)
+            tests.check(tests.shown(out) && out.text.indexOf("counting words") >= 0 && tests.findContaining("Short running", card) !== null, "a running check's output shows on the card as it comes")
+            tests.shotWindow("clicks-workflow-live-check") } }
+        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => !!tests.workflowRun() && tests.workflowRun().state === "done", 120000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.log("workflow log:\n" + r.log.map(e => "#" + e.attempt + " " + e.text).join("\n"))
+            tests.check(r.state === "done" && r.attempt === 3 && r.workflow === "Careful", "the run of Careful is done on attempt 3 (" + r.state + ", " + r.attempt + ")")
+            const at = (attempt, text) => r.log.findIndex(e => e.attempt === attempt && e.text.indexOf(text) === 0)
+            const order = [at(1, "Tests failed"), at(2, "Tests passed"), at(2, "Short passed"), at(2, "Review asked for changes"), at(3, "Tests passed"), at(3, "Short passed"), at(3, "Review approved")]
+            tests.check(order.every((i, n) => i >= 0 && (n === 0 || i > order[n - 1])), "each fix goes through both checks before the review (" + order + ")")
+            tests.check(at(1, "Short") < 0, "a failed check stops the attempt: the next check doesn't run")
+            const card = tests.findName("workflowCard", chat)
+            tests.check(tests.findText("Done: Tests passed · Short passed · Review approved", card) !== null, "the card says what it went through")
+            tests.check(tests.findText("Careful · attempt 3", card) !== null, "and names its workflow")
+            tests.check(JSON.stringify(r.stages.map(s => s.label)) === JSON.stringify(["Implement", "Tests", "Short", "Review"]), "its stages are the workflow's (" + r.stages.map(s => s.label) + ")")
+            tests.check(!tests.shown(tests.findName("workflowLive", card)) && r.liveCheck === null, "ended, it's gone from the card")
+            tests.shotWindow("clicks-workflow-custom-done")
+            const mine = JSON.parse(Workspace.workflowDefinitionsJson()).find(f => f.name === "Careful")
+            Workspace.deleteWorkflowDefinition(mine.id) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(!JSON.parse(Workspace.workflowDefinitionsJson()).some(f => f.name === "Careful"), "the workflow is deleted")
+            tests.check(tests.workflowRun().stages.length === 4 && tests.findText("Careful · attempt 3", tests.findName("workflowCard", chat)) !== null, "its run keeps its own copy")
+            const card = tests.findName("workflowCard", chat)
+            tests.check(tests.shown(tests.findName("workflowMerge", card)) && tests.shown(tests.findName("workflowPublish", card)) && tests.shown(tests.findName("workflowRemove", card)), "done, its card offers Merge, a pull request and Remove worktree")
+            tests.check(tests.findName("workflowMerge", card).text === "Merge into " + JSON.parse(Workspace.worktreeInfo(chat.session.key)).base, "Merge names the branch it goes into (" + tests.findName("workflowMerge", card).text + ")")
+            tests.clickItem(tests.findName("workflowPublish", card), "Push for a pull request") } }
+        // (The test repository has no remote: the push fails, and says so.)
+        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => tests.workflowLogHas("Pushing failed"), 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            tests.check(!tests.workflowRun().published && Workspace.noticeError, "a push that fails is logged and shown, and the run isn't marked published (" + Workspace.notice + ")")
+            tests.clickItem(tests.findName("workflowMerge", tests.findName("workflowCard", chat)), "Merge") } }
+        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => tests.workflowRun().merged, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = tests.workflowRun(), card = tests.findName("workflowCard", chat)
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/greet.txt") === "hello!\n", "merged: the project's checkout has the approved change")
+            tests.check(r.log.some(e => e.text.indexOf("Merged workflow/") === 0), "the run's log says it was merged")
+            tests.check(!tests.shown(tests.findName("workflowMerge", card)) && tests.findText("Merged into " + r.base, card) !== null, "the card says it's merged, and offers no second merge")
+            tests.shotWindow("clicks-workflow-merged")
+            tests.clickItem(tests.findName("workflowRemove", card), "Remove worktree") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(tests.findText("Remove the run's worktree?") !== null, "Remove asks first")
+            tests.clickText("Discard") } }
+        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => tests.workflowRun().removed, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(r.log.some(e => e.text.indexOf("Removed the worktree and the merged branch") === 0), "its worktree and merged branch are removed (" + r.log[r.log.length - 1].text + ")")
+            tests.check(r.worktree !== "" && TestInput.readFile(r.worktree + "/greet.txt") === "", "its folder is gone (" + r.worktree + ")")
+            tests.check(r.removed && tests.findText("Merged, worktree removed") !== null || !tests.shown(tests.findName("workflowCard", chat)), "the card, where it still shows, says so")
             tests.summary(); Qt.quit() } }
     }
 

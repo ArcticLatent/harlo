@@ -11,6 +11,7 @@ Item {
     signal newSessionRequested()
     signal dropDownRequested()
     signal miniChatRequested()
+    signal quitRequested()
     readonly property bool available: tray.available
 
     function showWindow() {
@@ -69,7 +70,7 @@ Item {
             Platform.MenuSeparator { }
             Platform.MenuItem {
                 text: "Quit harlo"
-                onTriggered: Qt.quit()
+                onTriggered: root.quitRequested()
             }
         }
     }

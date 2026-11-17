@@ -45,6 +45,7 @@ Popup {
         { id: "wiki", title: "Wiki", icon: "book-open", group: "workspace", keywords: "wiki openwiki writer model agent thinking create update continue cheaper cheap cost tokens spend" },
         { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "workspace", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
         { id: "git", title: "Git", icon: "git-repository", group: "workspace", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
+        { id: "workflows", title: "Workflows", icon: "list-check-2", group: "workspace", keywords: "workflow workflows implement verify check checks tests review reviewer stages run runs pipeline lint clippy security retry tries fixes" },
         { id: "schedules", title: "Schedules", icon: "history", group: "workspace", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
         { id: "mcp", title: "MCP", icon: "node-tree", group: "agents", keywords: "mcp tool servers model context protocol tools stdio http oauth" },
         { id: "orchestration", title: "Orchestration", icon: "ai-agent", group: "agents", keywords: "orchestration handoff advisor committee second opinion delegate subagent agents start sessions mcp tools" },
@@ -480,7 +481,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, providers: providersPage, lsp: lspPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, workflows: workflowsPage, providers: providersPage, lsp: lspPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -701,6 +702,11 @@ Popup {
     Component {
         id: schedulesPage
         SchedulesPage { }
+    }
+
+    Component {
+        id: workflowsPage
+        WorkflowsPage { }
     }
 
     Component {
