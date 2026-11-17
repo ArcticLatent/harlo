@@ -126,6 +126,61 @@ pub fn added_paths(root: &Path, ignore: &Ignore, base: &str, head: &str) -> std:
     Ok(out)
 }
 
+/// harlo: lines from which a source file no Claim cites is named to an
+/// update; smaller files are helpers that a page about their feature covers
+/// without citing each one.
+pub const UNCOVERED_LINES: usize = 300;
+
+/// harlo: a test, a fixture or vendored (minified) code: not what a wiki
+/// describes, however large.
+fn is_test_or_vendored(p: &str) -> bool {
+    let name = p.rsplit('/').next().unwrap_or(p);
+    let stem = name.split_once('.').map_or(name, |(s, _)| s);
+    let low = stem.to_ascii_lowercase();
+    let in_dir = p.split('/').rev().skip(1).map(str::to_ascii_lowercase).any(|d| matches!(d.as_str(), "test" | "tests" | "benches" | "fixtures" | "testdata" | "vendor" | "third_party") || d.ends_with("tests"));
+    // (`foo_test`, `test_foo`, `FooTests`, `foo.test.ts`; not `latest`.)
+    let named = matches!(low.as_str(), "test" | "tests") || low.starts_with("test_") || ["_test", "_tests", "_spec"].iter().any(|s| low.ends_with(s)) || ["Test", "Tests", "Spec"].iter().any(|s| stem.ends_with(s));
+    in_dir || named || name.contains(".min.") || name.contains(".test.") || name.contains(".spec.")
+}
+
+/// harlo: committed source files added since the wiki was first committed
+/// that no page cites, largest first.
+///
+/// Those of [`UNCOVERED_LINES`] or more, past the wiki's, its setup files,
+/// ignored ones, tests and vendored code. An update looks only at what
+/// changed since the last one, so a feature that update left out would
+/// otherwise never come up again; naming it lets a later update catch up.
+/// Code that was there when the wiki was written and left out was the
+/// writer's choice, so it isn't named (the whole repository is, when the
+/// wiki was never committed); nor is code a plan already decided on.
+///
+/// # Errors
+///
+/// git's message when it couldn't list the files.
+pub fn uncovered_paths(root: &Path, ignore: &Ignore, cited: &HashSet<String>) -> std::result::Result<Vec<String>, String> {
+    // (The commit that first added the wiki's record of its updates.)
+    let start = git_lines(root, &["log", "--diff-filter=A", "--format=%H", "--", UPDATE_METADATA_PATH]).pop();
+    let candidates = match &start {
+        Some(c) => git_strict(root, &["diff", "--name-only", "-z", "--no-ext-diff", "--diff-filter=A", c, "HEAD"])?,
+        None => git_strict(root, &["ls-files", "--cached", "-z"])?,
+    };
+    let reviewed: HashSet<String> = read_last_update(root)?.map(|l| l.reviewed.into_iter().collect()).unwrap_or_default();
+    let mut weighed: Vec<(usize, String)> = Vec::new();
+    for p in split_nul(&candidates)?.iter().map(|p| p.replace('\\', "/")) {
+        let source = p.rsplit_once('.').is_some_and(|(_, ext)| SOURCE_EXTENSIONS.contains(&ext));
+        if !source || cited.contains(&p) || reviewed.contains(&p) || is_wiki_path(&p) || SETUP_FILES.contains(&p.as_str()) || ignore.ignores(&p, false) || is_test_or_vendored(&p) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(root.join(&p)) else { continue };
+        let lines = bytes.iter().filter(|c| **c == b'\n').count();
+        if lines >= UNCOVERED_LINES {
+            weighed.push((lines, p));
+        }
+    }
+    weighed.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| util::cmp16(&a.1, &b.1)));
+    Ok(weighed.into_iter().map(|(_, p)| p).collect())
+}
+
 /// harlo: lines added and removed in a source file since the last update
 /// from which it needs a model, whatever else changed (see grown_paths).
 pub const GROWN_LINES: usize = 50;
@@ -646,6 +701,9 @@ pub struct LastUpdate {
     pub model: String,
     pub status: String,
     pub language: Option<String>,
+    /// harlo: uncovered code a plan already decided on (see
+    /// [`uncovered_paths`]): it isn't asked about again.
+    pub reviewed: Vec<String>,
 }
 
 impl LastUpdate {
@@ -661,6 +719,9 @@ impl LastUpdate {
         if let Some(l) = &self.language {
             m.insert("language".into(), l.clone().into());
         }
+        if !self.reviewed.is_empty() {
+            m.insert("uncoveredReviewed".into(), self.reviewed.clone().into());
+        }
         Value::Object(m)
     }
 
@@ -674,6 +735,7 @@ impl LastUpdate {
             model: s("model")?.to_owned(),
             status: if s("status") == Some("interrupted") { "interrupted" } else { "complete" }.to_owned(),
             language: s("language").map(str::to_owned),
+            reviewed: v.get("uncoveredReviewed").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect(),
         })
     }
 }
@@ -691,8 +753,11 @@ pub fn read_last_update(root: &Path) -> Result<Option<LastUpdate>> {
     }
 }
 
-/// Records a run's end (or start, as interrupted): `git_head` None takes
-/// the current HEAD, Some(None) leaves it out.
+/// Records a run's end (or start, as interrupted).
+///
+/// `git_head` None takes the current HEAD, Some(None) leaves it out. An
+/// update keeps the uncovered code already decided on; a wiki written anew
+/// starts over.
 ///
 /// # Errors
 ///
@@ -703,7 +768,9 @@ pub fn write_last_update(root: &Path, command: &str, model: &str, status: &str, 
         Some(Some(h)) => Some(h.to_owned()),
         None => self::git_head(root),
     };
+    let reviewed = if command == "update" { read_last_update(root)?.map(|l| l.reviewed).unwrap_or_default() } else { Vec::new() };
     let m = LastUpdate {
+        reviewed,
         updated_at: util::now_iso(),
         command: command.to_owned(),
         git_head: head,
@@ -712,6 +779,26 @@ pub fn write_last_update(root: &Path, command: &str, model: &str, status: &str, 
         language: language.filter(|l| !l.is_empty()).map(str::to_owned),
     };
     util::write_text_atomic(&root.join(UPDATE_METADATA_PATH), &format!("{}\n", util::json_pretty(&m.to_json())), 0o644).map_err(|e| e.to_string())
+}
+
+/// harlo: adds uncovered code a plan decided on to the last update's record.
+///
+/// # Errors
+///
+/// The I/O error's message when the record can't be read or written.
+pub fn add_reviewed(root: &Path, paths: &[String]) -> Result<()> {
+    let Some(mut last) = read_last_update(root)? else { return Ok(()) };
+    let before = last.reviewed.len();
+    for p in paths {
+        if !last.reviewed.contains(p) {
+            last.reviewed.push(p.clone());
+        }
+    }
+    if last.reviewed.len() == before {
+        return Ok(());
+    }
+    last.reviewed.sort_by(|a, b| util::cmp16(a, b));
+    util::write_text_atomic(&root.join(UPDATE_METADATA_PATH), &format!("{}\n", util::json_pretty(&last.to_json())), 0o644).map_err(|e| e.to_string())
 }
 
 /// The wiki's own instructions (openwiki/INSTRUCTIONS.md), when it has any.

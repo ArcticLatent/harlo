@@ -186,6 +186,8 @@ pub fn run_prompt_with(mode: &str, run_mode: &str, ignored: &[String], found: Op
 fn change_note(found: &Value) -> String {
     const PAGES: usize = 20;
     const FILES: usize = 30;
+    // (Named in every update while no page cites them: fewer.)
+    const UNCOVERED: usize = 15;
     let list = |v: Vec<String>, max: usize| {
         let more = v.len().saturating_sub(max);
         let mut out = v.into_iter().take(max).collect::<Vec<_>>().join(", ");
@@ -206,6 +208,7 @@ fn change_note(found: &Value) -> String {
     let added: Vec<String> = found["added"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
     let grown: Vec<String> = found["grown"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
     let edited: Vec<String> = found["edited"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
+    let uncovered: Vec<String> = found["uncovered"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| format!("`{f}`")).collect();
     let mut parts = Vec::new();
     if !stale.is_empty() {
         parts.push(format!("pages with facts whose cited code changed: {}", list(stale, PAGES)));
@@ -214,16 +217,26 @@ fn change_note(found: &Value) -> String {
         parts.push(format!("pages edited since they were verified (check what they say now against the code): {}", list(edited, PAGES)));
     }
     if !added.is_empty() {
-        parts.push(format!("files added since the last update: {}", list(added, FILES)));
+        parts.push(format!("files added since the last update (largest first): {}", list(added, FILES)));
     }
     if !grown.is_empty() {
-        parts.push(format!("files with new definitions or larger changes: {}", list(grown, FILES)));
+        parts.push(format!("files with new definitions or larger changes (largest first): {}", list(grown, FILES)));
     }
     if parts.is_empty() {
         return String::new();
     }
+    // (Code an earlier update left out: an update sees only what changed
+    // since the last one, so it wouldn't come up again.)
+    let gaps = if uncovered.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Code added since the wiki was first written that no page cites (largest first): {}. These are features earlier updates left out, and the plan decides each (openwiki_begin's `uncoveredPaths`): look through them, plan a page for each feature they make up (a feature's files together in its `seedPaths`) and put the rest in `leaveUncovered`; quickstart's map links each new page.",
+            list(uncovered, UNCOVERED)
+        )
+    };
     format!(
-        "\n\nharlo's check before this session found {}. Start your research there and leave pages these don't touch as they are, unless openwiki_begin's queue asks for them.",
+        "\n\nharlo's check before this session found {}. Start your research there and leave pages these don't touch as they are, unless openwiki_begin's queue asks for them. New files that make up a feature no page covers yet (look through all of them: `git diff --name-only` lists the rest) get a page of their own in the plan, and quickstart's map links it.{gaps}",
         parts.join("; ")
     )
 }
@@ -1625,13 +1638,19 @@ esac; done"#
         // What the check found leads an update, not the others.
         let found = json!({"recorded": false, "stale": [{"page": "/openwiki/a.md", "files": ["src/a.rs", "src/b.rs"]}], "added": ["src/c.rs"], "grown": ["src/d.rs"]});
         let p = run_prompt_with("update", "", &[], Some(&found));
-        assert!(p.contains("pages with facts whose cited code changed: `/openwiki/a.md` (`src/a.rs`, `src/b.rs`); files added since the last update: `src/c.rs`; files with new definitions or larger changes: `src/d.rs`."), "{p}");
+        assert!(p.contains("pages with facts whose cited code changed: `/openwiki/a.md` (`src/a.rs`, `src/b.rs`); files added since the last update (largest first): `src/c.rs`; files with new definitions or larger changes (largest first): `src/d.rs`."), "{p}");
         let hand = json!({"edited": ["/openwiki/b.md"]});
         assert!(run_prompt_with("update", "", &[], Some(&hand)).contains("found pages edited since they were verified (check what they say now against the code): `/openwiki/b.md`."));
         assert!(!run_prompt_with("create", "", &[], Some(&found)).contains("check before"));
         assert!(!run_prompt_with("update", "", &[], Some(&json!({"recorded": false, "reason": "x"}))).contains("check before"));
         let many = json!({"added": (0..40).map(|i| format!("f{i}")).collect::<Vec<_>>()});
         assert!(run_prompt_with("update", "", &[], Some(&many)).contains("`f29` and 10 more"));
+        // Code no page cites rides along, and alone it's no reason to look.
+        assert!(!p.contains("no page cites (largest first)"));
+        let gaps = json!({"grown": ["src/d.rs"], "uncovered": (0..20).map(|i| format!("u{i}")).collect::<Vec<_>>()});
+        let g = run_prompt_with("update", "", &[], Some(&gaps));
+        assert!(g.contains("Code added since the wiki was first written that no page cites (largest first): `u0`") && g.contains("`u14` and 5 more. These are features earlier updates left out, and the plan decides each"), "{g}");
+        assert!(!run_prompt_with("update", "", &[], Some(&json!({"uncovered": ["u0"]}))).contains("check before"));
     }
 
     #[test]

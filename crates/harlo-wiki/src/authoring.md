@@ -39,6 +39,13 @@
      on `openwiki_submit_plan` to leave unrelated stale Claim pages for a later
      full update. The completed run remains marked interrupted until that debt
      is reconciled;
+   - when `openwiki_begin` returns `uncoveredPaths` (code added since the wiki
+     was first written that no page cites: features earlier updates left out),
+     decide each one: put it in the `seedPaths` of a planned page that will
+     describe its feature (a new page for a feature no page covers, its files
+     together), or list it in `leaveUncovered` when it needs no page (a helper
+     an existing page's subject already explains). A plan that leaves one
+     undecided is refused, and decided files aren't asked about again;
    - call `openwiki_submit_plan` with final canonical page paths, concise page
      purposes, useful seed source paths, meaningful `relatedPages`, page-relevant
      global `instructions`, and any page deletions required by an update.

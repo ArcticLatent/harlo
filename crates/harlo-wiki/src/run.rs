@@ -114,6 +114,7 @@ fn last_update_schema(v: &Value) -> Option<Value> {
         ("model", false, &when(any_string)),
         ("status", false, &when(|v| matches!(v.as_str(), Some("complete" | "interrupted")))),
         ("language", true, &when(any_string)),
+        ("uncoveredReviewed", true, &when(|v| string_list(v, any_string))),
     ])
 }
 
@@ -170,6 +171,7 @@ fn state_schema(v: &Value) -> Option<Value> {
         ("wikiGoal", true, &when(any_string)),
         ("beforeContentSnapshot", false, &when(any_string)),
         ("preparedWiki", false, &prepared_schema),
+        ("uncoveredPaths", true, &when(|v| string_list(v, any_string))),
         ("plan", true, &plan_schema),
     ])
 }
@@ -758,7 +760,7 @@ fn job(path: &str, title: &str, purpose: &str, seeds: &[String], related: &[Stri
 }
 
 /// `createRepositoryPlan`.
-fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[String], language_changed: bool) -> Result<Value> {
+fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[String], language_changed: bool, uncovered: &[String]) -> Result<Value> {
     let mut pages: Vec<Value> = Vec::new();
     for p in input["pages"].as_array().into_iter().flatten() {
         let path = plan_page_path(p["path"].as_str().unwrap_or(""))?;
@@ -795,6 +797,7 @@ fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[
     if mode == "init" && !planned.contains(QUICKSTART) {
         return Err(fail("invalid_input", "Init plan must include /openwiki/quickstart.md."));
     }
+    undecided_uncovered(input, &pages, uncovered)?;
     let defer = input["deferUnplannedClaimIssues"].as_bool() == Some(true);
     if mode == "update" {
         let deleted: HashSet<&String> = deletes.iter().collect();
@@ -843,6 +846,32 @@ fn create_plan(mode: &str, input: &Value, issues: &[claims::Issue], required: &[
         Vec::new()
     };
     Ok(json!({"pages": pages, "deletePages": deletes, "deferredClaimPages": deferred}))
+}
+
+/// harlo: refuses a plan that leaves uncovered code undecided.
+///
+/// Each of `uncovered` (code added since the wiki was first written that no
+/// page cites) must be a planned page's seed (or under a seeded folder) or
+/// in `leaveUncovered`: an update otherwise does only what changed and the
+/// feature never comes up again. Every undecided file is named at once.
+fn undecided_uncovered(input: &Value, pages: &[Value], uncovered: &[String]) -> Result<()> {
+    let leave: HashSet<String> = strings(&input["leaveUncovered"]).iter().filter_map(|x| seed_path(x).ok()).collect();
+    let seeds: Vec<String> = pages.iter().flat_map(|p| strings(&p["seedPaths"])).collect();
+    let seeded = |f: &str| seeds.iter().any(|s| f == s || f.strip_prefix(s.trim_end_matches('/')).is_some_and(|r| r.starts_with('/')));
+    let undecided: Vec<&String> = uncovered.iter().filter(|f| !leave.contains(f.as_str()) && !seeded(f)).collect();
+    if undecided.is_empty() {
+        return Ok(());
+    }
+    let list = undecided.iter().map(|f| format!("- `{f}`")).collect::<Vec<_>>().join("\n");
+    Err(fail(
+        "invalid_input",
+        format!(
+            "{} uncovered file{} need{} a decision: code added since the wiki was first written that no page cites (features earlier updates left out). Put each in the `seedPaths` of a planned page that will describe its feature (a new page for a feature no page covers, its files together), or in `leaveUncovered` when it needs no page; leaving it out isn't a decision. Then submit the plan again:\n{list}",
+            undecided.len(),
+            if undecided.len() == 1 { "" } else { "s" },
+            if undecided.len() == 1 { "s" } else { "" },
+        ),
+    ))
 }
 
 fn simplified(plan: &Value) -> Value {
@@ -1047,6 +1076,11 @@ impl Run {
         v.insert("changedPaths".into(), json!(changed));
         v.insert("pageUpdateWindows".into(), Value::Array(windows));
         v.insert("claimIssues".into(), Value::Array(self.claims.issues.iter().map(claims::Issue::to_json).collect()));
+        let uncovered = strings(&self.state["uncoveredPaths"]);
+        if self.state["phase"] == "planning" && !uncovered.is_empty() {
+            v.insert("uncoveredPaths".into(), json!(uncovered));
+            v.insert("uncoveredNote".into(), "uncoveredPaths: code added since the wiki was first written that no page cites (features earlier updates left out, largest first). The plan decides each: a planned page's seedPaths (a new page for a feature no page covers, its files together), or leaveUncovered when it needs no page.".into());
+        }
         v.insert("completedPages".into(), pages.iter().filter(|p| p["status"] == "complete").count().into());
         if self.state.get("plan").is_some() {
             v.insert("totalPages".into(), pages.len().into());
@@ -1207,6 +1241,31 @@ fn prepare_claims(root: &Path, ignore: &Ignore, mode: &str, resume_init: bool) -
     claims::prepare(root, ignore, mode == "init" && !resume_init)
 }
 
+/// harlo: files heaviest first: text by its line count, pictures, fonts
+/// and licences last (ties by path). The update's prompt names the first
+/// few, so a new feature's code leads rather than its icons: listed
+/// alphabetically, a feature of a dozen files was hidden in "and 262
+/// more" behind provider logos, and the update wrote nothing about it.
+fn by_weight(root: &Path, paths: Vec<String>) -> Vec<String> {
+    const ASSETS: &[&str] = &["svg", "png", "jpg", "jpeg", "gif", "ico", "icns", "webp", "ttf", "otf", "woff", "woff2", "lock", "jsonl"];
+    let weight = |p: &str| -> usize {
+        let name = p.rsplit('/').next().unwrap_or(p);
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        if ASSETS.contains(&ext.as_str()) || name.to_ascii_uppercase().contains("LICENSE") {
+            return 0;
+        }
+        std::fs::read(root.join(p)).map_or(0, |b| b.iter().filter(|c| **c == b'\n').count() + 1)
+    };
+    let mut weighed: Vec<(usize, String)> = paths.into_iter().map(|p| (weight(&p), p)).collect();
+    weighed.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| cmp16(&a.1, &b.1)));
+    weighed.into_iter().map(|(_, p)| p).collect()
+}
+
+/// harlo: the files the wiki's Claims cite.
+fn cited_paths(session: &claims::Session) -> HashSet<String> {
+    session.evidence_by_page().into_iter().flat_map(|(_, e)| e).filter_map(|e| claims::parse_resource(&e).ok().map(|r| r.path)).collect()
+}
+
 /// harlo: what an update's check before any model found.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Quiet {
@@ -1217,20 +1276,23 @@ pub enum Quiet {
     /// A model is needed, and why: `stale` pages with the cited files that
     /// changed under them, `added` files no page may cover yet, `grown`
     /// files with a new definition or a larger change, `edited` pages
-    /// whose text changed since they were verified.
-    Needed { reason: String, stale: Vec<(String, Vec<String>)>, added: Vec<String>, grown: Vec<String>, edited: Vec<String> },
+    /// whose text changed since they were verified; and `uncovered`, the
+    /// largest code no page cites (it doesn't make a model needed, but one
+    /// that's needed anyway can catch up on a feature an update left out).
+    Needed { reason: String, stale: Vec<(String, Vec<String>)>, added: Vec<String>, grown: Vec<String>, edited: Vec<String>, uncovered: Vec<String> },
 }
 
 impl Quiet {
     pub fn to_json(&self) -> Value {
         match self {
             Quiet::Recorded { commits } => json!({ "recorded": true, "commits": commits }),
-            Quiet::Needed { reason, stale, added, grown, edited } => json!({
+            Quiet::Needed { reason, stale, added, grown, edited, uncovered } => json!({
                 "recorded": false, "reason": reason,
                 "stale": stale.iter().map(|(p, f)| json!({ "page": p, "files": f })).collect::<Vec<_>>(),
                 "added": added,
                 "grown": grown,
                 "edited": edited,
+                "uncovered": uncovered,
             }),
         }
     }
@@ -1252,7 +1314,7 @@ impl Quiet {
 /// An [`Error`] when the wiki's files or the repository can't be read, or the
 /// record can't be written.
 pub fn quiet_update(root: &Path) -> Result<Quiet> {
-    let needed = |r: &str| Ok(Quiet::Needed { reason: r.to_owned(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: Vec::new() });
+    let needed = |r: &str| Ok(Quiet::Needed { reason: r.to_owned(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: Vec::new(), uncovered: Vec::new() });
     inside(root, "openwiki")?;
     if read_state(root)?.is_some() {
         return needed("a run is under way");
@@ -1277,7 +1339,7 @@ pub fn quiet_update(root: &Path) -> Result<Quiet> {
     let (added, grown) = match (repo::added_paths(root, &ignore, &base, &head), repo::grown_paths(root, &ignore, &base)) {
         (Ok(a), Ok(g)) => {
             let g = g.into_iter().filter(|p| !a.contains(p)).collect::<Vec<_>>();
-            (a, g)
+            (by_weight(root, a), by_weight(root, g))
         }
         (Err(e), _) | (_, Err(e)) => return needed(&format!("git couldn't list the changes ({})", e.trim())),
     };
@@ -1323,7 +1385,14 @@ pub fn quiet_update(root: &Path) -> Result<Quiet> {
         .flatten()
         .collect::<Vec<_>>()
         .join(", ");
-        return Ok(Quiet::Needed { reason, stale, added, grown, edited });
+        // (Claims it can't read cite nothing it can tell: none named.)
+        let uncovered = match &rt {
+            Ok(r) => {
+                repo::uncovered_paths(root, &ignore, &cited_paths(&r.session)).unwrap_or_default()
+            }
+            Err(_) => Vec::new(),
+        };
+        return Ok(Quiet::Needed { reason, stale, added, grown, edited, uncovered });
     }
     let Ok(mut rt) = rt else { return needed("its claims couldn't be read") };
     let commits = repo::git_lines(root, &["rev-list", "--count", &format!("{base}..{head}"), "--", ".", ":(exclude)openwiki"]).first().and_then(|n| n.trim().parse().ok()).unwrap_or(0);
@@ -1352,6 +1421,7 @@ pub fn quiet_update(root: &Path) -> Result<Quiet> {
 /// `invalid_state`, `conflict`) when the step doesn't apply to the run as it
 /// is, a Claims one when a page's Claims are refused, another when the wiki's
 /// files can't be read or written.
+#[expect(clippy::too_many_lines, reason = "OpenWiki's beginRepositoryRun, one step after another, kept as one to compare")]
 pub fn begin(input: &Begin) -> Result<Begun> {
     let requested = match lang::resolve(input.language.as_deref()) {
         lang::Resolved::Unrecognized(m) => return Err(fail("invalid_input", m)),
@@ -1437,6 +1507,11 @@ pub fn begin(input: &Begin) -> Result<Begun> {
         }
         st.insert("beforeContentSnapshot".into(), before.into());
         st.insert("preparedWiki".into(), json!({"generatedProvenance": finish::serialize_provenance(&prepared)}));
+        // harlo: code a plan must decide on (see undecided_uncovered).
+        let uncovered = if update { repo::uncovered_paths(root, &ignore, &cited_paths(&rt.session)).unwrap_or_default() } else { Vec::new() };
+        if !uncovered.is_empty() {
+            st.insert("uncoveredPaths".into(), json!(uncovered));
+        }
         let state = Value::Object(st);
         write_state(root, &state)?;
         written = true;
@@ -1596,8 +1671,9 @@ impl Run {
     /// wiki's files can't be read or written.
     pub fn submit_plan(&mut self, input: &Value) -> Result<Value> {
         let required = strings(&self.state["requiredRewritePages"]);
+        let uncovered = strings(&self.state["uncoveredPaths"]);
         if self.state.get("plan").is_some() {
-            let proposed = create_plan(self.st(), input, &self.claims.issues, &required, self.state["languageChanged"] == true)?;
+            let proposed = create_plan(self.st(), input, &self.claims.issues, &required, self.state["languageChanged"] == true, &uncovered)?;
             if simplified(&self.state["plan"]) != simplified(&proposed) {
                 return Err(fail("invalid_state", "This OpenWiki run already has a different persisted plan."));
             }
@@ -1606,7 +1682,7 @@ impl Run {
         if self.state["phase"] != "planning" {
             return Err(fail("invalid_state", "OpenWiki plan can only be submitted during planning."));
         }
-        let plan = create_plan(self.st(), input, &self.claims.issues, &required, self.state["languageChanged"] == true)?;
+        let plan = create_plan(self.st(), input, &self.claims.issues, &required, self.state["languageChanged"] == true, &uncovered)?;
         let total = plan["pages"].as_array().map_or(0, Vec::len);
         let mut next = self.state.clone();
         next["phase"] = "generating".into();
@@ -1871,6 +1947,8 @@ impl Run {
         } else {
             repo::write_last_update(&self.root, &mode, &self.model(), "complete", Some(&language), None).map_err(other)?;
         }
+        // harlo: the plan decided on these; they aren't asked about again.
+        repo::add_reviewed(&self.root, &strings(&self.state["uncoveredPaths"])).map_err(other)?;
         remove_state(&self.root);
         Ok(if changed { json!({"status": "complete", "sourceChanged": true}) } else { json!({"status": "complete"}) })
     }
@@ -2084,6 +2162,134 @@ mod tests {
     /// changed cited line or a new file needs a model, and then nothing
     /// is written.
     #[test]
+    fn changed_files_are_listed_heaviest_first() {
+        let r = std::env::temp_dir().join(format!("harlo-run-weight-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&r);
+        std::fs::create_dir_all(r.join("icons")).unwrap();
+        std::fs::write(r.join("icons/a.svg"), "<svg>\n".repeat(500)).unwrap();
+        std::fs::write(r.join("icons/LICENSE"), "MIT\n".repeat(50)).unwrap();
+        std::fs::write(r.join("small.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(r.join("workflow.rs"), "fn b() {}\n".repeat(300)).unwrap();
+        let paths = ["icons/LICENSE", "icons/a.svg", "small.rs", "workflow.rs"].map(str::to_owned).to_vec();
+        assert_eq!(by_weight(&r, paths), ["workflow.rs", "small.rs", "icons/LICENSE", "icons/a.svg"]);
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn the_largest_code_no_page_cites_is_named_when_a_model_is_needed() {
+        let r = std::env::temp_dir().join(format!("harlo-run-uncovered-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&r);
+        for d in ["src", "tests", "web"] {
+            std::fs::create_dir_all(r.join(d)).unwrap();
+        }
+        let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&r).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).status().unwrap().success());
+        let commit = |m: &str| {
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "-m", m]);
+        };
+        let filler = |n: usize| "fn f() {}\n".repeat(n);
+        git(&["init", "-q"]);
+        std::fs::write(r.join("src/a.rs"), format!("// a\npub const LIMIT: u32 = 100;\n{}", filler(400))).unwrap();
+        // (There when the wiki was written, and left out: the writer's choice.)
+        std::fs::write(r.join("src/old.rs"), filler(900)).unwrap();
+        commit("code");
+        let mut w = Writer::new("harlo");
+        let begun = w.call("openwiki_begin", &json!({"root": r.to_string_lossy(), "mode": "init"})).unwrap();
+        let run = begun["runId"].as_str().unwrap().to_owned();
+        w.call("openwiki_submit_plan", &json!({"runId": run, "pages": [{"path": "/openwiki/quickstart.md", "title": "Quickstart", "purpose": "Where to start."}]})).unwrap();
+        let next = w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        let job = next["job"]["jobId"].as_str().or(next["job"]["id"].as_str()).unwrap().to_owned();
+        std::fs::write(r.join("openwiki/quickstart.md"), "---\ntype: overview\ntitle: Quickstart\ndescription: Where to start.\ntags: [a]\n---\n\n# Quickstart\n\nThe limit is 100.\n").unwrap();
+        w.call("openwiki_submit_page", &json!({"runId": run, "jobId": job, "claims": [{"statement": "The limit is 100.", "evidence": [{"resource": "repo://src/a.rs#L2-L2"}]}]})).unwrap();
+        w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        w.call("openwiki_finish", &json!({"runId": run})).unwrap();
+        commit("wiki");
+        // Added since, and an update that left it out.
+        std::fs::write(r.join("src/big.rs"), filler(400)).unwrap();
+        std::fs::write(r.join("src/latest.rs"), filler(350)).unwrap();
+        std::fs::write(r.join("src/small.rs"), filler(299)).unwrap();
+        std::fs::write(r.join("src/SelfTests.qml"), filler(900)).unwrap();
+        std::fs::write(r.join("src/ship_test.rs"), filler(900)).unwrap();
+        std::fs::write(r.join("tests/flow.rs"), filler(900)).unwrap();
+        std::fs::write(r.join("web/app.min.js"), filler(900)).unwrap();
+        std::fs::write(r.join("web/logo.svg"), filler(900)).unwrap();
+        commit("feature");
+        repo::write_last_update(&r, "update", "harlo", "complete", Some("en"), Some(Some(&repo::git_head(&r).unwrap()))).unwrap();
+        commit("its update");
+        // Code no page cites doesn't make a model needed by itself.
+        assert!(matches!(quiet_update(&r).unwrap(), Quiet::Recorded { .. }));
+        // When one's needed anyway, it's named: largest first, past cited
+        // code, code older than the wiki, small files, tests, vendored code
+        // and pictures.
+        std::fs::write(r.join("src/a.rs"), format!("// a\npub const LIMIT: u32 = 200;\n{}", filler(400))).unwrap();
+        let q = quiet_update(&r).unwrap();
+        assert!(matches!(&q, Quiet::Needed { uncovered, .. } if uncovered == &vec!["src/big.rs".to_owned(), "src/latest.rs".to_owned()]), "{q:?}");
+        assert_eq!(q.to_json()["uncovered"], json!(["src/big.rs", "src/latest.rs"]));
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn an_update_plan_decides_on_every_uncovered_file_once() {
+        let r = std::env::temp_dir().join(format!("harlo-run-decide-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&r);
+        std::fs::create_dir_all(r.join("src/flow")).unwrap();
+        let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&r).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).status().unwrap().success());
+        let commit = |m: &str| {
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "-m", m]);
+        };
+        let filler = |n: usize| "fn f() {}\n".repeat(n);
+        git(&["init", "-q"]);
+        std::fs::write(r.join("src/a.rs"), "// a\npub const LIMIT: u32 = 100;\n").unwrap();
+        commit("code");
+        let mut w = Writer::new("harlo");
+        let root = r.to_string_lossy().into_owned();
+        let page = |path: &str, title: &str, body: &str| std::fs::write(r.join(path), format!("---\ntype: guide\ntitle: {title}\ndescription: {title}.\ntags: [a]\n---\n\n# {title}\n\n{body}\n")).unwrap();
+        let begun = w.call("openwiki_begin", &json!({"root": root, "mode": "init"})).unwrap();
+        let run = begun["runId"].as_str().unwrap().to_owned();
+        assert!(begun.get("uncoveredPaths").is_none(), "a wiki written anew decides nothing");
+        w.call("openwiki_submit_plan", &json!({"runId": run, "pages": [{"path": "/openwiki/quickstart.md", "title": "Quickstart", "purpose": "Where to start."}]})).unwrap();
+        let job = w.call("openwiki_next_page", &json!({"runId": run})).unwrap()["job"]["id"].as_str().unwrap().to_owned();
+        page("openwiki/quickstart.md", "Quickstart", "The limit is 100.");
+        w.call("openwiki_submit_page", &json!({"runId": run, "jobId": job, "claims": [{"statement": "The limit is 100.", "evidence": [{"resource": "repo://src/a.rs#L2-L2"}]}]})).unwrap();
+        w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        w.call("openwiki_finish", &json!({"runId": run})).unwrap();
+        commit("wiki");
+        // A feature of two files, and a helper, added since.
+        std::fs::write(r.join("src/flow/engine.rs"), filler(500)).unwrap();
+        std::fs::write(r.join("src/flow/driver.rs"), filler(400)).unwrap();
+        std::fs::write(r.join("src/helper.rs"), filler(300)).unwrap();
+        commit("feature");
+        let begun = w.call("openwiki_begin", &json!({"root": root, "mode": "update"})).unwrap();
+        let run = begun["runId"].as_str().unwrap().to_owned();
+        assert_eq!(begun["uncoveredPaths"], json!(["src/flow/engine.rs", "src/flow/driver.rs", "src/helper.rs"]));
+        // Leaving them out isn't a decision: every one is named at once.
+        let e = w.call("openwiki_submit_plan", &json!({"runId": run, "pages": []})).unwrap_err().to_string();
+        assert!(e.contains("3 uncovered files need a decision") && e.contains("- `src/flow/engine.rs`\n- `src/flow/driver.rs`\n- `src/helper.rs`"), "{e}");
+        let e = w.call("openwiki_submit_plan", &json!({"runId": run, "pages": [], "leaveUncovered": ["src/helper.rs"]})).unwrap_err().to_string();
+        assert!(e.contains("2 uncovered files need a decision") && !e.contains("helper"), "{e}");
+        // A seeded folder decides its files.
+        let plan = json!({"runId": run, "pages": [{"path": "/openwiki/flow.md", "title": "Flow", "purpose": "The flow.", "seedPaths": ["src/flow/"]}], "leaveUncovered": ["src/helper.rs"]});
+        w.call("openwiki_submit_plan", &plan).unwrap();
+        let job = w.call("openwiki_next_page", &json!({"runId": run})).unwrap()["job"]["id"].as_str().unwrap().to_owned();
+        page("openwiki/flow.md", "Flow", "The engine has functions.");
+        w.call("openwiki_submit_page", &json!({"runId": run, "jobId": job, "claims": [{"statement": "The engine has functions.", "evidence": [{"resource": "repo://src/flow/engine.rs#L1-L1"}]}]})).unwrap();
+        w.call("openwiki_next_page", &json!({"runId": run})).unwrap();
+        w.call("openwiki_finish", &json!({"runId": run})).unwrap();
+        let last = repo::read_last_update(&r).unwrap().unwrap();
+        assert_eq!(last.reviewed, ["src/flow/driver.rs", "src/flow/engine.rs", "src/helper.rs"]);
+        // Decided: not asked about again, and kept by later records.
+        repo::write_last_update(&r, "update", "m", "complete", Some("en"), None).unwrap();
+        assert_eq!(repo::read_last_update(&r).unwrap().unwrap().reviewed.len(), 3);
+        commit("its update");
+        std::fs::write(r.join("src/a.rs"), "// a\npub const LIMIT: u32 = 200;\n").unwrap();
+        assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { uncovered, .. } if uncovered.is_empty()));
+        let begun = w.call("openwiki_begin", &json!({"root": root, "mode": "update"})).unwrap();
+        assert!(begun.get("uncoveredPaths").is_none(), "{begun}");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
     fn a_resumed_run_keeps_its_plan_when_the_code_changed() {
         let r = std::env::temp_dir().join(format!("harlo-run-kept-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&r);
@@ -2173,7 +2379,7 @@ mod tests {
         // model, then nothing recorded; a test's new function, no.
         let at = last_head();
         std::fs::write(r.join("src/b.rs"), "fn b() { let _ = 1; }\n\npub fn ship() {}\n").unwrap();
-        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 file with new definitions or larger changes".into(), stale: Vec::new(), added: Vec::new(), grown: vec!["src/b.rs".into()], edited: Vec::new() });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 file with new definitions or larger changes".into(), stale: Vec::new(), added: Vec::new(), grown: vec!["src/b.rs".into()], edited: Vec::new(), uncovered: Vec::new() });
         let lines: String = (0..60).map(|i| format!("    let _x{i} = {i};\n")).collect();
         std::fs::write(r.join("src/b.rs"), format!("fn b() {{\n{lines}}}\n")).unwrap();
         assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { grown, .. } if grown == vec!["src/b.rs".to_owned()]), "60 lines");
@@ -2193,7 +2399,7 @@ mod tests {
         let kept = std::fs::read_to_string(&page).unwrap();
         let at = last_head();
         std::fs::write(&page, kept.replace("The limit is 100.", "The limit is 999.")).unwrap();
-        let wrong = Quiet::Needed { reason: "1 page changed since verified".into(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: vec!["/openwiki/quickstart.md".into()] };
+        let wrong = Quiet::Needed { reason: "1 page changed since verified".into(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: vec!["/openwiki/quickstart.md".into()], uncovered: Vec::new() };
         assert_eq!(quiet_update(&r).unwrap(), wrong);
         commit("hand edit");
         assert_eq!(quiet_update(&r).unwrap(), wrong);
@@ -2217,7 +2423,7 @@ mod tests {
         let before = last_head();
         // A new file, committed or not.
         std::fs::write(r.join("src/c.rs"), "fn c() {}\n").unwrap();
-        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 new file".into(), stale: Vec::new(), added: vec!["src/c.rs".into()], grown: Vec::new(), edited: Vec::new() });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 new file".into(), stale: Vec::new(), added: vec!["src/c.rs".into()], grown: Vec::new(), edited: Vec::new(), uncovered: Vec::new() });
         commit("c");
         assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { added, .. } if added == vec!["src/c.rs".to_owned()]));
         assert_eq!(last_head(), before);
@@ -2226,7 +2432,7 @@ mod tests {
         let kept = std::fs::read(&sidecar).unwrap();
         std::fs::write(&sidecar, "{}").unwrap();
         std::fs::write(r.join("src/d.rs"), "fn d() {}\n").unwrap();
-        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "its claims couldn't be read, 1 page changed since verified, 2 new files".into(), stale: Vec::new(), added: vec!["src/c.rs".into(), "src/d.rs".into()], grown: Vec::new(), edited: vec!["/openwiki/quickstart.md".into()] });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "its claims couldn't be read, 1 page changed since verified, 2 new files".into(), stale: Vec::new(), added: vec!["src/c.rs".into(), "src/d.rs".into()], grown: Vec::new(), edited: vec!["/openwiki/quickstart.md".into()], uncovered: Vec::new() });
         std::fs::write(&sidecar, kept).unwrap();
         std::fs::remove_file(r.join("src/d.rs")).unwrap();
         // A run under way (an update begun, not finished): not now.
@@ -2234,7 +2440,7 @@ mod tests {
         commit("no c");
         let mut w = Writer::new("harlo");
         w.call("openwiki_begin", &json!({"root": r.to_string_lossy(), "mode": "update", "force": true})).unwrap();
-        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "a run is under way".into(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: Vec::new() });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "a run is under way".into(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: Vec::new(), uncovered: Vec::new() });
         let _ = std::fs::remove_dir_all(&r);
     }
 
@@ -2280,7 +2486,7 @@ mod tests {
             g(&["add", "src/b.rs"]);
             g(&["commit", "-q", "-m", "mid-check"]);
         })));
-        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "the code changed while it was checked".into(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: Vec::new() });
+        assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "the code changed while it was checked".into(), stale: Vec::new(), added: Vec::new(), grown: Vec::new(), edited: Vec::new(), uncovered: Vec::new() });
         assert_eq!(last_head(), at);
         assert!(matches!(quiet_update(&r).unwrap(), Quiet::Needed { grown, .. } if grown == vec!["src/b.rs".to_owned()]), "seen next time");
         // Declarations other languages make; small edits stay free.
@@ -2306,7 +2512,7 @@ mod tests {
             git(&["reset", "-q", "--hard", &at]);
             std::fs::write(r.join(file), before).unwrap();
             commit(&format!("{file} before"));
-            assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 new file".into(), stale: Vec::new(), added: vec![file.into()], grown: Vec::new(), edited: Vec::new() });
+            assert_eq!(quiet_update(&r).unwrap(), Quiet::Needed { reason: "1 new file".into(), stale: Vec::new(), added: vec![file.into()], grown: Vec::new(), edited: Vec::new(), uncovered: Vec::new() });
             // (Recorded as if updated: the file is the wiki's to know now.)
             repo::write_last_update(&r, "update", "m", "complete", None, None).unwrap();
             std::fs::write(r.join(file), after).unwrap();
