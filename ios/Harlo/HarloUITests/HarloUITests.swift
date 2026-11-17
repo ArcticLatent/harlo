@@ -642,13 +642,16 @@ final class HarloUITests: XCTestCase {
         shot("29-dashboard-runs")
         audit("dashboard-runs")
         run.tap()
-        see("Tests running")
-        XCTAssertTrue(app.descendants(matching: .any)["workflowLiveOutput"].waitForExistence(timeout: 8), "the check's output")
-        see("keeps_place_2")
-        XCTAssertTrue(app.buttons["workflowPause"].exists && app.buttons["workflowStop"].exists, "Pause and Stop while it runs")
+        // Its actions under its stages, then the output (scrolled to: a
+        // small phone or large text leaves it below the screen).
+        XCTAssertTrue(app.buttons["workflowPause"].waitForExistence(timeout: 8) && app.buttons["workflowStop"].exists, "Pause and Stop while it runs")
         XCTAssertFalse(app.buttons["workflowMerge"].exists, "nothing to merge yet")
         shot("30-workflow-check")
         audit("workflow-check")
+        app.collectionViews.firstMatch.swipeUp()
+        see("Tests running")
+        XCTAssertTrue(app.descendants(matching: .any)["workflowLiveOutput"].waitForExistence(timeout: 8), "the check's output")
+        see("keeps_place_2")
 
         // Done: its implementation session's line opens it.
         launch("workflow")
@@ -661,7 +664,7 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(line.label.contains("Done: Tests passed · Review approved"), line.label)
         shot("31-workflow-line")
         line.tap()
-        see("Tests passed in")
+        see("Done: Tests passed")
         XCTAssertTrue(app.buttons["workflowMerge"].waitForExistence(timeout: 5), "Merge")
         XCTAssertTrue(app.buttons["workflowMerge"].label.contains("Merge into main"), app.buttons["workflowMerge"].label)
         XCTAssertTrue(app.buttons["workflowPublish"].exists && app.buttons["workflowRemove"].exists, "Push and Remove")

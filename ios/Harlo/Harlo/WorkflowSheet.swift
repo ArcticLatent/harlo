@@ -27,6 +27,9 @@ struct WorkflowSheet: View {
                         } footer: {
                             Text(where_(run))
                         }
+                        // What you'd do, before the output (long, it hid
+                        // them below a small phone's screen).
+                        actions(run)
                         if let live = run.liveCheck {
                             Section {
                                 output(live.output, empty: "No output yet")
@@ -41,7 +44,6 @@ struct WorkflowSheet: View {
                                 Text(Self.verdict(t)).textCase(nil)
                             }
                         }
-                        actions(run)
                         if !run.log.isEmpty {
                             Section("Log") {
                                 ForEach(Array(Array(run.log.enumerated()).reversed()), id: \.offset) { _, e in
