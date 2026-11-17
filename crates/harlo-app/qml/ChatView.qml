@@ -93,6 +93,7 @@ Rectangle {
     signal openDiff(string path)
     signal fileSaved(string path)
     signal addProjectRequested()
+    signal workflowRequested(int projectId, string task, string agent, string model)
     signal signInOnHost(string agent, string host)
     /// A turn was undone: the folder's files changed.
     signal filesUndone()
@@ -360,6 +361,7 @@ Rectangle {
                     Workspace.closeTab("view:new")
             }
             onAddProjectRequested: root.addProjectRequested()
+            onWorkflowRequested: (projectId, task, agent, model) => root.workflowRequested(projectId, task, agent, model)
         }
         RunView {
             Layout.fillWidth: true

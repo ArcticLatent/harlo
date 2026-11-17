@@ -127,6 +127,14 @@ pub mod qobject {
         /// Adds a project folder (a path or a `file://` URL).
         #[qinvokable]
         fn add_project(self: Pin<&mut Workspace>, path: &QString);
+        /// Makes a new project folder `name` in `parent` (a path or a
+        /// `file://` URL), a git repository: `{ path }` or `{ error }`.
+        #[qinvokable]
+        fn create_project_folder(self: &Workspace, parent: &QString, name: &QString) -> QString;
+        /// Where a new project folder goes unless you pick: the folder
+        /// your latest project on this computer is in, else your home.
+        #[qinvokable]
+        fn new_project_parent(self: &Workspace) -> QString;
         #[qinvokable]
         fn remove_project(self: Pin<&mut Workspace>, id: i32);
         /// What a project's sessions are, for asking before removing it:
@@ -243,9 +251,15 @@ pub mod qobject {
         fn run_plan(self: Pin<&mut Workspace>, key: &QString, agent: &QString, model: &QString) -> QString;
         /// Starts a workflow in a project (`form`: `{ workflow, task,
         /// criteria, testCommand, implementer, implementerModel, reviewer,
-        /// reviewerModel, approval }`); the problem, if any.
+        /// reviewerModel, approval, prepare }`); the problem, if any.
         #[qinvokable]
         fn start_workflow(self: Pin<&mut Workspace>, project_id: i32, form: &QString) -> QString;
+        /// Whether a project's folder can have a run's worktree: `{ state,
+        /// files }`, state "ready", "no-commits" (a repository with nothing
+        /// committed) or "no-git"; files, when it isn't ready, whether the
+        /// folder holds anything (a run's branch would start without it).
+        #[qinvokable]
+        fn project_repo_state(self: &Workspace, project_id: i32) -> QString;
         /// The test command a project's workflow runs (last used, else guessed).
         #[qinvokable]
         fn workflow_test_command(self: &Workspace, project_id: i32) -> QString;
@@ -1823,6 +1837,29 @@ impl Workspace {
             self.remote_kick.notify_one();
         }
         self.rebuild();
+    }
+
+    pub fn create_project_folder(&self, parent: &QString, name: &QString) -> QString {
+        let parent = PathBuf::from(url_to_path(&parent.to_string()));
+        let answer = match git::new_repo_folder(&parent, &name.to_string()) {
+            Ok(path) => json!({ "path": path.to_string_lossy() }),
+            Err(e) => json!({ "error": format!("{e:#}") }),
+        };
+        QString::from(&answer.to_string())
+    }
+
+    pub fn new_project_parent(&self) -> QString {
+        let latest = self
+            .db()
+            .and_then(|db| db.projects().ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| !harlo_core::remote::is_remote(&p.path))
+            .max_by_key(|p| p.id)
+            .and_then(|p| p.path.parent().map(Path::to_path_buf))
+            .filter(|d| d.is_dir());
+        let home = || PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/".into()));
+        QString::from(&latest.unwrap_or_else(home).to_string_lossy().into_owned())
     }
 
     pub fn add_project(mut self: Pin<&mut Self>, path: &QString) {

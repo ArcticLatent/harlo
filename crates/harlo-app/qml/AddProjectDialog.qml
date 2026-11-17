@@ -2,12 +2,14 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import harlo
 
 // Adds a project (the sidebar's + Project, the new-session page's Add
 // project…): its folder, the agent its sessions start with and that
 // agent's model. Adding saves both as the project's own and opens the
-// new-session page for it.
+// new-session page for it. New folder… makes the folder (a git repository)
+// instead of picking one.
 AppDialog {
     id: dlg
     objectName: "addProjectDialog"
@@ -16,6 +18,13 @@ AppDialog {
     signal chooseFolder()
     /// Added: the project's id.
     signal added(int projectId)
+    // New folder…: its name and where it goes (this computer only: a
+    // host's folder picker makes folders itself).
+    property bool creating: false
+    property string newParent: ""
+    property string problem: ""
+    // Test hooks.
+    property alias newFolderName: newFolderName
 
     /// The folder: a path, or a host's (from its listing).
     property string folder: ""
@@ -36,6 +45,14 @@ AppDialog {
         folder = path.startsWith("file://") ? decodeURIComponent(path.substring(7)).replace(/\/+$/, "") : path
     }
     function add() {
+        if (creating) {
+            const made = JSON.parse(Workspace.createProjectFolder(newParent, newFolderName.text))
+            if (made.error) {
+                problem = made.error
+                return
+            }
+            folder = made.path
+        }
         const before = JSON.parse(Workspace.projectsJson()).map(p => p.id)
         Workspace.addProject(folder)
         const now = JSON.parse(Workspace.projectsJson())
@@ -51,6 +68,9 @@ AppDialog {
     width: Math.min(520, (Overlay.overlay ? Overlay.overlay.width : 560) - 40)
     onAboutToShow: {
         folder = ""
+        creating = false
+        problem = ""
+        newFolderName.text = ""
         harness = Workspace.defaultAgent()
         if (!agents.some(a => a.id === harness) && agents.length > 0) harness = agents[0].id
         model = ""
@@ -64,8 +84,8 @@ AppDialog {
         DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
         DialogButton {
             objectName: "addProjectAdd"
-            text: "Add project"
-            enabled: dlg.folder !== "" && dlg.harness !== ""
+            text: dlg.creating ? "Create and add" : "Add project"
+            enabled: (dlg.creating ? newFolderName.text.trim() !== "" && dlg.newParent !== "" : dlg.folder !== "") && dlg.harness !== ""
             DialogButtonBox.buttonRole: DialogButtonBox.ApplyRole
             onClicked: dlg.add()
         }
@@ -75,8 +95,9 @@ AppDialog {
         width: parent.width
         spacing: 6
 
-        FormLabel { text: "Folder" }
+        FormLabel { text: dlg.creating ? "New folder" : "Folder" }
         RowLayout {
+            visible: !dlg.creating
             Layout.fillWidth: true
             spacing: 8
             Rectangle {
@@ -105,6 +126,65 @@ AppDialog {
                 font.pixelSize: Theme.px(12)
                 onClicked: dlg.chooseFolder()
             }
+        }
+        FlatButton {
+            objectName: "addProjectNewFolder"
+            visible: !dlg.creating && !dlg.remote
+            text: "Or start a new folder…"
+            outlined: false
+            padding: 2
+            font.pixelSize: Theme.px(12)
+            onClicked: {
+                dlg.newParent = Workspace.newProjectParent()
+                dlg.creating = true
+                dlg.problem = ""
+                newFolderName.forceActiveFocus()
+            }
+        }
+        // New folder: its name, and where.
+        AppTextField {
+            id: newFolderName
+            objectName: "addProjectNewName"
+            visible: dlg.creating
+            Layout.fillWidth: true
+            placeholderText: "Its name, e.g. my-app"
+            font.pixelSize: Theme.px(12.5)
+            onTextEdited: dlg.problem = ""
+            onAccepted: if (text.trim() !== "" && dlg.harness !== "") dlg.add()
+        }
+        RowLayout {
+            visible: dlg.creating
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                Layout.fillWidth: true
+                text: "In " + dlg.newParent
+                color: Theme.muted
+                font.family: Theme.mono
+                font.pixelSize: Theme.px(12)
+                elide: Text.ElideMiddle
+            }
+            FlatButton { objectName: "addProjectNewWhere"; text: "Change…"; font.pixelSize: Theme.px(12); onClicked: parentDialog.open() }
+            FlatButton { text: "Use an existing folder"; font.pixelSize: Theme.px(12); onClicked: { dlg.creating = false; dlg.problem = "" } }
+        }
+        FormNote {
+            visible: dlg.creating
+            text: "Harlo makes the folder and sets up git in it (a workflow needs a repository)."
+        }
+        PlainLabel {
+            objectName: "addProjectProblem"
+            visible: dlg.problem !== ""
+            Layout.fillWidth: true
+            text: dlg.problem
+            color: Theme.error
+            font.pixelSize: Theme.px(12)
+            wrapMode: Text.Wrap
+        }
+        FolderDialog {
+            id: parentDialog
+            title: "Where the new folder goes"
+            currentFolder: "file://" + dlg.newParent
+            onAccepted: dlg.newParent = decodeURIComponent(selectedFolder.toString().replace(/^file:\/\//, "")).replace(/\/+$/, "") || "/"
         }
 
         FormLabel { text: "Agent"; Layout.topMargin: 10 }

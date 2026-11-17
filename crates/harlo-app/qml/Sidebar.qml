@@ -158,11 +158,18 @@ Rectangle {
 
     RemoveProjectDialog { id: removeProjectDialog }
     WorktreeDialogs { id: worktreeDialogs }
-    WorkflowDialog { id: workflowDialog; onEditRequested: root.settingsPageRequested("workflows") }
+    WorkflowDialog {
+        id: workflowDialog
+        onEditRequested: root.settingsPageRequested("workflows")
+        // (Started from a new session's message: that draft is done with.)
+        onStarted: if (fromDraft) root.draftWorkflowStarted()
+    }
     // For the command palette.
     /// Settings → Projects, on this project.
     signal projectSettingsRequested(int projectId)
     signal settingsPageRequested(string page)
+    // A run started from a new session's message.
+    signal draftWorkflowStarted()
     /// Open the new-session page for a project (-1: home folder).
     signal newSessionRequested(int projectId)
     /// Export a session as Markdown (the window asks where).
@@ -174,6 +181,7 @@ Rectangle {
     property alias trashDialog: trashDialog
     property alias worktreeDialogs: worktreeDialogs
     property alias workflowDialog: workflowDialog
+    property alias addProjectDialog: addProjectDialog
     function openAddProject() { addProjectDialog.open() }
     // Test hook.
     property alias remoteFolderDialog: remoteFolderDialog

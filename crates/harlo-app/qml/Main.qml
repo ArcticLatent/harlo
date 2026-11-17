@@ -465,6 +465,7 @@ ApplicationWindow {
                     onManageInstancesRequested: settingsDialog.openPage("remote")
                     onProjectSettingsRequested: projectId => settingsDialog.openProject(projectId)
                     onSettingsPageRequested: page => settingsDialog.openPage(page)
+                    onDraftWorkflowStarted: chat.draftView.workflowStarted()
                     onNewSessionRequested: projectId => win.openDraft(projectId)
                     onExportRequested: (key, title) => win.exportMarkdown(key, title)
                     onSearchMessagesRequested: text => searchDialog.openSearch(text)
@@ -483,6 +484,10 @@ ApplicationWindow {
             ChatView {
                 id: chat
                 onAddProjectRequested: sidebar.openAddProject()
+                onWorkflowRequested: (projectId, task, agent, model) => {
+                    const p = JSON.parse(Workspace.projectsJson()).find(x => x.id === projectId)
+                    if (p) sidebar.workflowDialog.showFor(p.id, p.name, p.harness, task, agent, model)
+                }
                 onSignInOnHost: (agent, host) => signInDialog.openFor(agent + "@" + host, Theme.harnessLabel(agent) + " on " + host)
                 SplitView.fillHeight: true
                 SplitView.minimumHeight: 200

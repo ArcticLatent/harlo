@@ -10080,16 +10080,19 @@ Item {
         ScriptAction { script: {
             const d = sidebar.workflowDialog
             tests.check(d.visible && d.title.indexOf("Run a workflow in") === 0, "the project menu opens Run a workflow (" + d.title + ")")
-            tests.check(d.flowBox.currentText === "Implement and verify" && tests.findText("Implement  →  Tests  →  Review", d.contentItem) !== null, "it offers Implement and verify first, its stages under it (" + d.flowBox.currentText + ")")
+            tests.check(d.flowBox.currentText === "Implement and verify" && tests.findName("workflowPickStages").text.indexOf("Implement  →  ") === 0, "it offers Implement and verify first, its stages under it (" + d.flowBox.currentText + ", " + tests.findName("workflowPickStages").text + ")")
             tests.check(d.implementerBox.currentText === "Harlo" && d.reviewerBox.currentText === "Claude", "Harlo implements and Claude reviews by default (" + d.implementerBox.currentText + ", " + d.reviewerBox.currentText + ")")
-            tests.check(!tests.findName("workflowStart").enabled, "Start waits for a task and a test command")
+            tests.check(!tests.findName("workflowStart").enabled, "Start waits for a task")
+            tests.check(d.repoState === "ready" && !tests.shown(tests.findName("workflowNoGit")) && !tests.shown(tests.findName("workflowNoCommits")), "a repository with commits needs nothing more (" + d.repoState + ")")
             d.taskArea.text = "Write greet.txt greeting the user"
             d.criteriaArea.text = "- greet.txt says hello!"
             d.testField.text = "" } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
-            tests.check(!tests.findName("workflowStart").enabled, "no test command, no Start")
+            tests.check(tests.findName("workflowStart").enabled, "with no test command it can still start")
+            tests.check(tests.findName("workflowPickStages").text === "Implement  →  Review    (Tests left out: no test command)", "and the stages say its tests are left out (" + tests.findName("workflowPickStages").text + ")")
             sidebar.workflowDialog.testField.text = tests.workflowTests
+            tests.check(tests.findName("workflowPickStages").text === "Implement  →  Tests  →  Review", "given one, they're back (" + tests.findName("workflowPickStages").text + ")")
             tests.check(sidebar.workflowDialog.testField.cursorPosition === 0, "a long test command shows where it starts")
             tests.check(tests.findName("workflowStart").accent, "Start is the dialog's main button")
             const d = sidebar.workflowDialog
@@ -10350,6 +10353,15 @@ Item {
             tests.log("open said:", tests.workflowOpenTried, "instance:", Workspace.instance)
             tests.check(tests.shown(tests.findName("workflowCard", chat)) && tests.findText("Done: Tests passed · Review approved", tests.findName("workflowCard", chat)) !== null, "its card says it's done")
             tests.shotWindow("clicks-workflow-remote-done")
+            // What git needs, read on box: its repository is ready; a folder
+            // there with a file and no git isn't.
+            const proj = JSON.parse(Workspace.projectsJson()).find(x => x.path === "box:" + win.argValue("--cwd="))
+            const ready = proj ? JSON.parse(Workspace.projectRepoState(proj.id)) : {}
+            tests.check(ready.state === "ready", "box's repository is ready for a run (" + JSON.stringify(ready) + ")")
+            Workspace.addProject("ssh://box" + win.argValue("--cwd=").replace(/\/[^\/]+$/, "/plain"))
+            const plain = JSON.parse(Workspace.projectsJson()).find(x => x.path === "box:" + win.argValue("--cwd=").replace(/\/[^\/]+$/, "/plain"))
+            const state = plain ? JSON.parse(Workspace.projectRepoState(plain.id)) : {}
+            tests.check(state.state === "no-git" && state.files === true, "a folder on box with a file and no git is seen as one (" + JSON.stringify(state) + ")")
             tests.summary(); Qt.quit() } }
     }
 
@@ -10679,17 +10691,26 @@ Item {
             tests.check(mine && mine.stages[0].agent.harness === "harlo" && mine.stages[0].agent.model.indexOf("fake-helper") >= 0, "and its implementation keeps its agent and model")
             tests.check(tests.findText("Careful", settingsDialog.contentItem) !== null, "and listed")
             settingsDialog.close()
-            const p = JSON.parse(Workspace.projectsJson())[0]
-            sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = p.path; sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
-            sidebar.projectMenu.popup(sidebar, 120, 160) } }
+            // Started from a new session's message: Run as workflow.
+            win.openDraft(JSON.parse(Workspace.projectsJson())[0].id)
+            chat.draftView.harness = "harlo"
+            chat.draftView.input.text = "Write greet.txt greeting the user" } }
         PauseAnimation { duration: 400 }
-        ScriptAction { script: tests.clickItem(tests.findText("Run a workflow…"), "the project menu's Run a workflow…") }
+        ScriptAction { script: {
+            const b = tests.findName("draftWorkflowButton")
+            tests.check(tests.shown(b) && b.enabled, "a new session with a task and a project offers Run as workflow")
+            const hint = tests.findName("draftStartHint")
+            tests.check(!hint || hint.text === "" || hint.contentWidth <= hint.width + 1, "the start hint fits beside the buttons, or isn't there (" + (hint ? hint.text + " " + hint.contentWidth + "/" + hint.width : "") + ")")
+            tests.shotWindow("clicks-workflow-draft") } }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: tests.clickItem(tests.findName("draftWorkflowButton"), "Run as workflow") }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const d = sidebar.workflowDialog
+            tests.check(d.visible && d.fromDraft && d.taskArea.text === "Write greet.txt greeting the user" && d.title === "Run a workflow in " + JSON.parse(Workspace.projectsJson())[0].name,
+                        "it opens the start dialog with the message as the task, in the session's project (" + d.title + ", " + d.taskArea.text + ")")
             d.flowBox.currentIndex = d.flows.findIndex(f => f.name === "Careful")
             d.flowBox.activated(d.flowBox.currentIndex)
-            d.taskArea.text = "Write greet.txt greeting the user"
             d.criteriaArea.text = "- greet.txt says hello!"
             d.testField.text = tests.workflowTests } }
         PauseAnimation { duration: 300 }
@@ -10708,6 +10729,7 @@ Item {
             const card = tests.findName("workflowCard", chat)
             const out = tests.findName("workflowLiveOutput", card)
             tests.check(tests.shown(out) && out.text.indexOf("counting words") >= 0 && tests.findContaining("Short running", card) !== null, "a running check's output shows on the card as it comes")
+            tests.check(chat.draftView.input.text === "" && !Workspace.tabs.some(t => t.startsWith("view:new\t")), "the new session's message went into the run: the draft is cleared and its tab closed")
             tests.shotWindow("clicks-workflow-live-check") } }
         ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => !!tests.workflowRun() && tests.workflowRun().state === "done", 120000) }
         PauseAnimation { duration: 600 }
@@ -10764,6 +10786,109 @@ Item {
             tests.check(r.log.some(e => e.text.indexOf("Removed the worktree and the merged branch") === 0), "its worktree and merged branch are removed (" + r.log[r.log.length - 1].text + ")")
             tests.check(r.worktree !== "" && TestInput.readFile(r.worktree + "/greet.txt") === "", "its folder is gone (" + r.worktree + ")")
             tests.check(r.removed && tests.findText("Merged, worktree removed") !== null || !tests.shown(tests.findName("workflowCard", chat)), "the card, where it still shows, says so")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // A new project from a workflow: Add a project → a new folder (a git
+    // repository with nothing in it) → its new session's message run as a
+    // workflow with no tests yet: an empty first commit is made for the
+    // run's branch, Harlo writes greet.txt, the stand-in claude reviews.
+    // Then a folder with files and no git: the dialog offers git init and
+    // says the run would start without its files.
+    property string workflowNewFolder: ""
+    SequentialAnimation {
+        id: workflowNewSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflownew"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            if (tests.useFakeClaude()) sidebar.openAddProject() } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(sidebar.addProjectDialog.visible, "Add a project opens")
+            tests.clickItem(tests.findName("addProjectNewFolder"), "Or start a new folder…") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = sidebar.addProjectDialog
+            tests.check(d.creating && d.newParent !== "" && tests.shown(tests.findName("addProjectNewName")), "it asks for the new folder's name, and where (" + d.newParent + ")")
+            tests.check(!tests.findName("addProjectAdd").enabled, "Add waits for a name")
+            d.newFolderName.text = "greeter"
+            const agent = tests.findName("addProjectAgent-harlo")
+            if (agent) tests.clickItem(agent, "Harlo")
+            tests.workflowNewFolder = d.newParent + "/greeter" } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const add = tests.findName("addProjectAdd")
+            tests.check(add.enabled && add.text === "Create and add", "Add reads Create and add (" + add.text + ")")
+            tests.shotPopup(sidebar.addProjectDialog, "clicks-new-project-folder")
+            tests.clickItem(add, "Create and add") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.projectsJson()).find(x => x.path === tests.workflowNewFolder)
+            tests.check(!sidebar.addProjectDialog.visible && !!p, "the folder is made and added (" + tests.workflowNewFolder + ")")
+            tests.check(TestInput.listDir(tests.workflowNewFolder) === ".git", "a git repository with nothing in it (" + TestInput.listDir(tests.workflowNewFolder) + ")")
+            const repo = p ? JSON.parse(Workspace.projectRepoState(p.id)) : {}
+            tests.check(repo.state === "no-commits" && !repo.files, "nothing committed yet, and no files (" + JSON.stringify(repo) + ")")
+            tests.check(chat.draftView.visible && chat.draftView.project && chat.draftView.project.id === p.id, "its new session opens")
+            chat.draftView.harness = "harlo"
+            chat.draftView.input.text = "Write greet.txt greeting the user" } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: tests.clickItem(tests.findName("draftWorkflowButton"), "Run as workflow") }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            tests.check(d.visible && d.fromDraft && d.taskArea.text === "Write greet.txt greeting the user", "the message opens the start dialog as its task")
+            tests.check(d.repoState === "no-commits" && tests.shown(tests.findName("workflowNoCommits")) && !tests.shown(tests.findName("workflowNoGit")), "it says an empty first commit will be made")
+            tests.check(d.testField.text === "", "an empty folder has no test command to guess (" + d.testField.text + ")")
+            tests.check(tests.findName("workflowPickStages").text.indexOf("Implement  →  Review") === 0, "so its stages leave the tests out (" + tests.findName("workflowPickStages").text + ")")
+            tests.check(tests.findName("workflowStart").enabled, "and it can start without one")
+            d.criteriaArea.text = "- greet.txt says hello!"
+            tests.shotWindow("clicks-workflow-new-project") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.clickItem(tests.findName("workflowStart"), "Start") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.check(!!r && !sidebar.workflowDialog.visible, "the run starts (" + (r ? r.branch : "none") + ")")
+            tests.check(r && JSON.stringify(r.stages.map(s => s.label)) === JSON.stringify(["Implement", "Review"]), "with no tests, it goes straight from the implementation to the review (" + (r ? r.stages.map(s => s.label) : "") + ")")
+            const p = JSON.parse(Workspace.projectsJson()).find(x => x.path === tests.workflowNewFolder)
+            tests.check(JSON.parse(Workspace.projectRepoState(p.id)).state === "ready", "the folder has its first commit now")
+            tests.check(chat.draftView.input.text === "", "the draft's message went into the run") } }
+        ScriptAction { script: tests.waitUntil(workflowNewSteps, () => !!tests.workflowRun() && tests.workflowRun().state === "done", 60000) }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const r = tests.workflowRun()
+            tests.log("workflow log:\n" + r.log.map(e => "#" + e.attempt + " " + e.text).join("\n"))
+            tests.check(r.state === "done" && r.attempt === 2, "the review's changes made, it's done on attempt 2 (" + r.state + ", " + r.attempt + ")")
+            tests.check(TestInput.readFile(r.worktree + "/greet.txt") === "hello!\n", "the worktree has greet.txt")
+            tests.check(TestInput.listDir(tests.workflowNewFolder) === ".git", "the project's own folder is untouched until it's merged")
+            if (!tests.shown(tests.findName("workflowCard", chat))) Workspace.open(r.implementation) } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const card = tests.findName("workflowCard", chat)
+            tests.check(tests.findText("Done: Review approved", card) !== null, "the card says it's done")
+            tests.shotWindow("clicks-workflow-new-project-done")
+            // A folder with a file, not a repository.
+            Workspace.addProject(win.argValue("--cwd=").replace(/\/[^\/]+$/, "/plain"))
+            const p = JSON.parse(Workspace.projectsJson()).find(x => x.name === "plain")
+            tests.check(!!p, "a folder without git is added")
+            if (p) sidebar.workflowDialog.show(p.id, p.name, p.harness)
+            sidebar.workflowDialog.taskArea.text = "Tidy the notes" } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const d = sidebar.workflowDialog
+            const note = tests.findName("workflowNoGit")
+            tests.check(d.repoState === "no-git" && d.folderFiles && tests.shown(note), "the dialog says it isn't a git repository")
+            tests.check(tests.findContaining("without the files here", d.contentItem) !== null, "and that the run would start without its files")
+            tests.check(d.criteriaArea.text === "", "the last project's criteria don't carry over")
+            tests.check(!tests.findName("workflowStart").enabled, "Start waits until you say to make it one")
+            tests.clickItem(tests.findName("workflowMakeRepo"), "Make it a git repository") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.findName("workflowStart").enabled, "then Start can start")
+            tests.check(TestInput.listDir(win.argValue("--cwd=").replace(/\/[^\/]+$/, "/plain")) === "notes.md", "nothing is done to the folder before Start")
+            tests.shotWindow("clicks-workflow-no-git")
+            sidebar.workflowDialog.close()
             tests.summary(); Qt.quit() } }
     }
 

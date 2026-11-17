@@ -63,6 +63,14 @@ Rectangle {
     }
     signal startedSession(string key)
     signal addProjectRequested()
+    // Run as workflow: the start dialog, with the message as the task and
+    // this draft's agent and model as the implementer.
+    signal workflowRequested(int projectId, string task, string agent, string model)
+    /// The workflow started: the draft is done with, as when a session starts.
+    function workflowStarted() {
+        reset()
+        startedSession("")
+    }
     /// Sign this agent in on that host.
     signal signInOnHost(string agent, string host)
 
@@ -897,6 +905,16 @@ Rectangle {
                                 onDelegated: text => root.send(text)
                             }
                         }
+                        // Run as workflow: implement, check and review in a worktree.
+                        ComposerIconButton {
+                            objectName: "draftWorkflowButton"
+                            visible: !root.parallel && root.effectiveHarness !== "demo"
+                            enabled: root.project !== null && root.input.text.trim() !== ""
+                            iconName: "list-check-2"
+                            tip: root.project === null ? "Run as workflow: pick a project first; a run works in a worktree of it"
+                                : "Run as workflow: the agent implements the task in a worktree, then checks and reviews go over it until they pass (type the task first)"
+                            onClicked: root.workflowRequested(root.projectId, root.input.text, root.effectiveHarness, root.activeModel)
+                        }
                         ComposerIconButton {
                             objectName: "draftParallelButton"
                             iconName: "node-tree"
@@ -921,6 +939,7 @@ Rectangle {
                         // Fills the gap; shortens (then vanishes) before Send moves.
                         Label {
                             id: startHint
+                            objectName: "draftStartHint"
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             Layout.preferredWidth: 0
@@ -929,7 +948,9 @@ Rectangle {
                             // (Narrow: the short form, rather than one cut mid-word.)
                             readonly property string full: root.parallel ? "Enter starts " + root.lanes.length + " lanes" : "Enter to start · Shift+Enter for a new line"
                             TextMetrics { id: startHintFull; font: startHint.font; text: startHint.full }
-                            text: root.parallel || width >= startHintFull.advanceWidth ? full : "Enter to start"
+                            TextMetrics { id: startHintShort; font: startHint.font; text: "Enter to start" }
+                            // (No room even for that: nothing, rather than over the buttons.)
+                            text: root.parallel || width >= startHintFull.advanceWidth ? full : width >= startHintShort.advanceWidth ? "Enter to start" : ""
                             color: Theme.muted
                             font.pixelSize: Theme.px(11)
                         }

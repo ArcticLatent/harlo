@@ -400,6 +400,103 @@ pub fn looks_like_repo(dir: &Path) -> bool {
     !crate::remote::is_remote(dir) && dir.ancestors().any(|d| d.join(".git").exists())
 }
 
+/// Makes a new folder `name` in `parent` (on this computer), a git repository.
+///
+/// For a new project: the folder mustn't exist yet. When git can't set it
+/// up, the folder it just made goes again.
+///
+/// # Errors
+///
+/// When the name isn't a plain folder name, `parent` isn't a folder, a file
+/// or folder of that name is there already, or the folder or the repository
+/// can't be made (what git or the system said).
+pub fn new_repo_folder(parent: &Path, name: &str) -> Result<PathBuf> {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+        bail!("Give the folder a name, without slashes.");
+    }
+    if !parent.is_dir() {
+        bail!("{} isn't a folder.", parent.display());
+    }
+    let folder = parent.join(name);
+    if folder.symlink_metadata().is_ok() {
+        bail!("{name} is already in {}.", parent.display());
+    }
+    std::fs::create_dir(&folder).with_context(|| format!("making {}", folder.display()))?;
+    let mut cmd = git(&folder);
+    cmd.args(["init", "-q"]);
+    if let Err(e) = run_ok(&cmd) {
+        // (Only what was just made: a new folder, perhaps a partial .git.)
+        let _ = std::fs::remove_dir_all(&folder);
+        return Err(e.context("setting up git in the new folder"));
+    }
+    Ok(folder)
+}
+
+/// Whether a folder can have worktrees: a repository with a first commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoState {
+    /// A repository with at least one commit.
+    Ready,
+    /// A repository, but nothing committed yet (a branch with no commit).
+    NoCommits,
+    /// Not in a repository.
+    NotRepo,
+}
+
+/// What `dir` is, git-wise (here or on its host).
+#[must_use]
+pub fn repo_state(dir: &Path) -> RepoState {
+    if repo_root(dir).is_none() {
+        RepoState::NotRepo
+    } else if output_in(dir, &["rev-parse", "--verify", "-q", "HEAD"]).trim().is_empty() {
+        RepoState::NoCommits
+    } else {
+        RepoState::Ready
+    }
+}
+
+/// Whether `dir` (here or on its host) holds anything besides `.git`.
+///
+/// A folder that can't be read counts as empty.
+#[must_use]
+pub fn has_files(dir: &Path) -> bool {
+    if crate::remote::is_remote(dir) {
+        return crate::remote::list_dir(dir).is_ok_and(|entries| entries.iter().any(|e| e.name != ".git"));
+    }
+    std::fs::read_dir(dir).is_ok_and(|mut entries| entries.any(|e| e.is_ok_and(|e| e.file_name() != ".git")))
+}
+
+/// Makes `dir` ready for worktrees: a repository with a first commit.
+///
+/// A folder that isn't in a repository gets `git init`; a repository with
+/// no commit gets an empty first one on its branch, made without the index,
+/// so nothing staged or in the folder goes into it.
+///
+/// # Errors
+///
+/// What git said (no name and email set for the commit, say), or why it
+/// couldn't be run.
+pub fn make_ready(dir: &Path, message: &str) -> Result<()> {
+    if repo_state(dir) == RepoState::NotRepo {
+        let mut cmd = git(dir);
+        cmd.args(["init", "-q"]);
+        run_ok(&cmd)?;
+    }
+    if repo_state(dir) == RepoState::NoCommits {
+        let mut cmd = git(dir);
+        cmd.args(["hash-object", "-t", "tree", "/dev/null"]);
+        let tree = run_ok(&cmd)?.trim().to_owned();
+        let mut cmd = git(dir);
+        cmd.args(["commit-tree", &tree, "-m", message]);
+        let commit = run_ok(&cmd)?.trim().to_owned();
+        let mut cmd = git(dir);
+        cmd.args(["update-ref", "HEAD", &commit]);
+        run_ok(&cmd)?;
+    }
+    Ok(())
+}
+
 /// The repository containing `dir`, or `None` if it is not in one.
 pub fn repo_root(dir: &Path) -> Option<PathBuf> {
     let mut cmd = git(dir);
@@ -1656,6 +1753,54 @@ pub fn branch_slug(branch: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_new_project_folder_is_a_repository_and_never_replaces_one() {
+        let parent = std::env::temp_dir().join(format!("harlo-new-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&parent).unwrap();
+        let made = new_repo_folder(&parent, "  my-app ").expect("made");
+        assert_eq!(made, parent.join("my-app"));
+        assert!(made.join(".git").is_dir());
+        assert_eq!(repo_root(&made).map(|r| r.canonicalize().unwrap()), Some(made.canonicalize().unwrap()));
+        // Not over one that's there, nor with a path for a name.
+        std::fs::write(made.join("keep.txt"), "mine").unwrap();
+        assert!(new_repo_folder(&parent, "my-app").unwrap_err().to_string().contains("already"));
+        assert_eq!(std::fs::read_to_string(made.join("keep.txt")).unwrap(), "mine");
+        for bad in ["", " ", "..", "a/b"] {
+            assert!(new_repo_folder(&parent, bad).is_err(), "{bad:?}");
+        }
+        new_repo_folder(&parent.join("missing"), "x").unwrap_err();
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn a_folder_is_made_ready_for_worktrees_without_committing_its_files() {
+        let dir = std::env::temp_dir().join(format!("harlo-ready-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!has_files(&dir));
+        std::fs::write(dir.join("notes.md"), "mine").unwrap();
+        assert!(has_files(&dir));
+        assert_eq!(repo_state(&dir), RepoState::NotRepo);
+        sh(&dir, &["init", "-q"]);
+        sh(&dir, &["add", "notes.md"]);
+        assert_eq!(repo_state(&dir), RepoState::NoCommits);
+        // (The test's own identity: a machine without one gets git's message.)
+        sh(&dir, &["config", "user.name", "Test"]);
+        sh(&dir, &["config", "user.email", "test@example.com"]);
+        make_ready(&dir, "Start").expect("ready");
+        assert_eq!(repo_state(&dir), RepoState::Ready);
+        // The first commit is empty: the staged file stays staged, not committed.
+        assert_eq!(output_in(&dir, &["ls-tree", "-r", "--name-only", "HEAD"]).trim(), "");
+        assert_eq!(output_in(&dir, &["diff", "--cached", "--name-only"]).trim(), "notes.md");
+        assert_eq!(output_in(&dir, &["log", "--format=%s"]).trim(), "Start");
+        // Ready already: nothing more.
+        make_ready(&dir, "Again").unwrap();
+        assert_eq!(output_in(&dir, &["rev-list", "--count", "HEAD"]).trim(), "1");
+        // `.git` alone doesn't count.
+        std::fs::remove_file(dir.join("notes.md")).unwrap();
+        assert!(!has_files(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_turn_is_undone_to_its_snapshot() {
         let root = repo("turns");

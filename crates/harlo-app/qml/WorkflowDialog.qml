@@ -14,6 +14,17 @@ AppDialog {
     property var flows: []
     readonly property var flow: flows[flowBox.currentIndex] || null
     signal editRequested()
+    // A run started (from the dialog's Start).
+    signal started()
+    // Opened from a new session's message (Run as workflow).
+    property bool fromDraft: false
+    // The project's folder, git-wise: "ready", "no-commits" (an empty first
+    // commit is made at the start) or "no-git" (it's made a repository only
+    // when you say so).
+    property string repoState: "ready"
+    /// Not ready and holding files: the run's branch would start without them.
+    property bool folderFiles: false
+    property alias makeRepo: makeRepoSwitch.checked
     // Test hooks.
     property alias taskArea: taskArea
     property alias criteriaArea: criteriaArea
@@ -80,7 +91,34 @@ AppDialog {
         Qt.callLater(pickImplementerModel)
     }
 
+    /// Opens it from a new session: the message as the task, the session's
+    /// agent and model as the implementer's.
+    function showFor(id, name, harness, task, agent, model) {
+        show(id, name, harness)
+        fromDraft = true
+        taskArea.text = task
+        // (A workflow that names its implementer keeps it.)
+        const own = flow && flow.stages.length > 0 && flow.stages[0].agent.harness !== ""
+        if (!own && agent !== "" && providers.some(p => p.id === agent)) {
+            implementerBox.currentIndex = providers.findIndex(p => p.id === agent)
+            pendingModels = Object.assign({}, pendingModels, { implementer: model })
+            askHost(agent)
+            Qt.callLater(pickImplementerModel)
+        }
+        criteriaArea.forceActiveFocus()
+    }
+
     function show(id, name, harness) {
+        fromDraft = false
+        const repo = JSON.parse(Workspace.projectRepoState(id))
+        repoState = repo.state
+        folderFiles = repo.files
+        makeRepoSwitch.checked = false
+        // (Another project's task and criteria don't carry over.)
+        if (id !== projectId) {
+            taskArea.text = ""
+            criteriaArea.text = ""
+        }
         projectId = id
         title = qsTr("Run a workflow in %1").arg(name)
         const project = JSON.parse(Workspace.projectsJson()).find(p => p.id === id)
@@ -138,14 +176,18 @@ AppDialog {
             workflow: flow ? flow.id : "", task: taskArea.text, criteria: criteriaArea.text, testCommand: testField.text,
             implementer: implementerAgent, implementerModel: implementerModel,
             reviewer: reviewerAgent, reviewerModel: reviewing ? reviewerModel : "",
-            approval: approvalModes[approvalBox.currentIndex]
+            approval: approvalModes[approvalBox.currentIndex],
+            prepare: repoState === "no-commits" || repoState === "no-git" && makeRepo
         }))
         problem.text = err
         if (err === "") {
             Workspace.setSetting("workflow_implementer_" + projectId, implementerAgent + "\t" + implementerModel)
             if (reviewing)
                 Workspace.setSetting("workflow_reviewer_" + projectId, reviewerAgent + "\t" + reviewerModel)
+            taskArea.text = ""
+            criteriaArea.text = ""
             close()
+            started()
         }
     }
 
@@ -158,7 +200,8 @@ AppDialog {
             objectName: "workflowStart"
             text: qsTr("Start")
             accent: true
-            enabled: taskArea.text.trim() !== "" && (!dialog.flow || !dialog.flow.needsTestCommand || testField.text.trim() !== "")
+            // (No test command: the checks that would run it are left out.)
+            enabled: taskArea.text.trim() !== "" && (dialog.repoState !== "no-git" || dialog.makeRepo)
             onClicked: dialog.start()
         }
         DialogButton { text: qsTr("Cancel"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
@@ -184,7 +227,13 @@ AppDialog {
         PlainLabel {
             objectName: "workflowPickStages"
             Layout.fillWidth: true
-            text: dialog.flow ? dialog.flow.stages.map(s => s.name).join("  →  ") : ""
+            // (A check of the project's tests is left out while there's no
+            // test command.)
+            readonly property var leftOut: dialog.flow && dialog.testField.text.trim() === ""
+                ? dialog.flow.stages.filter(s => s.kind === "check" && s.command.trim() === "") : []
+            text: !dialog.flow ? ""
+                : dialog.flow.stages.filter(s => leftOut.indexOf(s) < 0).map(s => s.name).join("  →  ")
+                  + (leftOut.length > 0 ? "    " + qsTr("(%1 left out: no test command)").arg(leftOut.map(s => s.name).join(", ")) : "")
             color: Theme.muted
             font.pixelSize: Theme.px(12)
             wrapMode: Text.Wrap
@@ -226,7 +275,7 @@ AppDialog {
             rowSpacing: 8
             Label { visible: testField.visible; text: qsTr("Tests") }
             // (Left: back to its start, so a long command shows where it begins.)
-            AppTextField { id: testField; objectName: "workflowTests"; visible: !dialog.flow || dialog.flow.needsTestCommand; Layout.fillWidth: true; font.family: Theme.mono; placeholderText: qsTr("The command that runs them, e.g. cargo test"); onActiveFocusChanged: if (!activeFocus) cursorPosition = 0; onTextChanged: if (!activeFocus) cursorPosition = 0 }
+            AppTextField { id: testField; objectName: "workflowTests"; visible: !dialog.flow || dialog.flow.needsTestCommand; Layout.fillWidth: true; font.family: Theme.mono; placeholderText: qsTr("The command that runs them, e.g. cargo test (none yet: leave it empty)"); onActiveFocusChanged: if (!activeFocus) cursorPosition = 0; onTextChanged: if (!activeFocus) cursorPosition = 0 }
             Label { text: qsTr("Agent") }
             RowLayout {
                 Layout.fillWidth: true
@@ -275,6 +324,49 @@ AppDialog {
             }
         }
 
+        // A folder that isn't a repository: made one only when you say so.
+        ColumnLayout {
+            objectName: "workflowNoGit"
+            visible: dialog.repoState === "no-git"
+            Layout.fillWidth: true
+            Layout.topMargin: 2
+            spacing: 6
+            PlainLabel {
+                Layout.fillWidth: true
+                text: dialog.folderFiles
+                      ? qsTr("This folder isn't a git repository. A run works in a worktree of one: Harlo can run git init here and make an empty first commit, but the run starts from it without the files here. To have them, commit them yourself first.")
+                      : qsTr("This folder isn't a git repository. A run works in a worktree of one: Harlo can run git init here and make an empty first commit.")
+                color: Theme.warning
+                font.pixelSize: Theme.px(12)
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                PlainLabel {
+                    Layout.fillWidth: true
+                    text: qsTr("Make it a git repository")
+                    font.pixelSize: Theme.px(13)
+                    TapHandler { onTapped: makeRepoSwitch.toggle() }
+                }
+                AppSwitch {
+                    id: makeRepoSwitch
+                    objectName: "workflowMakeRepo"
+                    Accessible.name: qsTr("Make it a git repository")
+                }
+            }
+        }
+        PlainLabel {
+            objectName: "workflowNoCommits"
+            visible: dialog.repoState === "no-commits"
+            Layout.fillWidth: true
+            text: dialog.folderFiles
+                  ? qsTr("Nothing is committed here yet: Harlo makes an empty first commit for the run's branch to start from, so the run won't have the files here. To have them, commit them first.")
+                  : qsTr("Nothing is committed here yet: Harlo makes an empty first commit for the run's branch to start from.")
+            color: dialog.folderFiles ? Theme.warning : Theme.textMuted
+            font.pixelSize: Theme.px(12)
+            wrapMode: Text.Wrap
+        }
         MoreText {
             objectName: "workflowNote"
             Layout.fillWidth: true

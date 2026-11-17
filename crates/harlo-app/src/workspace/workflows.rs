@@ -224,8 +224,11 @@ fn stream(mut cmd: std::process::Command, started: std::time::Instant, live: &dy
 impl Workspace {
     /// Starts a workflow in a project: `form` is `{ workflow, task,
     /// criteria, testCommand, implementer, implementerModel, reviewer,
-    /// reviewerModel, approval }` (`workflow` "": the built-in one). The
-    /// problem, if any ("" once started).
+    /// reviewerModel, approval, prepare }` (`workflow` "": the built-in
+    /// one; `prepare`: the folder may be made a repository with a first
+    /// commit, which a run's worktree needs). A check with no command when
+    /// no test command is given is left out of the run. The problem, if
+    /// any ("" once started).
     pub fn start_workflow(mut self: Pin<&mut Self>, project_id: i32, form: &QString) -> QString {
         let form: Value = serde_json::from_str(&form.to_string()).unwrap_or_default();
         let field = |k: &str| form[k].as_str().unwrap_or_default().trim().to_owned();
@@ -235,7 +238,7 @@ impl Workspace {
         if !self.orchestration_on {
             return QString::from("Workflows need Teamwork on (Settings → Teamwork).");
         }
-        let Some(definition) = self.workflow_definition(&field("workflow")) else {
+        let Some(mut definition) = self.workflow_definition(&field("workflow")) else {
             return QString::from("That workflow isn't saved any more: pick another.");
         };
         if let Err(why) = definition.validate() {
@@ -245,8 +248,22 @@ impl Workspace {
         if task.is_empty() {
             return QString::from("Say what to implement.");
         }
+        // (No tests yet, as in a new project: the checks that would run
+        // them are left out, unless nothing would be left to check.)
         if test_command.is_empty() && definition.needs_test_command() {
-            return QString::from("Give the command that runs the project's tests.");
+            definition.stages.retain(|s| s.kind != StageKind::Check || !s.command.trim().is_empty());
+            if definition.validate().is_err() {
+                return QString::from("Give the command that runs the project's tests.");
+            }
+        }
+        match git::repo_state(&project.path) {
+            git::RepoState::Ready => {}
+            _ if form["prepare"] != true => return QString::from("The project's folder needs to be a git repository with a commit for a run's worktree."),
+            _ => {
+                if let Err(e) = git::make_ready(&project.path, "Start") {
+                    return QString::from(&format!("Couldn't set up git in the project's folder: {e:#}"));
+                }
+            }
         }
         let agent = |name: &str, model: &str, fallback: &str| {
             let harness = HarnessKind::parse(&field(name)).map_or_else(|| fallback.to_owned(), |k| k.as_str().to_owned());
@@ -273,6 +290,20 @@ impl Workspace {
         self.as_mut().keep_workflow(run);
         self.as_mut().do_workflow(&id, actions);
         QString::default()
+    }
+
+    pub fn project_repo_state(&self, project_id: i32) -> QString {
+        let Some(project) = self.projects.iter().find(|p| p.id == i64::from(project_id)) else {
+            return QString::from(&json!({ "state": "no-git", "files": false }).to_string());
+        };
+        let state = git::repo_state(&project.path);
+        let name = match state {
+            git::RepoState::Ready => "ready",
+            git::RepoState::NoCommits => "no-commits",
+            git::RepoState::NotRepo => "no-git",
+        };
+        let files = state != git::RepoState::Ready && git::has_files(&project.path);
+        QString::from(&json!({ "state": name, "files": files }).to_string())
     }
 
     /// The test command a project's workflow runs: the last one used,
