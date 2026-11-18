@@ -38,7 +38,7 @@ ureq = { workspace = true, features = ["platform-verifier"] }
 sha2.workspace = true
 harlo-update-signing.workspace = true
 # The wiki's reading tools (search, read, linked wikis), native.
-harlo-wiki.workspace = true
+harlo-okf.workspace = true
 # Phone pairing: NaCl box (X25519 + XSalsa20-Poly1305), as the phone's tweetnacl.
 crypto_box = { workspace = true, features = ["std"] }
 base64.workspace = true
@@ -46,7 +46,6 @@ libc.workspace = true
 
 [dev-dependencies]
 # Tests read fixture wikis only, never the user's linked ones.
-harlo-wiki = { workspace = true, features = ["test-util"] }
 # Signs stand-in release manifests in the update tests.
 ed25519-dalek = { workspace = true, features = ["std"] }
 

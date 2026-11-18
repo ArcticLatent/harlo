@@ -291,13 +291,26 @@ ColumnLayout {
             function set(name, on) { Workspace.setSetting(name + "_" + pid, on ? "1" : "0"); rev++ }
             SettingRow {
                 title: "Wiki"
-                detail: "A wiki of this project in openwiki/, written by your agent from the code. Agents search it and read the sections they need. On unless you switch it off."
-                more: "Create and update it from the Wiki panel (right edge); each run spends the tokens of the model that writes it (Settings → Wiki). Its pages and tools follow OpenWiki's (MIT), built into harlo."
+                detail: "A wiki of this project in .okf/, written by your agent from the code. Agents are pointed to it and read the pages they need. On unless you switch it off."
+                more: "Create and update it from the Wiki panel (right edge); each run spends the tokens of the model that writes it (Settings → Wiki). Its pages are Open Knowledge Format, each claim footnoted with the code it comes from."
                 icon: "book-open"
                 AppSwitch {
                     objectName: "projectWiki"
                     checked: featureGroup.on("wiki", true)
                     onToggled: featureGroup.set("wiki", checked)
+                }
+            }
+            SettingRow {
+                divider: true
+                visible: featureGroup.on("wiki", true)
+                title: "Keep it current as you work"
+                detail: "When this project's sessions go quiet after changing code, harlo checks the wiki and updates it in the background if the code moved past it."
+                more: "The check needs no model; each update is a session of the wiki's writer (Settings → Wiki) and spends its tokens. Without this, the Wiki panel shows what's out of date and offers Update when work is merged. Off unless you switch it on."
+                icon: "refresh"
+                AppSwitch {
+                    objectName: "projectWikiKeep"
+                    checked: featureGroup.on("wiki_keep", false)
+                    onToggled: featureGroup.set("wiki_keep", checked)
                 }
             }
             SettingRow {

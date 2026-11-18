@@ -300,19 +300,21 @@ final class HarloUITests: XCTestCase {
         audit("plan")
     }
 
-    /// The project's wiki from the session menu: how fresh it is, its
-    /// pages by folder, a page (a diagram drawn, code in a well), the
-    /// pages' graph, and a search that opens its section.
+    /// The project's wiki from the session menu: what it owes the code, its
+    /// pages by folder, a page (what it owes, a diagram drawn, code in a
+    /// well, its footnotes), the pages' graph, and a search that opens its
+    /// section.
     func test09bWiki() {
         launch("plan")
         openMain()
         app.buttons["Session menu"].tap()
         tap("Wiki")
         XCTAssertTrue(app.navigationBars["Wiki"].waitForExistence(timeout: 8), "the wiki opens")
-        see("1 commit since")
+        see("2 footnotes' code changed")
         see("Update the wiki")
         shot("15b-wiki")
-        see("Quickstart")
+        see("Overview")
+        see("2 things to do")
         see("Architecture")
         // (Below the fold with large text.)
         let workflows = element("Workflows")
@@ -342,18 +344,21 @@ final class HarloUITests: XCTestCase {
             if row.exists && row.isHittable { row.tap() }
             _ = meta.waitForExistence(timeout: 5)
         }
-        see("checked against the code")
+        see("reviewed by sam")
+        see("Footnote 1: its code changed since the page was written (src/projects.rs)")
+        see("Check this page")
+        see("Mark reviewed")
         see("Rebuilding rows")
         see("Diagram", timeout: 15)
         shot("15e-wiki-page")
         audit("wiki-page")
-        // Its sources: the files and lines its claims come from.
-        let source = app.descendants(matching: .any)["wikiSource"].firstMatch
-        for _ in 0..<6 where !(source.exists && source.isHittable) { app.swipeUp() }
-        XCTAssertTrue(source.waitForExistence(timeout: 5), "the page's sources")
-        see("src/sidebar.rs")
-        see("lines 1–2, 4–9")
-        shot("15g-wiki-sources")
+        // Its footnotes: the code each claim comes from, at its lines now.
+        let footnote = app.descendants(matching: .any)["wikiFootnote"].firstMatch
+        for _ in 0..<6 where !(footnote.exists && footnote.isHittable) { app.swipeUp() }
+        XCTAssertTrue(footnote.waitForExistence(timeout: 5), "the page's footnotes")
+        see("src/sidebar.rs, fn merge_by_key")
+        see("Linked from")
+        shot("15g-wiki-footnotes")
         // Back in the graph: the page read last is ringed, and a page's
         // box opens it. (The search stays, back from a page.)
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -364,13 +369,13 @@ final class HarloUITests: XCTestCase {
         let readLast = boxes.matching(NSPredicate(format: "label == %@", "Read Sidebar, read last")).firstMatch
         XCTAssertTrue(readLast.waitForExistence(timeout: 15), "the graph rings the page read last")
         shot("15h-wiki-graph-read-last")
-        let quick = boxes.matching(NSPredicate(format: "label == %@", "Read Quickstart")).firstMatch
-        XCTAssertTrue(quick.waitForExistence(timeout: 5), "the quickstart's box")
-        quick.tap()
-        XCTAssertTrue(app.navigationBars["Quickstart"].waitForExistence(timeout: 8), "a box opens its page")
+        let overview = boxes.matching(NSPredicate(format: "label == %@", "Read Overview")).firstMatch
+        XCTAssertTrue(overview.waitForExistence(timeout: 5), "the overview's box")
+        overview.tap()
+        XCTAssertTrue(app.navigationBars["Overview"].waitForExistence(timeout: 8), "a box opens its page")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         tap("Pages")
-        // A search: OpenWiki's sections, a result opening its page.
+        // A search: the pages' sections, a result opening its page.
         let field = app.searchFields["Search the wiki"]
         XCTAssertTrue(field.waitForExistence(timeout: 8), "the wiki's search")
         field.tap()
@@ -385,9 +390,9 @@ final class HarloUITests: XCTestCase {
         // (Opened at the section found, its heading on screen.)
         XCTAssertTrue(app.navigationBars["Sidebar"].waitForExistence(timeout: 8), "the result opens its page")
         see("Rebuilding rows")
-        // A link in its text to the code opens the file there.
-        let code = app.links.matching(NSPredicate(format: "label CONTAINS %@", "sidebar.rs")).firstMatch
-        XCTAssertTrue(code.waitForExistence(timeout: 8), "the page's link to the code")
+        // A footnote's mark in its text opens its code there.
+        let code = app.links.matching(NSPredicate(format: "label CONTAINS %@", "[2]")).firstMatch
+        XCTAssertTrue(code.waitForExistence(timeout: 8), "the section's footnote mark")
         code.tap()
         see("In src")
     }

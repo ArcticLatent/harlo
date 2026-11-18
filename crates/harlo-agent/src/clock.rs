@@ -73,6 +73,12 @@ pub fn local(unix: i64) -> Local {
     at(unix, false)
 }
 
+/// Now in UTC, as ISO 8601 (`2026-11-18T04:05:06Z`).
+pub fn utc_now() -> String {
+    let t = at(unix_now(), true);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", t.year, t.month, t.day, t.hour, t.minute, t.second)
+}
+
 impl Local {
     /// `2026-11-07 (Saturday)`.
     pub fn date(&self) -> String {

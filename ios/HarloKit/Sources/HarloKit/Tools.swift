@@ -26,12 +26,9 @@ public enum ToolName {
         "plan_set": "Plan", "plan_read": "Read the plan", "plan_start": "Start a step", "plan_done": "Finish a step",
     ]
 
-    /// The project wiki's tools (OpenWiki's).
+    /// The project wiki's tool (a wiki session's).
     static let wiki: [String: String] = [
-        "openwiki_search": "Search the wiki", "openwiki_read": "Read the wiki", "openwiki_list_workspaces": "List wiki workspaces",
-        "openwiki_list_wikis": "List linked wikis", "openwiki_begin": "Start the wiki run", "openwiki_submit_plan": "Plan the wiki",
-        "openwiki_next_page": "Next wiki page", "openwiki_inspect_page_claims": "Check a page's claims", "openwiki_submit_page": "Write a wiki page",
-        "openwiki_finish": "Finish the wiki",
+        "wiki_check": "Check the wiki",
     ]
 
     /// A tool's name without harlo's prefix (`mcp__harlo__x`, `harlo_x`;

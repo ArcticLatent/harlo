@@ -80,5 +80,4 @@ package() {
     install -Dm644 crates/harlo-app/icons/PASEO-NOTICE "$pkgdir/usr/share/licenses/$pkgname/paseo-NOTICE"
     install -Dm644 crates/harlo-app/sounds/NOTICE "$pkgdir/usr/share/licenses/$pkgname/sounds-NOTICE"
     install -Dm644 crates/harlo-app/sounds/CC-BY-SA-4.0.txt "$pkgdir/usr/share/licenses/$pkgname/sounds-CC-BY-SA-4.0.txt"
-    install -Dm644 crates/harlo-wiki/LICENSE-OPENWIKI "$pkgdir/usr/share/licenses/$pkgname/openwiki-LICENSE"
 }

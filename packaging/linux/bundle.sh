@@ -61,8 +61,6 @@ install -Dm644 crates/harlo-app/icons/providers/LOBEHUB-LICENSE "$LIC/provider-l
 install -Dm644 crates/harlo-app/icons/providers/OPENCODE-LICENSE "$LIC/provider-logos-opencode-LICENSE"
 install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$LIC/tweetnacl-LICENSE"
 install -Dm644 crates/harlo-app/assets/mermaid/LICENSE "$LIC/mermaid-LICENSE"
-# (The wiki is ported from OpenWiki, MIT.)
-install -Dm644 crates/harlo-wiki/LICENSE-OPENWIKI "$LIC/openwiki-LICENSE"
 for f in crates/harlo-app/fonts/*LICENSE* crates/harlo-app/fonts/*OFL*; do [ -f "$f" ] && install -Dm644 "$f" "$LIC/fonts-$(basename "$f")"; done
 # (Qt's own licences: LGPLv3, linked dynamically.)
 [ -d "$QTDIR/../../Licenses" ] && cp -r "$QTDIR/../../Licenses" "$LIC/qt" || true

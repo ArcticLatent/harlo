@@ -4,12 +4,14 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// The wiki of the active session's repository, kept by OpenWiki in its
-// openwiki/ folder: its pages by folder, each read here (links between
-// pages open in the panel, with Back; links to code open the file at their
-// lines), a search, the pages' links drawn as a graph, and how fresh it is.
-// Create, Update and Continue start a session that writes it with the
-// project's agent; the result shows in Changes like any edit.
+// The wiki of the active session's repository: Open Knowledge Format pages
+// in its .okf/ folder, by folder (a filter by type), each read here (links
+// between pages open in the panel, with Back; a footnote opens the code it
+// cites, marked when that code changed since), a search, the pages' links
+// drawn as a graph, and what the wiki owes the code now. Create and Update
+// start a session that writes it with the project's agent; harlo checks
+// first, with no model, and an update with nothing owed starts none. The
+// result shows in Changes like any edit.
 Rectangle {
     id: root
     /// The active session's key, or `project:<id>` on the new-session page.
@@ -47,8 +49,8 @@ Rectangle {
     property string shownRoot: ""
     /// Who writes it (Settings → Wiki, else the project's agent and model).
     property var writer: ({})
-    /// The last update was harlo's, with no model: nothing was stale.
-    readonly property bool quiet: !!st.quiet
+    /// What the wiki owes the code now (`work`: counts and the list).
+    readonly property var work: st.work || ({ count: 0, current: true })
     /// Who writes a kind of run ("create", "update"): "Written by Harlo
     /// with GPT-5 mini (Settings → Wiki)", or "".
     function writerOf(op) {
@@ -57,25 +59,40 @@ Rectangle {
         const agent = w.agent === "claude" ? "Claude Code" : w.agent === "harlo" ? "Harlo" : w.agent
         return "Written by " + agent + (w.model ? " with " + Theme.modelLabel(w.model) : "") + " (Settings → Wiki)"
     }
-    // (Create's writer; Update's, or Create's again for a first run that stopped.)
     readonly property string writerText: writerOf("create")
-    readonly property string updaterText: writerOf(st.run && st.run.mode === "init" ? "create" : "update")
+    readonly property string updaterText: writerOf("update")
     function load() {
         st = JSON.parse(Workspace.wikiJson(sessionKey))
         writer = JSON.parse(Workspace.wikiWriterJson(sessionKey))
         if (st.root !== "" && st.root !== shownRoot) {
             shownRoot = st.root
-            closePage(); results = null; query = ""; searchField.text = ""; mode = "pages"
+            closePage(); results = null; query = ""; searchField.text = ""; mode = "pages"; typeFilter = ""
+        }
+        // (What it owes changed: the open page reads again, where it was.)
+        const seen = JSON.stringify(st.work || {}) + JSON.stringify(pages.find(p => p.path === openPage) || {})
+        if (seen !== shownWork) {
+            const was = shownWork
+            shownWork = seen
+            if (was !== "" && openPage !== "" && loadingPage === "") {
+                keepY = reader.contentY
+                loadingPage = openPage
+                wantSection = ""
+                Workspace.requestWikiPage(sessionKey, openPage)
+            }
         }
     }
+    /// What the wiki owed when the open page was last read (with that page's row).
+    property string shownWork: ""
+    /// Where the reader was, for a page read again (-1 a page opened afresh).
+    property real keepY: -1
     onSessionKeyChanged: if (visible) load()
     onVisibleChanged: if (visible) load()
     Component.onCompleted: if (visible) load()
-    // While a run writes it, its progress.
+    // What it owes, kept current while it shows (read in the background).
     Timer {
-        interval: 2500
+        interval: 4000
         repeat: true
-        running: root.visible && (!!root.st.running || !!root.st.run)
+        running: root.visible && root.st.project >= 0
         onTriggered: root.load()
     }
     Connections {
@@ -88,7 +105,11 @@ Rectangle {
             root.loadingPage = ""
             root.pageView = JSON.parse(json)
             root.openPage = root.pageView.path
+            const y = root.keepY
+            root.keepY = -1
             reader.contentY = 0
+            // (Read again: back where it was, once its blocks are laid out.)
+            if (y > 0) Qt.callLater(() => { reader.contentY = Math.min(y, Math.max(0, reader.contentHeight - reader.height)) })
             if (root.wantSection !== "") Qt.callLater(root.showSection, root.wantSection)
         }
         function onWikiSearchReady(query, json) {
@@ -100,10 +121,10 @@ Rectangle {
 
     // ---- reading ----
 
-    /// Opens a page (as a search ref or a link names it: "openwiki/x.md",
+    /// Opens a page (as a search ref or a link names it: ".okf/x.md",
     /// "x.md"), at a section when given.
     function openWiki(page, section, keep) {
-        const p = String(page).replace(/^\.?\//, "").replace(/^openwiki\//, "")
+        const p = String(page).replace(/^\.okf\//, "").replace(/^\.?\//, "")
         if (keep && root.openPage !== "") root.history = root.history.concat([{ page: root.openPage, y: reader.contentY }])
         if (p === root.openPage && root.pageView) { root.showSection(section || ""); return }
         root.wantSection = section || ""
@@ -133,6 +154,12 @@ Rectangle {
     /// A link in a page: another page (in the panel), code (in the editor),
     /// a section of this one, or the web.
     function follow(href) {
+        // A footnote: the code it cites, at its lines now.
+        if (href.startsWith("okf-fn:")) {
+            const f = ((root.pageView || {}).footnotes || []).find(x => x.label === decodeURIComponent(href.substring(7)))
+            if (f && f.state !== "gone") root.openFileRequested(root.st.root + "/" + f.path, f.start || 0)
+            return
+        }
         if (href.startsWith("repo://")) {
             const m = /^repo:\/\/([^#]+)(?:#L(\d+))?/.exec(href)
             if (m) root.openFileRequested(root.st.root + "/" + decodeURIComponent(m[1]), m[2] ? Number(m[2]) : 0)
@@ -141,13 +168,16 @@ Rectangle {
         if (href.startsWith("#")) { root.showSection(href.substring(1)); return }
         if (/^[a-z][a-z0-9+.-]*:/i.test(href)) { Qt.openUrlExternally(href); return }
         const [path, section] = href.split("#")
-        if (!path.endsWith(".md")) { root.openFileRequested(root.st.root + "/" + path, 0); return }
-        const parts = root.openPage.split("/").slice(0, -1)
+        // From the page's folder in .okf/ (`../src/run.rs`), or the wiki's
+        // top (`/x.md`): a page when it stays in .okf/, else the
+        // repository's file (`../../README.md`).
+        const at = [".okf"].concat(path.startsWith("/") ? [] : root.openPage.split("/").slice(0, -1))
         for (const c of path.split("/")) {
-            if (c === "..") parts.pop()
-            else if (c !== "." && c !== "") parts.push(c)
+            if (c === "..") at.pop()
+            else if (c !== "." && c !== "") at.push(c)
         }
-        root.openWiki(parts.join("/"), section || "", true)
+        if (at[0] === ".okf" && path.endsWith(".md")) root.openWiki(at.slice(1).join("/"), section || "", true)
+        else root.openFileRequested(root.st.root + "/" + at.join("/"), 0)
     }
 
     // ---- searching ----
@@ -216,10 +246,30 @@ Rectangle {
         const f = path.substring(0, i).split("/").pop().replace(/[-_]/g, " ")
         return f.charAt(0).toUpperCase() + f.slice(1)
     }
-    readonly property var pageRows: pages.map(p => Object.assign({ group: groupOf(p.path) }, p))
+    /// The pages' types, for the filter (only when there's more than one).
+    readonly property var types: {
+        const seen = []
+        for (const p of pages) if (p.type && seen.indexOf(p.type) < 0) seen.push(p.type)
+        return seen.sort()
+    }
+    /// The type shown ("" all).
+    property string typeFilter: ""
+    readonly property var pageRows: pages.filter(p => typeFilter === "" || p.type === typeFilter).map(p => Object.assign({ group: groupOf(p.path) }, p))
     function titleOf(path) {
-        const p = pages.find(x => x.path === path.replace(/^openwiki\//, ""))
-        return p ? p.title : path.replace(/^openwiki\//, "")
+        const p = pages.find(x => x.path === path.replace(/^\.okf\//, ""))
+        return p ? p.title : path.replace(/^\.okf\//, "")
+    }
+    /// Who an OKF actor is, in words: "you" (this computer's person),
+    /// "Claude Code with Opus 5.5", "Harlo with GPT-5 mini".
+    function actorText(by) {
+        const a = String(by || "")
+        if (a.startsWith("human:")) return a === ((root.pageView || {}).you || "") ? "you" : a.substring(6)
+        const agent = a.split("/")[0], model = a.slice(agent.length + 1)
+        const name = agent === "claude" ? "Claude Code" : agent === "harlo" ? "Harlo" : agent
+        // (The model as its agent lists it, where it does: "Opus 5.5".)
+        const p = model && Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(x => x.id === agent) : null
+        const i = p ? (p.modelIds || []).findIndex(id => id === model || id.endsWith("/" + model)) : -1
+        return name + (model ? " with " + Theme.modelLabel(i >= 0 && p.models[i] ? p.models[i] : model) : "")
     }
     /// "3 days ago", from an ISO time.
     function ago(iso) {
@@ -240,7 +290,7 @@ Rectangle {
         root.load()
     }
     /// The pages as a Mermaid flowchart: all of them, or for a big wiki
-    /// the open page (else the quickstart) and its neighbours.
+    /// the open page (else the overview) and its neighbours.
     readonly property var graphPages: {
         if (pages.length < 2) return []
         if (pages.length <= 40) return pages
@@ -306,7 +356,7 @@ Rectangle {
         if (graphBox.contentWidth <= graphBox.width + 1) return
         graphCentredFor = key
         let i = graphPages.findIndex(p => p.path === lastRead)
-        if (i < 0) i = graphPages.findIndex(p => p.path === "quickstart.md")
+        if (i < 0) i = graphPages.findIndex(p => p.path === "overview.md")
         if (i < 0) i = 0
         const b = graphImage.boxes.find(x => String(x.id) === "p" + i)
         if (!b) return
@@ -331,7 +381,7 @@ Rectangle {
             title: "Wiki"
             subtitle: root.st.root.replace(/\/+$/, "").split("/").pop() + (root.st.host ? " on " + root.st.host : "")
             onCloseRequested: root.closeRequested()
-            PanelButton { objectName: "wikiRefresh"; iconName: "refresh"; tip: "Refresh"; onClicked: { root.load(); if (root.openPage !== "") root.openWiki(root.openPage, "", false) } }
+            PanelButton { objectName: "wikiRefresh"; iconName: "refresh"; tip: "Refresh"; onClicked: { Workspace.refreshWiki(); root.shownWork = "?"; root.load() } }
         }
 
         Label {
@@ -346,9 +396,10 @@ Rectangle {
         Label {
             Layout.margins: 18
             Layout.fillWidth: true
-            visible: root.st.project >= 0 && !!root.st.loading
+            objectName: "wikiReading"
+            visible: root.st.project >= 0 && (!!root.st.loading || !!root.st.error)
             wrapMode: Text.Wrap
-            text: "Reading the wiki on " + root.st.host + "…"
+            text: root.st.error ? "The wiki couldn't be read: " + root.st.error : "Reading the wiki…"
             color: Theme.textMuted
             font.pixelSize: Theme.px(12.5)
         }
@@ -358,7 +409,7 @@ Rectangle {
             objectName: "wikiEmpty"
             Layout.fillWidth: true
             Layout.margins: 18
-            visible: root.st.project >= 0 && !root.st.exists && !root.st.loading
+            visible: root.st.project >= 0 && (!root.st.exists || root.pages.length === 0) && !root.st.loading && !root.st.error
             spacing: 10
             Label {
                 Layout.fillWidth: true
@@ -370,7 +421,7 @@ Rectangle {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "A wiki of this project, written by your agent from the code: how its parts work and why, each fact tied to the lines it came from. Agents search it instead of reading through the code, and you can read it here."
+                text: "A wiki of this project, written by your agent from the code: how its parts fit and why, each claim footnoted with the code it came from. harlo tells you when that code changes or new code comes that no page mentions, and agents read the pages instead of searching through the code."
                 color: Theme.textMuted
                 font.pixelSize: Theme.px(12.5)
                 lineHeight: 1.15
@@ -378,7 +429,7 @@ Rectangle {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "It's written in a session you can watch, a page at a time, and spends that agent's tokens: more for a bigger repository. The pages land in openwiki/ and show in Changes for you to review and commit."
+                text: "It's written in a session you can watch and spends that agent's tokens: more for a bigger repository. The pages land in .okf/ (Open Knowledge Format) and show in Changes for you to review and commit."
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(12)
                 lineHeight: 1.15
@@ -471,9 +522,7 @@ Rectangle {
                     wrapMode: Text.Wrap
                     text: root.searching ? "Searching…"
                         : !root.results ? ""
-                        : root.results.workspaces.length > 0 ? "This wiki is linked to others. Search which workspace?"
                         : root.results.hits.length === 0 ? "Nothing in the wiki matches “" + root.query + "”."
-                        : root.results.plain ? "OpenWiki couldn't run, so these are the pages that have its words."
                         : ""
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
@@ -627,17 +676,68 @@ Rectangle {
                         lineHeight: 1.15
                         wrapMode: Text.Wrap
                     }
+                    // What it is, who wrote it and who read it against the code.
                     Label {
                         objectName: "wikiPageMeta"
                         Layout.fillWidth: true
                         Layout.topMargin: 8
                         Layout.bottomMargin: 10
                         visible: text !== ""
-                        text: !root.pageView || root.pageView.error ? "" : [root.pageView.type ? root.pageView.type.charAt(0).toUpperCase() + root.pageView.type.slice(1) : "",
-                                                                           root.pageView.verified ? "checked against the code " + root.ago(root.pageView.verified) : ""].filter(x => x !== "").join(" · ")
+                        readonly property var pv: root.pageView && !root.pageView.error ? root.pageView : null
+                        readonly property var lastCheck: pv && pv.verified.length > 0 ? pv.verified[pv.verified.length - 1] : null
+                        text: !pv ? "" : [pv.type,
+                                          pv.status === "draft" ? "draft" : pv.status === "deprecated" ? "deprecated" : "",
+                                          pv.generated ? "written by " + root.actorText(pv.generated.by) + " " + root.ago(pv.generated.at) : "",
+                                          lastCheck ? "reviewed by " + root.actorText(lastCheck.by) + " " + root.ago(lastCheck.at) : "",
+                                          !pv.edited ? "" : pv.generated || lastCheck ? "edited since" : "not checked yet"].filter(x => x !== "").join(" · ")
                         color: Theme.textFaint
                         font.pixelSize: Theme.px(11.5)
                         wrapMode: Text.Wrap
+                    }
+                    // What it owes the code, and what to do about it.
+                    ColumnLayout {
+                        objectName: "wikiPageOwes"
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: 12
+                        visible: !!root.pageView && !root.pageView.error
+                        spacing: 6
+                        readonly property var items: root.pageView && root.pageView.items ? root.pageView.items : []
+                        Repeater {
+                            model: parent.items
+                            Label {
+                                required property string modelData
+                                Layout.fillWidth: true
+                                text: modelData
+                                color: Theme.warning
+                                font.pixelSize: Theme.px(12)
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            FlatButton {
+                                objectName: "wikiCheckPage"
+                                text: "Check this page"
+                                variant: (root.pageView && root.pageView.items || []).length > 0 ? "primary" : "outline"
+                                enabled: !root.st.running
+                                font.pixelSize: Theme.px(12)
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Start a session that reads this page against its code and fixes it" + (root.updaterText ? ". " + root.updaterText + "." : "")
+                                ToolTip.delay: 600
+                                onClicked: root.start("page:" + root.openPage)
+                            }
+                            FlatButton {
+                                objectName: "wikiMarkReviewed"
+                                text: "Mark reviewed"
+                                outlined: false
+                                font.pixelSize: Theme.px(12)
+                                ToolTip.visible: hovered
+                                ToolTip.text: "You've read it against its code: its changed footnotes count as checked"
+                                ToolTip.delay: 600
+                                onClicked: Workspace.markWikiReviewed(root.sessionKey, root.openPage)
+                            }
+                        }
                     }
                     Repeater {
                         id: blocks
@@ -802,35 +902,35 @@ Rectangle {
                             }
                         }
                     }
-                    // Where in the code the page comes from: its sources and
-                    // the lines its facts cite, each opening the file there.
+                    // Its footnotes: each opens the code it cites, at its
+                    // lines now, marked when that code changed or is gone.
                     Label {
                         Layout.fillWidth: true
                         Layout.topMargin: 14
                         Layout.bottomMargin: 2
-                        visible: sourceRows.count > 0
-                        text: "Sources"
+                        visible: footnoteRows.count > 0
+                        text: "Footnotes"
                         color: Theme.textMuted
                         font.pixelSize: Theme.px(12)
                         font.weight: Font.DemiBold
                     }
                     Repeater {
-                        id: sourceRows
-                        model: root.pageView && !root.pageView.error ? root.pageView.sources || [] : []
+                        id: footnoteRows
+                        model: root.pageView && !root.pageView.error ? root.pageView.footnotes || [] : []
                         TextEdit {
                             required property var modelData
-                            objectName: "wikiSource"
+                            objectName: "wikiFootnote"
                             Layout.fillWidth: true
                             Layout.topMargin: 2
                             textFormat: TextEdit.RichText
                             text: {
-                                const p = modelData.path, e = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                                const lines = (modelData.ranges || []).map(r => "<a href=\"repo://" + encodeURI(p) + "#L" + r[0] + "-L" + r[1] + "\">" + (r[0] === r[1] ? r[0] : r[0] + "–" + r[1]) + "</a>")
-                                const first = (modelData.ranges || [])[0]
-                                const cited = modelData.claims === 1 ? "cited once" : modelData.claims === 2 ? "cited twice" : "cited " + modelData.claims + " times"
-                                return Theme.htmlStyle + "<a href=\"repo://" + encodeURI(p) + (first ? "#L" + first[0] : "") + "\" style=\"font-family:'" + Theme.mono + "';font-size:" + Theme.mpx(12) + "px;\">" + e(p) + "</a>"
-                                    + (lines.length ? " <span style=\"color:" + Theme.textFaint + "\">lines</span> " + lines.join(", ") : "")
-                                    + (modelData.claims ? " <span style=\"color:" + Theme.textFaint + "\">· " + cited + "</span>" : "")
+                                const f = modelData, e = x => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                                const where = e(f.path) + (f.locator ? ", " + e(f.locator) : "")
+                                const link = f.state === "gone" ? where : "<a href=\"okf-fn:" + encodeURIComponent(f.label) + "\" style=\"font-family:'" + Theme.mono + "';font-size:" + Theme.mpx(12) + "px;\">" + where + "</a>"
+                                const lines = f.start > 0 ? " <span style=\"color:" + Theme.textFaint + "\">lines " + (f.start === f.end ? f.start : f.start + "–" + f.end) + "</span>" : ""
+                                const note = { stale: "its code changed since the page was written", missing: "names nothing in the file", gone: "the file isn't there" }[f.state]
+                                return Theme.htmlStyle + "<span style=\"color:" + Theme.textFaint + "\">" + f.n + "</span>&nbsp; " + link + lines
+                                    + (note ? " <span style=\"color:" + Theme.warning + "\">· " + note + "</span>" : "")
                             }
                             font.family: Theme.uiFont
                             font.pixelSize: Theme.px(12.5)
@@ -840,8 +940,33 @@ Rectangle {
                             readOnly: true
                             selectByMouse: true
                             wrapMode: TextEdit.Wrap
-                            onLinkActivated: link => root.follow(link)
+                            onLinkActivated: link => root.follow(decodeURIComponent(link))
                             HoverHandler { cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
+                        }
+                    }
+                    // The pages that link here.
+                    Label {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 14
+                        Layout.bottomMargin: 2
+                        visible: backlinkRows.count > 0
+                        text: "Linked from"
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.px(12)
+                        font.weight: Font.DemiBold
+                    }
+                    Repeater {
+                        id: backlinkRows
+                        model: root.pageView && !root.pageView.error ? root.pageView.backlinks || [] : []
+                        FlatButton {
+                            required property var modelData
+                            objectName: "wikiBacklink"
+                            Layout.leftMargin: -8
+                            outlined: false
+                            padding: 4
+                            text: modelData.title
+                            font.pixelSize: Theme.px(12.5)
+                            onClicked: root.openWiki(modelData.path, "", true)
                         }
                     }
                 }
@@ -1055,6 +1180,29 @@ Rectangle {
         }
 
         // ---- the pages ----
+        // By type, when there's more than one.
+        Flow {
+            objectName: "wikiTypes"
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            Layout.topMargin: 8
+            visible: list.visible && root.types.length > 1
+            spacing: 4
+            Repeater {
+                model: [""].concat(root.types)
+                FlatButton {
+                    required property string modelData
+                    objectName: "wikiType-" + (modelData || "all")
+                    text: modelData || "All"
+                    outlined: root.typeFilter === modelData
+                    padding: 5
+                    font.pixelSize: Theme.px(12)
+                    Accessible.name: (modelData || "All") + " pages"
+                    onClicked: root.typeFilter = modelData
+                }
+            }
+        }
         ListView {
             id: list
             objectName: "wikiPages"
@@ -1112,6 +1260,17 @@ Rectangle {
                         maximumLineCount: 2
                         elide: Text.ElideRight
                     }
+                    // What it owes the code, or an edit not checked yet.
+                    PlainLabel {
+                        objectName: "wikiPageMark"
+                        Layout.fillWidth: true
+                        visible: text !== ""
+                        text: row.modelData.owes > 0 ? (row.modelData.owes === 1 ? "1 thing to do" : row.modelData.owes + " things to do")
+                            : row.modelData.edited ? "Edited, not checked yet" : ""
+                        color: row.modelData.owes > 0 ? Theme.warning : Theme.textFaint
+                        font.pixelSize: Theme.px(11.5)
+                        elide: Text.ElideRight
+                    }
                 }
                 onClicked: root.openWiki(modelData.path, "", false)
             }
@@ -1119,15 +1278,15 @@ Rectangle {
         Label {
             Layout.margins: 18
             Layout.fillWidth: true
-            visible: root.st.exists && root.pages.length === 0 && !root.st.run
+            visible: root.st.exists && root.pages.length > 0 && root.pageRows.length === 0
             wrapMode: Text.Wrap
-            text: "The wiki has no pages yet."
+            text: "No " + root.typeFilter + " pages."
             color: Theme.textMuted
             font.pixelSize: Theme.px(12.5)
         }
         Item { Layout.fillHeight: true; visible: !list.visible && !hitList.visible && !(root.reading && root.st.exists) }
 
-        // ---- how fresh it is, and its runs ----
+        // ---- what it owes the code ----
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.hairline; visible: footer.visible }
         ColumnLayout {
             id: footer
@@ -1137,34 +1296,30 @@ Rectangle {
             Layout.rightMargin: 14
             Layout.topMargin: 10
             Layout.bottomMargin: 12
-            visible: root.st.project >= 0 && (root.st.exists || !!root.st.run || root.runError !== "")
+            visible: root.st.project >= 0 && ((root.st.exists && root.pages.length > 0) || !!root.st.running || root.runError !== "")
             spacing: 8
-            readonly property var run: root.st.run || null
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
-                // How fresh the wiki is, in phrases that each stay whole on a
-                // line where they fit: a narrow panel breaks at the dot, and a
+                // What it owes, in phrases that each stay whole on a line
+                // where they fit: a narrow panel breaks at the dot, and a
                 // phrase wider than the panel breaks between its words.
                 Flow {
                     id: freshness
                     objectName: "wikiFreshness"
                     Layout.fillWidth: true
                     readonly property var phrases: {
-                        const r = footer.run, l = root.st.last
-                        if (r && root.st.running) return [r.phase === "planning" || r.total === 0 ? "Planning the wiki…" : "Writing pages: " + r.done + " of " + r.total]
-                        if (r) return ["A run stopped part way" + (r.total > 0 ? " (" + r.done + " of " + r.total + " pages)" : "") + "."]
-                        if (root.st.running) return ["Starting a run…"]
+                        const w = root.work, n = (k, one, many) => k + " " + (k === 1 ? one : many)
+                        if (root.st.running) return ["A session is writing the wiki."]
                         if (root.st.checking) return ["Checking what changed…"]
-                        if (!l) return ["Not written by OpenWiki yet."]
-                        const when = "Updated " + root.ago(l.at)
-                        const b = root.st.behind
-                        // (harlo recorded it, no model needed.)
-                        if (root.quiet && b === 0) {
-                            const n = root.st.quiet.commits
-                            return [when, "up to date", n === 0 ? "nothing changed" : n + (n === 1 ? " commit" : " commits") + " checked, none change what it says, so no model ran"]
-                        }
-                        return b === null || b === undefined ? [when] : [when, b === 0 ? "up to date" : b + (b === 1 ? " commit" : " commits") + " since"]
+                        if (root.st.loading) return ["Reading the wiki…"]
+                        const out = []
+                        if (w.stale > 0) out.push(n(w.stale, "footnote's code changed", "footnotes' code changed"))
+                        if (w.new > 0) out.push(n(w.new, "new declaration no page mentions", "new declarations no page mentions"))
+                        if (w.unowned > 0) out.push(n(w.unowned, "file no page covers", "files no page covers"))
+                        if (w.broken > 0) out.push(n(w.broken, "footnote finds no code", "footnotes find no code"))
+                        if (out.length > 0) return out
+                        return ["Up to date"].concat(root.st.last ? ["written " + root.ago(root.st.last)] : [])
                     }
                     readonly property string text: phrases.join(" · ")
                     Repeater {
@@ -1175,7 +1330,7 @@ Rectangle {
                             text: modelData + (index < freshness.phrases.length - 1 ? " ·\u00a0" : "")
                             width: Math.min(implicitWidth, freshness.width)
                             wrapMode: Text.WordWrap
-                            color: Theme.textMuted
+                            color: root.work.count > 0 && !root.st.running ? Theme.foreground : Theme.textMuted
                             font.pixelSize: Theme.px(12)
                         }
                     }
@@ -1190,27 +1345,17 @@ Rectangle {
                 }
                 FlatButton {
                     objectName: "wikiRun"
-                    visible: !root.st.running && !root.st.checking
-                    // (Behind the code: the one thing to do here.)
-                    variant: footer.run || (root.st.behind || 0) > 0 ? "primary" : "outline"
-                    readonly property bool anyway: !footer.run && root.quiet && root.st.behind === 0
-                    text: footer.run ? "Continue" : anyway ? "Update anyway" : "Update"
+                    visible: !root.st.running && !root.st.checking && root.pages.length > 0
+                    // (Owing the code: the one thing to do here.)
+                    variant: root.work.count > 0 ? "primary" : "outline"
+                    text: "Update"
                     font.pixelSize: Theme.px(12)
-                    onClicked: root.start(footer.run ? "continue" : anyway ? "update-anyway" : "update")
+                    onClicked: root.start("update")
                     ToolTip.visible: hovered
-                    ToolTip.text: (footer.run ? "Start a session that finishes this run"
-                                   : anyway ? "Start a session that looks over every page anyway"
-                                   : "Bring the wiki in line with the code: Harlo checks first, and starts a session only when cited code changed or files were added") + (root.updaterText ? ". " + root.updaterText + "." : "")
+                    ToolTip.text: (root.work.count > 0 ? "Start a session that deals with what the wiki owes the code"
+                                   : "harlo checks the code first, and starts a session only when there's something to do") + (root.updaterText ? ". " + root.updaterText + "." : "")
                     ToolTip.delay: 600
                 }
-            }
-            AppProgressBar {
-                Layout.fillWidth: true
-                visible: !!footer.run && !!root.st.running
-                indeterminate: !!footer.run && (footer.run.phase === "planning" || footer.run.total === 0)
-                from: 0
-                to: footer.run ? Math.max(1, footer.run.total) : 1
-                value: footer.run ? footer.run.done : 0
             }
             Label {
                 Layout.fillWidth: true
@@ -1228,7 +1373,7 @@ Rectangle {
                 Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: root.st.enabled ? "Agents search it, in sessions started from now on." : "Agents don't use it: switched off for this project."
+                    text: root.st.enabled ? "Agents are pointed to it, in sessions started from now on." : "Agents aren't told of it: switched off for this project."
                     color: Theme.textFaint
                     font.pixelSize: Theme.px(11.5)
                 }

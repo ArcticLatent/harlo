@@ -154,9 +154,8 @@ ColumnLayout {
     readonly property string target: reportArgs && reportArgs.summary !== "" ? reportArgs.summary : label !== "" ? label : sessionTitle !== "" ? sessionTitle : subtitle !== "" || rowState !== "pending" ? card.transcript.local(subtitle) : Theme.toolWriting(title)
     // Code type only for code: a command, a path, a pattern, a link. A
     // title, a question or a task's description is prose.
-    // (A wiki step's words, "Quickstart" or "1 page planned", aren't
-    // code; a wiki read's page path is.)
-    readonly property bool codeLike: label === "" && sessionTitle === "" && !/openwiki_(?!read$)/.test(title) && (shell || command !== "" || /^(bash|shell|exec|run_?command|read|edit|multi_?edit|write|apply_?patch|patch|create|ls|find|glob|grep|lsp|web_?fetch|fetch|notebook)/i.test(title) || !/\s/.test(target))
+    // (The wiki check's words, "1 footnote confirmed", aren't code.)
+    readonly property bool codeLike: label === "" && sessionTitle === "" && !/wiki_check$/.test(title) && (shell || command !== "" || /^(bash|shell|exec|run_?command|read|edit|multi_?edit|write|apply_?patch|patch|create|ls|find|glob|grep|lsp|web_?fetch|fetch|notebook)/i.test(title) || !/\s/.test(target))
     readonly property bool isPath: label === "" && !shell && /^[^\s]+$/.test(target) && /[\/.]/.test(target)
     readonly property real headHeight: headBox.height
     spacing: 4

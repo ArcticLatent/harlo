@@ -1108,10 +1108,6 @@ impl Transcript {
             r.ended = run.ended_at;
             if run.ended {
                 (r.result, r.diff) = crate::tool_facts::facts(name, args, &run.output, run.is_error);
-                // (The page OpenWiki gave, once it answered.)
-                if let Some(page) = wiki_next(name, &run.output).filter(|_| !run.is_error) {
-                    r.subtitle = page;
-                }
             }
             // Pictures it returned; else picture files it
             // names (in what it was asked; in what it said
@@ -1375,55 +1371,22 @@ struct MdRow {
     head: usize,
 }
 
-/// An OpenWiki writing step in words: what it did, never the run's or a
-/// page job's id (`None`: not one of them).
+/// The wiki's check in words: what the writer decided along with it
+/// (`None`: not the check).
 fn wiki_step(name: &str, args: &Value) -> Option<String> {
-    let tool = name.rsplit_once("openwiki_").map(|(_, t)| t)?;
-    let count = |key: &str| args[key].as_array().map_or(0, Vec::len);
-    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
-    Some(match tool {
-        "begin" => match args["mode"].as_str() {
-            Some("init") => "a new wiki".to_owned(),
-            Some("update") => "an update".to_owned(),
-            _ => String::new(),
-        },
-        "submit_plan" => {
-            // (Not yet arrived, while the call streams in: nothing, not
-            // "0 pages planned".)
-            if !args["pages"].is_array() {
-                return Some(String::new());
-            }
-            let (pages, gone) = (count("pages"), count("deletePages"));
-            let mut s = if pages == 0 { "no pages to change".to_owned() } else { n(pages, "page planned", "pages planned") };
-            if gone > 0 {
-                let _ = write!(s, ", {} to remove", n(gone, "page", "pages"));
-            }
-            s
-        }
-        "submit_page" => match count("claims") + count("confirmedClaimIds") {
-            0 => String::new(),
-            k => n(k, "fact tied to the code", "facts tied to the code"),
-        },
-        "next_page" | "inspect_page_claims" | "finish" => String::new(),
-        _ => return None,
-    })
-}
-
-/// What openwiki_next_page gave: the page to write next ("Orders"), or
-/// "none left" when the plan's pages are done.
-fn wiki_next(name: &str, output: &str) -> Option<String> {
-    if !name.ends_with("openwiki_next_page") {
+    if !name.ends_with(crate::wiki::CHECK) {
         return None;
     }
-    let v: Value = serde_json::from_str(output.get(output.find('{')?..)?.trim()).ok()?;
-    match v["status"].as_str()? {
-        "complete" => Some("none left".to_owned()),
-        "pending" => {
-            let job = &v["job"];
-            job["title"].as_str().or_else(|| job["path"].as_str()).filter(|t| !t.is_empty()).map(str::to_owned)
-        }
-        _ => None,
+    let count = |key: &str| args[key].as_array().map_or(0, Vec::len);
+    let n = |k: usize, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    let mut parts = Vec::new();
+    if count("confirm") > 0 {
+        parts.push(n(count("confirm"), "footnote confirmed", "footnotes confirmed"));
     }
+    if count("leave") > 0 {
+        parts.push(format!("{} left out", n(count("leave"), "path", "paths")));
+    }
+    Some(parts.join(", "))
 }
 
 fn summarize_args(args: &Value) -> String {
@@ -2464,19 +2427,10 @@ mod tests {
         assert_eq!(summarize_args(&json!({"why":"The helper's part can go on beside mine.","helpers":[{"agent":"harlo"}]})), "The helper's part can go on beside mine.");
         assert_eq!(summarize_args(&json!({"node":"/obj/a","depth":2,"flags":{"a":1}})), "/obj/a");
         assert_eq!(summarize_args(&json!({"x":1,"y":true,"list":[1,2]})), "x=1  y=true");
-        // OpenWiki's writing steps: what they did, never a run's id.
-        let run = "380ad742-68a0-4f95-a5a9-529de7132d1e";
-        assert_eq!(wiki_step("mcp__harlo__openwiki_begin", &json!({"mode":"init"})).as_deref(), Some("a new wiki"));
-        assert_eq!(wiki_step("openwiki_submit_plan", &json!({"runId":run,"pages":[{"path":"a"},{"path":"b"}],"deletePages":["c"]})).as_deref(), Some("2 pages planned, 1 page to remove"));
-        assert_eq!(wiki_step("openwiki_submit_plan", &json!({"runId":run})).as_deref(), Some(""), "still streaming in");
-        assert_eq!(wiki_step("openwiki_submit_plan", &json!({"runId":run,"pages":[]})).as_deref(), Some("no pages to change"));
-        assert_eq!(wiki_step("openwiki_next_page", &json!({"runId":run})).as_deref(), Some(""));
-        assert_eq!(wiki_step("openwiki_submit_page", &json!({"runId":run,"jobId":run,"claims":[{"statement":"x"}]})).as_deref(), Some("1 fact tied to the code"));
-        assert_eq!(wiki_step("openwiki_search", &json!({"query":"refunds"})), None);
-        assert_eq!(wiki_next("mcp__harlo__openwiki_next_page", r#"{"status":"pending","job":{"id":"j1","path":"architecture/orders.md","title":"Orders"}}"#).as_deref(), Some("Orders"));
-        assert_eq!(wiki_next("openwiki_next_page", r#"{"status":"complete"}"#).as_deref(), Some("none left"));
-        assert_eq!(wiki_next("openwiki_next_page", "not json"), None);
-        assert_eq!(wiki_next("openwiki_finish", r#"{"status":"complete"}"#), None);
+        // The wiki's check: what the writer decided along with it.
+        assert_eq!(wiki_step("mcp__harlo__wiki_check", &json!({"confirm":["a.md#x"],"leave":[{"path":"gen/","why":"generated"}, {"path":"b.rs","why":"tiny"}]})).as_deref(), Some("1 footnote confirmed, 2 paths left out"));
+        assert_eq!(wiki_step("wiki_check", &json!({})).as_deref(), Some(""));
+        assert_eq!(wiki_step("read", &json!({"path":"a.rs"})), None);
     }
 
     #[test]

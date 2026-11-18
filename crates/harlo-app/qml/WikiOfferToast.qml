@@ -4,20 +4,21 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Merged work on a project's default branch changes code its wiki
-// describes: offer the update in the corner (it spends the agent's
-// tokens, so it waits for you). Not now holds until the branch moves again.
+// Merged work on a project's default branch left its wiki owing the code
+// (new declarations no page mentions, cited code that changed): offer the
+// update in the corner (it spends the agent's tokens, so it waits for
+// you). Not now holds until the branch moves again.
 ToastStack {
     id: root
     entries: Workspace.wikiOffersJson !== "" ? JSON.parse(Workspace.wikiOffersJson) : []
     keyOf: o => String(o.project)
 
-    /// "src/a.rs", "src/a.rs and src/b.rs", "src/a.rs and 3 more files".
-    function filesText(files) {
-        const name = f => f.split("/").pop()
-        if (files.length === 1) return name(files[0])
-        if (files.length === 2) return name(files[0]) + " and " + name(files[1])
-        return name(files[0]) + " and " + (files.length - 1) + " more files"
+    /// "post", "post and close", "post and 3 more".
+    function namesText(names) {
+        const short = n => String(n).split(/::|\./).pop()
+        if (names.length === 1) return short(names[0])
+        if (names.length === 2) return short(names[0]) + " and " + short(names[1])
+        return short(names[0]) + " and " + (names.length - 1) + " more"
     }
 
     card: ToastCard {
@@ -28,7 +29,7 @@ ToastStack {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            text: "Merged work changes what " + (toast.entry.name !== "" ? toast.entry.name + "'s" : "the") + " wiki describes"
+            text: "Merged work isn't in " + (toast.entry.name !== "" ? toast.entry.name + "'s" : "the") + " wiki yet"
             color: Theme.foreground
             font.pixelSize: Theme.px(13)
             font.weight: Font.DemiBold
@@ -38,8 +39,8 @@ ToastStack {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             text: (toast.entry.commits === 1 ? "A commit" : toast.entry.commits + " commits") + " on " + toast.entry.branch
-                + " since its last update change " + root.filesText(toast.entry.files)
-                + ". An update redoes only the pages about them, in a session you can watch."
+                + ((toast.entry.new || []).length > 0 ? " added " + root.namesText(toast.entry.new) + ", which no page mentions" : " changed code the wiki cites")
+                + ". An update deals with " + (toast.entry.owed === 1 ? "that" : "the " + toast.entry.owed + " things it owes") + " in a session you can watch."
             color: Theme.muted
             font.pixelSize: Theme.px(12)
         }

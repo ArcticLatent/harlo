@@ -11,9 +11,9 @@ name: tests
 on:
   push:
     branches: [main]
-    paths-ignore: ["ios/**", "site/**", "openwiki/**", "**.md"]
+    paths-ignore: ["ios/**", "site/**", "**.md"]
   pull_request:
-    paths-ignore: ["ios/**", "site/**", "openwiki/**", "**.md"]
+    paths-ignore: ["ios/**", "site/**", "**.md"]
   workflow_dispatch:
 
 permissions:

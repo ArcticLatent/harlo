@@ -12,7 +12,7 @@ use harlo_harness::HarnessKind;
 use serde_json::{Value, json};
 
 use crate::orchestration::{self, Starting};
-use crate::{openwiki, plan, remote};
+use crate::{plan, remote, wiki};
 
 /// The session calling harlo's tools, as harlo knows it.
 #[derive(Debug, Clone, Default)]
@@ -44,9 +44,9 @@ pub struct Project {
 ///
 /// harlo's own, without `request_approval` for Harlo (it asks with its own
 /// ask tool), with a helper's report and questions for a helper, then the
-/// wiki's (writing ones for a wiki session, reading ones when the project's
-/// wiki is on and `wiki_found`) and the plan's when it's on.
-pub fn offered(starting: Starting, caller: &Caller, wiki_found: bool) -> Vec<Value> {
+/// wiki's check for a wiki session, and the plan's when it's on. (Other
+/// sessions read the wiki with their own tools: [`reads_wiki`].)
+pub fn offered(starting: Starting, caller: &Caller) -> Vec<Value> {
     let list = |v: Value| v.as_array().cloned().unwrap_or_default();
     let mut tools = list(orchestration::tools(starting));
     if caller.harness == "harlo" {
@@ -57,9 +57,7 @@ pub fn offered(starting: Starting, caller: &Caller, wiki_found: bool) -> Vec<Val
     }
     if let Some(p) = &caller.project {
         if caller.writing {
-            tools.extend(openwiki::writing_tools());
-        } else if p.wiki && wiki_found {
-            tools.extend(list(openwiki::reading_tools()));
+            tools.push(wiki::check_tool());
         }
         if p.plan {
             tools.extend(list(plan::tools(p.commits)));
@@ -70,26 +68,28 @@ pub fn offered(starting: Starting, caller: &Caller, wiki_found: bool) -> Vec<Val
 
 /// What a session is told of its tools.
 ///
-/// harlo's instructions and when to start sessions, then the wiki's when
-/// it reads one (`wiki_found`), then the plan's. Claude Code plans in its
-/// own flow, so it isn't told to put a Plan mode plan in the card.
-pub fn instructions(starting: Starting, caller: &Caller, wiki_found: bool) -> String {
+/// harlo's instructions and when to start sessions, then the plan's.
+/// Claude Code plans in its own flow, so it isn't told to put a Plan mode
+/// plan in the card. (The wiki's note follows when [`reads_wiki`].)
+pub fn instructions(starting: Starting, caller: &Caller) -> String {
     let mut text = format!("{} {}\n\n{}", orchestration::BASE_INSTRUCTIONS, orchestration::when_to_start(starting), orchestration::DIAGRAMS);
-    if let Some(p) = &caller.project {
-        if p.wiki && !caller.writing && wiki_found {
-            text = format!("{text}\n\n{}", openwiki::READ_INSTRUCTIONS);
-        }
-        if p.plan {
-            text = format!("{text}\n\n{}", plan::instructions(p.commits, caller.harness != "claude"));
-        }
+    if let Some(p) = &caller.project
+        && p.plan
+    {
+        text = format!("{text}\n\n{}", plan::instructions(p.commits, caller.harness != "claude"));
     }
     text
 }
 
+/// The folder whose wiki the caller is told of ([`wiki::reading_note`]):
+/// its project has the wiki on and one (`wiki_found`), and it isn't writing it.
+pub fn reads_wiki(caller: &Caller, wiki_found: bool) -> Option<&Path> {
+    caller.project.as_ref().filter(|p| p.wiki && !caller.writing && wiki_found).map(|p| p.cwd.as_path())
+}
+
 /// The folder a wiki tool works in, when the caller may use `tool`.
 ///
-/// A wiki session reads and writes; another session only reads, and only
-/// with its project's wiki on.
+/// Only a wiki session has one: [`wiki::CHECK`], for what it wrote.
 ///
 /// # Errors
 ///
@@ -98,10 +98,11 @@ pub fn wiki_folder<'a>(tool: &str, caller: &'a Caller) -> anyhow::Result<&'a Pat
     let Some(p) = &caller.project else {
         anyhow::bail!("The wiki is for sessions in a harlo project.");
     };
-    let writes = openwiki::WRITE_TOOLS.contains(&tool);
-    let allowed = if caller.writing { openwiki::OFFERED.contains(&tool) || writes } else { p.wiki && openwiki::OFFERED.contains(&tool) };
-    if !allowed {
-        anyhow::bail!(if writes { "Only a wiki session harlo starts (its Wiki panel) writes the wiki." } else { "The wiki is off for this project (its settings in harlo)." });
+    if tool != wiki::CHECK {
+        anyhow::bail!("harlo's wiki has no tool {tool}: read the pages in .okf/ with your own tools.");
+    }
+    if !caller.writing {
+        anyhow::bail!("Only a wiki session harlo starts (its Wiki panel) checks the wiki.");
     }
     Ok(&p.cwd)
 }
@@ -228,49 +229,46 @@ mod tests {
 
     #[test]
     fn each_session_gets_the_tools_its_project_allows() {
-        let base = names(&offered(Starting::WhenAsked, &caller("claude", None), false)).len();
-        let harlo = offered(Starting::WhenAsked, &caller("harlo", None), false);
+        let base = names(&offered(Starting::WhenAsked, &caller("claude", None))).len();
+        let harlo = offered(Starting::WhenAsked, &caller("harlo", None));
         assert!(!names(&harlo).contains(&"request_approval"), "Harlo asks with its own tool");
-        assert!(names(&offered(Starting::WhenAsked, &caller("claude", None), false)).contains(&"request_approval"));
-        // The wiki's reading tools only with it on and found; the plan's when on.
-        let with = offered(Starting::WhenAsked, &caller("claude", Some(project(true, true))), true);
-        assert!(names(&with).contains(&"openwiki_search") && names(&with).contains(&"plan_read"));
-        let off = offered(Starting::WhenAsked, &caller("claude", Some(project(false, false))), true);
+        assert!(names(&offered(Starting::WhenAsked, &caller("claude", None))).contains(&"request_approval"));
+        // The plan's when on; no wiki tools to read with (agents read .okf/ themselves).
+        let with = offered(Starting::WhenAsked, &caller("claude", Some(project(true, true))));
+        assert!(names(&with).contains(&"plan_read") && !names(&with).iter().any(|n| n.contains("wiki")));
+        let off = offered(Starting::WhenAsked, &caller("claude", Some(project(false, false))));
         assert_eq!(names(&off).len(), base);
-        let missing = offered(Starting::WhenAsked, &caller("claude", Some(project(true, false))), false);
-        assert!(!names(&missing).contains(&"openwiki_search"));
-        // A wiki session writes; a helper reports.
+        // A wiki session checks; a helper reports.
         let writer = Caller { writing: true, helper: true, ..caller("claude", Some(project(false, false))) };
-        let w = offered(Starting::WhenAsked, &writer, false);
-        assert!(names(&w).contains(&"openwiki_begin") && names(&w).contains(&"report_done"));
+        let w = offered(Starting::WhenAsked, &writer);
+        assert!(names(&w).contains(&"wiki_check") && names(&w).contains(&"report_done"));
     }
 
     #[test]
     fn instructions_follow_the_same_settings() {
-        let plain = instructions(Starting::WhenAsked, &caller("claude", None), false);
-        assert!(plain.starts_with(orchestration::BASE_INSTRUCTIONS) && !plain.contains(openwiki::READ_INSTRUCTIONS));
-        let wiki = instructions(Starting::WhenAsked, &caller("claude", Some(project(true, false))), true);
-        assert!(wiki.contains(openwiki::READ_INSTRUCTIONS));
-        let writer = Caller { writing: true, ..caller("claude", Some(project(true, false))) };
-        assert!(!instructions(Starting::WhenAsked, &writer, true).contains(openwiki::READ_INSTRUCTIONS));
+        let plain = instructions(Starting::WhenAsked, &caller("claude", None));
+        assert!(plain.starts_with(orchestration::BASE_INSTRUCTIONS));
+        // The wiki's note: its project's wiki on and found, and not its writer.
+        let reader = caller("claude", Some(project(true, false)));
+        assert_eq!(reads_wiki(&reader, true), Some(Path::new("/p")));
+        assert_eq!(reads_wiki(&reader, false), None);
+        assert_eq!(reads_wiki(&caller("claude", Some(project(false, false))), true), None);
+        assert_eq!(reads_wiki(&Caller { writing: true, ..reader }, true), None);
         // Claude Code plans in its own flow; Harlo puts its Plan mode plan in the card.
-        let claude = instructions(Starting::WhenAsked, &caller("claude", Some(project(false, true))), false);
-        let harlo = instructions(Starting::WhenAsked, &caller("harlo", Some(project(false, true))), false);
+        let claude = instructions(Starting::WhenAsked, &caller("claude", Some(project(false, true))));
+        let harlo = instructions(Starting::WhenAsked, &caller("harlo", Some(project(false, true))));
         assert!(claude.contains(&plan::instructions(false, false)) && harlo.contains(&plan::instructions(false, true)));
     }
 
     #[test]
-    fn the_wiki_is_written_only_by_a_wiki_session() {
-        let reader = caller("claude", Some(project(true, false)));
-        assert_eq!(wiki_folder("openwiki_search", &reader).unwrap(), Path::new("/p"));
-        let refused = wiki_folder("openwiki_begin", &reader).unwrap_err().to_string();
+    fn only_a_wiki_session_checks_the_wiki() {
+        let refused = wiki_folder("wiki_check", &caller("claude", Some(project(true, false)))).unwrap_err().to_string();
         assert!(refused.starts_with("Only a wiki session"), "{refused}");
-        let off = wiki_folder("openwiki_search", &caller("claude", Some(project(false, false)))).unwrap_err().to_string();
-        assert!(off.contains("off for this project"), "{off}");
-        wiki_folder("openwiki_search", &caller("claude", None)).unwrap_err();
+        wiki_folder("wiki_check", &caller("claude", None)).unwrap_err();
         let writer = Caller { writing: true, ..caller("claude", Some(project(false, false))) };
-        wiki_folder("openwiki_begin", &writer).unwrap();
-        wiki_folder("openwiki_read", &writer).unwrap();
+        assert_eq!(wiki_folder("wiki_check", &writer).unwrap(), Path::new("/p"));
+        let gone = wiki_folder("wiki_read", &writer).unwrap_err().to_string();
+        assert!(gone.contains(".okf/"), "{gone}");
     }
 
     #[test]

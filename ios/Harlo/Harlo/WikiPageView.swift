@@ -1,9 +1,11 @@
 import HarloKit
 import SwiftUI
 
-/// A wiki page: what kind it is, when it was checked against the code,
-/// its summary, then its text (diagrams drawn, code in wells). A link to
-/// another page opens it here; a link to code opens the file at its line.
+/// A wiki page: what kind it is, who wrote and reviewed it, what it owes
+/// the code (with Check this page and Mark reviewed), its summary and text
+/// (diagrams drawn, code in wells), its footnotes and the pages linking to
+/// it. A link to another page opens it here; a footnote or a link to a
+/// file opens the code.
 struct WikiPageView: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -14,15 +16,10 @@ struct WikiPageView: View {
     @State private var next: WikiLink?
     @State private var file: WikiFile?
     @State private var jump = ""
+    @State private var notice: String?
+    @State private var busy = false
 
     var title: String { page?.title ?? wiki.pages.first { $0.path == link.path }?.title ?? link.path }
-
-    var meta: String {
-        guard let page else { return "" }
-        let kind = page.kind.isEmpty ? "" : page.kind.prefix(1).uppercased() + page.kind.dropFirst()
-        let checked = page.verified.isEmpty ? "" : "checked against the code " + Wiki.ago(page.verified)
-        return [kind, checked].filter { !$0.isEmpty }.joined(separator: " · ")
-    }
 
     var body: some View {
         ScrollViewReader { reader in
@@ -37,17 +34,19 @@ struct WikiPageView: View {
                             Text(page.summary).font(.body).foregroundStyle(Color(p.foreground).opacity(0.82))
                                 .accessibilityIdentifier("wikiPageLede")
                         }
+                        let meta = page.meta()
                         if !meta.isEmpty {
                             Text(meta).font(.footnote).foregroundStyle(Color(p.muted)).accessibilityIdentifier("wikiPageMeta")
-                                .padding(.bottom, 4)
                         }
+                        owes(page)
                         ForEach(page.blocks.indices, id: \.self) { i in
                             WikiBlock(block: page.blocks[i], first: i == 0).id(page.blocks[i].anchor.isEmpty ? "b\(i)" : page.blocks[i].anchor)
                         }
-                        if !page.sources.isEmpty {
-                            WikiSources(list: page.sources) { s in
-                                file = WikiFile(path: wiki.file(s.path), line: s.ranges.first?.lowerBound ?? 0)
-                            }
+                        if !page.footnotes.isEmpty {
+                            WikiFootnotes(list: page.footnotes) { open($0) }
+                        }
+                        if !page.backlinks.isEmpty {
+                            backlinks(page.backlinks)
                         }
                     } else if failed {
                         ContentUnavailableView(title, systemImage: "book.closed", description: Text("The page couldn't be read."))
@@ -70,27 +69,103 @@ struct WikiPageView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $next) { l in WikiPageView(wiki: wiki, link: l) }
         .sheet(item: $file) { f in FileView(path: f.path, line: f.line) }
+        .alert(notice ?? "", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+            Button("OK", role: .cancel) {}
+        }
         .environment(\.openURL, OpenURLAction { url in
-            let target = url.absoluteString
-            if let code = WikiPageText.code(of: target) {
-                file = WikiFile(path: wiki.file(code.path), line: code.line)
+            switch page?.target(of: url.absoluteString) {
+            case .page(let path, let section)?:
+                if path == link.path { jump = section } else { next = WikiLink(path: path, section: section) }
                 return .handled
-            }
-            if let to = page?.page(of: target) {
-                if to.path == link.path { jump = to.section } else { next = WikiLink(path: to.path, section: to.section) }
+            case .file(let path)?:
+                file = WikiFile(path: wiki.file(path), line: 0)
                 return .handled
+            case .footnote(let f)?:
+                open(f)
+                return .handled
+            case nil:
+                return .systemAction
             }
-            return .systemAction
         })
         .task {
             model.wikiReadLast[wiki.root] = link.path
-            page = await model.wikiPage(link.path)
-            failed = page == nil
+            await load()
             if !link.section.isEmpty {
                 // (Once it's laid out.)
                 try? await Task.sleep(for: .milliseconds(150))
                 jump = link.section
             }
         }
+    }
+
+    func load() async {
+        page = await model.wikiPage(link.path)
+        failed = page == nil
+    }
+
+    /// A footnote's code, at its lines now (a file that's gone: nothing).
+    func open(_ f: WikiPageText.Footnote) {
+        guard f.state != "gone" else { return }
+        file = WikiFile(path: wiki.file(f.path), line: f.start)
+    }
+
+    /// What it owes the code, and what to do about it: a session that
+    /// checks it against its code, or your word that you have.
+    @ViewBuilder func owes(_ page: WikiPageText) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(page.owes, id: \.self) { line in
+                Text(line).font(.footnote).foregroundStyle(Color(p.warning))
+            }
+            HStack(spacing: 16) {
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    Task {
+                        busy = true
+                        if await model.runWiki("page:" + link.path) {
+                            notice = "A session on your computer is checking this page against its code."
+                        }
+                        busy = false
+                    }
+                } label: {
+                    Text("Check this page").font(.subheadline.weight(page.owes.isEmpty ? .regular : .semibold))
+                }
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("wikiCheckPage")
+                .accessibilityHint("Starts a session on your computer that reads it against its code and fixes it")
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    Task {
+                        busy = true
+                        if await model.reviewWiki(link.path) { await load() }
+                        busy = false
+                    }
+                } label: {
+                    Text("Mark reviewed").font(.subheadline)
+                }
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("wikiMarkReviewed")
+                .accessibilityHint("You've read it against its code: its changed footnotes count as checked")
+            }
+            .disabled(busy || wiki.running)
+        }
+        .padding(.bottom, 4)
+    }
+
+    /// The pages that link here.
+    func backlinks(_ list: [WikiPage]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Linked from")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color(p.muted))
+                .padding(.bottom, 2)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(list) { other in
+                Button(other.title.isEmpty ? other.path : other.title) { next = WikiLink(path: other.path) }
+                    .font(.footnote)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("wikiBacklink")
+            }
+        }
+        .padding(.top, 8)
     }
 }

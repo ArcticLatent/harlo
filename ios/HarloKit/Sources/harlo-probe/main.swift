@@ -693,20 +693,30 @@ func record(_ link: String, to path: String) async {
     let planned = await turn("Plan the rest of the work.")
     _ = await waitFor(5) { (s.plan?.steps.count ?? 0) >= 3 }
     check(planned && (s.plan?.steps.count ?? 0) >= 3, "a plan (\(s.plan?.steps.map(\.title) ?? []))")
-    // The project's wiki, as the plan's sheet shows it: its pages and how
-    // fresh, each page read, a search OpenWiki answers.
-    await model.loadWiki()
-    check(s.wiki?.pages.map(\.title) == ["Quickstart", "Sidebar", "Releasing"] && s.wiki?.behind == 1, "the wiki's pages, one commit behind (\(String(describing: s.wiki)))")
+    // The project's wiki, as the plan's sheet shows it: its pages and what
+    // they owe the code, each page read, a search.
+    // (Read in the background on the computer: loading until it's read.)
+    for _ in 0..<50 {
+        await model.loadWiki()
+        if s.wiki?.loading == false { break }
+        try? await Task.sleep(for: .milliseconds(200))
+    }
+    // (The sidebar's fix earlier changed `rebuild`; a commit, projects.rs.)
+    check(s.wiki?.pages.map(\.title) == ["Overview", "Sidebar", "Releasing"] && s.wiki?.freshness() == ["2 footnotes' code changed"],
+          "the wiki's pages, two footnotes' code changed since (\(String(describing: s.wiki)))")
     for page in s.wiki?.pages ?? [] { _ = await model.wikiPage(page.path) }
     let sidebarPage = await model.wikiPage("architecture/sidebar.md")
     check(sidebarPage?.blocks.map(\.kind).contains("mermaid") == true && sidebarPage?.blocks.map(\.kind).contains("code") == true, "a page in blocks (\(sidebarPage?.blocks.map(\.kind) ?? []))")
-    check(sidebarPage?.sources.map(\.path) == ["src/sidebar.rs", "src/projects.rs"] && sidebarPage?.sources.first?.ranges == [1...2, 4...9], "its sources, the lines its claims cite (\(sidebarPage?.sources.map { "\($0.path) \($0.ranges)" } ?? []))")
+    check(sidebarPage?.footnotes.map(\.place) == ["src/projects.rs", "src/sidebar.rs, fn rebuild", "src/sidebar.rs, fn merge_by_key"]
+          && sidebarPage?.footnotes.map(\.state) == ["stale", "stale", "current"] && sidebarPage?.owes.count == 2,
+          "its footnotes, those whose code changed marked (\(sidebarPage?.footnotes.map { "\($0.place) \($0.state)" } ?? []))")
+    check(sidebarPage?.backlinks.map(\.title) == ["Overview", "Releasing"], "and the pages linking to it (\(sidebarPage?.backlinks.map(\.title) ?? []))")
     // (Its graph and its page's diagram: drawn at the end.)
     // (Each drawn across and down: the phone shows the one larger on it.)
     let wikiDiagrams = ([s.wiki?.mermaid ?? ""] + (sidebarPage?.blocks.filter { $0.kind == "mermaid" }.map(\.code) ?? []))
         .flatMap { [$0] + (DiagramPicture.down($0).map { [$0] } ?? []) }
     let found = await model.searchWiki("rebuilds the whole list")
-    check(found?.hits.first?.page == "openwiki/architecture/sidebar.md" && found?.hits.first?.heading == "Rebuilding rows" && found?.plain == false, "OpenWiki's search finds the section (\(found?.hits.first.map { "\($0.page)#\($0.section)" } ?? "none"))")
+    check(found?.hits.first?.page == "architecture/sidebar.md" && found?.hits.first?.heading == "Rebuilding rows", "the search finds the section (\(found?.hits.first.map { "\($0.page)#\($0.section)" } ?? "none"))")
     rec.scene("plan")
     let helped = await turn("Have a helper update the changelog.", 90) { s in s.rows.contains { $0.html.contains("changelog entry is in") } }
     check(helped, "a helper's change brought over (\(s.rows.suffix(4).map { "\($0.kind) \($0.title) \($0.text.prefix(30))" }))")

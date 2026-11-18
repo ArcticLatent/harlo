@@ -122,10 +122,21 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
             let (everywhere, cwd, own) = (result["everywhere"] == true, path("cwd"), path("own"));
             return on_ui(thread, move |this| this.found_sessions(&hits, everywhere, cwd.as_deref(), own.as_deref()));
         }
-        if tool.starts_with("openwiki_") {
-            let root = harlo_core::openwiki::root_of(std::path::Path::new(result["cwd"].as_str().unwrap_or_default()));
-            let said = harlo_core::openwiki::call(&root, tool, args.clone()).map_err(|e| anyhow::anyhow!("{e:#}"))?;
-            return harlo_core::openwiki::answer(&said);
+        if tool == harlo_core::orchestration::INSTRUCTIONS {
+            // (Checked here, off the UI thread: another machine's is asked over SSH.)
+            let text = result["text"].as_str().unwrap_or_default();
+            return Ok(match harlo_core::wiki::reading_note(std::path::Path::new(result["cwd"].as_str().unwrap_or_default())) {
+                Some(note) => json!(format!("{text}\n\n{note}")),
+                None => json!(text),
+            });
+        }
+        if tool == harlo_core::wiki::CHECK {
+            let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
+            let writer = result["writer"].as_str().unwrap_or_default().to_owned();
+            let answer = harlo_core::wiki::call_check(&cwd, &writer, args)?;
+            crate::workspace::forget_wiki_reads();
+            let _ = thread.queue(|mut this| this.as_mut().wiki_ready());
+            return Ok(answer);
         }
         let outcome = crate::plans::tool(tool, args, &result);
         let _ = thread.queue(super::workspace::qobject::Workspace::plans_changed);

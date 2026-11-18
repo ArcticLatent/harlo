@@ -45,7 +45,7 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 | | |
 |---|---|
 | **Two agents, one chat** | **Harlo**, harlo's own agent, works with your ChatGPT plan, an OpenAI key or any OpenAI-compatible server, your own models included. It sees images, searches and reads the web, uses MCP servers and skills, splits work between subagents (each writer in a worktree of its own), and runs its commands in a sandbox. It counts every request's tokens and says what they cost, or that the cost is unknown, never a made-up $0. **Claude Code** uses your own login and settings, and your existing Claude Code sessions show up in the sidebar: click one to carry on. |
-| **A wiki of your code** | harlo keeps wikis in [OpenWiki](https://github.com/langchain-ai/openwiki)'s format, with its tools built in. **Create wiki** has your agent write a linked wiki of the repository (its architecture, workflows and the reasons behind them), with every fact tied to the lines of code it came from. Your agents then search it and read only the sections they need. The Wiki panel lists the pages, reads them with their diagrams and sources, searches them and draws them as a graph. It also shows how far behind the code the wiki is, and Update rewrites only the pages whose code changed. |
+| **A wiki of your code** | **Create wiki** has your agent write a wiki of the repository in `.okf/` (Open Knowledge Format): how its parts fit, its workflows and the decisions behind them, each claim footnoted with the file and declaration it comes from. harlo checks every footnote against the code without a model, so it knows which pages the code has moved past and what new code no page mentions yet. Your agents are pointed to the wiki and told which pages are out of date, and **Update** has a session deal with only what changed. The Wiki panel lists the pages, reads them with their diagrams and footnotes (each opens its code), searches them and draws them as a graph; **Mark reviewed** records that you've read a page against its code. |
 | **Plans and helpers** | For a bigger task the agent writes a plan you can edit, and works through it step by step. **Run with helpers** gives each step a session of its own, steps that don't depend on each other at the same time in worktrees, and each finished step is reviewed by another agent. An agent can also offer to split work between helpers; you decide. |
 | **Diagrams, choices and mockups** | Agents draw Mermaid diagrams, which harlo shows as pictures. A choice between approaches comes as cards with their pros and cons and a Choose button. A UI change comes as a mockup harlo renders, before and after. |
 | **Changes and diffs** | Every file an agent touched, side-by-side diffs, review comments sent back to the agent, and undo for any turn. A folder of repositories shows each one's changes. |
@@ -155,7 +155,7 @@ It speaks plain HTTP: put it behind something that adds HTTPS (Caddy, a Cloudfla
 | `crates/harlo-harness` | Runs the agents (Harlo over its RPC, Claude Code's stream-json) and turns what they say into one stream of events |
 | `crates/harlo-agent` | Harlo, harlo's own agent (`harlo-agent`): the model loop, its tools, the sandbox, MCP and subagents |
 | `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, plans, the wiki's state, remote machines, model servers, phone protocol, state. No Qt. Its `harlo-engines` program sets up and runs model servers on other machines |
-| `crates/harlo-wiki` | The wiki: reading, searching and writing OpenWiki-format wikis, ported from OpenWiki (MIT) |
+| `crates/harlo-okf` | The wiki engine: finds the declarations in the code, checks a `.okf/` wiki's footnotes against them, and keeps its ledger, indexes and log. No model |
 | `crates/harlo-code` | The text and terminal views drawn by Rust: the editor, both sides of a diff, the terminal |
 | `crates/harlo-app` | The desktop app: cxx-qt bridges and the QML interface |
 | `crates/harlo-relay` | The relay |
@@ -176,4 +176,4 @@ harlo is open source and made by one person, so contributions are very welcome: 
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled themes, icons, fonts and other work by others keep their own licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The wiki (`crates/harlo-wiki`) is ported from [OpenWiki](https://github.com/langchain-ai/openwiki) (MIT): see [its license](crates/harlo-wiki/LICENSE-OPENWIKI).
+MIT, see [LICENSE](LICENSE). Bundled themes, icons, fonts and other work by others keep their own licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

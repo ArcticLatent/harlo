@@ -19,7 +19,7 @@ harlo-harness = { path = "crates/harlo-harness" }
 harlo-code = { path = "crates/harlo-code" }
 harlo-relay = { path = "crates/harlo-relay" }
 harlo-apns = { path = "crates/harlo-apns" }
-harlo-wiki = { path = "crates/harlo-wiki" }
+harlo-okf = { path = "crates/harlo-okf" }
 harlo-update-signing = { path = "crates/harlo-update-signing" }
 
 # Every other dependency, its version only: each crate names the features it uses.
@@ -40,26 +40,22 @@ chrono = { version = "0.4", default-features = false }
 cosmic-text = "0.19"
 crypto_box = "0.9"
 ed25519-dalek = { version = "2", default-features = false }
-fancy-regex = "0.16"
 futures-util = "0.3"
 getrandom = "0.3"
 htmd = "0.5.6"
 httpdate = "1"
 ignore = "0.4"
 image = { version = "0.25", default-features = false }
-indexmap = "2"
 libc = "0.2"
 markup5ever_rcdom = "=0.38.0"
 merman = "0.9.3"
 nucleo-matcher = "0.3"
 pulldown-cmark = { version = "0.13", default-features = false }
 qrcode = { version = "0.14", default-features = false }
-regex = "1"
 reqwest = { version = "0.12", default-features = false }
 ring = "0.17"
 rusqlite = "0.41"
 sha2 = "0.10"
-stacker = "0.1"
 syntect = { version = "5.3", default-features = false }
 tokio-tungstenite = "0.29"
 tokio-util = "0.7"
@@ -157,7 +153,7 @@ unused_result_ok = "warn"
 # May cause issues with structured logging otherwise.
 literal_string_with_formatting_args = "allow"
 # Opted out for good: #[must_use] on every pure function is noise in crates
-# used only by this workspace; product names (OpenWiki, GitHub) aren't code;
+# used only by this workspace; product names (GitHub, Swift) aren't code;
 # long literals here are timestamps and sizes; short local names and helper
 # functions after statements are the house style; structs mirroring QML or
 # settings carry many flags.
@@ -174,8 +170,8 @@ struct_excessive_bools = "allow"
 # write!, on paths that aren't hot.
 float_cmp = "allow"
 format_collect = "allow"
-# The file names matched by suffix are ones harlo or OpenWiki write, or must
-# match as OpenWiki's own checks do (case-sensitive).
+# The file names matched by suffix are ones harlo writes, or known ones
+# matched case-sensitively on purpose.
 case_sensitive_file_extension_comparisons = "allow"
 # Match arms with the same body stay apart where their order or grouping
 # explains the code (a fallback after named cases, icons grouped by tool).

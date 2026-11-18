@@ -1248,7 +1248,7 @@ impl Conn {
                 }
                 // (Off the loop: a model's server may start first; machines
                 // and model servers are asked over SSH; a wiki is read.)
-                "send" | "new" | "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" | "mockup" | "wikiPage" | "wikiSearch" => {
+                "send" | "new" | "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" | "mockup" | "wikiPage" | "wikiSearch" | "wikiReview" => {
                     let (msg, later, id) = (msg.clone(), self.later_tx.clone(), id.clone());
                     tokio::spawn(async move {
                         let mut reply = slow_reply(msg).await;
@@ -1400,24 +1400,35 @@ async fn slow_reply(msg: Value) -> Value {
             json!({ "stopped": stopped_models(agent, host, models).await })
         }
         "send" | "new" => send_after_server(msg).await,
-        "wikiPage" | "wikiSearch" => wiki_reply(&msg).await,
+        "wikiPage" | "wikiSearch" | "wikiReview" => wiki_reply(&msg).await,
         op => start_or_stop_server(&msg, op == "startServer").await,
     }
 }
 
-/// A wiki page or search: the repository from harlo, read off the loop (a host's over SSH).
+/// A wiki page, a search, or a page marked reviewed by the person at the
+/// computer: the repository from harlo, read and written off the loop.
 async fn wiki_reply(msg: &Value) -> Value {
     let at = crate::phone_bridge::call(json!({ "op": "wikiFolder", "key": msg["key"] })).await;
-    match at["cwd"].as_str().map(std::path::PathBuf::from) {
-        None => at,
-        Some(cwd) => {
-            let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
-            let (op, a, b) = (text("op"), text(if msg["op"] == "wikiPage" { "page" } else { "query" }), text("workspace"));
-            tokio::task::spawn_blocking(move || if op == "wikiPage" { crate::workspace::wiki_page_at(&cwd, &a) } else { crate::workspace::wiki_search_at(&cwd, &a, &b) })
-                .await
-                .unwrap_or_else(|_| json!({ "error": "The wiki couldn't be read." }))
-        }
+    let Some(cwd) = at["cwd"].as_str().map(std::path::PathBuf::from) else { return at };
+    let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
+    let (op, page, query) = (text("op"), text("page"), text("query"));
+    let review = op == "wikiReview";
+    let said = tokio::task::spawn_blocking(move || match op.as_str() {
+        "wikiPage" => crate::workspace::wiki_page_at(&cwd, &page),
+        "wikiSearch" => crate::workspace::wiki_search_at(&cwd, &query, ""),
+        _ => match harlo_core::wiki::mark_reviewed(&cwd, &page) {
+            Ok(why) if why.is_empty() => json!({ "ok": true }),
+            Ok(why) => json!({ "error": why }),
+            Err(e) => json!({ "error": format!("The page couldn't be marked reviewed: {e:#}") }),
+        },
+    })
+    .await
+    .unwrap_or_else(|_| json!({ "error": "The wiki couldn't be read." }));
+    // (Marked: the desktop's panel and the next look read it again.)
+    if review {
+        crate::phone_bridge::call(json!({ "op": "wikiChanged" })).await;
     }
+    said
 }
 
 /// Undo a turn, for a phone: `undoTargets`, `undoPlan` or `undo` (see the

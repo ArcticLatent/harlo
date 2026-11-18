@@ -350,13 +350,19 @@ public actor HarloClient {
         WikiPageText(try check(await call("wikiPage", ["key": .string(key), "page": .string(page)])))
     }
 
-    /// A search of that wiki (in one of its workspaces, when it asked).
-    public func wikiSearch(_ key: String, query: String, workspace: String = "") async throws -> WikiHits {
-        WikiHits(try check(await call("wikiSearch", ["key": .string(key), "query": .string(query), "workspace": .string(workspace)])))
+    /// A search of that wiki's pages.
+    public func wikiSearch(_ key: String, query: String) async throws -> WikiHits {
+        WikiHits(try check(await call("wikiSearch", ["key": .string(key), "query": .string(query)])))
+    }
+
+    /// Marks a page of that wiki reviewed by the person at the computer:
+    /// read against its code, its changed footnotes count as checked.
+    public func wikiReview(_ key: String, page: String) async throws {
+        try check(await call("wikiReview", ["key": .string(key), "page": .string(page)]))
     }
 
     /// Starts a session on the computer that writes the wiki ("create",
-    /// "update" or "continue").
+    /// "update", or "page:<path>" to check one page against its code).
     public func wikiRun(_ key: String, mode: String) async throws {
         try check(await call("wikiRun", ["key": .string(key), "mode": .string(mode)]))
     }

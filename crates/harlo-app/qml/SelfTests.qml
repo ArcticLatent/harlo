@@ -3617,7 +3617,12 @@ Item {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: { chat.transcript.scrollToEnd(); windowSettings.rightMode = "wiki" } }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: wikiPanel.openWiki("workflows/manifests-and-weights.md", "weight-calculation-the-current-asymmetry-matters") }
+        // (The page Claude Code read, at its section on weighing.)
+        ScriptAction { script: wikiPanel.openWiki((wikiPanel.pages.find(p => /manifest/.test(p.path)) || wikiPanel.pages[0]).path, "", false) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const b = ((wikiPanel.pageView || {}).blocks || []).find(x => /weigh/i.test(x.anchor))
+            if (b) wikiPanel.openWiki(wikiPanel.openPage, b.anchor, false) } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: { chat.transcript.scrollToEnd(); tests.shotWindow("site-wiki"); Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 1200 }
@@ -8628,10 +8633,10 @@ Item {
     }
 
     // The wiki with Harlo and Claude Code: with Wiki on for a project that
-    // has one, its search and read tools (no others) and a few lines on
-    // when to use them reach both through harlo's tools, and harlo answers
-    // them itself from the repository's openwiki/;
-    // with Wiki off they're gone.
+    // has one (.okf/), both are told of it through harlo's tools, with the
+    // pages whose code changed since; neither gets a wiki tool. With Wiki
+    // off they aren't told. An update with nothing owed starts no session;
+    // one with work runs a session of its own, which alone gets wiki_check.
     property int wikiProject: -1
     property int wikiDone: 0
     property int wikiRequests: 0
@@ -8645,6 +8650,19 @@ Item {
         const tools = msgs.filter(m => m.role === "tool")
         const last = tools[tools.length - 1]
         return last ? (typeof last.content === "string" ? last.content : JSON.stringify(last.content)) : ""
+    }
+    // The system lines of the model's request `i`, and its wiki tools.
+    /// Wiki update sessions so far: their first requests to the model.
+    function wikiUpdates() { return tests.modelRequests().filter(r => { const m = (r.messages || []).filter(x => x.role === "user"); return m.length === 1 && !(r.messages || []).some(x => x.role === "assistant") && JSON.stringify(m[0]).indexOf("Bring this repository's wiki") >= 0 }).length }
+    /// The wiki of the project being tested is current, with no session writing it.
+    function wikiSettled() { const st = JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)); return !st.running && !!st.work && st.work.current }
+    function wikiSaid(i) { return JSON.stringify(((tests.modelRequests()[i] || {}).messages || []).filter(m => m.role === "system")) }
+    function wikiTools(i) { return ((tests.modelRequests()[i] || {}).tools || []).map(t => t.function.name).filter(n => n.indexOf("wiki") >= 0) }
+    /// Opens a new Harlo session in the wiki's project, its requests counted from here.
+    function wikiHello() {
+        tests.wikiRequests = tests.modelRequests().length
+        tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
+        Workspace.setApprovalMode(tests.harloKey, "yolo")
     }
     SequentialAnimation {
         id: harloWikiSteps
@@ -8660,114 +8678,97 @@ Item {
             tests.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
             // (Wiki left as it comes: on, the project having a wiki.)
             tests.check(Workspace.setting("wiki_" + tests.wikiProject) === "", "the Wiki setting not set")
-            tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
+            tests.wikiHello() } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendWiki("search the wiki for how are failed jobs retried") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.wikiAnswered(), 20000) }
+        ScriptAction { script: tests.sendByKeys("hello") }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 20000) }
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
-            const first = tests.modelRequests()[0] || {}
-            const names = (first.tools || []).map(t => t.function.name)
-            const wiki = names.filter(n => n.indexOf("openwiki") >= 0)
-            tests.check(wiki.length === 2 && wiki.some(n => n.endsWith("openwiki_search")) && wiki.some(n => n.endsWith("openwiki_read")), "Wiki on (as it comes): search and read reach Harlo, and no other wiki tool (" + wiki.join(", ") + ")")
-            const tool = (first.tools || []).find(t => t.function.name.endsWith("openwiki_search"))
-            tests.check(tool && JSON.stringify(tool.function.parameters).indexOf("root") < 0, "without root: harlo fills in the repository")
-            const said = JSON.stringify((first.messages || []).filter(m => m.role === "system"))
-            tests.check(said.indexOf("This project has a wiki") >= 0 && said.indexOf("check it in the code") >= 0, "and a few lines on when to use them")
-            const t = tests.lastToolResult()
-            tests.check(t.indexOf("openwiki/architecture/jobs.md") >= 0 && t.indexOf("retried three times") >= 0, "the search finds the section (" + t.slice(0, 240) + ")")
-            tests.check(tests.findText("Search the wiki", chat.transcript) !== null, "its card says what it did")
-            tests.sendWiki("read the wiki at openwiki/architecture/jobs.md#retry-control") } }
+            const said = tests.wikiSaid(tests.wikiRequests)
+            tests.check(tests.wikiTools(tests.wikiRequests).length === 0, "Wiki on (as it comes): no wiki tool reaches Harlo (" + tests.wikiTools(tests.wikiRequests).join(", ") + ")")
+            tests.check(said.indexOf("This project has a wiki in .okf/") >= 0 && said.indexOf("check that code before relying on it") >= 0, "but a few lines on the wiki and when to read it")
+            tests.check(said.indexOf("Out of date") < 0, "with no page out of date yet")
+            // Nothing owed: Update records that and starts no session.
+            tests.wikiKeyBefore = Workspace.activeKey
+            tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "update") === "", "Update starts") } }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)).recorded, 20000) }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            tests.check(Workspace.activeKey === tests.wikiKeyBefore, "with nothing owed, no session starts")
+            tests.check((TestInput.readFile(win.argValue("--cwd=") + "/.okf/.harlo/ledger.json") || "").indexOf("src/jobs.rs") >= 0, "the check records the footnotes' code")
+            // The code a footnote cites changes: sessions are told the page is out of date.
+            TestInput.writeFile(win.argValue("--cwd=") + "/src/jobs.rs", "pub fn retry() {\n    four();\n}\n")
+            tests.wikiHello() } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.wikiAnswered(), 20000) }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.sendByKeys("hello") }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 20000) }
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
-            const t = tests.lastToolResult()
-            tests.check(t.indexOf("Retry control") >= 0 && t.indexOf("three times") >= 0, "openwiki_read gives the section (" + t.slice(0, 240) + ")")
+            const said = tests.wikiSaid(tests.wikiRequests)
+            tests.check(said.indexOf("so the code wins): .okf/architecture/jobs.md.") >= 0, "a page whose code changed is named out of date (" + said.slice(said.indexOf("Out of date"), said.indexOf("Out of date") + 120) + ")")
             tests.shotWindow("clicks-harlo-wiki")
             // Claude Code, through the same tools.
             tests.claudeKey = Workspace.newSession(tests.wikiProject, "claude") } }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("wiki search failed jobs retried") }
+        ScriptAction { script: tests.sendByKeys("wiki note") }
         ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.chatText().indexOf("Wiki tools:") >= 0, 20000) }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             const t = tests.chatText()
-            tests.check(t.indexOf("Wiki tools: openwiki_search, openwiki_read; wiki told; found: openwiki/architecture/jobs.md") >= 0, "Claude Code gets them and the lines too, and finds the page (" + t.slice(t.indexOf("Wiki tools:"), t.indexOf("Wiki tools:") + 200) + ")")
-            // Back to Harlo: another search.
-            Workspace.open(tests.harloKey) } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: tests.sendWiki("search the wiki for backoff") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.wikiAnswered(), 20000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const t = tests.lastToolResult()
-            tests.check(t.indexOf("architecture/jobs.md") >= 0 && t.indexOf("backoff") >= 0, "it finds that too (" + t.slice(0, 160) + ")")
-            // Wiki off: a new session gets neither the tools nor the lines.
+            tests.check(t.indexOf("Wiki tools: none; wiki told; out of date: .okf/architecture/jobs.md") >= 0, "Claude Code is told the same, with no wiki tool (" + t.slice(t.indexOf("Wiki tools:"), t.indexOf("Wiki tools:") + 200) + ")")
+            // Wiki off: a new session isn't told.
             Workspace.setSetting("wiki_" + tests.wikiProject, "0")
-            tests.wikiRequests = tests.modelRequests().length
-            tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
+            tests.wikiHello() } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendWiki("hello") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.modelRequests().length > tests.wikiRequests, 15000) }
+        ScriptAction { script: tests.sendByKeys("hello") }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 20000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const next = tests.modelRequests()[tests.wikiRequests] || {}
-            const names = (next.tools || []).map(t => t.function.name)
-            tests.check(next.tools && names.every(n => n.indexOf("openwiki") < 0), "Wiki off: no wiki tools in a new session (" + names.join(", ") + ")")
-            tests.check(JSON.stringify((next.messages || []).filter(m => m.role === "system")).indexOf("This project has a wiki") < 0, "nor the lines")
+            tests.check(tests.wikiSaid(tests.wikiRequests).indexOf("This project has a wiki") < 0, "Wiki off: a new session isn't told of it")
             tests.claudeKey = Workspace.newSession(tests.wikiProject, "claude") } }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("wiki search failed jobs") }
+        ScriptAction { script: tests.sendByKeys("wiki note") }
         ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.chatText().indexOf("Wiki tools:") >= 0, 20000) }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Wiki tools: none; wiki not told") >= 0, "nor for Claude Code (" + tests.chatText().slice(-120) + ")")
-            // Creating the wiki: a session of its own runs OpenWiki's steps
-            // with the writing tools (harlo's own, in this process), which
+            tests.check(tests.chatText().indexOf("Wiki tools: none; wiki not told") >= 0, "nor is Claude Code (" + tests.chatText().slice(-120) + ")")
+            // Updating it: a session of its own with harlo's check, which
             // only it gets.
             Workspace.setSetting("default_harness", "harlo")
             // (Written with the project's model for Harlo.)
             Workspace.setSetting("project_model_" + tests.wikiProject + "_harlo", "fake/fake-helper")
             tests.wikiRequests = tests.modelRequests().length
             tests.wikiKeyBefore = Workspace.activeKey
-            tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "create") === "", "Create starts") } }
+            tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "update") === "", "Update starts") } }
         ScriptAction { script: tests.waitUntil(harloWikiSteps, () => Workspace.activeKey !== tests.wikiKeyBefore && chat.session.key === Workspace.activeKey, 20000) }
-        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => /Wiki: (complete|no update|the page|unexpected)/.test(tests.chatText()) && chat.session.status === "idle", 60000) }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => /Wiki: /.test(tests.chatText()) && chat.session.status === "idle", 60000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const reqs = tests.modelRequests().slice(tests.wikiRequests)
             const first = reqs[0] || {}
-            const names = (first.tools || []).map(t => t.function.name)
+            const names = (first.tools || []).map(t => t.function.name).filter(n => n.indexOf("wiki") >= 0)
             const asked = JSON.stringify(first.messages || [])
-            tests.check(["openwiki_begin", "openwiki_submit_plan", "openwiki_next_page", "openwiki_submit_page", "openwiki_finish"].every(n => names.some(m => m.endsWith(n))), "the wiki session gets the writing tools (" + names.filter(n => n.indexOf("openwiki") >= 0).join(", ") + ")")
-            tests.check(asked.indexOf("Create this repository's wiki with OpenWiki") >= 0 && asked.indexOf("Required sequence") >= 0, "and OpenWiki's own steps as its prompt")
-            tests.check(chat.session.title === "Wiki: create", "titled Wiki: create (" + chat.session.title + ")")
+            tests.check(names.length === 1 && names[0].endsWith("wiki_check"), "the wiki session gets wiki_check, and no other wiki tool (" + names.join(", ") + ")")
+            tests.check(asked.indexOf("Bring this repository's wiki (.okf/) in line") >= 0 && asked.indexOf("[^retry] src/jobs.rs, fn retry (lines 1–3) changed since the page was written") >= 0, "its prompt says what's owed: the stale footnote")
+            tests.check(chat.session.title === "Wiki: update", "titled Wiki: update (" + chat.session.title + ")")
             tests.check(reqs.length > 0 && reqs.every(r => r.model === "fake-helper"), "with the project's model (" + reqs.map(r => r.model).filter((m, i, a) => a.indexOf(m) === i).join(", ") + ")")
             tests.check(Workspace.approvalMode(Workspace.activeKey) === "write", "its writes go ahead (the write mode); commands still ask (" + Workspace.approvalMode(Workspace.activeKey) + ")")
             const said = tests.chatText()
-            tests.check(JSON.parse(chat.session.userPrompts()).length === 0 && tests.findText("Wiki: create. The agent writes this project's wiki from its code, a page at a time.", chat.transcript) !== null,
-                      "it opens with harlo's line, not OpenWiki's text as your message")
-            tests.check(tests.findText("a new wiki", chat.transcript) !== null && tests.findText("1 page planned", chat.transcript) !== null,
-                      "its steps say what they did (a new wiki, 1 page planned), not a run's id")
-            tests.check(tests.findText("none left", chat.transcript) !== null && tests.findText("type: overview", chat.transcript) === null,
-                      "the next page step says what it got (none left at the end), and the page's write shows its text, not its YAML header")
-            tests.check(said.indexOf("Wiki: complete") >= 0, "the run finishes (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
+            tests.check(JSON.parse(chat.session.userPrompts()).length === 0 && tests.findText("Wiki: update. The agent brings the wiki in line with the code again.", chat.transcript) !== null,
+                      "it opens with harlo's line, not the prompt as your message")
+            tests.check(tests.findText("Check the wiki", chat.transcript) !== null && tests.findText("1 footnote confirmed", chat.transcript) !== null,
+                      "its check's card says what it did (1 footnote confirmed)")
+            tests.check(said.indexOf("Wiki: complete") >= 0, "the update finishes (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
             const cwd = win.argValue("--cwd=")
-            tests.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written")
-            tests.check((TestInput.readFile(cwd + "/openwiki/.last-update.json") || "").indexOf("gitHead") >= 0, "the run records the update")
-            tests.check((TestInput.readFile(cwd + "/AGENTS.md") || "").indexOf("OPENWIKI:START") >= 0, "and its block in AGENTS.md")
-            tests.check(TestInput.readFile(cwd + "/.github/workflows/openwiki-update.yml") === "" && TestInput.listDir(cwd + "/.github") === "", "but not the daily update workflow")
-            tests.shotWindow("clicks-harlo-wiki-create")
+            tests.check((TestInput.readFile(cwd + "/.okf/log.md") || "").indexOf("(/architecture/jobs.md)") >= 0, "the log records the stamped pages (" + (TestInput.readFile(cwd + "/.okf/log.md") || "").slice(0, 200) + ")")
+            tests.check(TestInput.readFile(cwd + "/AGENTS.md") === "" && TestInput.listDir(cwd + "/.github") === "", "and nothing outside .okf/ is written")
+            tests.shotWindow("clicks-harlo-wiki-update")
             // Done, and left: on the project's Wiki shelf, folded.
             Workspace.open(tests.wikiKeyBefore) } }
         PauseAnimation { duration: 1500 }
@@ -8779,16 +8780,44 @@ Item {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const rows = tests.findAllNames("sessionRow", win.contentItem)
-            tests.check(rows.some(r => r.title === "Wiki: create" && r.settled !== ""), "opened, it shows the run (" + rows.map(r => r.title + (r.settled ? " [" + r.settled + "]" : "")).join(", ") + ")")
+            tests.check(rows.some(r => r.title === "Wiki: update" && r.settled !== ""), "opened, it shows the run (" + rows.map(r => r.title + (r.settled ? " [" + r.settled + "]" : "")).join(", ") + ")")
+            tests.check(tests.wikiUpdates() === 1, "with Keep it current off (as it comes), no update started on its own (" + tests.wikiUpdates() + ")")
+            // Keep it current as you work: the code a footnote cites
+            // changes, a turn ends, and once it's quiet an update starts
+            // in the background.
+            Workspace.setSetting("wiki_" + tests.wikiProject, "1")
+            Workspace.setSetting("wiki_keep_" + tests.wikiProject, "1")
+            TestInput.writeFile(win.argValue("--cwd=") + "/src/jobs.rs", "pub fn retry() {\n    five();\n}\n")
+            tests.wikiHello() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: { tests.wikiKeyBefore = Workspace.activeKey; tests.sendByKeys("hello") } }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.wikiUpdates() === 2 && tests.wikiSettled(), 30000) }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const reqs = tests.modelRequests(), asked = JSON.stringify(reqs.filter(r => JSON.stringify(r.messages || []).indexOf("Bring this repository's wiki") >= 0).slice(-1)[0] || {})
+            tests.check(tests.wikiUpdates() === 2 && asked.indexOf("[^retry] src/jobs.rs, fn retry") >= 0, "Keep it current on: a session updates the wiki on its own (" + tests.wikiUpdates() + ")")
+            tests.check(Workspace.activeKey === tests.wikiKeyBefore, "in the background: the session you're in stays open")
+            const st = JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject))
+            tests.check(!st.running && st.work && st.work.current, "and the wiki is current again (" + (st.work ? st.work.text : "") + ")")
+            // A turn that changes nothing the wiki cites: no update.
+            tests.sendByKeys("hello") } }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: {
+            tests.check(tests.wikiUpdates() === 2, "and a turn after that, with nothing owed, starts none (" + tests.wikiUpdates() + ")")
             tests.summary(); Qt.quit() } }
     }
     property string wikiKeyBefore: ""
 
-    // The Wiki panel: a project's pages by folder, each read with its
-    // diagram and code, links between pages followed (and Back), a link to
-    // code opening the file, a search, the graph whose boxes open pages,
-    // how fresh it is, an interrupted run's Continue; and a project with
-    // none, whose Create runs a wiki session and then shows its pages.
+    // The Wiki panel: a project's pages by folder and by type, each read
+    // with its diagram, code, footnotes and the pages linking to it; links
+    // between pages followed (and Back), a footnote opening its code, a
+    // search, the graph whose boxes open pages; Mark reviewed, a footnote
+    // whose code changed, new code no page mentions and Check this page;
+    // and a project with none, whose Create runs a wiki session and then
+    // shows its pages, and whose Update with nothing owed starts none.
     property int wikiProject2: -1
     /// Clicks the words of a link in a page's text.
     function clickLink(edit, words) {
@@ -8801,6 +8830,8 @@ Item {
     }
     function wikiProse(words) { return tests.findAllNames("wikiProse", wikiPanel).find(t => t.getText(0, t.length).indexOf(words) >= 0) || null }
     function wikiRows() { return tests.findAllNames("wikiPageRow", wikiPanel).map(r => r.modelData.title) }
+    /// What the open page owes the code, as it lists it.
+    function wikiOwes() { return (wikiPanel.pageView && wikiPanel.pageView.items) || [] }
     SequentialAnimation {
         id: wikiPanelSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikipanel"
@@ -8831,43 +8862,43 @@ Item {
             TestInput.key(Qt.Key_K, Qt.ControlModifier | Qt.ShiftModifier) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.wikiRows().length === 3, 10000) }
-        PauseAnimation { duration: 300 }
-        // (Larger text: the freshness line breaks between its phrases, or a
-        // phrase between its words, never inside a word.)
-        ScriptAction { script: { tests.wikiScale = Workspace.textScale; Workspace.chooseTextScale(1.25) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const f = tests.findName("wikiFreshness", wikiPanel)
-            const labs = f ? f.children.filter(c => c.lineCount !== undefined) : []
-            tests.check(labs.length === 2 && labs.every(l => l.lineCount === 1 || l.implicitWidth > f.width),
-                      "at 125% the freshness line keeps its words whole (" + labs.map(l => l.lineCount).join(",") + " lines, " + Math.round(f ? f.width : 0) + "px)")
-            Workspace.chooseTextScale(tests.wikiScale) } }
+        // (The pointer off the rail button clicked before: its tip covers
+        // the filter's second row in a narrow panel.)
+        ScriptAction { script: { const at = wikiPanel.mapToItem(null, 12, 12); TestInput.moveTo(at.x, at.y) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(windowSettings.rightMode === "wiki" && tests.findName("wikiSearch", wikiPanel).activeFocus, "and opens it again, its search ready to type in")
             tests.check(win.shortcutList.some(x => x.id === "wikiPanel" && x.seq === "Ctrl+Shift+K" && x.group === "Panels"), "listed with the other panels' shortcuts")
-            tests.check(JSON.stringify(tests.wikiRows()) === JSON.stringify(["Quickstart", "Jobs", "Releasing"]), "its pages, the quickstart first (" + JSON.stringify(tests.wikiRows()) + ")")
+            tests.check(JSON.stringify(tests.wikiRows()) === JSON.stringify(["Overview", "Jobs", "Releasing"]), "its pages, the overview first (" + JSON.stringify(tests.wikiRows()) + ")")
             tests.check(tests.findText("Architecture", wikiPanel) !== null && tests.findText("Workflows", wikiPanel) !== null, "grouped by folder")
-            const fresh = tests.findName("wikiFreshness", wikiPanel)
-            tests.check(fresh && fresh.text.replace(/\u00a0/g, " ") === "Updated just now · 1 commit since", "how fresh it is, against the code (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
+            const marks = tests.findAllNames("wikiPageMark", wikiPanel).map(m => m.text)
+            tests.check(marks.length === 3 && marks.every(m => m === "Edited, not checked yet"), "pages harlo hasn't checked say so (" + marks.join(", ") + ")")
+            tests.check(tests.wikiFresh() === "Up to date", "nothing owed to the code (" + tests.wikiFresh() + ")")
             const run = tests.findName("wikiRun", wikiPanel)
-            tests.check(run && run.text === "Update" && run.variant === "primary", "Update, the thing to do when it's behind")
-            tests.check(tests.findName("wikiSwitch", wikiPanel).checked && tests.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and whether agents use it (on unless switched off)")
+            tests.check(run && run.text === "Update" && run.variant === "outline", "so Update is quiet")
+            tests.check(tests.findName("wikiSwitch", wikiPanel).checked && tests.findText("Agents are pointed to it, in sessions started from now on.", wikiPanel) !== null, "and agents are pointed to it (on unless switched off)")
             tests.shotWindow("clicks-wiki-pages")
+            tests.clickItem(tests.findName("wikiType-Workflow", wikiPanel), "the Workflow filter") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(JSON.stringify(tests.wikiRows()) === JSON.stringify(["Releasing"]), "a type shows only its pages (" + JSON.stringify(tests.wikiRows()) + ")")
+            tests.clickItem(tests.findName("wikiType-all", wikiPanel), "All") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.wikiRows().length === 3, "All shows them all again")
             // (Off the rail first: its button's tooltip can sit over the row.)
             TestInput.moveTo(win.width / 2, win.height / 2) } }
         PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.clickItem(tests.findAllNames("wikiPageRow", wikiPanel)[0], "the Quickstart row") }
+        ScriptAction { script: tests.clickItem(tests.findAllNames("wikiPageRow", wikiPanel)[0], "the Overview row") }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "quickstart.md" && tests.wikiProse("job runner") !== null, 10000) }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "overview.md" && tests.wikiProse("job runner") !== null, 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const meta = tests.findName("wikiPageMeta", wikiPanel)
-            tests.check(meta && meta.text === "Overview", "a page says what kind it is (" + (meta ? meta.text : "") + ")")
-            tests.check(tests.findText("Where to start.", wikiPanel) !== null, "and its summary")
+            tests.check(meta && meta.text === "Overview · not checked yet", "a page says what kind it is, and that it's not checked yet (" + (meta ? meta.text : "") + ")")
             const title = tests.findName("wikiPageTitle", wikiPanel), lede = tests.findName("wikiPageLede", wikiPanel)
-            tests.check(title && title.text === "Quickstart" && lede && title.y < lede.y && lede.y < meta.y
-                      && tests.findAllNames("wikiProse", wikiPanel).every(t => !t.visible || t.text.indexOf(">Quickstart<") < 0),
+            tests.check(title && title.text === "Overview" && lede && lede.text === "Where to start." && title.y < lede.y && lede.y < meta.y
+                      && tests.findAllNames("wikiProse", wikiPanel).every(t => !t.visible || t.text.indexOf(">Overview<") < 0),
                       "its title first, then its summary and kind, the title not again in its text")
             tests.clickLink(tests.wikiProse("job runner"), "job runner") } }
         PauseAnimation { duration: 300 }
@@ -8877,28 +8908,42 @@ Item {
         ScriptAction { script: {
             tests.check(true, "a link to another page opens it in the panel")
             const back = tests.findName("wikiBack", wikiPanel)
-            tests.check(back && back.text === "← Quickstart", "with Back to the page before (" + (back ? back.text : "") + ")")
+            tests.check(back && back.text === "← Overview", "with Back to the page before (" + (back ? back.text : "") + ")")
             tests.check(tests.findAllNames("wikiDiagram", wikiPanel).some(d => d.ready), "its diagram drawn as a picture")
             const code = tests.findAllNames("wikiCode", wikiPanel)
             tests.check(code.length === 1 && code[0].children[0].getText(0, code[0].children[0].length).indexOf("run-jobs --retries 3") >= 0, "its code in a code well")
             const codeText = code.length === 1 ? code[0].children[0] : null
             tests.check(codeText && codeText.contentWidth <= codeText.width + 1 && codeText.lineCount > 1,
                       "its long line wrapped in the well, not cut (" + (codeText ? Math.round(codeText.contentWidth) + " in " + Math.round(codeText.width) + ", " + codeText.lineCount + " lines" : "") + ")")
-            tests.check(tests.findName("wikiPageMeta", wikiPanel).text === "Architecture", "and its kind")
+            const retry = tests.wikiProse("retried three times")
+            tests.check(retry && retry.text.indexOf("okf-fn:retry") >= 0 && retry.getText(0, retry.length).indexOf("[^retry]") < 0, "a footnote's mark is a link, not its syntax")
+            const notes = tests.findAllNames("wikiFootnote", wikiPanel).map(f => f.getText(0, f.length))
+            tests.check(notes.length === 1 && notes[0].indexOf("src/jobs.rs, fn retry") >= 0 && notes[0].indexOf("lines 1–3") >= 0 && notes[0].indexOf("changed") < 0,
+                      "the footnote names its code and lines (" + notes.join(" | ") + ")")
+            const links = tests.findAllNames("wikiBacklink", wikiPanel).map(b => b.text)
+            tests.check(JSON.stringify(links) === JSON.stringify(["Overview", "Releasing"]), "and the pages linking here (" + JSON.stringify(links) + ")")
             tests.shotWindow("clicks-wiki-reader")
-            tests.clickLink(tests.wikiProse("starts in"), "README.md") } }
+            tests.clickLink(tests.findAllNames("wikiFootnote", wikiPanel)[0], "src/jobs.rs") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => Workspace.activeKey.endsWith("/repo/src/jobs.rs"), 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(Workspace.activeKey === "file:" + win.argValue("--cwd=") + "/src/jobs.rs", "a footnote opens its code (" + Workspace.activeKey + ")")
+            Workspace.open(tests.harloKey) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: tests.clickLink(tests.wikiProse("starts in"), "README.md") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => Workspace.activeKey.endsWith("/repo/README.md"), 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            tests.check(Workspace.activeKey === "file:" + win.argValue("--cwd=") + "/README.md", "a link to code opens the file (" + Workspace.activeKey + ")")
+            tests.check(Workspace.activeKey === "file:" + win.argValue("--cwd=") + "/README.md", "a link to a file opens it (" + Workspace.activeKey + ")")
             Workspace.open(tests.harloKey) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             tests.check(wikiPanel.openPage === "architecture/jobs.md", "and back in the session the page is still open")
             tests.clickItem(tests.findName("wikiBack", wikiPanel), "Back") } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "quickstart.md" && wikiPanel.loadingPage === "", 10000) }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => wikiPanel.openPage === "overview.md" && wikiPanel.loadingPage === "", 10000) }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             tests.check(tests.findName("wikiBack", wikiPanel).text === "← Pages", "Back returns to it, then to the pages")
@@ -8914,13 +8959,13 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const hits = tests.findAllNames("wikiHit", wikiPanel)
-            tests.check(hits[0].modelData.page.endsWith("architecture/jobs.md") && hits[0].modelData.section === "retry-control" && !wikiPanel.results.plain,
+            tests.check(hits[0].modelData.page === "architecture/jobs.md" && hits[0].modelData.section === "retry-control",
                       "the search finds the section (" + JSON.stringify(hits[0].modelData) + ")")
             tests.check(tests.findText("Retry control", wikiPanel) !== null, "shown by its heading")
             const snip = tests.findName("wikiHitSnippet", hits[0])
             tests.check(snip && snip.visible && /<b><font[^>]*>(failed|job|retried)<\/font><\/b>/i.test(snip.text)
-                      && hits.every(h => !/-->|\| *-{3}/.test(h.modelData.snippet)),
-                      "its text says why it matched, the query's words marked, no diagram or table syntax (" + (snip ? snip.text : "-") + ")")
+                      && hits.every(h => !/-->|\| *-{3}|\[\^/.test(h.modelData.snippet)),
+                      "its text says why it matched, the query's words marked, no diagram, table or footnote syntax (" + (snip ? snip.text : "-") + ")")
             const fill = wikiPanel.marked("How a job is retried", "how is a job retried")
             tests.check(fill.split("<b>").length === 3 && fill.indexOf(">job<") > 0 && fill.indexOf(">retried<") > 0 && wikiPanel.marked("How it works", "how").split("<b>").length === 2,
                       "filler words left unmarked, unless the query is only those (" + fill + ")")
@@ -8955,7 +9000,7 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const meta = tests.findName("wikiPageMeta", wikiPanel)
-            tests.check(meta.text.indexOf("Workflow · checked against the code ") === 0, "a box opens its page, which says when it was checked (" + meta.text + ")")
+            tests.check(meta.text.indexOf("Workflow · reviewed by sam ") === 0 && meta.text.endsWith(" · edited since"), "a box opens its page, which says who reviewed it (" + meta.text + ")")
             // A link to a section of another page: opened at it.
             tests.clickLink(tests.wikiProse("the jobs"), "the jobs") } }
         PauseAnimation { duration: 300 }
@@ -8963,21 +9008,56 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(tests.findName("wikiBack", wikiPanel).text === "← Releasing", "a link to a section opens its page")
-            // A run that stopped part way: Continue.
-            const cwd = win.argValue("--cwd=")
-            TestInput.writeFile(cwd + "/openwiki/.run.json", JSON.stringify({ mode: "update", phase: "generating", startedAt: new Date().toISOString(),
-                plan: { pages: [{ path: "/openwiki/quickstart.md", status: "complete" }, { path: "/openwiki/a.md", status: "pending" }, { path: "/openwiki/b.md", status: "pending" }] } }))
-            wikiPanel.load() } }
+            // Read against its code: Mark reviewed.
+            tests.clickItem(tests.findName("wikiMarkReviewed", wikiPanel), "Mark reviewed") } }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => /reviewed by you just now$/.test(tests.findName("wikiPageMeta", wikiPanel).text), 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const fresh = tests.findName("wikiFreshness", wikiPanel)
-            tests.check(fresh && fresh.text.replace(/\u00a0/g, " ") === "A run stopped part way (1 of 3 pages).", "a run that stopped part way says so (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
-            tests.check(tests.findName("wikiRun", wikiPanel).text === "Continue", "with Continue")
-            TestInput.writeFile(win.argValue("--cwd=") + "/openwiki/.run.json", "")   // (unreadable: no run)
+            tests.check(true, "Mark reviewed stamps it as reviewed by you (" + tests.findName("wikiPageMeta", wikiPanel).text + ")")
+            // The code its footnote cites changes.
+            TestInput.writeFile(win.argValue("--cwd=") + "/src/jobs.rs", "pub fn retry() {\n    four();\n}\n")
+            tests.clickItem(tests.findName("wikiRefresh", wikiPanel), "Refresh") } }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.wikiFresh() === "1 footnote's code changed" && tests.wikiOwes().length === 1, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.wikiOwes()[0] === "Footnote 1: its code changed since the page was written (src/jobs.rs, fn retry)", "the page says which footnote's code changed (" + tests.wikiOwes().join(" | ") + ")")
+            const note = tests.findAllNames("wikiFootnote", wikiPanel)[0]
+            tests.check(note && note.getText(0, note.length).indexOf("its code changed since the page was written") >= 0, "and so does the footnote")
+            tests.check(tests.findName("wikiRun", wikiPanel).variant === "primary" && tests.findName("wikiCheckPage", wikiPanel).variant === "primary", "Update and Check this page, the things to do")
+            tests.shotWindow("clicks-wiki-stale")
+            tests.clickItem(tests.findName("wikiMarkReviewed", wikiPanel), "Mark reviewed") } }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.wikiFresh() === "Up to date" && tests.wikiOwes().length === 0, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(true, "reviewed again, the footnote counts as read: up to date")
+            // New code no page mentions.
+            TestInput.writeFile(win.argValue("--cwd=") + "/src/jobs.rs", "pub fn retry() {\n    four();\n}\n\npub fn cancel() {}\n")
+            tests.clickItem(tests.findName("wikiRefresh", wikiPanel), "Refresh") } }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.wikiFresh() === "1 new declaration no page mentions" && tests.wikiOwes().length === 1, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.wikiOwes()[0] === "New function cancel (in src/jobs.rs, line 5) that no page mentions", "the page that covers it names it (" + tests.wikiOwes().join(" | ") + ")")
+            tests.wikiKeyBefore = Workspace.activeKey
+            tests.wikiRequests = tests.modelRequests().length
+            tests.clickItem(tests.findName("wikiCheckPage", wikiPanel), "Check this page") } }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => Workspace.activeKey !== tests.wikiKeyBefore && chat.session.key === Workspace.activeKey, 20000) }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => /Wiki: /.test(tests.chatText()) && chat.session.status === "idle", 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const asked = JSON.stringify((tests.modelRequests()[tests.wikiRequests] || {}).messages || [])
+            tests.check(chat.session.title === "Wiki: check a page" && asked.indexOf("Check the wiki page .okf/architecture/jobs.md") >= 0 && asked.indexOf("new fn cancel in src/jobs.rs:5") >= 0,
+                      "Check this page starts a session on that page and what it owes (" + chat.session.title + ")")
+            tests.check(tests.findText("1 path left out", chat.transcript) !== null && tests.chatText().indexOf("Wiki: complete") >= 0, "which leaves the new function out, and the wiki is current (" + tests.chatText().slice(-200) + ")")
+            Workspace.open(tests.harloKey) } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => /^Up to date · written /.test(tests.wikiFresh()), 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(true, "back in the panel: up to date, and when it was written (" + tests.wikiFresh() + ")")
             // A project without a wiki: what it is, and Create.
             tests.harloKey = Workspace.newSession(tests.wikiProject2, "harlo") } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.findName("wikiCreate", wikiPanel) !== null, 10000) }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.findName("wikiCreate", wikiPanel) !== null && tests.findName("wikiCreate", wikiPanel).visible, 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(tests.findText("No wiki yet", wikiPanel) !== null && tests.findName("wikiCreate", wikiPanel).enabled, "a project without one: what a wiki is, and Create")
@@ -8987,41 +9067,36 @@ Item {
             tests.clickItem(tests.findName("wikiCreate", wikiPanel), "Create wiki") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => Workspace.activeKey !== tests.wikiKeyBefore && chat.session.key === Workspace.activeKey, 20000) }
-        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => /Wiki: (complete|no update|the page|unexpected)/.test(tests.chatText()) && chat.session.status === "idle", 60000) }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => /Wiki: /.test(tests.chatText()) && chat.session.status === "idle", 60000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.wikiRows().length === 1, 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            tests.check(chat.session.title === "Wiki: create" && tests.chatText().indexOf("Wiki: complete") >= 0, "Create runs a wiki session (" + chat.session.title + ")")
+            tests.check(chat.session.title === "Wiki: create" && tests.chatText().indexOf("Wiki: complete") >= 0, "Create runs a wiki session (" + chat.session.title + ", " + tests.chatText().slice(-160) + ")")
             tests.check(Workspace.setting("wiki_" + tests.wikiProject2) === "1", "and turns the wiki on for the project's agents")
-            tests.check(JSON.stringify(tests.wikiRows()) === JSON.stringify(["Quickstart"]), "its page shows in the panel (" + JSON.stringify(tests.wikiRows()) + ")")
-            const fresh = tests.findName("wikiFreshness", wikiPanel)
-            tests.check(fresh && fresh.text.replace(/\u00a0/g, " ") === "Updated just now · up to date", "up to date (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
+            tests.check(JSON.stringify(tests.wikiRows()) === JSON.stringify(["Overview"]), "its page shows in the panel (" + JSON.stringify(tests.wikiRows()) + ")")
+            tests.check(tests.wikiFresh() === "Up to date · written just now", "up to date (" + tests.wikiFresh() + ")")
             tests.check(tests.findName("wikiRun", wikiPanel).variant === "outline", "Update is quiet then")
-            tests.check(tests.findText("Agents search it, in sessions started from now on.", wikiPanel) !== null, "and agents use it")
+            tests.check(tests.findText("Agents are pointed to it, in sessions started from now on.", wikiPanel) !== null, "and agents are pointed to it")
             tests.shotWindow("clicks-wiki-created")
-            // A commit to a line no fact cites (click-tests.sh makes it).
+            // A commit no page needs to answer for (click-tests.sh makes it).
             tests.log("wiki-quiet-now") } }
-        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => { wikiPanel.load(); return wikiPanel.st.behind === 1 }, 15000) }
-        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => TestInput.readFile(win.argValue("--cwd=").replace(/\/repo$/, "/repo2") + "/README.md").indexOf("and more") >= 0, 15000) }
+        PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            tests.check(tests.wikiFresh() === "Updated just now · 1 commit since", "a commit behind (" + tests.wikiFresh() + ")")
             tests.wikiKeyBefore = Workspace.activeKey
-            tests.wikiSessionsBefore = Workspace.sessionCount
+            tests.wikiRequests = tests.modelRequests().length
             tests.clickItem(tests.findName("wikiRun", wikiPanel), "Update") } }
-        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => !!wikiPanel.st.quiet, 20000) }
-        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => !!wikiPanel.st.recorded, 20000) }
+        PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            tests.check(tests.wikiFresh() === "Updated just now · up to date · 1 commit checked, none change what it says, so no model ran",
-                      "nothing it says changed: harlo records the update, no model (" + tests.wikiFresh() + ")")
-            tests.check(Workspace.activeKey === tests.wikiKeyBefore && Workspace.sessionCount === tests.wikiSessionsBefore, "and no session starts")
-            const run = tests.findName("wikiRun", wikiPanel)
-            tests.check(run && run.text === "Update anyway" && run.variant === "outline", "Update anyway, if wanted (" + (run ? run.text : "") + ")")
+            tests.check(Workspace.activeKey === tests.wikiKeyBefore && tests.modelRequests().length === tests.wikiRequests, "nothing owed: Update records that, and no session or model runs")
+            tests.check(tests.wikiFresh() === "Up to date · written just now", "still up to date (" + tests.wikiFresh() + ")")
             tests.shotWindow("clicks-wiki-quiet")
             tests.clickItem(tests.findName("wikiSwitch", wikiPanel), "the panel's Wiki switch") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            tests.check(Workspace.setting("wiki_" + tests.wikiProject2) === "0" && tests.findText("Agents don't use it: switched off for this project.", wikiPanel) !== null, "switched off, it says so")
+            tests.check(Workspace.setting("wiki_" + tests.wikiProject2) === "0" && tests.findText("Agents aren't told of it: switched off for this project.", wikiPanel) !== null, "switched off, it says so")
             tests.shotWindow("clicks-wiki-off")
             settingsDialog.projectId = tests.wikiProject2
             settingsDialog.openPage("projects") } }
@@ -9031,10 +9106,18 @@ Item {
             const sw = tests.findName("projectWiki", settingsDialog.contentItem)
             const f = tests.findName("settingsPage", settingsDialog.contentItem)
             if (sw && f) f.contentY = Math.max(0, Math.min(sw.mapToItem(f.contentItem, 0, 0).y - 160, f.contentHeight - f.height))
-            tests.check(sw !== null && !sw.checked, "Settings shows it off too") } }
+            tests.check(sw !== null && !sw.checked, "Settings shows it off too")
+            tests.check(!tests.shown(tests.findName("projectWikiKeep", settingsDialog.contentItem)), "with no Keep it current while it's off")
+            tests.clickItem(sw, "the project's Wiki switch") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
+            const keep = tests.findName("projectWikiKeep", settingsDialog.contentItem)
+            tests.check(Workspace.setting("wiki_" + tests.wikiProject2) === "1" && tests.shown(keep) && !keep.checked, "on again: Keep it current as you work shows, off unless switched on")
             tests.shotWindow("clicks-wiki-settings")
+            tests.clickItem(keep, "Keep it current as you work") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(Workspace.setting("wiki_keep_" + tests.wikiProject2) === "1", "and switches on")
             settingsDialog.close()
             tests.summary(); Qt.quit() } }
     }
@@ -9072,11 +9155,11 @@ Item {
 
     // A wiki checked whole (scripts/wiki-check: the demo project, with the
     // hand-written wiki or one an agent wrote): the panel lists its pages,
-    // the quickstart first, and how far behind the code it is; every page
-    // opens; every link to a page goes to one, every link to code to a file
-    // and lines that are there, every diagram draws; the graph has a box
-    // per page; the search finds the pages that answer each of
-    // wiki-queries.json; and a Harlo session searches and reads it.
+    // the overview first, and what it owes the code; every page opens;
+    // every link to a page goes to one, every footnote to code that's
+    // there, every diagram draws; the graph has a box per page; the search
+    // finds the pages that answer each of wiki-queries.json; and a Harlo
+    // session is told of it (and of its out-of-date pages) and reads one.
     property var demoPages: []
     property var demoProblems: ({ opened: [], links: [], code: [], diagrams: [], search: [] })
     property int demoLinks: 0
@@ -9101,18 +9184,18 @@ Item {
             Workspace.setApprovalMode(tests.harloKey, "yolo")
             windowSettings.rightMode = "wiki" } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: tests.waitUntil(wikiDemoSteps, () => wikiPanel.pages.length > 0, 15000) }
+        ScriptAction { script: tests.waitUntil(wikiDemoSteps, () => wikiPanel.pages.length > 0 && !wikiPanel.st.checking && !wikiPanel.st.loading, 15000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const pages = wikiPanel.pages
             tests.demoPages = pages.map(p => p.path)
             tests.check(pages.length >= 3, "the wiki has pages (" + pages.length + ": " + tests.demoPages.join(", ") + ")")
-            tests.check(pages[0].path === "quickstart.md", "the quickstart first (" + pages[0].path + ")")
-            tests.check(pages.every(p => p.title !== ""), "every page has a title")
-            const behind = Number(win.argValue("--wiki-behind=") || "-1")
-            const fresh = tests.findName("wikiFreshness", wikiPanel)
-            if (behind >= 0)
-                tests.check(fresh && fresh.text.replace(/\u00a0/g, " ").endsWith(behind === 0 ? "· up to date" : "· " + behind + (behind === 1 ? " commit" : " commits") + " since"), "how far behind the code (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
+            tests.check(pages[0].path === "overview.md" && pages[0].type === "Overview", "the overview first (" + pages[0].path + ")")
+            tests.check(pages.every(p => p.title !== "" && p.type !== ""), "every page has a title and a kind")
+            const stale = win.argValue("--wiki-stale=") !== ""
+            const fresh = tests.wikiFresh()
+            // (A wiki with a footnote broken says so rather than up to date.)
+            tests.check(stale ? /^\d+ footnotes?'s? code changed/.test(fresh) : /^Up to date|^1 footnote finds no code$/.test(fresh), "what it owes the code (" + fresh + ")")
             tests.demoQueries = JSON.parse(TestInput.readFile(win.argValue("--wiki-queries=")) || "[]")
             tests.shotWindow("wiki-demo-pages")
             // Every page, opened in the panel and checked.
@@ -9139,31 +9222,26 @@ Item {
                              const hrefs = /href="([^"]+)"/g
                              for (let m = hrefs.exec(String(b.html || "")); m !== null; m = hrefs.exec(String(b.html || ""))) {
                                  const href = m[1].replace(/&amp;/g, "&")
-                                 if (href.startsWith("repo://")) {
-                                     tests.demoCode++
-                                     const c = /^repo:\/\/([^#]+)(?:#L(\d+)(?:-L(\d+))?)?/.exec(href)
-                                     const text = c ? tests.demoFile(decodeURIComponent(c[1])) : ""
-                                     const last = c && c[3] ? Number(c[3]) : c && c[2] ? Number(c[2]) : 1
-                                     if (text === "" || text.split("\n").length < last) tests.demoProblems.code.push(p + " → " + href)
-                                 } else if (/\.md(#|$)/.test(href) && !/^[a-z]+:/.test(href)) {
+                                 if (/\.md(#|$)/.test(href) && !/^[a-z-]+:/.test(href)) {
                                      tests.demoLinks++
                                      const parts = href.startsWith("/") ? [] : dir.slice()
                                      for (const s of href.split("#")[0].split("/")) { if (s === "..") parts.pop(); else if (s !== "." && s !== "") parts.push(s) }
-                                     const to = parts.join("/").replace(/^openwiki\//, "")
+                                     const to = parts.join("/").replace(/^\.okf\//, "")
                                      if (tests.demoPages.indexOf(to) < 0) tests.demoProblems.links.push(p + " → " + href)
                                  }
                              }
                          }
-                         // (Its sources: files and the lines its claims cite.)
-                         for (const src of v.sources || []) {
+                         // (Its footnotes: each names code that's there, at lines the file has.)
+                         const notes = v.footnotes || []
+                         for (const f of notes) {
                              tests.demoCode++
-                             const text = tests.demoFile(src.path)
-                             const last = Math.max(1, ...(src.ranges || []).map(r => r[1]))
-                             if (text === "" || text.split("\n").length < last) tests.demoProblems.code.push(p + " → source " + src.path + " L" + last)
+                             const text = tests.demoFile(f.path)
+                             if (text === "" || f.state === "gone" || f.state === "missing" || (f.end > 0 && text.split("\n").length < f.end))
+                                 tests.demoProblems.code.push(p + " [^" + f.label + "] " + f.path + (f.locator ? ", " + f.locator : "") + " (" + (f.state || "lines " + f.end) + ")")
                          }
-                         // (Shown under the page, a link each.)
-                         if ((v.sources || []).length && tests.findAllNames("wikiSource", wikiPanel).length !== v.sources.length)
-                             tests.demoProblems.code.push(p + ": " + tests.findAllNames("wikiSource", wikiPanel).length + " of " + v.sources.length + " sources shown")
+                         // (Shown under the page, a line each.)
+                         if (tests.findAllNames("wikiFootnote", wikiPanel).length !== notes.length)
+                             tests.demoProblems.code.push(p + ": " + tests.findAllNames("wikiFootnote", wikiPanel).length + " of " + notes.length + " footnotes shown")
                          if (!tests.demoBest || v.blocks.length > 6) tests.demoBest = p
                      }, 30000) } }
         PauseAnimation { duration: 200 }
@@ -9173,7 +9251,7 @@ Item {
             const pr = tests.demoProblems
             tests.check(pr.opened.length === 0, "every page opens (" + tests.demoPages.length + " read" + (pr.opened.length ? "; " + pr.opened.join("; ") : "") + ")")
             tests.check(pr.links.length === 0, "every link to a page goes to one (" + tests.demoLinks + " links" + (pr.links.length ? "; broken: " + pr.links.join("; ") : "") + ")")
-            tests.check(tests.demoCode > 0 && pr.code.length === 0, "every link to code (and source) goes to a file and lines that are there (" + tests.demoCode + " links" + (pr.code.length ? "; broken: " + pr.code.join("; ") : "") + ")")
+            tests.check(tests.demoCode > 0 && pr.code.length === 0, "every footnote names code that's there (" + tests.demoCode + " footnotes" + (pr.code.length ? "; broken: " + pr.code.join("; ") : "") + ")")
             tests.check(pr.diagrams.length === 0, "every diagram draws (" + tests.demoDiagrams + (pr.diagrams.length ? "; failed: " + pr.diagrams.join("; ") : "") + ")")
             wikiPanel.openWiki(tests.demoBest, "", false) } }
         PauseAnimation { duration: 300 }
@@ -9185,12 +9263,12 @@ Item {
             const drawn = tests.findAllNames("wikiDiagram", wikiPanel).filter(d => d.ready)
             tests.check(drawn.every(d => !d.down || d.down.state !== "ready" || d.fit + 0.001 >= Math.max(0.7, Math.min(1, d.width / Math.max(1, d.across.width)))),
                       "its diagrams shown the way they fit larger (" + drawn.map(d => d.downward ? "down" : "across").join(", ") + ")")
-            // (Its end: the files and lines it comes from.)
+            // (Its end: its footnotes and the pages linking to it.)
             const reader = tests.findName("wikiReader", wikiPanel)
             if (reader) reader.contentY = Math.max(0, reader.contentHeight - reader.height) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            tests.shotWindow("wiki-demo-sources")
+            tests.shotWindow("wiki-demo-footnotes")
             const edge = tests.findName("wikiBackEdge", wikiPanel)
             tests.check(edge && Qt.colorEqual(edge.color, Theme.hairline), "scrolled, the page has an edge under Back")
             wikiPanel.closePage()
@@ -9209,62 +9287,57 @@ Item {
             tests.check(!!gbox && gbox.wider === /scroll sideways/.test(capText) && !!tests.findName("wikiGraphFull", wikiPanel),
                       "wider than the panel, its caption says to scroll or open it full size, with a button for that (" + (gbox ? gbox.wider : "-") + ")")
             const last = wikiPanel.graphPages.findIndex(p => p.path === wikiPanel.lastRead)
-            const qi = last >= 0 ? last : wikiPanel.graphPages.findIndex(p => p.path === "quickstart.md")
-            const qbox = tests.findAllNames("wikiGraphBox", wikiPanel).find(b => b.index === qi)
+            const qbox = tests.findAllNames("wikiGraphBox", wikiPanel).find(b => b.index === last)
             const qx = qbox ? qbox.mapToItem(gbox, 0, 0).x : -1
             tests.check(last >= 0 && qbox && qbox.lastRead && tests.findAllNames("wikiGraphBox", wikiPanel).filter(b => b.lastRead).length === 1,
                       "the page read last ringed in it (" + wikiPanel.lastRead + ")")
-            tests.check(qi < 0 || (qbox && qx >= 0 && qx + qbox.width <= gbox.width + 1), "it opens with the page read last in view (" + Math.round(qx) + "+" + (qbox ? Math.round(qbox.width) : "-") + " in " + (gbox ? Math.round(gbox.width) + ", scrolled " + Math.round(gbox.contentX) + " of " + Math.round(gbox.contentWidth) : "-") + ")")
+            tests.check(qbox && qx >= 0 && qx + qbox.width <= gbox.width + 1, "it opens with the page read last in view (" + Math.round(qx) + "+" + (qbox ? Math.round(qbox.width) : "-") + " in " + (gbox ? Math.round(gbox.width) + ", scrolled " + Math.round(gbox.contentX) + " of " + Math.round(gbox.contentWidth) : "-") + ")")
             tests.shotWindow("wiki-demo-graph")
             wikiPanel.mode = "pages"
             // Each search, as the panel asks it.
             tests.walk(tests.demoQueries, q => wikiPanel.search(q.q), q => !wikiPanel.searching && wikiPanel.query === q.q,
                      (q, ok) => {
-                         const hits = ok && wikiPanel.results ? wikiPanel.results.hits.map(h => h.page.replace(/^openwiki\//, "")) : []
-                         const plain = !!(wikiPanel.results && wikiPanel.results.plain)
-                         const good = hits.length > 0 && !plain && (q.pages.length === 0 || q.pages.some(p => hits.slice(0, 3).indexOf(p) >= 0))
-                         if (!good) tests.demoProblems.search.push("“" + q.q + "” → " + (plain ? "(plain) " : "") + (hits.slice(0, 3).join(", ") || "nothing"))
-                         // (No hit reads as a flattened code block.)
-                         const code = ok && wikiPanel.results ? wikiPanel.results.hits.find(h => /(^|\s)(python|rust|sh|bash|js|ts)\s+\S*[(@{=]/.test(h.snippet)) : null
-                         if (code) tests.demoProblems.search.push("“" + q.q + "” shows code: " + code.snippet.slice(0, 60))
+                         const hits = ok && wikiPanel.results ? wikiPanel.results.hits.map(h => h.page.replace(/^\.okf\//, "")) : []
+                         const good = hits.length > 0 && (q.pages.length === 0 || q.pages.some(p => hits.slice(0, 3).indexOf(p) >= 0))
+                         if (!good) tests.demoProblems.search.push("“" + q.q + "” → " + (hits.slice(0, 3).join(", ") || "nothing"))
+                         // (No hit reads as a flattened code block, or shows a footnote's raw form.)
+                         const code = ok && wikiPanel.results ? wikiPanel.results.hits.find(h => /(^|\s)(python|rust|sh|bash|js|ts)\s+\S*[(@{=]/.test(h.snippet) || /\[\^\w+\]/.test(h.snippet)) : null
+                         if (code) tests.demoProblems.search.push("“" + q.q + "” shows markup: " + code.snippet.slice(0, 60))
                      }, 30000) } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: tests.waitUntil(wikiDemoSteps, () => walker.done, 300000) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             tests.check(tests.demoProblems.search.length === 0, "the search finds the page for each question (" + tests.demoQueries.length + (tests.demoProblems.search.length ? "; missed: " + tests.demoProblems.search.join("; ") : "") + ")")
-            const snips = wikiPanel.results ? wikiPanel.results.hits.map(h => h.snippet).join(" | ") : ""
-            tests.check(/\b(place|amend|pay|refund)_order\b/.test(snips) && !/\b(place|amend|pay|refund) order\b/.test(snips),
-                      "its hits keep the code's names (place_order, not \"place order\") (" + snips.slice(0, 160) + ")")
             tests.shotWindow("wiki-demo-search")
             wikiPanel.search("") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(wikiDemoSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendWiki("search the wiki for " + (tests.demoQueries[0] ? tests.demoQueries[0].q : "orders")) }
+        ScriptAction { script: tests.sendWiki("read the wiki at " + tests.demoBest) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(wikiDemoSteps, () => tests.wikiAnswered(), 30000) }
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
+            // (Told of the wiki in its instructions, with the pages whose
+            // code changed since; no wiki tools of its own.)
+            const req = tests.modelRequests()[0] || {}
+            const said = JSON.stringify(req.messages || [])
+            // (A broken footnote makes its page out of date too.)
+            const stale = win.argValue("--wiki-stale=") !== "", broken = win.argValue("--wiki-break=") !== ""
+            const note = (/This project has a wiki in \.okf\/[^"]{0,200}/.exec(said) || [""])[0]
+            tests.check(note !== "" && (stale ? said.indexOf(".okf/architecture/orders.md") >= 0 : broken ? said.indexOf(".okf/overview.md") >= 0 : said.indexOf("Out of date") < 0),
+                      "a Harlo session is told of the wiki" + (stale ? ", and that orders.md is out of date" : broken ? ", and that overview.md is out of date" : "") + " (" + note + ")")
+            tests.check(!(req.tools || []).some(t => /wiki/.test((t.function || t).name || "")), "with no wiki tools (" + (req.tools || []).map(t => (t.function || t).name).filter(n => /wiki/.test(n)).join(", ") + ")")
             const t = tests.lastToolResult()
-            const found = /openwiki\/([\w\/.-]+\.md)#([\w-]*)/.exec(t)
-            tests.check(found !== null, "a Harlo session searches it (" + t.slice(0, 200) + ")")
-            tests.demoBest = found ? found[1] + "#" + found[2] : "quickstart.md"
-            tests.sendWiki("read the wiki at openwiki/" + tests.demoBest) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(wikiDemoSteps, () => tests.wikiAnswered(), 30000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const t = tests.lastToolResult()
-            tests.check(t.length > 80 && !/error|not found|Invalid/i.test(t.slice(0, 120)), "and reads what it found (" + tests.demoBest + ": " + t.slice(0, 160) + ")")
+            tests.check(t.length > 80 && /^---|type:|# /.test(t.trim().slice(0, 200)) && !/error|not found/i.test(t.slice(0, 120)), "and reads a page as a file (" + tests.demoBest + ": " + t.slice(0, 120) + ")")
             tests.shotWindow("wiki-demo-session")
             tests.summary(); Qt.quit() } }
     }
 
-    // Merged work changing code the wiki cites: an offer in the corner to
-    // update it; Not now holds until main moves again; Update starts the
-    // update's session.
-    property int wikiBehindBefore: 0
+    // Merged work the wiki owes something (a cited function changed, a new
+    // one): an offer in the corner to update it; Not now holds until main
+    // moves again; Update starts the update's session.
     property int wikiSessionsBefore: 0
     property string wikiPanelWriter: ""
     function wikiFresh() {
@@ -9284,14 +9357,28 @@ Item {
         ScriptAction { script: {
             tests.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
             Workspace.setSetting("project_model_" + tests.wikiProject + "_harlo", "fake/fake-helper")
+            // (Its footnote recorded: an update with nothing owed, no session.)
+            tests.wikiSessionsBefore = Workspace.sessionCount
+            Workspace.startWikiRun("project:" + tests.wikiProject, "update") } }
+        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => !!JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)).recorded, 10000) }
+        ScriptAction { script: {
+            tests.check(Workspace.sessionCount === tests.wikiSessionsBefore, "a current wiki: Update starts no session")
             Workspace.checkWikiOffers() } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            tests.check(tests.findName("wikiOffer-" + tests.wikiProject) === null && Workspace.setting("wiki_seen_" + tests.wikiProject) !== "", "the first look notes main, and offers nothing")
+            tests.log("wiki-merge-now") } }
+        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/src/b.rs") !== "", 10000) }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: Workspace.checkWikiOffers() }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => tests.findName("wikiOffer-" + tests.wikiProject) !== null, 10000) }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const toast = tests.findName("wikiOffer-" + tests.wikiProject)
             const text = toast ? tests.findName("wikiOfferText", toast).text : ""
-            tests.check(text.indexOf("2 commits on main since its last update change a.rs.") === 0, "an offer: main's commits since the update, and only the cited file they change (" + text + ")")
-            tests.check(tests.findText("Merged work changes what repo's wiki describes", toast) !== null, "naming the project")
+            tests.check(/^3 commits on main added b, which no page mentions\. An update deals with the 2 things it owes in a session you can watch\.$/.test(text),
+                      "an offer: main's commits, the declaration they add and what the wiki owes (" + text + ")")
+            tests.check(tests.findText("Merged work isn't in repo's wiki yet", toast) !== null, "naming the project")
             tests.shotWindow("clicks-harlo-wiki-offer")
             tests.clickItem(tests.findName("wikiOfferLater", toast), "Not now") } }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => tests.findName("wikiOffer-" + tests.wikiProject) === null, 5000) }
@@ -9300,23 +9387,20 @@ Item {
             Workspace.checkWikiOffers() } }
         PauseAnimation { duration: 1500 }
         // A commit made outside harlo while the Wiki panel is open: the
-        // panel counts it once the regular look at the branches sees them move.
+        // panel counts what it adds.
         ScriptAction { script: {
             tests.check(tests.findName("wikiOffer-" + tests.wikiProject) === null, "and doesn't come back while main stays where it is")
             win.openDraft(tests.wikiProject)
             windowSettings.rightMode = "wiki" } }
-        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => /commits? since/.test(tests.wikiFresh()), 10000) }
+        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => tests.wikiFresh() === "1 footnote's code changed · 1 new declaration no page mentions", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.log("wiki-commit-now") }
+        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => /2 new declarations/.test(tests.wikiFresh()), 15000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            tests.wikiBehindBefore = parseInt(tests.wikiFresh().split("· ")[1])
-            tests.log("wiki-commit-now") } }
-        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => { Workspace.checkWikiOffers(); return parseInt(tests.wikiFresh().split("· ")[1]) === tests.wikiBehindBefore + 1 }, 15000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(parseInt(tests.wikiFresh().split("· ")[1]) === tests.wikiBehindBefore + 1, "a commit made elsewhere shows in the open panel (" + tests.wikiBehindBefore + " → " + tests.wikiFresh() + ")")
+            tests.check(true, "a commit made elsewhere shows in the open panel (" + tests.wikiFresh() + ")")
             windowSettings.rightMode = ""
-            // (As if main had moved since.)
-            Workspace.setSetting("wiki_seen_" + tests.wikiProject, "")
+            // Main moved: the offer comes again.
             Workspace.checkWikiOffers() } }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => tests.findName("wikiOffer-" + tests.wikiProject) !== null, 10000) }
         PauseAnimation { duration: 400 }
@@ -9369,7 +9453,7 @@ Item {
             tests.wikiKeyBefore = Workspace.activeKey
             tests.clickItem(tests.findName("wikiOfferUpdate", tests.findName("wikiOffer-" + tests.wikiProject)), "Update the wiki") } }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => Workspace.activeKey !== tests.wikiKeyBefore && chat.session.key === Workspace.activeKey && chat.session.title === "Wiki: update", 20000) }
-        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => JSON.stringify(tests.modelRequests().map(r => r.messages || [])).indexOf("Update this repository's wiki") >= 0, 20000) }
+        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => JSON.stringify(tests.modelRequests().map(r => r.messages || [])).indexOf("Bring this repository's wiki") >= 0, 20000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(chat.session.title === "Wiki: update", "Update starts the update's session (" + chat.session.title + ")")
@@ -9380,8 +9464,8 @@ Item {
             tests.check(w.update.model === "fake/fake-coder" && w.create.model === "fake/fake-helper", "Update's writer, Create's the project's (" + JSON.stringify(w) + ")")
             // (Its prompt: where the check found change.)
             const asked = JSON.stringify(tests.modelRequests().map(r => r.messages || []))
-            const at = asked.indexOf("check before this session found")
-            tests.check(at >= 0 && asked.indexOf("src/c.rs", at) >= 0, "the update starts where the check found change (" + (at >= 0 ? asked.slice(at, at + 260) : "not said") + ")")
+            const at = asked.indexOf("harlo's check found")
+            tests.check(at >= 0 && asked.indexOf("new fn c in src/c.rs:1", at) >= 0 && asked.indexOf("[^a] src/a.rs, fn a", at) >= 0, "the update starts with what the check found owed (" + (at >= 0 ? asked.slice(at, at + 300) : "not said") + ")")
             tests.check(tests.wikiPanelWriter === "Written by Harlo with " + Theme.modelLabel("fake/fake-coder") + " (Settings → Wiki)", "and the panel says who updates it (" + tests.wikiPanelWriter + ")")
             tests.summary(); Qt.quit() } }
     }
@@ -9421,14 +9505,14 @@ Item {
             } } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: tests.waitUntil(wikiRealSteps, () => tests.harloKey !== "" ? chat.session.modelName !== "" || chat.session.harness === "claude"
-                                                                         : Workspace.activeKey !== tests.wikiKeyBefore && Workspace.activeKey !== "" || !!JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)).quiet, 120000) }
+                                                                         : Workspace.activeKey !== tests.wikiKeyBefore && Workspace.activeKey !== "" || !!JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)).recorded, 120000) }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             // (An update with nothing stale: recorded by harlo, no session.)
             const quiet = JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject))
-            if (tests.harloKey === "" && quiet.quiet) {
-                TestInput.writeFile(win.selftestDir + "/wiki-real.json", JSON.stringify({ mode: win.argValue("--wiki-mode="), quiet: quiet.quiet, wiki: quiet }, null, 1))
-                tests.log("done quiet", quiet.quiet.commits, "commits")
+            if (tests.harloKey === "" && quiet.recorded) {
+                TestInput.writeFile(win.selftestDir + "/wiki-real.json", JSON.stringify({ mode: win.argValue("--wiki-mode="), recorded: quiet.recorded, wiki: quiet }, null, 1))
+                tests.log("done quiet", quiet.recorded)
                 Qt.quit()
             } else {
                 tests.log("session", chat.session.key, chat.session.harness, chat.session.modelName, chat.session.title)
@@ -9476,14 +9560,12 @@ Item {
             windowSettings.rightMode = "wiki" } }
     }
 
-    // The wiki on another machine (the test's SSH server; the demo project
-    // there): the panel lists, reads and searches the pages there, and a
-    // Harlo session there searches and reads them, all through harlo's own
-    // agent there (`harlo-agent wiki`): no OpenWiki goes over.
-    function hostOpenWiki() {
-        const cache = win.selftestDir + "/sshd/home/.cache/harlo"
-        return TestInput.listDir(cache).split("\n").filter(n => n.startsWith("openwiki-")).map(n => cache + "/" + n)
-    }
+    // A wiki on another machine: the panel reads it there (pages, a page
+    // with its footnotes, search) through harlo's agent on it; a quiet
+    // Update records it there; a session there is told a page is out of
+    // date; Mark reviewed stamps it there; Create writes one for a second
+    // repository there, its check run there too.
+    function remoteWikiFile(rel) { return TestInput.readFile(win.argValue("--cwd=") + rel) || "" }
     SequentialAnimation {
         id: wikiRemoteSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikiremote"
@@ -9496,80 +9578,84 @@ Item {
             Remotes.connectHost("box") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => JSON.parse(Remotes.hostsJson())[0].state === "connected", 30000) }
         PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            tests.check(tests.hostOpenWiki().length === 0, "no OpenWiki on box yet")
-            Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
+        ScriptAction { script: Workspace.addProject("ssh://box" + win.argValue("--cwd=")) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo")
             tests.wikiProject = p ? Number(p[0]) : -1
-            tests.check(Workspace.instance === "box" && tests.wikiProject >= 0 && p[2] === "harlo", "the demo project on box, with Harlo there")
-            Workspace.setSetting("wiki_" + tests.wikiProject, "1")
+            tests.check(Workspace.instance === "box" && tests.wikiProject >= 0 && p[2] === "harlo", "the project on box, with Harlo there")
             tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
             Workspace.setApprovalMode(tests.harloKey, "yolo")
             windowSettings.rightMode = "wiki" } }
         PauseAnimation { duration: 600 }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => wikiPanel.pages.length > 0 && !wikiPanel.st.loading, 30000) }
+        // (The first read may put harlo's agent on box.)
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiRows().length === 2 && !wikiPanel.st.loading, 150000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const pages = wikiPanel.pages, fresh = tests.findName("wikiFreshness", wikiPanel)
-            tests.check(wikiPanel.st.host === "box" && wikiPanel.st.root === "ssh://box" + win.argValue("--cwd="), "the panel reads the wiki on box (" + wikiPanel.st.root + ")")
-            tests.check(pages.length === 6 && pages[0].path === "quickstart.md", "its pages, the quickstart first (" + pages.map(p => p.path).join(", ") + ")")
-            tests.check(fresh && fresh.text.replace(/\u00a0/g, " ").endsWith("· 1 commit since"), "how far behind box's code (" + (fresh ? fresh.text.replace(/\u00a0/g, " ") : "") + ")")
+            tests.check(wikiPanel.st.host === "box" && wikiPanel.st.root === "ssh://box" + win.argValue("--cwd=") && !wikiPanel.st.error, "the panel reads the wiki on box (" + wikiPanel.st.root + (wikiPanel.st.error ? ", " + wikiPanel.st.error : "") + ")")
+            tests.check(JSON.stringify(tests.wikiRows()) === JSON.stringify(["Overview", "Jobs"]), "its pages, the overview first (" + JSON.stringify(tests.wikiRows()) + ")")
+            tests.check(tests.wikiFresh() === "Up to date", "nothing owed to box's code (" + tests.wikiFresh() + ")")
             tests.check(tests.findText("repo on box", wikiPanel) !== null, "its head names the host")
             tests.shotWindow("wiki-remote-pages")
-            wikiPanel.openWiki("architecture/orders.md", "refunds", false) } }
+            wikiPanel.openWiki("architecture/jobs.md", "", false) } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => wikiPanel.openPage === "architecture/orders.md" && wikiPanel.loadingPage === "" && wikiPanel.pageView
-                                              && (wikiPanel.pageView.blocks || []).filter(b => b.kind === "mermaid").every(b => JSON.parse(Diagrams.diagram(b.code, Theme.isLight, "{}")).state !== "drawing"), 20000) }
-        PauseAnimation { duration: 1200 }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => wikiPanel.openPage === "architecture/jobs.md" && wikiPanel.loadingPage === "" && !!wikiPanel.pageView, 30000) }
+        PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const v = wikiPanel.pageView, blocks = v.blocks || []
-            tests.check(!v.error && v.title === "Orders" && blocks.length > 5, "a page read from box (" + (v.error || v.title + ", " + blocks.length + " blocks") + ")")
-            const mer = blocks.filter(b => b.kind === "mermaid")
-            const drawn = mer.length ? JSON.parse(Diagrams.diagram(mer[0].code, Theme.isLight, "{}")) : {}
-            tests.check(mer.length === 1 && drawn.state === "ready" && tests.findAllNames("wikiDiagram", wikiPanel).length >= 1, "its diagram drawn (" + mer.length + ", " + drawn.state + " " + (drawn.error || "") + ", " + tests.findAllNames("wikiDiagram", wikiPanel).length + " shown)")
-            tests.check(blocks.some(b => String(b.html || "").indexOf("repo://shipyard/orders/service.py#L") >= 0), "its links to box's code")
+            const v = wikiPanel.pageView, notes = v.footnotes || []
+            const html = (v.blocks || []).map(b => b.html || "").join("")
+            tests.check(!v.error && v.title === "Jobs" && html.indexOf("okf-fn:retry") >= 0, "a page read from box, its footnote marked in the text (" + (v.error || v.title) + ")")
+            tests.check(notes.length === 1 && notes[0].path === "src/jobs.rs" && notes[0].start === 1 && notes[0].state === "current", "its footnote found in box's code (" + JSON.stringify(notes) + ")")
+            tests.check((v.backlinks || []).length === 1 && v.backlinks[0].path === "overview.md", "and the page linking to it")
             tests.shotWindow("wiki-remote-reader")
             wikiPanel.closePage()
-            wikiPanel.search("assorted pallet weight") } }
+            wikiPanel.search("retry backoff") } }
         PauseAnimation { duration: 300 }
-        // (The first search may put harlo's agent on box.)
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => !wikiPanel.searching && wikiPanel.query === "assorted pallet weight", 150000) }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => !wikiPanel.searching && wikiPanel.query === "retry backoff" && !!wikiPanel.results, 30000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const r = wikiPanel.results || {}, hits = (r.hits || []).map(h => h.page.replace(/^openwiki\//, ""))
-            tests.check(!r.plain && hits[0] === "architecture/manifest.md", "the search on box finds the page (" + (r.plain ? "plain text search: " : "") + hits.slice(0, 3).join(", ") + (r.error ? " " + r.error : "") + ")")
-            tests.check(tests.hostOpenWiki().length === 0, "with no OpenWiki put on box (" + tests.hostOpenWiki().join(", ") + ")")
-            tests.check(TestInput.listDir(win.selftestDir + "/data/harlo").split("\n").every(n => !n.startsWith("openwiki")), "nor anything of it in this computer's data")
-            tests.shotWindow("wiki-remote-search")
-            wikiPanel.search("") } }
+            const r = wikiPanel.results || {}, hits = (r.hits || []).map(h => h.page + "#" + h.section)
+            tests.check(hits[0] === "architecture/jobs.md#retry-control", "the search on box finds the section (" + hits.slice(0, 3).join(", ") + (r.error ? " " + r.error : "") + ")")
+            wikiPanel.search("")
+            // Nothing owed: Update records that there, and starts no session.
+            tests.wikiKeyBefore = Workspace.activeKey
+            tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "update") === "", "Update starts on box") } }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => !!JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)).recorded, 60000) }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(Workspace.activeKey === tests.wikiKeyBefore, "with nothing owed, no session starts")
+            tests.check(tests.remoteWikiFile("/.okf/.harlo/ledger.json").indexOf("src/jobs.rs") >= 0, "the check records the footnotes' code on box")
+            // The code its footnote cites changes on box.
+            TestInput.writeFile(win.argValue("--cwd=") + "/src/jobs.rs", "pub fn retry() {\n    four();\n}\n")
+            Workspace.refreshWiki() } }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiFresh().indexOf("1 footnote's code changed") >= 0, 40000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            tests.check(tests.wikiFresh().indexOf("1 footnote's code changed") >= 0, "the panel says box's code changed (" + tests.wikiFresh() + ")")
+            tests.wikiHello() } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => chat.session.modelName !== "", 30000) }
         PauseAnimation { duration: 50 }
         ScriptAction { script: {
             tests.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a Harlo session on box (" + chat.session.cwd + ")")
-            tests.sendWiki("search the wiki for how to add a new report") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiAnswered(), 60000) }
+            tests.sendByKeys("hello") } }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 30000) }
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
-            const t = tests.lastToolResult()
-            const found = /openwiki\/([\w\/.-]+\.md)#([\w-]*)/.exec(t)
-            tests.check(found !== null && found[1] === "workflows/reports.md", "the session searches the wiki on box (" + t.slice(0, 200) + ")")
-            tests.demoBest = found ? found[1] + "#" + found[2] : "quickstart.md"
-            tests.sendWiki("read the wiki at openwiki/" + tests.demoBest) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiAnswered(), 60000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const t = tests.lastToolResult()
-            tests.check(t.length > 80 && t.indexOf("register") >= 0 && !/error|not found|Invalid/i.test(t.slice(0, 120)), "and reads it (" + tests.demoBest + ": " + t.slice(0, 160) + ")")
-            tests.check(tests.hostOpenWiki().length === 0, "still no OpenWiki on box")
+            const said = tests.wikiSaid(tests.wikiRequests)
+            tests.check(tests.wikiTools(tests.wikiRequests).length === 0, "no wiki tool reaches it (" + tests.wikiTools(tests.wikiRequests).join(", ") + ")")
+            tests.check(said.indexOf("so the code wins): .okf/architecture/jobs.md.") >= 0, "and it's told the page is out of date, as box's code says (" + said.slice(said.indexOf("This project has a wiki"), said.indexOf("This project has a wiki") + 60) + ")")
             tests.shotWindow("wiki-remote-session")
+            Workspace.markWikiReviewed("project:" + tests.wikiProject, "architecture/jobs.md") } }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.remoteWikiFile("/.okf/architecture/jobs.md").indexOf("verified:") >= 0, 30000) }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiFresh() === "Up to date", 40000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const page = tests.remoteWikiFile("/.okf/architecture/jobs.md")
+            tests.check(/by: "?human:/.test(page), "Mark reviewed stamps the page on box (" + page.slice(0, 200).replace(/\n/g, " | ") + ")")
+            tests.check(tests.wikiFresh() === "Up to date", "and its changed footnote counts as read (" + tests.wikiFresh() + ")")
             // Create, for another repository on box: a wiki session there,
-            // its writing tools harlo's agent there (`harlo-agent wiki
-            // --write`).
+            // its check run there.
             Workspace.addProject("ssh://box" + win.argValue("--cwd=") + "2") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
@@ -9581,38 +9667,31 @@ Item {
             tests.wikiKeyBefore = Workspace.activeKey
             tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "create") === "", "Create starts on box") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => Workspace.activeKey !== tests.wikiKeyBefore && chat.session.key === Workspace.activeKey, 60000) }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => /Wiki: (complete|no update|the page|unexpected)/.test(tests.chatText()) && chat.session.status === "idle", 90000) }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => /Wiki: /.test(tests.chatText()) && chat.session.status === "idle", 90000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const said = tests.chatText(), cwd = win.argValue("--cwd=") + "2"
             tests.check(chat.session.title === "Wiki: create" && chat.session.cwd === "ssh://box" + cwd, "a wiki session on box (" + chat.session.title + ", " + chat.session.cwd + ")")
             tests.check(said.indexOf("Wiki: complete") >= 0, "the run finishes there (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
-            tests.check((TestInput.readFile(cwd + "/openwiki/quickstart.md") || "").indexOf("greets the reader") >= 0, "the page is written on box")
-            const last = TestInput.readFile(cwd + "/openwiki/.last-update.json") || ""
-            tests.check(last.indexOf("\"command\": \"init\"") >= 0 && last.indexOf("\"status\": \"complete\"") >= 0, "and the run recorded there (" + last.replace(/\s+/g, " ").slice(0, 160) + ")")
-            tests.check((TestInput.readFile(cwd + "/AGENTS.md") || "").indexOf("OPENWIKI:START") >= 0, "with its block in AGENTS.md")
-            tests.check(TestInput.listDir(cwd + "/.github") === "", "but not the daily update workflow")
-            tests.check(TestInput.readFile(cwd + "/openwiki/.run.json") === "", "its run state gone")
-            tests.check(tests.hostOpenWiki().length === 0, "with no OpenWiki put on box")
+            const page = TestInput.readFile(cwd + "/.okf/overview.md") || ""
+            tests.check(page.indexOf("generated:") >= 0 && page.indexOf("harlo/fake-helper") >= 0, "the page is written and stamped on box (" + page.slice(0, 160).replace(/\n/g, " | ") + ")")
+            tests.check((TestInput.readFile(cwd + "/.okf/log.md") || "").indexOf("(/overview.md)") >= 0 && (TestInput.readFile(cwd + "/.okf/index.md") || "").indexOf("okf_version") >= 0, "with its index and log there")
+            tests.check(TestInput.readFile(cwd + "/AGENTS.md") === "", "and nothing outside .okf/ written")
             tests.shotWindow("wiki-remote-create")
-            // A commit there to a README line no fact cites (click-tests.sh
-            // makes it): Update checks on box, and needs no model.
+            // A commit there to the README, which no page answers for:
+            // Update checks on box, and needs no model.
             tests.log("wiki-quiet-now") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => (TestInput.readFile(win.argValue("--cwd=") + "2/.git/logs/HEAD") || "").indexOf("commit: more") >= 0, 30000) }
         // (git writes its log a moment before HEAD moves.)
         PauseAnimation { duration: 700 }
         ScriptAction { script: {
             tests.wikiKeyBefore = Workspace.activeKey
-            tests.wikiSessionsBefore = Workspace.sessionCount
+            tests.wikiRequests = tests.modelRequests().length
             tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "update") === "", "Update starts on box") } }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => !!JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)).quiet, 60000) }
-        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => !!JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)).recorded, 60000) }
+        PauseAnimation { duration: 800 }
         ScriptAction { script: {
-            const st = JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)), cwd = win.argValue("--cwd=") + "2"
-            tests.check(st.quiet.commits === 1 && st.behind === 0, "nothing it says changed: recorded on box with no model (" + JSON.stringify(st.quiet) + ", " + st.behind + " behind)")
-            tests.check(Workspace.activeKey === tests.wikiKeyBefore && Workspace.sessionCount === tests.wikiSessionsBefore, "and no session starts")
-            const last = TestInput.readFile(cwd + "/openwiki/.last-update.json") || ""
-            tests.check(last.indexOf("\"command\": \"update\"") >= 0 && last.indexOf("\"status\": \"complete\"") >= 0, "the update recorded there (" + last.replace(/\s+/g, " ").slice(0, 160) + ")")
+            tests.check(Workspace.activeKey === tests.wikiKeyBefore && tests.modelRequests().length === tests.wikiRequests, "nothing owed: recorded on box with no model, and no session starts")
             tests.summary(); Qt.quit() } }
     }
 

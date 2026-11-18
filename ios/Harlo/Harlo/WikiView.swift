@@ -1,8 +1,8 @@
 import HarloKit
 import SwiftUI
 
-/// The wiki's pages by folder (the quickstart first), a search of it, and
-/// its pages' links as a graph.
+/// The wiki's pages by folder (the overview first), each with what it
+/// owes the code, a search of it, and its pages' links as a graph.
 struct WikiView: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -15,7 +15,6 @@ struct WikiView: View {
     @State private var query = ""
     @State private var hits: WikiHits?
     @State private var searching = false
-    @State private var workspace = ""
     @State private var graph = false
     @State private var zoom: ZoomedPicture?
 
@@ -34,7 +33,7 @@ struct WikiView: View {
                 if !wiki.inProject {
                     Text("This session isn't in one of harlo's projects, so it has no wiki.")
                         .foregroundStyle(Color(p.muted))
-                } else if !wiki.exists || wiki.loading {
+                } else if !wiki.exists || wiki.pages.isEmpty || wiki.loading || !wiki.error.isEmpty {
                     // (Reading it, or what a wiki is and Create.)
                     WikiSection(wiki: wiki, notice: $notice, showSession: showSession)
                 } else if !query.isEmpty && (hits != nil || searching) {
@@ -57,7 +56,7 @@ struct WikiView: View {
                         Section {
                             PagesGraph(wiki: wiki, zoom: $zoom, open: open)
                         } footer: {
-                            Text((wiki.graphPages.count < wiki.pages.count ? "The quickstart and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Tap a page to read it, or elsewhere to zoom.")
+                            Text((wiki.graphPages.count < wiki.pages.count ? "The overview and the pages it links to or from. " : "") + "An arrow is a link from one page to another. Tap a page to read it, or elsewhere to zoom.")
                         }
                     } else {
                         ForEach(groups, id: \.name) { g in
@@ -82,7 +81,7 @@ struct WikiView: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search the wiki")
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { _, q in
-            if q.isEmpty { hits = nil; workspace = "" }
+            if q.isEmpty { hits = nil }
         }
     }
 
@@ -91,6 +90,9 @@ struct WikiView: View {
             Text(page.title.isEmpty ? page.path : page.title).font(.body.weight(.medium))
             if !page.summary.isEmpty {
                 Text(page.summary).font(.footnote).foregroundStyle(Color(p.muted)).lineLimit(2)
+            }
+            if !page.mark.isEmpty {
+                Text(page.mark).font(.caption).foregroundStyle(Color(page.owes > 0 ? p.warning : p.muted))
             }
         }
         .padding(.vertical, 2)
@@ -103,26 +105,12 @@ struct WikiView: View {
                 Text("Searching…").font(.subheadline).foregroundStyle(Color(p.muted))
             }
         } else if let hits {
-            if !hits.workspaces.isEmpty {
-                Section {
-                    ForEach(hits.workspaces, id: \.id) { w in
-                        Button(w.name) {
-                            workspace = w.id
-                            Task { await search() }
-                        }
-                        .frame(minHeight: 44)
-                    }
-                } header: {
-                    Text("Search which workspace?")
-                } footer: {
-                    Text("This wiki is linked to others.")
-                }
-            } else if hits.hits.isEmpty {
+            if hits.hits.isEmpty {
                 Text("Nothing in the wiki matches “\(query)”.").foregroundStyle(Color(p.muted))
             } else {
                 Section {
                     ForEach(hits.hits) { hit in
-                        NavigationLink(value: WikiLink(path: hit.page.hasPrefix("openwiki/") ? String(hit.page.dropFirst(9)) : hit.page, section: hit.section)) {
+                        NavigationLink(value: WikiLink(path: hit.page, section: hit.section)) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(hit.heading.isEmpty ? title(of: hit.page) : hit.heading).font(.body.weight(.medium))
                                 if !hit.heading.isEmpty {
@@ -136,16 +124,13 @@ struct WikiView: View {
                         }
                         .accessibilityIdentifier("wikiHit")
                     }
-                } footer: {
-                    if hits.plain { Text("OpenWiki couldn't run, so these are the pages that have its words.") }
                 }
             }
         }
     }
 
     func title(of page: String) -> String {
-        let path = page.hasPrefix("openwiki/") ? String(page.dropFirst(9)) : page
-        return wiki.pages.first { $0.path == path }?.title ?? path
+        wiki.pages.first { $0.path == page }?.title ?? page
     }
 
     /// A hit's text with the query's words in the text colour and medium
@@ -176,7 +161,7 @@ struct WikiView: View {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         searching = true
-        hits = await model.searchWiki(q, workspace: workspace) ?? WikiHits(["hits": []])
+        hits = await model.searchWiki(q) ?? WikiHits(["hits": []])
         searching = false
     }
 }

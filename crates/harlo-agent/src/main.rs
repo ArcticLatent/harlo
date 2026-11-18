@@ -14,6 +14,11 @@
 //! harlo-agent models           the models your plan can use
 //! harlo-agent -p "…" [-m model] [--thinking low|medium|high]
 //!                              [--resume | --session <file>]
+//! harlo-agent wiki --check <dir>
+//!                              harlo's check of the repository's .okf/ wiki,
+//!                              no model: records what needs none (JSON out)
+//! harlo-agent wiki --okf       a request of a .okf/ wiki, JSON on stdin and
+//!                              out (how harlo reads one on this machine)
 //! harlo-agent --version        and the commit it was built from
 //! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
 //!                         [--harlo-tools] [--task-model provider/model] [--budget tokens]
@@ -100,7 +105,7 @@ async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("login") => login(sign_of(&args), args.iter().any(|a| a == "--paste")).await,
         Some("mcp") => mcp_sign(&args[1..]).await,
-        // The wiki's tools over stdio (how harlo reads a wiki on this machine).
+        // The .okf/ wiki: harlo's requests of one on this machine.
         Some("wiki") => {
             wiki_command();
             Ok(())
@@ -341,27 +346,31 @@ fn show_status(args: &[String]) {
     }
 }
 
-/// `harlo-agent wiki`: the wiki's tools over stdio, or a quiet update.
+/// `harlo-agent wiki`: a request of a .okf/ wiki, or harlo's check of one.
+///
+/// `--okf` reads a request ([`harlo_okf::view::answer`]'s) as JSON on
+/// stdin and prints the answer: how harlo reads and checks a wiki on this
+/// machine from another. `--check DIR` is harlo's check of the wiki of
+/// the repository DIR is in, with no model: it records what needs none.
 fn wiki_command() {
-    // (`--quiet-update DIR`: harlo's Update with nothing for a model
-    // to redo, recorded here; prints what it found as JSON.)
-    if let Some(dir) = std::env::args().skip_while(|a| a != "--quiet-update").nth(1) {
-        let found = harlo_wiki::tools::repository_root(&dir).and_then(|root| harlo_wiki::run::quiet_update(&root));
-        let v = found.map_or_else(
-            |e| {
-                if let Some(m) = harlo_wiki::run::unexpected(&e) {
-                    eprintln!("OpenWiki MCP operation failed: {m}");
-                }
-                serde_json::json!({ "recorded": false, "reason": harlo_wiki::run::error_text(e) })
-            },
-            |q| q.to_json(),
-        );
-        println!("{v}");
+    let args: Vec<String> = std::env::args().collect();
+    let request = if args.iter().any(|a| a == "--okf") {
+        let mut input = String::new();
+        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
+        serde_json::from_str(&input).unwrap_or_default()
+    } else if let Some(dir) = args.iter().skip_while(|a| *a != "--check").nth(1) {
+        let root = repository_root(std::path::Path::new(dir));
+        serde_json::json!({ "op": "check", "root": root.to_string_lossy(), "options": { "now": clock::utc_now() } })
+    } else {
+        println!("harlo-agent wiki --okf (a request on stdin) | --check <dir>");
         return;
-    }
-    // (`--write HOST`: the writing tools too, run as that host.)
-    let host = std::env::args().skip_while(|a| a != "--write").nth(1);
-    harlo_wiki::mcp::serve_as(host.as_deref());
+    };
+    println!("{}", harlo_okf::view::answer(&request));
+}
+
+/// The repository `dir` is in (the folder holding `.git`), else `dir`.
+fn repository_root(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.ancestors().find(|d| d.join(".git").exists()).unwrap_or(dir).to_path_buf()
 }
 
 /// An image given with `-p`, as it'll be sent.

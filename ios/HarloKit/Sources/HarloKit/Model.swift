@@ -988,14 +988,23 @@ public final class HarloModel {
     }
 
     /// A search of the open session's wiki.
-    public func searchWiki(_ query: String, workspace: String = "") async -> WikiHits? {
+    public func searchWiki(_ query: String) async -> WikiHits? {
         if demo || samples != nil { return Self.sampleWikiHits(query) }
         guard features.contains("wiki") else { return nil }
-        return await with { c, k in try await c.wikiSearch(k, query: query, workspace: workspace) }
+        return await with { c, k in try await c.wikiSearch(k, query: query) }
     }
 
-    /// Starts a wiki session on the computer ("create", "update",
-    /// "continue"): true when it started.
+    /// Marks a page of the open session's wiki reviewed by the person at
+    /// the computer: true when it was (an alert says why not).
+    public func reviewWiki(_ page: String) async -> Bool {
+        if demo || samples != nil { return true }
+        guard await with({ c, k in try await c.wikiReview(k, page: page) }) != nil else { return false }
+        await loadWiki()
+        return true
+    }
+
+    /// Starts a wiki session on the computer ("create", "update", or
+    /// "page:<path>"): true when it started (or harlo found nothing to do).
     public func runWiki(_ mode: String) async -> Bool {
         if demo || samples != nil {
             session?.wiki?.running = true

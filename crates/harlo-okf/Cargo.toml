@@ -1,0 +1,19 @@
+[package]
+name = "harlo-okf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "harlo's project wiki: an Open Knowledge Format bundle kept current with the code"
+
+[dependencies]
+sha2.workspace = true
+ignore.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+yaml-rust.workspace = true
+
+[lints]
+workspace = true
