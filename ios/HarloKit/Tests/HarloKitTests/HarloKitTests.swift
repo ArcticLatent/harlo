@@ -1385,6 +1385,22 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(s.aside?.text, "Because **so**.")
     }
 
+    @MainActor func testOpeningAgainShowsOnlyWhatsCurrent() {
+        let s = OpenSession(key: "live:1")
+        s.opened(liveKey: "live:1", harness: "claude")
+        s.take(Event(["ev": "subagents", "key": "live:1", "subagents": [["id": "t1", "agent": "web-fetch", "status": "running"]]])!)
+        XCTAssertEqual(s.subagents.map(\.status), ["running"])
+        // Away while it ended; opened again, harlo sends the list as it is.
+        s.liveKey = ""
+        s.take(Event(["ev": "subagents", "key": "live:2", "subagents": [["id": "t1", "agent": "web-fetch", "status": "completed"]]])!)
+        s.opened(liveKey: "live:2", harness: "claude")
+        XCTAssertEqual(s.subagents.map(\.status), ["completed"])
+        // With none left, none show.
+        s.liveKey = ""
+        s.opened(liveKey: "live:3", harness: "claude")
+        XCTAssertTrue(s.subagents.isEmpty)
+    }
+
     @MainActor func testStoppedMessagesComeBack() {
         let jpeg = Data([0xFF, 0xD8, 0xFF, 1, 2, 3])
         let ev = Event(["ev": "unsent", "key": "live:1", "text": "fix the tests\n\nthen this",

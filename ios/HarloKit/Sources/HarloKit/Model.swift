@@ -229,6 +229,11 @@ public final class OpenSession {
     func opened(liveKey: String, harness: String) {
         self.liveKey = liveKey
         if !harness.isEmpty { self.harness = harness }
+        // Opening again (back from the background, a new connection):
+        // harlo sends what's current, so what was shown before goes (a
+        // subagent that ended meanwhile no longer shows as running).
+        todos = []
+        subagents = []
         let waiting = early
         early = []
         for ev in waiting { take(ev) }

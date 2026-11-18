@@ -486,6 +486,9 @@ struct DriverState {
     run_error: Option<String>,
     /// Subagents already reported as finished.
     subagents_done: std::collections::HashSet<String>,
+    /// The subagents' latest state (their frames folded), for a newcomer:
+    /// a phone that comes back sees how each one ended.
+    subagents: Vec<Value>,
     /// The current run was stopped by you.
     aborted: bool,
 }
@@ -852,6 +855,7 @@ impl DriverState {
             recent: Vec::new(),
             run_error: None,
             subagents_done: std::collections::HashSet::default(),
+            subagents: Vec::new(),
             aborted: false,
         }
     }
@@ -901,6 +905,7 @@ impl DriverState {
         if self.todos.as_array().is_some_and(|a| !a.is_empty()) {
             out.push(SessionUpdate::Todos(self.todos.clone()));
         }
+        out.extend(self.subagents.iter().map(|s| SessionUpdate::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": s }))));
         out.extend(
             self.status_entries
                 .iter()
@@ -1784,6 +1789,7 @@ fn subagent_frame(st: &mut DriverState, pending: &mut Vec<SessionUpdate>, frame:
             task: p["description"].as_str().or_else(|| p["task"].as_str()).unwrap_or_default().to_owned(),
         }));
     }
+    crate::subagents::apply_event(&mut st.subagents, frame);
     pending.push(SessionUpdate::SubagentActivity(frame.clone()));
 }
 
@@ -2644,6 +2650,30 @@ mod tests {
         let all = crate::context::spent_in_file(&file).unwrap();
         assert!(own.requests >= 2 && all.requests >= own.requests + 2 && all.input > own.input, "{own:?} {all:?}");
         eprintln!("used: {}", all.line(&meta.model_id));
+    }
+
+    #[tokio::test]
+    async fn a_late_subscriber_sees_how_subagents_ended() {
+        let handle = SessionHandle::spawn(cfg(HarnessKind::Demo, SessionTarget::New));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let mut rows = Vec::new();
+        assert!(collect_until(&mut rx, &mut rows, |u| matches!(u, SessionUpdate::Status(SessionStatus::Idle))).await);
+        handle.prompt("subagents please", Vec::new(), SendMode::Normal);
+        let ended = |u: &SessionUpdate| matches!(u, SessionUpdate::SubagentActivity(f) if f["payload"]["id"] == "ScoutLark" && f["payload"]["status"] == "completed");
+        assert!(collect_until(&mut rx, &mut rows, ended).await);
+        // (A phone that was away while it ended.)
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle.subscribe(ChannelSink(tx));
+        let first = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.ok().flatten().expect("a snapshot");
+        let mut list = Vec::new();
+        for u in std::iter::once(first).chain(std::iter::from_fn(|| rx.try_recv().ok())) {
+            if let SessionUpdate::SubagentActivity(f) = u {
+                crate::subagents::apply_event(&mut list, &f);
+            }
+        }
+        let status = |id: &str| list.iter().find(|s| s["id"] == id).map(|s| s["status"].clone());
+        assert_eq!((status("ScoutLark"), status("BuildOtter")), (Some(json!("completed")), Some(json!("running"))), "{list:?}");
     }
 
     #[tokio::test]
