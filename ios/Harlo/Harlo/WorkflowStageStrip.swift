@@ -26,6 +26,7 @@ struct WorkflowStageStrip: View {
         switch status {
         case "done": "done"
         case "active": "under way"
+        case "asking": "needs you"
         case "paused": "paused"
         default: "to come"
         }

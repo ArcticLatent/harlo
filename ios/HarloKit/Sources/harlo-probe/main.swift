@@ -764,7 +764,7 @@ func record(_ link: String, to path: String) async {
 @MainActor
 func recordWorkflow(_ model: HarloModel, _ rec: Recorder, trigger: String) async {
     let form: JSON = ["task": "Keep the session list's place when a session finishes", "criteria": "- The list doesn't jump to the top\n- Tests cover it",
-                      "testCommand": "./check.sh", "implementer": "harlo", "implementerModel": "tour/tour-coder", "reviewer": "claude", "approval": "yolo"]
+                      "testCommand": "./check.sh", "implementer": "harlo", "implementerModel": "tour/tour-coder", "reviewer": "claude", "approval": "write"]
     model.watchRuns(true)
     defer { model.watchRuns(false) }
     _ = await waitFor(20) { model.state == .connected }
@@ -784,6 +784,13 @@ func recordWorkflow(_ model: HarloModel, _ rec: Recorder, trigger: String) async
         check(false, "its implementation session opens")
         return
     }
+    // It asks before running the tests: the run needs you.
+    let asking = await waitFor(30) { s.workflow?.asking == true && s.requests.contains(where: \.approval) }
+    check(asking && s.workflow?.statusLine.contains("needs you: it asks to run a command") == true && s.workflow?.askingKey.isEmpty == false,
+          "the run needs you: its session asks to run a command (\(s.workflow?.statusLine ?? "none"))")
+    await model.loadWorkflows()
+    rec.scene("workflow-asks")
+    if let a = s.requests.first(where: \.approval) { await model.answer(a, a.approval(true)) }
     let checking = await waitFor(40) { (s.workflow?.liveCheck?.output.contains("keeps_place_2") ?? false) }
     check(checking, "the check's output comes as it runs (\(s.workflow?.liveCheck?.output.suffix(60) ?? "none"), \(s.workflow?.statusLine ?? ""))")
     await model.loadWorkflows()

@@ -632,6 +632,28 @@ final class HarloUITests: XCTestCase {
         XCTAssertEqual(tiles.count, 1, "only your photo is a thumbnail")
         XCTAssertEqual(tiles.firstMatch.label, "Picture: You sent")
     }
+    /// A run whose session asks before a command: amber on the dashboard,
+    /// and its sheet says what it waits for, with the way to that session.
+    func test17aWorkflowNeedsYou() {
+        launch("workflow-asks")
+        see("Workflow runs")
+        let run = app.buttons["workflowRun"]
+        XCTAssertTrue(run.waitForExistence(timeout: 8), "the run on the dashboard")
+        XCTAssertTrue(run.label.contains("needs you"), run.label)
+        run.tap()
+        let needs = app.descendants(matching: .any)["workflowNeedsYou"]
+        XCTAssertTrue(needs.waitForExistence(timeout: 8), "the sheet says the run needs you")
+        XCTAssertTrue(needs.label.contains("it asks to run a command"), needs.label)
+        let open = app.buttons["workflowOpenAsking"]
+        XCTAssertTrue(open.exists, "Open it, to the session that asks")
+        shot("29a-workflow-needs-you")
+        audit("workflow-needs-you")
+        open.tap()
+        see("./run-tests.sh")
+        XCTAssertTrue(app.buttons["Approve"].firstMatch.waitForExistence(timeout: 8), "its approval, to answer")
+        shot("29b-workflow-asking-session")
+    }
+
     /// A workflow run: on the dashboard while its check runs, and in full
     /// with the check's output coming in; done, from its implementation
     /// session's line, with its work to merge.
@@ -651,7 +673,10 @@ final class HarloUITests: XCTestCase {
         XCTAssertFalse(app.buttons["workflowMerge"].exists, "nothing to merge yet")
         shot("30-workflow-check")
         audit("workflow-check")
-        app.collectionViews.firstMatch.swipeUp()
+        // (Scrolled to only when it's below the screen: a swipe past it
+        // takes it off the top.)
+        let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Tests running")).firstMatch
+        if !(header.exists && header.isHittable) { app.collectionViews.firstMatch.swipeUp() }
         see("Tests running")
         XCTAssertTrue(app.descendants(matching: .any)["workflowLiveOutput"].waitForExistence(timeout: 8), "the check's output")
         see("keeps_place_2")

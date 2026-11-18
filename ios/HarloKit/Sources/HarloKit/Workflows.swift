@@ -4,7 +4,8 @@ import Foundation
 public struct WorkflowStage: Equatable, Sendable {
     /// Its name ("Implement", "Tests", "Review").
     public var label: String
-    /// "done", "active", "paused" or "todo".
+    /// "done", "active", "asking" (under way, its session waiting on you),
+    /// "paused" or "todo".
     public var status: String
     /// "implement", "check" or "review".
     public var kind: String
@@ -138,6 +139,10 @@ public struct WorkflowRun: Equatable, Sendable, Identifiable {
     public var merged: Bool
     public var published: Bool
     public var removed: Bool
+    /// One of its sessions waits on you (a question or an approval).
+    public var asking: Bool
+    /// That session's key ("" none).
+    public var askingKey: String
 
     public init(_ v: JSON) {
         id = v["id"].text
@@ -163,6 +168,10 @@ public struct WorkflowRun: Equatable, Sendable, Identifiable {
         merged = v["merged"].bool ?? false
         published = v["published"].bool ?? false
         removed = v["removed"].bool ?? false
+        asking = v["asking"].bool ?? false
+        askingKey = v["askingKey"].text
+        // (The stage under way waits on you too, while its session asks.)
+        if asking { stages = stages.map { var s = $0; if s.status == "active" { s.status = "asking" }; return s } }
     }
 
     /// The card's title: the workflow and the attempt.
@@ -187,6 +196,9 @@ public struct WorkflowRun: Equatable, Sendable, Identifiable {
     /// It can be paused or stopped (it's running).
     public var running: Bool { state == "running" }
     public var paused: Bool { state == "paused" }
+
+    /// It needs you: paused, or a session of it asking.
+    public var needsYou: Bool { paused || asking }
 }
 
 /// What can be done to a run from the phone, as harlo names it.

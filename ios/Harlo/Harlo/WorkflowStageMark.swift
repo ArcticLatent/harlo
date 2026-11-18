@@ -12,9 +12,11 @@ struct WorkflowStageMark: View {
             switch status {
             case "done":
                 Image(systemName: "checkmark.circle.fill").font(.system(size: size)).foregroundStyle(Color(p.success))
-            case "active":
-                Circle().strokeBorder(Color(p.primary), lineWidth: 1.5)
-                Circle().fill(Color(p.primary)).padding(size * 0.3)
+            case "active", "asking":
+                // (Amber while its session waits on you.)
+                let tint = Color(status == "asking" ? p.warning : p.primary)
+                Circle().strokeBorder(tint, lineWidth: 1.5)
+                Circle().fill(tint).padding(size * 0.3)
             case "paused":
                 Image(systemName: "pause.circle.fill").font(.system(size: size)).foregroundStyle(Color(p.warning))
             default:

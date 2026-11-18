@@ -1191,6 +1191,19 @@ final class PlanTests: XCTestCase {
         XCTAssertNil(plan.steps.first { $0.id == 3 })
     }
 
+    func testARunWhoseSessionAsksNeedsYou() {
+        let run = WorkflowRun(["id": "wf-4", "workflow": "W", "state": "running", "attempt": 1, "asking": true, "askingKey": "s-review",
+                               "waiting": "The review needs you: it asks to run a command",
+                               "stages": [["label": "Implement", "status": "done"], ["label": "Review", "status": "active"]]])
+        XCTAssertTrue(run.needsYou)
+        XCTAssertEqual(run.askingKey, "s-review")
+        XCTAssertEqual(run.stages.map(\.status), ["done", "asking"], "the stage under way waits on you")
+        XCTAssertEqual(run.statusLine, "The review needs you: it asks to run a command")
+        let working = WorkflowRun(["id": "wf-5", "workflow": "W", "state": "running", "stages": [["label": "Implement", "status": "active"]]])
+        XCTAssertFalse(working.needsYou)
+        XCTAssertEqual(working.stages.map(\.status), ["active"])
+    }
+
     func testAWorkflowRunAsHarloSendsIt() throws {
         let run = WorkflowRun(try JSON.parse(#"""
         {"id":"wf-1","title":"Add a CSV export","workflow":"Implement and verify","doneText":"Tests passed · Review approved",
@@ -1550,7 +1563,7 @@ final class RecordingTests: XCTestCase {
 
     func testEveryScene() async throws {
         let text = try XCTUnwrap(Self.text)
-        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end", "pictures", "workflow-check", "workflow"])
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end", "pictures", "workflow-asks", "workflow-check", "workflow"])
         let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
 
         var (m, s) = try await open("session")
@@ -1639,6 +1652,17 @@ final class RecordingTests: XCTestCase {
         // A workflow run started on the computer: its implementation
         // session shows it, its check's output coming in; the list has it.
         let task = "Keep the session list's place"
+        // It asks before running the tests: the run needs you, the stage
+        // under way too, and the list says which session asks.
+        (m, s) = try await open("workflow-asks", task)
+        for _ in 0..<250 where s.workflow == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        let asks = try XCTUnwrap(s.workflow)
+        XCTAssertTrue(asks.asking && asks.needsYou)
+        XCTAssertEqual(asks.stages.map(\.status), ["asking", "todo", "todo"])
+        XCTAssertEqual(asks.statusLine, "The implementation session needs you: it asks to run a command")
+        XCTAssertTrue(s.requests.contains(where: \.approval), "its approval")
+        await m.loadWorkflows()
+        XCTAssertEqual(m.workflowRuns.first?.askingKey, s.key)
         (m, s) = try await open("workflow-check", task)
         for _ in 0..<250 where s.workflow == nil { try await Task.sleep(nanoseconds: 20_000_000) }
         let live = try XCTUnwrap(s.workflow)

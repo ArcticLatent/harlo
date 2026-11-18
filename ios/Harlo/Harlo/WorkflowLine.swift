@@ -14,7 +14,7 @@ struct WorkflowLine: View {
                 WorkflowStageStrip(stages: run.stages)
                 Text(run.liveCheck.map { "\($0.name) running · \($0.seconds) s" } ?? run.statusLine.replacingOccurrences(of: "`", with: ""))
                     .scaledFont(13)
-                    .foregroundStyle(Color(run.paused ? p.warning : p.foreground))
+                    .foregroundStyle(Color(run.needsYou ? p.warning : p.foreground))
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up").scaledFont(10, .semibold).foregroundStyle(Color(p.muted))

@@ -20,6 +20,7 @@ struct WorkflowSheet: View {
             List {
                 if let run {
                     Group {
+                        if run.asking { needsYou(run) }
                         Section {
                             stages(run)
                         } header: {
@@ -80,7 +81,7 @@ struct WorkflowSheet: View {
         ForEach(Array(run.stages.enumerated()), id: \.offset) { _, s in
             HStack(spacing: 10) {
                 WorkflowStageMark(status: s.status)
-                Text(s.label).scaledFont(15, s.status == "active" || s.status == "paused" ? .semibold : .regular)
+                Text(s.label).scaledFont(15, ["active", "asking", "paused"].contains(s.status) ? .semibold : .regular)
                 Spacer(minLength: 8)
                 let command = s.kind == "check"
                 Text(command ? s.what.trimmingCharacters(in: CharacterSet(charactersIn: "`")) : s.doer)
@@ -94,11 +95,38 @@ struct WorkflowSheet: View {
         }
     }
 
+    /// A session of it waits on you: what for, and the way to it (unless
+    /// it's the one open).
+    func needsYou(_ run: WorkflowRun) -> some View {
+        Section {
+            Label(run.waiting, systemImage: "exclamationmark.bubble.fill")
+                .scaledFont(15)
+                .foregroundStyle(Color(p.warning))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("workflowNeedsYou")
+            if canOpen(run.askingKey) {
+                Button("Open it") {
+                    dismiss()
+                    model.openHelper(run.askingKey)
+                }
+                .accessibilityHint("Opens the session that asks, to answer it")
+                .accessibilityIdentifier("workflowOpenAsking")
+            }
+        }
+    }
+
+    /// A session to go to: in the list, and not the one open.
+    func canOpen(_ key: String) -> Bool {
+        guard !key.isEmpty, model.sessions.contains(where: { $0.key == key }) else { return false }
+        return model.session.map { $0.key != key && $0.liveKey != key } ?? true
+    }
+
     /// Where it runs, and what it's doing.
     func where_(_ run: WorkflowRun) -> String {
         let place = [run.project.isEmpty ? nil : run.project, run.host.isEmpty ? nil : run.host, run.branch.isEmpty ? nil : "on \(run.branch)"]
             .compactMap(\.self).joined(separator: " · ")
-        let line = run.statusLine.replacingOccurrences(of: "`", with: "")
+        // (A session asking: said above the stages instead.)
+        let line = run.asking ? "" : run.statusLine.replacingOccurrences(of: "`", with: "")
         return [line, place].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 

@@ -24,7 +24,7 @@ struct WorkflowRunRow: View {
             if !line.isEmpty {
                 Text(line)
                     .scaledFont(13)
-                    .foregroundStyle(Color(run.paused ? p.warning : p.foreground))
+                    .foregroundStyle(Color(run.needsYou ? p.warning : p.foreground))
                     .lineLimit(2)
             }
         }
