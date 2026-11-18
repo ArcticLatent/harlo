@@ -462,6 +462,17 @@ Rectangle {
                     onClicked: branchDialog.show(Workspace.sessionFile(Workspace.activeKey), session.harness, session.cwd)
                 }
                 FlatButton {
+                    objectName: "picturesButton"
+                    visible: session.pictureCount > 0
+                    text: "Pictures"
+                    outlined: false
+                    font.pixelSize: Theme.px(13)
+                    accent: transcript.chatPictures.opened ? Theme.accent : Theme.textMuted
+                    ToolTip.visible: hovered
+                    ToolTip.text: session.pictureCount === 1 ? "The chat's picture" : "The chat's " + session.pictureCount + " pictures, as a grid"
+                    onClicked: transcript.showPictureGrid()
+                }
+                FlatButton {
                     text: "Changes"
                     outlined: false
                     font.pixelSize: Theme.px(13)

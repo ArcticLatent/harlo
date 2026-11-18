@@ -108,6 +108,9 @@ pub mod qobject {
         /// Bumped when a host's file arrives (an edit's lines are numbered
         /// from it: `diffLines` again).
         #[qproperty(i32, files_read, cxx_name = "filesRead")]
+        /// How many pictures the chat shows (`sessionPictures`), for the
+        /// header's Pictures button.
+        #[qproperty(i32, picture_count, cxx_name = "pictureCount")]
         type ChatSession = super::ChatSessionRust;
     }
 
@@ -473,6 +476,7 @@ pub struct ChatSessionRust {
     /// the session (sent with the message that still mentions them).
     mentions: Vec<(String, HarnessKind, PathBuf)>,
     files_read: i32,
+    picture_count: i32,
     /// Files on a host that edits were numbered from: when each was asked
     /// for, and its text once it came.
     host_files: std::cell::RefCell<std::collections::HashMap<String, HostFile>>,
@@ -1685,7 +1689,13 @@ impl ChatSession {
     }
 
     fn apply_updates(mut self: Pin<&mut Self>, updates: Vec<SessionUpdate>) {
+        let mut pictures = false;
         for update in updates {
+            pictures |= match &update {
+                SessionUpdate::Reset(_) => true,
+                SessionUpdate::Rows(changes) => self.touches_pictures(changes),
+                _ => false,
+            };
             match update {
                 // SAFETY: begin_reset_model and end_reset_model are paired here, on the
                 // GUI thread that owns the model, and the rows change only between them.
@@ -1773,6 +1783,40 @@ impl ChatSession {
                 }
                 SessionUpdate::StatusEntry { key, text } => self.as_mut().set_status_entry(key, text),
             }
+        }
+        if pictures {
+            self.as_mut().count_pictures();
+        }
+    }
+
+    /// Whether row changes may add or take away a picture: a row with
+    /// some comes or goes, or one's pictures change. (Most changes are a
+    /// reply streaming in: no count then, which looks at files. The
+    /// indexes are before the batch: close enough, as one rarely holds
+    /// more than a streaming row's update.)
+    fn touches_pictures(&self, changes: &[RowChange]) -> bool {
+        let has = |r: &Row| !r.images.is_empty() || !r.mentions.is_empty();
+        changes.iter().any(|c| match c {
+            RowChange::Update { at, row } => self.rows.get(*at).is_none_or(|old| old.images != row.images || old.mentions != row.mentions),
+            RowChange::Insert { rows, .. } => rows.iter().any(|r| has(r)),
+            // (Rare: older rows let go, a compaction.)
+            RowChange::Remove { .. } => true,
+        })
+    }
+
+    /// Counts the chat's pictures again (`pictureCount`).
+    fn count_pictures(mut self: Pin<&mut Self>) {
+        let mut all: Vec<String> = Vec::new();
+        for r in &self.rows {
+            for p in self.shown_pictures(r) {
+                if !all.contains(&p) {
+                    all.push(p);
+                }
+            }
+        }
+        let n = i32::try_from(all.len()).unwrap_or(i32::MAX);
+        if n != self.picture_count {
+            self.as_mut().set_picture_count(n);
         }
     }
 

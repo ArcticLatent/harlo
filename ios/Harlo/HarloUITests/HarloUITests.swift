@@ -651,6 +651,18 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 5), "your photo's thumbnail")
         XCTAssertEqual(tiles.count, 1, "only your photo is a thumbnail")
         XCTAssertEqual(tiles.firstMatch.label, "Picture: You sent")
+        // The session menu's Pictures: the grid straight away, the latest
+        // picture marked.
+        app.buttons["Session menu"].tap()
+        if !app.buttons["Pictures"].waitForExistence(timeout: 4) { app.buttons["Session menu"].tap() }
+        app.buttons["Pictures"].tap()
+        XCTAssertTrue(cells.firstMatch.waitForExistence(timeout: 8), "Pictures opens the grid")
+        XCTAssertEqual(cells.count, 2, "both pictures")
+        XCTAssertTrue(cells.element(boundBy: 1).isSelected, "the latest is marked")
+        app.buttons["pictureGridBack"].tap()
+        see("2 of 2")
+        app.buttons["pictureDone"].tap()
+        XCTAssertTrue(gone(viewer), "Done closes it")
     }
     /// A run whose session asks before a command: amber on the dashboard,
     /// and its sheet says what it waits for, with the way to that session.

@@ -7623,6 +7623,24 @@ Item {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             tests.check(!chat.transcript.chatPictures.opened, "Esc again closes the viewer")
+            // The header's Pictures: the grid without opening one first.
+            const button = tests.findName("picturesButton", chat)
+            const all = JSON.parse(chat.session.sessionPictures())
+            tests.check(button && tests.shown(button) && chat.session.pictureCount === all.length, "the header has Pictures (" + chat.session.pictureCount + " of " + all.length + ")")
+            tests.shotWindow("clicks-pictures-header")
+            tests.clickItem(button, "Pictures") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const v = tests.picViewer()
+            const all = JSON.parse(chat.session.sessionPictures())
+            tests.check(chat.transcript.chatPictures.opened && v.gridMode && v.grid.currentIndex === all.length - 1 && v.grid.activeFocus,
+                        "Pictures opens the grid, the latest marked, keys on it (" + v.grid.currentIndex + " of " + all.length + ")")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(!chat.transcript.chatPictures.opened, "Esc twice closes it")
             tests.clickItem(tests.picTiles().find(t => t.modelData === tests.picAll[0]), "the sent picture") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {

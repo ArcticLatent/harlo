@@ -301,6 +301,13 @@ struct SessionContent: View {
                             Label("Wiki", systemImage: "book")
                         }
                     }
+                    if let last = session.rows.last(where: { !$0.images.isEmpty })?.images.last {
+                        Button {
+                            picture = PictureOpening(path: last, grid: true)
+                        } label: {
+                            Label("Pictures", systemImage: "photo.on.rectangle")
+                        }
+                    }
                     if !session.todos.isEmpty || !session.subagents.isEmpty || !session.helpers.isEmpty {
                         Button {
                             sheet = .activity
@@ -357,7 +364,7 @@ struct SessionContent: View {
         .environment(\.openPicture, { (path: String) in picture = PictureOpening(path: path) })
         .fullScreenCover(item: $picture) { opening in
             let all = session.pictures
-            PictureViewer(paths: all.contains(opening.path) ? all : [opening.path], current: opening.path)
+            PictureViewer(paths: all.contains(opening.path) ? all : [opening.path], current: opening.path, grid: opening.grid)
                 .presentationBackground(.clear)
         }
         // The branch: when it opens, and after each run (the agent may switch).

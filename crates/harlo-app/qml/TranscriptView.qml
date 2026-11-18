@@ -79,7 +79,15 @@ Item {
         const all = JSON.parse(root.session.sessionPictures())
         if (all.indexOf(path) < 0) all.push(path)
         root.pictureLabelCache = JSON.parse(root.session.pictureLabels())
-        chatPictures.show(all, path, root.pictureLabelCache)
+        chatPictures.show(all, path, root.pictureLabelCache, false)
+    }
+    // All of the chat's pictures as a grid (the header's Pictures), the
+    // latest one picked.
+    function showPictureGrid() {
+        const all = JSON.parse(root.session.sessionPictures())
+        if (all.length === 0) return
+        root.pictureLabelCache = JSON.parse(root.session.pictureLabels())
+        chatPictures.show(all, all[all.length - 1], root.pictureLabelCache, true)
     }
     // Where each picture came from, in words, for the thumbnails' tips and
     // names (asked again for one not known yet; forgotten with the session).
@@ -107,7 +115,7 @@ Item {
         closePolicy: Popup.NoAutoClose
         // (The viewer is built when a picture opens and let go when it closes.)
         readonly property var viewer: viewerLoader.item
-        function show(list, path, labels) {
+        function show(list, path, labels, grid) {
             viewerLoader.active = true
             const v = viewerLoader.item
             v.gridMode = false
@@ -116,7 +124,12 @@ Item {
             v.path = path
             v.source = path
             open()
-            Qt.callLater(() => { if (viewerLoader.item) viewerLoader.item.focusView() })
+            Qt.callLater(() => {
+                const v = viewerLoader.item
+                if (!v) return
+                if (grid && list.length > 1) v.showGrid(true)
+                else v.focusView()
+            })
         }
         background: Rectangle { color: Theme.stage }
         Overlay.modal: Rectangle { color: "transparent" }

@@ -20,9 +20,10 @@ struct PictureViewer: View {
     @State private var pulled: CGFloat = 0
     @State private var shown: [String: UIImage] = [:]
 
-    init(paths: [String], current: String) {
+    init(paths: [String], current: String, grid: Bool = false) {
         self.paths = paths
         _current = State(initialValue: current)
+        _grid = State(initialValue: grid && paths.count > 1)
     }
 
     var index: Int { paths.firstIndex(of: current) ?? 0 }
