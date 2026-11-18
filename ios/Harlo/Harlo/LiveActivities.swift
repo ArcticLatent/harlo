@@ -33,11 +33,13 @@ enum LiveActivities {
         // Still showing this session's run: it goes on (harlo gets the token again).
         if let running = mine.first(where: { $0.activityState == .active }) {
             if let token = tokens[key] { Task { await model.setActivityToken(token, for: key) } }
-            Task { await running.update(ActivityContent(state: state, staleDate: staleDate)) }
+            let id = running.id, stale = staleDate
+            Task { await update(id, to: state, staleDate: stale) }
             return
         }
         // A finished one still on the lock screen goes.
-        for old in mine { Task { await old.end(nil, dismissalPolicy: .immediate) } }
+        let old = mine.map(\.id)
+        if !old.isEmpty { Task { await end(old) } }
         let attributes = SessionActivityAttributes(key: key, title: s.title.isEmpty ? "Session" : s.title, harness: s.harness)
         guard let activity = try? Activity.request(attributes: attributes, content: ActivityContent(state: state, staleDate: staleDate), pushType: .token) else { return }
         Task {
@@ -54,23 +56,43 @@ enum LiveActivities {
     /// (you're in the app now; one left there for hours may later show
     /// empty).
     static func tidy(_ sessions: [SessionSummary]) {
+        var gone: [String] = []
         for a in Activity<SessionActivityAttributes>.activities where a.activityState == .ended {
-            Task { await a.end(nil, dismissalPolicy: .immediate) }
+            gone.append(a.id)
             tokens[a.attributes.key] = nil
         }
         for a in Activity<SessionActivityAttributes>.activities where a.activityState == .active || a.activityState == .stale {
             guard let s = sessions.first(where: { $0.key == a.attributes.key }),
                   Date.now.timeIntervalSince(started[s.key] ?? .distantPast) > 20 else { continue }
             if !["busy", "starting", "input"].contains(s.status) {
-                Task { await a.end(nil, dismissalPolicy: .immediate) }
+                gone.append(a.id)
                 tokens[a.attributes.key] = nil
             }
         }
+        if !gone.isEmpty { Task { await end(gone) } }
     }
 
     /// Turned off in Settings: those showing go.
     static func endAll() {
-        for a in Activity<SessionActivityAttributes>.activities { Task { await a.end(nil, dismissalPolicy: .immediate) } }
+        let all = Activity<SessionActivityAttributes>.activities.map(\.id)
+        if !all.isEmpty { Task { await end(all) } }
         tokens = [:]
+    }
+
+    // An `Activity` isn't Sendable (the iOS 27 SDK says so): what's handed
+    // off the main actor is its id, and the activity is looked up where it's
+    // updated or ended.
+
+    /// Ends the activities with these ids, right away.
+    nonisolated private static func end(_ ids: [String]) async {
+        for a in Activity<SessionActivityAttributes>.activities where ids.contains(a.id) {
+            await a.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
+    /// Shows this state on the activity with this id.
+    nonisolated private static func update(_ id: String, to state: SessionActivityAttributes.ContentState, staleDate: Date) async {
+        guard let a = Activity<SessionActivityAttributes>.activities.first(where: { $0.id == id }) else { return }
+        await a.update(ActivityContent(state: state, staleDate: staleDate))
     }
 }
