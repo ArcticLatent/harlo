@@ -7487,6 +7487,7 @@ Item {
     // returned, a file a command wrote, a reply's Markdown images (one gone
     // from disk) and one a model made; a click opens the viewer over the
     // chat, stepping through them all; Open in tab; the composer's.
+    function toolCardOf(it) { for (let q = it.parent; q; q = q.parent) if (q.objectName === "toolCard") return q; return null }
     function picTiles() { return tests.findAllNames("pictureTile", chat.transcript).filter(t => tests.shown(t)) }
     function picViewer() { return chat.transcript.chatPictures.viewer }
     property var picAll: []
@@ -7511,6 +7512,15 @@ Item {
             const gone = tiles.filter(t => t.thumb.status === "error")
             tests.check(gone.length === 1 && gone[0].modelData.endsWith("/art/gone.png") && tests.findText("No longer on disk", gone[0]) !== null, "a picture gone from disk says so")
             tests.check(tiles.filter(t => t.thumb.status === "ready").length === 7, "the rest are drawn")
+            {
+                // A tool's pictures sit under its name, clear of the run's line.
+                const inTool = tiles.filter(t => tests.toolCardOf(t) !== null)
+                const bad = inTool.filter(t => { const card = tests.toolCardOf(t), mark = card ? tests.findName("toolMark", card) : null; return !mark || t.mapToItem(null, 0, 0).x < mark.mapToItem(null, mark.width, 0).x + 4 })
+                tests.check(inTool.length > 0 && bad.length === 0, "a tool's thumbnails start past its mark (" + inTool.length + " in tools, " + bad.length + " over the line)")
+                // Its tip keeps its words as the pointer leaves.
+                const t0 = tiles[0]
+                tests.check(t0.ToolTip.text !== "" && t0.ToolTip.text === chat.transcript.pictureLabel(t0.modelData), "a thumbnail's tip has its words whether or not it's hovered (" + t0.ToolTip.text + ")")
+            }
             tests.shotWindow("clicks-pictures-thumbs")
             tests.check(tests.findText("paste-1.png", chat.transcript) === null, "a pasted picture shows as itself, not its file's name")
             tests.check(tests.findContaining("a yellow sun", chat.transcript) !== null, "a Markdown image's words stay in the reply")

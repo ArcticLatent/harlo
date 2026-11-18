@@ -59,7 +59,9 @@ Flow {
             Keys.onSpacePressed: strip.openRequested(tile.modelData)
             ToolTip.visible: tileHover.hovered
             ToolTip.delay: 600
-            ToolTip.text: tileHover.hovered ? strip.labelOf(tile.modelData) : ""
+            // (Not emptied on leaving: the tip fades out with its words, not
+            // as an empty box.)
+            ToolTip.text: strip.labelOf(tile.modelData)
         }
     }
 }

@@ -9,6 +9,7 @@ import harlo
 // an edit's lines, a command's last lines.
 ColumnLayout {
     id: card
+    objectName: "toolCard"
     /// The transcript it's in (its helpers, its list's state).
     /// (An Item: a TranscriptView makes ToolCards, so naming its type here would be a cycle.)
     required property Item transcript
@@ -617,6 +618,8 @@ ColumnLayout {
     }
     PictureStrip {
         Layout.fillWidth: true
+        // (Under the step's name, as its output: the run's line left clear.)
+        Layout.leftMargin: 22
         Layout.topMargin: 4
         Layout.bottomMargin: 2
         side: 96
