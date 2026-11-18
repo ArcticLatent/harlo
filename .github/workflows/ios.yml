@@ -242,12 +242,16 @@ jobs:
           import json, os, re, sys
           d = json.load(sys.stdin)["devices"]
           store = os.environ.get("STORE") == "true"
-          rts = sorted((k for k in d if "iOS" in k), key=lambda k: [int(x) for x in re.findall(r"\d+", k.split("iOS")[-1])])
-          for rt in reversed(rts):
-              phones = [x for x in d[rt] if x["name"].startswith("iPhone")]
-              pick = [x for x in phones if "Pro" in x["name"] and ("Max" in x["name"]) == store] or phones
-              if pick:
-                  print(pick[0]["udid"]); print(pick[0]["name"], rt, file=sys.stderr); break
+          # (The iPhones of every runtime of the newest iOS: one version can
+          # come as two runtimes, the folding iPhone Duo in its own, which is
+          # left out while there are others.)
+          ver = lambda k: [int(x) for x in re.findall(r"\d+", k.split("iOS")[-1])][:2]
+          rts = [k for k in d if "iOS" in k and any(x["name"].startswith("iPhone") for x in d[k])]
+          newest = max(map(ver, rts))
+          phones = [x for k in rts if ver(k) == newest for x in d[k] if x["name"].startswith("iPhone")]
+          phones = [x for x in phones if "Duo" not in x["name"]] or phones
+          pick = [x for x in phones if "Pro" in x["name"] and ("Max" in x["name"]) == store] or phones
+          print(pick[0]["udid"]); print(pick[0]["name"], ".".join(map(str, newest)), file=sys.stderr)
           ')
           [ -n "$udid" ] || { echo "::error::No iPhone simulator"; xcrun simctl list devices available; exit 1; }
           echo "UDID=$udid" >> "$GITHUB_ENV"
@@ -332,8 +336,14 @@ jobs:
           python3 - "$RUNNER_TEMP/devices.json" "$RUN" > "$RUNNER_TEMP/runs.txt" <<'PY'
           import json, re, sys
           d = json.load(open(sys.argv[1]))["devices"]
-          rts = sorted((k for k in d if "iOS" in k), key=lambda k: [int(x) for x in re.findall(r"\d+", k.split("iOS")[-1])])
-          phones = next(([x for x in d[rt] if x["name"].startswith("iPhone")] for rt in reversed(rts) if any(x["name"].startswith("iPhone") for x in d[rt])), [])
+          # (The iPhones of every runtime of the newest iOS: one version can
+          # come as two runtimes, the folding iPhone Duo in its own, which is
+          # left out while there are others.)
+          ver = lambda k: [int(x) for x in re.findall(r"\d+", k.split("iOS")[-1])][:2]
+          rts = [k for k in d if "iOS" in k and any(x["name"].startswith("iPhone") for x in d[k])]
+          newest = max(map(ver, rts))
+          phones = [x for k in rts if ver(k) == newest for x in d[k] if x["name"].startswith("iPhone")]
+          phones = [x for x in phones if "Duo" not in x["name"]] or phones
           def pick(*patterns):
               for p in patterns:
                   for x in phones:
