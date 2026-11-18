@@ -9,8 +9,10 @@ struct WikiSheet: View {
     @Environment(\.dismiss) private var dismiss
     let session: OpenSession
     @State private var notice: String?
-    /// The pages opened: one path for the whole sheet.
-    @State private var path: [WikiLink] = []
+    /// What's open: one path for the whole sheet, of pages (WikiLink) and
+    /// code cards (WikiHits.Code). (A path typed for pages alone ignored a
+    /// code hit's tap.)
+    @State private var path = NavigationPath()
     /// Read once, as the sheet opens (not each time a page closes).
     @State private var loaded = false
 
