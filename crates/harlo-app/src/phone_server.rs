@@ -1248,7 +1248,7 @@ impl Conn {
                 }
                 // (Off the loop: a model's server may start first; machines
                 // and model servers are asked over SSH; a wiki is read.)
-                "send" | "new" | "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" | "mockup" | "wikiPage" | "wikiSearch" | "wikiReview" => {
+                "send" | "new" | "connect" | "servers" | "stoppedModels" | "startServer" | "stopServer" | "diagram" | "mockup" | "wikiPage" | "wikiSearch" | "wikiLookup" | "wikiReview" => {
                     let (msg, later, id) = (msg.clone(), self.later_tx.clone(), id.clone());
                     tokio::spawn(async move {
                         let mut reply = slow_reply(msg).await;
@@ -1400,22 +1400,24 @@ async fn slow_reply(msg: Value) -> Value {
             json!({ "stopped": stopped_models(agent, host, models).await })
         }
         "send" | "new" => send_after_server(msg).await,
-        "wikiPage" | "wikiSearch" | "wikiReview" => wiki_reply(&msg).await,
+        "wikiPage" | "wikiSearch" | "wikiLookup" | "wikiReview" => wiki_reply(&msg).await,
         op => start_or_stop_server(&msg, op == "startServer").await,
     }
 }
 
-/// A wiki page, a search, or a page marked reviewed by the person at the
-/// computer: the repository from harlo, read and written off the loop.
+/// A wiki page, a search, a declaration's card from the code index, or a
+/// page marked reviewed by the person at the computer: the repository from
+/// harlo, read and written off the loop.
 async fn wiki_reply(msg: &Value) -> Value {
     let at = crate::phone_bridge::call(json!({ "op": "wikiFolder", "key": msg["key"] })).await;
     let Some(cwd) = at["cwd"].as_str().map(std::path::PathBuf::from) else { return at };
     let text = |k: &str| msg[k].as_str().unwrap_or_default().to_owned();
-    let (op, page, query) = (text("op"), text("page"), text("query"));
+    let (op, page, query, name, path) = (text("op"), text("page"), text("query"), text("name"), text("path"));
     let review = op == "wikiReview";
     let said = tokio::task::spawn_blocking(move || match op.as_str() {
         "wikiPage" => crate::workspace::wiki_page_at(&cwd, &page),
         "wikiSearch" => crate::workspace::wiki_search_at(&cwd, &query, ""),
+        "wikiLookup" => harlo_core::wiki_view::lookup(&cwd, &name, &path),
         _ => match harlo_core::wiki::mark_reviewed(&cwd, &page) {
             Ok(why) if why.is_empty() => json!({ "ok": true }),
             Ok(why) => json!({ "error": why }),

@@ -663,7 +663,9 @@ pub fn run_bridge() {
                 let tool = p["name"].as_str().unwrap_or_default();
                 let answer = ask_harlo(&call_line(&session, tool, &p["arguments"]));
                 let (text, error) = match answer {
-                    Some(a) if a["ok"] == true => (a["result"].to_string(), false),
+                    // (Text as text: a card reads as it is, not as a quoted
+                    // JSON string with its line breaks escaped.)
+                    Some(a) if a["ok"] == true => (a["result"].as_str().map_or_else(|| a["result"].to_string(), str::to_owned), false),
                     Some(a) => (a["error"].as_str().unwrap_or("harlo couldn't do that").to_owned(), true),
                     None => ("harlo isn't running.".to_owned(), true),
                 };

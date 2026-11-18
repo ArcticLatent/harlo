@@ -42,6 +42,9 @@ Rectangle {
     property var results: null
     property bool searching: false
     property string workspace: ""
+    /// The code hit whose card is open (`path#name`), and the cards read: key → text.
+    property string cardKey: ""
+    property var cards: ({})
     property string runError: ""
 
     /// The repository whose wiki is shown: another one starts afresh (a
@@ -117,6 +120,12 @@ Rectangle {
             root.searching = false
             root.results = JSON.parse(json)
         }
+        function onWikiLookupReady(name, path, json) {
+            const v = JSON.parse(json)
+            const next = Object.assign({}, root.cards)
+            next[path + "#" + name] = v.error ? v.error : v.text
+            root.cards = next
+        }
     }
 
     // ---- reading ----
@@ -191,10 +200,18 @@ Rectangle {
     }
 
     function search(text) {
+        root.cardKey = ""
         root.query = text.trim()
         if (root.query === "") { root.results = null; root.searching = false; return }
         root.searching = true
         Workspace.requestWikiSearch(root.sessionKey, root.query, root.workspace)
+    }
+
+    /// Opens a code hit's card (or closes it), asking the index for it once.
+    function toggleCard(hit) {
+        const key = hit.path + "#" + hit.name
+        root.cardKey = root.cardKey === key ? "" : key
+        if (root.cardKey !== "" && root.cards[key] === undefined) Workspace.requestWikiLookup(root.sessionKey, hit.name, hit.path)
     }
 
     /// A hit's snippet as styled text, the query's words in the text
@@ -522,8 +539,9 @@ Rectangle {
                     wrapMode: Text.Wrap
                     text: root.searching ? "Searching…"
                         : !root.results ? ""
-                        : root.results.hits.length === 0 ? "Nothing in the wiki matches “" + root.query + "”."
-                        : ""
+                        : root.results.hits.length > 0 ? ""
+                        : (root.results.code || []).length > 0 ? "No page mentions “" + root.query + "”."
+                        : "Nothing in the wiki or the code matches “" + root.query + "”."
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
                 }
@@ -589,6 +607,34 @@ Rectangle {
                     }
                 }
                 onClicked: root.openWiki(modelData.page, modelData.section, false)
+            }
+            // Declarations in the code with that name, each opening its card.
+            footer: ColumnLayout {
+                width: hitList.width
+                spacing: 0
+                visible: !root.searching && !!root.results && (root.results.code || []).length > 0
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 18
+                    Layout.topMargin: hitList.count > 0 ? 14 : 0
+                    Layout.bottomMargin: 4
+                    text: "In the code"
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(12)
+                    font.weight: Font.DemiBold
+                }
+                Repeater {
+                    model: root.results ? root.results.code || [] : []
+                    CodeHit {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        hit: modelData
+                        open: root.cardKey === modelData.path + "#" + modelData.name
+                        card: root.cards[modelData.path + "#" + modelData.name]
+                        onToggled: root.toggleCard(modelData)
+                        onOpenFile: root.openFileRequested(root.st.root + "/" + modelData.path, modelData.line)
+                    }
+                }
             }
         }
 
@@ -929,8 +975,9 @@ Rectangle {
                                 const link = f.state === "gone" ? where : "<a href=\"okf-fn:" + encodeURIComponent(f.label) + "\" style=\"font-family:'" + Theme.mono + "';font-size:" + Theme.mpx(12) + "px;\">" + where + "</a>"
                                 const lines = f.start > 0 ? " <span style=\"color:" + Theme.textFaint + "\">lines " + (f.start === f.end ? f.start : f.start + "–" + f.end) + "</span>" : ""
                                 const note = { stale: "its code changed since the page was written", missing: "names nothing in the file", gone: "the file isn't there" }[f.state]
+                                const sig = f.signature ? "<br><span style=\"font-family:'" + Theme.mono + "';font-size:" + Theme.mpx(11.5) + "px;color:" + Theme.textFaint + "\">" + e(f.signature) + "</span>" : ""
                                 return Theme.htmlStyle + "<span style=\"color:" + Theme.textFaint + "\">" + f.n + "</span>&nbsp; " + link + lines
-                                    + (note ? " <span style=\"color:" + Theme.warning + "\">· " + note + "</span>" : "")
+                                    + (note ? " <span style=\"color:" + Theme.warning + "\">· " + note + "</span>" : "") + sig
                             }
                             font.family: Theme.uiFont
                             font.pixelSize: Theme.px(12.5)

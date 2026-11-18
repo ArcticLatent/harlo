@@ -42,7 +42,8 @@ pub fn facts(name: &str, args: &Value, output: &str, is_error: bool) -> (String,
         {
             return (if note.contains("Its outline follows") { format!("{n} lines, outline") } else { format!("{n} lines") }, String::new());
         }
-        let n = output.lines().count();
+        // (The agent's notes after the lines aren't the file's.)
+        let n = crate::listing::without_notes(output).lines().count();
         return (if n == 1 { "1 line".into() } else { format!("{n} lines") }, String::new());
     } else if matches!(short.as_str(), "grep" | "search" | "glob" | "find" | "rg" | "ls" | "list") && !is_error {
         let n = output.lines().filter(|l| !l.trim().is_empty()).count();
@@ -249,6 +250,7 @@ mod tests {
         assert_eq!(facts("Bash", &json!({}), "oops\nCommand exited with code 2", true).0, "exit 2");
         assert_eq!(facts("bash", &json!({}), "fine", false).0, "");
         assert_eq!(facts("read", &json!({}), "a\nb\nc", false).0, "3 lines");
+        assert_eq!(facts("read", &json!({}), "a\nb\nc\n\n[Wiki: this page is out of date.\n- x]", false).0, "3 lines");
         assert_eq!(facts("grep", &json!({}), "x:1\ny:2\n", false).0, "2 results");
         assert_eq!(facts("mystery", &json!({}), "", true).0, "failed");
     }

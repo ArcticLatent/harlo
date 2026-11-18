@@ -9,6 +9,7 @@ publish.workspace = true
 description = "harlo's project wiki: an Open Knowledge Format bundle kept current with the code"
 
 [dependencies]
+harlo-index.workspace = true
 sha2.workspace = true
 ignore.workspace = true
 serde = { workspace = true, features = ["derive"] }

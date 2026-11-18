@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Settings → Projects: each project's name, icon, colour and harness, its wiki and plan.
+// Settings → Projects: each project's name, icon, colour and harness, its wiki, code lookup and plan.
 ColumnLayout {
     id: proj
     property int projectId: -1
@@ -274,8 +274,8 @@ ColumnLayout {
         // The wiki and the shared plan.
         SectionHeader {
             visible: proj.p !== null
-            title: "Wiki and plans"
-            subtitle: "Tools that help this project's agents plan and keep track."
+            title: "Wiki, lookup and plans"
+            subtitle: "Tools that help this project's agents find their way, plan and keep track."
             more: "Every agent gets them, through Harlo's tools (Settings → Teamwork). Sessions started afterwards get them."
         }
         Group {
@@ -311,6 +311,18 @@ ColumnLayout {
                     objectName: "projectWikiKeep"
                     checked: featureGroup.on("wiki_keep", false)
                     onToggled: featureGroup.set("wiki_keep", checked)
+                }
+            }
+            SettingRow {
+                divider: true
+                title: "Code lookup"
+                detail: "Agents can look up a function or type by name: where it's declared, its signature, what it calls and what calls it, without reading files."
+                more: "From harlo's code index of this project (its own cache; nothing is written in the project). Harlo has it as a tool of its own, other agents through Harlo's tools. Off unless you switch it on: it's one more tool in every request."
+                icon: "node-tree"
+                AppSwitch {
+                    objectName: "projectLookup"
+                    checked: featureGroup.on("lookup", false)
+                    onToggled: featureGroup.set("lookup", checked)
                 }
             }
             SettingRow {

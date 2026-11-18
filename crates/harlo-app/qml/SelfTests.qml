@@ -3149,6 +3149,7 @@ Item {
     property string instanceKey: ""
     property string remoteWorktree: ""
     SequentialAnimation {
+        id: remoteClaudeSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksremoteclaude"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
@@ -3199,6 +3200,14 @@ Item {
             tests.check(kids.length === 1 && Workspace.instanceOf(kids[0].id) === "box", "and its helper runs on box (" + JSON.stringify(kids) + ")")
             tests.check(t.indexOf("The Claude session") >= 0 && t.indexOf("harlo · ") >= 0, "whose reply comes back to it")
             tests.check(Workspace.sessionFile(tests.remoteClaudeKey) !== "", "(still the host's session)")
+            // Code lookup on: harlo's tools offer it, answered from box's code.
+            Workspace.setSetting("lookup_" + JSON.parse(Workspace.projectsJson()).find(p => p.remote).id, "1")
+            tests.sendByKeys("lookup note") } }
+        ScriptAction { script: tests.waitUntil(remoteClaudeSteps, () => tests.chatText().indexOf("Lookup tools:") >= 0, 60000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const t = tests.chatText()
+            tests.check(/Lookup tools: \S*lookup; retry: fn retry  src\/jobs\.rs:1-3/.test(t), "Code lookup on: Claude on box gets lookup, its card from box's code (" + t.slice(t.indexOf("Lookup tools:"), t.indexOf("Lookup tools:") + 120) + ")")
             Workspace.renameSession(tests.remoteClaudeKey, "Remote chat") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
@@ -8664,6 +8673,81 @@ Item {
         tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
         Workspace.setApprovalMode(tests.harloKey, "yolo")
     }
+    // Code lookup: off as it comes, neither Harlo nor Claude Code gets the
+    // lookup tool; switched on for the project (Settings → Projects), both
+    // do, and it answers from harlo's code index.
+    property int lookupProject: -1
+    function lookupHello() {
+        tests.wikiRequests = tests.modelRequests().length
+        tests.harloKey = Workspace.newSession(tests.lookupProject, "harlo")
+        Workspace.setApprovalMode(tests.harloKey, "yolo")
+    }
+    function lookupTools(i) { return ((tests.modelRequests()[i] || {}).tools || []).map(t => t.function.name).filter(n => n.indexOf("lookup") >= 0) }
+    SequentialAnimation {
+        id: harloLookupSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlolookup"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.lookupProject = JSON.parse(Workspace.projectsJson())[0].id
+            tests.check(Workspace.setting("lookup_" + tests.lookupProject) === "", "Code lookup not set (off as it comes)")
+            tests.lookupHello() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.sendByKeys("hello") }
+        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            tests.check(tests.lookupTools(tests.wikiRequests).length === 0, "off: no lookup tool reaches Harlo (" + tests.lookupTools(tests.wikiRequests).join(", ") + ")")
+            tests.claudeKey = Workspace.newSession(tests.lookupProject, "claude") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.sendByKeys("lookup note") }
+        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.chatText().indexOf("Lookup tools:") >= 0, 20000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            tests.check(tests.chatText().indexOf("Lookup tools: none") >= 0, "nor Claude Code (" + tests.chatText().slice(-120) + ")")
+            // On, from Settings → Projects.
+            settingsDialog.projectId = tests.lookupProject
+            settingsDialog.openPage("projects") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const sw = tests.findName("projectLookup", settingsDialog.contentItem)
+            const f = tests.findName("settingsPage", settingsDialog.contentItem)
+            if (sw && f) f.contentY = Math.max(0, Math.min(sw.mapToItem(f.contentItem, 0, 0).y - 160, f.contentHeight - f.height))
+            tests.check(sw !== null && tests.shown(sw) && !sw.checked, "Settings → Projects has Code lookup, off (" + (sw ? sw.checked : "no switch") + ")")
+            if (sw) tests.clickItem(sw, "Code lookup") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(Workspace.setting("lookup_" + tests.lookupProject) === "1", "clicked, it's on for the project (" + Workspace.setting("lookup_" + tests.lookupProject) + ")")
+            tests.shotWindow("clicks-harlo-lookup-setting")
+            settingsDialog.close()
+            tests.lookupHello() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: { tests.wikiDone = tests.doneCount(); tests.sendByKeys("look up retry") } }
+        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.wikiAnswered(), 30000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            tests.check(tests.lookupTools(tests.wikiRequests).length === 1 && tests.lookupTools(tests.wikiRequests)[0] === "lookup", "on: Harlo gets the lookup tool (" + tests.lookupTools(tests.wikiRequests).join(", ") + ")")
+            const said = tests.lastToolResult()
+            tests.check(said.indexOf("fn retry  src/jobs.rs:1-3") >= 0 && said.indexOf("pub fn retry()") >= 0, "and its card comes from the code index (" + said.slice(0, 160) + ")")
+            tests.shotWindow("clicks-harlo-lookup")
+            tests.claudeKey = Workspace.newSession(tests.lookupProject, "claude") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.sendByKeys("lookup note") }
+        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.chatText().indexOf("Lookup tools:") >= 0, 30000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const t = tests.chatText()
+            tests.check(/Lookup tools: \S*lookup; retry: fn retry  src\/jobs\.rs:1-3/.test(t), "Claude Code gets it through harlo's tools, the same card (" + t.slice(t.indexOf("Lookup tools:"), t.indexOf("Lookup tools:") + 160) + ")")
+            tests.summary(); Qt.quit() } }
+    }
     SequentialAnimation {
         id: harloWikiSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowiki"
@@ -8710,6 +8794,18 @@ Item {
         ScriptAction { script: {
             const said = tests.wikiSaid(tests.wikiRequests)
             tests.check(said.indexOf("so the code wins): .okf/architecture/jobs.md.") >= 0, "a page whose code changed is named out of date (" + said.slice(said.indexOf("Out of date"), said.indexOf("Out of date") + 120) + ")")
+            // Reading that page, Harlo is told which of its footnotes to check.
+            tests.wikiDone = tests.doneCount()
+            tests.sendByKeys("read the wiki at architecture/jobs.md") } }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.wikiAnswered(), 30000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const read = tests.lastToolResult()
+            const note = read.indexOf("[Wiki: this page is out of date.")
+            tests.check(read.indexOf("retried three times") >= 0 && note >= 0 && read.indexOf("[^retry] src/jobs.rs, fn retry (lines 1–3) changed since the page was written", note) >= 0,
+                        "reading it, Harlo is told which footnotes' code changed (" + read.slice(Math.max(note, 0), Math.max(note, 0) + 200) + ")")
+            const counts = tests.findAllNames("toolResult", chat.transcript).map(l => l.text)
+            tests.check(counts.indexOf("15 lines") >= 0, "its card counts the page's 15 lines, not the note's (" + counts.join(" | ") + ")")
             tests.shotWindow("clicks-harlo-wiki")
             // Claude Code, through the same tools.
             tests.claudeKey = Workspace.newSession(tests.wikiProject, "claude") } }
@@ -8985,6 +9081,34 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(tests.wikiRows().length === 3 && tests.findName("wikiSearch", wikiPanel).text === "", "Escape clears the search")
+            // A name: its declaration in the code, under the sections.
+            tests.clickItem(tests.findName("wikiSearch", wikiPanel), "the search field")
+            TestInput.typeText("retry")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => !wikiPanel.searching && tests.findAllNames("wikiCodeHit", wikiPanel).length > 0, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const code = tests.findAllNames("wikiCodeHit", wikiPanel)
+            tests.check(code.length === 1 && code[0].hit.path === "src/jobs.rs" && code[0].hit.name === "retry" && code[0].hit.kind === "fn",
+                      "a name's search lists its declaration in the code (" + code.map(c => JSON.stringify(c.hit)).join(" | ") + ")")
+            tests.check(tests.findText("In the code", wikiPanel) !== null, "under In the code")
+            tests.clickItem(code[0], "the declaration") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => { const c = tests.findName("wikiCodeCard", wikiPanel); return c && c.visible && c.text.indexOf("pub fn retry()") === 0 }, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const card = tests.findName("wikiCodeCard", wikiPanel)
+            tests.check(card.text === "pub fn retry()\ncalled by: nothing the index finds",
+                      "clicked, its card from the code index, without the row's name and place again (" + card.text.replace(/\n/g, " / ") + ")")
+            const open = tests.findName("wikiCodeOpen", wikiPanel)
+            tests.check(open && open.visible && open.text === "Open jobs.rs", "with Open for its file (" + (open ? open.text : "-") + ")")
+            tests.shotWindow("clicks-wiki-code")
+            tests.clickItem(tests.findName("wikiSearch", wikiPanel), "the search field")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.wikiRows().length === 3, "Escape clears it")
             tests.clickItem(tests.findName("wikiViewGraph", wikiPanel), "Graph") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.findAllNames("wikiGraphBox", wikiPanel).length === 3, 20000) }
@@ -9616,6 +9740,20 @@ Item {
         ScriptAction { script: {
             const r = wikiPanel.results || {}, hits = (r.hits || []).map(h => h.page + "#" + h.section)
             tests.check(hits[0] === "architecture/jobs.md#retry-control", "the search on box finds the section (" + hits.slice(0, 3).join(", ") + (r.error ? " " + r.error : "") + ")")
+            // A name: box's code index lists it, and its card comes from there.
+            wikiPanel.search("retry") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => !wikiPanel.searching && wikiPanel.query === "retry" && !!wikiPanel.results, 60000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const code = (wikiPanel.results || {}).code || []
+            tests.check(code.length === 1 && code[0].path === "src/jobs.rs" && code[0].name === "retry", "a name's search lists its declaration in box's code (" + JSON.stringify(code) + ")")
+            if (code[0]) wikiPanel.toggleCard(code[0]) } }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => wikiPanel.cards["src/jobs.rs#retry"] !== undefined, 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const card = wikiPanel.cards["src/jobs.rs#retry"]
+            tests.check(card === "pub fn retry()\ncalled by: nothing the index finds", "and its card, from the code index on box (" + JSON.stringify(card) + ")")
             wikiPanel.search("")
             // Nothing owed: Update records that there, and starts no session.
             tests.wikiKeyBefore = Workspace.activeKey
@@ -9645,7 +9783,21 @@ Item {
             const said = tests.wikiSaid(tests.wikiRequests)
             tests.check(tests.wikiTools(tests.wikiRequests).length === 0, "no wiki tool reaches it (" + tests.wikiTools(tests.wikiRequests).join(", ") + ")")
             tests.check(said.indexOf("so the code wins): .okf/architecture/jobs.md.") >= 0, "and it's told the page is out of date, as box's code says (" + said.slice(said.indexOf("This project has a wiki"), said.indexOf("This project has a wiki") + 60) + ")")
+            tests.check(tests.lookupTools(tests.wikiRequests).length === 0, "Code lookup off: no lookup tool (" + tests.lookupTools(tests.wikiRequests).join(", ") + ")")
             tests.shotWindow("wiki-remote-session")
+            // Code lookup on: a new session on box gets it, answered there.
+            Workspace.setSetting("lookup_" + tests.wikiProject, "1")
+            tests.wikiHello() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => chat.session.modelName !== "", 30000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: { tests.wikiDone = tests.doneCount(); tests.sendByKeys("look up retry") } }
+        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiAnswered(), 60000) }
+        PauseAnimation { duration: 100 }
+        ScriptAction { script: {
+            const said = tests.lastToolResult()
+            tests.check(tests.lookupTools(tests.wikiRequests).join() === "lookup" && said.indexOf("fn retry  src/jobs.rs:1-3") >= 0,
+                      "on: the session on box gets lookup, its card from box's code (" + tests.lookupTools(tests.wikiRequests).join() + ": " + said.slice(0, 120) + ")")
             Workspace.markWikiReviewed("project:" + tests.wikiProject, "architecture/jobs.md") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.remoteWikiFile("/.okf/architecture/jobs.md").indexOf("verified:") >= 0, 30000) }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiFresh() === "Up to date", 40000) }
@@ -10045,14 +10197,17 @@ Item {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "benchtask"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            Workspace.setProviderEnabled("claude", false)
+            // (--harness=claude: a Claude Code session, with harlo's tools.)
+            Workspace.setProviderEnabled("claude", win.argValue("--harness=") === "claude")
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const project = JSON.parse(Workspace.projectsJson())[0].id
-            // (--wiki=on|off: the project's wiki's reading tools, on or off.)
+            // (--wiki=on|off: the project's wiki, its agents told of it or not;
+            // --lookup=on|off: the lookup tool.)
             if (win.argValue("--wiki=") !== "") Workspace.setSetting("wiki_" + project, win.argValue("--wiki=") === "on" ? "1" : "0")
-            tests.harloKey = Workspace.newSession(project, "harlo")
+            if (win.argValue("--lookup=") !== "") Workspace.setSetting("lookup_" + project, win.argValue("--lookup=") === "on" ? "1" : "0")
+            tests.harloKey = Workspace.newSession(project, win.argValue("--harness=") || "harlo")
             Workspace.setApprovalMode(tests.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(benchSteps, () => chat.session.modelName !== "", 20000) }

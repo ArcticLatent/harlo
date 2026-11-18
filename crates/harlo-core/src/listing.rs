@@ -216,17 +216,27 @@ fn numbered_search(words: &[String]) -> bool {
         .any(|a| a == "--line-number" || (a.starts_with('-') && !a.starts_with("--") && a[1..].chars().all(|c| c.is_ascii_alphanumeric()) && a.contains('n')))
 }
 
+/// Notes Harlo's agent adds after a read's lines, each after a blank line:
+/// a folder's rules (`[Rules from sub/AGENTS.md, …:]` and the rules), and
+/// the wiki's note on an out-of-date page (`[Wiki: …]`).
+const READ_NOTES: [&str; 2] = ["\n\n[Rules from ", "\n\n[Wiki: "];
+
+/// A read's output without the notes after its lines.
+pub(crate) fn without_notes(output: &str) -> &str {
+    READ_NOTES.iter().filter_map(|n| output.find(n)).min().map_or(output, |i| &output[..i])
+}
+
 /// A read tool's plain lines, numbered as a numbered read's are.
 ///
 /// Harlo's reads have no numbers, to save tokens. They're numbered "
 /// 7→text": from `offset` (1 without one), or from the range its note gives.
 /// Its notes (a big file's "[… These are lines 1-N …]" before them, "[Lines a-b
-/// of N …]" after) are left out; hash-anchored lines ("7#AB:text") keep their
-/// own numbers, and so do a big file's outline rows ("7: text", after "[… Its
-/// outline follows …]"). None when it isn't a file's lines or is numbered
-/// already.
+/// of N …]" after, and a folder's rules or the wiki's note after those) are
+/// left out; hash-anchored lines ("7#AB:text") keep their own numbers, and so
+/// do a big file's outline rows ("7: text", after "[… Its outline follows
+/// …]"). None when it isn't a file's lines or is numbered already.
 pub fn number_read(offset: Option<u64>, output: &str) -> Option<String> {
-    let mut lines: Vec<&str> = output.lines().collect();
+    let mut lines: Vec<&str> = without_notes(output).lines().collect();
     let first = *lines.first()?;
     if numbered(&lines, 1).is_some() || first == "(empty file)" || first.starts_with("[Image: ") || (lines.len() == 1 && first.contains(" is a binary file (")) {
         return None;
@@ -654,6 +664,9 @@ mod tests {
         let big = "[src/x.rs is 900 lines (30 KB), more than one read shows. These are lines 1-2: grep it for what you need, or read a range with offset and limit (up to 400 lines).]\nfn a() {}\nfn b() {}";
         assert_eq!(number_read(None, big).as_deref(), Some("     1→fn a() {}\n     2→fn b() {}"));
         assert_eq!(number_read(Some(10), "p\nq\n\n[Lines 10-11 of 90. Read on with offset=12.]").as_deref(), Some("    10→p\n    11→q"));
+        let noted = "p\nq\n\n[Lines 10-11 of 90. Read on with offset=12.]\n\n[Rules from sub/AGENTS.md, for the files under sub/:]\nBe kind.\n\n[Wiki: this page is out of date. Check these footnotes against the code before relying on what they say:\n- [^a] x.rs, fn a changed since the page was written]";
+        assert_eq!(number_read(Some(10), noted).as_deref(), Some("    10→p\n    11→q"), "the agent's notes aren't the file's lines");
+        assert_eq!(number_read(None, "a\n\n[Wiki: this page is out of date.\n- x]").as_deref(), Some("     1→a"));
         assert_eq!(number_read(None, "7#AB:x\n8#Q2:y").as_deref(), Some("     7→x\n     8→y"));
         // Numbered already, or not a file's lines.
         assert_eq!(number_read(None, "     1→a"), None);

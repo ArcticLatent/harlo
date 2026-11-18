@@ -134,6 +134,9 @@ pub struct Unit {
     pub parent: Option<usize>,
     /// The hash of its own text (see the module docs).
     pub hash: String,
+    /// The hash as wikis stamped before plain comments were left out of it:
+    /// a claim stamped then is current if this still matches.
+    pub legacy: String,
 }
 
 impl Unit {
@@ -165,7 +168,64 @@ pub fn scan(path: &str, text: &str) -> Vec<Unit> {
         _ => braced(&file),
     };
     units.sort_by_key(|u| (u.start, std::cmp::Reverse(u.end)));
-    finish(&file, units)
+    let mut units = finish(&file, units);
+    hash(text, &lex::plain_comments(lang, text), &mut units);
+    units
+}
+
+/// Fills in `units`' hashes from `text` (see the module docs): `plain` are
+/// the byte ranges of the comments the hash leaves out.
+pub fn hash(text: &str, plain: &[(usize, usize)], units: &mut [Unit]) {
+    let spans: Vec<(usize, usize)> = units.iter().map(|u| (u.start, u.end)).collect();
+    let hashes = own_hashes(text, plain, &spans);
+    let legacy = own_hashes(text, &[], &spans);
+    for ((u, h), l) in units.iter_mut().zip(hashes).zip(legacy) {
+        u.hash = h;
+        u.legacy = l;
+    }
+}
+
+/// Fills in `units`' old-style hashes (comments counted) from `text`, for
+/// units whose hashes came from elsewhere.
+pub fn fill_legacy(text: &str, units: &mut [Unit]) {
+    let spans: Vec<(usize, usize)> = units.iter().map(|u| (u.start, u.end)).collect();
+    for (u, l) in units.iter_mut().zip(own_hashes(text, &[], &spans)) {
+        u.legacy = l;
+    }
+}
+
+/// The hash of each span's own text: its lines without those of the spans
+/// nested in it (each line belongs to the innermost span holding it),
+/// trimmed, without blank lines, `blank` byte ranges left out.
+fn own_hashes(text: &str, blank: &[(usize, usize)], spans: &[(usize, usize)]) -> Vec<String> {
+    let mut bytes = text.as_bytes().to_vec();
+    for &(a, b) in blank {
+        for byte in &mut bytes[a.min(text.len())..b.min(text.len())] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+    }
+    // Blanking whole comments (whole characters) keeps the text UTF-8.
+    let text = String::from_utf8_lossy(&bytes);
+    let lines: Vec<&str> = text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let mut owner: Vec<Option<usize>> = vec![None; lines.len()];
+    for (i, &(start, end)) in spans.iter().enumerate() {
+        for slot in owner.iter_mut().take(end.min(lines.len())).skip(start.saturating_sub(1)) {
+            *slot = Some(i);
+        }
+    }
+    let mut own: Vec<String> = vec![String::new(); spans.len()];
+    for (line, o) in lines.iter().zip(&owner) {
+        if let Some(i) = o {
+            let t = line.trim();
+            if !t.is_empty() {
+                own[*i].push_str(t);
+                own[*i].push('\n');
+            }
+        }
+    }
+    own.iter().map(|t| digest(t.as_bytes())).collect()
 }
 
 /// A file's text, its masked text, and their lines.
@@ -664,7 +724,17 @@ fn braced(file: &File<'_>) -> Vec<Unit> {
         let qualifier = d.owner.clone().or_else(|| parent.filter(|&p| units[p].kind.qualifies()).map(|p| units[p].name.clone()));
         let sep = if matches!(file.lang, Lang::Rust | Lang::C) { "::" } else { "." };
         let name = qualifier.map_or_else(|| d.name.clone(), |q| format!("{q}{sep}{}", d.name));
-        units.push(Unit { name, kind: d.kind, start: i + 1, end: end + 1, public, test: d.test || parent.is_some_and(|p| units[p].test), parent, hash: String::new() });
+        units.push(Unit {
+            name,
+            kind: d.kind,
+            start: i + 1,
+            end: end + 1,
+            public,
+            test: d.test || parent.is_some_and(|p| units[p].test),
+            parent,
+            hash: String::new(),
+            legacy: String::new(),
+        });
         open.push(units.len() - 1);
     }
     units
@@ -769,7 +839,7 @@ fn indented(file: &File<'_>) -> Vec<Unit> {
             Some(p) if parent_kind == Some(Kind::Type) => format!("{}.{name}", units[p].name),
             _ => name.to_owned(),
         };
-        units.push(Unit { name: qualified, kind, start: i + 1, end: end + 1, public, test, parent, hash: String::new() });
+        units.push(Unit { name: qualified, kind, start: i + 1, end: end + 1, public, test, parent, hash: String::new(), legacy: String::new() });
         open.push(units.len() - 1);
     }
     units
@@ -797,7 +867,17 @@ fn headings(file: &File<'_>) -> Vec<Unit> {
     for (n, (i, level, title)) in found.iter().enumerate() {
         let next = found[n + 1..].iter().find(|(_, l, _)| l <= level).map_or(last_line + 1, |(j, _, _)| *j);
         let end = (*i..next).rev().find(|&k| !file.lines[k].trim().is_empty()).unwrap_or(*i);
-        units.push(Unit { name: title.clone(), kind: Kind::Heading, start: i + 1, end: end + 1, public: *level <= 2, test: false, parent: None, hash: String::new() });
+        units.push(Unit {
+            name: title.clone(),
+            kind: Kind::Heading,
+            start: i + 1,
+            end: end + 1,
+            public: *level <= 2,
+            test: false,
+            parent: None,
+            hash: String::new(),
+            legacy: String::new(),
+        });
     }
     units
 }
@@ -844,7 +924,17 @@ fn tables(file: &File<'_>) -> Vec<Unit> {
     for (n, (i, name)) in found.iter().enumerate() {
         let next = found.get(n + 1).map_or(last_line + 1, |(j, _)| *j);
         let end = (*i..next).rev().find(|&k| !file.lines[k].trim().is_empty()).unwrap_or(*i);
-        units.push(Unit { name: name.clone(), kind: Kind::Table, start: i + 1, end: end + 1, public: true, test: false, parent: None, hash: String::new() });
+        units.push(Unit {
+            name: name.clone(),
+            kind: Kind::Table,
+            start: i + 1,
+            end: end + 1,
+            public: true,
+            test: false,
+            parent: None,
+            hash: String::new(),
+            legacy: String::new(),
+        });
     }
     units
 }
@@ -862,27 +952,6 @@ fn finish(file: &File<'_>, mut units: Vec<Unit>) -> Vec<Unit> {
             units[i].parent = stack.last().copied();
         }
         stack.push(i);
-    }
-    // Each line belongs to the innermost unit holding it (a nested unit's
-    // first line stays its own, even when its parent starts there too).
-    let mut owner: Vec<Option<usize>> = vec![None; file.lines.len()];
-    for (i, u) in units.iter().enumerate() {
-        for slot in owner.iter_mut().take(u.end.min(file.lines.len())).skip(u.start - 1) {
-            *slot = Some(i);
-        }
-    }
-    let mut texts: Vec<String> = vec![String::new(); units.len()];
-    for (line, o) in owner.iter().enumerate() {
-        if let Some(i) = o {
-            let t = file.lines[line].trim();
-            if !t.is_empty() {
-                texts[*i].push_str(t);
-                texts[*i].push('\n');
-            }
-        }
-    }
-    for (u, t) in units.iter_mut().zip(texts) {
-        u.hash = digest(t.as_bytes());
     }
     units
 }
@@ -921,12 +990,17 @@ mod tests {
     #[test]
     fn own_text_hashes() {
         let before = "impl A {\n    fn one() { 1 }\n    fn two() { 2 }\n}\n";
-        let after = "impl A {\n        fn one() { 1 }\n\n    fn two() { 3 }\n}\n";
+        let after = "impl A {\n        fn one() { 1 } // one\n\n    fn two() { 3 }\n}\n";
         let (b, a) = (scan("a.rs", before), scan("a.rs", after));
-        // Re-indenting and a blank line change nothing; `two` changed; its container didn't.
+        // Re-indenting, a blank line and a plain comment change nothing; `two` changed; its container didn't.
         assert_eq!(b[0].hash, a[0].hash);
         assert_eq!(b[1].hash, a[1].hash);
         assert_ne!(b[2].hash, a[2].hash);
+        // The old hash counted the comment; a doc comment counts in both.
+        assert_ne!(b[1].legacy, a[1].legacy);
+        assert_eq!(b[1].legacy, b[1].hash);
+        let doc = scan("a.rs", "impl A {\n    /// One.\n    fn one() { 1 }\n    fn two() { 2 }\n}\n");
+        assert_ne!(doc[0].hash, b[0].hash);
     }
 
     #[test]

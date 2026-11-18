@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use crate::bundle::{self, Bundle};
 use crate::check::{self, Level};
 use crate::cite::{self, Found};
+use crate::indexed::{self, Declarations};
 use crate::ledger::{self, Ledger};
 use crate::page::{self, Page};
 use crate::stamp::{self, Options};
@@ -49,12 +50,33 @@ pub fn answer(request: &Value) -> Value {
         "pageReport" => json!({ "text": page_report(root, text("path")) }),
         "outOfDate" => json!({ "exists": bundle::exists(root), "pages": out_of_date(root) }),
         "check" => run_check(root, &request["options"]),
+        "lookup" => {
+            let depth = request["depth"].as_u64().and_then(|d| usize::try_from(d).ok()).unwrap_or(2);
+            let query = indexed::Lookup { name: text("name"), path: Some(text("path")).filter(|p| !p.is_empty()), depth };
+            match indexed::lookup(root, &query) {
+                Ok(text) => json!({ "text": card_body(&text) }),
+                Err(e) => json!({ "error": e }),
+            }
+        }
         other => json!({ "error": format!("No wiki request {other:?}") }),
     }
 }
 
+/// One card without its first line (kind, name, place: what the row it
+/// opens under shows already), the rest unindented; several cards, or a
+/// "nothing named" answer, as they are.
+fn card_body(text: &str) -> String {
+    let heads = text.lines().filter(|l| !l.is_empty() && !l.starts_with(' ')).count();
+    if heads != 1 || text.starts_with("Nothing named") {
+        return text.to_owned();
+    }
+    text.lines().skip(1).map(|l| l.strip_prefix("  ").unwrap_or(l)).collect::<Vec<_>>().join("\n")
+}
+
 /// A check with the options a request gives.
 fn run_check(root: &Path, options: &Value) -> Value {
+    // (A writer's first message gets the code index's brief.)
+    let briefed = options["brief"] == true;
     let strings = |k: &str| -> Vec<String> { options[k].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default() };
     let actor = |k: &str| options[k].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
     let leave = options["leave"]
@@ -72,7 +94,15 @@ fn run_check(root: &Path, options: &Value) -> Value {
     match stamp::run(root, &options) {
         Ok(o) => {
             let pages = bundle::load(root).map_or(0, |b| b.pages.len());
-            json!({ "current": o.is_current(), "text": o.report(), "refused": o.refused, "pages": pages })
+            let mut text = o.report();
+            if briefed && !o.is_current()
+                && let Some(b) = crate::brief::brief(root, &o.work, &ledger::read(root).unwrap_or_else(|_| Ledger::new()), pages == 0)
+            {
+                text = format!("{}
+
+{b}", text.trim_end());
+            }
+            json!({ "current": o.is_current(), "text": text, "refused": o.refused, "pages": pages })
         }
         Err(e) => json!({ "error": format!("The wiki couldn't be checked: {e}") }),
     }
@@ -249,7 +279,7 @@ pub fn anchor(heading: &str) -> String {
 ///
 /// Its shape: `{ path, title, description, type, status, tier, generated,
 /// verified, edited, body, footnotes: [{ n, label, path, locator, start,
-/// end, state }], backlinks: [{ path, title }], items }` (`error` when
+/// end, state, signature }], backlinks: [{ path, title }], items }` (`error` when
 /// there's no such page). `body` is the page's Markdown with its footnote
 /// definitions taken out and each reference a link to `okf-fn:label`.
 pub fn page(root: &Path, path: &str) -> Value {
@@ -264,19 +294,25 @@ pub fn page(root: &Path, path: &str) -> Value {
         numbers.entry(label.clone()).or_insert(next);
     }
     let mut scanned: BTreeMap<&str, Vec<units::Unit>> = BTreeMap::new();
+    let mut decls: Option<Declarations> = None;
     let mut footnotes: Vec<Value> = p
         .cites
         .iter()
         .map(|c| {
             let state = footnote_state(items, &c.label);
             let mut at = (0, 0);
+            let mut signature = String::new();
             if let Some(locator) = c.locator.as_deref().filter(|_| state != "gone") {
-                let units = scanned.entry(&c.path).or_insert_with(|| std::fs::read_to_string(root.join(&c.path)).map(|t| units::scan(&c.path, &t)).unwrap_or_default());
+                let units = scanned.entry(&c.path).or_insert_with(|| {
+                    let decls = decls.get_or_insert_with(|| Declarations::load(root));
+                    std::fs::read_to_string(root.join(&c.path)).map(|t| decls.units(&c.path, &t)).unwrap_or_default()
+                });
                 if let Found::One(i) = cite::locate(units, locator) {
                     at = (units[i].start, units[i].end);
+                    signature = decls.as_ref().and_then(|d| d.symbol(&c.path, &units[i].name)).map(|s| s.signature.clone()).unwrap_or_default();
                 }
             }
-            json!({ "n": numbers.get(&c.label).copied().unwrap_or(0), "label": c.label, "path": c.path, "locator": c.locator, "start": at.0, "end": at.1, "state": state })
+            json!({ "n": numbers.get(&c.label).copied().unwrap_or(0), "label": c.label, "path": c.path, "locator": c.locator, "start": at.0, "end": at.1, "state": state, "signature": signature })
         })
         .collect();
     footnotes.sort_by_key(|f| f["n"].as_u64().unwrap_or(0));
@@ -413,8 +449,10 @@ struct Section {
 /// A search of the pages' sections, best first, at most `limit`.
 ///
 /// Its shape: `{ hits: [{ page, section, heading, snippet }], workspaces:
-/// [] }`. A section scores by how many of the query's words it has (a
-/// title or heading counting twice); its snippet is the sentence around
+/// [], code: [{ path, name, kind, line, end, signature, doc }] }` (`code`:
+/// declarations whose names hold a one-word query, from the code index).
+/// A section scores by how many of the query's words it has (a title or
+/// heading counting twice); its snippet is the sentence around
 /// the first.
 pub fn search(root: &Path, query: &str, limit: usize) -> Value {
     let words = query_words(query);
@@ -461,8 +499,26 @@ pub fn search(root: &Path, query: &str, limit: usize) -> Value {
         }
     }
     hits.sort_by_key(|h| std::cmp::Reverse(h.0));
-    json!({ "hits": hits.into_iter().take(limit).map(|(_, h)| h).collect::<Vec<_>>(), "workspaces": [] })
+    json!({ "hits": hits.into_iter().take(limit).map(|(_, h)| h).collect::<Vec<_>>(), "workspaces": [], "code": code_hits(root, query) })
 }
+
+/// Declarations in the code index whose names hold `query` (one word), at
+/// most [`CODE_HITS`]: `[{ path, name, kind, line, end, signature, doc }]`.
+fn code_hits(root: &Path, query: &str) -> Vec<Value> {
+    let q = query.trim();
+    if q.is_empty() || q.contains(char::is_whitespace) {
+        return Vec::new();
+    }
+    let decls = Declarations::load(root);
+    decls
+        .matching(q, CODE_HITS)
+        .into_iter()
+        .map(|(path, s)| json!({ "path": path, "name": s.name, "kind": s.kind.word(), "line": s.start, "end": s.end, "signature": s.signature, "doc": s.doc.clone().unwrap_or_default() }))
+        .collect()
+}
+
+/// Code declarations a search lists, at most.
+const CODE_HITS: usize = 8;
 
 /// A page's work, in words, for a session that checks just that page.
 pub fn page_report(root: &Path, path: &str) -> String {
@@ -471,6 +527,33 @@ pub fn page_report(root: &Path, path: &str) -> String {
         Some(items) if !items.is_empty() => items.iter().map(|i| format!("- {}\n", i.text())).collect(),
         _ => "Nothing flagged: its footnotes' code hasn't changed since it was written.\n".to_owned(),
     }
+}
+
+/// Footnotes a reading note names, at most.
+const NOTE_ITEMS: usize = 8;
+
+/// The note for an agent reading the page `path` (under `.okf/`) whose
+/// code changed since it was checked.
+///
+/// Names the footnotes to check against the code. None when the page is
+/// current, isn't a stamped page, or there's no wiki: a reader is told
+/// only when it matters.
+#[must_use]
+pub fn reading_note(root: &Path, path: &str) -> Option<String> {
+    let (Ok(bundle), Ok(ledger)) = (bundle::load(root), ledger::read(root)) else { return None };
+    let items = work::page_items(&bundle, &ledger, path);
+    if items.is_empty() {
+        return None;
+    }
+    let mut out = String::from("[Wiki: this page is out of date. Check these footnotes against the code before relying on what they say:");
+    for item in items.iter().take(NOTE_ITEMS) {
+        let _ = write!(out, "\n- {}", item.text());
+    }
+    if items.len() > NOTE_ITEMS {
+        let _ = write!(out, "\n- … {} more", items.len() - NOTE_ITEMS);
+    }
+    out.push(']');
+    Some(out)
 }
 
 /// The pages whose code changed since they were stamped, or that owe new
@@ -483,6 +566,16 @@ pub fn out_of_date(root: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_card_drops_its_header_under_its_row() {
+        let one = "fn retry  src/jobs.rs:1-3\n  pub fn retry()\n  called by:\n    run (src/main.rs:4)";
+        assert_eq!(card_body(one), "pub fn retry()\ncalled by:\n  run (src/main.rs:4)");
+        let two = "fn a  x.rs:1-2\n  fn a()\nfn a  x.rs:5-6\n  fn a(n: u8)";
+        assert_eq!(card_body(two), two);
+        let none = "Nothing named rety; names like it:\n  fn retry  src/jobs.rs:1";
+        assert_eq!(card_body(none), none);
+    }
 
     #[test]
     fn a_page_reads_with_its_footnotes() {

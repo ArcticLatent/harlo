@@ -1,0 +1,74 @@
+[package]
+name = "harlo-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "harlo's code index: each file's declarations, imports and calls, read with tree-sitter"
+
+[features]
+default = ["scan"]
+# Reading code: the parser, its grammars and the index's cache. Without it the
+# crate is only the index's types, for code that reads the helper's output.
+scan = [
+    "dep:ignore",
+    "dep:serde_json",
+    "dep:sha2",
+    "dep:tree-sitter",
+    "dep:tree-sitter-bash",
+    "dep:tree-sitter-c",
+    "dep:tree-sitter-c-sharp",
+    "dep:tree-sitter-cpp",
+    "dep:tree-sitter-go",
+    "dep:tree-sitter-java",
+    "dep:tree-sitter-javascript",
+    "dep:tree-sitter-julia",
+    "dep:tree-sitter-kotlin-ng",
+    "dep:tree-sitter-lua",
+    "dep:tree-sitter-php",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-qmljs",
+    "dep:tree-sitter-ruby",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-scala",
+    "dep:tree-sitter-swift",
+    "dep:tree-sitter-typescript",
+]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+ignore = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+tree-sitter = { workspace = true, optional = true }
+tree-sitter-bash = { workspace = true, optional = true }
+tree-sitter-c = { workspace = true, optional = true }
+tree-sitter-c-sharp = { workspace = true, optional = true }
+tree-sitter-cpp = { workspace = true, optional = true }
+tree-sitter-go = { workspace = true, optional = true }
+tree-sitter-java = { workspace = true, optional = true }
+tree-sitter-javascript = { workspace = true, optional = true }
+tree-sitter-julia = { workspace = true, optional = true }
+tree-sitter-kotlin-ng = { workspace = true, optional = true }
+tree-sitter-lua = { workspace = true, optional = true }
+tree-sitter-php = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-qmljs = { workspace = true, optional = true }
+tree-sitter-ruby = { workspace = true, optional = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-scala = { workspace = true, optional = true }
+tree-sitter-swift = { workspace = true, optional = true }
+tree-sitter-typescript = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[bin]]
+name = "harlo-index"
+path = "src/main.rs"
+required-features = ["scan"]
+
+[lints]
+workspace = true

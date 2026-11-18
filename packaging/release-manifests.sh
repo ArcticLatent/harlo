@@ -7,7 +7,8 @@
 #   linux-release.json   the .deb, .rpm and Arch packages and the AppImage,
 #                        with their SHA-256 sums and addresses: what harlo
 #                        reads to update itself
-#   SHA256SUMS           every file's checksum, for people
+#   SHA256SUMS           every file's checksum, for people (the static
+#                        harlo-agent and harlo-index for CI too)
 #
 # The manifest is signed with HARLO_UPDATE_SIGNING_KEY (crates/harlo-
 # manifest-signer) and then checked against the public key built into
@@ -51,6 +52,7 @@ done | jq -s --arg version "$VERSION" --arg tag "$TAG" --arg repo "$REPOSITORY" 
 signer sign "$DIR/linux-release.json"
 signer verify "$DIR/linux-release.json"
 
-(cd "$DIR" && sha256sum "${packages[@]}" linux-release.json >SHA256SUMS)
+mapfile -t tools < <(find "$DIR" -maxdepth 1 -type f -name 'harlo-*-linux-*' -printf '%f\n' | sort)
+(cd "$DIR" && sha256sum "${packages[@]}" "${tools[@]}" linux-release.json >SHA256SUMS)
 echo "Manifest for $TAG:"
 cat "$DIR/SHA256SUMS"

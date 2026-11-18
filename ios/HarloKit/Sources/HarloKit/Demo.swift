@@ -191,7 +191,13 @@ extension HarloModel {
 
     nonisolated static func sampleWikiHits(_ query: String) -> WikiHits {
         WikiHits(["hits": [["page": "architecture/sessions.md", "section": "sessions", "heading": "Sessions",
-                            "snippet": "A session starts its agent and keeps its rows by key."]]])
+                            "snippet": "A session starts its agent and keeps its rows by key."]],
+                  "code": [["path": "src/session.rs", "name": "Session::start", "kind": "fn", "line": 42,
+                            "signature": "pub fn start(&mut self, agent: Agent) -> Result<()>", "doc": "Starts the session's agent."]]])
+    }
+
+    nonisolated static func sampleCodeCard(_ code: WikiHits.Code) -> String {
+        "\(code.signature)\n\(code.doc)\ncalls: Agent::spawn (src/agent.rs:20)\ncalled by:\n  Workspace::open (src/workspace.rs:88)"
     }
 
     nonisolated static func samplePlan() -> Plan {

@@ -108,6 +108,7 @@ const QML_FILES: &[&str] = &[
     "qml/AddProjectDialog.qml",
     "qml/RemoveProjectDialog.qml",
     "qml/WikiPanel.qml",
+    "qml/CodeHit.qml",
     "qml/OptionsCards.qml",
     "qml/MockupView.qml",
     "qml/PictureViewer.qml",

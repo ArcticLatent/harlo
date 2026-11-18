@@ -107,6 +107,18 @@ Download the file for your system from [harlo.run/download](https://harlo.run/do
 
 The packages bring their own Qt and need glibc 2.35 or newer, an x86-64 CPU with AVX2, and git. harlo updates itself (Settings → General → Check for updates). Each release lists its files' SHA-256 sums in `SHA256SUMS`.
 
+**Checking a wiki in CI.** Each release also has Harlo's agent and the code index on their own (`harlo-agent-linux-x86_64`, `harlo-index-linux-x86_64`, and `aarch64` builds), static, for a CI job. `wiki --validate` checks a repository's `.okf/` wiki without changing anything: it fails on pages that break the format, and with `--strict` also when the code has moved past the wiki (a page whose cited code changed, a footnote naming nothing, new code no page covers). `--json` gives the report as JSON.
+
+```yaml
+- name: Check the wiki
+  run: |
+    cd "$RUNNER_TEMP"
+    base=https://github.com/ArcticLatent/harlo/releases/latest/download
+    curl -fsSL -O "$base/harlo-agent-linux-x86_64" -O "$base/harlo-index-linux-x86_64"
+    chmod +x harlo-*-linux-x86_64
+    ./harlo-agent-linux-x86_64 wiki --validate "$GITHUB_WORKSPACE" --strict
+```
+
 On first start, harlo's setup guide helps you install and sign in the agents you want (`harlo --setup` opens it again). Once the iPhone app is in the App Store, get it, then Settings → Devices → Pair a device on your computer, and scan the code.
 
 ## Build from source
@@ -128,7 +140,7 @@ On Arch, `cd packaging/aur/harlo-git && makepkg -si` builds the latest commit ag
 - **The composer.** Enter sends, Shift+Enter adds a line, `/` completes the agent's commands, `@` completes files and past sessions, Up/Down recalls earlier prompts. While the agent works, Enter queues a follow-up, Ctrl+Enter steers, Esc stops. Drop files or pictures on the chat to attach them. Below it: Build / Plan (Tab), the permissions shield, the model, the microphone and expand (Ctrl+Shift+X).
 - **Panels.** Changes (Ctrl+Shift+G), Files (Ctrl+Shift+E), Activity (Ctrl+Shift+A), Context (Ctrl+Shift+I), Notes (Ctrl+Shift+N), Wiki (Ctrl+Shift+K) and the terminal (Ctrl+`). Ctrl+K opens the command palette, Ctrl+P finds a session, Ctrl+Shift+F searches every conversation, Ctrl+F finds in the one shown, Ctrl+/ lists the shortcuts.
 - **Projects.** Settings → Projects gives a project a name, a colour, an icon, its default agent, its wiki setting and the commands to run in each new worktree.
-- **The wiki.** In the Wiki panel, **Create wiki** starts a session that writes it; its changes land in Changes for you to review and commit, like any other. Once a project has a wiki, its sessions get the wiki's search and read tools unless you switch Wiki off for the project. After merged work changes what the wiki describes, harlo offers to update it.
+- **The wiki.** In the Wiki panel, **Create wiki** starts a session that writes it; its changes land in Changes for you to review and commit, like any other. Once a project has a wiki, its sessions are pointed to it and told which pages are out of date, unless you switch Wiki off for the project; Harlo's agent also says so when it reads a page whose code has changed, naming the footnotes to check. After merged work changes what the wiki describes, harlo offers to update it.
 - **Remote machines.** Settings → Remote Instances adds SSH connections (`user@host` or a `~/.ssh/config` name). The instance menu at the top of the sidebar switches between this computer and each machine, and connects or disconnects one. **+ Project** then offers each machine's folders (with New folder), and its sessions run there, with its terminal, files and changes. An agent there signs in from the model menu (**Sign in on <machine>**).
 - **Model servers.** Settings → Model servers: **Set up a local model…** for this computer, **Set up a model on <machine>…** for each connected machine. harlo shows what fits the machine's card and memory, installs the engine, downloads the model, starts it and tests it. Tick the agents that should use it, on that machine or (through SSH) here. On another machine, harlo runs a small helper of its own (`harlo-engines`, in `~/.cache/harlo` there) for the setup.
 - **Your phone.** Settings → Devices → Pair a device shows a QR code. On the same network the phone connects directly (port 7676; if a firewall blocks it, harlo offers to open it for that network only). Away from home it goes through a harlo relay or Tailscale Funnel.

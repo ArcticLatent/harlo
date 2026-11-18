@@ -21,7 +21,26 @@ use crate::units::Lang;
 pub fn mask(lang: Lang, text: &str) -> Vec<u8> {
     let b = text.as_bytes();
     let mut out = b.to_vec();
-    let mut lexer = Lexer { b, lang, ranges: Vec::new() };
+    for (start, end) in lex(lang, text).ranges {
+        for byte in &mut out[start..end.min(b.len())] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+    }
+    out
+}
+
+/// The byte ranges of `text`'s comments, other than doc comments (`///`,
+/// `//!`, `/** */`): what a declaration's hash leaves out, so editing such
+/// a comment changes no hash.
+pub fn plain_comments(lang: Lang, text: &str) -> Vec<(usize, usize)> {
+    lex(lang, text).comments
+}
+
+fn lex(lang: Lang, text: &str) -> Lexer<'_> {
+    let b = text.as_bytes();
+    let mut lexer = Lexer { b, lang, ranges: Vec::new(), comments: Vec::new() };
     match lang {
         Lang::Markdown => lexer.fences(),
         _ => {
@@ -33,14 +52,15 @@ pub fn mask(lang: Lang, text: &str) -> Vec<u8> {
             }
         }
     }
-    for (start, end) in lexer.ranges {
-        for byte in &mut out[start..end.min(b.len())] {
-            if *byte != b'\n' {
-                *byte = b' ';
-            }
-        }
-    }
-    out
+    lexer
+}
+
+/// Whether a comment's text marks it as documentation.
+fn doc_comment(text: &[u8]) -> bool {
+    (text.starts_with(b"///") && !text.starts_with(b"////"))
+        || text.starts_with(b"//!")
+        || (text.starts_with(b"/**") && !text.starts_with(b"/***") && !text.starts_with(b"/**/"))
+        || text.starts_with(b"/*!")
 }
 
 struct Lexer<'a> {
@@ -48,6 +68,8 @@ struct Lexer<'a> {
     lang: Lang,
     /// Byte ranges to blank.
     ranges: Vec<(usize, usize)>,
+    /// The comments among them that aren't doc comments.
+    comments: Vec<(usize, usize)>,
 }
 
 fn is_ident(c: u8) -> bool {
@@ -89,21 +111,19 @@ impl Lexer<'_> {
                 }
                 depth -= 1;
             }
-            if slash_comments && c == b'/' && self.at(i + 1) == b'/' {
-                let end = self.line_end(i);
+            if slash_comments && c == b'/' && matches!(self.at(i + 1), b'/' | b'*') {
+                let end = if self.at(i + 1) == b'/' { self.line_end(i) } else { self.block_comment(i) };
                 self.ranges.push((i, end));
-                i = end;
-                continue;
-            }
-            if slash_comments && c == b'/' && self.at(i + 1) == b'*' {
-                let end = self.block_comment(i);
-                self.ranges.push((i, end));
+                if !doc_comment(&self.b[i..end]) {
+                    self.comments.push((i, end));
+                }
                 i = end;
                 continue;
             }
             if hash_comments && c == b'#' {
                 let end = self.line_end(i);
                 self.ranges.push((i, end));
+                self.comments.push((i, end));
                 i = end;
                 continue;
             }
@@ -420,6 +440,15 @@ mod tests {
         let md = "# Title\n```sh\n# not a heading\n```\n## Part\n";
         let m = masked(Lang::Markdown, md);
         assert_eq!(m.lines().filter(|l| l.starts_with('#')).count(), 2, "{m}");
+    }
+
+    #[test]
+    fn plain_comments_only() {
+        let src = "/// Doc.\nfn a() {} // plain\n/* block */ /** doc */ let s = \"// not\";\n";
+        let found: Vec<&str> = plain_comments(Lang::Rust, src).iter().map(|&(a, b)| &src[a..b]).collect();
+        assert_eq!(found, ["// plain", "/* block */"]);
+        let py = "x = 1  # note\ns = '# not'\n";
+        assert_eq!(plain_comments(Lang::Python, py), [(7, 13)]);
     }
 
     #[test]

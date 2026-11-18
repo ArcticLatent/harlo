@@ -106,7 +106,8 @@ struct WikiView: View {
             }
         } else if let hits {
             if hits.hits.isEmpty {
-                Text("Nothing in the wiki matches “\(query)”.").foregroundStyle(Color(p.muted))
+                Text(hits.code.isEmpty ? "Nothing in the wiki or the code matches “\(query)”." : "No page mentions “\(query)”.")
+                    .foregroundStyle(Color(p.muted))
             } else {
                 Section {
                     ForEach(hits.hits) { hit in
@@ -123,6 +124,16 @@ struct WikiView: View {
                             .padding(.vertical, 2)
                         }
                         .accessibilityIdentifier("wikiHit")
+                    }
+                }
+            }
+            if !hits.code.isEmpty {
+                Section("In the code") {
+                    ForEach(hits.code) { code in
+                        NavigationLink(value: code) {
+                            WikiCodeRow(code: code)
+                        }
+                        .accessibilityIdentifier("wikiCodeHit")
                     }
                 }
             }

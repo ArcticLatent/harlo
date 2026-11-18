@@ -360,8 +360,9 @@ fn fail(text: impl Into<String>) -> Outcome {
 pub fn read_only(name: &str) -> bool {
     // (`jobs` touches only this session's own background commands.)
     // (`todo` only keeps the model's own list.)
-    // (`lsp` asks a language server, which runs none of the project's code.)
-    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs" | "todo" | "lsp")
+    // (`lsp` asks a language server, which runs none of the project's code;
+    // `lookup` the code index, which only reads it.)
+    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs" | "todo" | "lsp" | "lookup")
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
@@ -469,6 +470,23 @@ fn unchanged(path: &Path, seen: &Seen, now: Option<&[u8]>) -> bool {
         Some(bytes) => hash_of(bytes) == seen.hash,
         None => std::fs::read(path).is_ok_and(|b| hash_of(&b) == seen.hash),
     }
+}
+
+/// The wiki's note for a read of `path`, when it's a page of a `.okf/`
+/// wiki whose code changed since the page was checked.
+///
+/// The note names the footnotes to check (see
+/// [`harlo_okf::view::reading_note`]); a current page, or any other file,
+/// gets none. Off the async threads: it reads the files the page cites, and
+/// may ask the code index.
+async fn wiki_note(path: PathBuf) -> Option<String> {
+    if path.extension().is_none_or(|e| e != "md") {
+        return None;
+    }
+    let okf = path.ancestors().find(|a| a.file_name().is_some_and(|n| n == harlo_okf::bundle::DIR))?.to_path_buf();
+    let page = path.strip_prefix(&okf).ok()?.to_str()?.replace('\\', "/");
+    let root = okf.parent()?.to_path_buf();
+    tokio::task::spawn_blocking(move || harlo_okf::view::reading_note(&root, &page)).await.ok().flatten()
 }
 
 /// Whether `path` starts as a picture does.
@@ -729,6 +747,12 @@ impl Tools {
                 {
                     out.text.push_str(&rules);
                 }
+                if !out.failed
+                    && let Some(note) = wiki_note(self.path(s("path"))).await
+                {
+                    out.text.push_str("\n\n");
+                    out.text.push_str(&note);
+                }
                 out
             }
             "write" | "edit" | "apply_patch" => {
@@ -796,6 +820,10 @@ impl Tools {
                     return no;
                 }
                 self.lsp.call(args, path, &self.cwd, self.sandbox.as_deref()).await
+            }
+            crate::lookup::NAME => {
+                let (text, failed) = crate::lookup::run(args, &self.cwd, &self.hidden_names(&self.cwd)).await;
+                Outcome::new(text, failed)
             }
             "jobs" => {
                 let (text, failed) = self.jobs.call(args).await;
@@ -1570,6 +1598,36 @@ mod tests {
         assert_eq!(ranged, "line 4000\nline 4001\nline 4002\n\n[Lines 4000-4002 of 5000. Read on with offset=4003.]");
         let small = t.call("read", &json!({ "path": "small.rs" })).await.text;
         assert!(small.ends_with("// 1500"), "a file that fits is read whole");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_stale_wiki_page_reads_with_a_note() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-wiki-note-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let write = |p: &str, t: &str| {
+            let f = dir.join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, t).unwrap();
+        };
+        write("src/run.rs", "pub fn run() {\n    go();\n}\n");
+        write(".okf/runs.md", "---\ntype: Concept\ntitle: Runs\ndescription: How a run goes.\ncovers: [src/]\n---\n# Runs\n\nIt goes.[^run]\n\n[^run]: src/run.rs, fn run\n");
+        let checked = harlo_okf::view::answer(&json!({ "op": "check", "root": dir.to_string_lossy(), "options": { "now": "2026-11-18T00:00:00Z" } }));
+        assert_eq!(checked["current"], true, "{checked}");
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let current = t.call("read", &json!({ "path": ".okf/runs.md" })).await.text;
+        assert!(!current.contains("[Wiki:"), "a current page reads as it is: {current}");
+        write("src/run.rs", "pub fn run() {\n    stop();\n}\n");
+        let stale = t.call("read", &json!({ "path": ".okf/runs.md" })).await.text;
+        assert!(
+            stale.ends_with("\n\n[Wiki: this page is out of date. Check these footnotes against the code before relying on what they say:\n- [^run] src/run.rs, fn run (lines 1–3) changed since the page was written]"),
+            "{stale}"
+        );
+        let ranged = t.call("read", &json!({ "path": ".okf/runs.md", "offset": 9, "limit": 1 })).await.text;
+        assert!(ranged.starts_with("It goes.[^run]") && ranged.contains("[Wiki: this page is out of date."), "{ranged}");
+        write("notes/runs.md", "Not a wiki page.\n");
+        assert!(!t.call("read", &json!({ "path": "notes/runs.md" })).await.text.contains("[Wiki:"));
+        assert!(!t.call("read", &json!({ "path": ".okf/index.md" })).await.text.contains("[Wiki:"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

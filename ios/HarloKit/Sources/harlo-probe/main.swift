@@ -717,6 +717,15 @@ func record(_ link: String, to path: String) async {
         .flatMap { [$0] + (DiagramPicture.down($0).map { [$0] } ?? []) }
     let found = await model.searchWiki("rebuilds the whole list")
     check(found?.hits.first?.page == "architecture/sidebar.md" && found?.hits.first?.heading == "Rebuilding rows", "the search finds the section (\(found?.hits.first.map { "\($0.page)#\($0.section)" } ?? "none"))")
+    // A name: the code's declarations too, and one's card from the code
+    // index (what it calls, what calls it).
+    let named = await model.searchWiki("rebuild")
+    let rebuild = named?.code.first { $0.name == "rebuild" }
+    check(rebuild?.path == "src/sidebar.rs" && rebuild?.kind == "fn", "a name's search finds its declaration (\(named?.code.map(\.id) ?? []))")
+    if let rebuild {
+        let card = await model.lookupCode(rebuild)
+        check(card?.hasPrefix("pub fn rebuild(") == true && card?.contains("calls: ") == true, "its card from the code index (\(card ?? "none"))")
+    }
     rec.scene("plan")
     let helped = await turn("Have a helper update the changelog.", 90) { s in s.rows.contains { $0.html.contains("changelog entry is in") } }
     check(helped, "a helper's change brought over (\(s.rows.suffix(4).map { "\($0.kind) \($0.title) \($0.text.prefix(30))" }))")

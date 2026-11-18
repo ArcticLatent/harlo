@@ -379,6 +379,21 @@ final class HarloUITests: XCTestCase {
         let field = app.searchFields["Search the wiki"]
         XCTAssertTrue(field.waitForExistence(timeout: 8), "the wiki's search")
         field.tap()
+        // A name: its declaration in the code too, whose card says what
+        // it calls and what calls it.
+        field.typeText("rebuild\n")
+        let decl = app.descendants(matching: .any).matching(identifier: "wikiCodeHit").firstMatch
+        XCTAssertTrue(decl.waitForExistence(timeout: 8), "a declaration found in the code")
+        see("In the code")
+        shot("15i-wiki-code")
+        decl.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["wikiCodeCard"].waitForExistence(timeout: 8), "its card from the code index")
+        see("calls:")
+        shot("15j-wiki-code-card")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 8), "back at the search")
+        field.tap()
+        if field.buttons["Clear text"].exists { field.buttons["Clear text"].tap() }
         field.typeText("rebuilds the whole list\n")
         // (Several sections match: the one with the words.)
         let hit = app.descendants(matching: .any).matching(identifier: "wikiHit")

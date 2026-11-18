@@ -247,6 +247,10 @@ pub mod qobject {
         /// brings the hits); `workspace` is unused.
         #[qinvokable]
         fn request_wiki_search(self: &Workspace, key: &QString, query: &QString, workspace: &QString);
+        /// A declaration's card from the code index, for a code hit of the
+        /// search (`wikiLookupReady` brings it).
+        #[qinvokable]
+        fn request_wiki_lookup(self: &Workspace, key: &QString, name: &QString, path: &QString);
         /// Your edit of a session's plan: `{ op: "add", title, detail,
         /// after }`, `{ op: "edit", id, title, detail }`, `{ op: "remove",
         /// id }`, `{ op: "shift", id, by }`, `{ op: "skip", id, skipped }`,
@@ -837,6 +841,10 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "wikiSearchReady"]
         fn wiki_search_ready(self: Pin<&mut Workspace>, query: &QString, json: &QString);
+        /// A declaration's card: `{ text }` or `{ error }`.
+        #[qsignal]
+        #[cxx_name = "wikiLookupReady"]
+        fn wiki_lookup_ready(self: Pin<&mut Workspace>, name: &QString, path: &QString, json: &QString);
         /// A project's branches (`request_branches`), current first.
         #[qsignal]
         #[cxx_name = "branchesReady"]
@@ -2272,7 +2280,7 @@ impl Workspace {
                 session: SessionTarget::Resume(info.path.clone()),
                 extra_args: self.harlo_args(info.harness),
                 // (Orchestration: the agent's harlo tools know who's calling.)
-                env: vec![("HARLO_SESSION".into(), token.clone())],
+                env: self.session_env(info.harness, &info.cwd, &token),
                 remote,
             };
             let handle = {
@@ -2341,7 +2349,7 @@ impl Workspace {
                 args
             },
             // (Orchestration: the agent's harlo tools know who's calling.)
-            env: vec![("HARLO_SESSION".into(), token.clone())],
+            env: self.session_env(kind, &cwd, &token),
             remote,
         };
         let handle = {
@@ -2561,6 +2569,16 @@ impl Workspace {
         });
     }
 
+    pub fn request_wiki_lookup(&self, key: &QString, name: &QString, path: &QString) {
+        let (name, path) = (name.to_string(), path.to_string());
+        let Some((cwd, _)) = self.wiki_folder(&key.to_string()) else { return };
+        let thread = self.qt_thread();
+        crate::runtime().spawn_blocking(move || {
+            let v = harlo_core::wiki_view::lookup(&cwd, &name, &path);
+            let _ = thread.queue(move |mut this| this.as_mut().wiki_lookup_ready(&QString::from(&name), &QString::from(&path), &QString::from(&v.to_string())));
+        });
+    }
+
     /// The model a session started for a project gets when none is picked:
     /// the project's own for that agent (Settings → Projects), else the
     /// agent's default from Settings (not on another machine: its agent's
@@ -2686,7 +2704,7 @@ impl Workspace {
             };
             // First a check with no model: it records what needs none, and
             // when nothing's owed an update needs no session.
-            let outcome = match harlo_core::wiki::quiet_check(&root) {
+            let outcome = match harlo_core::wiki::writer_check(&root) {
                 Ok(o) => o,
                 Err(e) => {
                     done(&thread, cwd, None);
@@ -3388,6 +3406,31 @@ impl Workspace {
         Some((cwd, self.wiki_on(project), self.plan_on(i32::try_from(project).unwrap_or(i32::MAX)), self.plan_commits_on(i32::try_from(project).unwrap_or(i32::MAX))))
     }
 
+    /// A project's agents may look names up in its code index (its Code
+    /// lookup setting; off unless switched on).
+    fn lookup_on(&self, project: i64) -> bool {
+        self.setting_str(&format!("lookup_{project}")) == "1"
+    }
+
+    /// The environment of a session started in `cwd`: its orchestration
+    /// `token`, and for Harlo its code lookup when the project has it on
+    /// (on another machine, harlo's code index is put there first, off
+    /// this thread; the tool shows up once it's there).
+    fn session_env(&self, kind: HarnessKind, cwd: &Path, token: &str) -> Vec<(String, String)> {
+        let mut env = vec![("HARLO_SESSION".to_owned(), token.to_owned())];
+        if kind == HarnessKind::Harlo && self.project_at(cwd).is_some_and(|p| self.lookup_on(p)) {
+            env.push(("HARLO_AGENT_LOOKUP".to_owned(), "on".to_owned()));
+            if let Some(host) = harlo_core::remote::host_of(cwd) {
+                std::thread::spawn(move || {
+                    if let Err(e) = harlo_core::agent_host::index_on(&host) {
+                        tracing::event!(name: "lookup.index_on.failed", tracing::Level::WARN, server.address = %host, error.message = %format_args!("{e:#}"), "code index to {{server.address}}: {{error.message}}");
+                    }
+                });
+            }
+        }
+        env
+    }
+
     /// What harlo knows of a session calling its tools (None: one it doesn't).
     fn caller_facts(&self, caller: Option<&str>) -> tool_calls::Caller {
         let Some(c) = caller else { return tool_calls::Caller::default() };
@@ -3396,7 +3439,10 @@ impl Workspace {
             // (A helper: it reports to its parent, and offers no splits.)
             helper: self.orch_children.get(c).is_some_and(|ch| ch.notify) || self.serves_workflow(c),
             writing: self.wiki_sessions.contains(c),
-            project: self.features_of(c).map(|(cwd, wiki, plan, commits)| tool_calls::Project { cwd, wiki, plan, commits }),
+            project: self.features_of(c).map(|(cwd, wiki, plan, commits)| {
+                let lookup = self.project_of(c).is_some_and(|(_, p)| self.lookup_on(p));
+                tool_calls::Project { cwd, wiki, plan, commits, lookup }
+            }),
         }
     }
 
@@ -3420,14 +3466,18 @@ impl Workspace {
     /// A session's folder, and the project it's in (its worktree's).
     fn project_of(&self, key: &str) -> Option<(PathBuf, i64)> {
         let cwd = self.live.get(key).map(|e| e.info.cwd.clone()).or_else(|| self.sessions.get(Path::new(key)).map(|s| s.cwd.clone()))?;
-        let project = self
-            .worktrees
+        let project = self.project_at(&cwd)?;
+        Some((cwd, project))
+    }
+
+    /// The project a folder is in (its worktree's).
+    fn project_at(&self, cwd: &Path) -> Option<i64> {
+        self.worktrees
             .iter()
             .filter(|w| cwd.starts_with(&w.path))
             .max_by_key(|w| w.path.components().count())
             .map(|w| w.project_id)
-            .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))?;
-        Some((cwd, project))
+            .or_else(|| self.projects.iter().filter(|p| cwd.starts_with(&p.path)).max_by_key(|p| p.path.components().count()).map(|p| p.id))
     }
 
     /// Who a session's helpers are: its project's team (Settings →
@@ -7109,6 +7159,14 @@ impl Workspace {
         self.orchestrate_as(caller, tool, args)
     }
 
+    /// A code lookup by `caller`: in its folder, when its project has it on
+    /// (the index answers off this thread).
+    fn lookup_call(&self, caller: Option<&str>, facts: &tool_calls::Caller) -> anyhow::Result<serde_json::Value> {
+        let folder = tool_calls::lookup_folder(facts)?;
+        let cwd = caller.and_then(|c| self.live.get(c)).map_or_else(|| folder.to_path_buf(), |e| e.info.cwd.clone());
+        Ok(tool_calls::deferred(serde_json::json!({ "cwd": cwd.to_string_lossy() })))
+    }
+
     /// A tool call from `caller` (None: not a session harlo knows).
     fn orchestrate_as(mut self: Pin<&mut Self>, caller: Option<String>, tool: &str, args: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         use serde_json::json;
@@ -7124,7 +7182,9 @@ impl Workspace {
         }
         let facts = self.caller_facts(caller.as_deref());
         let helper = facts.helper;
-        let starting = self.agents_starting().for_session(helper);
+        // (A wiki session offers no splits either: no one's there to answer
+        // one when it runs in the background, and the run would wait.)
+        let starting = self.agents_starting().for_session(helper || facts.writing);
         if tool == harlo_core::orchestration::TOOLS {
             return Ok(json!(tool_calls::offered(starting, &facts)));
         }
@@ -7137,6 +7197,10 @@ impl Workspace {
                 Some(cwd) => tool_calls::deferred(json!({ "cwd": cwd.to_string_lossy(), "text": text })),
                 None => json!(text),
             });
+        }
+        // Code lookup: answered off this thread (crate::orchestration).
+        if tool == tool_calls::LOOKUP {
+            return self.lookup_call(caller.as_deref(), &facts);
         }
         // The wiki: answered off this thread (crate::orchestration).
         if tool == harlo_core::wiki::CHECK {

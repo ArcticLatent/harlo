@@ -1,0 +1,13 @@
+# The CI.
+name: CI
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: cargo build # compile
+  test:
+    runs-on: ubuntu-latest

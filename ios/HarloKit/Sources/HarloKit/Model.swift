@@ -994,6 +994,14 @@ public final class HarloModel {
         return await with { c, k in try await c.wikiSearch(k, query: query) }
     }
 
+    /// A declaration's card from the open session's code index (nil: it
+    /// couldn't be asked).
+    public func lookupCode(_ code: WikiHits.Code) async -> String? {
+        if demo || samples != nil { return Self.sampleCodeCard(code) }
+        guard features.contains("wiki") else { return nil }
+        return await with { c, k in try await c.wikiLookup(k, name: code.name, path: code.path) }
+    }
+
     /// Marks a page of the open session's wiki reviewed by the person at
     /// the computer: true when it was (an alert says why not).
     public func reviewWiki(_ page: String) async -> Bool {

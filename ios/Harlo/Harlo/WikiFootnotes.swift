@@ -25,6 +25,10 @@ struct WikiFootnotes: View {
                             Text(f.place).font(.footnote.monospaced())
                                 .foregroundStyle(Color(f.state == "gone" ? p.muted : p.primary.legible(on: p.background, toward: p.foreground, ratio: 5)))
                                 .multilineTextAlignment(.leading)
+                            if !f.signature.isEmpty {
+                                Text(f.signature).font(.caption.monospaced()).foregroundStyle(Color(p.muted))
+                                    .multilineTextAlignment(.leading)
+                            }
                             if !f.lines.isEmpty || !f.note.isEmpty {
                                 about(f).font(.caption).multilineTextAlignment(.leading)
                             }

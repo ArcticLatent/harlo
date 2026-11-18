@@ -20,6 +20,7 @@ harlo-code = { path = "crates/harlo-code" }
 harlo-relay = { path = "crates/harlo-relay" }
 harlo-apns = { path = "crates/harlo-apns" }
 harlo-okf = { path = "crates/harlo-okf" }
+harlo-index = { path = "crates/harlo-index", default-features = false }
 harlo-update-signing = { path = "crates/harlo-update-signing" }
 
 # Every other dependency, its version only: each crate names the features it uses.
@@ -65,6 +66,26 @@ unicode-segmentation = "1"
 ureq = "3"
 whisper-rs = "0.16"
 yaml-rust = "0.4"
+# harlo-index's parser and its grammars (the harlo-index helper only).
+tree-sitter = "0.27"
+tree-sitter-bash = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-julia = "0.23"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-lua = "0.2"
+tree-sitter-php = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-qmljs = "0.3"
+tree-sitter-ruby = "0.23"
+tree-sitter-rust = "0.24"
+tree-sitter-scala = "0.24"
+tree-sitter-swift = "0.7"
+tree-sitter-typescript = "0.23"
 
 # Checksums of engine downloads (gigabytes) in a dev build: seconds, not minutes.
 [profile.dev.package.sha2]

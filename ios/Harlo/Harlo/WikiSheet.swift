@@ -24,6 +24,10 @@ struct WikiSheet: View {
                 .navigationDestination(for: WikiLink.self) { link in
                     if let wiki = session.wiki { WikiPageView(wiki: wiki, link: link) }
                 }
+                // A search's code hit pushes its card.
+                .navigationDestination(for: WikiHits.Code.self) { code in
+                    WikiCodeCard(code: code)
+                }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 }

@@ -355,6 +355,12 @@ public actor HarloClient {
         WikiHits(try check(await call("wikiSearch", ["key": .string(key), "query": .string(query)])))
     }
 
+    /// A declaration's card from that repository's code index (what it
+    /// calls, what calls it), as text.
+    public func wikiLookup(_ key: String, name: String, path: String) async throws -> String {
+        try check(await call("wikiLookup", ["key": .string(key), "name": .string(name), "path": .string(path)]))["text"].text
+    }
+
     /// Marks a page of that wiki reviewed by the person at the computer:
     /// read against its code, its changed footnotes count as checked.
     public func wikiReview(_ key: String, page: String) async throws {

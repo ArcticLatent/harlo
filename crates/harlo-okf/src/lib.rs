@@ -9,9 +9,11 @@
 
 // Rust guideline compliant 2026-10-09
 
+pub mod brief;
 pub mod bundle;
 pub mod check;
 pub mod cite;
+pub mod indexed;
 pub mod ledger;
 pub mod lex;
 pub mod page;
@@ -19,5 +21,6 @@ pub mod scope;
 pub mod split;
 pub mod stamp;
 pub mod units;
+pub mod validate;
 pub mod view;
 pub mod work;

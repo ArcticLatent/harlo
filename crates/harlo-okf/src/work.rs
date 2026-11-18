@@ -23,6 +23,7 @@
 
 use crate::bundle::Bundle;
 use crate::cite::{self, Found};
+use crate::indexed::Declarations;
 use crate::ledger::{self, Claim, Ledger, Seen};
 use crate::page::Page;
 use crate::scope;
@@ -233,6 +234,8 @@ struct Source {
 struct Tree<'a> {
     root: &'a Path,
     files: HashMap<String, Option<Source>>,
+    /// Where declarations come from, found on first need.
+    decls: Option<Declarations>,
 }
 
 impl Tree<'_> {
@@ -249,9 +252,14 @@ impl Tree<'_> {
     }
 
     fn units(&mut self, path: &str) -> Option<&[Unit]> {
-        let s = self.get(path)?;
+        if self.decls.is_none() {
+            self.decls = Some(Declarations::load(self.root));
+        }
+        self.get(path)?;
+        let Tree { files, decls, .. } = self;
+        let s = files.get_mut(path)?.as_mut()?;
         if s.units.is_none() {
-            s.units = Some(units::scan(path, &s.text));
+            s.units = Some(decls.as_ref()?.units(path, &s.text));
         }
         s.units.as_deref()
     }
@@ -327,11 +335,39 @@ struct Pass<'a> {
     missing: Vec<(String, usize, Claim)>,
 }
 
+/// What one page, `path`, owes the code: its own footnotes only.
+///
+/// Reads just the files the page cites, so it's quick enough for every read
+/// of the page. A footnote whose declaration is gone from its file counts
+/// as naming nothing here (the whole bundle's [`work`] may find it moved).
+/// Empty for a deprecated page, one the bundle hasn't got, or one never
+/// stamped (nothing to compare with).
+#[must_use]
+pub fn page_items(bundle: &Bundle, ledger: &Ledger, path: &str) -> Vec<Item> {
+    let Some(page) = bundle.pages.iter().find(|p| p.path == path && p.front.status.as_deref() != Some("deprecated")) else {
+        return Vec::new();
+    };
+    if !ledger.claims.contains_key(path) {
+        return Vec::new();
+    }
+    let root = bundle.root.as_path();
+    let mut pass = Pass { root, ledger, tree: Tree { root, files: HashMap::new(), decls: None }, out: Work::default(), cited: BTreeSet::new(), missing: Vec::new() };
+    pass.page(page);
+    let mut items = pass.out.pages.remove(path).unwrap_or_default();
+    for (_, index, claim) in pass.missing {
+        if let Some(c) = page.cites.get(index) {
+            let locator = c.locator.clone().unwrap_or_else(|| claim.unit.clone().unwrap_or_default());
+            items.push(Item::Unresolved { label: c.label.clone(), path: c.path.clone(), locator, line: c.line });
+        }
+    }
+    items
+}
+
 /// What the wiki at `bundle` owes the working tree, by its `ledger`.
 pub fn work(bundle: &Bundle, ledger: &Ledger) -> Work {
     let root = bundle.root.as_path();
     let live: Vec<&Page> = bundle.pages.iter().filter(|p| p.front.status.as_deref() != Some("deprecated")).collect();
-    let mut pass = Pass { root, ledger, tree: Tree { root, files: HashMap::new() }, out: Work::default(), cited: BTreeSet::new(), missing: Vec::new() };
+    let mut pass = Pass { root, ledger, tree: Tree { root, files: HashMap::new(), decls: None }, out: Work::default(), cited: BTreeSet::new(), missing: Vec::new() };
     for page in &live {
         pass.page(page);
     }
@@ -413,7 +449,8 @@ impl Pass<'_> {
                     self.cited.insert((c.path.clone(), u.name.clone()));
                     let now = Claim { path: c.path.clone(), unit: Some(u.name.clone()), hash: u.hash.clone(), file };
                     match was.filter(|w| w.path == c.path && w.unit.as_deref() == Some(u.name.as_str())) {
-                        Some(w) if w.hash != u.hash => {
+                        // (Stamped before plain comments left the hash: its old hash counts.)
+                        Some(w) if w.hash != u.hash && w.hash != u.legacy => {
                             self.out.current.insert((page.path.clone(), c.label.clone()), now);
                             items.push(Item::Stale { label: c.label.clone(), path: c.path.clone(), locator: Some(locator.clone()), line: c.line, lines: Some((u.start, u.end)) });
                         }
@@ -492,7 +529,7 @@ impl Pass<'_> {
         for (page_path, index, was) in std::mem::take(&mut self.missing) {
             let Some(c) = bundle.page(&page_path).and_then(|p| p.cites.get(index)) else { continue };
             let name = was.unit.as_deref().unwrap_or_default();
-            let fits: Vec<&(String, Unit)> = all.iter().filter(|(_, u)| u.short() == short(name) && u.hash == was.hash).collect();
+            let fits: Vec<&(String, Unit)> = all.iter().filter(|(_, u)| u.short() == short(name) && (u.hash == was.hash || u.legacy == was.hash)).collect();
             let items = self.out.pages.entry(page_path.clone()).or_default();
             if let [(path, u)] = fits.as_slice() {
                 items.retain(|i| !matches!(i, Item::Absent { label: Some(l), .. } if *l == c.label));
@@ -580,6 +617,27 @@ mod tests {
         // Recording keeps both on the list.
         w.record(&repo.0, &mut ledger).unwrap();
         assert_eq!(repo.work(&ledger).len(), 2);
+    }
+
+    #[test]
+    fn one_page_is_checked_against_its_own_footnotes() {
+        let repo = Repo::new("one-page");
+        repo.write("src/ledger.rs", LEDGER_RS);
+        repo.write(".okf/ledger.md", PAGE);
+        let mut ledger = Ledger::new();
+        // Never stamped: nothing to compare with.
+        assert!(page_items(&bundle::load(&repo.0).unwrap(), &ledger, "ledger.md").is_empty());
+        ledger.leave.insert("src/ledger.rs#Ledger".into(), "a plain holder".into());
+        repo.record(&mut ledger);
+        let items = || page_items(&bundle::load(&repo.0).unwrap(), &ledger, "ledger.md");
+        assert!(items().is_empty());
+        // A new function isn't this page's to report to a reader; a changed body is.
+        repo.write("src/ledger.rs", &LEDGER_RS.replace("one()", "two()").replace("    }\n}\n", "    }\n    pub fn close(&self) {}\n}\n"));
+        assert_eq!(items(), [Item::Stale { label: "post".into(), path: "src/ledger.rs".into(), locator: Some("fn Ledger::post".into()), line: 11, lines: Some((3, 5)) }]);
+        // The declaration gone from its file: the footnote names nothing.
+        repo.write("src/ledger.rs", "pub struct Ledger {}\n");
+        assert_eq!(items(), [Item::Unresolved { label: "post".into(), path: "src/ledger.rs".into(), locator: "fn Ledger::post".into(), line: 11 }]);
+        assert!(page_items(&bundle::load(&repo.0).unwrap(), &ledger, "elsewhere.md").is_empty());
     }
 
     #[test]

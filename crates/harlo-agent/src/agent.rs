@@ -1328,6 +1328,10 @@ impl Agent {
             if self.allowed.is_none_or(|a| a.contains(&"lsp")) && crate::lsp::offered(&self.cwd) {
                 list.push(crate::lsp::spec());
             }
+            // (The code index, when the project has it on.)
+            if self.allowed.is_none_or(|a| a.contains(&crate::lookup::NAME)) && crate::lookup::offered() {
+                list.push(crate::lookup::spec());
+            }
             if let Some(m) = self.mcp.as_ref().filter(|_| self.allowed.is_none()) {
                 list.extend(m.specs().iter().cloned());
             }

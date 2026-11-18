@@ -19,6 +19,10 @@
 //!                              no model: records what needs none (JSON out)
 //! harlo-agent wiki --okf       a request of a .okf/ wiki, JSON on stdin and
 //!                              out (how harlo reads one on this machine)
+//! harlo-agent wiki --validate [<dir>] [--strict] [--json]
+//!                              the wiki checked for CI, writing nothing:
+//!                              exits 1 on errors (--strict: on anything the
+//!                              wiki owes the code too), 2 with no wiki
 //! harlo-agent --version        and the commit it was built from
 //! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
 //!                         [--harlo-tools] [--task-model provider/model] [--budget tokens]
@@ -47,6 +51,7 @@ mod images;
 mod isolate;
 mod jobs;
 mod keys;
+mod lookup;
 mod lsp;
 mod mcp;
 mod mcp_auth;
@@ -352,8 +357,12 @@ fn show_status(args: &[String]) {
 /// stdin and prints the answer: how harlo reads and checks a wiki on this
 /// machine from another. `--check DIR` is harlo's check of the wiki of
 /// the repository DIR is in, with no model: it records what needs none.
+/// `--validate [DIR]` is the read-only check for CI ([`wiki_validate`]).
 fn wiki_command() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--validate") {
+        std::process::exit(wiki_validate(&args));
+    }
     let request = if args.iter().any(|a| a == "--okf") {
         let mut input = String::new();
         let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
@@ -362,10 +371,37 @@ fn wiki_command() {
         let root = repository_root(std::path::Path::new(dir));
         serde_json::json!({ "op": "check", "root": root.to_string_lossy(), "options": { "now": clock::utc_now() } })
     } else {
-        println!("harlo-agent wiki --okf (a request on stdin) | --check <dir>");
+        println!("harlo-agent wiki --okf (a request on stdin) | --check <dir> | --validate [<dir>] [--strict] [--json]");
         return;
     };
     println!("{}", harlo_okf::view::answer(&request));
+}
+
+/// `wiki --validate [DIR] [--strict] [--json]`: the wiki of the repository
+/// DIR (default: here) is in, checked for CI with nothing written.
+///
+/// Prints the report and returns the exit code: 0 when it passes, 1 when it
+/// fails (errors; with `--strict`, anything the wiki owes the code too), 2
+/// when there's no wiki to check.
+fn wiki_validate(args: &[String]) -> i32 {
+    let strict = args.iter().any(|a| a == "--strict");
+    let as_json = args.iter().any(|a| a == "--json");
+    let dir = args.iter().skip_while(|a| *a != "--validate").skip(1).find(|a| !a.starts_with("--")).map_or(".", String::as_str);
+    let root = repository_root(&std::path::absolute(dir).unwrap_or_else(|_| std::path::PathBuf::from(dir)));
+    match harlo_okf::validate::validate(&root) {
+        Ok(report) => {
+            if as_json {
+                println!("{}", report.json(strict));
+            } else {
+                print!("{}", report.text(strict));
+            }
+            i32::from(!report.passes(strict))
+        }
+        Err(why) => {
+            eprintln!("harlo-agent wiki --validate: {why}");
+            2
+        }
+    }
 }
 
 /// The repository `dir` is in (the folder holding `.git`), else `dir`.

@@ -130,6 +130,14 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
                 None => json!(text),
             });
         }
+        if tool == harlo_core::tool_calls::LOOKUP {
+            let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
+            let query = harlo_core::tool_calls::lookup_query(args);
+            if query.name.is_empty() {
+                anyhow::bail!("Give the name to look up.");
+            }
+            return Ok(json!(harlo_core::agent_host::lookup(&cwd, &query)?));
+        }
         if tool == harlo_core::wiki::CHECK {
             let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
             let writer = result["writer"].as_str().unwrap_or_default().to_owned();

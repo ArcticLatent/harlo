@@ -147,6 +147,20 @@ pub fn quiet_check(folder: &Path) -> Result<Checked> {
     check(folder, &json!({ "now": now() }))
 }
 
+/// The check before a wiki session starts, with a brief for the writer.
+///
+/// [`quiet_check`]'s, with harlo's code index's brief added to its text
+/// when something's owed (a map of the code for a new wiki; see
+/// `harlo_okf::brief`).
+///
+/// # Errors
+///
+/// When the wiki or its ledger can't be read or written, or its machine
+/// can't be reached.
+pub fn writer_check(folder: &Path) -> Result<Checked> {
+    check(folder, &json!({ "now": now(), "brief": true }))
+}
+
 /// The person at this computer, as an OKF actor (`human:<login>`).
 pub fn human() -> String {
     let login = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();

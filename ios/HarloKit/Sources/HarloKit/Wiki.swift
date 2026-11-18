@@ -266,6 +266,9 @@ public struct WikiPageText: Equatable, Sendable {
         /// "current", "stale" (its code changed), "missing" (names nothing
         /// there) or "gone" (the file isn't there).
         public var state: String
+        /// The declaration as the code index has it ("pub fn retry(n: u32)";
+        /// "" for a file, or without the index).
+        public var signature: String = ""
         public var id: String { label }
 
         /// "src/jobs.rs, fn retry".
@@ -298,7 +301,7 @@ public struct WikiPageText: Equatable, Sendable {
         blocks = (v["blocks"].array ?? []).map { Block(kind: $0["kind"].text, html: $0["html"].text, code: $0["code"].text, lang: $0["lang"].text, anchor: $0["anchor"].text) }
         footnotes = (v["footnotes"].array ?? []).map {
             Footnote(n: Int($0["n"].int ?? 0), label: $0["label"].text, path: $0["path"].text, locator: $0["locator"].text,
-                     start: Int($0["start"].int ?? 0), end: Int($0["end"].int ?? 0), state: $0["state"].text)
+                     start: Int($0["start"].int ?? 0), end: Int($0["end"].int ?? 0), state: $0["state"].text, signature: $0["signature"].text)
         }
         backlinks = (v["backlinks"].array ?? []).map { WikiPage(path: $0["path"].text, title: $0["title"].text) }
         owes = (v["items"].array ?? []).map(\.text)
@@ -365,7 +368,8 @@ public struct WikiPageText: Equatable, Sendable {
     }
 }
 
-/// What a wiki search found: sections, best first.
+/// What a wiki search found: sections, best first, and declarations in the
+/// code whose names hold a one-word query (from harlo's code index).
 public struct WikiHits: Equatable, Sendable {
     public struct Hit: Equatable, Sendable, Identifiable {
         /// Within .okf/ ("architecture/jobs.md").
@@ -375,9 +379,30 @@ public struct WikiHits: Equatable, Sendable {
         public var snippet: String
         public var id: String { page + "#" + section }
     }
+    /// A declaration in the code.
+    public struct Code: Equatable, Sendable, Identifiable, Hashable {
+        /// In the repository ("src/jobs.rs").
+        public var path: String
+        /// Its full name ("Queue::retry").
+        public var name: String
+        /// "fn", "type", …
+        public var kind: String
+        public var line: Int
+        public var signature: String
+        /// Its doc comment's first line.
+        public var doc: String
+        public var id: String { path + "#" + name }
+
+        /// "src/jobs.rs:12".
+        public var place: String { "\(path):\(line)" }
+    }
     public var hits: [Hit]
+    public var code: [Code]
 
     public init(_ v: JSON) {
         hits = (v["hits"].array ?? []).map { Hit(page: $0["page"].text, section: $0["section"].text, heading: $0["heading"].text, snippet: $0["snippet"].text) }
+        code = (v["code"].array ?? []).map {
+            Code(path: $0["path"].text, name: $0["name"].text, kind: $0["kind"].text, line: Int($0["line"].int ?? 0), signature: $0["signature"].text, doc: $0["doc"].text)
+        }
     }
 }

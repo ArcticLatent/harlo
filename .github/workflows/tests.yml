@@ -1,5 +1,5 @@
-# The Rust tests of Harlo's agent (harlo-agent) and harlo's core
-# (harlo-core) on every push to main and every pull request: plain
+# The Rust tests of Harlo's agent (harlo-agent), harlo's core (harlo-core),
+# the code index (harlo-index) and the wiki (harlo-okf) on every push to main and every pull request: plain
 # `cargo test`, no Qt, no model, no network service of ours. Then clippy, with
 # warnings as errors, on every crate that builds without Qt (all but
 # harlo-app). A separate job checks the dependencies: known
@@ -45,6 +45,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: harlo-agent and harlo-core
         run: cargo test --locked -p harlo-agent -p harlo-core
+      # (The wiki's tests run the built index helper too.)
+      - name: harlo-index and harlo-okf
+        run: |
+          cargo build --locked -p harlo-index
+          cargo test --locked -p harlo-index -p harlo-okf
       - name: clippy
         run: cargo clippy --locked --workspace --exclude harlo-app --all-targets -- -D warnings
 

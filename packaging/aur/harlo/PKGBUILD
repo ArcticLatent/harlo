@@ -45,6 +45,11 @@ build() {
     # offered on other machines.
     if [ -d "$(rustc --print target-libdir --target x86_64-unknown-linux-musl 2>/dev/null)" ]; then
         CC_x86_64_unknown_linux_musl=gcc cargo build --frozen --profile agent -p harlo-agent --target x86_64-unknown-linux-musl
+        # The code index: static too, one copy for here and other machines.
+        CC_x86_64_unknown_linux_musl=gcc cargo build --frozen --profile agent -p harlo-index --target x86_64-unknown-linux-musl
+    else
+        # (Without the musl target, the code index for here only.)
+        cargo build --frozen --profile agent -p harlo-index
     fi
 }
 
@@ -64,6 +69,12 @@ package() {
     if [ -f target/x86_64-unknown-linux-musl/agent/harlo-agent ]; then
         install -Dm755 target/x86_64-unknown-linux-musl/agent/harlo-agent "$pkgdir/usr/lib/harlo/harlo-agent-x86_64"
     fi
+    # (The code index, which harlo looks for in lib/harlo.)
+    if [ -f target/x86_64-unknown-linux-musl/agent/harlo-index ]; then
+        install -Dm755 target/x86_64-unknown-linux-musl/agent/harlo-index "$pkgdir/usr/lib/harlo/harlo-index-x86_64"
+    else
+        install -Dm755 target/agent/harlo-index "$pkgdir/usr/lib/harlo/harlo-index"
+    fi
     install -Dm644 packaging/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
     install -Dm644 crates/harlo-app/icons/app/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
@@ -75,6 +86,7 @@ package() {
     install -Dm644 crates/harlo-app/icons/providers/LOBEHUB-LICENSE "$pkgdir/usr/share/licenses/$pkgname/provider-logos-lobehub-LICENSE"
     install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$pkgdir/usr/share/licenses/$pkgname/tweetnacl-LICENSE"
     install -Dm644 crates/harlo-app/assets/mermaid/LICENSE "$pkgdir/usr/share/licenses/$pkgname/mermaid-LICENSE"
+    install -Dm644 crates/harlo-index/GRAMMARS-LICENSE "$pkgdir/usr/share/licenses/$pkgname/tree-sitter-grammars-LICENSE"
     install -Dm644 crates/harlo-app/fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/jetbrains-mono-OFL.txt"
     install -Dm644 crates/harlo-app/fonts/Geist-OFL.txt "$pkgdir/usr/share/licenses/$pkgname/geist-OFL.txt"
     install -Dm644 crates/harlo-app/icons/PASEO-NOTICE "$pkgdir/usr/share/licenses/$pkgname/paseo-NOTICE"

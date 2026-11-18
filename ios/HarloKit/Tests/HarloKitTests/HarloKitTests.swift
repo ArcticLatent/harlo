@@ -1305,7 +1305,7 @@ final class PlanTests: XCTestCase {
                                  "you": "human:me", "edited": false,
                                  "blocks": [["kind": "prose", "html": "<h1>Jobs</h1>", "anchor": "jobs"], ["kind": "mermaid", "code": "flowchart LR\n a --> b"],
                                             ["kind": "code", "html": "<pre><code>run</code></pre>", "code": "run", "lang": "sh"]],
-                                 "footnotes": [["n": 1, "label": "retry", "path": "src/jobs.rs", "locator": "fn retry", "start": 1, "end": 3, "state": "stale"],
+                                 "footnotes": [["n": 1, "label": "retry", "path": "src/jobs.rs", "locator": "fn retry", "start": 1, "end": 3, "state": "stale", "signature": "pub fn retry(n: u32)"],
                                                ["n": 2, "label": "all", "path": "src/queue.rs", "locator": .null, "start": 0, "end": 0, "state": "gone"]],
                                  "items": ["Footnote 1: its code changed since the page was written (src/jobs.rs, fn retry)"],
                                  "backlinks": [["path": "overview.md", "title": "Overview"]]])
@@ -1320,6 +1320,7 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(page.footnotes.map(\.place), ["src/jobs.rs, fn retry", "src/queue.rs"])
         XCTAssertEqual(page.footnotes.map(\.lines), ["lines 1–3", ""])
         XCTAssertEqual(page.footnotes.map(\.note), ["its code changed since the page was written", "the file isn't there"])
+        XCTAssertEqual(page.footnotes.map(\.signature), ["pub fn retry(n: u32)", ""], "the index's signature, none for a file")
         XCTAssertEqual(page.backlinks.map(\.title), ["Overview"])
         XCTAssertEqual(page.blocks.map(\.kind), ["prose", "mermaid", "code"])
         XCTAssertEqual(page.blocks[0].anchor, "jobs")
@@ -1337,6 +1338,11 @@ final class PlanTests: XCTestCase {
         let hits = WikiHits(["hits": [["page": "architecture/jobs.md", "section": "retry-control", "heading": "Retry control", "snippet": "retried three times"]]])
         XCTAssertEqual(hits.hits.first?.heading, "Retry control")
         XCTAssertEqual(hits.hits.first?.id, "architecture/jobs.md#retry-control")
+        XCTAssertEqual(hits.code, [], "no code hits from a desktop without the index")
+        let code = WikiHits(["hits": [], "code": [["path": "src/jobs.rs", "name": "Queue::retry", "kind": "fn", "line": 12, "signature": "pub fn retry(&self)", "doc": "Runs it again."]]]).code
+        XCTAssertEqual(code.map(\.id), ["src/jobs.rs#Queue::retry"])
+        XCTAssertEqual(code.first?.place, "src/jobs.rs:12")
+        XCTAssertEqual(code.first?.doc, "Runs it again.")
         if case .plan(let key)? = Event(["ev": "plan", "key": "live:1"]) { XCTAssertEqual(key, "live:1") } else { XCTFail("a plan event") }
     }
 

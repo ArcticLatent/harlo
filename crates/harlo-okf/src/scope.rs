@@ -4,11 +4,13 @@
 //! counts. The walk follows the repository's ignore rules (`.gitignore`,
 //! `.git/info/exclude`, the global one) and skips hidden folders, so local
 //! notes and build output stay out. Of what's left, a file is in scope when
-//! the scanner knows its language and it isn't tests, vendored or generated
-//! code, a licence or a changelog, or the wiki itself.
+//! the scanner or the code index (`harlo-index`) knows its language and it
+//! isn't tests, vendored or generated code, a licence or a changelog, or the
+//! wiki itself. Which files are in scope doesn't depend on whether the
+//! index's helper is installed: only which declarations are found in them.
 //!
 //! Code files must each belong to a page (or be left out on purpose);
-//! Markdown and TOML files may be cited but needn't belong to one.
+//! Markdown, TOML and YAML files may be cited but needn't belong to one.
 
 // Rust guideline compliant 2026-10-09
 
@@ -40,7 +42,15 @@ fn excluded(path: &str) -> bool {
 
 /// Whether a file in scope must belong to a page: code, not prose or settings.
 pub fn needs_owner(path: &str) -> bool {
-    !matches!(units::lang(path), Some(Lang::Markdown | Lang::Toml) | None)
+    match units::lang(path) {
+        Some(lang) => !matches!(lang, Lang::Markdown | Lang::Toml),
+        None => harlo_index::lang(path).is_some_and(|l| l != harlo_index::Lang::Yaml),
+    }
+}
+
+/// Whether the wiki reads a file of this name: the scanner or the index knows its language.
+fn known(path: &str) -> bool {
+    units::lang(path).is_some() || harlo_index::lang(path).is_some()
 }
 
 /// The files in scope in the repository at `root`, sorted, as paths from it.
@@ -54,7 +64,7 @@ pub fn files(root: &Path) -> Vec<String> {
         let Ok(rel) = entry.path().strip_prefix(root) else { continue };
         let Some(rel) = rel.to_str() else { continue };
         let rel = rel.replace('\\', "/");
-        if units::lang(&rel).is_none() || excluded(&rel) || entry.metadata().is_ok_and(|m| m.len() > MAX_BYTES) {
+        if !known(&rel) || excluded(&rel) || entry.metadata().is_ok_and(|m| m.len() > MAX_BYTES) {
             continue;
         }
         out.push(rel);
@@ -66,6 +76,16 @@ pub fn files(root: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn languages_the_index_reads_are_in_scope() {
+        assert!(known("src/Cart.kt") && needs_owner("src/Cart.kt"));
+        assert!(known("db/schema.sql") && needs_owner("db/schema.sql"));
+        // Settings may be cited, but needn't belong to a page.
+        assert!(known("deploy/app.yaml") && !needs_owner("deploy/app.yaml"));
+        assert!(known("Cargo.toml") && !needs_owner("Cargo.toml"));
+        assert!(!known("logo.png") && !needs_owner("logo.png"));
+    }
 
     #[test]
     fn scope_by_name() {

@@ -31,6 +31,9 @@ cargo build --profile agent --locked -p harlo-agent
 # whatever C library they have. (ring's bits of C: the system's gcc does.)
 rustup target add x86_64-unknown-linux-musl 2>/dev/null || true
 CC_x86_64_unknown_linux_musl=${CC_x86_64_unknown_linux_musl:-gcc} cargo build --profile agent --locked -p harlo-agent --target x86_64-unknown-linux-musl
+# The code index (its grammars make it big, so it's a program of its own):
+# static too, the one copy serving here and other machines alike.
+CC_x86_64_unknown_linux_musl=${CC_x86_64_unknown_linux_musl:-gcc} cargo build --profile agent --locked -p harlo-index --target x86_64-unknown-linux-musl
 
 fetch() {
     [ -x "$TOOLS/$1" ] || { curl -fsSL -o "$TOOLS/$1" "$2"; chmod +x "$TOOLS/$1"; }
@@ -61,6 +64,7 @@ install -Dm644 crates/harlo-app/icons/providers/LOBEHUB-LICENSE "$LIC/provider-l
 install -Dm644 crates/harlo-app/icons/providers/OPENCODE-LICENSE "$LIC/provider-logos-opencode-LICENSE"
 install -Dm644 crates/harlo-app/phone/TWEETNACL-LICENSE "$LIC/tweetnacl-LICENSE"
 install -Dm644 crates/harlo-app/assets/mermaid/LICENSE "$LIC/mermaid-LICENSE"
+install -Dm644 crates/harlo-index/GRAMMARS-LICENSE "$LIC/tree-sitter-grammars-LICENSE"
 for f in crates/harlo-app/fonts/*LICENSE* crates/harlo-app/fonts/*OFL*; do [ -f "$f" ] && install -Dm644 "$f" "$LIC/fonts-$(basename "$f")"; done
 # (Qt's own licences: LGPLv3, linked dynamically.)
 [ -d "$QTDIR/../../Licenses" ] && cp -r "$QTDIR/../../Licenses" "$LIC/qt" || true
@@ -86,6 +90,12 @@ install -Dm755 -s "${CARGO_TARGET_DIR:-target}/agent/harlo-agent" "$APPDIR/usr/l
 install -Dm755 -s "${CARGO_TARGET_DIR:-target}/x86_64-unknown-linux-musl/agent/harlo-agent" "$APPDIR/usr/lib/harlo/harlo-agent-x86_64"
 if [ -f "$OUT/helpers/harlo-agent-aarch64" ]; then
     install -Dm755 "$OUT/helpers/harlo-agent-aarch64" "$APPDIR/usr/lib/harlo/harlo-agent-aarch64"
+fi
+# The code index, for here and other machines (harlo-okf and harlo look for
+# harlo-index-<arch> in lib/harlo), x86_64 and (built on one) ARM.
+install -Dm755 -s "${CARGO_TARGET_DIR:-target}/x86_64-unknown-linux-musl/agent/harlo-index" "$APPDIR/usr/lib/harlo/harlo-index-x86_64"
+if [ -f "$OUT/helpers/harlo-index-aarch64" ]; then
+    install -Dm755 "$OUT/helpers/harlo-index-aarch64" "$APPDIR/usr/lib/harlo/harlo-index-aarch64"
 fi
 # ARM machines' (built on one: the release's arm64 job puts it in dist/helpers).
 if [ -f "$OUT/helpers/harlo-engines-aarch64" ]; then

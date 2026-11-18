@@ -72,7 +72,9 @@ for raw in sys.stdin:
         if answer is None:
             text, failed = "harlo isn't running (or can't be reached from this machine).", True
         elif answer.get("ok"):
-            text, failed = json.dumps(answer.get("result")), False
+            result = answer.get("result")
+            # (Text as text, not a quoted JSON string.)
+            text, failed = (result if isinstance(result, str) else json.dumps(result)), False
         else:
             text, failed = answer.get("error") or "harlo couldn't do that", True
         reply(msg_id, {"content": [{"type": "text", "text": text}], "isError": failed})

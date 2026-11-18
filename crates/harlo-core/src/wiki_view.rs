@@ -45,6 +45,9 @@ pub fn ask(folder: &Path, mut request: Value) -> Value {
 fn on_host(host_name: &str, request: &Value) -> anyhow::Result<Value> {
     let host = remote::host(host_name).ok_or_else(|| anyhow::anyhow!("No remote instance named {host_name}"))?;
     let agent = crate::agent_host::program_on(host_name)?;
+    // The code index beside it, for the declarations (without it, harlo's
+    // agent reads them with its own scanner: a failure here isn't one).
+    let _ = crate::agent_host::index_on(host_name);
     let out = remote::run_with_input(&host, &format!("exec {} wiki --okf", remote::quote_path(&agent)), Some(request.to_string().as_bytes()), HOST_TIMEOUT)?;
     if !out.status.success() {
         anyhow::bail!("{}", remote::ssh_error(host_name, &out));
@@ -104,6 +107,12 @@ pub fn page_view(folder: &Path, path: &str) -> Value {
 pub fn search(folder: &Path, query: &str, limit: usize) -> Value {
     let v = ask(folder, json!({ "op": "search", "query": query, "limit": limit }));
     if v.get("hits").is_some() { v } else { json!({ "hits": [], "workspaces": [], "error": v["error"] }) }
+}
+
+/// A declaration's card from the code index (`name`, in the file or folder
+/// `path` when given): `{ text }`, or `{ error }`.
+pub fn lookup(folder: &Path, name: &str, path: &str) -> Value {
+    ask(folder, json!({ "op": "lookup", "name": name, "path": path, "depth": 2 }))
 }
 
 /// A page's work, in words, for a session that checks just that page.

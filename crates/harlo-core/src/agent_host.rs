@@ -2,12 +2,14 @@
 //!
 //! harlo puts its agent there (a static build, so it runs whatever C library
 //! the machine has; once per build of it) and runs it over SSH as the other
-//! agents run there. Its sign-in, settings and sessions are that machine's own,
+//! agents run there. The code index goes beside it on the first use of the
+//! wiki there. Its sign-in, settings and sessions are that machine's own,
 //! in harlo-agent's folders there.
 
 // Rust guideline compliant 2026-10-09
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -21,8 +23,19 @@ use crate::remote_helper::{ARCHES, Helper};
 
 static AGENT: Helper = Helper::new("harlo-agent", true, "agent", "--version");
 
+/// harlo's code index, which harlo's agent there finds beside itself (its
+/// wiki checks read declarations with it).
+static INDEX: Helper = Helper::new("harlo-index", true, "code index", "version");
+
 /// Whether Harlo's sessions on other machines get this computer's provider
 /// keys (Settings → Models).
+/// Where harlo's code index is on each machine it was put on (machine name → path).
+static INDEX_PATHS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// The longest a lookup on another machine may take (a first index of a
+/// big repository included).
+const LOOKUP_LIMIT: Duration = Duration::from_secs(90);
+
 static SHARE_KEYS: AtomicBool = AtomicBool::new(true);
 
 /// The keys each machine was last given, by a hash of them (given again
@@ -40,6 +53,61 @@ static SHARED: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 pub fn program_on(host_name: &str) -> Result<String> {
     let host = remote::host(host_name).with_context(|| format!("unknown machine {host_name}"))?;
     AGENT.on(&host)
+}
+
+/// harlo's code index on `host_name`, put there first if needed.
+///
+/// Its path there (blocking). harlo's agent finds it beside itself; without
+/// it, the wiki there reads declarations with its own scanner.
+///
+/// # Errors
+///
+/// When the machine can't be reached, there's no build for its kind, or it
+/// can't be written there.
+pub fn index_on(host_name: &str) -> Result<String> {
+    let host = remote::host(host_name).with_context(|| format!("unknown machine {host_name}"))?;
+    INDEX.on(&host)
+}
+
+/// The code index's answer to `query` for the folder `cwd`, on this
+/// computer or (its path naming another machine) there (blocking).
+///
+/// On another machine harlo's code index is put there first if needed;
+/// its path there is remembered while harlo runs.
+///
+/// # Errors
+///
+/// When the index isn't installed, fails or takes too long, or the machine
+/// can't be reached.
+pub fn lookup(cwd: &std::path::Path, query: &harlo_okf::indexed::Lookup<'_>) -> Result<String> {
+    let Some((host_name, folder)) = remote::split(cwd) else {
+        return harlo_okf::indexed::lookup(cwd, query).map_err(anyhow::Error::msg);
+    };
+    let host = remote::host(&host_name).with_context(|| format!("unknown machine {host_name}"))?;
+    let known = INDEX_PATHS.lock().ok().and_then(|m| m.as_ref()?.get(&host_name).cloned());
+    let program = match known {
+        Some(p) => p,
+        None => {
+            let p = INDEX.on(&host)?;
+            if let Ok(mut m) = INDEX_PATHS.lock() {
+                m.get_or_insert_with(HashMap::new).insert(host_name.clone(), p.clone());
+            }
+            p
+        }
+    };
+    let mut script = format!("{} lookup {} {} --depth {}", remote::quote_path(&program), remote::quote_path(&folder), remote::quote(query.name), query.depth.clamp(1, 3));
+    if let Some(p) = query.path.filter(|p| !p.trim().is_empty()) {
+        let _ = write!(script, " --path {}", remote::quote(p));
+    }
+    let out = remote::run(&host, &script, LOOKUP_LIMIT)?;
+    if !out.status.success() {
+        // (A build harlo put there and something removed: put again next time.)
+        if let Some(m) = INDEX_PATHS.lock().ok().as_mut().and_then(|m| m.as_mut()) {
+            m.remove(&host_name);
+        }
+        anyhow::bail!("The code index on {host_name} failed: {}", remote::ssh_error(&host_name, &out).trim_start_matches("harlo-index: "));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_owned())
 }
 
 /// Why Harlo can't run on a machine its check found (None: it can).

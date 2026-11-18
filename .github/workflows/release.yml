@@ -30,7 +30,7 @@ env:
 jobs:
   # The helper harlo puts on ARM (aarch64) machines to run model servers
   # there, built on one (Ubuntu 22.04's glibc, as harlo's own), and Harlo's
-  # agent for them (static: musl).
+  # agent and the code index for them (static: musl).
   engines-arm64:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 45
@@ -58,12 +58,20 @@ jobs:
           strip -o helpers/harlo-agent-aarch64 target/aarch64-unknown-linux-musl/agent/harlo-agent
           file helpers/harlo-agent-aarch64 | tee /dev/stderr | grep -q "static"
           helpers/harlo-agent-aarch64 --version
+      - name: harlo-index
+        run: |
+          CC_aarch64_unknown_linux_musl=gcc cargo build --profile agent --locked -p harlo-index --target aarch64-unknown-linux-musl
+          strip -o helpers/harlo-index-aarch64 target/aarch64-unknown-linux-musl/agent/harlo-index
+          file helpers/harlo-index-aarch64 | tee /dev/stderr | grep -q "static"
+          helpers/harlo-index-aarch64 version
+          helpers/harlo-index-aarch64 file crates/harlo-index/src/lib.rs > /dev/null
       - uses: actions/upload-artifact@v6
         with:
           name: harlo-engines-aarch64
           path: |
             helpers/harlo-engines-aarch64
             helpers/harlo-agent-aarch64
+            helpers/harlo-index-aarch64
 
   linux:
     needs: engines-arm64
@@ -113,9 +121,13 @@ jobs:
         run: |
           export VERSION=$(cat dist/version)
           for p in deb rpm archlinux; do nfpm package -f packaging/linux/nfpm.yaml -p $p -t dist/; done
+          # Harlo's agent and the code index on their own, static, for a
+          # CI job that checks a repository's wiki (`harlo-agent wiki
+          # --validate`): side by side, the agent finds the index.
+          for a in x86_64 aarch64; do for b in agent index; do cp dist/opt/harlo/lib/harlo/harlo-$b-$a dist/harlo-$b-linux-$a; done; done
           cd dist
-          ls -la *.AppImage *.deb *.rpm *.pkg.tar.zst
-          sha256sum *.AppImage *.deb *.rpm *.pkg.tar.zst > SHA256SUMS
+          ls -la *.AppImage *.deb *.rpm *.pkg.tar.zst harlo-*-linux-*
+          sha256sum *.AppImage *.deb *.rpm *.pkg.tar.zst harlo-*-linux-* > SHA256SUMS
           cat SHA256SUMS
 
       - name: Starts (offscreen, from the .deb's tree and the AppImage)
@@ -130,6 +142,9 @@ jobs:
           # Its static copies for other machines.
           for a in x86_64 aarch64; do test -x dist/opt/harlo/lib/harlo/harlo-agent-$a; file dist/opt/harlo/lib/harlo/harlo-agent-$a | grep -q static; done
           dist/opt/harlo/lib/harlo/harlo-agent-x86_64 --version
+          # The code index, both kinds, static.
+          for a in x86_64 aarch64; do test -x dist/opt/harlo/lib/harlo/harlo-index-$a; file dist/opt/harlo/lib/harlo/harlo-index-$a | grep -q static; done
+          dist/opt/harlo/lib/harlo/harlo-index-x86_64 file crates/harlo-index/src/lib.rs > /dev/null
           # It runs and its QML loads: --version prints and quits; a short
           # offscreen start must not report missing modules or libraries.
           QT_QPA_PLATFORM=offscreen dist/opt/harlo/bin/harlo --version
@@ -148,6 +163,7 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.pkg.tar.zst
+            dist/harlo-*-linux-*
             dist/SHA256SUMS
 
   # Each package installed with its system's own package manager on a clean
