@@ -19,6 +19,8 @@ struct PagesGraph: View {
     @State private var loading = true
 
     var light: Bool { p.background.luminance > 0.5 }
+    /// The graph to draw (an overview's links only when it was read last).
+    var source: String { wiki.graph(readLast: model.wikiReadLast[wiki.root] ?? "") }
 
     /// Drawn down when that shows it larger on the screen.
     var shown: DiagramPicture? {
@@ -40,8 +42,8 @@ struct PagesGraph: View {
         }
         .frame(maxWidth: .infinity)
         .onGeometryChange(for: Double.self) { $0.size.width } action: { width = $0 }
-        .task(id: "\(light)|\(wiki.mermaid)") {
-            let source = wiki.mermaid
+        .task(id: "\(light)|\(source)") {
+            let source = source
             loading = true
             let colors = ["background": p.elevated.hex, "surface": p.raised.hex, "text": p.foreground.hex, "muted": p.muted.hex, "accent": p.primary.hex]
             let r = await model.diagram(source, light: light, colors: colors)

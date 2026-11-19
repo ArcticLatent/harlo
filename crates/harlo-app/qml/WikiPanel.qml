@@ -319,13 +319,18 @@ Rectangle {
         }
         return pages.filter(p => near.has(p.path))
     }
+    // An overview's links, when the graph shows every page of a wiki
+    // past a handful: left out (it links to every page by design, so they
+    // only cross the rest), unless it's the page read last.
+    readonly property bool graphHubsQuiet: graphPages.length > 5 && graphPages.length === pages.length
     readonly property string graphSource: {
         const shown = graphPages
         if (shown.length < 2) return ""
         const at = new Map(shown.map((p, i) => [p.path, i]))
+        const quiet = p => root.graphHubsQuiet && p.type === "Overview" && p.path !== root.lastRead
         let out = "flowchart LR\n"
         shown.forEach((p, i) => { out += "  p" + i + "[\"" + p.title.replace(/"/g, "#quot;").replace(/[\[\]{}<>]/g, " ") + "\"]\n" })
-        shown.forEach((p, i) => p.links.forEach(l => { if (at.has(l)) out += "  p" + i + " --> p" + at.get(l) + "\n" }))
+        shown.forEach((p, i) => { if (!quiet(p)) p.links.forEach(l => { if (at.has(l)) out += "  p" + i + " --> p" + at.get(l) + "\n" }) })
         return out
     }
     // Drawn both across and down: the panel shows whichever it fits

@@ -183,9 +183,16 @@ public struct Wiki: Equatable, Sendable {
 
     /// The pages and their links as a Mermaid flowchart ("" under two
     /// pages), as the desktop's Wiki panel draws it.
-    public var mermaid: String {
+    public var mermaid: String { graph(readLast: "") }
+
+    /// The flowchart with the page read last known: when it shows every
+    /// page of a wiki past a handful, an overview's links are left out (it
+    /// links to every page by design, so they only cross the rest), unless
+    /// it's the page read last.
+    public func graph(readLast: String) -> String {
         let shown = graphPages
         guard shown.count > 1 else { return "" }
+        let quiet = shown.count > 5 && shown.count == pages.count
         let at = Dictionary(shown.enumerated().map { ($1.path, $0) }, uniquingKeysWith: { a, _ in a })
         var out = "flowchart LR\n"
         for (i, p) in shown.enumerated() {
@@ -193,7 +200,7 @@ public struct Wiki: Equatable, Sendable {
             for c in ["[", "]", "{", "}", "<", ">"] { title = title.replacing(c, with: " ") }
             out += "  p\(i)[\"\(title)\"]\n"
         }
-        for (i, p) in shown.enumerated() {
+        for (i, p) in shown.enumerated() where !(quiet && p.kind == "Overview" && p.path != readLast) {
             for l in p.links { if let j = at[l] { out += "  p\(i) --> p\(j)\n" } }
         }
         return out

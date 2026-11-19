@@ -1300,6 +1300,13 @@ final class PlanTests: XCTestCase {
         // Its graph, as the desktop draws it; files in the repository.
         XCTAssertEqual(wiki.mermaid, "flowchart LR\n  p0[\"Overview\"]\n  p1[\"Jobs\"]\n  p0 --> p1\n")
         XCTAssertEqual(Wiki(["project": 3, "pages": [["path": "a.md", "title": "A"]]]).mermaid, "", "one page: no graph")
+        // An overview linking every page of a bigger wiki: its links left
+        // out, unless it was read last.
+        let hub = Wiki(["project": 3, "pages": .array([["path": "overview.md", "title": "O", "type": "Overview", "links": ["a.md", "b.md", "c.md", "d.md", "e.md"]]]
+                                                      + ["a", "b", "c", "d", "e"].map { ["path": .string("\($0).md"), "title": .string($0), "links": $0 == "a" ? ["b.md"] : []] })])
+        XCTAssertEqual(hub.mermaid.components(separatedBy: "-->").count - 1, 1, "only a → b")
+        XCTAssertTrue(hub.mermaid.contains("p1 --> p2"))
+        XCTAssertEqual(hub.graph(readLast: "overview.md").components(separatedBy: "-->").count - 1, 6, "read last: its links too")
         XCTAssertEqual(wiki.file("src/a.rs"), "/home/me/shop/src/a.rs")
         let big = Wiki(["project": 3, "pages": .array([["path": "overview.md", "title": "O", "links": ["p1.md"]]] + (1...45).map { ["path": .string("p\($0).md"), "title": .string("P\($0)"), "links": $0 == 2 ? ["overview.md"] : []] })])
         XCTAssertEqual(big.graphPages.map(\.path), ["overview.md", "p1.md", "p2.md"], "a big wiki: the overview and its neighbours")
