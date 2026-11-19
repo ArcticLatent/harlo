@@ -44,7 +44,7 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 
 | | |
 |---|---|
-| **Two agents, one chat** | **Harlo**, harlo's own agent, works with your ChatGPT plan, an OpenAI key or any OpenAI-compatible server, your own models included. It sees images, searches and reads the web, uses MCP servers and skills, splits work between subagents (each writer in a worktree of its own), and runs its commands in a sandbox. It counts every request's tokens and says what they cost, or that the cost is unknown, never a made-up $0. **Claude Code** uses your own login and settings, and your existing Claude Code sessions show up in the sidebar: click one to carry on. |
+| **Two agents, one chat** | **Harlo**, harlo's own agent, works with your ChatGPT plan, an OpenAI key or any OpenAI-compatible server, your own models included. It sees images, searches and reads the web, uses MCP servers and skills, splits work between subagents (each writer in a worktree of its own), and runs its commands in a sandbox. Extras you can turn on in Settings: a second model that reviews each turn's work before it finishes, notes it keeps between sessions, a debugger, and search and edits by the code's structure. It counts every request's tokens and says what they cost, or that the cost is unknown, never a made-up $0. **Claude Code** uses your own login and settings, and your existing Claude Code sessions show up in the sidebar: click one to carry on. |
 | **A wiki of your code** | **Create wiki** has your agent write a wiki of the repository in `.okf/` (Open Knowledge Format): how its parts fit, its workflows and the decisions behind them, each claim footnoted with the file and declaration it comes from. harlo checks every footnote against the code without a model, so it knows which pages the code has moved past and what new code no page mentions yet. Your agents are pointed to the wiki and told which pages are out of date, and **Update** has a session deal with only what changed. The Wiki panel lists the pages, reads them with their diagrams and footnotes (each opens its code), searches them and draws them as a graph; **Mark reviewed** records that you've read a page against its code. |
 | **Plans and helpers** | For a bigger task the agent writes a plan you can edit, and works through it step by step. **Run with helpers** gives each step a session of its own, steps that don't depend on each other at the same time in worktrees, and each finished step is reviewed by another agent. An agent can also offer to split work between helpers; you decide. |
 | **Diagrams, choices and mockups** | Agents draw Mermaid diagrams, which harlo shows as pictures. A choice between approaches comes as cards with their pros and cons and a Choose button. A UI change comes as a mockup harlo renders, before and after. |
@@ -74,12 +74,12 @@ Harlo, pi and opencode on the same 26 coding tasks (fixing bugs across files, re
 | | Harlo | pi | opencode |
 |---|---|---|---|
 | Tasks passed | 25 of 25 | 24 of 25 | 25 of 25 |
-| Input tokens | 807k | 1,175k | 2,702k |
-| Not from cache | 220k | 247k | 520k |
-| Output tokens | 25.2k | 22.0k | 32.1k |
-| Time | 14 min | 15 min | 15 min |
+| Input tokens | 824k | 907k | 3,130k |
+| Not from cache | 284k | 263k | 644k |
+| Output tokens | 23.0k | 23.2k | 32.2k |
+| Time | 13 min | 19 min | 16 min |
 
-On these tasks Harlo sent less than a third of opencode's input and less than pi's, and passed every one (it passed the 26th too, which pi can't run). Measured on 12 November 2026 with harlo-agent at b6896427, pi 1.5.2 and opencode 2.2.5; your numbers will vary with the model and the task.
+On these tasks Harlo sent the least input (9% less than pi, about a quarter of opencode's), finished soonest, and passed every one (it passed the 26th too, which pi can't run). pi had the least input not served from cache: 263k against Harlo's 284k. Measured on 19 November 2026 with harlo-agent from this repository on that date, pi 1.5.2 and opencode 2.2.5; your numbers will vary with the model and the task.
 
 ### On your iPhone
 
