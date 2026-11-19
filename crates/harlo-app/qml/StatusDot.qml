@@ -13,7 +13,7 @@ Rectangle {
     color: Theme.statusColor(status)
     opacity: (status === "live" ? 0.6 : 1) * pulse
     SequentialAnimation on pulse {
-        running: dot.status === "busy" || dot.status === "starting"
+        running: (dot.status === "busy" || dot.status === "starting") && Theme.motion > 0
         loops: Animation.Infinite
         alwaysRunToEnd: true
         NumberAnimation { to: 0.3; duration: 600 }

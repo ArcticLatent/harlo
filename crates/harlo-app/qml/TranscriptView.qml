@@ -1105,7 +1105,7 @@ Item {
                 // (Pulsing only while it shows, in a window that's shown;
                 // stopped, it's back at full opacity.)
                 SequentialAnimation on opacity {
-                    running: workingLabel.visible && root.windowShown
+                    running: workingLabel.visible && root.windowShown && Theme.motion > 0
                     loops: Animation.Infinite
                     onStopped: workingLabel.opacity = 1
                     NumberAnimation { to: 0.35; duration: 700 }

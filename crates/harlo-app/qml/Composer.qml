@@ -750,8 +750,9 @@ Rectangle {
                 radius: 4.5
                 color: Theme.error
                 SequentialAnimation on opacity {
-                    running: root.recording
+                    running: root.recording && Theme.motion > 0
                     loops: Animation.Infinite
+                    alwaysRunToEnd: true
                     NumberAnimation { to: 0.3; duration: 600 }
                     NumberAnimation { to: 1; duration: 600 }
                 }

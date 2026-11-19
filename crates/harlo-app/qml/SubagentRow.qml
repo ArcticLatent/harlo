@@ -57,7 +57,7 @@ Rectangle {
             radius: 4
             color: agentRow.statusColor(agentRow.a.status)
             SequentialAnimation on opacity {
-                running: agentRow.live
+                running: agentRow.live && Theme.motion > 0
                 loops: Animation.Infinite
                 NumberAnimation { from: 1; to: 0.3; duration: 700 }
                 NumberAnimation { from: 0.3; to: 1; duration: 700 }

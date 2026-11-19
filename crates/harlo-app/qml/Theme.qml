@@ -141,8 +141,11 @@ QtObject {
     // helpers and composer all share it. Wide and Full widen them
     // together. (Unscaled: `px` scales it with the text.)
     readonly property real chatMaxWidth: look.chatWidth === "full" ? 100000 : look.chatWidth === "wide" ? 1180 : 760
-    /// Panels open and close in this long (ms; 0: at once).
-    readonly property int motion: look.motion === undefined ? 160 : look.motion
+    /// Panels open and close in this long (ms; 0: at once). Self-test runs
+    /// default to 0, so a screenshot never catches a fade or a slide half
+    /// way (a test that sets the look's motion still gets it).
+    readonly property int motion: look.motion !== undefined ? look.motion : selfTest ? 0 : 160
+    readonly property bool selfTest: Qt.application.arguments.some(a => a.startsWith("--selftest="))
     /// Hover and selection colours ease in this long (ms).
     readonly property int hoverMotion: Math.round(motion * 0.7)
     /// A side pane slides open or shut in this long (ms).
