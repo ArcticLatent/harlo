@@ -66,8 +66,9 @@ struct SessionCard: View {
         }
     }
 
-    /// The project, then the model, always on one line: a long project
-    /// name is cut short, the model isn't.
+    /// The project, then the model, always on one line, sharing it: where
+    /// there isn't room for both (beside Running, say), the longer is cut
+    /// short and neither shrinks to nothing.
     @ViewBuilder var facts: some View {
         let agent = Style.harnessLabel(session.harness)
         if !place.isEmpty || !model.isEmpty {
@@ -78,7 +79,6 @@ struct SessionCard: View {
                 // (Read out with its agent: on screen only its tile says it.)
                 if !model.isEmpty {
                     fact(model, "cpu", spoken: "\(model) with \(agent)")
-                        .layoutPriority(1)
                 }
             }
         }

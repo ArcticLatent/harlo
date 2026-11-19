@@ -203,8 +203,8 @@ final class HarloUITests: XCTestCase {
         see("Run the tests")
         showUnderHeader("Read 1 file")
         shot("03-session-run")
-        // The command's card is open from the start: the command and the
-        // end of its output.
+        // The command's card opened: the command and the end of its output.
+        tapInConversation("Run the tests")
         see("./run-tests.sh")
         see("112 passed; 0 failed")
         showUnderHeader("Run the tests")

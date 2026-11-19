@@ -6782,6 +6782,13 @@ impl Workspace {
         // (Who made each one's model: its icon.)
         for s in &mut list {
             s["maker"] = json!(crate::provider_logos::maker_of(s["model"].as_str().unwrap_or_default()).unwrap_or_default());
+            // A finished helper or wiki run the desktop still has open (it
+            // settles once you leave it there): settled on a phone already.
+            let key = s["key"].as_str().unwrap_or_default();
+            if s["settled"] == "" && self.settle_later.contains(key) {
+                let why = if self.wiki_sessions.contains(key) { "wiki" } else { "helper" };
+                s["settled"] = json!(harlo_core::shelf::why_text(why));
+            }
         }
         crate::phone_bridge::publish_sessions(serde_json::Value::Array(list));
     }

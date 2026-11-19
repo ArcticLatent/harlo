@@ -3,15 +3,16 @@ import SwiftUI
 import UIKit
 
 /// A tool call on a card: what it did ("Edited file"), on what, how it
-/// went (lines added and removed, or a tick and how long), and, open (as
-/// it starts), its diff or output (see `ToolOutput`); a command's result
-/// under it.
+/// went (lines added and removed, or a tick and how long), and, opened, its
+/// diff or output, highlighted (see `ToolOutput`); a command's result under
+/// it.
 struct ToolCard: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let row: Row
-    /// Shown open: what it did is there to read; tap its line to fold it.
-    @State private var open = true
+    /// Folded until you tap its line (open, a chat of many calls reads as
+    /// a wall of output).
+    @State private var open = false
 
     /// The line under its name, and whether it's words: harlo's tools name
     /// the session they're about by its title (live:4 → Update the changelog).
