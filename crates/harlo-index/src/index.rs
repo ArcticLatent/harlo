@@ -239,7 +239,7 @@ fn is_manifest(path: &str) -> bool {
 }
 
 /// Whether a path is someone else's code kept in the repository, or built code.
-fn vendored(path: &str) -> bool {
+pub(crate) fn vendored(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     name.contains(".min.")
         || ["/vendor/", "/third_party/", "/third-party/", "/node_modules/", "/dist/", "/build/"].iter().any(|d| format!("/{path}").contains(d))

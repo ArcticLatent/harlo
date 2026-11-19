@@ -722,6 +722,7 @@ ApplicationWindow {
         { seq: "Enter", label: "Send", group: "Composer", icon: "send-plane" },
         { seq: "Shift+Enter", label: "New line", group: "Composer", icon: "text-wrap" },
         { seq: "Ctrl+Enter", label: "Steer the running agent", group: "Composer", icon: "compass-3" },
+        { seq: "Ctrl+Shift+Enter", label: "Stop the run and send", group: "Composer", icon: "stop" },
         { seq: "Ctrl+Shift+Enter", label: "Run as workflow (a new session)", group: "Composer", icon: "list-check-2" },
         { seq: "Esc", label: "Stop the run", group: "Composer", icon: "stop" },
         { seq: "Esc", label: "Leave the expanded composer", group: "Composer", icon: "fullscreen-exit" },

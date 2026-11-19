@@ -11,6 +11,14 @@
 //! own, no helper sessions. Approvals go through the session's own; Stop
 //! ends them all.
 //!
+//! Besides `explore` and `general`, a `scout` finds where things are and
+//! answers in a few lines (on the small model when one is set), and a
+//! `review` reads the changes against the request and reports defects. A
+//! task with `returns` answers with a JSON object of those fields. With
+//! `HARLO_AGENT_BACKGROUND=on`, a call with `background` returns at once:
+//! `wait` gets the results, and those not waited for come to the model
+//! before its turn ends.
+//!
 //! What harlo's Subagents box shows comes as omp's frames:
 //! `subagent_lifecycle` when one starts and ends, `subagent_progress` as it
 //! calls tools. The result's `details.progress` lists them for a saved
@@ -40,6 +48,21 @@ const RESULT_SHOWN: usize = 2000;
 /// What each kind may use.
 pub const EXPLORE: &[&str] = &["read", "grep", "find", "ls", "bash", "fetch", "recall", "current_time", "lsp", "lookup"];
 pub const GENERAL: &[&str] = &["read", "write", "edit", "bash", "grep", "find", "ls", "fetch", "recall", "current_time", "lsp", "lookup"];
+
+/// What a scout and a reviewer are told, after their part.
+const SCOUT_NOTE: &str = "\n\nFind, don't explain: answer with the paths and line numbers, and a line on what's at each; no file contents, at most 15 lines.";
+const REVIEW_NOTE: &str = "\n\nYou're reviewing: read the changes (git diff, and new files) against what was asked. Report only real defects (wrong behaviour, missed cases, broken callers), \
+                           each with file:line and why, the most serious first; if there are none, say \"No problems found.\" No style remarks, no fixes.";
+
+/// The subagents running, by id: each one's stop and its queue.
+pub type Running = Arc<Mutex<HashMap<String, (CancellationToken, Arc<Mutex<crate::agent::Inbox>>)>>>;
+
+/// The tool that waits for subagents started in the background.
+pub const WAIT: &str = "wait";
+
+/// Subagents started in the background, by call id (`bg-…`), until their
+/// results are taken.
+pub type Background = Arc<Mutex<Vec<(String, tokio::task::JoinHandle<Outcome>)>>>;
 
 /// Whether sessions get `task` (`HARLO_AGENT_NO_TASK` set: not, to compare).
 pub fn enabled() -> bool {
@@ -76,33 +99,58 @@ pub fn spec(profiles: &[crate::profiles::Profile]) -> Value {
          and their changes come back here when they finish (any that clash are kept aside; the result says where)."
     );
     let description = format!(
-        "{} For independent parts worth doing in parallel, or a search through much of the code that would fill your context; \
-         not for a quick look. kind explore (default) reads, searches and runs commands, changing no files; {copies}{agents}",
+        "{} A subagent costs more than doing the work yourself, so use one only for work too big for this conversation: \
+         a large part that can go on while others do, or a search through much of the code that would fill your context. \
+         Do quick looks and small fixes yourself, even several unrelated ones. kind explore (default) reads, searches and runs commands, changing no files; \
+         scout finds where things are, briefly; review checks the changes for defects; {copies}{agents}",
         if forks() { FORK_START } else { FRESH_START }
     );
-    json!({
+    let mut spec = json!({
         "type": "function", "name": "task", "strict": false,
         "description": description,
         "parameters": {
             "type": "object",
-            "properties": { "tasks": { "type": "array", "maxItems": MAX_TASKS, "items": {
+            "properties": {
+                "tasks": { "type": "array", "maxItems": MAX_TASKS, "items": {
                 "type": "object",
                 "properties": {
                     "description": { "type": "string", "description": "A few words, shown to the user" },
                     "prompt": { "type": "string", "description": if forks() { "Which part it does and what to report (everything it needs, for general tasks side by side)" } else { "The whole task, self-contained" } },
-                    "kind": { "type": "string", "enum": ["explore", "general"] },
+                    "kind": { "type": "string", "enum": ["explore", "general", "scout", "review"] },
+                    "returns": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Fields of a JSON answer (name: what goes in it)" },
                     "agent": { "type": "string", "description": "A profile's name, instead of kind" },
                     "model": { "type": "string", "description": "provider/model, if not the subagents' default (smaller for simple work, stronger for hard)" },
                     "effort": { "type": "string", "enum": ["off", "minimal", "low", "medium", "high", "xhigh"], "description": "If not the default" },
                 },
                 "required": ["description", "prompt"], "additionalProperties": false,
-            } } },
+                } },
+            },
             "required": ["tasks"], "additionalProperties": false,
         },
+    });
+    if background_on() {
+        spec["parameters"]["properties"]["background"] = json!({ "type": "boolean", "description": "Return at once; wait gets their results (or they come before you finish)" });
+    }
+    spec
+}
+
+/// Whether `task` takes `background` and `wait` comes with it
+/// (`HARLO_AGENT_BACKGROUND=on`; off, they cost every request ~110 tokens).
+pub fn background_on() -> bool {
+    std::env::var("HARLO_AGENT_BACKGROUND").as_deref() == Ok("on")
+}
+
+/// `wait`'s spec.
+pub fn wait_spec() -> Value {
+    json!({
+        "type": "function", "name": WAIT, "strict": false,
+        "description": "Waits for background subagents and returns their results.",
+        "parameters": { "type": "object", "properties": { "ids": { "type": "array", "items": { "type": "string" }, "description": "The calls' bg- ids (default: all)" } }, "additionalProperties": false },
     })
 }
 
 /// What a session's subagents take from it.
+#[derive(Clone)]
 pub struct Ctx {
     pub model: String,
     pub effort: Option<String>,
@@ -113,8 +161,8 @@ pub struct Ctx {
     pub cache_key: String,
     pub notify: Option<Notify>,
     pub known: crate::agent::Known,
-    /// Those running, by id: for cancelling one.
-    pub running: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    /// Those running, by id: for cancelling or steering one.
+    pub running: Running,
     /// The agent profiles tasks may name.
     pub profiles: Vec<crate::profiles::Profile>,
     /// What subagents run on when a task doesn't say (None: the session's model).
@@ -127,6 +175,10 @@ pub struct Ctx {
     pub lsp: Arc<crate::lsp::Servers>,
     /// Subagents as forks: what they start from.
     pub fork: Option<Arc<Fork>>,
+    /// What scouts run on (None: as the others).
+    pub small_model: Option<String>,
+    /// Those started in the background.
+    pub background: Background,
 }
 
 const FRESH_START: &str = "Runs subagents, at the same time: each starts fresh (its prompt must say everything it needs: \
@@ -172,33 +224,86 @@ struct Writers {
 /// Runs the call's tasks: their answers, in order. (Boxed: a run inside
 /// a run, its type named here.)
 pub fn run<'a>(args: &'a Value, call_id: &'a str, ctx: &'a Ctx, stop: &'a CancellationToken) -> BoxFuture<'a, Outcome> {
-    Box::pin(run_all(args, call_id, ctx, stop))
+    Box::pin(async move {
+        if args["background"] != true || !background_on() {
+            return run_all(args, call_id, ctx, stop).await;
+        }
+        if let Err(why) = checked(args, ctx) {
+            return Outcome::new(why, true);
+        }
+        let id = format!("bg-{}", hex_id());
+        let (args, call_id, ctx_owned, stop) = (args.clone(), call_id.to_owned(), ctx.clone(), stop.clone());
+        let handle = tokio::spawn(async move { run_all(&args, &call_id, &ctx_owned, &stop).await });
+        ctx.background.lock().unwrap().push((id.clone(), handle));
+        Outcome::new(format!("Started as {id}; they work while you go on. Call wait when you need their results (those not waited for come before you finish)."), false)
+    })
 }
 
-async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToken) -> Outcome {
+/// The call's tasks, or why it's refused.
+fn checked<'a>(args: &'a Value, ctx: &Ctx) -> Result<Vec<&'a Value>, String> {
     let tasks: Vec<&Value> = args["tasks"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
     if tasks.is_empty() {
-        return Outcome::new("Give tasks: a list of {description, prompt, kind}.", true);
+        return Err("Give tasks: a list of {description, prompt, kind}.".to_owned());
     }
     if tasks.len() > MAX_TASKS {
-        return Outcome::new(format!("At most {MAX_TASKS} tasks in one call."), true);
+        return Err(format!("At most {MAX_TASKS} tasks in one call."));
     }
     if let Some(i) = tasks.iter().position(|t| t["prompt"].as_str().is_none_or(|p| p.trim().is_empty())) {
-        return Outcome::new(format!("Task {} has no prompt.", i + 1), true);
+        return Err(format!("Task {} has no prompt.", i + 1));
     }
     for (i, t) in tasks.iter().enumerate() {
         if let Some(a) = t["agent"].as_str().filter(|a| !a.is_empty())
             && !ctx.profiles.iter().any(|p| p.name == a)
         {
             let names: Vec<&str> = ctx.profiles.iter().map(|p| p.name.as_str()).collect();
-            return Outcome::new(format!("Task {}: there's no agent profile {a}{}.", i + 1, if names.is_empty() { String::new() } else { format!(" (there are: {})", names.join(", ")) }), true);
+            return Err(format!("Task {}: there's no agent profile {a}{}.", i + 1, if names.is_empty() { String::new() } else { format!(" (there are: {})", names.join(", ")) }));
         }
         if let Some(m) = t["model"].as_str().filter(|m| !m.is_empty())
             && let Err(e) = crate::providers::resolve(m)
         {
-            return Outcome::new(format!("Task {}: {e:#}.", i + 1), true);
+            return Err(format!("Task {}: {e:#}.", i + 1));
         }
     }
+    Ok(tasks)
+}
+
+/// Waits for the background calls `ids` (None: all), taking their results.
+pub async fn wait(background: &Background, ids: Option<Vec<String>>, stop: &CancellationToken) -> Outcome {
+    let taken: Vec<(String, tokio::task::JoinHandle<Outcome>)> = {
+        let mut all = background.lock().unwrap();
+        let (taken, kept) = std::mem::take(&mut *all).into_iter().partition(|(id, _)| ids.as_ref().is_none_or(|ids| ids.contains(id)));
+        *all = kept;
+        taken
+    };
+    if taken.is_empty() {
+        return Outcome::new(match ids {
+            Some(ids) => format!("No background subagents named {} are left (their results were already taken).", ids.join(", ")),
+            None => "No background subagents are left.".to_owned(),
+        }, true);
+    }
+    let mut text = String::new();
+    let mut total = crate::used::Used::default();
+    let mut progress = Vec::new();
+    let mut failed = true;
+    for (id, handle) in taken {
+        let out = tokio::select! {
+            biased;
+            () = stop.cancelled() => Outcome::new("Stopped.", true),
+            o = handle => o.unwrap_or_else(|e| Outcome::new(format!("It broke: {e}"), true)),
+        };
+        let _ = write!(text, "# {id}\n{}\n\n", out.text);
+        total.add(&crate::used::Used::from_details(&out.details["usage"]));
+        progress.extend(out.details["progress"].as_array().cloned().unwrap_or_default());
+        failed &= out.failed;
+    }
+    Outcome { text: text.trim_end().to_owned(), failed, details: json!({ "progress": progress, "usage": total.details() }), images: Vec::new() }
+}
+
+async fn run_all(args: &Value, call_id: &str, ctx: &Ctx, stop: &CancellationToken) -> Outcome {
+    let tasks = match checked(args, ctx) {
+        Ok(t) => t,
+        Err(why) => return Outcome::new(why, true),
+    };
     // Two or more that edit: each in a worktree, when the project allows.
     let writers = if tasks.iter().filter(|t| writes(t, ctx)).count() >= 2 {
         let cwd = ctx.cwd.clone();
@@ -266,6 +371,8 @@ fn kind_of(task: &Value, profile: Option<&crate::profiles::Profile>) -> (String,
     match profile {
         Some(p) => (p.name.clone(), p.tools),
         None if task["kind"] == "general" => ("general".to_owned(), GENERAL),
+        None if task["kind"] == "scout" => ("scout".to_owned(), EXPLORE),
+        None if task["kind"] == "review" => ("review".to_owned(), EXPLORE),
         None => ("explore".to_owned(), EXPLORE),
     }
 }
@@ -274,7 +381,10 @@ fn kind_of(task: &Value, profile: Option<&crate::profiles::Profile>) -> (String,
 /// session's) and effort (another provider's model: its own default, unless
 /// asked).
 fn model_and_effort(task: &Value, profile: Option<&crate::profiles::Profile>, ctx: &Ctx) -> (String, Option<String>) {
-    let model = [task["model"].as_str(), profile.map(|p| p.model.as_str()), ctx.task_model.as_deref()]
+    // (A scout: the small model, at low effort, unless the task says.)
+    let scout = profile.is_none() && task["kind"] == "scout";
+    let small = ctx.small_model.as_deref().filter(|_| scout);
+    let model = [task["model"].as_str(), profile.map(|p| p.model.as_str()), small, ctx.task_model.as_deref()]
         .into_iter()
         .flatten()
         .find(|m| !m.is_empty() && crate::providers::resolve(m).is_ok())
@@ -284,6 +394,7 @@ fn model_and_effort(task: &Value, profile: Option<&crate::profiles::Profile>, ct
     let effort = match task["effort"].as_str().filter(|e| !e.is_empty()) {
         Some("off") => None,
         Some(e) => Some(e.to_owned()),
+        None if scout => Some("low".to_owned()),
         None if same_provider => ctx.effort.clone(),
         None => None,
     };
@@ -315,9 +426,9 @@ fn equip(agent: &mut Agent, ctx: &Ctx, allowed: &'static [&'static str], profile
     agent.known = ctx.known.clone();
 }
 
-/// How a task's run ended: its status, its answer (or why it failed) and
-/// what it used.
-fn record_end(done: &mut Done, agent: &mut Agent, ended: anyhow::Result<Ended>) {
+/// How a task's run ended: its status, its answer (or why it failed, or
+/// its JSON object for `returns`) and what it used.
+fn record_end(done: &mut Done, agent: &mut Agent, ended: anyhow::Result<Ended>, returns: Option<&serde_json::Map<String, Value>>) {
     done.status = match &ended {
         Ok(Ended::Done) => "completed",
         Ok(Ended::Stopped) => "aborted",
@@ -330,8 +441,19 @@ fn record_end(done: &mut Done, agent: &mut Agent, ended: anyhow::Result<Ended>) 
         done.text = format!("Failed: {why}");
     } else {
         done.text = last_text(agent.messages());
+        // (A JSON answer: only the object.)
+        if let Some(object) = returns.and_then(|fields| answer_json(&done.text, fields)) {
+            done.text = object.to_string();
+        }
     }
     done.usage = agent.totals.details();
+}
+
+/// A subagent stopped while it waited to start: no longer running.
+fn not_started(ctx: &Ctx, mut done: Done) -> Done {
+    ctx.running.lock().unwrap().remove(&done.id);
+    done.text = "Stopped before it started.".into();
+    done
 }
 
 async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaphore, stop: &CancellationToken, writers: Option<&Writers>) -> Done {
@@ -344,7 +466,9 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     let id = format!("task-{}", hex_id());
     let mut done = Done { id: id.clone(), description: description.clone(), kind: kind.clone(), prompt: prompt.clone(), status: "aborted", text: String::new(), usage: json!({}), worktree: None, note: String::new(), unguarded: false };
     let token = stop.child_token();
-    ctx.running.lock().unwrap().insert(id.clone(), token.clone());
+    // (Its own queue: what the user sends it goes in at its next step.)
+    let inbox: Arc<Mutex<crate::agent::Inbox>> = Arc::default();
+    ctx.running.lock().unwrap().insert(id.clone(), (token.clone(), Arc::clone(&inbox)));
     // (Waiting for a free place; stopped while it waits: never started.)
     let permit = tokio::select! {
         biased;
@@ -352,9 +476,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         p = slots.acquire() => p.ok(),
     };
     if permit.is_none() {
-        ctx.running.lock().unwrap().remove(&id);
-        done.text = "Stopped before it started.".into();
-        return done;
+        return not_started(ctx, done);
     }
     // A writer beside others: in its own worktree; none made, in the
     // project itself, when no other writer is there.
@@ -382,9 +504,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
                     t = w.turn.lock() => Some(t),
                 };
                 if turn_held.is_none() {
-                    ctx.running.lock().unwrap().remove(&id);
-                    done.text = "Stopped before it started.".into();
-                    return done;
+                    return not_started(ctx, done);
                 }
                 done.note = format!("\n\n(No copy of the project could be made for it ({why}), so it worked in the project itself, while no other writer did.)");
             }
@@ -397,7 +517,7 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
     };
     // A fork: the session's model, its requests as they were, the same cache
     // (not in a copy of the files, nor on another model or profile).
-    let other_model = task["model"].as_str().is_some_and(|m| !m.is_empty() && m != ctx.model) || ctx.task_model.as_ref().is_some_and(|m| *m != ctx.model);
+    let other_model = model != ctx.model;
     let fork = ctx.fork.as_ref().filter(|_| profile.is_none() && !other_model && done.worktree.is_none());
     let (past, model, effort) = match fork {
         // (Its log starts with its own messages: the parent's have ids of their own here.)
@@ -405,16 +525,19 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         None => (Past::default(), model, effort),
     };
     let mut agent = Agent::new(cwd, log, past, model, effort);
+    agent.inbox = inbox;
     // (One that only looks: its commands can't change the project.)
     if !writer && !agent.look_only() && allowed.contains(&"bash") {
         done.unguarded = true;
     }
     equip(&mut agent, ctx, allowed, profile);
     agent.cache_key = Some(if fork.is_some() { ctx.cache_key.clone() } else { format!("{}/task", ctx.cache_key) });
-    let mut asked = prompt.clone();
+    let returns = task["returns"].as_object().filter(|r| !r.is_empty());
+    let part = part_of(&prompt, &kind, profile.is_some(), returns);
+    let mut asked = part.clone();
     if let Some(f) = fork {
         agent.fixed = Some((f.system.clone(), f.specs.clone()));
-        asked = fork_prompt(&description, &prompt, allowed, writer);
+        asked = fork_prompt(&description, &part, allowed, writer);
     }
     let _ = agent.rename(&description);
     ctx.tell(json!({ "type": "subagent_lifecycle", "payload": {
@@ -432,8 +555,8 @@ async fn one(task: &Value, call_id: &str, ctx: &Ctx, slots: &tokio::sync::Semaph
         (Shown::Limits(l), Some(n)) => n(json!({ "type": "harlo_limits", "provider": l["provider"], "account": l["account"], "windows": l["windows"] })),
         _ => {}
     };
-    let ended = agent.run(&asked, &[], &token, &mut show).await;
-    record_end(&mut done, &mut agent, ended);
+    let ended = run_for(&mut agent, &asked, returns, &token, &mut show).await;
+    record_end(&mut done, &mut agent, ended, returns);
     ctx.running.lock().unwrap().remove(&id);
     let shown: String = done.text.chars().take(RESULT_SHOWN).collect();
     ctx.tell(json!({ "type": "subagent_lifecycle", "payload": { "id": id, "status": done.status, "result": shown, "usage": done.usage } }));
@@ -447,6 +570,44 @@ fn writes(task: &Value, ctx: &Ctx) -> bool {
         Some(p) => p.writes(),
         None => task["kind"] == "general",
     }
+}
+
+/// A task's part: its prompt, what its kind is told, and the fields of its
+/// answer.
+fn part_of(prompt: &str, kind: &str, profiled: bool, returns: Option<&serde_json::Map<String, Value>>) -> String {
+    let note = match kind {
+        "scout" if !profiled => SCOUT_NOTE,
+        "review" if !profiled => REVIEW_NOTE,
+        _ => "",
+    };
+    format!("{prompt}{note}{}", returns.map(json_ask).unwrap_or_default())
+}
+
+/// Runs a subagent on its part; asked for JSON and not given it, it's
+/// asked once more.
+async fn run_for(agent: &mut Agent, asked: &str, returns: Option<&serde_json::Map<String, Value>>, token: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> anyhow::Result<Ended> {
+    let ended = agent.run(asked, &[], token, show).await;
+    match returns {
+        Some(fields) if matches!(ended, Ok(Ended::Done)) && answer_json(&last_text(agent.messages()), fields).is_none() => {
+            let keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+            agent.run(&format!("Reply with only the JSON object, with the fields {}.", keys.join(", ")), &[], token, show).await
+        }
+        _ => ended,
+    }
+}
+
+/// What a task with `returns` is told about its answer.
+fn json_ask(fields: &serde_json::Map<String, Value>) -> String {
+    let listed: Vec<String> = fields.iter().map(|(k, v)| format!("\"{k}\": {}", v.as_str().unwrap_or("…"))).collect();
+    format!("\n\nYour final message is only a JSON object with these fields: {{{}}}.", listed.join(", "))
+}
+
+/// The JSON object a `returns` task answered with (in a fence or around
+/// text), if it has every field.
+fn answer_json(text: &str, fields: &serde_json::Map<String, Value>) -> Option<Value> {
+    let (start, end) = (text.find('{')?, text.rfind('}')?);
+    let object: Value = serde_json::from_str(text.get(start..=end)?).ok()?;
+    fields.keys().all(|k| object.get(k).is_some()).then_some(object)
 }
 
 /// The last thing the model said (its final message's text).
@@ -498,7 +659,17 @@ mod tests {
         let general = names(GENERAL);
         assert!(general.contains(&"edit".to_owned()) && !general.contains(&"task".to_owned()));
         let all = crate::tools::specs_of(None, Some(&[]), false);
-        assert_eq!(all.as_array().unwrap().last().unwrap()["name"], "task");
+        assert_eq!(all.as_array().unwrap().last().unwrap()["name"], if background_on() { WAIT } else { "task" });
+    }
+
+    #[test]
+    fn a_json_answer_needs_every_field() {
+        let fields = json!({ "file": "where", "line": "which" });
+        let fields = fields.as_object().unwrap();
+        assert_eq!(answer_json("```json\n{\"file\": \"a.py\", \"line\": 3}\n```", fields), Some(json!({ "file": "a.py", "line": 3 })));
+        assert_eq!(answer_json("{\"file\": \"a.py\"}", fields), None);
+        assert_eq!(answer_json("in a.py at 3", fields), None);
+        assert!(json_ask(fields).contains("\"file\": where, \"line\": which"));
     }
 
     #[test]
@@ -517,6 +688,7 @@ mod tests {
         let ctx = Ctx {
             model: "x/y".into(), effort: None, cwd: std::env::temp_dir(), gate: None, parent_file: None, cache_key: "k".into(),
             notify: None, known: crate::agent::Known::default(), running: Arc::default(), profiles: Vec::new(), task_model: None, budget: None, fallback: None, lsp: Arc::default(), fork: None,
+            small_model: None, background: Arc::default(),
         };
         let stop = CancellationToken::new();
         assert!(run(&json!({}), "c", &ctx, &stop).await.failed);

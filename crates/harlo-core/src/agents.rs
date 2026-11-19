@@ -24,13 +24,13 @@ pub fn harlo_args(kind: HarnessKind, sandbox: bool, network: bool) -> Vec<String
     args
 }
 
-/// Harlo's subagents' model and the one it goes on with at the plan's
-/// limit, as its arguments.
+/// Harlo's subagents' model, the one it goes on with at the plan's limit,
+/// and the one reviewing its turns, as its arguments.
 ///
 /// An empty setting, or one that isn't a single model name, gives none.
-pub fn model_args(task_model: &str, fallback: &str) -> Vec<String> {
+pub fn model_args(task_model: &str, fallback: &str, advisor: &str) -> Vec<String> {
     let mut args = Vec::new();
-    for (flag, value) in [("--task-model", task_model.trim()), ("--fallback", fallback.trim())] {
+    for (flag, value) in [("--task-model", task_model.trim()), ("--fallback", fallback.trim()), ("--advisor", advisor.trim())] {
         if !value.is_empty() && !value.contains(char::is_whitespace) {
             args.extend([flag.to_owned(), value.to_owned()]);
         }
@@ -67,9 +67,10 @@ mod tests {
         assert_eq!(harlo_args(HarnessKind::Harlo, true, false), ["--harlo-tools", "--sandbox", "no-network"]);
         assert_eq!(harlo_args(HarnessKind::Harlo, false, true), ["--harlo-tools", "--sandbox", "off"]);
         assert!(harlo_args(HarnessKind::Claude, false, false).is_empty());
-        assert_eq!(model_args(" codex/gpt-6.1-mini ", ""), ["--task-model", "codex/gpt-6.1-mini"]);
-        assert_eq!(model_args("", "local/qwen"), ["--fallback", "local/qwen"]);
-        assert!(model_args("", "not a model").is_empty());
+        assert_eq!(model_args(" codex/gpt-6.1-mini ", "", ""), ["--task-model", "codex/gpt-6.1-mini"]);
+        assert_eq!(model_args("", "local/qwen", ""), ["--fallback", "local/qwen"]);
+        assert_eq!(model_args("", "", "codex/gpt-6.2-sol"), ["--advisor", "codex/gpt-6.2-sol"]);
+        assert!(model_args("", "not a model", "").is_empty());
     }
 
     #[test]

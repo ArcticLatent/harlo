@@ -514,6 +514,71 @@ ColumnLayout {
                 }
             }
         }
+        SettingRow {
+            id: advisorRow
+            divider: true
+            property string saved: Workspace.setting("harlo_advisor")
+            readonly property var choices: harloModels.choices(saved)
+            title: qsTr("Reviewer before it finishes")
+            detail: qsTr("A second model reads each turn's work and diff, and sends it back once with a note when something's wrong or missing.")
+            more: qsTr("It costs a request every turn, so it's off unless a model is picked. Its notes show in the chat. Applies to Harlo sessions started afterwards.")
+            icon: "search-eye"
+            ComboField {
+                objectName: "harloAdvisor"
+                enabled: advisorRow.choices.length > 0
+                width: 240
+                model: [qsTr("Off")].concat(harloModels.labels(advisorRow.choices))
+                currentIndex: advisorRow.choices.indexOf(advisorRow.saved) + 1
+                onActivated: i => {
+                    advisorRow.saved = i === 0 ? "" : advisorRow.choices[i - 1]
+                    Workspace.setSetting("harlo_advisor", advisorRow.saved)
+                }
+            }
+        }
+        SettingRow {
+            id: steeringRow
+            divider: true
+            property string saved: Workspace.setting("harlo_steering")
+            title: qsTr("Messages sent while it works")
+            detail: qsTr("Go in right away, or wait until it finishes what it's doing.")
+            more: qsTr("Right away: Harlo reads a message at its next step, stopping a wait or putting a long command in the background so it can. Waiting: the message starts the next turn. Applies to Harlo sessions started afterwards.")
+            icon: "send-plane"
+            ComboField {
+                objectName: "harloSteering"
+                width: 240
+                model: [qsTr("Right away"), qsTr("When it finishes")]
+                currentIndex: steeringRow.saved === "wait" ? 1 : 0
+                onActivated: i => {
+                    steeringRow.saved = i === 1 ? "wait" : ""
+                    Workspace.setSetting("harlo_steering", steeringRow.saved)
+                }
+            }
+        }
+        Repeater {
+            model: [
+                { key: "harlo_memory", icon: "bookmark", title: qsTr("Notes between sessions"),
+                  detail: qsTr("Harlo keeps what it learns about a project (a command that works, a pitfall) and the next sessions start with it.") },
+                { key: "harlo_debug", icon: "bug", title: qsTr("Debugger"),
+                  detail: qsTr("Harlo can run a program under a debugger: breakpoints, stepping, the stack and variables (Python, Go, C, C++, Rust).") },
+                { key: "harlo_ast", icon: "node-tree", title: qsTr("Structural search and edit"),
+                  detail: qsTr("Harlo can find and rewrite code by its shape, as patterns over the syntax tree.") },
+                { key: "harlo_background", icon: "ai-agent", title: qsTr("Helpers in the background"),
+                  detail: qsTr("Harlo's own helpers can work while it goes on, and it waits for them when it needs their results.") }
+            ]
+            delegate: SettingRow {
+                required property var modelData
+                divider: true
+                title: modelData.title
+                detail: modelData.detail
+                more: qsTr("Off by default: each adds to every request. Applies to Harlo sessions started afterwards.")
+                icon: modelData.icon
+                AppSwitch {
+                    objectName: modelData.key
+                    checked: Workspace.setting(modelData.key) === "1"
+                    onToggled: Workspace.setSetting(modelData.key, checked ? "1" : "0")
+                }
+            }
+        }
     }
     // (Browse… for an agent's program.)
     FileDialog {

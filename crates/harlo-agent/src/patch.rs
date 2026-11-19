@@ -40,7 +40,7 @@ pub fn on(model: &str) -> bool {
 pub fn reworded(text: &str) -> String {
     text.replace("Change files with edit (small, exact replacements) or write (new files)", "Change files with apply_patch (or write, for a whole new file)")
         .replace("To change part of a file, use edit.", "To change part of a file, use apply_patch.")
-        .replace("use edit or write.", "use apply_patch or write.")
+        .replace("use edit or write", "use apply_patch or write")
 }
 
 pub fn spec() -> Value {
@@ -50,7 +50,8 @@ pub fn spec() -> Value {
             `*** Update File: <path>` (then `*** Move to: <path>` to rename it), followed by hunks. A hunk starts with `@@`, optionally followed by a line it comes after (a function or class line, to say where); then its lines, each starting with ' ' (kept), '-' (removed) or '+' (added). Give about 3 kept lines before and after each change; the kept and removed lines must be as the file has them now.\n\
             `*** Add File: <path>` followed by the new file's lines, each starting with '+'.\n\
             `*** Delete File: <path>`.\n\
-            Paths are relative to the working directory. All of it applies, or none of it. Refused if a file changed since you last read it.",
+            Paths are relative to the working directory. All of it applies, or none of it. Refused if a file changed since you last read it.\n\
+            Put all the changes you're making now in one patch, across files. Its result confirms them: don't re-read the files or run git diff to check.",
         "parameters": {
             "type": "object",
             "properties": { "input": { "type": "string", "description": "The whole patch" } },

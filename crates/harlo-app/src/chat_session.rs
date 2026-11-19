@@ -1049,6 +1049,7 @@ impl ChatSession {
         let mode = match mode.to_string().as_str() {
             "steer" => SendMode::Steer,
             "followUp" => SendMode::FollowUp,
+            "stopAndSend" => SendMode::StopAndSend,
             _ => SendMode::Normal,
         };
         let Some(h) = self.handle().cloned() else { return };

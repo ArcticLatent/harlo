@@ -347,12 +347,13 @@ public enum Event: Equatable, Sendable {
     }
 }
 
-/// How a message is sent: a new turn, or (while it works) steering it or
-/// queueing a follow-up.
+/// How a message is sent: a new turn, or (while it works) steering it,
+/// queueing a follow-up, or stopping the run and sending it instead.
 public enum SendMode: String, Sendable {
     case normal = ""
     case steer
     case followUp
+    case stopAndSend
 }
 
 extension SessionSummary {

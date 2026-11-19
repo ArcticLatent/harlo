@@ -199,6 +199,31 @@ pub fn lookup(root: &Path, query: &Lookup<'_>) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out).trim_end().to_owned())
 }
 
+/// The helper's structural search (or rewrite, which it only works out:
+/// nothing is written) for `query` in the repository at `root`.
+///
+/// # Errors
+///
+/// When the helper isn't installed, fails or takes too long, or the
+/// pattern doesn't parse; the text says which.
+pub fn structural(root: &Path, query: &harlo_index::Search<'_>) -> Result<harlo_index::Structural, String> {
+    let helper = helper().ok_or("Structural search needs the code index (harlo-index), which isn't installed beside harlo.")?;
+    let limit = query.limit.to_string();
+    let lang = query.lang.map(harlo_index::Lang::name);
+    let mut args = vec![OsStr::new("ast"), root.as_os_str(), OsStr::new(query.pattern), OsStr::new("--limit"), OsStr::new(&limit)];
+    if let Some(r) = query.rewrite {
+        args.extend([OsStr::new("--rewrite"), OsStr::new(r)]);
+    }
+    if let Some(l) = lang {
+        args.extend([OsStr::new("--lang"), OsStr::new(l)]);
+    }
+    for p in &query.paths {
+        args.extend([OsStr::new("--path"), OsStr::new(*p)]);
+    }
+    let out = run(&helper, &args)?;
+    serde_json::from_slice(&out).map_err(|e| format!("The code index's answer couldn't be read: {e}"))
+}
+
 /// The helper's map of the repository at `root` (packages, entry points,
 /// most-called declarations), when it's installed and runs.
 #[must_use]

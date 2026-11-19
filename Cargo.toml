@@ -68,6 +68,7 @@ whisper-rs = "0.16"
 yaml-rust = "0.4"
 # harlo-index's parser and its grammars (the harlo-index helper only).
 tree-sitter = "0.27"
+ast-grep-core = { version = "0.51", default-features = false, features = ["tree-sitter"] }
 tree-sitter-bash = "0.25"
 tree-sitter-c = "0.24"
 tree-sitter-c-sharp = "0.23"

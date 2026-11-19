@@ -605,6 +605,9 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(ToolName.words("bash", running: false), "Ran command")
         XCTAssertEqual(ToolName.words("Bash", running: true), "Running command")
         XCTAssertEqual(ToolName.words("run_code", running: false), "Ran a program")
+        XCTAssertEqual(ToolName.words("ast_grep", running: false), "Searched the code's structure")
+        XCTAssertEqual(ToolName.words("debug", running: true), "Debugging")
+        XCTAssertEqual(ToolName.symbol("memory"), "note.text")
         // Words under a question or a plan, a path or a command under the rest.
         XCTAssertTrue(ToolName.saysWords("ask"))
         XCTAssertTrue(ToolName.saysWords("AskUserQuestion"))
@@ -1780,5 +1783,15 @@ final class QueuedMessageTests: XCTestCase {
         let q = QueuedMessage.list(steering: [], followUp: ["again", "again"])
         XCTAssertEqual(Set(q.map(\.id)).count, 2)
         XCTAssertNotEqual(QueuedMessage.list(steering: ["again"], followUp: ["again"]).map(\.id).first, q.first?.id)
+    }
+
+    /// While it works a message steers, waits, or stops the run and goes
+    /// instead; idle, it's a new turn whatever was asked.
+    @MainActor func testHowAMessageGoes() {
+        XCTAssertEqual(HarloModel.mode(busy: true, steer: false, stopping: true), .stopAndSend)
+        XCTAssertEqual(HarloModel.mode(busy: true, steer: true, stopping: false), .steer)
+        XCTAssertEqual(HarloModel.mode(busy: true, steer: false, stopping: false), .followUp)
+        XCTAssertEqual(HarloModel.mode(busy: false, steer: true, stopping: true), .normal)
+        XCTAssertEqual(SendMode.stopAndSend.rawValue, "stopAndSend", "the name harlo's phone server reads")
     }
 }

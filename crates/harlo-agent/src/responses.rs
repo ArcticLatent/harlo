@@ -216,6 +216,32 @@ pub fn request(model: &str, instructions: &str, input: &[Value], tools: Value, e
     body
 }
 
+/// Moves a request's instructions into its input, as the Codex backend's own
+/// client sends them: a leading developer message tagged as the base
+/// instructions.
+///
+/// The Codex backend never serves top-level `instructions` from its prompt
+/// cache. Measured on 2026-11-19 (six-request conversations, 6.5k-token
+/// prompt, 12 tools): top-level instructions got 0 cached tokens on every
+/// request, while as a developer message requests 2–6 mostly read 6.5k from
+/// the cache.
+pub fn instructions_in_input(body: &mut Value) {
+    let Some(Value::String(text)) = body.as_object_mut().and_then(|b| b.remove("instructions")) else {
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+    let message = json!({
+        "type": "message", "role": "developer",
+        "content": [{ "type": "input_text", "text": text }],
+        "internal_chat_message_metadata_passthrough": { "content_item_kinds": ["model.base_instructions"] },
+    });
+    if let Some(input) = body["input"].as_array_mut() {
+        input.insert(0, message);
+    }
+}
+
 /// A reply's output items as pi's assistant message: reasoning as
 /// `thinking` (the whole item in `thinkingSignature`), text with its item's
 /// id (and phase) in `textSignature`, calls as `toolCall` with
@@ -391,11 +417,51 @@ pub fn input(messages: &[Value], provider: &str, model: &str, images: bool) -> V
     out
 }
 
+/// The plan's sticky routing token for a turn, by session: the backend
+/// sends it in `x-codex-turn-state` with a turn's first reply, and the
+/// turn's later requests send it back, so they reach the server whose
+/// cache holds their shared start. Without it a turn's next few requests
+/// usually missed the cache (in a 2026-11-18 benchmark none of requests 2–4 were cached).
+static TURN_STATE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
+
+/// The header the turn's routing token travels in, both ways.
+const TURN_STATE_HEADER: &str = "x-codex-turn-state";
+
+/// A new turn of `session` starts: its routing token from the last turn
+/// is dropped (the backend gives each turn its own).
+pub fn new_turn(session: &str) {
+    TURN_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(session);
+}
+
+/// The turn's routing token, when the backend gave one.
+fn turn_state(session: &str) -> Option<String> {
+    TURN_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(session).cloned()
+}
+
+/// Keeps a reply's routing token for the rest of the turn (the first one
+/// given stands, as the backend expects).
+fn keep_turn_state(session: &str, headers: &reqwest::header::HeaderMap) {
+    if let Some(v) = headers.get(TURN_STATE_HEADER).and_then(|v| v.to_str().ok()).filter(|v| !v.is_empty()) {
+        TURN_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(session.to_owned()).or_insert_with(|| v.to_owned());
+    }
+}
+
 /// Sends one request and calls `on` with each event until it completes.
 /// `affinity`: the session's id, sent as the plan's affinity headers, so
 /// its requests go where their shared start is cached. `headers`: the
-/// provider's own.
-pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, headers: &[(&'static str, String)], body: &Value, mut on: impl FnMut(Event)) -> Result<()> {
+/// provider's own. `socket`: over the session's WebSocket (the Codex
+/// backend's; see [`crate::socket`]), unless it failed this session.
+pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, headers: &[(&'static str, String)], body: &Value, socket: bool, mut on: impl FnMut(Event)) -> Result<()> {
+    if socket
+        && let Some(session) = affinity
+        && !crate::socket::fell_back(session)
+    {
+        let to = crate::socket::Wire { base, token, session, headers };
+        match Box::pin(crate::socket::stream(to, body, &mut on)).await {
+            Err(e) if e.is::<crate::socket::Unusable>() => crate::socket::fall_back(session, &e),
+            done => return done,
+        }
+    }
     let mut req = client().post(format!("{base}/responses")).json(body);
     if let Some(t) = token {
         req = req.bearer_auth(t);
@@ -405,9 +471,15 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
     }
     if let Some(session) = affinity {
         req = req.header("session-id", session).header("x-client-request-id", session);
+        if let Some(state) = turn_state(session) {
+            req = req.header(TURN_STATE_HEADER, state);
+        }
     }
     let resp = send(req, base).await?;
     let status = resp.status();
+    if let Some(session) = affinity {
+        keep_turn_state(session, resp.headers());
+    }
     let retry_after = crate::retry::retry_after(resp.headers());
     // (Refused ones too: a used-up window says so.)
     let windows = limits(resp.headers());
@@ -416,10 +488,7 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
     }
     if !status.is_success() {
         let body: Value = serde_json::from_str(&refusal_text(resp).await).unwrap_or(Value::Null);
-        let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
-        let resets_at = body["error"]["resets_at"].as_i64().or_else(|| body["error"]["resets_in_seconds"].as_i64().map(|s| now + s));
-        return Err(ApiError { status: status.as_u16(), message: refusal(status.as_u16(), &body), code, retry_after, resets_at }.into());
+        return Err(refused(status.as_u16(), &body, retry_after).into());
     }
     let mut events = Events::new(resp);
     while let Some(data) = events.next().await? {
@@ -427,37 +496,55 @@ pub async fn stream(base: &str, token: Option<&str>, affinity: Option<&str>, hea
             continue;
         }
         let Ok(ev) = serde_json::from_str::<Value>(&data) else { continue };
-        match ev["type"].as_str().unwrap_or_default() {
-            "response.output_item.added" => on(Event::Added { index: index(&ev), item: ev["item"].clone() }),
-            "response.output_text.delta" => on(Event::Text { index: index(&ev), delta: delta(&ev) }),
-            "response.reasoning_summary_text.delta" => {
-                on(Event::Reasoning { index: index(&ev), part: usize::try_from(ev["summary_index"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX), delta: delta(&ev) });
-            }
-            "response.function_call_arguments.delta" => on(Event::Args { index: index(&ev), delta: delta(&ev) }),
-            "response.output_item.done" => on(Event::Item { index: index(&ev), item: ev["item"].clone() }),
-            "response.completed" => {
-                let output = ev["response"]["output"].as_array().cloned().unwrap_or_default();
-                on(Event::Completed { usage: ev["response"]["usage"].clone(), output });
-                return Ok(());
-            }
-            "response.failed" => {
-                let err = &ev["response"]["error"];
-                let code = err["code"].as_str().unwrap_or_default();
-                return Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")), usage: ev["response"]["usage"].clone() }.into());
-            }
-            "response.incomplete" => {
-                let reason = ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given").to_owned();
-                return Err(CutOff { reason, usage: ev["response"]["usage"].clone() }.into());
-            }
-            "error" => {
-                let code = ev["code"].as_str().or_else(|| ev["error"]["code"].as_str()).unwrap_or_default();
-                let message = ev["message"].as_str().or_else(|| ev["error"]["message"].as_str()).unwrap_or("the request failed");
-                return Err(Failed { code: code.to_owned(), message: explain(code, message), usage: Value::Null }.into());
-            }
-            _ => {}
+        if let Some(end) = handle(&ev, &mut on) {
+            return end;
         }
     }
     Err(Dropped("The connection closed before the reply finished".into(), Value::Null).into())
+}
+
+/// A refusal (`status`, its body as JSON) as an [`ApiError`].
+pub(crate) fn refused(status: u16, body: &Value, retry_after: Option<u64>) -> ApiError {
+    let code = body["error"]["type"].as_str().or_else(|| body["error"]["code"].as_str()).unwrap_or_default().to_owned();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    let resets_at = body["error"]["resets_at"].as_i64().or_else(|| body["error"]["resets_in_seconds"].as_i64().map(|s| now + s));
+    ApiError { status, message: refusal(status, body), code, retry_after, resets_at }
+}
+
+/// One event of a reply (as SSE data or a WebSocket message), passed on to
+/// `on`: `Some` once the reply has ended, with how it ended.
+pub(crate) fn handle(ev: &Value, on: &mut impl FnMut(Event)) -> Option<Result<()>> {
+    match ev["type"].as_str().unwrap_or_default() {
+        "response.output_item.added" => on(Event::Added { index: index(ev), item: ev["item"].clone() }),
+        "response.output_text.delta" => on(Event::Text { index: index(ev), delta: delta(ev) }),
+        "response.reasoning_summary_text.delta" => {
+            on(Event::Reasoning { index: index(ev), part: usize::try_from(ev["summary_index"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX), delta: delta(ev) });
+        }
+        "response.function_call_arguments.delta" => on(Event::Args { index: index(ev), delta: delta(ev) }),
+        "response.output_item.done" => on(Event::Item { index: index(ev), item: ev["item"].clone() }),
+        // (`response.done`: the WebSocket's name for it.)
+        "response.completed" | "response.done" => {
+            let output = ev["response"]["output"].as_array().cloned().unwrap_or_default();
+            on(Event::Completed { usage: ev["response"]["usage"].clone(), output });
+            return Some(Ok(()));
+        }
+        "response.failed" => {
+            let err = &ev["response"]["error"];
+            let code = err["code"].as_str().unwrap_or_default();
+            return Some(Err(Failed { code: code.to_owned(), message: explain(code, err["message"].as_str().unwrap_or("the request failed")), usage: ev["response"]["usage"].clone() }.into()));
+        }
+        "response.incomplete" => {
+            let reason = ev["response"]["incomplete_details"]["reason"].as_str().unwrap_or("no reason given").to_owned();
+            return Some(Err(CutOff { reason, usage: ev["response"]["usage"].clone() }.into()));
+        }
+        "error" => {
+            let code = ev["code"].as_str().or_else(|| ev["error"]["code"].as_str()).unwrap_or_default();
+            let message = ev["message"].as_str().or_else(|| ev["error"]["message"].as_str()).unwrap_or("the request failed");
+            return Some(Err(Failed { code: code.to_owned(), message: explain(code, message), usage: Value::Null }.into()));
+        }
+        _ => {}
+    }
+    None
 }
 
 fn index(ev: &Value) -> usize {
@@ -590,6 +677,66 @@ fn explain(code: &str, message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instructions_lead_the_input_as_a_developer_message() {
+        let user = json!({ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] });
+        let mut body = request("m", "Be brief.", std::slice::from_ref(&user), json!([]), None, "s");
+        instructions_in_input(&mut body);
+        assert!(body.get("instructions").is_none());
+        let input = body["input"].as_array().unwrap();
+        assert_eq!((input.len(), &input[1]), (2, &user));
+        assert_eq!((input[0]["role"].as_str(), input[0]["content"][0]["text"].as_str()), (Some("developer"), Some("Be brief.")));
+        // Empty instructions add nothing.
+        let mut body = request("m", "", std::slice::from_ref(&user), json!([]), None, "s");
+        instructions_in_input(&mut body);
+        assert_eq!(body["input"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[tokio::test]
+    async fn a_turns_requests_carry_its_routing_token() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        // A stand-in backend: each request's turn-state header (or "-") is
+        // sent back on a channel; it hands out "t1" first, "t2" after.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            let mut n = 0;
+            loop {
+                let Ok((mut s, _)) = listener.accept().await else { return };
+                n += 1;
+                let mut buf = vec![0u8; 65536];
+                let len = s.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..len]).to_lowercase();
+                let sent = head.lines().find_map(|l| l.strip_prefix("x-codex-turn-state: ")).unwrap_or("-").trim().to_owned();
+                let _ = tx.send(sent);
+                let done = "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{}}}\n\n";
+                let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nx-codex-turn-state: t{n}\r\nConnection: close\r\n\r\n{done}");
+                let _ = s.write_all(reply.as_bytes()).await;
+            }
+        });
+        let base = format!("http://{addr}");
+        let ask = |session: Option<&'static str>| {
+            let base = base.clone();
+            async move { stream(&base, None, session, &[], &json!({}), false, |_| {}).await.unwrap() }
+        };
+        // The turn's first request has none; the next ones send the first
+        // token given (not a later one); a new turn starts over.
+        new_turn("s");
+        for _ in 0..3 {
+            ask(Some("s")).await;
+        }
+        new_turn("s");
+        ask(Some("s")).await;
+        // (No affinity, as with an API key: never sent.)
+        ask(None).await;
+        let mut sent = Vec::new();
+        for _ in 0..5 {
+            sent.push(rx.recv().await.unwrap());
+        }
+        assert_eq!(sent, ["-", "t1", "t1", "-", "-"]);
+    }
 
     #[test]
     fn the_plan_used_up() {

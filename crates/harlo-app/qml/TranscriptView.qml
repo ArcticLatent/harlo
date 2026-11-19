@@ -470,7 +470,11 @@ Item {
     // The shared plan's tools and the wiki's, by what they do.
     readonly property var planTools: ({ plan_set: "Plan", plan_read: "Read the plan", plan_start: "Start a step", plan_done: "Finish a step",
                                         wiki_check: "Check the wiki" })
+    // Harlo's own tools whose names don't say it in words.
+    readonly property var agentTools: ({ ast_grep: qsTr("Structural search"), ast_edit: qsTr("Structural edit"), debug: qsTr("Debugger"),
+                                         wait: qsTr("Wait for subagents"), run_code: qsTr("Run code") })
     function toolName(t) {
+        if (agentTools[t]) return agentTools[t]
         const p = /^(?:mcp__harlo__|harlo_)?((?:plan|wiki)_[a-z_]+)$/.exec(t || "")
         if (p && planTools[p[1]]) return planTools[p[1]]
         const l = Theme.toolLabel(t)

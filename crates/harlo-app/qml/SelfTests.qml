@@ -970,8 +970,65 @@ Item {
         ScriptAction { script: {
             tests.check(tests.modelGot("send this one instead"), "the next message goes, after its snapshot")
             tests.check(!tests.modelGot("never send this walrus") && !tests.modelGot("and this narwhal"), "and the stopped ones still never went")
+            // Stop with a follow-up queued: it comes back into the box.
+            // (Busy in its command: the prompt's request and the write's;
+            // yolo, so the write doesn't wait for a yes.)
+            Workspace.setApprovalMode(chat.session.key, "yolo")
+            tests.requestsBefore = tests.modelRequests().length
+            tests.sendByKeys("write and wait") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloStopSteps, () => chat.session.status === "busy" && tests.modelRequests().length >= tests.requestsBefore + 2, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.sendByKeys("keep this queued orca") }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(chat.session.queued.some(q => q.indexOf("keep this queued orca") >= 0), "queued while it works (" + chat.session.queued.join(" | ") + ")")
+            tests.clickItem(tests.findName("stopButton"), "stop") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloStopSteps, () => chat.session.status !== "busy" && chat.composerItem.text !== "", 8000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(chat.composerItem.text === "keep this queued orca", "Stop gives the queued message back to the box (" + JSON.stringify(chat.composerItem.text) + ")")
+            tests.check(chat.session.queued.length === 0, "and nothing stays queued (" + chat.session.queued.join(" | ") + ")")
+            tests.check(!tests.modelGot("keep this queued orca"), "the model never got it")
+            tests.shot("clicks-harlo-stop-queue-back")
+            chat.composerItem.text = ""
+            // Stop and send: the run stops, and the message starts the next.
+            tests.requestsBefore = tests.modelRequests().length
+            tests.sendByKeys("write and wait") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloStopSteps, () => chat.session.status === "busy" && tests.modelRequests().length >= tests.requestsBefore + 2, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.clickItem(tests.findName("composerInput"), "composer")
+            TestInput.typeText("go another way")
+            const send = tests.findName("sendButton"), p = send.mapToItem(null, send.width / 2, send.height / 2)
+            TestInput.rightClick(p.x, p.y) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const items = ["sendFollowUp", "sendSteer", "sendStopAndSend"].map(n => tests.findName(n))
+            tests.check(items.every(i => i !== null && tests.shown(i)), "the send button's menu offers follow-up, steer, and stop and send")
+            tests.shotWindow("clicks-harlo-send-menu")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(chat.session.status === "busy", "Esc closed the menu, the run goes on")
+            tests.clickItem(tests.findName("composerInput"), "composer")
+            tests.stopSentAt = Date.now()
+            TestInput.key(Qt.Key_Return, Qt.ControlModifier | Qt.ShiftModifier) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloStopSteps, () => tests.chatText().indexOf("ok: go another way") >= 0 && chat.session.status !== "busy", 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.chatText().indexOf("ok: go another way") >= 0, "Ctrl+Shift+Enter: the model answers the new message")
+            tests.check(Date.now() - tests.stopSentAt < 4500, "before the command it stopped would have ended (" + (Date.now() - tests.stopSentAt) + " ms)")
+            tests.check(tests.chatText().indexOf("Done waiting.") < 0, "the stopped run didn't go on")
+            tests.check(chat.composerItem.text === "", "the box is empty (" + JSON.stringify(chat.composerItem.text) + ")")
+            tests.shot("clicks-harlo-stop-and-send")
             tests.summary(); Qt.quit() } }
     }
+    property real stopSentAt: 0
+    property int requestsBefore: 0
 
     // Spending limits (the demo agent costs $0.25 a prompt): a session past
     // its limit is stopped and held, Allow more lets it go on; the day's
@@ -11899,11 +11956,19 @@ Item {
             }
             pick("harloTaskModel", "Fake Helper")
             pick("harloFallback", "Go on with Fake Helper")
-            pick("harloHelperBudget", "500k tokens") } }
+            pick("harloHelperBudget", "500k tokens")
+            pick("harloAdvisor", "Fake Helper")
+            pick("harloSteering", "When it finishes")
+            const memory = tests.findName("harlo_memory", settingsDialog.contentItem)
+            tests.check(memory !== null && !memory.checked, "Notes between sessions is there, off")
+            if (memory) { tests.scrollIntoView(memory); memory.toggle(); memory.toggled() } } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(Workspace.setting("harlo_task_model") === "fake/fake-helper" && Workspace.setting("harlo_fallback") === "fake/fake-helper" && Workspace.setting("harlo_helper_budget") === "500k",
                       "the three are saved as picked (" + [Workspace.setting("harlo_task_model"), Workspace.setting("harlo_fallback"), Workspace.setting("harlo_helper_budget")].join(", ") + ")")
+            tests.check(Workspace.setting("harlo_advisor") === "fake/fake-helper" && Workspace.setting("harlo_memory") === "1", "the reviewer and the notes too (" + Workspace.setting("harlo_advisor") + ", " + Workspace.setting("harlo_memory") + ")")
+            tests.check(Workspace.setting("harlo_steering") === "wait", "messages sent while it works wait for the turn's end (" + Workspace.setting("harlo_steering") + ")")
+            tests.shotWindow("clicks-harlo-extras")
             tests.shotWindow("clicks-harlo-settings")
             settingsDialog.openPage("git") } }
         PauseAnimation { duration: 500 }
@@ -11928,7 +11993,13 @@ Item {
             const first = b => JSON.stringify(((b.messages || []).find(m => m.role === "user") || {}).content || "")
             const sub = tests.modelRequests().filter(b => first(b).indexOf("SUBTASK") >= 0)
             tests.check(sub.length > 0 && sub.every(b => b.model === "fake-helper"), "the subagent runs on the subagents' model (" + sub.map(b => b.model).join() + ")")
-            tests.check(tests.modelRequests().filter(b => first(b).indexOf("use a subagent") >= 0).every(b => b.model === "fake-coder"), "the session stays on its own")
+            // (The reviewer's requests: its own instructions, on the model picked.)
+            const reviewing = b => JSON.stringify(((b.messages || [])[0] || {}).content || "").indexOf("You review a coding agent's work") >= 0
+            const own = tests.modelRequests().filter(b => first(b).indexOf("use a subagent") >= 0 && !reviewing(b))
+            tests.check(own.length > 0 && own.every(b => b.model === "fake-coder"), "the session stays on its own")
+            const reviews = tests.modelRequests().filter(reviewing)
+            tests.check(reviews.length === 1 && reviews[0].model === "fake-helper", "the reviewer reads the turn once, on the model picked (" + reviews.map(b => b.model).join() + ")")
+            tests.check(own.every(b => (b.tools || []).some(t => (t.function || t).name === "memory")), "and the session has its notes tool")
             tests.sendByKeys("be busy now") } }
         PauseAnimation { duration: 300 }
         // (Retries take 1 + 2 + 4 s.)

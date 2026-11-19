@@ -90,9 +90,15 @@ pub(crate) fn remote_script(remote: &RemoteLaunch, program: &str, args: &[String
 /// While streaming, a prompt must say how it should be queued.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendMode {
+    /// A new turn (or, while one runs, as the agent queues by default).
     Normal,
+    /// Into the turn under way, at its next step.
     Steer,
+    /// For after the turn under way.
     FollowUp,
+    /// The turn under way stopped, and this one sent in its place (what's
+    /// queued stays queued).
+    StopAndSend,
 }
 
 pub(crate) type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
@@ -290,41 +296,24 @@ impl Harness {
     /// ([`is_gone`](Error::is_gone)), or answers with an error
     /// ([`is_refused`](Error::is_refused)), its own text the message.
     pub async fn request(&self, cmd: Value) -> Result<Value, Error> {
-        // The queue can only be cleared whole: what's kept goes back in, in
-        // order (as text: a queued message's images don't come back).
+        // (A queued message that went out meanwhile can't be changed.)
         if self.in_steps(&cmd) {
-            let promote = cmd["type"] == "promote_queued_message";
-            let text = cmd["message"].as_str().unwrap_or_default();
-            let queue = if promote { "followUp" } else { cmd["queue"].as_str().unwrap_or("followUp") };
-            let had = self.rpc(json!({ "type": "clear_queue" })).await?;
-            let list = |key: &str| had[key].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>();
-            let (mut steering, mut follow_up) = (list("steering"), list("followUp"));
-            let from = if queue == "steering" { &mut steering } else { &mut follow_up };
-            let taken = from.iter().position(|t| t == text).map(|at| from.remove(at));
-            if promote && let Some(t) = &taken {
-                steering.push(t.clone());
-            }
-            for t in &steering {
-                self.rpc(json!({ "type": "steer", "message": t })).await?;
-            }
-            for t in &follow_up {
-                self.rpc(json!({ "type": "follow_up", "message": t })).await?;
-            }
-            return match taken {
-                Some(_) => Ok(Value::Null),
-                None => Err(Error::new(ErrorKind::AlreadySent, "That message has been sent already.")),
+            let data = self.rpc(cmd).await?;
+            return if data["removed"] == false || data["promoted"] == false {
+                Err(Error::new(ErrorKind::AlreadySent, "That message has been sent already."))
+            } else {
+                Ok(data)
             };
         }
         self.rpc(cmd).await
     }
 
-    /// Whether [`request`](Self::request) does this command in several steps.
-    ///
-    /// Harlo's queue can only be cleared whole, so removing or promoting a
-    /// queued message is several commands; [`ask`](Self::ask) sends one.
+    /// Whether [`request`](Self::request) checks this command's answer:
+    /// removing or promoting a queued message, which fails when the
+    /// message was sent meanwhile; [`ask`](Self::ask) only sends.
     #[must_use]
     pub fn in_steps(&self, cmd: &Value) -> bool {
-        self.kind == HarnessKind::Harlo && matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message"))
+        matches!(cmd["type"].as_str(), Some("remove_queued_message" | "promote_queued_message"))
     }
 
     /// Sends a command now and returns its answer to wait for.
@@ -366,6 +355,7 @@ impl Harness {
             SendMode::Normal => {}
             SendMode::Steer => cmd["streamingBehavior"] = json!("steer"),
             SendMode::FollowUp => cmd["streamingBehavior"] = json!("followUp"),
+            SendMode::StopAndSend => cmd["type"] = json!("abort_and_prompt"),
         }
         self.send(cmd)
     }

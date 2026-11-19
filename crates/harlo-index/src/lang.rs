@@ -107,6 +107,30 @@ impl fmt::Display for Lang {
     }
 }
 
+/// The language called `name`: its JSON name, or a usual short one (`py`,
+/// `ts`, `c++`, `c#`, `sh`).
+#[must_use]
+pub fn named(name: &str) -> Option<Lang> {
+    let name = name.trim().to_ascii_lowercase();
+    Lang::ALL.into_iter().find(|l| l.name() == name).or_else(|| {
+        Some(match name.as_str() {
+            "rs" => Lang::Rust,
+            "py" => Lang::Python,
+            "golang" => Lang::Go,
+            "js" | "jsx" => Lang::JavaScript,
+            "ts" => Lang::TypeScript,
+            "c++" | "cxx" => Lang::Cpp,
+            "c#" | "cs" => Lang::CSharp,
+            "rb" => Lang::Ruby,
+            "kt" => Lang::Kotlin,
+            "jl" => Lang::Julia,
+            "sh" | "shell" => Lang::Bash,
+            "yml" => Lang::Yaml,
+            _ => return None,
+        })
+    })
+}
+
 /// The language of the file at `path`, if the index reads it.
 #[must_use]
 pub fn lang(path: &str) -> Option<Lang> {
@@ -153,6 +177,7 @@ mod tests {
         assert_eq!(lang("data.csv"), None);
         assert_eq!(Lang::Rust.separator(), "::");
         assert_eq!(Lang::CSharp.to_string(), "csharp");
+        assert_eq!((named("Python"), named("c++"), named("ts"), named("cobol")), (Some(Lang::Python), Some(Lang::Cpp), Some(Lang::TypeScript), None));
     }
 
     #[test]

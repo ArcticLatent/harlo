@@ -43,6 +43,10 @@ pub mod qobject {
         /// Left click at window coordinates.
         #[qinvokable]
         fn click(self: &TestInput, x: f64, y: f64);
+        /// Right click at window coordinates.
+        #[qinvokable]
+        #[cxx_name = "rightClick"]
+        fn right_click(self: &TestInput, x: f64, y: f64);
         /// The left button pressed (`down`) or released at window
         /// coordinates: with moveTo between, a drag.
         #[qinvokable]
@@ -100,6 +104,11 @@ impl qobject::TestInput {
 
     pub fn click(&self, x: f64, y: f64) {
         qobject::test_click(x, y, 1);
+    }
+
+    pub fn right_click(&self, x: f64, y: f64) {
+        // (Qt::RightButton.)
+        qobject::test_click(x, y, 2);
     }
 
     pub fn press(&self, x: f64, y: f64, down: bool) {

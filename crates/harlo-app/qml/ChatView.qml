@@ -299,7 +299,7 @@ Rectangle {
         if (Workspace.spendHold(session.key) !== "")
             return
         const busy = session.status === "busy"
-        session.send(text, busy ? (mode === "steer" ? "steer" : "followUp") : "normal")
+        session.send(text, busy ? (mode === "steer" || mode === "stopAndSend" ? mode : "followUp") : "normal")
         composer.text = ""
         delete drafts[session.key]
         transcript.scrollToEnd()
@@ -1089,7 +1089,7 @@ Rectangle {
             Layout.rightMargin: transcript.gutter + 4
             Layout.topMargin: 6
             visible: session.status === "busy" && composer.text.trim() !== "" && !root.covered
-            text: "Enter sends this when the current turn ends  ·  Ctrl+Enter sends it now, into this turn"
+            text: "Enter sends this when the current turn ends  ·  Ctrl+Enter sends it now, into this turn  ·  Ctrl+Shift+Enter stops the turn and sends it"
             color: Theme.muted
             elide: Text.ElideRight
             font.pixelSize: Theme.px(12)

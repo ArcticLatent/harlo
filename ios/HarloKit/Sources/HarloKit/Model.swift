@@ -795,9 +795,10 @@ public final class HarloModel {
     }
 
     /// Sends a message: a new turn, or while it works, a follow-up it takes
-    /// when done.
+    /// when done (steering, with the session's switch). `stopping`: while it
+    /// works, the run stops and this message starts the next.
     @discardableResult
-    public func send(_ text: String, photos: [Photo] = []) async -> Bool {
+    public func send(_ text: String, photos: [Photo] = [], stopping: Bool = false) async -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty || !photos.isEmpty else { return false }
         if demo { return demoSend(t) }
@@ -806,12 +807,20 @@ public final class HarloModel {
             return false
         }
         do {
-            try await c.send(s.liveKey, text: t, mode: s.busy ? (s.steer ? .steer : .followUp) : .normal, photos: photos)
+            try await c.send(s.liveKey, text: t, mode: Self.mode(busy: s.busy, steer: s.steer, stopping: stopping), photos: photos)
             return true
         } catch {
             alert = Self.describe(error)
             return false
         }
+    }
+
+    /// How a message goes: while it works, stopping it, steering it or
+    /// after it; otherwise a new turn.
+    static func mode(busy: Bool, steer: Bool, stopping: Bool) -> SendMode {
+        guard busy else { return .normal }
+        if stopping { return .stopAndSend }
+        return steer ? .steer : .followUp
     }
 
     /// Runs `body` with the connection (and the open session's live key when

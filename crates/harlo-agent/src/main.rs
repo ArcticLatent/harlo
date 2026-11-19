@@ -26,7 +26,8 @@
 //! harlo-agent --version        and the commit it was built from
 //! harlo-agent --mode rpc [--session <file> | --no-session] [-m model] [--thinking level]
 //!                         [--harlo-tools] [--task-model provider/model] [--budget tokens]
-//!                         [--fallback provider/model]
+//!                         [--fallback provider/model[,…]] [--small-model provider/model]
+//!                         [--advisor provider/model]
 //!                              pi's RPC protocol on stdin/stdout (for harlo;
 //!                              with harlo's own tools on the same pipe)
 //! ```
@@ -37,12 +38,15 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod advisor;
 mod agent;
+mod ast;
 mod auth;
 mod chat;
 mod clock;
 mod compact;
 mod danger;
+mod debug;
 mod fetch;
 mod gemini;
 mod generated;
@@ -55,6 +59,7 @@ mod lookup;
 mod lsp;
 mod mcp;
 mod mcp_auth;
+mod memory;
 mod messages;
 mod outline;
 mod patch;
@@ -65,10 +70,14 @@ mod repeats;
 mod responses;
 mod retry;
 mod rpc;
+mod rules;
 mod sandbox;
+mod effort;
+mod locate;
 mod search;
 mod session;
 mod skills;
+mod socket;
 mod stubs;
 mod sys;
 mod task;
@@ -182,7 +191,7 @@ async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("-p") => print_mode(args).await,
         _ => {
-            println!("harlo-agent login [--codex | --openrouter] | logout [--codex] | providers | key set|test|remove <provider> | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model] [--budget tokens] [--fallback provider/model]");
+            println!("harlo-agent login [--codex | --openrouter] | logout [--codex] | providers | key set|test|remove <provider> | status | usage | models | -p \"prompt\"|- [--image file]… [-m model] [--thinking low|medium|high] [--resume | --session file | --no-session] [--no-tools] [--sandbox on|off|no-network] [--task-model provider/model] [--budget tokens] [--fallback provider/model[,…]] [--small-model provider/model] [--advisor provider/model]");
             Ok(())
         }
     }
@@ -710,7 +719,10 @@ fn summary(name: &str, args: &serde_json::Value) -> String {
         "read" | "write" | "ls" => s("path"),
         "apply_patch" => crate::patch::parse(&s("input")).map(|ops| ops.iter().map(crate::patch::Op::path).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
         "edit" => format!("{} ({} edit{})", s("path"), args["edits"].as_array().map_or(0, Vec::len), if args["edits"].as_array().map_or(0, Vec::len) == 1 { "" } else { "s" }),
-        "grep" | "find" => format!("{} {}", s("pattern"), s("path")),
+        "grep" | "find" | crate::ast::GREP => format!("{} {}", s("pattern"), s("path")),
+        crate::ast::EDIT => format!("{} → {} {}", s("pattern"), s("rewrite"), s("path")),
+        crate::debug::NAME => format!("{} {}", s("action"), [s("program"), s("expression")].join(" ").trim()),
+        crate::memory::NAME => format!("{} {}", s("action"), s("text")),
         _ => args.to_string(),
     };
     let one: String = text.replace('\n', " ⏎ ").chars().take(160).collect();

@@ -390,6 +390,21 @@ pub fn spec() -> Value {
     })
 }
 
+/// The `rename` tool: offered beside `lsp` where changes may be made.
+pub fn rename_spec() -> Value {
+    json!({
+        "type": "function", "name": "rename", "strict": false,
+        "description": "Rename a symbol everywhere it's used, through the project's language server (imports and other files included), in one call. Give the file, the line (from 1) and the name as written there, and the new name.",
+        "parameters": { "type": "object", "properties": {
+            "path": { "type": "string" },
+            "line": { "type": "integer", "description": "From 1" },
+            "symbol": { "type": "string" },
+            "occurrence": { "type": "integer", "description": "Which use of it on the line, from 1 (1 by default)" },
+            "new_name": { "type": "string" },
+        }, "required": ["path", "line", "symbol", "new_name"], "additionalProperties": false },
+    })
+}
+
 /// How long an edit waits for the server's word on it (starting the
 /// server and its first reading of the project included); past it, the
 /// edit's result says nothing of errors.
@@ -432,12 +447,40 @@ pub struct Servers {
 impl Servers {
     /// `path`: the file asked about, made whole (and allowed to be read).
     pub async fn call(&self, args: &Value, path: PathBuf, cwd: &Path, sandbox: Option<&Sandbox>) -> Outcome {
-        let fail = |t: String| Outcome::new(t, true);
+        let op = args["operation"].as_str().unwrap_or_default().trim();
+        if !["definition", "references", "implementations", "callers", "hover"].contains(&op) {
+            return Outcome::new("Give operation: definition, references, implementations, callers or hover.", true);
+        }
+        match self.answer(args, path, cwd, sandbox).await {
+            Ok(answer) => Outcome::new(answer.render(cwd, op), false),
+            Err(why) => Outcome::new(why, true),
+        }
+    }
+
+    /// A rename of the symbol `args` names (`line`, `symbol`, `occurrence`)
+    /// to `args.new_name`: each file it changes, with its new text.
+    ///
+    /// # Errors
+    ///
+    /// Why it can't be made: no server, the server can't rename, a file
+    /// it would change can't be read, or it changes nothing.
+    pub async fn rename(&self, args: &Value, path: PathBuf, cwd: &Path, sandbox: Option<&Sandbox>) -> Result<Vec<(PathBuf, String)>, String> {
+        let mut asked = args.clone();
+        asked["operation"] = json!("rename");
+        let answer = self.answer(&asked, path, cwd, sandbox).await?;
+        let edits = renamed(&answer.value, answer.encoding)?;
+        if edits.is_empty() {
+            return Err("The language server's rename changes nothing.".into());
+        }
+        Ok(edits)
+    }
+
+    /// The server's answer to `args.operation` about the symbol `args`
+    /// names.
+    async fn answer(&self, args: &Value, path: PathBuf, cwd: &Path, sandbox: Option<&Sandbox>) -> Result<Answer, String> {
+        let fail = Err::<Answer, String>;
         let s = |k: &str| args[k].as_str().unwrap_or_default().trim();
         let op = s("operation");
-        if !["definition", "references", "implementations", "callers", "hover"].contains(&op) {
-            return fail("Give operation: definition, references, implementations, callers or hover.".into());
-        }
         if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {
             return fail(format!("The language server can't start: the sandbox can't start here ({why})."));
         }
@@ -465,8 +508,9 @@ impl Servers {
             Ok(s) => s,
             Err(e) => return fail(format!("{e:#}")),
         };
-        match server.ask(op, &path, language, &text, line - 1, line_text, column, deadline).await {
-            Ok(answer) => Outcome::new(answer.render(cwd, op), false),
+        let new_name = s("new_name");
+        match server.ask(op, &path, language, &text, line - 1, line_text, column, deadline, new_name).await {
+            Ok(answer) => Ok(answer),
             Err(e) => {
                 if server.exited() {
                     self.running.lock().unwrap().remove(&(li, root));
@@ -866,8 +910,9 @@ impl Server {
     }
 
     #[expect(clippy::too_many_arguments, reason = "each is a separate input of one language server request")]
-    async fn ask(&self, op: &str, path: &Path, language: &str, text: &str, line: usize, line_text: &str, column: usize, deadline: Instant) -> anyhow::Result<Answer> {
+    async fn ask(&self, op: &str, path: &Path, language: &str, text: &str, line: usize, line_text: &str, column: usize, deadline: Instant, new_name: &str) -> anyhow::Result<Answer> {
         let provider = match op {
+            "rename" => "renameProvider",
             "definition" => "definitionProvider",
             "references" => "referencesProvider",
             "implementations" => "implementationProvider",
@@ -892,6 +937,11 @@ impl Server {
                     self.request("textDocument/references", p, deadline).await
                 }
                 "hover" => self.request("textDocument/hover", at.clone(), deadline).await,
+                "rename" => {
+                    let mut p = at.clone();
+                    p["newName"] = json!(new_name);
+                    self.request("textDocument/rename", p, deadline).await
+                }
                 _ => match self.request("textDocument/prepareCallHierarchy", at.clone(), deadline).await {
                     Ok(items) => match items.as_array().and_then(|a| a.first()) {
                         Some(item) => self.request("callHierarchy/incomingCalls", json!({ "item": item }), deadline).await.map(|calls| json!({ "item": item, "calls": calls })),
@@ -1227,6 +1277,50 @@ struct Answer {
     op: String,
 }
 
+/// A rename's workspace edit applied: each file it changes, with its new
+/// text (edits in `changes` or `documentChanges`; files it creates,
+/// renames or deletes aren't made).
+fn renamed(edit: &Value, encoding: Encoding) -> Result<Vec<(PathBuf, String)>, String> {
+    let mut by_file: Vec<(String, Vec<Value>)> = Vec::new();
+    if let Some(changes) = edit["changes"].as_object() {
+        by_file.extend(changes.iter().map(|(u, e)| (u.clone(), e.as_array().cloned().unwrap_or_default())));
+    }
+    for d in edit["documentChanges"].as_array().into_iter().flatten() {
+        if d.get("kind").is_some() {
+            return Err("The rename would also create, move or delete files: do that with edit and bash instead.".into());
+        }
+        if let Some(u) = d["textDocument"]["uri"].as_str() {
+            by_file.push((u.to_owned(), d["edits"].as_array().cloned().unwrap_or_default()));
+        }
+    }
+    let mut out = Vec::new();
+    for (u, mut edits) in by_file {
+        let path = path_of(&u).ok_or_else(|| format!("The rename names a file harlo can't place: {u}"))?;
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("Can't read {}: {e}", path.display()))?;
+        // (Last first, so earlier offsets stay right.)
+        let at = |pos: &Value| -> usize {
+            let line = usize::try_from(pos["line"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
+            let units = usize::try_from(pos["character"].as_u64().unwrap_or(0)).unwrap_or(usize::MAX);
+            let start: usize = text.split_inclusive('\n').take(line).map(str::len).sum();
+            let line_text = text[start.min(text.len())..].split('\n').next().unwrap_or_default();
+            let chars = encoding.chars_from_units(line_text, units);
+            start + line_text.chars().take(chars).map(char::len_utf8).sum::<usize>()
+        };
+        let mut spans: Vec<(usize, usize, String)> = edits.drain(..).map(|e| (at(&e["range"]["start"]), at(&e["range"]["end"]), e["newText"].as_str().unwrap_or_default().to_owned())).collect();
+        spans.sort_by_key(|span| std::cmp::Reverse(span.0));
+        let mut new = text.clone();
+        for (from, to, with) in spans {
+            if from <= to && to <= new.len() {
+                new.replace_range(from..to, &with);
+            }
+        }
+        if new != text {
+            out.push((path, new));
+        }
+    }
+    Ok(out)
+}
+
 /// A place in a file: its path, line (from 0) and server column.
 struct Place {
     path: PathBuf,
@@ -1322,6 +1416,31 @@ impl Answer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rename's edits land where the server meant, counted in UTF-16 past
+    /// wider characters, in both of a workspace edit's forms; a rename that
+    /// would make or move files is refused.
+    #[test]
+    fn a_renames_edits_are_applied_in_place() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-rename-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("a.py"), dir.join("b.py"));
+        std::fs::write(&a, "def old():\n    return \"é😀\" + old_x\n").unwrap();
+        std::fs::write(&b, "from a import old\nold()\n").unwrap();
+        let range = |l: u64, c: u64, n: u64| json!({ "start": { "line": l, "character": c }, "end": { "line": l, "character": c + n } });
+        let edit = json!({
+            "changes": { uri(&a): [{ "range": range(0, 4, 3), "newText": "new" }] },
+            "documentChanges": [{ "textDocument": { "uri": uri(&b), "version": 1 }, "edits": [{ "range": range(0, 14, 3), "newText": "new" }, { "range": range(1, 0, 3), "newText": "new" }] }],
+        });
+        let out = renamed(&edit, Encoding::Utf16).unwrap();
+        assert_eq!(out, vec![(a.clone(), "def new():\n    return \"é😀\" + old_x\n".to_owned()), (b.clone(), "from a import new\nnew()\n".to_owned())]);
+        // (Past "é😀": 3 UTF-16 units, 6 bytes: column 19 is byte 22.)
+        let wide = json!({ "changes": { uri(&a): [{ "range": range(1, 19, 5), "newText": "new_x" }] } });
+        assert_eq!(renamed(&wide, Encoding::Utf16).unwrap()[0].1, "def old():\n    return \"é😀\" + new_x\n");
+        let moves = json!({ "documentChanges": [{ "kind": "rename", "oldUri": uri(&a), "newUri": uri(&b) }] });
+        assert!(renamed(&moves, Encoding::Utf16).unwrap_err().contains("create, move or delete"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     /// Each language's hint on a system with these tools and this manager.
     fn hints(tools: &[&'static str], manager: Option<&'static str>, set: impl FnOnce(&mut System)) -> Vec<String> {

@@ -18,7 +18,7 @@ notices under `/usr/share/licenses/harlo` (the AppImage under
 | Notification sounds | [KDE's Ocean sound theme](https://invent.kde.org/plasma/ocean-sound-theme) (Guilherme Marçal Silva) | CC-BY-SA-4.0 | [`crates/harlo-app/sounds/NOTICE`](crates/harlo-app/sounds/NOTICE) |
 | TweetNaCl-js (the phone page's encryption) | [TweetNaCl-js](https://github.com/dchest/tweetnacl-js) | Public domain (Unlicense) | [`crates/harlo-app/phone/TWEETNACL-LICENSE`](crates/harlo-app/phone/TWEETNACL-LICENSE) |
 | Qt 6 (in the release packages) | [The Qt Company](https://www.qt.io) | LGPL-3.0 | installed with the packages (`qt/`) |
-| tree-sitter and its grammars for 18 languages (the code index, `harlo-index`) | [tree-sitter](https://github.com/tree-sitter) and the grammars' authors | MIT | [`crates/harlo-index/GRAMMARS-LICENSE`](crates/harlo-index/GRAMMARS-LICENSE) |
+| tree-sitter and its grammars for 18 languages, and ast-grep-core (the code index and structural search, `harlo-index`) | [tree-sitter](https://github.com/tree-sitter), the grammars' authors and [ast-grep](https://github.com/ast-grep/ast-grep) | MIT | [`crates/harlo-index/GRAMMARS-LICENSE`](crates/harlo-index/GRAMMARS-LICENSE) |
 | whisper.cpp (dictation) | [ggml-org](https://github.com/ggml-org/whisper.cpp) | MIT | built from the `whisper-rs` crate |
 
 The agents' names and marks belong to their projects. The Rust crates harlo

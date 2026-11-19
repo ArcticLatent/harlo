@@ -137,7 +137,9 @@ struct Composer: View {
             }
             .accessibilityLabel("Stop")
         } else {
-            Button(action: send) {
+            Button {
+                send()
+            } label: {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 16, weight: .bold))
                     .frame(width: 36, height: 36)
@@ -146,6 +148,17 @@ struct Composer: View {
             }
             .disabled(!canSend)
             .accessibilityLabel("Send")
+            // While it works: stop the run and send this instead.
+            .contextMenu {
+                if session.busy {
+                    Button("Stop and send", systemImage: "stop.circle") { send(stopping: true) }
+                }
+            }
+            .accessibilityActions {
+                if session.busy {
+                    Button("Stop and send") { send(stopping: true) }
+                }
+            }
         }
     }
 
@@ -157,7 +170,7 @@ struct Composer: View {
         session.returnedPhotos = []
     }
 
-    func send() {
+    func send(stopping: Bool = false) {
         let (t, ph) = (text, photos)
         session.draft = ""
         photos = []
@@ -165,7 +178,7 @@ struct Composer: View {
         onSend()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         Task {
-            let sent = await model.send(t, photos: ph)
+            let sent = await model.send(t, photos: ph, stopping: stopping)
             sendingPhotos = []
             if sent {
                 // On the lock screen while it works.

@@ -23,6 +23,9 @@
 //!   most-called declarations, as text (for writing a wiki).
 //! - `harlo-index cards <root> <path>#<name>… [--no-cache]`: those
 //!   declarations' cards (signature, doc line, callers, callees), as JSON.
+//! - `harlo-index ast <root> <pattern> [--rewrite <code>] [--lang <name>] [--path <p>]… [--limit <n>]`:
+//!   the code matching a structural pattern (and with `--rewrite`, each
+//!   changed file's new text), as JSON; nothing is written.
 
 // Rust guideline compliant 2026-10-09
 
@@ -58,6 +61,7 @@ fn run(args: &[&str]) -> Result<String, String> {
             harlo_index::syntax_tree(path, &text).ok_or_else(|| format!("no grammar for {path}"))
         }
         ["lookup", root, name, rest @ ..] => lookup(root, name, rest),
+        ["ast", root, pattern, rest @ ..] => structural(root, pattern, rest),
         ["map" | "cards", root, rest @ ..] => {
             let cache = if rest.contains(&"--no-cache") { None } else { harlo_index::default_cache() };
             let index = harlo_index::index(Path::new(root), cache.as_deref()).map_err(|e| e.to_string())?;
@@ -112,6 +116,24 @@ fn lookup(root: &str, name: &str, rest: &[&str]) -> Result<String, String> {
     Ok(harlo_index::lookup(&graph, &query))
 }
 
+/// `ast`'s answer, its options in `rest`.
+fn structural(root: &str, pattern: &str, rest: &[&str]) -> Result<String, String> {
+    let mut query = harlo_index::Search { pattern, limit: 200, ..harlo_index::Search::default() };
+    let mut rest = rest.iter();
+    while let Some(option) = rest.next() {
+        let value = rest.next().ok_or_else(usage)?;
+        match *option {
+            "--rewrite" => query.rewrite = Some(value),
+            "--lang" => query.lang = Some(harlo_index::named(value).ok_or_else(|| format!("no language called {value}"))?),
+            "--path" => query.paths.push(value),
+            "--limit" => query.limit = value.parse().map_err(|_not_a_number| usage())?,
+            _ => return Err(usage()),
+        }
+    }
+    let found = harlo_index::search(Path::new(root), &query)?;
+    serde_json::to_string(&found).map_err(|e| e.to_string())
+}
+
 /// The manifests, each dependency with the files that use it.
 fn deps(index: &harlo_index::Index) -> String {
     let packages = harlo_index::Packages::new(&index.manifests);
@@ -162,5 +184,5 @@ fn sites(index: &harlo_index::Index) -> String {
 }
 
 fn usage() -> String {
-    "usage: harlo-index version | file <path> | tree <path> | repo <root> [--no-cache] | symbols <root> [--no-cache] | sites <root> [--no-cache] | deps <root> [--no-cache] | lookup <root> <name> [--path <p>] [--depth 1-3] [--no-cache] | map <root> [--no-cache] | cards <root> <path>#<name>… [--no-cache]".to_owned()
+    "usage: harlo-index version | file <path> | tree <path> | repo <root> [--no-cache] | symbols <root> [--no-cache] | sites <root> [--no-cache] | deps <root> [--no-cache] | lookup <root> <name> [--path <p>] [--depth 1-3] [--no-cache] | map <root> [--no-cache] | cards <root> <path>#<name>… [--no-cache] | ast <root> <pattern> [--rewrite <code>] [--lang <name>] [--path <p>]… [--limit <n>]".to_owned()
 }

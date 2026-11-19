@@ -943,6 +943,14 @@ fn where_on_host(path: &Path) -> String {
 /// The penguins (Theme.qml's `avatars`; icons/avatars/).
 /// The folder a harlo writes branch previews in, by its process id.
 const BRANCH_PREVIEW: &str = "harlo-branch-preview-";
+/// Harlo's extra tools, off by default (each costs every request): their
+/// setting and the switch harlo-agent reads.
+const HARLO_EXTRAS: [(&str, &str); 4] = [
+    ("harlo_memory", "HARLO_AGENT_MEMORY"),
+    ("harlo_debug", "HARLO_AGENT_DEBUG"),
+    ("harlo_ast", "HARLO_AGENT_AST"),
+    ("harlo_background", "HARLO_AGENT_BACKGROUND"),
+];
 
 /// A page of the wiki of the repository `cwd` is in, for reading (`.okf/x.md`
 /// or `x.md`). Blocking: it works out what the page owes the code (on
@@ -3422,12 +3430,25 @@ impl Workspace {
         }
     }
 
-    /// The environment of a session started in `cwd`: its orchestration
+    /// The environment of a session started in `cwd`: Harlo's extra tools
+    /// that are on, its orchestration
     /// `token`, and for Harlo its code lookup when the project has it on
     /// (on another machine, harlo's code index is put there first, off
     /// this thread; the tool shows up once it's there).
     fn session_env(&self, kind: HarnessKind, cwd: &Path, token: &str) -> Vec<(String, String)> {
         let mut env = vec![("HARLO_SESSION".to_owned(), token.to_owned())];
+        // (Harlo's extra tools, as Settings → Harlo has them.)
+        if kind == HarnessKind::Harlo {
+            for (setting, var) in HARLO_EXTRAS {
+                if self.setting_str(setting) == "1" {
+                    env.push((var.to_owned(), "on".to_owned()));
+                }
+            }
+            // (Messages sent while it works: at the end of its turn.)
+            if self.setting_str("harlo_steering") == "wait" {
+                env.push(("HARLO_AGENT_STEERING".to_owned(), "wait".to_owned()));
+            }
+        }
         if kind == HarnessKind::Harlo && self.project_at(cwd).is_some_and(|p| self.lookup_on(p)) {
             env.push(("HARLO_AGENT_LOOKUP".to_owned(), "on".to_owned()));
             if let Some(host) = harlo_core::remote::host_of(cwd) {
@@ -4346,7 +4367,7 @@ impl Workspace {
     fn harlo_args(&self, kind: HarnessKind) -> Vec<String> {
         let mut args = agents::harlo_args(kind, self.setting_str("harlo_sandbox") != "0", self.setting_str("harlo_sandbox_net") != "0");
         if kind == HarnessKind::Harlo {
-            args.extend(agents::model_args(&self.setting_str("harlo_task_model"), &self.setting_str("harlo_fallback")));
+            args.extend(agents::model_args(&self.setting_str("harlo_task_model"), &self.setting_str("harlo_fallback"), &self.setting_str("harlo_advisor")));
         }
         args
     }
@@ -6571,6 +6592,7 @@ impl Workspace {
         let mode = match msg["mode"].as_str() {
             Some("steer") => harlo_harness::SendMode::Steer,
             Some("followUp") => harlo_harness::SendMode::FollowUp,
+            Some("stopAndSend") => harlo_harness::SendMode::StopAndSend,
             _ => harlo_harness::SendMode::Normal,
         };
         let images = harlo_core::phone::images(&msg["images"]);

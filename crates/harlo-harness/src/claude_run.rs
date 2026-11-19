@@ -102,6 +102,9 @@ struct State {
     queued: Vec<Held>,
     /// Stopped by you: what's queued doesn't follow.
     aborted: bool,
+    /// Stopped by you to send this instead: it goes when the stopped turn
+    /// ends.
+    instead: Option<Held>,
     /// Text the current turn showed (a `result` with none shows its own).
     turn_text: bool,
     /// Subagents, by the id of the Task / Agent call that started them (as
@@ -606,7 +609,10 @@ async fn read_stdout(s: Arc<Shared>, stdout: tokio::process::ChildStdout, genera
         s.emit(HarnessEvent::Settled);
     }
     // It can't send what was waiting: say so, and what.
-    let held = std::mem::take(&mut s.state.lock().unwrap().queued);
+    let held: Vec<Held> = {
+        let mut st = s.state.lock().unwrap();
+        st.instead.take().into_iter().chain(std::mem::take(&mut st.queued)).collect()
+    };
     if !held.is_empty() {
         held_changed(&s);
         let texts: Vec<String> = held.into_iter().map(|h| h.text).collect();
@@ -842,8 +848,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
     match ty.as_str() {
         "prompt" => reply(true, prompt(shared, &cmd).await, ""),
         "remove_queued_message" => {
-            let text = cmd["message"].as_str().unwrap_or_default();
-            let removed = take_held(shared, text).is_some();
+            let removed = take_held(shared, cmd["message"].as_str().unwrap_or_default()).is_some();
             if removed {
                 held_changed(shared);
             }
@@ -865,6 +870,7 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
             abort(shared).await;
             reply(true, Value::Null, "");
         }
+        "abort_and_prompt" => reply(true, stop_and_send(shared, &cmd).await, ""),
         "get_state" => reply(true, state(shared), ""),
         "get_session_stats" => reply(true, stats(shared), ""),
         "get_available_models" => reply(true, models(shared), ""),
@@ -944,14 +950,34 @@ async fn command(shared: &Arc<Shared>, pending: &Pending, cmd: Value) {
     }
 }
 
-/// A message: sent now (into the turn under way, when steering), or held for after this turn.
-async fn prompt(shared: &Arc<Shared>, cmd: &Value) -> Value {
+/// Stops the turn under way and sends this message when it has ended
+/// (nothing running: sends it now).
+async fn stop_and_send(shared: &Arc<Shared>, cmd: &Value) -> Value {
+    let running = shared.state.lock().unwrap().running;
+    if !running {
+        return prompt(shared, cmd).await;
+    }
     let text = cmd["message"].as_str().unwrap_or_default().to_owned();
+    let content = content_of(cmd, &text);
+    shared.state.lock().unwrap().instead = Some(Held { text, content });
+    abort(shared).await;
+    json!({ "disposition": "queued" })
+}
+
+/// A command's message as Claude's content: its pictures, then `text`.
+fn content_of(cmd: &Value, text: &str) -> Vec<Value> {
     let mut content = vec![];
     for img in cmd["images"].as_array().into_iter().flatten() {
         content.push(json!({ "type": "image", "source": { "type": "base64", "media_type": img["mimeType"], "data": img["data"] } }));
     }
     content.push(json!({ "type": "text", "text": text }));
+    content
+}
+
+/// A message: sent now (into the turn under way, when steering), or held for after this turn.
+async fn prompt(shared: &Arc<Shared>, cmd: &Value) -> Value {
+    let text = cmd["message"].as_str().unwrap_or_default().to_owned();
+    let content = content_of(cmd, &text);
     // For after this turn: it waits here, and shows as waiting.
     let hold = cmd["streamingBehavior"] == "followUp" && {
         let mut st = shared.state.lock().unwrap();
@@ -1325,7 +1351,10 @@ async fn turn_result(shared: &Arc<Shared>, frame: &Value) {
         // What was waiting for this turn: the run goes on with it.
         let next = {
             let mut st = shared.state.lock().unwrap();
-            let next = (!std::mem::take(&mut st.aborted) && !out_of_limit && !st.queued.is_empty()).then(|| st.queued.remove(0));
+            // (Stopped to send another: that one, whatever else waits.)
+            let instead = st.instead.take();
+            let aborted = std::mem::take(&mut st.aborted);
+            let next = instead.or_else(|| (!aborted && !out_of_limit && !st.queued.is_empty()).then(|| st.queued.remove(0)));
             st.running = next.is_some();
             next
         };
@@ -2225,6 +2254,28 @@ mod tests {
         command(&shared, &pending, json!({ "type": "promote_queued_message", "message": "after a stop" })).await;
         assert!(shared.state.lock().unwrap().queued.is_empty());
         assert!(shared.state.lock().unwrap().messages.iter().any(|m| m.to_string().contains("after a stop")));
+    }
+
+    /// Stop and send: the turn stops, the message goes when it has ended,
+    /// and what was queued stays queued.
+    #[tokio::test]
+    async fn stop_and_send_sends_once_the_stopped_turn_ends() {
+        let (shared, _rx) = shared();
+        let pending: Pending = Arc::default();
+        shared.state.lock().unwrap().running = true;
+        command(&shared, &pending, json!({ "type": "prompt", "message": "waiting", "streamingBehavior": "followUp" })).await;
+        command(&shared, &pending, json!({ "type": "abort_and_prompt", "message": "instead" })).await;
+        {
+            let st = shared.state.lock().unwrap();
+            assert!(st.aborted, "the turn is stopped");
+            assert!(!st.messages.iter().any(|m| m.to_string().contains("instead")), "not before the turn ends");
+        };
+        incoming(&shared, json!({ "type": "result", "subtype": "error_during_execution", "errors": [] })).await;
+        let st = shared.state.lock().unwrap();
+        assert!(st.running, "it goes on with the new message");
+        assert!(st.messages.iter().any(|m| m.to_string().contains("instead")));
+        assert_eq!(st.queued.len(), 1, "what was queued stays");
+        assert!(!st.aborted);
     }
 
     /// The conversation isn't kept: it's the transcript as it was read when

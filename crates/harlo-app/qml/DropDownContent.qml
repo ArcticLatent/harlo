@@ -95,7 +95,7 @@ Rectangle {
             session: activeSession
             onSubmitted: (text, mode) => {
                 const busy = activeSession.status === "busy"
-                activeSession.send(text, busy ? (mode === "steer" ? "steer" : "followUp") : "normal")
+                activeSession.send(text, busy ? (mode === "steer" || mode === "stopAndSend" ? mode : "followUp") : "normal")
                 composer.text = ""
                 transcript.scrollToEnd()
             }

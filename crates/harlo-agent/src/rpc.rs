@@ -64,6 +64,8 @@ struct Shared {
     /// What get_state and get_messages say (also while a run has the agent).
     view: Mutex<View>,
     inbox: Arc<Mutex<Inbox>>,
+    /// Steering held until the turn would end (the agent's).
+    hold_steering: Arc<std::sync::atomic::AtomicBool>,
     /// The run working, if any: its stop.
     running: Mutex<Option<CancellationToken>>,
     /// Settings changed while a run had the agent: applied when it ends.
@@ -71,7 +73,7 @@ struct Shared {
     /// The plan's models.
     models: Mutex<Vec<providers::ModelInfo>>,
     /// The session's subagents running (`task`), by id.
-    subagents: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    subagents: crate::task::Running,
     /// Starts a run for background commands that ended, when none is
     /// going (set once the agent is shared).
     wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -214,7 +216,7 @@ impl Gate for Approvals {
             // (An MCP server's tool that may change things: as bash, but
             // not in plan mode.)
             let mcp = name.starts_with(crate::mcp::PREFIX);
-            if plan && (mcp || matches!(name.as_str(), "write" | "edit" | "apply_patch")) {
+            if plan && (mcp || matches!(name.as_str(), "write" | "edit" | "apply_patch" | "rename" | crate::ast::EDIT)) {
                 return Err(anyhow::Error::msg(if mcp { PLAN_REFUSAL_MCP } else { PLAN_REFUSAL }));
             }
             // Outside the sandbox: asked every time, in every mode.
@@ -226,7 +228,7 @@ impl Gate for Approvals {
             let ask = match approval.as_str() {
                 _ if free => false,
                 // (What's fetched can carry what's in the project away.)
-                "write" => matches!(name.as_str(), "bash" | "fetch" | "run_code") || mcp,
+                "write" => matches!(name.as_str(), "bash" | "fetch" | "run_code" | crate::debug::NAME) || mcp,
                 _ => true,
             };
             if !ask || sh.always.lock().unwrap().contains(&name) {
@@ -248,6 +250,8 @@ impl Gate for Approvals {
                 }
                 "edit" => format!("{} ({} change{})", args["path"].as_str().unwrap_or_default(), args["edits"].as_array().map_or(0, Vec::len), if args["edits"].as_array().map_or(0, Vec::len) == 1 { "" } else { "s" }),
                 "apply_patch" => crate::patch::parse(args["input"].as_str().unwrap_or_default()).map(|ops| ops.iter().map(crate::patch::Op::path).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+                crate::debug::NAME => format!("{} {}", args["action"].as_str().unwrap_or_default(), args["program"].as_str().or(args["expression"].as_str()).unwrap_or_default()),
+                crate::ast::EDIT => format!("{} → {}\nin {}", args["pattern"].as_str().unwrap_or_default(), args["rewrite"].as_str().unwrap_or_default(), args["path"].as_str().unwrap_or("the project")),
                 _ => args["path"].as_str().unwrap_or_default().to_owned(),
             };
             sh.emit(json!({
@@ -359,6 +363,7 @@ pub async fn serve(keep: Keep, model: Option<String>, effort: Option<String>, ha
         next_harlo: AtomicU64::new(0),
         view: Mutex::default(),
         inbox: Arc::clone(&agent.inbox),
+        hold_steering: Arc::clone(&agent.hold_steering),
         running: Mutex::default(),
         pending: Mutex::default(),
         models: Mutex::default(),
@@ -488,23 +493,30 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             if busy && ty == "prompt" && behavior.is_empty() {
                 return reply(Err(anyhow::Error::msg("A run is working: steer it or queue a follow-up.")));
             }
-            if busy {
-                queue(sh, if ty == "prompt" { behavior == "steer" } else { ty == "steer" }, text(), images());
+            // (Queued only while a run works, checked as it's queued: a run
+            // that just ended starts one for it instead.)
+            if (ty != "prompt" || !behavior.is_empty()) && queue(sh, if ty == "prompt" { behavior == "steer" } else { ty == "steer" }, text(), images()) {
                 return reply(Ok(Value::Null));
             }
             reply(start(sh, agent, Some((text(), images()))).await.map(|()| Value::Null));
         }
-        "abort" => {
-            if let Some(stop) = sh.running.lock().unwrap().as_ref() {
-                stop.cancel();
-            }
+        // Stop, then this message: the run ends and the next starts with
+        // it (what was queued stays queued, after it).
+        "abort_and_prompt" => {
+            let queued = {
+                let mut inbox = sh.inbox.lock().unwrap();
+                let running = sh.running.lock().unwrap();
+                running.as_ref().inspect(|stop| {
+                    inbox.steering.insert(0, crate::agent::Queued { text: text(), images: images() });
+                    stop.cancel();
+                }).is_some()
+            };
             sh.withdraw();
-            reply(Ok(Value::Null));
-        }
-        "clear_queue" => {
-            let (steering, follow_up) = std::mem::take(&mut *sh.inbox.lock().unwrap()).texts();
-            sh.queue_update();
-            reply(Ok(json!({ "steering": steering, "followUp": follow_up })));
+            if queued {
+                sh.queue_update();
+                return reply(Ok(Value::Null));
+            }
+            reply(start(sh, agent, Some((text(), images()))).await.map(|()| Value::Null));
         }
         "extension_ui_response" => {
             let ui = cmd["id"].as_str().unwrap_or_default();
@@ -531,8 +543,75 @@ async fn handle(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
             drop(m);
             reply(Ok(Value::Null));
         }
-        _ => reply(answer(sh, agent, root, cwd, &cmd, busy).await),
+        _ => match queue_command(sh, &cmd) {
+            Some(result) => reply(result),
+            None => reply(answer(sh, agent, root, cwd, &cmd, busy).await),
+        },
     }
+}
+
+/// The queue's commands: Stop (what was queued comes back), one message
+/// out or moved to steering, how steering goes in, and the queue cleared.
+/// None: not one of them.
+fn queue_command(sh: &Shared, cmd: &Value) -> Option<anyhow::Result<Value>> {
+    let text = cmd["message"].as_str().unwrap_or_default().to_owned();
+    Some(match cmd["type"].as_str().unwrap_or_default() {
+        // Stop: the run ends, and what was queued for it comes back (to
+        // go back into the user's draft), images included.
+        "abort" => {
+            let withdrawn = {
+                let mut inbox = sh.inbox.lock().unwrap();
+                if let Some(stop) = sh.running.lock().unwrap().as_ref() {
+                    stop.cancel();
+                }
+                std::mem::take(&mut *inbox)
+            };
+            sh.withdraw();
+            let back = withdrawn_json(&withdrawn);
+            if !withdrawn.steering.is_empty() || !withdrawn.follow_up.is_empty() {
+                sh.queue_update();
+                sh.emit(json!({ "type": "queue_withdrawn", "steering": back["steering"], "followUp": back["followUp"] }));
+            }
+            Ok(back)
+        }
+        // One queued message out, or a follow-up moved to steering: the
+        // rest stay as they are.
+        "remove_queued_message" => {
+            let taken = sh.inbox.lock().unwrap().take(cmd["queue"].as_str().unwrap_or("followUp"), &text);
+            let Some(m) = taken else { return Some(Ok(json!({ "removed": false }))) };
+            sh.queue_update();
+            let mut data = json!({ "removed": true });
+            if !m.images.is_empty() {
+                data["images"] = json!(m.images);
+            }
+            Ok(data)
+        }
+        "promote_queued_message" => {
+            let promoted = {
+                let mut inbox = sh.inbox.lock().unwrap();
+                let m = inbox.take("followUp", &text);
+                m.map(|m| inbox.steering.push(m)).is_some()
+            };
+            if promoted {
+                sh.queue_update();
+            }
+            Ok(json!({ "promoted": promoted }))
+        }
+        // Steering at once (after the call running now) or at the turn's end.
+        "set_interrupt_mode" => match cmd["mode"].as_str() {
+            Some(m @ ("immediate" | "wait")) => {
+                sh.hold_steering.store(m == "wait", Ordering::Relaxed);
+                Ok(Value::Null)
+            }
+            _ => Err(anyhow::Error::msg("The mode is immediate or wait.")),
+        },
+        "clear_queue" => {
+            let (steering, follow_up) = std::mem::take(&mut *sh.inbox.lock().unwrap()).texts();
+            sh.queue_update();
+            Ok(json!({ "steering": steering, "followUp": follow_up }))
+        }
+        _ => return None,
+    })
 }
 
 /// A command answered with a result: what's asked for, or what changed.
@@ -562,13 +641,25 @@ async fn answer(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, root: 
         "get_subagents" => Ok(json!({ "subagents": [] })),
         "cancel_subagent" => {
             let id = cmd["subagentId"].as_str().unwrap_or_default();
-            let token = sh.subagents.lock().unwrap().get(id).cloned();
+            let token = sh.subagents.lock().unwrap().get(id).map(|(t, _)| t.clone());
             if let Some(t) = &token {
                 t.cancel();
             }
             Ok(json!({ "cancelled": token.is_some() }))
         }
-        "steer_subagent" => Err(anyhow::Error::msg("Harlo's subagents can't be steered: cancel one, or wait for its answer.")),
+        // A message for a subagent: it goes in at its next step.
+        "steer_subagent" => {
+            let id = cmd["subagentId"].as_str().unwrap_or_default();
+            let message = cmd["message"].as_str().map(str::trim).filter(|m| !m.is_empty());
+            match (sh.subagents.lock().unwrap().get(id), message) {
+                (_, None) => Err(anyhow::Error::msg("Say what to tell it.")),
+                (None, _) => Err(anyhow::Error::msg(format!("No subagent {id} is running (it may have finished)."))),
+                (Some((_, inbox)), Some(m)) => {
+                    inbox.lock().unwrap().steering.push(crate::agent::Queued { text: m.to_owned(), images: Vec::new() });
+                    Ok(json!({ "steered": true }))
+                }
+            }
+        }
         "new_session" => new_session(sh, agent, root, cwd, busy).await,
         // The session from just before one of your messages, in the same
         // file (what you send next is a new branch; the old one stays): its
@@ -594,6 +685,7 @@ fn state_json(sh: &Shared, busy: bool) -> Value {
         "messageCount": v.messages.len(),
         "pendingMessageCount": inbox.steering.len() + inbox.follow_up.len(),
         "steeringMode": "all",
+        "interruptMode": if sh.hold_steering.load(Ordering::Relaxed) { "wait" } else { "immediate" },
         "followUpMode": "one-at-a-time",
         "autoCompactionEnabled": false,
         "todoPhases": crate::todo::phases(&v.messages),
@@ -768,13 +860,26 @@ async fn fork_before(sh: &Shared, agent: &Arc<tokio::sync::Mutex<Agent>>, cmd: &
     Ok(json!({ "text": text, "cancelled": false }))
 }
 
-fn queue(sh: &Shared, steer: bool, text: String, images: Vec<Value>) {
+/// Queues a message for the run working (false: none works, so it isn't).
+/// Checked under the inbox's lock, which a run also holds as it ends, so a
+/// message is either queued in time for it or starts a run of its own.
+fn queue(sh: &Shared, steer: bool, text: String, images: Vec<Value>) -> bool {
     {
         let mut inbox = sh.inbox.lock().unwrap();
+        if sh.running.lock().unwrap().is_none() {
+            return false;
+        }
         let m = crate::agent::Queued { text, images };
         if steer { inbox.steering.push(m) } else { inbox.follow_up.push(m) }
     }
     sh.queue_update();
+    true
+}
+
+/// Messages taken off the queue, as harlo gets them back: text and images.
+fn withdrawn_json(inbox: &Inbox) -> Value {
+    let list = |q: &[crate::agent::Queued]| q.iter().map(|m| json!({ "text": m.text, "images": m.images })).collect::<Vec<_>>();
+    json!({ "steering": list(&inbox.steering), "followUp": list(&inbox.follow_up) })
 }
 
 /// The plan's models, listed once. A session with no model yet gets the
@@ -814,7 +919,7 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
     a.known.add(sh.models.lock().unwrap().iter());
     let stop = CancellationToken::new();
     *sh.running.lock().unwrap() = Some(stop.clone());
-    let sh = Arc::clone(sh);
+    let (sh, agent) = (Arc::clone(sh), Arc::clone(agent));
     // (Typed, it's a run as a prompt's is; asked for, only the command's answer.)
     let typed = reply_to.is_none();
     tokio::spawn(async move {
@@ -832,7 +937,12 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
             Compacted::Failed(e) => Err(anyhow::Error::msg(e)),
         };
         drop(a);
-        *sh.running.lock().unwrap() = None;
+        // (A message queued meanwhile: a run for it, after.)
+        let next = {
+            let mut inbox = sh.inbox.lock().unwrap();
+            *sh.running.lock().unwrap() = None;
+            inbox.next()
+        };
         if let Some(id) = reply_to {
             let mut r = json!({ "type": "response", "command": "compact", "id": id, "success": result.is_ok() });
             match result {
@@ -848,6 +958,12 @@ async fn compact_now(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, f
         if typed {
             sh.emit(json!({ "type": "agent_end", "messages": [] }));
             sh.emit(json!({ "type": "agent_settled" }));
+        }
+        if let Some(m) = next {
+            sh.queue_update();
+            if let Err(e) = start(&sh, &agent, Some((m.text, m.images))).await {
+                sh.emit(json!({ "type": "notice", "level": "error", "message": format!("{e:#}") }));
+            }
         }
     });
 }
@@ -909,7 +1025,7 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: O
         }
         a.model = m;
     }
-    let stop = CancellationToken::new();
+    let mut stop = CancellationToken::new();
     *sh.running.lock().unwrap() = Some(stop.clone());
     *sh.aside.lock().unwrap() = a.aside_parts().await;
     let sh = Arc::clone(sh);
@@ -917,30 +1033,51 @@ async fn start(sh: &Arc<Shared>, agent: &Arc<tokio::sync::Mutex<Agent>>, what: O
         sh.emit(json!({ "type": "agent_start" }));
         let shown = Arc::clone(&sh);
         let mut show = |s: Shown| shown.show(&s);
-        let result = match &what {
-            Some((prompt, images)) => a.run(prompt, images, &stop, &mut show).await,
-            None => a.wake(&stop, &mut show).await,
-        };
-        if let Err(e) = result {
-            let _ = a.failed(&format!("{e:#}"), &mut show);
-        }
-        // What was changed while it ran.
-        let p = std::mem::take(&mut *sh.pending.lock().unwrap());
-        if let Some(m) = p.model {
-            a.model = m;
-        }
-        // ("off": none.)
-        if let Some(e) = p.effort {
-            a.effort = (e != "off").then_some(e);
-        }
-        if let Some(n) = p.name {
-            let _ = a.rename(&n);
+        let mut what = what;
+        loop {
+            let result = match &what {
+                Some((prompt, images)) => a.run(prompt, images, &stop, &mut show).await,
+                None => a.wake(&stop, &mut show).await,
+            };
+            if let Err(e) = result {
+                let _ = a.failed(&format!("{e:#}"), &mut show);
+            }
+            // What was changed while it ran.
+            let p = std::mem::take(&mut *sh.pending.lock().unwrap());
+            if let Some(m) = p.model {
+                a.model = m;
+            }
+            // ("off": none.)
+            if let Some(e) = p.effort {
+                a.effort = (e != "off").then_some(e);
+            }
+            if let Some(n) = p.name {
+                let _ = a.rename(&n);
+            }
+            // A message queued after the turn's last look at the queue (or
+            // after a Stop): the run goes on with it. Otherwise it ends,
+            // under the queue's lock, so nothing is queued for it after.
+            let next = {
+                let mut inbox = sh.inbox.lock().unwrap();
+                let next = inbox.next();
+                let mut running = sh.running.lock().unwrap();
+                if next.is_some() {
+                    stop = CancellationToken::new();
+                    *running = Some(stop.clone());
+                } else {
+                    *running = None;
+                }
+                next
+            };
+            let Some(m) = next else { break };
+            sh.queue_update();
+            sh.withdraw();
+            what = Some((m.text, m.images));
         }
         let ended_since = a.has_notices();
         let _ = a.settle_side();
         drop(a);
         sh.withdraw();
-        *sh.running.lock().unwrap() = None;
         sh.emit(json!({ "type": "agent_end", "messages": [] }));
         sh.emit(json!({ "type": "agent_settled" }));
         // (A command that ended as the run finished: told now.)

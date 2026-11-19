@@ -170,8 +170,21 @@ pub fn command(command: &str, cwd: &Path, sandbox: Option<&Sandbox>) -> Command 
 /// variables).
 /// `stop`: the user stopping the turn ends it too, and what it printed so
 /// far comes back.
-pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path, sandbox: Option<&Sandbox>, stop: Option<&tokio_util::sync::CancellationToken>) -> (String, bool) {
+/// How long a command runs before it may step aside for a message from
+/// the user (a quick one just finishes).
+const ASIDE_AFTER: Duration = Duration::from_secs(2);
+
+/// A foreground command stepping aside: once `now` is cancelled (a message
+/// from the user is waiting) and it has run [`ASIDE_AFTER`], it goes on as
+/// a job of `jobs`, so the message gets in.
+pub struct Aside<'a> {
+    pub jobs: &'a std::sync::Arc<crate::jobs::Jobs>,
+    pub now: &'a tokio_util::sync::CancellationToken,
+}
+
+pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Path, sandbox: Option<&Sandbox>, stop: Option<&tokio_util::sync::CancellationToken>, aside: Option<Aside<'_>>) -> (String, bool) {
     let secs = timeout.filter(|t| *t > 0).unwrap_or(DEFAULT_TIMEOUT);
+    let started = std::time::Instant::now();
     let mut cmd = self::command(command, cwd, sandbox);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -203,15 +216,30 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
             None => std::future::pending().await,
         }
     };
-    let (status, timed_out, by_user) = tokio::select! {
+    let step_aside = async {
+        match &aside {
+            Some(a) => {
+                a.now.cancelled().await;
+                tokio::time::sleep(ASIDE_AFTER.saturating_sub(started.elapsed())).await;
+                // (No room for another job: it stays, and the message waits.)
+                if !a.jobs.has_room() {
+                    std::future::pending::<()>().await;
+                }
+            }
+            None => std::future::pending().await,
+        }
+    };
+    // (None: it steps aside.)
+    let ended = tokio::select! {
         biased;
         () = stopped => {
             group.kill(libc::SIGTERM);
             tokio::time::sleep(Duration::from_millis(300)).await;
             group.kill(libc::SIGKILL);
-            (None, false, true)
+            Some((None, false, true))
         }
-        r = tokio::time::timeout(Duration::from_secs(secs), work) => match r {
+        () = step_aside => None,
+        r = tokio::time::timeout(Duration::from_secs(secs), work) => Some(match r {
             Ok(s) => (s.ok(), false, false),
             Err(_) => {
                 group.kill(libc::SIGTERM);
@@ -219,7 +247,21 @@ pub async fn run(command: &str, cwd: &Path, timeout: Option<u64>, spill_dir: &Pa
                 group.kill(libc::SIGKILL);
                 (None, true, false)
             }
-        },
+        }),
+    };
+    let Some((status, timed_out, by_user)) = ended else {
+        // It goes on as a job, its output so far heading the job's (past
+        // what's kept, the end).
+        let so_far: Vec<u8> = if got.spill.is_some() { got.tail.iter().copied().collect() } else { got.all.clone() };
+        let left = secs.saturating_sub(started.elapsed().as_secs());
+        let printed = if got.total == 0 { "It printed nothing yet.".to_owned() } else { format!("What it printed so far:\n{}", got.shown(spill_dir)) };
+        if let Some(a) = &aside
+            && let Some((id, log)) = a.jobs.adopt(command, child, (out, err), left, &so_far)
+        {
+            group.0 = None;
+            return (format!("A message from the user came in while this ran, so it went on in the background as {id} (output in {}); you'll be told when it ends. {printed}", log.display()), false);
+        }
+        return (format!("A message from the user came in while this ran, and it couldn't go on in the background, so it was stopped with everything it started. It may have partly run. {printed}"), true);
     };
     // Finished: anything it left in the background goes too.
     group.kill(libc::SIGKILL);
@@ -323,12 +365,12 @@ mod tests {
     #[tokio::test]
     async fn runs_without_waiting_for_input() {
         let dir = std::env::temp_dir();
-        let (out, failed) = run("echo hi; echo err >&2; echo \"$PAGER $GIT_EDITOR $GIT_TERMINAL_PROMPT\"", &dir, None, &dir, None, None).await;
+        let (out, failed) = run("echo hi; echo err >&2; echo \"$PAGER $GIT_EDITOR $GIT_TERMINAL_PROMPT\"", &dir, None, &dir, None, None, None).await;
         assert!(!failed && out.contains("hi") && out.contains("err") && out.contains("cat false 0"), "{out}");
         // Reading stdin gets end-of-input, not a hang.
-        let (out, _) = run("read x; echo \"got:$x\"", &dir, Some(5), &dir, None, None).await;
+        let (out, _) = run("read x; echo \"got:$x\"", &dir, Some(5), &dir, None, None, None).await;
         assert!(out.contains("got:"), "{out}");
-        let (out, failed) = run("exit 3", &dir, None, &dir, None, None).await;
+        let (out, failed) = run("exit 3", &dir, None, &dir, None, None, None).await;
         assert!(failed && out.contains("[exit code 3]"));
     }
 
@@ -337,7 +379,7 @@ mod tests {
         let dir = std::env::temp_dir();
         let marker = dir.join(format!("harlo-agent-bg-{}", std::process::id()));
         let cmd = format!("(sleep 3; touch {}) & sleep 30", marker.display());
-        let (out, failed) = run(&cmd, &dir, Some(1), &dir, None, None).await;
+        let (out, failed) = run(&cmd, &dir, Some(1), &dir, None, None, None).await;
         assert!(failed && out.contains("stopped after 1 seconds"), "{out}");
         tokio::time::sleep(Duration::from_secs(4)).await;
         assert!(!marker.exists(), "the background child was left running");
@@ -346,9 +388,9 @@ mod tests {
     #[tokio::test]
     async fn a_timeout_keeps_what_was_printed() {
         let dir = std::env::temp_dir();
-        let (out, failed) = run("echo 'error: E0308 mismatched types'; sleep 30", &dir, Some(1), &dir, None, None).await;
+        let (out, failed) = run("echo 'error: E0308 mismatched types'; sleep 30", &dir, Some(1), &dir, None, None, None).await;
         assert!(failed && out.contains("stopped after 1 seconds") && out.contains("What it printed:") && out.contains("error: E0308"), "{out}");
-        let (out, _) = run("sleep 30", &dir, Some(1), &dir, None, None).await;
+        let (out, _) = run("sleep 30", &dir, Some(1), &dir, None, None, None).await;
         assert!(out.contains("It printed nothing."), "{out}");
     }
 
@@ -364,7 +406,7 @@ mod tests {
         });
         let started = std::time::Instant::now();
         let cmd = format!("echo 'step 1 of 3 done'; (sleep 3; touch {}) & sleep 30", marker.display());
-        let (out, failed) = run(&cmd, &dir, None, &dir, None, Some(&stop)).await;
+        let (out, failed) = run(&cmd, &dir, None, &dir, None, Some(&stop), None).await;
         assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
         assert!(failed && out.contains("the user stopped the turn") && out.contains("What it printed:") && out.contains("step 1 of 3 done"), "{out}");
         tokio::time::sleep(Duration::from_secs(4)).await;
@@ -388,7 +430,7 @@ mod tests {
         let spill = std::env::temp_dir().join(format!("harlo-agent-spill-{}", std::process::id()));
         // 20 MiB of lines, then the line that matters.
         let cmd = "yes 0123456789012345678901234567890123456789012345678901234567890123 | head -c 20971520; echo; echo 'FINAL: test x failed'";
-        let (out, failed) = run(cmd, &std::env::temp_dir(), Some(60), &spill, None, None).await;
+        let (out, failed) = run(cmd, &std::env::temp_dir(), Some(60), &spill, None, None, None).await;
         assert!(!failed && out.contains("FINAL: test x failed") && !out.contains("not kept"), "the real end shown: {}", &out[out.len().saturating_sub(300)..]);
         let file = out.split("The whole output is in ").nth(1).and_then(|r| r.split(' ').next()).expect("a file");
         let saved = std::fs::read(file).unwrap();
@@ -422,10 +464,10 @@ mod tests {
         std::fs::create_dir_all(&proj).unwrap();
         let p = crate::sandbox::Policy { on: true, network: false, writable: Vec::new(), hidden: Vec::new(), env: Vec::new() };
         let sb = Sandbox::new(&p, &proj, &home, &home.join("none"), None);
-        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY][$PAGER]\"", &proj, None, &root, Some(&sb), None).await;
+        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY][$PAGER]\"", &proj, None, &root, Some(&sb), None, None).await;
         assert!(out.contains("[][cat]"), "{out}");
         // (Outside the sandbox, the command has it: the key really was set.)
-        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY]\"", &proj, None, &root, None, None).await;
+        let (out, _) = run("echo \"[$HARLO_TEST_API_KEY]\"", &proj, None, &root, None, None, None).await;
         assert!(out.contains("[k]"), "{out}");
     }
 
@@ -446,14 +488,14 @@ mod tests {
         std::fs::write(home.join(".ssh/id"), "secret-key").unwrap();
         let p = crate::sandbox::Policy { on: true, network: false, writable: Vec::new(), hidden: Vec::new(), env: Vec::new() };
         let sb = Sandbox::new(&p, &proj, &home, &home.join("none"), None);
-        let (out, failed) = run("echo a > made && cat made && echo t > /tmp/harlo-agent-sb-t && rm /tmp/harlo-agent-sb-t", &proj, None, &root, Some(&sb), None).await;
+        let (out, failed) = run("echo a > made && cat made && echo t > /tmp/harlo-agent-sb-t && rm /tmp/harlo-agent-sb-t", &proj, None, &root, Some(&sb), None, None).await;
         assert!(!failed && out.contains('a'), "{out}");
-        let (out, failed) = run("echo x > ../other/f", &proj, None, &root, Some(&sb), None).await;
+        let (out, failed) = run("echo x > ../other/f", &proj, None, &root, Some(&sb), None, None).await;
         assert!(failed && out.contains("Read-only"), "{out}");
-        let (out, _) = run("cat ../.ssh/id; ls -A ../.ssh | wc -l", &proj, None, &root, Some(&sb), None).await;
+        let (out, _) = run("cat ../.ssh/id; ls -A ../.ssh | wc -l", &proj, None, &root, Some(&sb), None, None).await;
         assert!(!out.contains("secret-key") && out.ends_with('0'), "{out}");
         let marker = std::env::temp_dir().join(format!("harlo-agent-sb-bg-{}", std::process::id()));
-        let (out, failed) = run(&format!("(sleep 3; touch {}) & sleep 30", marker.display()), &proj, Some(1), &root, Some(&sb), None).await;
+        let (out, failed) = run(&format!("(sleep 3; touch {}) & sleep 30", marker.display()), &proj, Some(1), &root, Some(&sb), None, None).await;
         assert!(failed && out.contains("stopped after 1 seconds"), "{out}");
         tokio::time::sleep(Duration::from_secs(4)).await;
         assert!(!marker.exists(), "the background child was left running");

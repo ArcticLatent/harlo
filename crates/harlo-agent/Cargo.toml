@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 harlo-okf.workspace = true
+harlo-index.workspace = true
 anyhow.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -21,6 +22,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", 
 tokio-util.workspace = true
 reqwest = { workspace = true, features = ["http2", "rustls-tls", "json", "stream"] }
 futures-util.workspace = true
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 httpdate.workspace = true
 sha2.workspace = true
 base64.workspace = true

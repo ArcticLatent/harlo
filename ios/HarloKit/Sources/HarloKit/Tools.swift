@@ -74,6 +74,13 @@ public enum ToolName {
         case "todo", "todowrite", "todoread": return pick("Updating the todos", "Updated the todos")
         case "run_code": return pick("Running a program", "Ran a program")
         case "lsp": return pick("Looking up the code", "Looked up the code")
+        case "ast_grep": return pick("Searching the code's structure", "Searched the code's structure")
+        case "ast_edit": return pick("Rewriting by structure", "Rewrote by structure")
+        case "rename": return pick("Renaming a symbol", "Renamed a symbol")
+        case "locate": return pick("Locating in the code", "Located in the code")
+        case "debug": return pick("Debugging", "Debugged")
+        case "memory": return pick("Keeping a note", "Kept a note")
+        case "wait": return pick("Waiting for subagents", "Waited for subagents")
         case "current_time": return "Checked the time"
         case "ask", "askuserquestion": return pick("Asking you", "Asked you")
         case "mcp_resources": return pick("Reading a server's resources", "Read a server's resources")
@@ -104,6 +111,11 @@ public enum ToolName {
         case "todo", "todowrite", "todoread": return "checklist"
         case "run_code": return "chevron.left.forwardslash.chevron.right"
         case "lsp": return "curlybraces"
+        case "ast_grep", "locate": return "magnifyingglass"
+        case "ast_edit", "rename": return "pencil.line"
+        case "debug": return "ladybug"
+        case "memory": return "note.text"
+        case "wait": return "person.2"
         case "current_time": return "clock"
         case "ask", "askuserquestion": return "questionmark.bubble"
         case "mcp_resources": return "tray.full"

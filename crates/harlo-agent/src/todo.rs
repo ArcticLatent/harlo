@@ -3,7 +3,9 @@
 //! session's todos (`todoPhases` in `get_state`). Offered only when
 //! `HARLO_AGENT_TODO=on`: measured on the longest tasks against none, it
 //! passed as often but took 67% more requests and 68% more tokens (each
-//! update is a round of its own), so it's off by default.
+//! update was a round of its own), so it's off by default. Updates now go
+//! beside other calls (a list sent alone is told so), and a turn ending
+//! with steps still open is reminded once.
 
 // Rust guideline compliant 2026-10-09
 
@@ -22,7 +24,8 @@ pub fn on() -> bool {
 pub fn spec() -> Value {
     json!({
         "type": "function", "name": "todo", "strict": false,
-        "description": "Your list of steps for this task, shown to the user. For a task of three or more steps: write the list when you start, then call it again (with the whole list) as each step starts and ends; one step in_progress at a time. Not for a task of one or two steps.",
+        "description": "Your list of steps for this task, shown to the user. For a task of three or more steps: write the list when you start, then call it again (with the whole list) as each step starts and ends; one step in_progress at a time. Not for a task of one or two steps. \
+                        Never call it alone: send it in the same turn as your next other calls (a turn of its own costs a whole request).",
         "parameters": { "type": "object", "properties": { "todos": { "type": "array", "items": { "type": "object", "properties": {
             "content": { "type": "string", "description": "The step, in a few words" },
             "status": { "type": "string", "enum": STATUSES },
@@ -58,6 +61,19 @@ pub fn run(args: &Value) -> Outcome {
         many => _ = write!(text, " {} steps are in progress; one at a time is clearer.", many.len()),
     }
     Outcome::new(text, false)
+}
+
+/// Added to the result of a list sent with no other call.
+pub const ALONE: &str = " Next time, send the list beside your other calls: alone, it cost a whole request.";
+
+/// At the end of a turn whose list still has `open` steps.
+pub fn open_note(open: usize) -> String {
+    format!("[harlo] Your todo list still has {open} open step{}. If the task isn't done, keep working on them; if it is, just give your final answer (no list update needed).", if open == 1 { "" } else { "s" })
+}
+
+/// How many steps of the latest list in `messages` aren't completed.
+pub fn open(messages: &[Value]) -> usize {
+    phases(messages)[0]["tasks"].as_array().into_iter().flatten().filter(|t| t["status"] != "completed").count()
 }
 
 /// The latest list in `messages` (from the last `todo` call that worked),
@@ -99,5 +115,6 @@ mod tests {
         let p = phases(&messages);
         assert_eq!(p[0]["tasks"][1], json!({ "content": "write the parser", "status": "in_progress" }), "the last list that worked");
         assert_eq!(phases(&[]), json!([]));
+        assert_eq!((open(&messages[..2]), open(&[])), (2, 0), "open steps of the last list that worked");
     }
 }

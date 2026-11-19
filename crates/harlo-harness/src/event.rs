@@ -117,6 +117,9 @@ pub enum HarnessEvent {
     Compaction { started: bool, reason: Option<String>, error: Option<String> },
     Retry { started: bool, attempt: u64, max_attempts: u64, error: Option<String> },
     QueueChanged { steering: Vec<String>, follow_up: Vec<String> },
+    /// Stopped with messages queued: they're given back (each its text and
+    /// images, steering first).
+    QueueWithdrawn(Vec<(String, Vec<Value>)>),
     /// A subagent started, progressed or ended (the frame, for its id).
     SubagentActivity(Value),
     /// harlo-agent calling one of harlo's tools on its pipe (answered with
@@ -255,6 +258,13 @@ impl Translator {
                 steering: string_list(&frame["steering"]),
                 follow_up: string_list(&frame["followUp"]),
             },
+            "queue_withdrawn" => E::QueueWithdrawn(
+                ["steering", "followUp"]
+                    .iter()
+                    .flat_map(|k| frame[*k].as_array().cloned().unwrap_or_default())
+                    .map(|m| (str_of(&m, "text"), m["images"].as_array().cloned().unwrap_or_default()))
+                    .collect(),
+            ),
             "session_info_changed" => E::Renamed(opt_str(&frame, "name")),
             "thinking_level_changed" => E::ThinkingLevel(
                 opt_str(&frame, "level").or_else(|| opt_str(&frame, "thinkingLevel")).unwrap_or_default(),

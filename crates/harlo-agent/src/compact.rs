@@ -13,6 +13,9 @@
 //!   used. The files read and changed are listed by code, across
 //!   compactions. In the log: a `compaction` entry, as pi writes it; the
 //!   messages before stay in the file.
+//! - After: in the messages kept, a whole file's read that's read whole
+//!   again later says so instead of its text ([`elide`]). They're sent as
+//!   a new start then anyway, so nothing cached is lost.
 
 // Rust guideline compliant 2026-10-09
 
@@ -40,6 +43,35 @@ pub fn threshold(window: u64) -> u64 {
     }
     // (A small window: a quarter of it held back.)
     window.saturating_sub(RESERVE.min(window / 4))
+}
+
+/// What an earlier read of a file read whole again says instead of its text.
+pub const READ_AGAIN: &str = "[This file was read again later: see that read.]";
+
+/// Shortens, in `kept`, each successful whole-file read of a path read
+/// whole again later (and successfully); how many it shortened.
+pub fn elide(kept: &mut [Value]) -> usize {
+    // (Each read call: its id and path, whole or not.)
+    let mut reads: Vec<(String, String, bool)> = Vec::new();
+    for b in kept.iter().filter(|m| m["role"] == "assistant").flat_map(|m| m["content"].as_array().into_iter().flatten()).filter(|b| b["type"] == "toolCall" && b["name"] == "read") {
+        let a = &b["arguments"];
+        let path = a["path"].as_str().unwrap_or_default().trim().trim_start_matches("./").to_owned();
+        let whole = a["offset"].is_null() && a["limit"].is_null() && !path.rsplit_once(':').is_some_and(|(_, r)| r.chars().next().is_some_and(|c| c.is_ascii_digit() || c == '-'));
+        reads.push((b["id"].as_str().unwrap_or_default().to_owned(), path, whole));
+    }
+    let ok: BTreeSet<&str> = kept.iter().filter(|m| m["role"] == "toolResult" && m["toolName"] == "read" && m["isError"] != true).filter_map(|m| m["toolCallId"].as_str()).collect();
+    let superseded: BTreeSet<String> = reads
+        .iter()
+        .enumerate()
+        .filter(|(i, (id, path, whole))| *whole && ok.contains(id.as_str()) && reads[i + 1..].iter().any(|(later, p, w)| *w && p == path && ok.contains(later.as_str())))
+        .map(|(_, (id, _, _))| id.clone())
+        .collect();
+    let mut n = 0;
+    for m in kept.iter_mut().filter(|m| m["role"] == "toolResult" && m["toolCallId"].as_str().is_some_and(|id| superseded.contains(id))) {
+        m["content"] = serde_json::json!([{ "type": "text", "text": READ_AGAIN }]);
+        n += 1;
+    }
+    n
 }
 
 /// How much of the newest conversation to keep for a threshold.
@@ -295,6 +327,30 @@ pub fn overflowed(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_read_superseded_by_a_later_whole_read_is_shortened() {
+        let call = |id: &str, args: Value| serde_json::json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": id, "name": "read", "arguments": args }] });
+        let result = |id: &str, text: &str, error: bool| serde_json::json!({ "role": "toolResult", "toolCallId": id, "toolName": "read", "content": [{ "type": "text", "text": text }], "isError": error });
+        let mut kept = vec![
+            call("a", serde_json::json!({ "path": "src/x.rs" })),
+            result("a", "old text", false),
+            call("b", serde_json::json!({ "path": "src/y.rs:5-9" })),
+            result("b", "y lines", false),
+            call("c", serde_json::json!({ "path": "./src/x.rs" })),
+            result("c", "new text", false),
+            call("d", serde_json::json!({ "path": "src/y.rs" })),
+            result("d", "y whole", false),
+            call("e", serde_json::json!({ "path": "src/z.rs" })),
+            result("e", "z", false),
+            call("f", serde_json::json!({ "path": "src/z.rs" })),
+            result("f", "missing", true),
+        ];
+        assert_eq!(elide(&mut kept), 1);
+        assert_eq!(kept[1]["content"][0]["text"], READ_AGAIN);
+        // (A range read, the newest read, and a read whose later one failed stay.)
+        assert_eq!((kept[3]["content"][0]["text"].as_str(), kept[5]["content"][0]["text"].as_str(), kept[9]["content"][0]["text"].as_str()), (Some("y lines"), Some("new text"), Some("z")));
+    }
 
     #[test]
     fn a_native_compactions_note_names_the_requests() {

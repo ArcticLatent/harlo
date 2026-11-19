@@ -1,8 +1,10 @@
-harlo-index (harlo's code index) is built with tree-sitter and these
-tree-sitter grammars, each under the MIT License below. Copyright holders,
+harlo-index (harlo's code index) is built with tree-sitter, these
+tree-sitter grammars and ast-grep-core (structural search and edit), each
+under the MIT License below. Copyright holders,
 from each crate's LICENSE file (or, where it ships none, its listed authors):
 
 - tree-sitter 0.27, tree-sitter-language 0.1: Copyright (c) 2018 Max Brunsfeld
+- ast-grep-core 0.51: Copyright (c) 2022 Herrington Darkholme
 - tree-sitter-bash 0.25: Copyright (c) 2017 Max Brunsfeld
 - tree-sitter-c 0.24: Copyright (c) 2014 Max Brunsfeld
 - tree-sitter-c-sharp 0.23: Copyright (c) 2014-2023 Max Brunsfeld, Damien Guard, Amaan Qureshi, and contributors

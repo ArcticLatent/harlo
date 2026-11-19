@@ -255,6 +255,8 @@ impl Log {
                     ids = vec![id];
                     messages.extend(kept_messages);
                     ids.extend(kept_ids);
+                    // (As the compaction left them.)
+                    crate::compact::elide(&mut messages[1..]);
                     let list = |k: &str| e["details"][k].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_owned)).collect();
                     files = (list("readFiles"), list("modifiedFiles"));
                 }

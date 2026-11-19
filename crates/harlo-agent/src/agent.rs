@@ -34,6 +34,23 @@ fn max_rounds() -> usize {
     std::env::var("HARLO_AGENT_MAX_ROUNDS").ok().and_then(|v| v.trim().parse().ok()).filter(|n| *n > 0).unwrap_or(MAX_ROUNDS)
 }
 
+/// Whether steering waits for the turn's end (`HARLO_AGENT_STEERING=wait`)
+/// rather than going in after the call running now.
+fn holds_steering() -> bool {
+    std::env::var("HARLO_AGENT_STEERING").is_ok_and(|v| v.trim() == "wait")
+}
+
+/// A call whose arguments couldn't be read.
+const BAD_ARGS: &str = "The arguments weren't valid JSON; call the tool again.";
+
+/// A wait the model asked for, cut short by a message from the user.
+const WAIT_CUT: &str = "Stopped waiting: a message from the user came in (it follows). What you waited for goes on; wait again if you still need it.";
+
+/// Whether a call only waits (a message from the user ends it at once).
+fn only_waits(name: &str, args: &Value) -> bool {
+    (name == "jobs" || name == crate::debug::NAME) && args["action"] == "wait"
+}
+
 /// The round a run is told to wrap up at: four fifths of the way, when
 /// the cap isn't tiny.
 fn wrap_up_round(max: usize) -> Option<usize> {
@@ -45,6 +62,15 @@ const ROUNDS_NOTE: &str = "[harlo] You're near the most rounds of tool calls one
 
 /// In place of each call in a reply cut off at the length limit.
 const CUT_OFF: &str = "Not run: your reply was cut off at the length limit before this call was complete. Make the call again, smaller (write a big file in parts, or change it with edit).";
+
+/// After a reply with no text and no calls: the turn goes on.
+const EMPTY_STOP: &str = "[harlo] Your last reply had no text and no tool call, and the task isn't done. Go on: make the next tool call, or give your final answer.";
+
+/// After a reply cut off at the length limit with no calls: the turn goes on.
+const LENGTH_STOP: &str = "[harlo] Your last reply was cut off at the output limit. Go on from where it stopped, without repeating it. Reason only about the next step; write a big file in parts (a small working version first, then edits).";
+
+/// How many times one turn goes on after an empty or cut-off reply.
+const STOP_NUDGES: u8 = 2;
 
 /// Left in the history when the user stops a turn.
 const STOPPED_NOTE: &str = "<turn_stopped>The user stopped this turn. A call marked interrupted was stopped partway and may have partly run: check its effects before relying on them.</turn_stopped>";
@@ -231,8 +257,14 @@ pub struct Launch {
     pub task_model: Option<String>,
     /// `--budget`: the most tokens the session may use.
     pub budget: Option<u64>,
-    /// `--fallback`: what it goes on with when the plan's used up.
+    /// `--fallback`: what it goes on with when the plan's used up, or its
+    /// server keeps failing (several: each in turn, `a,b`).
     pub fallback: Option<String>,
+    /// `--small-model`: what its side requests run on (judging a prompt's
+    /// level, locate's judge); None: its own model.
+    pub small_model: Option<String>,
+    /// `--advisor`: the model that reviews each turn before it ends.
+    pub advisor: Option<String>,
 }
 
 /// A session's token budget: tokens sent and received, not counting those
@@ -450,7 +482,9 @@ impl Launch {
         let mut value = |name: &str| rest.next().filter(|v| !v.is_empty()).ok_or_else(|| anyhow::anyhow!("{name} needs a value"));
         match arg {
             "--task-model" => self.task_model = Some(crate::providers::full(&value(arg)?)),
-            "--fallback" => self.fallback = Some(crate::providers::full(&value(arg)?)),
+            "--fallback" => self.fallback = Some(value(arg)?.split(',').map(str::trim).filter(|m| !m.is_empty()).map(crate::providers::full).collect::<Vec<_>>().join(",")),
+            "--small-model" => self.small_model = Some(crate::providers::full(&value(arg)?)),
+            "--advisor" => self.advisor = Some(crate::providers::full(&value(arg)?)),
             "--budget" => {
                 let v = value(arg)?;
                 self.budget = Some(parse_tokens(&v).ok_or_else(|| anyhow::anyhow!("--budget takes tokens, as 400k or 2m (not {v})"))?);
@@ -490,6 +524,23 @@ impl Inbox {
     pub fn texts(&self) -> (Vec<String>, Vec<String>) {
         let texts = |q: &[Queued]| q.iter().map(|m| m.text.clone()).collect();
         (texts(&self.steering), texts(&self.follow_up))
+    }
+
+    /// The message to start a run with when none works: the first
+    /// steering message, else the first follow-up.
+    pub fn next(&mut self) -> Option<Queued> {
+        if self.steering.is_empty() {
+            (!self.follow_up.is_empty()).then(|| self.follow_up.remove(0))
+        } else {
+            Some(self.steering.remove(0))
+        }
+    }
+
+    /// Takes the first message in `queue` ("steering", else the follow-ups)
+    /// whose text is `text`.
+    pub fn take(&mut self, queue: &str, text: &str) -> Option<Queued> {
+        let list = if queue == "steering" { &mut self.steering } else { &mut self.follow_up };
+        list.iter().position(|m| m.text == text).map(|at| list.remove(at))
     }
 }
 
@@ -566,8 +617,17 @@ pub struct Agent {
     pub task_model: Option<String>,
     /// Its token budget (`--budget`), shared with its subagents.
     pub budget: Option<Arc<Budget>>,
-    /// What it goes on with when its model's plan is used up (`--fallback`).
+    /// What it goes on with when its model's plan is used up (`--fallback`;
+    /// several, comma-separated, each in turn).
     pub fallback: Option<String>,
+    /// What its side requests run on (`--small-model`, else
+    /// `HARLO_AGENT_SMALL_MODEL`; None: its own model).
+    pub small_model: Option<String>,
+    /// The model that reviews each turn before it ends (`--advisor`, else
+    /// `HARLO_AGENT_ADVISOR`; None: no review).
+    pub advisor: Option<String>,
+    /// The advisor's request failed this session (said once).
+    advisor_failed: bool,
     /// On the fallback: the model it left, and when to try it again (unix s).
     fell_back: Option<(String, i64)>,
     /// Whether the switch after the first change (`HARLO_AGENT_PREWALK`)
@@ -579,7 +639,9 @@ pub struct Agent {
     pub fixed: Option<(String, Value)>,
     pub notify: Option<Notify>,
     /// Its subagents running, by id.
-    pub subagents: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    pub subagents: crate::task::Running,
+    /// Subagents started in the background this turn.
+    pub background: crate::task::Background,
     /// harlo's tools as the model gets them, and what they're for (asked
     /// at each run's start).
     harlo_tools: Vec<Value>,
@@ -587,6 +649,9 @@ pub struct Agent {
     /// MCP servers, once started (at the first prompt; not a subagent's).
     mcp: Option<crate::mcp::Mcp>,
     pub inbox: Arc<Mutex<Inbox>>,
+    /// Steering held until the turn would end (`wait`), instead of going
+    /// in after the call running now (`immediate`, the default).
+    pub hold_steering: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Agent {
@@ -631,16 +696,21 @@ impl Agent {
             task_model: None,
             budget: None,
             fallback: None,
+            small_model: std::env::var("HARLO_AGENT_SMALL_MODEL").ok().map(|m| m.trim().to_owned()).filter(|m| !m.is_empty()).map(|m| crate::providers::full(&m)),
+            advisor: crate::advisor::from_env(),
+            advisor_failed: false,
             fell_back: None,
             prewalked: false,
             cache_key: None,
             fixed: None,
             notify: None,
             subagents: Arc::default(),
+            background: Arc::default(),
             harlo_tools: Vec::new(),
             harlo_text: String::new(),
             mcp: None,
             inbox: Arc::default(),
+            hold_steering: Arc::new(std::sync::atomic::AtomicBool::new(holds_steering())),
         }
     }
 
@@ -779,8 +849,53 @@ impl Agent {
             () = self.ask_harlo() => {}
         }
         self.start_mcp(stop, show).await;
+        // (A word in the prompt, or the judge, may set this turn's level;
+        // the session's comes back after it.)
+        let level = tokio::select! {
+            biased;
+            () = stop.cancelled() => None,
+            l = self.level_for(prompt) => l,
+        };
         self.push_user(prompt, images, show)?;
-        self.turn(stop, show).await
+        if let Some(w) = crate::effort::word(prompt) {
+            self.push(json!({ "role": "custom", "customType": "harlo_word_note", "content": w.note(), "display": false, "timestamp": now_ms() }), show)?;
+        }
+        // (A level other than the session's: said, so it's seen.)
+        if let Some(l) = level.as_deref().filter(|l| self.effort.as_deref() != Some(*l)) {
+            show(Shown::Notice { level: "info", text: &format!("Thinking at {l} for this turn.") });
+        }
+        let session_level = level.map(|l| self.effort.replace(l));
+        let ended = self.turn(stop, show).await;
+        if let Some(l) = session_level {
+            self.effort = l;
+        }
+        ended
+    }
+
+    /// The level this turn runs at, when a word in `prompt` sets one, or
+    /// (judging on, and the model thinks) when one small request judges it.
+    async fn level_for(&mut self, prompt: &str) -> Option<String> {
+        if let Some(w) = crate::effort::word(prompt) {
+            return w.effort().map(str::to_owned);
+        }
+        if !crate::effort::auto() || self.effort.is_none() {
+            return None;
+        }
+        let history = crate::search::history(&prompt.chars().take(crate::effort::JUDGED_CHARS).collect::<String>());
+        let none = json!([]);
+        let key = format!("{}-effort", self.cache_key.as_deref().unwrap_or(&self.log.id));
+        let size = compact::estimate_text(crate::effort::INSTRUCTIONS) + history.iter().map(compact::estimate).sum::<u64>();
+        let (model, pricing) = self.side_model().await;
+        let asked = Asked { model: &model, effort: Some("low"), instructions: crate::effort::INSTRUCTIONS, history: &history, session: &key, specs: &none, tools: false, images: false, trigger: false };
+        let mut tries = Tries::into_ledger(self.budget.as_ref(), size + REPLY_ROOM, size, pricing, "effort", &self.unsettled).ok()?;
+        let mut quiet = |_: Shown| {};
+        let sent = send(asked, &mut quiet, &mut tries).await;
+        self.settle();
+        let (reply, usage) = sent.ok()?;
+        let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
+        self.count(&used, true);
+        let _ = self.log.append(json!({ "type": "harlo_usage", "source": "effort", "usage": used.log(&usage, &pricing) }));
+        crate::effort::judged(&crate::search::findings(&reply)).map(str::to_owned)
     }
 
     /// Works on what the background commands that ended said (a run with
@@ -823,17 +938,23 @@ impl Agent {
         // aside, then (still too long) compacted: 0, 1, 2 steps taken.
         let mut overflow = 0;
         // A helper (harlo gave it report_done): whether it reported (or
-        // asked) in this run, and whether it was reminded to.
+        // asked) in this run.
         let helper = self.harlo_tools.iter().any(|t| t["name"] == "report_done");
-        let (mut handed_over, mut reminded) = (false, false);
+        let mut handed_over = false;
+        let mut notes = EndNotes { from: self.history.len(), ..EndNotes::default() };
+        // (A stopped turn's background subagents: stopped with it.)
+        for (_, h) in std::mem::take(&mut *self.background.lock().unwrap()) {
+            h.abort();
+        }
         // The same call getting the same result, again and again.
         let mut repeats = crate::repeats::Repeats::default();
         let max = max_rounds();
+        // (The plan's routing token is the turn's: a new turn gets its own.)
+        responses::new_turn(self.cache_key.as_deref().unwrap_or(&self.log.id));
         for round in 0..max {
             self.settle_side()?;
             if round > 0 {
-                self.take_steering(show)?;
-                self.take_notices(show)?;
+                self.between_rounds(show)?;
             }
             if Some(round) == wrap_up_round(max) {
                 self.push(json!({ "role": "custom", "customType": "harlo_rounds_note", "content": ROUNDS_NOTE, "display": false, "timestamp": now_ms() }), show)?;
@@ -881,6 +1002,7 @@ impl Agent {
             overflow = 0;
             let calls: Vec<Value> = reply["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "toolCall").cloned().collect();
             let cut_off = reply["stopReason"] == "length";
+            let early = early_stop(&reply);
             self.push(reply, show)?;
             // A reply cut off at the length limit: its calls may be
             // incomplete (a file's content cut short), so none run.
@@ -889,14 +1011,10 @@ impl Agent {
                 continue;
             }
             if calls.is_empty() {
-                if self.take_steering(show)? || self.take_notices(show)? || self.take_follow_up(show)? {
-                    continue;
-                }
-                // A helper ending its turn with no result for its parent:
-                // reminded once (then it ends as it answers).
-                if helper && !handed_over && !reminded {
-                    reminded = true;
-                    self.push(json!({ "role": "custom", "customType": "harlo_report_reminder", "content": REPORT_REMINDER, "display": false, "timestamp": now_ms() }), show)?;
+                if self.background_results(stop, show).await? || self.goes_on(&mut notes, helper && !handed_over, early, show)? || self.reviewed(&mut notes, helper, stop, show).await? {
+                    if stop.is_cancelled() {
+                        return Ok(Ended::Stopped);
+                    }
                     continue;
                 }
                 return Ok(Ended::Done);
@@ -910,7 +1028,7 @@ impl Agent {
             }
             let outcomes = self.run_batch(&ids, &names, &args, stop).await;
             handed_over |= hands_over(&names, &outcomes);
-            let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write" | "apply_patch") && !o.failed);
+            let changed = names.iter().zip(&outcomes).any(|(n, o)| matches!(*n, "edit" | "write" | "apply_patch" | "rename" | crate::ast::EDIT) && !o.failed);
             let (nudge, stuck) = repeated(&mut repeats, changed, &names, &args, &outcomes);
             self.push_results(&calls, &names, outcomes, show)?;
             if let Some((tool, n)) = stuck {
@@ -930,6 +1048,15 @@ impl Agent {
         bail!("The turn ended after {max} rounds of tool calls, the most one turn may take. Send a message to go on.")
     }
 
+    /// Before a round after the first: the user's steering (unless it waits
+    /// for the turn's end) and harlo's notices go in.
+    fn between_rounds(&mut self, show: &mut (dyn FnMut(Shown) + Send)) -> Result<()> {
+        if !self.hold_steering.load(std::sync::atomic::Ordering::Relaxed) {
+            self.take_steering(show)?;
+        }
+        self.take_notices(show).map(|_| ())
+    }
+
     /// Runs a batch of calls (at once, where they may be).
     async fn run_batch(&mut self, ids: &[&str], names: &[&str], args: &[Value], stop: &CancellationToken) -> Vec<tools::Outcome> {
         let triples: Vec<(&str, &str, &Value)> = ids.iter().copied().zip(names.iter().copied()).zip(args).map(|((i, n), a)| (i, n, a)).collect();
@@ -937,19 +1064,44 @@ impl Agent {
         let task = names.contains(&"task").then(|| self.task_ctx());
         let key = self.cache_key.clone().unwrap_or_else(|| self.log.id.clone());
         let pricing = if names.contains(&crate::search::NAME) { self.pricing().await } else { crate::used::Pricing::Unknown };
+        let (side_model, side_pricing) = if names.contains(&crate::locate::NAME) { self.side_model().await } else { (String::new(), crate::used::Pricing::Unknown) };
+        // Immediate steering: a message from the user, once queued, moves a
+        // long command into the background and ends waits, so it goes in
+        // when the batch is done.
+        let steered = CancellationToken::new();
+        let watching = (!self.hold_steering.load(std::sync::atomic::Ordering::Relaxed)).then(|| {
+            let (inbox, t) = (Arc::clone(&self.inbox), steered.clone());
+            tokio::spawn(async move {
+                while inbox.lock().unwrap().steering.is_empty() {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                t.cancel();
+            })
+        });
         let extra = Extra {
+            steered: watching.as_ref().map(|_| &steered),
             gate: self.gate.as_deref(),
             harlo: self.harlo.as_deref().map(|h| (h, self.harlo_tools.as_slice())),
             allowed: self.allowed,
             task: task.as_ref(),
+            background: Some(&self.background),
             mcp: self.mcp.as_ref(),
             search: Some((&self.model, &key, pricing, self.budget.as_ref(), &self.unsettled)),
+            side: Some((&side_model, &key, side_pricing, self.budget.as_ref(), &self.unsettled)),
         };
         // (The rules sent with the last batch's results are read now.)
         self.tools.batch_starts();
-        let outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
+        let mut outcomes = run_calls(&self.tools, &triples, &extra, stop).await;
+        if let Some(w) = watching {
+            w.abort();
+        }
         // (Searches' tries that failed, finished or stopped.)
         self.settle();
+        if names.iter().all(|n| *n == "todo") {
+            for o in outcomes.iter_mut().filter(|o| !o.failed) {
+                o.text.push_str(crate::todo::ALONE);
+            }
+        }
         outcomes
     }
 
@@ -970,6 +1122,98 @@ impl Agent {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// Whether a reply with no calls, which would end the turn, is followed
+    /// by more: steering, notices or a follow-up that came meanwhile; a
+    /// helper that `owes` its parent a result reminded once; a reply that
+    /// ended early (`early`: its note) sent back to work a few times; a
+    /// todo list with open steps reminded of once.
+    fn goes_on(&mut self, notes: &mut EndNotes, owes: bool, early: Option<&'static str>, show: &mut (dyn FnMut(Shown) + Send)) -> Result<bool> {
+        if self.take_steering(show)? || self.take_notices(show)? || self.take_follow_up(show)? {
+            return Ok(true);
+        }
+        let (kind, content) = if owes && !notes.reminded {
+            notes.reminded = true;
+            ("harlo_report_reminder", REPORT_REMINDER.to_owned())
+        } else if let Some(note) = early
+            && notes.nudged < STOP_NUDGES
+        {
+            notes.nudged += 1;
+            ("harlo_stop_note", note.to_owned())
+        } else if let open @ 1.. = crate::todo::open(self.history.get(notes.from..).unwrap_or_default())
+            && !notes.todo
+        {
+            notes.todo = true;
+            ("harlo_todo_note", crate::todo::open_note(open))
+        } else {
+            return Ok(false);
+        };
+        self.push(json!({ "role": "custom", "customType": kind, "content": content, "display": false, "timestamp": now_ms() }), show)?;
+        Ok(true)
+    }
+
+    /// Background subagents not waited for, when the turn would end: their
+    /// results go to the model (true), and the turn goes on.
+    async fn background_results(&mut self, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<bool> {
+        if self.background.lock().unwrap().is_empty() {
+            return Ok(false);
+        }
+        let out = crate::task::wait(&self.background, None, stop).await;
+        self.count(&Used::from_details(&out.details["usage"]), false);
+        let content = format!("[harlo] Your background subagents finished:\n\n{}", out.text);
+        self.push(json!({ "role": "custom", "customType": "harlo_background_tasks", "content": content, "display": false, "details": out.details, "timestamp": now_ms() }), show)?;
+        Ok(true)
+    }
+
+    /// The advisor's review, once a turn, when one is set (not a helper's).
+    async fn reviewed(&mut self, notes: &mut EndNotes, helper: bool, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<bool> {
+        if notes.advised || helper || self.advisor.is_none() {
+            return Ok(false);
+        }
+        notes.advised = true;
+        self.advise(notes.from, stop, show).await
+    }
+
+    /// The advisor's review of the turn (its messages from `from`): true
+    /// when it had a note, which goes to the model, and the turn goes on.
+    async fn advise(&mut self, from: usize, stop: &CancellationToken, show: &mut (dyn FnMut(Shown) + Send)) -> Result<bool> {
+        let Some(model) = self.advisor.clone() else { return Ok(false) };
+        let start = self.history[..from.min(self.history.len())].iter().rposition(|m| m["role"] == "user").unwrap_or(from).min(from);
+        let text = crate::advisor::transcript(&self.history[start..], &self.tools.cwd);
+        let history = crate::search::history(&text);
+        let none = json!([]);
+        let key = format!("{}-advisor", self.cache_key.as_deref().unwrap_or(&self.log.id));
+        let size = compact::estimate_text(crate::advisor::INSTRUCTIONS) + history.iter().map(compact::estimate).sum::<u64>();
+        let pricing = self.pricing_of(&model).await;
+        let asked = Asked { model: &model, effort: Some("low"), instructions: crate::advisor::INSTRUCTIONS, history: &history, session: &key, specs: &none, tools: false, images: false, trigger: false };
+        let Ok(mut tries) = Tries::into_ledger(self.budget.as_ref(), size + REPLY_ROOM, size, pricing, "advisor", &self.unsettled) else { return Ok(false) };
+        let mut quiet = |_: Shown| {};
+        let sent = tokio::select! {
+            biased;
+            () = stop.cancelled() => None,
+            r = send(asked, &mut quiet, &mut tries) => Some(r),
+        };
+        tries.stopped();
+        self.settle();
+        let (reply, usage) = match sent {
+            Some(Ok(r)) => r,
+            // (A reviewer that can't run: said once a session, not every turn.)
+            Some(Err(e)) => {
+                if !std::mem::replace(&mut self.advisor_failed, true) {
+                    show(Shown::Notice { level: "warning", text: &format!("The reviewer ({model}) couldn't run: {}", sentence(&format!("{e:#}"))) });
+                }
+                return Ok(false);
+            }
+            None => return Ok(false),
+        };
+        let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
+        self.count(&used, true);
+        let _ = self.log.append(json!({ "type": "harlo_usage", "source": "advisor", "usage": used.log(&usage, &pricing) }));
+        let Some(advice) = crate::advisor::advice(&crate::search::findings(&reply)) else { return Ok(false) };
+        // (Shown in the chat as the advice, with the model that gave it.)
+        self.push(json!({ "role": "custom", "customType": "harlo_advisor_note", "content": crate::advisor::note(&advice), "advice": advice, "advisor": model, "display": true, "timestamp": now_ms() }), show)?;
+        Ok(true)
     }
 
     /// A reply cut off at the length limit: its calls may be incomplete (a
@@ -1054,7 +1298,7 @@ impl Agent {
     /// A model chosen meanwhile stays.
     fn back_from_fallback(&mut self, show: &mut (dyn FnMut(Shown) + Send)) {
         let Some((plan, at)) = self.fell_back.clone() else { return };
-        if self.fallback.as_deref() != Some(self.model.as_str()) {
+        if !self.fallbacks().contains(&self.model.as_str()) {
             self.fell_back = None;
             return;
         }
@@ -1070,13 +1314,34 @@ impl Agent {
     /// Whether `e` moves the session to its fallback: the plan used up, or
     /// a server that kept failing through the retries (when it reset, if
     /// it said). Never for a refusal that names the request or the sign-in.
-    fn falls_back(&self, e: &anyhow::Error) -> Option<i64> {
-        self.fallback.as_deref().filter(|f| *f != self.model)?;
+    fn falls_back(&self, e: &anyhow::Error) -> Option<(String, i64)> {
+        let next = self.next_fallback()?;
         let now = crate::clock::now().unix;
-        match crate::retry::used_up(e) {
-            Some(at) => Some(at.unwrap_or(now + 3600)),
-            None => crate::retry::transient(e).map(|_| now),
-        }
+        let back = match crate::retry::used_up(e) {
+            Some(at) => at.unwrap_or(now + 3600),
+            None => crate::retry::transient(e).map(|_| now)?,
+        };
+        Some((next, back))
+    }
+
+    /// The fallback models, in order.
+    fn fallbacks(&self) -> Vec<&str> {
+        self.fallback.as_deref().map(|f| f.split(',').filter(|m| !m.is_empty()).collect()).unwrap_or_default()
+    }
+
+    /// The model to go on with now: the first fallback, or the one after
+    /// the fallback it's on (None: none left).
+    fn next_fallback(&self) -> Option<String> {
+        let chain = self.fallbacks();
+        let from = chain.iter().position(|m| *m == self.model).map_or(0, |i| i + 1);
+        chain.get(from..)?.iter().find(|m| **m != self.model && self.fell_back.as_ref().is_none_or(|(plan, _)| plan != *m)).map(|m| (*m).to_owned())
+    }
+
+    /// The model side requests run on, with its pricing.
+    async fn side_model(&mut self) -> (String, crate::used::Pricing) {
+        let model = self.small_model.clone().unwrap_or_else(|| self.model.clone());
+        let pricing = self.pricing_of(&model).await;
+        (model, pricing)
     }
 
     /// One request with the history: the reply, as pi's assistant message.
@@ -1100,12 +1365,15 @@ impl Agent {
         // (Tries cut off or failed spent what they say, retried or not.)
         self.settle();
         let (mut message, usage) = match sent {
-            Err(e) if let Some(back) = self.falls_back(&e) => {
-                // Goes on with the fallback: said, and in the log.
-                let (plan, fb) = (self.model.clone(), self.fallback.clone().unwrap_or_default());
+            Err(e) if let Some((fb, back)) = self.falls_back(&e) => {
+                // Goes on with the fallback: said, and in the log. (From one
+                // fallback to the next, the plan's model is still the one
+                // to go back to.)
+                let left = self.model.clone();
+                let plan = self.fell_back.as_ref().map_or_else(|| left.clone(), |(p, _)| p.clone());
                 show(Shown::Withdrawn);
                 let when = if back > crate::clock::now().unix + 60 { "once its limit resets" } else { "with the next prompt" };
-                show(Shown::Notice { level: "warning", text: &format!("{plan}: {} Going on with {fb}; {plan} is tried again {when}.", sentence(&format!("{e:#}"))) });
+                show(Shown::Notice { level: "warning", text: &format!("{left}: {} Going on with {fb}; {plan} is tried again {when}.", sentence(&format!("{e:#}"))) });
                 self.fell_back = Some((plan, back));
                 self.model = fb;
                 let (provider, id) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
@@ -1160,6 +1428,8 @@ impl Agent {
             budget: self.budget.clone(),
             fallback: self.fallback.clone(),
             lsp: Arc::clone(&self.tools.lsp),
+            small_model: self.small_model.clone(),
+            background: Arc::clone(&self.background),
             // (The conversation before the reply that asked for them.)
             fork: crate::task::forks().then(|| {
                 let before = self.history.len().saturating_sub(1);
@@ -1171,6 +1441,12 @@ impl Agent {
     pub fn launch(&mut self, l: &Launch) {
         self.task_model.clone_from(&l.task_model);
         self.fallback.clone_from(&l.fallback);
+        if l.small_model.is_some() {
+            self.small_model.clone_from(&l.small_model);
+        }
+        if l.advisor.is_some() {
+            self.advisor.clone_from(&l.advisor);
+        }
         // (What the session used before, when it goes on.)
         self.budget = l.budget.map(|limit| Arc::new(Budget { limit, spent: crate::session::used(&self.log.path).billed().into(), ..Budget::default() }));
     }
@@ -1327,10 +1603,31 @@ impl Agent {
             // project's language.)
             if self.allowed.is_none_or(|a| a.contains(&"lsp")) && crate::lsp::offered(&self.cwd) {
                 list.push(crate::lsp::spec());
+                // (Renames through it, where changes may be made.)
+                if self.allowed.is_none_or(|a| a.contains(&"edit")) {
+                    list.push(crate::lsp::rename_spec());
+                }
             }
             // (The code index, when the project has it on.)
             if self.allowed.is_none_or(|a| a.contains(&crate::lookup::NAME)) && crate::lookup::offered() {
                 list.push(crate::lookup::spec());
+            }
+            // (Notes for later sessions, when they're on: the session's own.)
+            if crate::memory::on() && self.allowed.is_none() {
+                list.push(crate::memory::spec());
+            }
+            // (A debugger, when it's on: it runs the program, as bash does.)
+            if crate::debug::on() && self.allowed.is_none_or(|a| a.contains(&"bash")) {
+                list.push(crate::debug::spec());
+            }
+            // (Structural search and rewrite, when they're on.)
+            if crate::ast::offered() {
+                if self.allowed.is_none_or(|a| a.contains(&crate::ast::GREP) || a.contains(&"grep")) {
+                    list.push(crate::ast::grep_spec());
+                }
+                if self.allowed.is_none_or(|a| a.contains(&"edit")) {
+                    list.push(crate::ast::edit_spec());
+                }
             }
             if let Some(m) = self.mcp.as_ref().filter(|_| self.allowed.is_none()) {
                 list.extend(m.specs().iter().cloned());
@@ -1472,11 +1769,17 @@ impl Agent {
     /// price the file or its server's list gives (asked of it once), or
     /// unknown.
     async fn pricing(&mut self) -> crate::used::Pricing {
-        let Ok((p, id)) = providers::resolve(&self.model) else { return crate::used::Pricing::Unknown };
-        if !p.is_plan() && !self.known.prices.contains_key(&self.model) {
+        let model = self.model.clone();
+        self.pricing_of(&model).await
+    }
+
+    /// `model`'s pricing (`provider/model`).
+    async fn pricing_of(&mut self, model: &str) -> crate::used::Pricing {
+        let Ok((p, id)) = providers::resolve(model) else { return crate::used::Pricing::Unknown };
+        if !p.is_plan() && !self.known.prices.contains_key(model) {
             self.ask_models().await;
         }
-        p.pricing(&id, self.known.prices.get(&self.model).copied().flatten())
+        p.pricing(&id, self.known.prices.get(model).copied().flatten())
     }
 
     /// Whether the context is past where old outputs are set aside: how
@@ -1652,6 +1955,7 @@ impl Agent {
             Err(e) => return failed(show, format!("{e:#}")),
         };
         self.history[0] = crate::session::summary_message(&entry);
+        compact::elide(&mut self.history[1..]);
         self.ids[0] = id;
         let after = self.estimate_whole();
         self.last_usage = json!({ "input_tokens": after, "output_tokens": 0 });
@@ -1800,6 +2104,8 @@ impl Agent {
     fn splice_summary(&mut self, entry: &Value, cut: usize, files: (Vec<String>, Vec<String>)) -> Result<u64> {
         let id = self.log.append(entry.clone())?;
         self.history.splice(..cut, [crate::session::summary_message(entry)]);
+        // (The rest starts a new cached prefix now: reads read again later shortened.)
+        compact::elide(&mut self.history[1..]);
         self.tools.rules_seen_in(&self.history);
         self.ids.splice(..cut, [id]);
         self.files = files;
@@ -1961,8 +2267,12 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), seen: &mu
     if !a.tools {
         body["tool_choice"] = json!("none");
     }
+    if provider.sign() == Some(crate::auth::Sign::Codex) {
+        responses::instructions_in_input(&mut body);
+    }
     // (The plan's affinity headers keep a session's requests where its cache is.)
     let affinity = provider.is_plan().then_some(a.session);
+    let socket = provider.sign() == Some(crate::auth::Sign::Codex) && crate::socket::on();
     let mut force = false;
     loop {
         let token = provider.token(force).await?;
@@ -1971,7 +2281,7 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), seen: &mu
         let mut items = Vec::new();
         let mut done: Option<(Value, Vec<Value>)> = None;
         let mut blocks = Blocks::default();
-        let result = responses::stream(&provider.base_url, token.as_deref(), affinity, &headers, &body, |ev| match ev {
+        let result = responses::stream(&provider.base_url, token.as_deref(), affinity, &headers, &body, socket, |ev| match ev {
             responses::Event::Item { index, item } => {
                 if let Some(end) = blocks.end(index, &item, &pid, &model) {
                     show(Shown::Stream(&end));
@@ -1999,7 +2309,11 @@ async fn send_once(a: Asked<'_>, show: &mut (dyn FnMut(Shown) + Send), seen: &mu
                 let (usage, output) = done.unwrap_or_default();
                 // The completed response's own list when it has one.
                 let items = if output.is_empty() { items } else { output };
-                return Ok((responses::assistant_message(&items, &pid, &model, &usage), usage));
+                let message = responses::assistant_message(&items, &pid, &model, &usage);
+                // (So the next request, when it builds on this, sends only
+                // what's new.)
+                socket.then(|| crate::socket::replied(a.session, responses::input(std::slice::from_ref(&message), &pid, &model, a.images)));
+                return Ok((message, usage));
             }
             // The plan's token, refused: refreshed once.
             Err(e) if provider.is_plan() && !force && e.downcast_ref::<responses::ApiError>().is_some_and(|a| a.status == 401) => force = true,
@@ -2080,14 +2394,21 @@ type SearchUse<'a> = (&'a str, &'a str, crate::used::Pricing, Option<&'a Arc<Bud
 /// What a round's calls may go through besides the tools themselves.
 #[derive(Default)]
 struct Extra<'a> {
+    /// Cancelled when a message from the user is queued (immediate
+    /// steering): waits end, long commands step aside.
+    steered: Option<&'a CancellationToken>,
     gate: Option<&'a dyn Gate>,
     harlo: Option<(&'a dyn Harlo, &'a [Value])>,
     /// A subagent's tools (None: all).
     allowed: Option<&'a [&'a str]>,
     task: Option<&'a crate::task::Ctx>,
+    /// Subagents started in the background, for `wait`.
+    background: Option<&'a crate::task::Background>,
     mcp: Option<&'a crate::mcp::Mcp>,
     /// The session's model, cache key, pricing and budget, for web searches.
     search: Option<SearchUse<'a>>,
+    /// The same with its side requests' model (locate's judge).
+    side: Option<SearchUse<'a>>,
 }
 
 impl Extra<'_> {
@@ -2132,12 +2453,54 @@ async fn web_search(args: &Value, model: &str, key: &str, pricing: crate::used::
     }
 }
 
+/// `locate`: the windows its lexical pass keeps, scored by one low-effort
+/// request to the session's model (see [`crate::locate`]).
+async fn locate(args: &Value, tools: &Tools, model: &str, key: &str, pricing: crate::used::Pricing, budget: Option<&Arc<Budget>>, ledger: &Ledger) -> tools::Outcome {
+    if let Some(why) = crate::locate::refused(args) {
+        return tools::Outcome::new(why, true);
+    }
+    let query = args["query"].as_str().unwrap_or_default().trim();
+    let root = args["path"].as_str().filter(|p| !p.trim().is_empty()).map_or_else(|| tools.cwd.clone(), |p| tools.cwd.join(p));
+    let files = crate::locate::files(&tools.cwd, &root).await;
+    let windows = crate::locate::windows(&files, &crate::locate::words(query, &crate::locate::keywords(args)));
+    if windows.is_empty() {
+        return tools::Outcome::new("None of the project's files has those words: give keywords (names you'd expect), or grep.", false);
+    }
+    let history = crate::search::history(&crate::locate::question(query, &windows));
+    let key = format!("{key}-locate");
+    let none = json!([]);
+    let asked = Asked { model, effort: Some("low"), instructions: crate::locate::INSTRUCTIONS, history: &history, session: &key, specs: &none, tools: false, images: false, trigger: false };
+    let size = compact::estimate_text(crate::locate::INSTRUCTIONS) + history.iter().map(compact::estimate).sum::<u64>();
+    let mut tries = match Tries::into_ledger(budget, size + REPLY_ROOM, size, pricing, "locate", ledger) {
+        Ok(t) => t,
+        Err(why) => return tools::Outcome::new(format!("{why:#}"), true),
+    };
+    let mut quiet = |_: Shown| {};
+    match send(asked, &mut quiet, &mut tries).await {
+        Ok((reply, usage)) => {
+            let used = Used::from_api(&usage).estimating(&usage, size, compact::estimate(&reply)).priced(&pricing);
+            if let Some(b) = budget {
+                b.spent.fetch_add(used.billed(), std::sync::atomic::Ordering::Relaxed);
+            }
+            let mut o = tools::Outcome::new(crate::locate::hits(&crate::search::findings(&reply), &windows), false);
+            o.details = json!({ "usage": used.details() });
+            o
+        }
+        Err(e) => tools::Outcome::new(format!("locate failed: {e:#}"), true),
+    }
+}
+
 /// A call of ours or of an MCP server's.
-async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, search: Option<SearchUse<'_>>, name: &str, args: &Value) -> tools::Outcome {
+async fn call_tool(tools: &Tools, mcp: Option<&crate::mcp::Mcp>, (search, side): (Option<SearchUse<'_>>, Option<SearchUse<'_>>), name: &str, args: &Value) -> tools::Outcome {
     if name == crate::search::NAME
         && let Some((model, key, pricing, budget, ledger)) = search
     {
         return web_search(args, model, key, pricing, budget, ledger).await;
+    }
+    if name == crate::locate::NAME
+        && let Some((model, key, pricing, budget, ledger)) = side.or(search)
+    {
+        return locate(args, tools, model, key, pricing, budget, ledger).await;
     }
     if name == "run_code" {
         let mut specs: Vec<Value> = tools::specs().as_array().cloned().unwrap_or_default();
@@ -2235,6 +2598,34 @@ async fn confirm_danger(tools: &Tools, gate: Option<&dyn Gate>, name: &str, args
     }
 }
 
+/// Calls that only look, run at once. Stopped, the calls that finished
+/// keep what they found, and what they spent; only the rest are
+/// interrupted.
+async fn run_read_only(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<'_>, stop: &CancellationToken) -> Vec<tools::Outcome> {
+    let mcp = extra.mcp;
+    let done: Vec<std::sync::Mutex<Option<tools::Outcome>>> = calls.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    let all = join_all(calls.iter().zip(&done).map(|((_, name, args), slot)| async move {
+        // (A wait: cut short by a message from the user.)
+        let cut_short = extra.steered.filter(|_| only_waits(name, args));
+        let o = if args.is_null() {
+            tools::Outcome::new(BAD_ARGS, true)
+        } else {
+            tokio::select! {
+                biased;
+                () = cut_short.map_or_else(|| futures_util::future::Either::Left(std::future::pending()), |t| futures_util::future::Either::Right(t.cancelled())) => tools::Outcome::new(WAIT_CUT, false),
+                o = call_tool(tools, mcp, (extra.search, extra.side), name, args) => o,
+            }
+        };
+        *slot.lock().unwrap() = Some(o);
+    }));
+    tokio::select! {
+        biased;
+        () = stop.cancelled() => {}
+        _ = all => {}
+    }
+    done.into_iter().map(|slot| slot.into_inner().unwrap().unwrap_or_else(|| tools::Outcome::new(INTERRUPTED, true))).collect()
+}
+
 /// `calls`: (id, name, arguments).
 async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<'_>, stop: &CancellationToken) -> Vec<tools::Outcome> {
     // (An MCP tool called through mcp_call, when they're listed, is that
@@ -2243,30 +2634,18 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
     let resolved: Vec<Option<(String, Value)>> = calls.iter().map(|(_, n, a)| extra.mcp.and_then(|m| m.resolve(n, a))).collect();
     let calls: Vec<(&str, &str, &Value)> = calls.iter().zip(&resolved).map(|(&(id, n, a), r)| r.as_ref().map_or((id, n, a), |(n, a)| (id, n.as_str(), a))).collect();
     let calls = calls.as_slice();
-    let bad_args = || tools::Outcome::new("The arguments weren't valid JSON; call the tool again.", true);
+    let bad_args = || tools::Outcome::new(BAD_ARGS, true);
     let cut = |text: &str| tools::Outcome::new(text, true);
     let (gate, harlo) = (extra.gate, extra.harlo);
     // (A subagent's: only its own.)
     // (apply_patch is edit when it's offered in its place.)
     // (web_search goes with fetch.)
     let not_here = |name: &str| {
-        extra.allowed.is_some_and(|only| !(only.contains(&name) || (name == "apply_patch" && only.contains(&"edit")) || (name == crate::search::NAME && only.contains(&"fetch"))))
+        extra.allowed.is_some_and(|only| !(only.contains(&name) || (matches!(name, "apply_patch" | "rename" | crate::ast::EDIT) && only.contains(&"edit")) || (name == crate::ast::GREP && only.contains(&"grep")) || (name == crate::debug::NAME && only.contains(&"bash")) || (name == crate::search::NAME && only.contains(&"fetch"))))
     };
     let mcp = extra.mcp;
     if calls.iter().all(|(_, n, _)| extra.read_only(n) && !not_here(n)) {
-        // (Stopped: the calls that finished keep what they found, and what
-        // they spent; only the rest are interrupted.)
-        let done: Vec<std::sync::Mutex<Option<tools::Outcome>>> = calls.iter().map(|_| std::sync::Mutex::new(None)).collect();
-        let all = join_all(calls.iter().zip(&done).map(|((_, name, args), slot)| async move {
-            let o = if args.is_null() { bad_args() } else { call_tool(tools, mcp, extra.search, name, args).await };
-            *slot.lock().unwrap() = Some(o);
-        }));
-        tokio::select! {
-            biased;
-            () = stop.cancelled() => {}
-            _ = all => {}
-        }
-        return done.into_iter().map(|slot| slot.into_inner().unwrap().unwrap_or_else(|| cut(INTERRUPTED))).collect();
+        return run_read_only(tools, calls, extra, stop).await;
     }
     let mut out = Vec::new();
     for (id, name, args) in calls {
@@ -2303,6 +2682,18 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
             out.push(crate::task::run(args, id, ctx, stop).await);
             continue;
         }
+        if *name == crate::task::WAIT
+            && let Some(bg) = extra.background
+        {
+            let ids = args["ids"].as_array().map(|a| a.iter().filter_map(|i| i.as_str().map(str::to_owned)).collect::<Vec<_>>()).filter(|i| !i.is_empty());
+            let waited = tokio::select! {
+                biased;
+                () = extra.steered.map_or_else(|| futures_util::future::Either::Left(std::future::pending()), |t| futures_util::future::Either::Right(t.cancelled())) => tools::Outcome::new(WAIT_CUT, false),
+                o = crate::task::wait(bg, ids, stop) => o,
+            };
+            out.push(waited);
+            continue;
+        }
         // A command that can't be undone: asked about in every mode (and
         // then not asked again), refused with no one to ask.
         let confirmed = match confirm_danger(tools, gate, name, args, stop).await {
@@ -2331,13 +2722,16 @@ async fn run_calls(tools: &Tools, calls: &[(&str, &str, &Value)], extra: &Extra<
         }
         // A command: stopped, it says what it printed so far.
         if *name == "bash" && !mcp.is_some_and(|m| m.has(name)) {
-            out.push(tools.bash(args, Some(stop)).await);
+            // (A subagent's can't go to the background.)
+            out.push(tools.bash(args, Some(stop), extra.steered.filter(|_| extra.allowed.is_none())).await);
             continue;
         }
+        let cut_short = extra.steered.filter(|_| only_waits(name, args));
         let ran = tokio::select! {
             biased;
             () = stop.cancelled() => None,
-            o = call_tool(tools, mcp, extra.search, name, args) => Some(o),
+            () = cut_short.map_or_else(|| futures_util::future::Either::Left(std::future::pending()), |t| futures_util::future::Either::Right(t.cancelled())) => Some(tools::Outcome::new(WAIT_CUT, false)),
+            o = call_tool(tools, mcp, (extra.search, extra.side), name, args) => Some(o),
         };
         out.push(ran.unwrap_or_else(|| cut(INTERRUPTED)));
     }
@@ -2397,6 +2791,35 @@ fn hands_over(names: &[&str], outcomes: &[tools::Outcome]) -> bool {
     names.iter().zip(outcomes).any(|(n, o)| HAND_OVERS.contains(n) && !o.failed)
 }
 
+/// Notes a turn has added at its end so far.
+#[derive(Default)]
+struct EndNotes {
+    /// Where the turn's messages start in the history (its todo list is
+    /// its own).
+    from: usize,
+    /// A helper reminded to report.
+    reminded: bool,
+    /// Replies that ended early, sent back to work.
+    nudged: u8,
+    /// Reminded of the todo list's open steps.
+    todo: bool,
+    /// Reviewed by the advisor.
+    advised: bool,
+}
+
+/// The note sending a reply that ended its turn early back to work: one
+/// cut off at the length limit, or one with nothing to show.
+fn early_stop(reply: &Value) -> Option<&'static str> {
+    let said = reply["content"].as_array().into_iter().flatten().any(|b| b["type"] == "text" && b["text"].as_str().is_some_and(|t| !t.trim().is_empty()));
+    if reply["stopReason"] == "length" {
+        Some(LENGTH_STOP)
+    } else if said {
+        None
+    } else {
+        Some(EMPTY_STOP)
+    }
+}
+
 /// What harlo is asked for its tools, and for what they're for.
 pub const HARLO_TOOLS: &str = "_tools";
 pub const HARLO_INSTRUCTIONS: &str = "_instructions";
@@ -2435,12 +2858,36 @@ fn instruction_parts(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> [
     let head = String::from(
         "You are harlo-agent, a coding agent. You work in the user's project with your tools, and finish the task you're given.\n\
          \n\
-         - Look before you change: read a file before editing it. When the task names a file, read it; search (grep, find) only when you don't know where something is.\n\
-         - Change files with edit (small, exact replacements) or write (new files). Never edit files through bash.\n\
+         Working:\n\
+         - Each turn costs time: call independent reads, searches and checks together in one turn.\n\
+         - Read a file before editing it: small files whole, large ones in ranges. Never re-read what you already have. When the task names a file, read it; search (grep, find) when you don't know where something is, and never open files you've only guessed at.\n\
+         - Follow the project's existing patterns; don't add a second way of doing something.\n\
+         - Change files with edit (small, exact replacements) or write (new files). Never edit files through bash. When an edit fails or a file changed underneath you, read it again.\n\
          - Run commands with bash to build, test and check your work. Commands can't take input.\n\
          - When a tool fails, read its message: it says what to do next.\n\
-         - Keep going until the task is done, then reply with a short summary of what you changed and anything left open. Be concise.\n",
+         - Never run destructive git commands or delete code the task doesn't touch.\n\
+         \n\
+         Checking:\n\
+         - Run the narrowest check that exercises the change, once. For a question, your answer is the proof: no tests.\n\
+         - Add a test only when no existing one covers the path, and only one that would catch a real bug.\n\
+         - Errors the user reports are facts: don't rerun anything to confirm them.\n\
+         \n\
+         Finishing:\n\
+         - Do the whole task, end to end: no stubs, placeholders or TODOs, and nothing quietly left out. Do no more than asked.\n\
+         - Fix causes, not symptoms: no suppressed errors or special-cased inputs.\n\
+         - Keep going while there's work you can do. Once the change is checked, stop: no extra audits or broad test runs.\n\
+         - Reply with a short summary of what you changed and anything left open. Report only checks you ran; never invent output.\n",
     );
+    let mut head = head;
+    if crate::lsp::offered(cwd) {
+        head.push_str("- Before changing a public function's or type's signature, find its uses (lsp references, or grep). To rename a symbol everywhere, use rename.\n");
+    }
+    if crate::memory::on() {
+        head.push_str("- Learned something non-obvious a later session would need (a command that works, a pitfall, a convention)? Keep it with memory.\n");
+    }
+    if crate::locate::on() {
+        head.push_str("- Don't know where some behaviour is in the code? Describe it to locate first, then read its ranges; grep only for names and strings you know.\n");
+    }
     let mut s = String::new();
     for (path, text) in project_instructions(cwd) {
         let _ = write!(s, "\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim());
@@ -2450,11 +2897,14 @@ fn instruction_parts(cwd: &Path, sandbox: Option<&crate::sandbox::Sandbox>) -> [
         let _ = write!(s, "\n<project_instructions path=\"{}\">\n{}\n</project_instructions>\n", path.display(), text.trim());
     }
     if !scoped.is_empty() {
-        s.push_str("\n<project_rules>\nRules for some of the project's files: read one before you work on the files it's for.\n");
+        s.push_str("\n<project_rules>\nRules for some kinds of work in the project: read one before you do the work it's for.\n");
         for (path, about) in scoped {
             let _ = writeln!(s, "- {} ({about})", path.display());
         }
         s.push_str("</project_rules>\n");
+    }
+    if let Some(notes) = crate::memory::loaded(cwd) {
+        s.push_str(&notes);
     }
     let rules = std::mem::take(&mut s);
     let skills = crate::skills::listing(&crate::skills::find(cwd, &home(), &crate::auth::config_dir()));
@@ -2545,30 +2995,25 @@ fn other_rules(cwd: &Path) -> (RuleFiles, RuleFiles) {
     } else if let Some(t) = std::fs::read_to_string(&cline).ok().and_then(keep) {
         sent.push((cline, t));
     }
-    // Cursor's: always applied, sent; for some files, or asked for by
-    // description, listed.
+    // Cursor's and Claude Code's: always applied, sent; asked for by
+    // description, listed. (Those for some files come with the first tool
+    // result that touches one: see `crate::rules`.)
     let mut scoped = Vec::new();
-    let mut mdc: Vec<PathBuf> = std::fs::read_dir(top.join(".cursor/rules")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "mdc" || e == "md")).collect();
-    mdc.sort();
-    for p in mdc {
-        let Ok(text) = std::fs::read_to_string(&p) else { continue };
-        let (head, body) = match text.strip_prefix("---\n").and_then(|r| r.split_once("\n---")) {
-            Some((h, b)) => (h, b.split_once('\n').map_or("", |(_, b)| b)),
-            None => ("", text.as_str()),
-        };
-        let field = |k: &str| head.lines().find_map(|l| l.split_once(':').filter(|(key, _)| key.trim() == k).map(|(_, v)| v.trim().trim_matches('"').to_owned())).filter(|v| !v.is_empty());
-        if field("alwaysApply").as_deref() == Some("true") || head.is_empty() {
-            if let Some(t) = keep(body.to_owned()) {
-                sent.push((p, t));
+    for (folder, key) in [(".cursor/rules", "globs"), (".claude/rules", "paths")] {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(top.join(folder)).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "mdc" || e == "md")).collect();
+        files.sort();
+        for p in files {
+            let Ok(text) = std::fs::read_to_string(&p) else { continue };
+            let (head, body) = crate::rules::frontmatter(&text);
+            let field = |k: &str| crate::rules::field(head, k);
+            let globbed = head.lines().any(|l| l.split_once(':').is_some_and(|(k, _)| k.trim() == key));
+            if field("alwaysApply").as_deref() == Some("true") || head.is_empty() || (folder == ".claude/rules" && !globbed) {
+                if let Some(t) = keep(body.to_owned()) {
+                    sent.push((p, t));
+                }
+            } else if !globbed && let Some(d) = field("description") {
+                scoped.push((p, d));
             }
-        } else {
-            let about = match (field("globs"), field("description")) {
-                (Some(g), Some(d)) => format!("for {g}: {d}"),
-                (Some(g), None) => format!("for {g}"),
-                (None, Some(d)) => d,
-                (None, None) => continue,
-            };
-            scoped.push((p, about));
         }
     }
     (sent, scoped)
@@ -2856,13 +3301,15 @@ mod tests {
         w(".cursor/rules/always.mdc", "---\ndescription: everywhere\nalwaysApply: true\n---\nAlways this.\n");
         w(".cursor/rules/ts.mdc", "---\ndescription: TypeScript style\nglobs: src/**/*.ts\nalwaysApply: false\n---\nTS only.\n");
         w(".cursor/rules/plain.mdc", "No frontmatter.\n");
+        w(".cursor/rules/release.mdc", "---\ndescription: Releasing\n---\nRelease steps.\n");
         let (sent, scoped) = other_rules(&top.join("sub"));
         let names: Vec<String> = sent.iter().map(|(p, _)| p.strip_prefix(&top).unwrap().display().to_string()).collect();
         assert_eq!(names, [".github/copilot-instructions.md", ".clinerules/a.md", ".clinerules/b.md", ".cursor/rules/always.mdc", ".cursor/rules/plain.mdc"]);
         assert_eq!(sent[3].1.trim(), "Always this.");
-        assert_eq!(scoped, [(top.join(".cursor/rules/ts.mdc"), "for src/**/*.ts: TypeScript style".to_owned())]);
+        // (A rule for some files comes with them, not in the instructions.)
+        assert_eq!(scoped, [(top.join(".cursor/rules/release.mdc"), "Releasing".to_owned())]);
         let text = instructions(&top.join("sub"), None);
-        assert!(text.contains("Use tabs.") && text.contains("<project_rules>") && text.contains("ts.mdc (for src/**/*.ts: TypeScript style)") && !text.contains("TS only."), "{text}");
+        assert!(text.contains("Use tabs.") && text.contains("<project_rules>") && text.contains("release.mdc (Releasing)") && !text.contains("ts.mdc") && !text.contains("TS only."), "{text}");
         let _ = std::fs::remove_dir_all(&top);
     }
 

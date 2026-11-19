@@ -10,6 +10,7 @@
 
 pub mod bash;
 pub mod edit;
+pub mod formats;
 
 use std::fmt::Write as _;
 use std::collections::{HashMap, HashSet};
@@ -177,6 +178,14 @@ pub struct Tools {
     pub jobs: Arc<crate::jobs::Jobs>,
     /// Language servers started for `lsp`.
     pub lsp: Arc<crate::lsp::Servers>,
+    /// The program being debugged, if any.
+    pub debugger: Arc<crate::debug::Debugger>,
+    /// `run_code`'s kernels, by language.
+    pub kernels: crate::program::Kernels,
+    /// Other agents' rules for the files their globs match (read once),
+    /// and those the model has, by file.
+    glob_rules: std::sync::OnceLock<(PathBuf, Vec<crate::rules::GlobRule>)>,
+    globs_given: Mutex<HashSet<String>>,
     /// Folders below `cwd` whose own rules (AGENTS.md) the model has, as
     /// paths relative to `cwd`.
     rules_given: Mutex<HashSet<PathBuf>>,
@@ -195,6 +204,9 @@ const NESTED_RULES_KEPT: usize = 8_000;
 /// history): `[Rules from sub/AGENTS.md, for the files under sub/:]`.
 const RULES_FROM: &str = "[Rules from ";
 const RULES_FOR: &str = ", for the files under ";
+/// How a rule for files matching globs starts in a tool result:
+/// `[Rules from .cursor/rules/api.mdc, for files matching src/api/**:]`.
+const RULES_MATCHING: &str = ", for files matching ";
 
 /// A file as the session last saw it.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -356,13 +368,16 @@ fn fail(text: impl Into<String>) -> Outcome {
     Outcome::new(text, true)
 }
 
+/// How long a background command may take to print its `ready` text.
+const READY_SECS: u64 = 120;
+
 /// Tools that only look: several run at once.
 pub fn read_only(name: &str) -> bool {
     // (`jobs` touches only this session's own background commands.)
-    // (`todo` only keeps the model's own list.)
+    // (`todo` only keeps the model's own list, `memory` its own notes.)
     // (`lsp` asks a language server, which runs none of the project's code;
     // `lookup` the code index, which only reads it.)
-    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs" | "todo" | "lsp" | "lookup")
+    matches!(name, "read" | "grep" | "find" | "ls" | "recall" | "current_time" | "jobs" | "todo" | "lsp" | "lookup" | crate::locate::NAME | crate::ast::GREP | crate::memory::NAME)
 }
 
 /// The tools' definitions for the Responses API: those in `only` (all
@@ -379,6 +394,10 @@ pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>
     // (The model's list of steps, when it's being measured.)
     if crate::todo::on() {
         all.push(crate::todo::spec());
+    }
+    // (Finding code from a description, when it's being measured.)
+    if crate::locate::on() {
+        all.push(crate::locate::spec());
     }
     // (No network in the sandbox: nothing to fetch.)
     if !crate::fetch::possible() {
@@ -398,6 +417,9 @@ pub fn specs_of(only: Option<&[&str]>, task: Option<&[crate::profiles::Profile]>
     }
     if let Some(profiles) = task {
         all.push(crate::task::spec(profiles));
+        if crate::task::background_on() {
+            all.push(crate::task::wait_spec());
+        }
     }
     Value::Array(all)
 }
@@ -409,17 +431,23 @@ pub fn specs() -> Value {
                 "parameters": { "type": "object", "properties": properties, "required": required, "additionalProperties": false } })
     };
     json!([
-        f("read", "Read a text file: up to 2000 lines (50 KB) from `offset` (1-based line), saying how to read on. A longer file read without offset or limit shows its first 250 lines and its size: grep it, or read a range.",
+        f("read", "Read a text file: up to 2000 lines (50 KB) from `offset` (1-based line), saying how to read on. A longer file read without offset or limit shows its first 250 lines and its size: grep it, or read a range. \
+                   A path may name lines: a.py:50-80, a.py:-40 (the last 40), a.py:5-9,90-95 (both in one call). A folder lists its entries; a notebook, PDF, archive or SQLite database shows as text. \
+                   Several files: call read for each in the same turn. Use it rather than cat, head or sed in bash.",
           json!({ "path": { "type": "string", "description": "Relative to the working directory, or absolute" }, "offset": { "type": "integer" }, "limit": { "type": "integer" } }), &["path"]),
         f("write", "Create a file, or replace a whole file you've read in this session. Makes missing folders. To change part of a file, use edit.",
           json!({ "path": { "type": "string" }, "content": { "type": "string" } }), &["path", "content"]),
-        f("edit", "Replace text in a file. Each old_text must match exactly one place in the file as it is now (copy it from read, with enough lines around it to be unique); edits apply together. Refused if the file changed since you read it.",
+        f("edit", "Replace text in a file. Each old_text must match exactly one place in the file as it is now (copy it from read, with enough lines around it to be unique); edits apply together. Refused if the file changed since you read it. \
+                   Put all of a file's changes in one call. Its result confirms the change: don't re-read the file or run git diff to check it.",
           json!({ "path": { "type": "string" }, "edits": { "type": "array", "items": { "type": "object", "properties": { "old_text": { "type": "string" }, "new_text": { "type": "string" } }, "required": ["old_text", "new_text"], "additionalProperties": false } } }), &["path", "edits"]),
-        f("bash", "Run a bash command in the working directory. No input (stdin closed; pagers and editors off). Times out after 120 s unless `timeout` (seconds) says otherwise. Long output shows its start and end, all of it saved to a file. Don't edit files with it: use edit or write. \
+        f("bash", "Run a bash command in the working directory. No input (stdin closed; pagers and editors off). Times out after 120 s unless `timeout` (seconds) says otherwise. Long output shows its start and end, all of it saved to a file. Don't edit files with it: use edit or write; to read or search files, use read, grep, find and ls. \
+                   Chain steps that go together in one command (&&), and run checks once, not again to confirm. \
                    background: true runs it in the background (a server, a watcher, a long test run): you get its job id at once and are told when it ends (timeout 30 min by default, up to 2 h); jobs shows its output, waits for it or stops it. Don't add & yourself.",
           json!({ "command": { "type": "string" }, "timeout": { "type": "integer" }, "background": { "type": "boolean" },
+                  "ready": { "type": "string", "description": "With background: text its output shows once it's up (e.g. Listening on; several with |): the call returns then, not at once" },
                   "outside_sandbox": { "type": "boolean", "description": "Run outside the sandbox: only when it failed because of the sandbox and really needs what it hides or protects (e.g. git push over SSH); say why first. The user is asked every time." } }), &["command"]),
-        f("grep", "Search file contents for a regular expression (ripgrep syntax, respects .gitignore). Shows file:line: text; with many matches, the first, a count per file, and all of them in a file.",
+        f("grep", "Search file contents for a regular expression (ripgrep syntax, respects .gitignore). Shows file:line: text; with many matches, the first, a count per file, and all of them in a file. \
+                   Several patterns or places: call grep for each in the same turn. Use it rather than grep or rg in bash.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" }, "glob": { "type": "string", "description": "Only files matching this, e.g. *.rs" }, "ignore_case": { "type": "boolean" } }), &["pattern"]),
         f("find", "Find files by name with a glob (e.g. **/*.toml), respecting .gitignore. Up to 500.",
           json!({ "pattern": { "type": "string" }, "path": { "type": "string" } }), &["pattern"]),
@@ -490,6 +518,16 @@ async fn wiki_note(path: PathBuf) -> Option<String> {
 }
 
 /// Whether `path` starts as a picture does.
+/// A file's first bytes (enough to tell its kind).
+fn head(path: &Path) -> Vec<u8> {
+    use std::io::Read as _;
+    let mut buf = Vec::with_capacity(16);
+    if let Ok(f) = std::fs::File::open(path) {
+        let _ = f.take(16).read_to_end(&mut buf);
+    }
+    buf
+}
+
 fn picture(path: &Path) -> bool {
     use std::io::Read;
     let mut head = [0u8; 64];
@@ -500,7 +538,7 @@ fn picture(path: &Path) -> bool {
 impl Tools {
     pub fn new(cwd: PathBuf, spill_dir: PathBuf) -> Self {
         let jobs = Arc::new(crate::jobs::Jobs::new(&spill_dir));
-        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default(), rules_given: Mutex::default(), rules_new: Mutex::default(), search_limit: search_limit() }
+        Tools { cwd, spill_dir, seen: Mutex::new(HashMap::new()), told_generated: Mutex::new(HashSet::new()), originals: Mutex::new(HashMap::new()), sandbox: None, jobs, lsp: Arc::default(), debugger: Arc::default(), kernels: crate::program::Kernels::default(), glob_rules: std::sync::OnceLock::new(), globs_given: Mutex::default(), rules_given: Mutex::default(), rules_new: Mutex::default(), search_limit: search_limit() }
     }
 
     /// Outputs set aside, kept for `recall` (`replace`: the session's
@@ -562,7 +600,39 @@ impl Tools {
                 }
             }
         }
+        out.push_str(&self.glob_rules_for(files));
         (!out.is_empty()).then_some(out)
+    }
+
+    /// Other agents' rules whose globs match one of `files` and that the
+    /// model doesn't have yet, as text for the tool result.
+    fn glob_rules_for(&self, files: &[PathBuf]) -> String {
+        let (top, rules) = self.glob_rules.get_or_init(|| {
+            let top = crate::rules::top(&self.cwd);
+            let rules = crate::rules::glob_rules(&top);
+            (top, rules)
+        });
+        let mut out = String::new();
+        if rules.is_empty() {
+            return out;
+        }
+        let mut given = self.globs_given.lock().unwrap();
+        for file in files {
+            let Some(rel) = file.strip_prefix(top).ok().and_then(Path::to_str) else { continue };
+            for r in rules.iter().filter(|r| r.matches(rel)) {
+                if !given.insert(r.shown.clone()) {
+                    continue;
+                }
+                let _ = write!(out, "\n\n{RULES_FROM}{}{RULES_MATCHING}{}:]\n", r.shown, r.globs.join(", "));
+                if r.body.len() > NESTED_RULES_KEPT {
+                    let cut = r.body.floor_char_boundary(NESTED_RULES_KEPT);
+                    let _ = write!(out, "{}\n[… cut at {} KB: read {} for the rest.]", &r.body[..cut], NESTED_RULES_KEPT / 1000, r.shown);
+                } else {
+                    out.push_str(&r.body);
+                }
+            }
+        }
+        out
     }
 
     /// The folders below the working directory on the way down to `file`
@@ -603,12 +673,16 @@ impl Tools {
     /// compacted or had outputs set aside.
     pub fn rules_seen_in(&self, history: &[Value]) {
         let mut given = self.rules_given.lock().unwrap();
+        let mut globbed = self.globs_given.lock().unwrap();
         given.clear();
+        globbed.clear();
         for m in history.iter().filter(|m| m["role"] == "toolResult" && m["harloStub"] != true) {
             for text in m["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()) {
                 for line in text.lines().filter_map(|l| l.strip_prefix(RULES_FROM)) {
                     if let Some(dir) = line.split_once(RULES_FOR).and_then(|(_, d)| d.strip_suffix("/:]")) {
                         given.insert(PathBuf::from(dir));
+                    } else if let Some((file, _)) = line.split_once(RULES_MATCHING) {
+                        globbed.insert(file.to_owned());
                     }
                 }
             }
@@ -721,8 +795,10 @@ impl Tools {
         }
     }
 
-    /// A command: `stop` (the turn's) ends it, with what it printed so far.
-    pub async fn bash(&self, args: &Value, stop: Option<&tokio_util::sync::CancellationToken>) -> Outcome {
+    /// A command: `stop` (the turn's) ends it, with what it printed so far;
+    /// `steered` (cancelled when a message from the user waits) moves a
+    /// long one into the background, and ends a wait for `ready`.
+    pub async fn bash(&self, args: &Value, stop: Option<&tokio_util::sync::CancellationToken>, steered: Option<&tokio_util::sync::CancellationToken>) -> Outcome {
         let s = |k: &str| args[k].as_str().unwrap_or_default();
         let sandbox = self.sandbox.as_deref();
         if let Some(why) = sandbox.and_then(|sb| sb.broken.as_ref()) {
@@ -731,30 +807,34 @@ impl Tools {
         let inside = sandbox.filter(|_| args["outside_sandbox"] != true);
         if args["background"] == true {
             let (text, failed) = self.jobs.start(s("command"), &self.cwd, args["timeout"].as_u64(), inside);
+            // (A server: back when it says it's up, not at once.)
+            if !failed
+                && !s("ready").trim().is_empty()
+                && let Some(id) = text.split_whitespace().find(|w| w.len() > 1 && w.starts_with('j') && w[1..].bytes().all(|b| b.is_ascii_digit()))
+            {
+                let waiting = self.jobs.ready(id, s("ready"), std::time::Duration::from_secs(READY_SECS));
+                // (Stopped while waiting: the turn ends; the job is left to
+                // the jobs it belongs with.)
+                let never = tokio_util::sync::CancellationToken::new();
+                let (ready, failed) = tokio::select! {
+                    biased;
+                    () = stop.unwrap_or(&never).cancelled() => (format!("Interrupted: the user stopped the turn before {id} was ready; it's still running in the background."), true),
+                    () = steered.unwrap_or(&never).cancelled() => (format!("A message from the user came in before {id} was ready; it's still running in the background."), false),
+                    r = waiting => r,
+                };
+                return Outcome::new(format!("{text}\n{ready}"), failed);
+            }
             return Outcome::new(text, failed);
         }
-        let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir, inside, stop).await;
+        let aside = steered.map(|now| bash::Aside { jobs: &self.jobs, now });
+        let (text, failed) = bash::run(s("command"), &self.cwd, args["timeout"].as_u64(), &self.spill_dir, inside, stop, aside).await;
         Outcome::new(text, failed)
     }
 
     pub async fn call(&self, name: &str, args: &Value) -> Outcome {
         let s = |k: &str| args[k].as_str().unwrap_or_default();
         match name {
-            "read" => {
-                let mut out = self.read(s("path"), args["offset"].as_u64(), args["limit"].as_u64()).await;
-                if !out.failed
-                    && let Some(rules) = self.nested_rules(&[self.path(s("path"))])
-                {
-                    out.text.push_str(&rules);
-                }
-                if !out.failed
-                    && let Some(note) = wiki_note(self.path(s("path"))).await
-                {
-                    out.text.push_str("\n\n");
-                    out.text.push_str(&note);
-                }
-                out
-            }
+            "read" => self.read_call(args).await,
             "write" | "edit" | "apply_patch" => {
                 // A folder's own rules come before a change in it, not after:
                 // the first change there is held back with them, to be made
@@ -807,13 +887,14 @@ impl Tools {
                 }
                 out
             }
-            "bash" => self.bash(args, None).await,
+            "bash" => self.bash(args, None, None).await,
             "grep" => self.grep(s("pattern"), s("path"), s("glob"), args["ignore_case"].as_bool() == Some(true)).await,
             "find" => self.find(s("pattern"), s("path")).await,
             "ls" => self.ls(s("path")),
             "recall" => self.recall(s("id")),
             "fetch" => crate::fetch::run(s("url"), &self.spill_dir).await,
             "todo" => crate::todo::run(args),
+            "rename" => self.rename(args).await,
             "lsp" => {
                 let path = self.path(s("path"));
                 if let Some(no) = self.hidden(&path) {
@@ -823,6 +904,13 @@ impl Tools {
             }
             crate::lookup::NAME => {
                 let (text, failed) = crate::lookup::run(args, &self.cwd, &self.hidden_names(&self.cwd)).await;
+                Outcome::new(text, failed)
+            }
+            crate::ast::GREP => self.ast_grep(args).await,
+            crate::ast::EDIT => self.ast_edit(args).await,
+            crate::debug::NAME => self.debug(args).await,
+            crate::memory::NAME => {
+                let (text, failed) = crate::memory::call(args, &self.cwd);
                 Outcome::new(text, failed)
             }
             "jobs" => {
@@ -842,13 +930,23 @@ impl Tools {
         if let Some(no) = self.hidden(&path) {
             return no;
         }
+        if path.is_dir() {
+            let listed = self.ls(p);
+            return if listed.failed { listed } else { ok(format!("[{} is a folder. Its entries:]\n{}", path.display(), listed.text)) };
+        }
+        // A notebook, PDF, archive or database: shown as text of its own.
+        let kind = formats::kind(&path, &head(&path));
         // A big one (not a picture): read as it comes, not whole.
-        if std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() > BIG_READ) && !picture(&path) {
+        if kind.is_none() && std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() > BIG_READ) && !picture(&path) {
             return self.read_big(path, offset, limit).await;
         }
         // (Off the async threads: a large file, or a slow disk, doesn't
-        // hold up a stop.)
+        // hold up a stop. Only a notebook of the other kinds is read here:
+        // the rest are read by the program that shows them.)
         let reading = path.clone();
+        if kind.is_some_and(|k| k != formats::Kind::Notebook) {
+            return self.read_converted(kind, &path, &[], offset, limit).await;
+        }
         let read = tokio::task::spawn_blocking(move || std::fs::read(reading)).await.unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
         let bytes = match read {
             Ok(b) => b,
@@ -856,6 +954,9 @@ impl Tools {
             Err(e) => return fail(format!("Can't read {}: {e}", path.display())),
         };
         self.remember(&path, &bytes);
+        if kind.is_some() {
+            return self.read_converted(kind, &path, &bytes, offset, limit).await;
+        }
         if crate::images::mime_of(&bytes).is_some() {
             return match crate::images::fit_apart(bytes).await {
                 Ok(f) => {
@@ -869,7 +970,12 @@ impl Tools {
         if bytes[..bytes.len().min(8192)].contains(&0) {
             return ok(format!("{} is a binary file ({} bytes).", path.display(), bytes.len()));
         }
-        let text = String::from_utf8_lossy(&bytes);
+        Self::page(&path, &String::from_utf8_lossy(&bytes), offset, limit)
+    }
+
+    /// A file's text, as read shows it: whole, the range asked for, or (too
+    /// long for one read) its outline or first lines.
+    fn page(path: &Path, text: &str, offset: Option<u64>, limit: Option<u64>) -> Outcome {
         let lines: Vec<&str> = text.lines().collect();
         if lines.is_empty() {
             return ok("(empty file)");
@@ -881,7 +987,7 @@ impl Tools {
         let preview = offset.is_none() && limit.is_none() && (lines.len() > READ_LINES || text.len() > READ_BYTES);
         if preview
             && crate::outline::on()
-            && let Some(outline) = crate::outline::of(&path, &text)
+            && let Some(outline) = crate::outline::of(path, text)
         {
             return ok(format!(
                 "[{} is {} lines ({} KB), more than one read shows. Its outline follows (line: definition): read the parts you need with offset and limit (up to {READ_LINES} lines), or grep it.]\n{outline}",
@@ -908,7 +1014,7 @@ impl Tools {
         }
         if n == 0 {
             // One line longer than the limit: its start, said so.
-            out = long_line(&path, start + 1, lines[start], lines[start].len());
+            out = long_line(path, start + 1, lines[start], lines[start].len());
             n = 1;
         }
         let end = start + n;
@@ -925,6 +1031,42 @@ impl Tools {
             let _ = write!(out, "\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, lines.len(), end + 1);
         }
         ok(out.trim_end_matches('\n').to_owned())
+    }
+
+    /// `read` of a notebook, PDF, archive or database: its text as
+    /// [`formats::text`] shows it, paged like a file's.
+    async fn read_converted(&self, kind: Option<formats::Kind>, path: &Path, bytes: &[u8], offset: Option<u64>, limit: Option<u64>) -> Outcome {
+        let Some(kind) = kind else { return fail("Not a kind of file read converts.") };
+        match formats::text(kind, path, bytes).await {
+            Ok(text) => Self::page(path, &text, offset, limit),
+            Err(why) => fail(format!("{} can't be shown as text: {why}.", path.display())),
+        }
+    }
+
+    /// `read` of a path's line ranges ([`formats::selector`]): each read in
+    /// turn, together.
+    async fn read_ranges(&self, file: &str, ranges: &[formats::Range]) -> Outcome {
+        let mut parts = Vec::new();
+        for r in ranges {
+            let (offset, limit) = match *r {
+                formats::Range::Lines(a, b) => (a, b.map(|b| b - a + 1)),
+                formats::Range::Last(n) => {
+                    let counting = self.path(file);
+                    let total = tokio::task::spawn_blocking(move || std::fs::read(counting).map(|b| b.split(|c| *c == b'\n').filter(|l| !l.is_empty()).count() as u64)).await.ok().and_then(Result::ok).unwrap_or(0);
+                    (total.saturating_sub(n) + 1, Some(n))
+                }
+            };
+            let mut out = self.read(file, Some(offset), limit).await;
+            if out.failed || ranges.len() == 1 {
+                return out;
+            }
+            // (Each range's "read on" note is noise beside the others.)
+            if let Some(cut) = out.text.rfind("\n\n[Lines ") {
+                out.text.truncate(cut);
+            }
+            parts.push(format!("[{file}:{offset}-{}]\n{}", limit.map_or_else(String::new, |l| (offset + l - 1).to_string()), out.text));
+        }
+        ok(parts.join("\n\n"))
     }
 
     /// `read` of a file past [`BIG_READ`]: its lines counted and the ones
@@ -984,6 +1126,130 @@ impl Tools {
             let _ = write!(out, "\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, got.lines, end + 1);
         }
         ok(out.trim_end_matches('\n').to_owned())
+    }
+
+    /// `rename`: the language server's rename, written to each file it
+    /// changes, each checked as a write is (all or none of them).
+    async fn rename(&self, args: &Value) -> Outcome {
+        let s = |k: &str| args[k].as_str().unwrap_or_default().trim();
+        if s("new_name").is_empty() || s("symbol").is_empty() {
+            return fail("Give the symbol, its line and the new_name.");
+        }
+        let path = self.path(s("path"));
+        if let Some(no) = self.hidden(&path) {
+            return no;
+        }
+        let files = match self.lsp.rename(args, path, &self.cwd, self.sandbox.as_deref()).await {
+            Ok(f) => f,
+            Err(why) => return fail(why),
+        };
+        let touched: Vec<PathBuf> = files.iter().map(|(p, _)| p.clone()).collect();
+        for p in &touched {
+            if let Some(no) = self.hidden(p).or_else(|| self.fenced(p)) {
+                return no;
+            }
+            if let Some(why) = self.stale(p, false, None) {
+                return fail(format!("Nothing was renamed: {why}"));
+            }
+        }
+        if let Some(rules) = self.nested_rules(&touched) {
+            return fail(format!("Nothing was renamed yet: this touches a folder with rules of its own, which you hadn't seen (below). Check the rename follows them, then make it again.{rules}"));
+        }
+        let mut done = Vec::new();
+        for (p, text) in &files {
+            if let Err(e) = std::fs::write(p, text) {
+                return fail(format!("Renamed in {} of {} files, then couldn't write {}: {e}. Changed: {}", done.len(), files.len(), p.display(), done.join(", ")));
+            }
+            self.remember(p, text.as_bytes());
+            done.push(p.strip_prefix(&self.cwd).unwrap_or(p).display().to_string());
+        }
+        ok(format!("Renamed {} to {} in {} file{}: {}", s("symbol"), s("new_name"), done.len(), if done.len() == 1 { "" } else { "s" }, done.join(", ")))
+    }
+
+    /// `read`: a file, its ranges (`a.py:5-9`) or a folder, with the rules
+    /// of a folder not seen yet and a stale wiki page's note.
+    async fn read_call(&self, args: &Value) -> Outcome {
+        // (Line ranges in the path, unless a file has that name.)
+        let p = args["path"].as_str().unwrap_or_default();
+        let ranged = formats::selector(p).filter(|_| !self.path(p).exists());
+        let file = ranged.as_ref().map_or(p, |(f, _)| f);
+        let mut out = match &ranged {
+            Some((f, ranges)) => self.read_ranges(f, ranges).await,
+            None => self.read(p, args["offset"].as_u64(), args["limit"].as_u64()).await,
+        };
+        if !out.failed
+            && let Some(rules) = self.nested_rules(&[self.path(file)])
+        {
+            out.text.push_str(&rules);
+        }
+        if !out.failed
+            && let Some(note) = wiki_note(self.path(p)).await
+        {
+            out.text.push_str("\n\n");
+            out.text.push_str(&note);
+        }
+        out
+    }
+
+    /// `debug`: an action on the program being debugged.
+    async fn debug(&self, args: &Value) -> Outcome {
+        if let Some(no) = args["program"].as_str().and_then(|p| self.hidden(&self.path(p))) {
+            return no;
+        }
+        let (text, failed) = self.debugger.call(args, &self.cwd, self.sandbox.as_deref()).await;
+        Outcome::new(text, failed)
+    }
+
+    /// `ast_grep`: a structural search's matches, a line each.
+    async fn ast_grep(&self, args: &Value) -> Outcome {
+        if let Some(no) = args["path"].as_str().and_then(|p| self.hidden(&self.path(p))) {
+            return no;
+        }
+        match crate::ast::find(args, &self.cwd, false).await {
+            Ok(found) => ok(crate::ast::listed(&found, &self.hidden_names(&self.cwd))),
+            Err(why) => fail(why),
+        }
+    }
+
+    /// `ast_edit`: a structural rewrite, written to each file it changes,
+    /// each checked as a write is (all or none of them).
+    async fn ast_edit(&self, args: &Value) -> Outcome {
+        if let Some(no) = args["path"].as_str().and_then(|p| self.hidden(&self.path(p))) {
+            return no;
+        }
+        let found = match crate::ast::find(args, &self.cwd, true).await {
+            Ok(f) => f,
+            Err(why) => return fail(format!("Nothing was changed: {why}")),
+        };
+        if found.files.is_empty() {
+            return fail("Nothing was changed: no code matches the pattern (or the rewrite leaves it as it is).");
+        }
+        let files: Vec<(PathBuf, &str)> = found.files.iter().map(|f| (self.cwd.join(&f.path), f.text.as_str())).collect();
+        for (p, _) in &files {
+            if let Some(no) = self.hidden(p).or_else(|| self.fenced(p)) {
+                return no;
+            }
+            if let Some(why) = self.stale(p, false, None) {
+                return fail(format!("Nothing was changed: {why}"));
+            }
+            if let Some(no) = std::fs::read(p).ok().and_then(|head| self.generated(p, &head)) {
+                return no;
+            }
+        }
+        let touched: Vec<PathBuf> = files.iter().map(|(p, _)| p.clone()).collect();
+        if let Some(rules) = self.nested_rules(&touched) {
+            return fail(format!("Nothing was changed yet: this touches a folder with rules of its own, which you hadn't seen (below). Check the rewrite follows them, then make it again.{rules}"));
+        }
+        let mut done = Vec::new();
+        for (p, text) in &files {
+            if let Err(e) = std::fs::write(p, text) {
+                return fail(format!("Changed {} of {} files, then couldn't write {}: {e}. Changed: {}", done.len(), files.len(), p.display(), done.join(", ")));
+            }
+            self.remember(p, text.as_bytes());
+            done.push(p.strip_prefix(&self.cwd).unwrap_or(p).display().to_string());
+        }
+        let n = found.matches.len();
+        ok(format!("Rewrote {n} match{} in {} file{}:\n{}", if n == 1 { "" } else { "es" }, done.len(), if done.len() == 1 { "" } else { "s" }, crate::ast::changes(&found)))
     }
 
     fn write(&self, p: &str, content: &str) -> Outcome {
@@ -1361,6 +1627,57 @@ impl Tools {
 mod tests {
     use super::*;
 
+    /// Stopping the turn ends a wait for a background command's `ready`
+    /// text at once (the command itself goes on as a job).
+    #[tokio::test]
+    async fn a_stop_ends_the_wait_for_ready() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-ready-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let stop = tokio_util::sync::CancellationToken::new();
+        let s = stop.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            s.cancel();
+        });
+        let started = std::time::Instant::now();
+        let o = t.bash(&serde_json::json!({ "command": "sleep 20", "background": true, "ready": "never printed" }), Some(&stop), None).await;
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
+        assert!(o.failed && o.text.contains("Interrupted: the user stopped the turn before j1 was ready"), "{}", o.text);
+        assert_eq!(t.jobs.running(), 1);
+        t.jobs.end_all();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Another agent's rule for files matching globs comes once, with the
+    /// first matching file read; after a compaction, it comes again.
+    #[tokio::test]
+    async fn a_glob_rule_comes_with_its_files() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-globrules-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".cursor/rules")).unwrap();
+        std::fs::create_dir_all(dir.join("src/api")).unwrap();
+        std::fs::write(dir.join(".cursor/rules/api.mdc"), "---\nglobs: src/api/**\n---\nValidate every input.\n").unwrap();
+        std::fs::write(dir.join("src/api/users.ts"), "export {}\n").unwrap();
+        std::fs::write(dir.join("src/api/teams.ts"), "export {}\n").unwrap();
+        std::fs::write(dir.join("src/main.ts"), "main()\n").unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let read = |p: &'static str| {
+            let t = &t;
+            async move { t.call("read", &serde_json::json!({ "path": p })).await }
+        };
+        assert!(!read("src/main.ts").await.text.contains(RULES_FROM));
+        let first = read("src/api/users.ts").await.text;
+        assert!(first.ends_with("[Rules from .cursor/rules/api.mdc, for files matching src/api/**:]\nValidate every input."), "{first}");
+        assert!(!read("src/api/teams.ts").await.text.contains(RULES_FROM), "once");
+        t.rules_seen_in(&[]);
+        assert!(read("src/api/teams.ts").await.text.contains("api.mdc"), "again once the history lost it");
+        t.rules_seen_in(&[serde_json::json!({ "role": "toolResult", "content": [{ "type": "text", "text": first }] })]);
+        assert!(!read("src/api/users.ts").await.text.contains(RULES_FROM), "kept in the history: not again");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// A folder's own AGENTS.md comes once, with the first file read or
     /// changed under it; the top folder's (in the instructions) doesn't.
     #[tokio::test]
@@ -1556,6 +1873,32 @@ mod tests {
             let want = format!("[Line 2 is 200 KB; only its first {READ_BYTES} bytes are shown. Read on with bash: sed -n '2p' '{}' | cut -b {}-{}, or grep -o what you need.]", dir.join(name).display(), READ_BYTES + 1, 2 * READ_BYTES);
             assert!(note.starts_with(&want), "{name}: {note}");
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Line ranges in the path read just those lines (several in one call,
+    /// the last few counted from the end); a file named like a range is read
+    /// as it's named; a folder lists its entries; a notebook shows its cells.
+    #[tokio::test]
+    async fn a_path_names_its_lines_and_other_kinds_read_as_text() {
+        let dir = std::env::temp_dir().join(format!("harlo-agent-ranges-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("f.txt"), (1..=10).map(|i| format!("l{i}\n")).collect::<String>()).unwrap();
+        std::fs::write(dir.join("odd:2"), "named so\n").unwrap();
+        std::fs::write(dir.join("n.ipynb"), r#"{"cells":[{"cell_type":"code","source":"print(1)","outputs":[]}]}"#).unwrap();
+        let t = Tools::new(dir.clone(), dir.join(".out"));
+        let read = |p: &'static str| {
+            let t = &t;
+            async move { t.call("read", &json!({ "path": p })).await }
+        };
+        assert_eq!(read("f.txt:3-4").await.text, "l3\nl4\n\n[Lines 3-4 of 10. Read on with offset=5.]");
+        assert_eq!(read("f.txt:-2").await.text, "l9\nl10");
+        assert_eq!(read("f.txt:2,9-").await.text, "[f.txt:2-2]\nl2\n\n[f.txt:9-]\nl9\nl10");
+        assert!(read("f.txt:20").await.failed);
+        assert_eq!(read("odd:2").await.text, "named so");
+        assert!(read("sub").await.text.starts_with(&format!("[{} is a folder. Its entries:]", dir.join("sub").display())));
+        assert_eq!(read("n.ipynb").await.text, "# cell 1 [code]\nprint(1)");
         let _ = std::fs::remove_dir_all(dir);
     }
 

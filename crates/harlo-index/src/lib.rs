@@ -31,6 +31,9 @@
 //! agent's question about a name from it, as compact text. [`code_map`]
 //! and [`cards`] brief a wiki's writer.
 //!
+//! [`search`] finds code by a pattern written as code (`foo($A, $$$REST)`),
+//! matched on syntax trees, and rewrites it with a template.
+//!
 //! Without the default `scan` feature the crate holds only these types, for
 //! code that reads the `harlo-index` helper's JSON output.
 
@@ -51,6 +54,7 @@ mod packages;
 mod rules;
 #[cfg(feature = "scan")]
 mod scan;
+mod structural;
 #[cfg(feature = "scan")]
 mod text;
 
@@ -61,13 +65,16 @@ pub use brief::{Card, Link, cards, code_map};
 pub use graph::{Edge, Graph, Ref, Site};
 #[cfg(feature = "scan")]
 pub use index::{Error, Index, default_cache, index};
-pub use lang::{Lang, lang};
+pub use lang::{Lang, lang, named};
 pub use lookup::{MAX_DEPTH, Query, lookup};
 #[cfg(feature = "scan")]
 pub use manifests::manifest;
 pub use packages::{Packages, import_names, users};
 #[cfg(feature = "scan")]
 pub use scan::{scan, syntax_tree};
+#[cfg(feature = "scan")]
+pub use structural::search;
+pub use structural::{Found, Rewritten, Search, Structural};
 
 /// What a symbol declares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

@@ -604,6 +604,14 @@ impl Transcript {
         if message["customType"] == "harlo_plugin" && message["failed"] == true {
             level = NoticeLevel::Error;
         }
+        // (An advisor's note: what it said, not how the agent was told; a
+        // saved session keeps only the latter, so it's read from that.)
+        if message["customType"] == "harlo_advisor_note" {
+            let said = text.split_once("says: ").map_or(text.as_str(), |(_, a)| a).split("\nCheck this against the code").next().unwrap_or_default().trim().to_owned();
+            let advice = message["advice"].as_str().map_or(said, str::to_owned);
+            let model = message["advisor"].as_str().and_then(|m| m.rsplit('/').next()).filter(|m| !m.is_empty());
+            text = format!("Advisor{}: {advice}", model.map(|m| format!(" ({m})")).unwrap_or_default());
+        }
         if message["customType"] == "harlo_job"
             && let Some((plain, failed)) = job_notice_for_people(&text) {
                 text = plain;
@@ -1390,6 +1398,11 @@ fn wiki_step(name: &str, args: &Value) -> Option<String> {
 }
 
 fn summarize_args(args: &Value) -> String {
+    // (An action and what it's on: Harlo's debugger, memory, jobs.)
+    if let Some(action) = args["action"].as_str() {
+        let on = ["program", "expression", "text", "id", "path"].iter().find_map(|k| args[*k].as_str()).unwrap_or_default();
+        return first_line(format!("{action} {on}").trim(), 200);
+    }
     // (A language server's question: what, about which symbol, where.)
     if let (Some(op), Some(symbol), Some(path)) = (args["operation"].as_str(), args["symbol"].as_str(), args["path"].as_str()) {
         return first_line(&format!("{op} {symbol} · {path}:{}", args["line"]), 200);
@@ -2034,6 +2047,22 @@ mod tests {
         assert!(!file.exists());
         drop(t);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_advisors_note_shows_what_it_said() {
+        let mut t = Transcript::default();
+        let note = serde_json::json!({ "role": "custom", "customType": "harlo_advisor_note", "content": "[harlo] A reviewer read your work and says: The test is missing.\nCheck this…",
+                                       "advice": "The test is missing.", "advisor": "openai-codex/gpt-6.2-sol", "display": true });
+        assert!(t.upsert_custom("a1", &note));
+        assert!(matches!(t.items[0].blocks.as_slice(), [Block::Text(s)] if s == "Advisor (gpt-6.2-sol): The test is missing."));
+        // (Reopened: the log has only how the agent was told.)
+        let saved = serde_json::json!({ "role": "custom", "customType": "harlo_advisor_note", "content": "[harlo] A reviewer read your work and says: The test is missing.\nCheck this against the code; fix what's right about it, then finish.", "display": true });
+        assert!(t.upsert_custom("a2", &saved));
+        assert!(matches!(t.items[1].blocks.as_slice(), [Block::Text(s)] if s == "Advisor: The test is missing."), "{:?}", t.items[1].blocks);
+        assert_eq!(summarize_args(&serde_json::json!({ "action": "launch", "program": "app.py", "breakpoints": ["app.py:3"] })), "launch app.py");
+        assert_eq!(summarize_args(&serde_json::json!({ "action": "continue" })), "continue");
+        assert_eq!(summarize_args(&serde_json::json!({ "action": "add", "text": "Tests run with make check." })), "add Tests run with make check.");
     }
 
     #[test]

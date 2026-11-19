@@ -13,6 +13,7 @@ default = ["scan"]
 # Reading code: the parser, its grammars and the index's cache. Without it the
 # crate is only the index's types, for code that reads the helper's output.
 scan = [
+    "dep:ast-grep-core",
     "dep:ignore",
     "dep:serde_json",
     "dep:sha2",
@@ -39,6 +40,7 @@ scan = [
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+ast-grep-core = { workspace = true, optional = true }
 ignore = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }

@@ -528,6 +528,13 @@ Rectangle {
         y: -height - 6
         onDraftUsed: root.text = ""
     }
+    // While it works, the ways to send (the send button's right click).
+    AppMenu {
+        id: sendMenu
+        AppMenuItem { objectName: "sendFollowUp"; text: "Queue as a follow-up"; hint: "Enter"; onTriggered: root.send("") }
+        AppMenuItem { objectName: "sendSteer"; text: "Steer now"; hint: "Ctrl+Enter"; onTriggered: root.send("steer") }
+        AppMenuItem { objectName: "sendStopAndSend"; text: "Stop and send"; hint: "Ctrl+Shift+Enter"; onTriggered: root.send("stopAndSend") }
+    }
     AppMenu {
         id: delegateMenu
         AppMenuItem { objectName: "delegateHandoff"; text: "Hand off…"; hint: "to a new session"; onTriggered: delegate.show("handoff") }
@@ -666,6 +673,12 @@ Rectangle {
                 }
                 if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter)
                     return
+                // (Ctrl+Shift+Enter while it works: stop it and send this.)
+                if ((event.modifiers & Qt.ControlModifier) && (event.modifiers & Qt.ShiftModifier) && root.session.status === "busy") {
+                    event.accepted = true
+                    root.send("stopAndSend")
+                    return
+                }
                 if (event.modifiers & Qt.ShiftModifier)
                     return
                 event.accepted = true
@@ -936,8 +949,13 @@ Rectangle {
             iconName: "send-plane-2"
             tint: Theme.primary
             enabled: input.text.trim() !== ""
-            tip: root.session.status === "busy" ? "Queue as a follow-up (Enter) — Ctrl+Enter steers now" : "Send (Enter)"
+            tip: root.session.status === "busy" ? "Queue as a follow-up (Enter) — Ctrl+Enter steers now, Ctrl+Shift+Enter stops it and sends; right-click for these" : "Send (Enter)"
             onClicked: root.send("")
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                enabled: root.session.status === "busy"
+                onTapped: sendMenu.popup(parent, 0, -sendMenu.implicitHeight - 6)
+            }
         }
     }
 }

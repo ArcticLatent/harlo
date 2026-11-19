@@ -1714,9 +1714,7 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
         HarnessEvent::Notice { level: harlo_harness::NoticeLevel::Error, text, system: false } => {
             pending.push(SessionUpdate::Notable(Notable::Error { message: text.clone() }));
         }
-        HarnessEvent::CommandsChanged(list) => {
-            let _ = aux.send(Aux::Commands(list.clone()));
-        }
+        HarnessEvent::CommandsChanged(list) => drop(aux.send(Aux::Commands(list.clone()))),
         HarnessEvent::Limits(info) => pending.push(SessionUpdate::Limits(info.clone())),
         HarnessEvent::Aside(a) => pending.push(SessionUpdate::Aside(a.clone())),
         HarnessEvent::Exited { code, stderr_tail } => exited(st, pending, &driver.cfg, *code, stderr_tail),
@@ -1735,6 +1733,8 @@ fn handle_event(ev: &HarnessEvent, st: &mut DriverState, pending: &mut Vec<Sessi
             st.queue = (steering.clone(), follow_up.clone());
             pending.push(SessionUpdate::Queue { steering: steering.clone(), follow_up: follow_up.clone() });
         }
+        // (Stopped: what was queued goes back in the box.)
+        HarnessEvent::QueueWithdrawn(list) => give_back(st, pending, list.iter().map(|(text, images)| Unsent { text: text.clone(), images: images.clone(), mode: SendMode::FollowUp, typed: None }).collect(), "Stopped"),
         HarnessEvent::Renamed(name) => {
             st.meta.name = name.clone().unwrap_or_default();
             pending.push(SessionUpdate::Meta(st.meta.clone()));

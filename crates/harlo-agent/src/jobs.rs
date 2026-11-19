@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::{Child, ChildStderr, ChildStdout};
 
 use crate::sandbox::Sandbox;
 
@@ -164,6 +165,11 @@ impl Jobs {
         *self.wake.lock().unwrap() = Some(f);
     }
 
+    /// Whether another job may start.
+    pub fn has_room(&self) -> bool {
+        self.running() < MAX_RUNNING
+    }
+
     pub fn running(&self) -> usize {
         self.list.lock().unwrap().iter().filter(|j| j.ended().is_none()).count()
     }
@@ -180,21 +186,47 @@ impl Jobs {
         if let Err(e) = std::fs::create_dir_all(&self.dir) {
             return (format!("Couldn't make the folder for its output: {e}"), true);
         }
-        let n = self.next.fetch_add(1, Ordering::Relaxed) + 1;
-        let id = format!("j{n}");
-        let log = self.dir.join(format!("{id}.log"));
         let mut cmd = crate::tools::bash::command(command, cwd, sandbox);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return (format!("Couldn't start {}: {e}", if sandbox.is_some() { "the sandbox (bwrap)" } else { "bash" }), true),
         };
+        let (out, err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
+        let (id, log) = self.watch(command, child, (out, err), secs, &[]);
+        (
+            format!(
+                "Started in the background as {id} (it times out after {}). Its output goes to {}. You'll be told when it ends; meanwhile use jobs to see its output, wait for it or stop it.",
+                took(Duration::from_secs(secs)),
+                log.display()
+            ),
+            false,
+        )
+    }
+
+    /// Takes over a command that's running in the foreground (stepping
+    /// aside for a message from the user): a job from now on, with what it
+    /// printed `so_far` at the top of its output, ending within `secs`.
+    /// None when no more jobs can run (it stays in the foreground).
+    pub fn adopt(self: &Arc<Self>, command: &str, child: Child, pipes: (ChildStdout, ChildStderr), secs: u64, so_far: &[u8]) -> Option<(String, PathBuf)> {
+        if self.running() >= MAX_RUNNING || std::fs::create_dir_all(&self.dir).is_err() {
+            return None;
+        }
+        Some(self.watch(command, child, pipes, secs.max(1), so_far))
+    }
+
+    /// Registers a started command as a job and keeps its output until it
+    /// ends: its id and output file.
+    fn watch(self: &Arc<Self>, command: &str, mut child: Child, (mut out, mut err): (ChildStdout, ChildStderr), secs: u64, so_far: &[u8]) -> (String, PathBuf) {
+        let n = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+        let id = format!("j{n}");
+        let log = self.dir.join(format!("{id}.log"));
         let pgid = child.id().map_or(0, |p| i32::try_from(p).unwrap_or(i32::MAX));
         GROUPS.lock().unwrap().push(pgid);
         let job = Arc::new(Job { id: id.clone(), command: command.trim().to_owned(), log: log.clone(), started: Instant::now(), pgid, state: Mutex::default() });
         self.list.lock().unwrap().push(Arc::clone(&job));
-        let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
         let jobs = Arc::clone(self);
+        let so_far = so_far.to_vec();
         tokio::spawn(async move {
             let mut file = tokio::fs::File::create(&job.log).await.ok();
             let keep = |bytes: &[u8], file: &mut Option<tokio::fs::File>| {
@@ -207,6 +239,11 @@ impl Jobs {
                 s.tail.drain(..over);
                 (take > 0 && file.is_some()).then(|| bytes[..take].to_vec())
             };
+            if let Some(w) = keep(&so_far, &mut file)
+                && let Some(f) = file.as_mut()
+            {
+                let _ = f.write_all(&w).await;
+            }
             let collect = async {
                 // (On the heap: in the future they would make every future awaiting it 16 KB bigger.)
                 let (mut b1, mut b2) = (vec![0u8; 8192], vec![0u8; 8192]);
@@ -260,14 +297,31 @@ impl Jobs {
                 w();
             }
         });
-        (
-            format!(
-                "Started in the background as {id} (it times out after {}). Its output goes to {}. You'll be told when it ends; meanwhile use jobs to see its output, wait for it or stop it.",
-                took(Duration::from_secs(secs)),
-                log.display()
-            ),
-            false,
-        )
+        (id, log)
+    }
+
+    /// Waits until job `id` prints one of `marks` (text, `|` between
+    /// several), ends, or `limit` passes: what to tell the model.
+    pub async fn ready(&self, id: &str, marks: &str, limit: Duration) -> (String, bool) {
+        let Some(j) = self.find(id) else { return (format!("There's no job {id:?}."), true) };
+        let marks: Vec<&str> = marks.split('|').map(str::trim).filter(|m| !m.is_empty()).collect();
+        let until = Instant::now() + limit;
+        loop {
+            let text = std::fs::read(&j.log).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+            if let Some(line) = text.lines().find(|l| marks.iter().any(|m| l.contains(m))) {
+                return (format!("{} is ready after {}: {}", j.id, took(j.started.elapsed()), line.trim()), false);
+            }
+            if j.ended().is_some() {
+                // (Told here: no notice later.)
+                j.state.lock().unwrap().quiet = true;
+                self.notices.lock().unwrap().retain(|n| !n.contains(&format!("Background job {} ", j.id)));
+                return (format!("{} ended before it was ready.\n{}", j.id, self.output(&j, 30)), true);
+            }
+            if Instant::now() >= until {
+                return (format!("{} isn't ready after {} (still running).\n{}", j.id, took(limit), self.output(&j, 15)), false);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     }
 
     fn find(&self, id: &str) -> Option<Arc<Job>> {
