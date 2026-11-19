@@ -631,7 +631,7 @@ Rectangle {
                         hit: modelData
                         open: root.cardKey === modelData.path + "#" + modelData.name
                         card: root.cards[modelData.path + "#" + modelData.name]
-                        onToggled: root.toggleCard(modelData)
+                        onCardToggled: root.toggleCard(modelData)
                         onOpenFile: root.openFileRequested(root.st.root + "/" + modelData.path, modelData.line)
                     }
                 }

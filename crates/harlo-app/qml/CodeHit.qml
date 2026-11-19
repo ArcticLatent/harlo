@@ -13,7 +13,7 @@ ItemDelegate {
     property bool open: false
     /// The card's text (undefined until it's read).
     property var card
-    signal toggled()
+    signal cardToggled()
     signal openFile()
 
     leftInset: 8
@@ -73,5 +73,5 @@ ItemDelegate {
             onClicked: codeHit.openFile()
         }
     }
-    onClicked: toggled()
+    onClicked: cardToggled()
 }
