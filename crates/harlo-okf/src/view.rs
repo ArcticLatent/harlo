@@ -34,7 +34,8 @@ use crate::work::{self, Item, Work};
 /// - `search` (`query`, `limit`): [`search`]'s.
 /// - `pageReport` (`path`): `{ text }`, what one page owes, a line each.
 /// - `outOfDate`: `{ exists, pages }`, whether there's a wiki, and the
-///   pages that owe the code something.
+///   pages that owe the code something; `unchecked` (why) instead when
+///   that couldn't be worked out (an unreadable ledger), not "none".
 /// - `check` (`options`: `{ writer, now, confirm, leave: [{ path, why }],
 ///   verifier, reviewed }`): `{ current, text, refused, pages }`, after
 ///   [`stamp::run`] with those options.
@@ -48,7 +49,10 @@ pub fn answer(request: &Value) -> Value {
         "page" => page(root, text("path")),
         "search" => search(root, text("query"), request["limit"].as_u64().map_or(12, |n| usize::try_from(n).unwrap_or(12))),
         "pageReport" => json!({ "text": page_report(root, text("path")) }),
-        "outOfDate" => json!({ "exists": bundle::exists(root), "pages": out_of_date(root) }),
+        "outOfDate" => match out_of_date(root) {
+            Ok(pages) => json!({ "exists": bundle::exists(root), "pages": pages }),
+            Err(why) => json!({ "exists": bundle::exists(root), "pages": [], "unchecked": why }),
+        },
         "map" => json!({ "text": crate::map::map(root) }),
         "check" => run_check(root, &request["options"]),
         "lookup" => {
@@ -559,9 +563,15 @@ pub fn reading_note(root: &Path, path: &str) -> Option<String> {
 
 /// The pages whose code changed since they were stamped, or that owe new
 /// code a mention; read-only, nothing is recorded.
-pub fn out_of_date(root: &Path) -> Vec<String> {
-    let (Ok(bundle), Ok(ledger)) = (bundle::load(root), ledger::read(root)) else { return Vec::new() };
-    work::work(&bundle, &ledger).pages.into_keys().collect()
+///
+/// # Errors
+///
+/// Why it couldn't be worked out: the pages or the ledger couldn't be read
+/// (not the same as nothing owed).
+pub fn out_of_date(root: &Path) -> Result<Vec<String>, String> {
+    let bundle = bundle::load(root).map_err(|e| e.to_string())?;
+    let ledger = ledger::read(root).map_err(|e| e.to_string())?;
+    Ok(work::work(&bundle, &ledger).pages.into_keys().collect())
 }
 
 #[cfg(test)]
@@ -596,7 +606,12 @@ mod tests {
         let found = answer(&json!({ "op": "search", "root": at, "query": "how does it go", "limit": 5 }));
         let late = answer(&json!({ "op": "outOfDate", "root": at }));
         let checked = answer(&json!({ "op": "check", "root": at, "options": { "now": "2026-11-17T00:00:00Z", "leave": [{ "path": "nowhere.rs", "why": "x" }] } }));
+        // An unreadable ledger: unknown, not "nothing out of date".
+        write(ledger::PATH, "{ not json");
+        let unknown = answer(&json!({ "op": "outOfDate", "root": at }));
         std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!((unknown["exists"].as_bool(), unknown["pages"].as_array().map(Vec::len)), (Some(true), Some(0)), "{unknown}");
+        assert!(unknown["unchecked"].as_str().is_some_and(|w| !w.is_empty()), "{unknown}");
         assert_eq!(found["hits"][0]["page"], "runs.md");
         assert_eq!(found["hits"][0]["snippet"], "It goes.");
         let notes: Vec<(u64, &str, u64, &str)> = v["footnotes"].as_array().unwrap().iter().map(|f| (f["n"].as_u64().unwrap(), f["label"].as_str().unwrap(), f["start"].as_u64().unwrap(), f["state"].as_str().unwrap())).collect();
@@ -609,7 +624,7 @@ mod tests {
         assert_eq!(st["pages"][0]["links"], json!(["runs.md"]));
         assert_eq!(st["pages"][1]["owes"], 1);
         assert_eq!(st["work"]["broken"], 1);
-        assert_eq!(late, json!({ "exists": true, "pages": ["runs.md"] }));
+        assert_eq!(late, json!({ "exists": true, "pages": ["runs.md"] }), "a healthy answer has no unchecked");
         assert_eq!((checked["current"].as_bool(), checked["pages"].as_u64()), (Some(false), Some(2)), "{checked}");
         assert_eq!(checked["refused"], json!(["nowhere.rs isn't in the repository, so there's nothing to leave out"]));
         assert_eq!(answer(&json!({ "op": "guess" }))["error"], "No wiki request \"guess\"");

@@ -40,6 +40,11 @@ pub struct Claim {
     /// The whole file's hash then: the same now means nothing in it changed.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub file: String,
+    /// The footnote's locator it was checked with (`fn run`): with the file
+    /// unchanged, the claim holds only for that locator. Empty for a whole
+    /// file or folder, and in ledgers stamped before it was kept.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub locator: String,
 }
 
 /// A file as the wiki last saw it.
@@ -161,7 +166,7 @@ mod tests {
         assert!(seen.had("one") && seen.had("S") && !seen.had("two") && !seen.had("t"));
         let mut l = Ledger::new();
         l.files.insert("a.rs".into(), seen);
-        l.claims.entry("p.md".into()).or_default().insert("one".into(), Claim { path: "a.rs".into(), unit: Some("one".into()), hash: "x".into(), file: "y".into() });
+        l.claims.entry("p.md".into()).or_default().insert("one".into(), Claim { path: "a.rs".into(), unit: Some("one".into()), hash: "x".into(), file: "y".into(), locator: String::new() });
         l.leave.insert("gen/".into(), "generated".into());
         l.leave.insert("a.rs#two".into(), "internal".into());
         let dir = std::env::temp_dir().join(format!("harlo-okf-ledger-{}", std::process::id()));

@@ -40,25 +40,47 @@ pub const NOTE: &str = "This project has a wiki in .okf/: pages written from its
 /// Out-of-date pages named in the note, at most.
 const NOTE_PAGES: usize = 10;
 
-/// The pages whose code changed since they were stamped (or that owe new
-/// code a mention), read-only: nothing is recorded. None without a wiki
-/// (or when its machine didn't answer).
-pub fn out_of_date(folder: &Path) -> Option<Vec<String>> {
-    let v = ask(folder, json!({ "op": "outOfDate" }));
-    (v["exists"] == true).then(|| v["pages"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default())
+/// What the wiki owes its code: the pages out of date, or why that couldn't
+/// be worked out (an unreadable ledger, say: not the same as none).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Freshness {
+    /// The pages whose code changed since they were stamped, or that owe
+    /// new code a mention.
+    Pages(Vec<String>),
+    /// The check failed, and why.
+    Unchecked(String),
 }
 
-/// [`NOTE`], with the pages that are out of date and, with `map` (the
-/// project's setting), the wiki's map; None without a wiki.
+/// What the wiki owes its code, read-only: nothing is recorded. None
+/// without a wiki (or when its machine didn't answer).
+pub fn out_of_date(folder: &Path) -> Option<Freshness> {
+    let v = ask(folder, json!({ "op": "outOfDate" }));
+    if v["exists"] != true {
+        return None;
+    }
+    if let Some(why) = v["unchecked"].as_str() {
+        return Some(Freshness::Unchecked(why.to_owned()));
+    }
+    Some(Freshness::Pages(v["pages"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default()))
+}
+
+/// [`NOTE`], with the pages that are out of date (or that it couldn't be
+/// checked) and, with `map` (the project's setting), the wiki's map; None
+/// without a wiki.
 pub fn reading_note(folder: &Path, map: bool) -> Option<String> {
-    let pages = out_of_date(folder)?;
     let mut note = NOTE.to_owned();
-    if !pages.is_empty() {
-        let mut list = pages.iter().take(NOTE_PAGES).map(|p| format!(".okf/{p}")).collect::<Vec<_>>().join(", ");
-        if pages.len() > NOTE_PAGES {
-            list = format!("{list} and {} more", pages.len() - NOTE_PAGES);
+    match out_of_date(folder)? {
+        Freshness::Pages(pages) if !pages.is_empty() => {
+            let mut list = pages.iter().take(NOTE_PAGES).map(|p| format!(".okf/{p}")).collect::<Vec<_>>().join(", ");
+            if pages.len() > NOTE_PAGES {
+                list = format!("{list} and {} more", pages.len() - NOTE_PAGES);
+            }
+            note = format!("{note} Out of date (their code changed since they were written, so the code wins): {list}.");
         }
-        note = format!("{note} Out of date (their code changed since they were written, so the code wins): {list}.");
+        Freshness::Pages(_) => {}
+        Freshness::Unchecked(why) => {
+            note = format!("{note} Which pages are out of date couldn't be checked ({why}), so any page may be: the code wins.");
+        }
     }
     if map_on(map)
         && let Some(map) = self::map(folder)
@@ -294,6 +316,11 @@ mod tests {
         std::fs::write(root.join("src/run.rs"), "fn run() { go(); }\n").unwrap();
         let note = reading_note(&root, true).unwrap_or_default();
         assert!(note.contains("so the code wins): .okf/run.md.\n\nWiki map"), "{note}");
+        // An unreadable ledger: unknown, not "none out of date".
+        std::fs::write(root.join(".okf/.harlo/ledger.json"), "{ not json").unwrap();
+        assert!(matches!(out_of_date(&root), Some(Freshness::Unchecked(_))), "{:?}", out_of_date(&root));
+        let note = reading_note(&root, false).unwrap_or_default();
+        assert!(note.starts_with(NOTE) && note.contains("couldn't be checked") && note.ends_with("the code wins."), "{note}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

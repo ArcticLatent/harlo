@@ -138,7 +138,7 @@ mod tests {
         work.pages.insert("ledger.md".into(), vec![Item::Stale { label: "post".into(), path: "src/ledger.rs".into(), locator: Some("fn Ledger::post".into()), line: 9, lines: None }]);
         work.pages.insert("cli.md".into(), vec![Item::New { path: "src/cli.rs".into(), name: "undo".into(), kind: Kind::Function, line: 3 }]);
         let mut ledger = Ledger::new();
-        let claim = |path: &str, unit: &str| Claim { path: path.into(), unit: Some(unit.into()), hash: String::new(), file: String::new() };
+        let claim = |path: &str, unit: &str| Claim { path: path.into(), unit: Some(unit.into()), hash: String::new(), file: String::new(), locator: String::new() };
         ledger.claims.entry("ledger.md".into()).or_default().insert("post".into(), claim("src/ledger.rs", "Ledger::post"));
         ledger.claims.entry("cli.md".into()).or_default().insert("run".into(), claim("src/cli.rs", "run"));
         ledger.claims.entry("ledger.md".into()).or_default().insert("close".into(), claim("src/ledger.rs", "Ledger::close"));

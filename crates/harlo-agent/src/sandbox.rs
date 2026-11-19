@@ -113,8 +113,14 @@ const SHOWN_IN_HOME: &[&str] = &[".local/share/harlo/worktrees", ".claude/skills
 const HIDDEN_ELSEWHERE: &[&str] = &["/var/run/docker.sock", "/run/docker.sock", "/tmp/.X11-unix"];
 /// Under the home folder: tool caches commands may write.
 const CACHES: &[&str] = &[".cache", ".cargo", ".rustup", ".npm", ".yarn", ".local/share/pnpm", ".local/share/uv", "go", ".m2", ".gradle", ".nuget", ".bun", ".deno"];
+/// Caches made before the sandbox opens them, with the command that writes
+/// each ("" any): only a folder that exists can be made writable, so a tool's
+/// first use (`uvx` on a machine where uv never ran) failed with "Read-only
+/// file system" and cost the agent a few turns working around it. (Not
+/// `~/go`: a folder in plain sight, often moved with `GOPATH`.)
+const MADE: &[(&str, &str)] = &[(".cache", ""), (".npm", "npm"), (".yarn", "yarn"), (".local/share/pnpm", "pnpm"), (".local/share/uv", "uv"), (".m2", "mvn"), (".gradle", "gradle"), (".nuget", "dotnet"), (".bun", "bun")];
 /// Variables naming caches elsewhere, writable too.
-const CACHE_VARS: &[&str] = &["XDG_CACHE_HOME", "CARGO_HOME", "RUSTUP_HOME", "GOPATH", "GOMODCACHE", "GOCACHE", "npm_config_cache", "PNPM_HOME", "YARN_CACHE_FOLDER", "UV_CACHE_DIR", "PIP_CACHE_DIR", "GRADLE_USER_HOME", "BUN_INSTALL", "DENO_DIR"];
+const CACHE_VARS: &[&str] = &["XDG_CACHE_HOME", "CARGO_HOME", "RUSTUP_HOME", "GOPATH", "GOMODCACHE", "GOCACHE", "npm_config_cache", "PNPM_HOME", "YARN_CACHE_FOLDER", "UV_CACHE_DIR", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "PIP_CACHE_DIR", "GRADLE_USER_HOME", "BUN_INSTALL", "DENO_DIR"];
 /// Variables a command doesn't get (with those whose names look secret).
 const DROPPED_VARS: &[&str] = &["SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"];
 
@@ -188,6 +194,37 @@ fn clean(p: &Path) -> PathBuf {
     out
 }
 
+/// The tool caches to open writable: [`CACHES`] under `home`, and those
+/// under `.local/share` in `data` (`XDG_DATA_HOME`) too when it's elsewhere.
+///
+/// Any of [`MADE`] that isn't there yet is created first when its command is
+/// on `PATH` (`on_path`), so the tool can write it on its first use.
+fn caches(home: &Path, data: Option<&Path>, on_path: impl Fn(&str) -> bool) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for c in CACHES {
+        let mut places = vec![home.join(c)];
+        if let (Some(rest), Some(d)) = (c.strip_prefix(".local/share/"), data) {
+            places.push(d.join(rest));
+        }
+        let tool = MADE.iter().find(|(f, _)| f == c).map(|(_, t)| *t);
+        for p in places {
+            if let Some(t) = tool
+                && !p.exists()
+                && (t.is_empty() || on_path(t))
+            {
+                let _ = std::fs::create_dir_all(&p);
+            }
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Whether `tool` is a file in one of `PATH`'s folders.
+fn on_path(tool: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(tool).is_file()))
+}
+
 impl Sandbox {
     /// `config`: harlo-agent's settings folder; `sessions`: its sessions
     /// (both hidden, wherever they are).
@@ -217,9 +254,15 @@ impl Sandbox {
             writable.extend(common.filter(|c| !c.starts_with(&project)));
         }
         writable.push(PathBuf::from("/tmp"));
-        writable.extend(CACHES.iter().map(|c| home.join(c)));
-        // (Caches moved elsewhere; none that holds home.)
-        writable.extend(CACHE_VARS.iter().filter_map(std::env::var_os).map(PathBuf::from).filter(|c| c.is_absolute() && !home.starts_with(c)));
+        let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|d| d.is_absolute() && !home.starts_with(d));
+        writable.extend(caches(home, data.as_deref(), on_path));
+        // (Caches moved elsewhere; none that holds home. The cache folder
+        // made if it isn't there, as ~/.cache is.)
+        let moved: Vec<PathBuf> = CACHE_VARS.iter().filter_map(std::env::var_os).map(PathBuf::from).filter(|c| c.is_absolute() && !home.starts_with(c)).collect();
+        if let Some(c) = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).filter(|c| moved.contains(c) && !c.exists()) {
+            let _ = std::fs::create_dir_all(c);
+        }
+        writable.extend(moved);
         writable.extend(p.writable.iter().cloned());
         let writable = existing(writable);
         let mut hidden: Vec<PathBuf> = HIDDEN_IN_HOME.iter().map(|h| home.join(h)).collect();
@@ -458,7 +501,9 @@ pub mod tests {
         let sb = Sandbox::new(&on(), &home.join("proj/src"), &home, &home.join(".config/harlo-agent"), Some(&home.join("data/harlo-agent/sessions")));
         assert_eq!(sb.project, home.join("proj/src"), "not a repository: the working directory");
         assert_eq!(sb.writable[0], home.join("proj/src"));
-        assert!(sb.writable.contains(&home.join(".cargo")) && !sb.writable.iter().any(|w| w.ends_with(".npm")), "existing caches only");
+        assert!(sb.writable.contains(&home.join(".cargo")), "an existing cache");
+        assert!(sb.writable.contains(&home.join(".cache")), "~/.cache, made");
+        assert_eq!(sb.writable.iter().any(|w| w.ends_with(".npm")), on_path("npm"), "npm's cache only with npm");
         for h in [".ssh", ".netrc", ".cargo/credentials.toml", ".config/harlo-agent", "data/harlo-agent"] {
             assert!(sb.hidden.contains(&home.join(h)), "{h} hidden: {:?}", sb.hidden);
         }
@@ -476,6 +521,27 @@ pub mod tests {
         assert_eq!(&args[args.len() - 3..], ["bash", "-c", "echo hi"]);
         let offline = Sandbox::new(&Policy { network: false, ..on() }, &home.join("proj"), &home, &home.join("none"), None);
         assert!(!offline.args("x", &home).iter().any(|a| a == "--share-net"));
+    }
+
+    /// A tool's cache that isn't there yet is made for a tool on `PATH`
+    /// (uv's under `XDG_DATA_HOME` too, when that's elsewhere), not for one
+    /// that isn't; and a command can write it.
+    #[test]
+    fn caches_a_tool_hasnt_made_yet_are_writable() {
+        let s = home_outside_tmp("caches");
+        let (home, data) = (s.0.join("home"), s.0.join("data"));
+        std::fs::create_dir_all(home.join("proj")).unwrap();
+        let listed = caches(&home, Some(&data), |t| t == "uv");
+        for made in [".cache", ".local/share/uv"] {
+            assert!(home.join(made).is_dir(), "{made} made");
+        }
+        assert!(data.join("uv").is_dir() && listed.contains(&data.join("uv")), "uv's folder under XDG_DATA_HOME");
+        assert!(!home.join(".npm").exists() && !home.join("go").exists(), "nothing for tools that aren't there");
+        // (Writable in the sandbox, as the cache uv makes in it on first use.)
+        let sb = Sandbox::new(&on(), &home.join("proj"), &home, &home.join("none"), None);
+        let cache = home.join(".cache/uv");
+        let out = std::process::Command::new("bwrap").args(sb.args(&format!("mkdir -p {} && echo made", cache.display()), &home.join("proj"))).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "made", "{}", String::from_utf8_lossy(&out.stderr));
     }
 
     #[test]

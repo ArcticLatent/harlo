@@ -281,11 +281,11 @@ fn short(name: &str) -> &str {
     after.rsplit_once('.').map_or(after, |(_, s)| s)
 }
 
-/// Whether a recorded declaration's name still fits a footnote's locator.
-fn names(recorded: &str, locator: &str) -> bool {
-    let (_, name) = cite::split(locator);
-    let recorded = recorded.replace("::", ".");
-    recorded == name || recorded.ends_with(&format!(".{name}")) || recorded.to_lowercase().starts_with(&name.to_lowercase())
+/// Whether a claim stamped from an unchanged file still holds: it was
+/// checked with this very locator. (One stamped before locators were kept
+/// is checked against the code again, and keeps its locator from then on.)
+fn same_claim(w: &Claim, locator: &str) -> bool {
+    !w.locator.is_empty() && w.locator == locator.trim()
 }
 
 /// Who answers for which paths: each live page's covers and cited paths.
@@ -408,7 +408,13 @@ impl Pass<'_> {
             }
             let path = folder_aware(root, &c.path);
             if path.ends_with('/') {
-                claims.insert(c.label.clone(), Claim { path, unit: None, hash: String::new(), file: String::new() });
+                // (A folder that's there; a missing one, or a file written
+                // as one, is absent.)
+                if root.join(&path).is_dir() {
+                    claims.insert(c.label.clone(), Claim { path, unit: None, hash: String::new(), file: String::new(), locator: String::new() });
+                } else {
+                    items.push(Item::Absent { path: c.path.clone(), label: Some(c.label.clone()), line: Some(c.line) });
+                }
                 continue;
             }
             let Some(src) = self.tree.get(&c.path) else {
@@ -422,7 +428,7 @@ impl Pass<'_> {
             };
             let file = src.hash.clone();
             let Some(locator) = &c.locator else {
-                let now = Claim { path: c.path.clone(), unit: None, hash: file.clone(), file };
+                let now = Claim { path: c.path.clone(), unit: None, hash: file.clone(), file, locator: String::new() };
                 if was.is_none_or(|w| w.unit.is_some() || w.path != c.path || w.hash == now.hash) {
                     claims.insert(c.label.clone(), now);
                 } else {
@@ -437,7 +443,7 @@ impl Pass<'_> {
                 && !w.file.is_empty()
                 && w.file == file
                 && let Some(name) = &w.unit
-                && names(name, locator)
+                && same_claim(w, locator)
             {
                 self.cited.insert((c.path.clone(), name.clone()));
                 continue;
@@ -447,7 +453,7 @@ impl Pass<'_> {
                 Found::One(i) => {
                     let u = &units[i];
                     self.cited.insert((c.path.clone(), u.name.clone()));
-                    let now = Claim { path: c.path.clone(), unit: Some(u.name.clone()), hash: u.hash.clone(), file };
+                    let now = Claim { path: c.path.clone(), unit: Some(u.name.clone()), hash: u.hash.clone(), file, locator: locator.trim().to_owned() };
                     match was.filter(|w| w.path == c.path && w.unit.as_deref() == Some(u.name.as_str())) {
                         // (Stamped before plain comments left the hash: its old hash counts.)
                         Some(w) if w.hash != u.hash && w.hash != u.legacy => {
@@ -531,13 +537,19 @@ impl Pass<'_> {
             let name = was.unit.as_deref().unwrap_or_default();
             let fits: Vec<&(String, Unit)> = all.iter().filter(|(_, u)| u.short() == short(name) && (u.hash == was.hash || u.legacy == was.hash)).collect();
             let items = self.out.pages.entry(page_path.clone()).or_default();
-            if let [(path, u)] = fits.as_slice() {
+            // (Still where it was stamped: the code didn't move, the
+            // footnote's locator changed to one that names nothing.)
+            let stayed = |(path, u): &&(String, Unit)| *path == c.path && u.name == name;
+            if let [fit] = fits.as_slice()
+                && !stayed(fit)
+            {
+                let (path, u) = fit;
                 items.retain(|i| !matches!(i, Item::Absent { label: Some(l), .. } if *l == c.label));
                 let file = self.tree.get(path).map(|s| s.hash.clone()).unwrap_or_default();
                 let locator = format!("{} {}", u.kind.word(), u.name);
                 let from = format!("{}, {}", c.path, c.locator.as_deref().unwrap_or_default());
-                self.out.moved.push(Moved { page: page_path.clone(), label: c.label.clone(), line: c.line, from, path: path.clone(), locator });
-                self.out.claims.entry(page_path).or_default().insert(c.label.clone(), Claim { path: path.clone(), unit: Some(u.name.clone()), hash: u.hash.clone(), file });
+                self.out.moved.push(Moved { page: page_path.clone(), label: c.label.clone(), line: c.line, from, path: path.clone(), locator: locator.clone() });
+                self.out.claims.entry(page_path).or_default().insert(c.label.clone(), Claim { path: path.clone(), unit: Some(u.name.clone()), hash: u.hash.clone(), file, locator });
             } else if self.root.join(&c.path).is_file() {
                 items.push(Item::Unresolved { label: c.label.clone(), path: c.path.clone(), locator: c.locator.clone().unwrap_or_default(), line: c.line });
             }
@@ -681,5 +693,57 @@ mod tests {
         assert!(page.ends_with("[^post]: src/book.rs, fn Book::post\n"), "{page}");
         assert!(repo.work(&ledger).moved.is_empty());
         assert_eq!(ledger.claims["ledger.md"]["post"].path, "src/book.rs");
+    }
+
+    #[test]
+    fn a_changed_locator_is_checked_again() {
+        let repo = Repo::new("locator");
+        repo.write("src/runs.py", "def run():\n    go()\n\ndef run_all():\n    run()\n");
+        let page = |locator: &str| format!("---\ntype: Concept\ntitle: Runs\ncovers:\n  - src/\n---\n# Runs\n\nIt runs.[^run]\n\n[^run]: src/runs.py, {locator}\n");
+        repo.write(".okf/runs.md", &page("fn run"));
+        let mut ledger = Ledger::new();
+        ledger.leave.insert("src/".into(), "test".into());
+        assert!(repo.record(&mut ledger).is_empty());
+        assert_eq!(ledger.claims["runs.md"]["run"].locator, "fn run");
+        // Only the footnote changes, to a kind that names nothing: not current.
+        repo.write(".okf/runs.md", &page("class run"));
+        let w = repo.work(&ledger);
+        assert_eq!(w.pages["runs.md"], [Item::Unresolved { label: "run".into(), path: "src/runs.py".into(), locator: "class run".into(), line: 11 }]);
+        assert!(w.moved.is_empty());
+        // Put back, it passes.
+        repo.write(".okf/runs.md", &page("fn run"));
+        assert!(repo.work(&ledger).is_empty());
+        // To another function in the unchanged file: that one is the claim now.
+        repo.write(".okf/runs.md", &page("fn run_all"));
+        assert!(repo.record(&mut ledger).is_empty());
+        assert_eq!(ledger.claims["runs.md"]["run"].unit.as_deref(), Some("run_all"));
+        repo.write(".okf/runs.md", &page("fn run"));
+        assert!(repo.record(&mut ledger).is_empty());
+        assert_eq!(ledger.claims["runs.md"]["run"].unit.as_deref(), Some("run"));
+        // A claim stamped before locators were kept is checked by name, and kind.
+        ledger.claims.get_mut("runs.md").unwrap().get_mut("run").unwrap().locator.clear();
+        repo.write(".okf/runs.md", &page("class run"));
+        assert!(!repo.work(&ledger).is_empty());
+    }
+
+    #[test]
+    fn a_cited_folder_must_be_one() {
+        let repo = Repo::new("folders");
+        repo.write("src/ledger.rs", LEDGER_RS);
+        repo.write("assets/logo.svg", "<svg/>");
+        let page = |cite: &str| format!("---\ntype: Concept\ntitle: Assets\ncovers:\n  - src/\n---\n# Assets\n\nThey're kept.[^assets]\n\n[^assets]: {cite}\n");
+        let mut ledger = Ledger::new();
+        ledger.leave.insert("src/".into(), "test".into());
+        ledger.leave.insert("assets/".into(), "test".into());
+        // A missing folder, and a file written as one: absent.
+        for cite in ["assets/missing/", "assets/logo.svg/"] {
+            repo.write(".okf/assets.md", &page(cite));
+            assert_eq!(repo.work(&ledger).pages["assets.md"], [Item::Absent { path: cite.into(), label: Some("assets".into()), line: Some(11) }], "{cite}");
+        }
+        // A real one, with or without its slash: current.
+        for cite in ["assets/", "assets"] {
+            repo.write(".okf/assets.md", &page(cite));
+            assert!(repo.work(&ledger).is_empty(), "{cite}: {}", repo.work(&ledger).report());
+        }
     }
 }
