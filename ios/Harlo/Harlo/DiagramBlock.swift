@@ -12,6 +12,9 @@ struct DiagramBlock: View {
     @State private var picture: DiagramPicture?
     /// The same flowchart drawn down, when it's drawn across.
     @State private var drawnDown: DiagramPicture?
+    /// Their pictures, decoded once (not on every pass of the body).
+    @State private var image: UIImage?
+    @State private var downImage: UIImage?
     @State private var width = 0.0
     @State private var why = ""
     @State private var loading = true
@@ -19,8 +22,12 @@ struct DiagramBlock: View {
     @State private var zoomed = false
 
     /// Drawn down when that shows it larger in the card (a narrow phone).
-    var shown: DiagramPicture? {
-        DiagramPicture.showsDown(across: picture, down: drawnDown, width: width - 20) ? drawnDown : picture
+    var shown: (picture: DiagramPicture, image: UIImage)? {
+        if DiagramPicture.showsDown(across: picture, down: drawnDown, width: width - 20), let d = drawnDown, let i = downImage {
+            return (d, i)
+        }
+        if let d = picture, let i = image { return (d, i) }
+        return nil
     }
 
     var light: Bool { p.background.luminance > 0.5 }
@@ -43,7 +50,8 @@ struct DiagramBlock: View {
                             .padding(.horizontal, 4)
                     }
                 }
-            } else if let d = shown, let image = UIImage(data: d.png) {
+            } else if let s = shown {
+                let d = s.picture, image = s.image
                 VStack(alignment: .leading, spacing: 0) {
                     Button { zoomed = true } label: {
                         Image(uiImage: image)
@@ -81,6 +89,7 @@ struct DiagramBlock: View {
             loading = true
             let r = await model.diagram(source, light: light, colors: colors)
             picture = r.picture
+            image = r.picture.flatMap { UIImage(data: $0.png) }
             why = r.why
             loading = false
             if r.picture != nil, let down = DiagramPicture.down(source) {
@@ -88,6 +97,7 @@ struct DiagramBlock: View {
             } else {
                 drawnDown = nil
             }
+            downImage = drawnDown.flatMap { UIImage(data: $0.png) }
         }
     }
 

@@ -178,6 +178,11 @@ struct SessionContent: View {
                 // (For the UI tests: where the conversation's visible part ends.)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("sessionBottom")
+                // Taller or shorter (a side question's answer coming in, a
+                // card going): the end kept in sight, after this layout.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
+                    if atBottom { Task { @MainActor in proxy.scrollTo("bottom", anchor: .bottom) } }
+                }
             }
         }
         .screen()

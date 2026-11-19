@@ -14,6 +14,9 @@ struct PagesGraph: View {
     let open: (WikiLink) -> Void
     @State private var picture: DiagramPicture?
     @State private var drawnDown: DiagramPicture?
+    /// Their pictures, decoded once (not on every pass of the body).
+    @State private var image: UIImage?
+    @State private var downImage: UIImage?
     @State private var width = 0.0
     @State private var why = ""
     @State private var loading = true
@@ -23,14 +26,18 @@ struct PagesGraph: View {
     var source: String { wiki.graph(readLast: model.wikiReadLast[wiki.root] ?? "") }
 
     /// Drawn down when that shows it larger on the screen.
-    var shown: DiagramPicture? {
-        DiagramPicture.showsDown(across: picture, down: drawnDown, width: width) ? drawnDown : picture
+    var shown: (picture: DiagramPicture, image: UIImage)? {
+        if DiagramPicture.showsDown(across: picture, down: drawnDown, width: width), let d = drawnDown, let i = downImage {
+            return (d, i)
+        }
+        if let d = picture, let i = image { return (d, i) }
+        return nil
     }
 
     var body: some View {
         Group {
-            if let d = shown, let image = UIImage(data: d.png) {
-                drawn(d, image)
+            if let s = shown {
+                drawn(s.picture, s.image)
             } else if loading {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -48,6 +55,7 @@ struct PagesGraph: View {
             let colors = ["background": p.elevated.hex, "surface": p.raised.hex, "text": p.foreground.hex, "muted": p.muted.hex, "accent": p.primary.hex]
             let r = await model.diagram(source, light: light, colors: colors)
             picture = r.picture
+            image = r.picture.flatMap { UIImage(data: $0.png) }
             why = r.why
             loading = false
             if r.picture != nil, let down = DiagramPicture.down(source) {
@@ -55,6 +63,7 @@ struct PagesGraph: View {
             } else {
                 drawnDown = nil
             }
+            downImage = drawnDown.flatMap { UIImage(data: $0.png) }
         }
     }
 

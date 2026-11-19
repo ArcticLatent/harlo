@@ -51,6 +51,21 @@ final class HarloUITests: XCTestCase {
         e.tap()
     }
 
+    /// Taps `item` in the session menu. (A tap while the session is still
+    /// settling sometimes doesn't open the menu: tapped again then.)
+    func fromSessionMenu(_ item: String, file: StaticString = #filePath, line: UInt = #line) {
+        let entry = element(item)
+        for _ in 0..<3 where !entry.exists {
+            app.buttons["Session menu"].tap()
+            _ = entry.waitForExistence(timeout: 4)
+        }
+        guard entry.exists else {
+            XCTFail("not in the session menu: \(item)", file: file, line: line)
+            return
+        }
+        entry.tap()
+    }
+
     /// Taps `text` in the conversation once it's above everything under it
     /// (the message box, the plan, a side question): at the largest text
     /// sizes it can sit under them, and the tap would land there (on the
@@ -68,6 +83,22 @@ final class HarloUITests: XCTestCase {
             from.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
         }
         e.tap()
+    }
+
+    /// Taps the part of `e` that shows between the header and what's under
+    /// the conversation: at large text sizes a tall picture's middle can sit
+    /// under the plan or a side question, and a plain tap lands there.
+    func tapVisible(_ e: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        let bottom = app.descendants(matching: .any).matching(identifier: "sessionBottom").firstMatch
+        let top = max(e.frame.minY, app.frame.height * 0.12)
+        let end = min(e.frame.maxY, bottom.exists ? bottom.frame.minY : app.frame.maxY)
+        guard end - top > 10 else {
+            XCTFail("not in view: \(e.label) (\(e.frame))", file: file, line: line)
+            return
+        }
+        e.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: e.frame.width / 2, dy: (top + end) / 2 - e.frame.minY))
+            .tap()
     }
 
     /// Scrolls the conversation until `text` sits just under the header, for
@@ -307,16 +338,18 @@ final class HarloUITests: XCTestCase {
     func test09bWiki() {
         launch("plan")
         openMain()
-        app.buttons["Session menu"].tap()
-        tap("Wiki")
+        fromSessionMenu("Wiki")
         XCTAssertTrue(app.navigationBars["Wiki"].waitForExistence(timeout: 8), "the wiki opens")
         see("2 footnotes' code changed")
         see("Update the wiki")
         shot("15b-wiki")
         see("Overview")
-        see("2 things to do")
         see("Architecture")
-        // (Below the fold with large text.)
+        // (Below the fold with large text: a list makes rows as they come
+        // into view.)
+        let owes = element("2 things to do")
+        for _ in 0..<3 where !owes.exists { app.swipeUp() }
+        see("2 things to do")
         let workflows = element("Workflows")
         for _ in 0..<3 where !workflows.exists { app.swipeUp() }
         see("Workflows")
@@ -448,10 +481,7 @@ final class HarloUITests: XCTestCase {
     func test12ChangesAndDiff() {
         launch("end")
         openMain()
-        app.buttons["Session menu"].tap()
-        // (A tap while the session was still settling sometimes didn't open it.)
-        if !element("Changed files").waitForExistence(timeout: 4) { app.buttons["Session menu"].tap() }
-        tap("Changed files")
+        fromSessionMenu("Changed files")
         see("sidebar.rs")
         shot("20-changes")
         audit("changes")
@@ -505,8 +535,7 @@ final class HarloUITests: XCTestCase {
     func test13ActionLog() {
         launch("end")
         openMain()
-        app.buttons["Session menu"].tap()
-        tap("Action log")
+        fromSessionMenu("Action log")
         see("run-tests.sh")
         shot("22-action-log")
     }
@@ -601,7 +630,7 @@ final class HarloUITests: XCTestCase {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32)))
         }
         // The viewer: at the one tapped, then across to your photo.
-        reply.tap()
+        tapVisible(reply)
         let viewer = app.descendants(matching: .any).matching(identifier: "pictureViewer").firstMatch
         XCTAssertTrue(viewer.waitForExistence(timeout: 8), "the viewer")
         see("2 of 2")
@@ -653,9 +682,7 @@ final class HarloUITests: XCTestCase {
         XCTAssertEqual(tiles.firstMatch.label, "Picture: You sent")
         // The session menu's Pictures: the grid straight away, the latest
         // picture marked.
-        app.buttons["Session menu"].tap()
-        if !app.buttons["Pictures"].waitForExistence(timeout: 4) { app.buttons["Session menu"].tap() }
-        app.buttons["Pictures"].tap()
+        fromSessionMenu("Pictures")
         XCTAssertTrue(cells.firstMatch.waitForExistence(timeout: 8), "Pictures opens the grid")
         XCTAssertEqual(cells.count, 2, "both pictures")
         XCTAssertTrue(cells.element(boundBy: 1).isSelected, "the latest is marked")
