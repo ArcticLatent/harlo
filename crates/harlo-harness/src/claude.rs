@@ -432,8 +432,9 @@ pub fn session_from_text(path: &Path, size: u64, modified: SystemTime, head: &st
     } else if !ai.is_empty() {
         name = ai;
     }
-    // A file with no conversation (only settings lines): not a session.
-    if first.is_empty() && name.is_empty() {
+    // A file with no conversation (only settings lines, or only commands
+    // run in Claude Code itself, `/plugin …`): not a session.
+    if name.is_empty() && (first.is_empty() || only_commands(head, tail)) {
         return None;
     }
     Some(SessionInfo {
@@ -450,6 +451,35 @@ pub fn session_from_text(path: &Path, size: u64, modified: SystemTime, head: &st
         parent_session: None,
         model: last_model(head, tail),
     })
+}
+
+/// Whether all a transcript holds is commands run in Claude Code itself
+/// (`/plugin install …`, `/login`): typed, but no message went to the model
+/// and none came back.
+fn only_commands(head: &str, tail: &str) -> bool {
+    let mut commands = false;
+    for line in head.lines().chain(tail.lines()) {
+        if !line.contains(r#""type":"user""#) && !line.contains(r#""type":"assistant""#) {
+            continue;
+        }
+        let Ok(e) = serde_json::from_str::<Value>(line) else { continue };
+        if e["isSidechain"] == true {
+            continue;
+        }
+        match e["type"].as_str() {
+            Some("assistant") => return false,
+            Some("user") if user_text(&e).is_some() => {
+                let text = &e["message"]["content"];
+                let typed = text.as_str().map_or_else(|| text.to_string(), str::to_owned);
+                if !typed.trim_start().starts_with("<command-name>") && !typed.contains(r#""text":"<command-name>"#) {
+                    return false;
+                }
+                commands = true;
+            }
+            _ => {}
+        }
+    }
+    commands
 }
 
 /// The model of a transcript's last reply (`anthropic/…`, as a saved
@@ -1638,6 +1668,19 @@ mod tests {
         assert!(listed(&format!("{}\n{tools}", user("sdk-ts", "sdk", "default"))));
         assert!(listed(&format!("{}\n{tools}", user("sdk-ts", "sdk", "bypassPermissions"))));
         assert!(listed(&user("cli", "human", "auto")));
+
+        // Only commands run in Claude Code itself: not a conversation.
+        let command = |args: &str| format!(r#"{{"type":"user","cwd":"/w","timestamp":"2026-11-01T08:00:00Z","isSidechain":false,"message":{{"role":"user","content":"<command-name>/plugin</command-name>\n<command-message>plugin</command-message>\n<command-args>{args}</command-args>"}}}}"#);
+        let caveat = r#"{"type":"user","isMeta":true,"cwd":"/w","isSidechain":false,"message":{"role":"user","content":"<local-command-caveat>…</local-command-caveat>"}}"#;
+        let output = r#"{"type":"user","cwd":"/w","isSidechain":false,"message":{"role":"user","content":"<local-command-stdout>Successfully added marketplace</local-command-stdout>"}}"#;
+        let plugins = format!("{caveat}\n{}\n{output}\n{}", command("marketplace add a/b"), command("install c@b"));
+        assert!(!listed(&plugins));
+        // Then a conversation: a session, under the command's name as before.
+        let reply = r#"{"type":"assistant","isSidechain":false,"message":{"role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"Hi"}]}}"#;
+        assert!(listed(&format!("{plugins}\n{reply}")));
+        assert!(listed(&format!("{plugins}\n{}", user("cli", "human", "default"))));
+        // Named by you: kept.
+        assert!(listed(&format!("{plugins}\n{{\"type\":\"custom-title\",\"customTitle\":\"Plugins\"}}")));
         // A message about these names is only a message.
         let about = r#"{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"\"id\":\"msg_syn_ and \"mcp__custom-tools__"}]}}"#;
         assert!(listed(&format!("{}\n{tools}\n{about}", user("sdk-ts", "human", "bypassPermissions"))));
