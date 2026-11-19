@@ -14,7 +14,9 @@ struct PictureGrid: View {
     var body: some View {
         ScrollViewReader { reader in
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {
+                // (Top-aligned: a name on two lines makes its cell taller, and
+                // centred cells would put the pictures of a row out of line.)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12, alignment: .top)], spacing: 16) {
                     ForEach(paths, id: \.self) { path in
                         PictureGridCell(path: path, name: name(path), open: path == current) { open(path) }
                             .id(path)
