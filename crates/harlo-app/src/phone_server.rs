@@ -181,6 +181,13 @@ const CODE_BYTES: usize = 256 * 1024;
 /// A code line too long for that: how much of it a phone gets, as plain
 /// text (escaped, it still fits).
 const LINE_BYTES: usize = 32 * 1024;
+/// A tool's output lines a phone gets highlighted, at most: it shows the
+/// first few and the rest under Show more. Highlighting costs about 6 ms per
+/// 100 lines of Rust, and a session opens with up to 300 rows.
+const CODE_LINES: usize = 120;
+/// Tool outputs kept highlighted (see `tool_code`), at most: a session's
+/// rows several times over, so opening one again costs nothing.
+const CODE_KEPT: usize = 2048;
 
 fn clip(s: &str) -> String {
     if s.len() <= ROW_BYTES {
@@ -229,7 +236,72 @@ fn row_json(r: &harlo_core::Row, folder: &std::path::Path) -> Value {
     let more = r.kind == harlo_core::RowKind::Code && matches!(r.label.as_str(), "part-middle" | "part-last");
     json!({ "key": r.key, "kind": if more { "codePart" } else { r.kind.as_str() }, "html": clip(&r.html), "text": text, "title": r.title, "subtitle": r.subtitle, "state": r.state,
         "group": r.group, "summary": r.summary, "groupOpen": r.group_open, "time": r.time, "ended": r.ended, "result": r.result, "diff": clip(&r.diff),
-        "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model, "images": harlo_core::pictures::shown(r, folder) })
+        "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model, "images": harlo_core::pictures::shown(r, folder),
+        "code": tool_code(r), "commandHtml": command_html(&r.command) })
+}
+
+/// A call's output as code on a phone, when it's a file's lines.
+///
+/// A read, a printed file, grep's numbered matches: `{ path, total, more,
+/// earlier, lines: [{ n, c, h, f }] }`, as the desktop's cards get it (`n`
+/// the line's number, `c` grep's context, `h` its highlighted HTML, `f` a
+/// file's name before its lines). Null for other output, while it runs, for
+/// an edit (its diff shows) and for lines too long to highlight; at most
+/// [`CODE_LINES`] lines and [`CODE_BYTES`] of HTML (`more` then).
+fn tool_code(r: &harlo_core::Row) -> Value {
+    if r.kind != harlo_core::RowKind::Tool || r.state == "running" || !r.diff.is_empty() || r.text.is_empty() {
+        return Value::Null;
+    }
+    // (Highlighted once: a session opened again, on any phone, sends the
+    // same rows.)
+    static KEPT: std::sync::LazyLock<Mutex<HashMap<u64, Value>>> = std::sync::LazyLock::new(Mutex::default);
+    let id = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (&r.title, &r.command, &r.subtitle, &r.text).hash(&mut h);
+        h.finish()
+    };
+    if let Some(v) = KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id) {
+        return v.clone();
+    }
+    let v = highlighted(r);
+    let mut kept = KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if kept.len() >= CODE_KEPT {
+        kept.clear();
+    }
+    kept.insert(id, v.clone());
+    v
+}
+
+/// [`tool_code`] worked out.
+fn highlighted(r: &harlo_core::Row) -> Value {
+    let Some(view) = harlo_core::listing::view(&r.title, &r.command, r.subtitle.trim_end_matches('…'), &r.text, CODE_LINES) else {
+        return Value::Null;
+    };
+    if view.lines.iter().any(|l| l.html.len() > LINE_BYTES) {
+        return Value::Null;
+    }
+    let (mut bytes, mut more) = (0, view.more || view.total > view.lines.len());
+    let mut lines = Vec::with_capacity(view.lines.len());
+    for l in &view.lines {
+        bytes += l.html.len() + l.file.len();
+        if bytes > CODE_BYTES {
+            more = true;
+            break;
+        }
+        lines.push(json!({ "n": l.num, "c": l.context, "h": l.html, "f": l.file }));
+    }
+    json!({ "path": view.path, "total": view.total, "more": more, "earlier": view.earlier, "lines": lines })
+}
+
+/// A shell command highlighted as shell, its lines' HTML a line apart; ""
+/// for none, or one too long to be worth it (it shows plain).
+fn command_html(command: &str) -> String {
+    if command.is_empty() || command.len() > LINE_BYTES {
+        return String::new();
+    }
+    let lines: Vec<&str> = command.lines().collect();
+    harlo_core::markdown::highlight_lines("command.sh", &lines).join("\n")
 }
 
 /// A code block on a phone: its html and the text it copies, cut at the
@@ -1482,6 +1554,27 @@ pub(crate) mod tests {
         r.command.clear();
         let text = row_json(&r, std::path::Path::new(""))["text"].as_str().unwrap().to_owned();
         assert!(text.starts_with("line 0\n") && text.ends_with("(cut here; the rest is in harlo on your computer)"));
+    }
+
+    /// A tool's output that is a file's lines comes highlighted, numbered as
+    /// grep numbered it, and its command highlighted as shell; other output
+    /// comes as text only.
+    #[test]
+    fn tool_output_comes_highlighted() {
+        let mut r = harlo_core::Row { key: "g".into(), kind: harlo_core::transcript::RowKind::Tool, title: "bash".into(),
+            command: "grep -n \"fn main\" src/main.rs".into(), text: "src/main.rs:3:fn main() {\nsrc/main.rs:4:    let x = 1;".into(), ..Default::default() };
+        let v = row_json(&r, std::path::Path::new(""));
+        let lines = v["code"]["lines"].as_array().expect("grep's lines as code");
+        let body: Vec<_> = lines.iter().filter(|l| l["f"] == "").collect();
+        assert_eq!(body.iter().map(|l| l["n"].as_str().unwrap()).collect::<Vec<_>>(), ["3", "4"]);
+        assert!(body[0]["h"].as_str().unwrap().contains("<span"), "highlighted: {}", body[0]["h"]);
+        assert!(v["commandHtml"].as_str().unwrap().contains("<span") && v["commandHtml"].as_str().unwrap().contains("grep"));
+        r.text = "Compiling harlo v0.1.0\nFinished in 3.2s".into();
+        r.command = "cargo build".into();
+        assert!(row_json(&r, std::path::Path::new(""))["code"].is_null(), "a log isn't code");
+        r.state = "running".into();
+        r.text = "src/main.rs:3:fn main() {".into();
+        assert!(row_json(&r, std::path::Path::new(""))["code"].is_null(), "not while it runs");
     }
 
     /// A diff's lines come coloured as code, each side on its own: a block

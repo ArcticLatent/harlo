@@ -654,6 +654,23 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(Row(key: "s", kind: "tool", text: "ok", title: "bash").shownOutput(), "ok")
     }
 
+    func testToolOutputAsCodeAsHarloSendsIt() throws {
+        let r = Row(["key": "g", "kind": "tool", "title": "bash", "command": "grep -n fn src",
+                     "commandHtml": "grep -n <span class=\"s2\">fn</span> src",
+                     "code": ["path": "", "total": 3, "more": false, "earlier": false, "lines": [
+                         ["n": "", "c": false, "h": "", "f": "src/main.rs"],
+                         ["n": "3", "c": false, "h": "<span class=\"s2\">fn</span> main() {", "f": ""],
+                         ["n": "4", "c": true, "h": "    let x = 1;", "f": ""]]]])
+        let code = try XCTUnwrap(r.code)
+        XCTAssertEqual(code.lines.map(\.file), ["src/main.rs", "", ""])
+        XCTAssertEqual(code.lines[1].number, "3")
+        XCTAssertEqual(code.lines[1].spans.first, Span("fn", code: true, token: 2))
+        XCTAssertTrue(code.hasContext)
+        XCTAssertEqual(code.total, 3)
+        XCTAssertEqual(RichText.plain(r.commandSpans), "grep -n fn src")
+        XCTAssertNil(Row(["key": "l", "kind": "tool", "title": "bash", "text": "ok", "code": nil]).code, "a log isn't code")
+    }
+
     func testFilesAndBranchesAsHarloSendsThem() {
         let f = FileText(["path": "a.rs", "total": 9000, "cut": true, "lines": ["<span class=\"s2\">fn</span> main() {}"]])
         XCTAssertEqual(f.spans(0).first, Span("fn", code: true, token: 2))

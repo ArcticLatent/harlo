@@ -29,22 +29,83 @@ struct SessionCard: View {
         }
     }
 
-    var detail: String {
-        // (Its model, when known, before its agent: "GLM 5.3 · Claude".)
-        var parts = [session.modelName.isEmpty ? Style.harnessLabel(session.harness) : session.modelName + " · " + Style.harnessLabel(session.harness)]
+    /// Its model as people say it ("claude-opus-5-5" → "Opus 5.5"); ""
+    /// when it isn't known (its tile shows the agent either way).
+    var model: String {
+        session.modelName.isEmpty ? "" : WorkflowStage.modelName(session.modelName)
+    }
+
+    /// Its project and the machine it's on (grouped by project, the group
+    /// says those).
+    var place: String {
+        guard showProject, !session.project.isEmpty else { return "" }
+        return session.host.isEmpty ? session.project : session.project + " on " + session.host
+    }
+
+    /// Whose helper it is, and how it ended.
+    var extra: String {
+        var parts: [String] = []
         if !nested && !session.helperOf.isEmpty { parts.append("Helper of “\(session.helperOf)”") }
-        if showProject && !session.project.isEmpty { parts.append(session.project) }
-        // (Grouped by project, the group says its machine.)
-        if showProject && !session.host.isEmpty { parts.append(session.host) }
-        if !session.branch.isEmpty { parts.append(session.branch) }
         if !session.settled.isEmpty { parts.append(session.settled) }
         return parts.joined(separator: " · ")
+    }
+
+    /// A detail with its kind as a symbol (a folder for the project, a
+    /// chip for the model, a branch), so they don't read as one sentence.
+    func fact(_ text: String, _ symbol: String, spoken: String, strong: Bool = false) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .scaledFont(12, .medium)
+                .foregroundStyle(Color(p.muted))
+                .accessibilityHidden(true)
+            Text(text)
+                .scaledFont(14.5, strong ? .medium : .regular)
+                .foregroundStyle(Color(strong ? p.foreground.mix(p.background, 0.2) : p.muted))
+                .lineLimit(1)
+                .accessibilityLabel(spoken)
+        }
+    }
+
+    /// The project, then the model, always on one line: a long project
+    /// name is cut short, the model isn't.
+    @ViewBuilder var facts: some View {
+        let agent = Style.harnessLabel(session.harness)
+        if !place.isEmpty || !model.isEmpty {
+            HStack(spacing: 14) {
+                if !place.isEmpty {
+                    fact(place, "folder", spoken: model.isEmpty ? "Project \(place), \(agent)" : "Project \(place)", strong: true)
+                }
+                // (Read out with its agent: on screen only its tile says it.)
+                if !model.isEmpty {
+                    fact(model, "cpu", spoken: "\(model) with \(agent)")
+                        .layoutPriority(1)
+                }
+            }
+        }
+    }
+
+    /// Its branch, then whose helper it is and how it ended.
+    @ViewBuilder var more: some View {
+        if !session.branch.isEmpty || !extra.isEmpty {
+            HStack(spacing: 8) {
+                if !session.branch.isEmpty {
+                    fact(session.branch, "arrow.triangle.branch", spoken: "Branch \(session.branch)")
+                }
+                if !extra.isEmpty {
+                    Text(extra)
+                        .scaledFont(13.5)
+                        .foregroundStyle(Color(p.muted))
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
+        }
     }
 
     var body: some View {
         HStack(spacing: 14) {
             AgentTile(harness: session.harness, maker: session.maker, size: 46, ring: p.raised)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if nested {
                         Image(systemName: "arrow.turn.down.right")
@@ -62,12 +123,8 @@ struct SessionCard: View {
                         .lineLimit(stacked ? 4 : 2)
                         .multilineTextAlignment(.leading)
                 }
-                Text(detail)
-                    .scaledFont(14.5)
-                    .foregroundStyle(Color(p.muted))
-                    // (With the model first it runs longer: a second line
-                    // rather than cut off.)
-                    .lineLimit(stacked ? 3 : 2)
+                facts
+                more
                 if stacked { state }
             }
             Spacer(minLength: 6)

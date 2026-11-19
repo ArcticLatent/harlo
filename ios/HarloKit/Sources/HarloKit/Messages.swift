@@ -103,6 +103,11 @@ public struct Row: Equatable, Sendable, Identifiable {
     /// made, a picture file it names), as harlo names them: ask harlo for
     /// one with `HarloModel.picture`.
     public var images: [String]
+    /// Tool rows: the output as code, when it's a file's lines (nil for
+    /// other output, it shows as text).
+    public var code: ToolCode?
+    /// Tool rows: the command highlighted as shell ("" none: it shows plain).
+    public var commandSpans: [Span]
 
     public var id: String { key }
 
@@ -126,13 +131,19 @@ public struct Row: Equatable, Sendable, Identifiable {
         command = v["command"].text
         model = v["model"].text
         images = (v["images"].array ?? []).compactMap(\.string)
+        code = ToolCode(v["code"])
+        let commandHtml = v["commandHtml"].text
+        commandSpans = commandHtml.isEmpty ? [] : RichText.codeLine(commandHtml)
     }
 
     public init(key: String, kind: String, html: String = "", text: String = "", title: String = "", subtitle: String = "",
                 state: String = "", group: String = "", summary: String = "", groupOpen: Bool = false,
                 time: Int64 = 0, ended: Int64 = 0, result: String = "", diff: String = "", runMs: Int64 = 0,
-                label: String = "", command: String = "", model: String = "", images: [String] = [])
+                label: String = "", command: String = "", model: String = "", images: [String] = [],
+                code: ToolCode? = nil, commandSpans: [Span] = [])
     {
+        self.code = code
+        self.commandSpans = commandSpans
         self.images = images
         self.label = label
         self.command = command

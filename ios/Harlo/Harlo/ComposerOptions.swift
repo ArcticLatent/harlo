@@ -1,7 +1,8 @@
 import HarloKit
 import SwiftUI
 
-/// The thinking level, approval mode and Plan, in one menu: its icon
+/// The thinking level, approval mode and Plan, in one menu, and while it
+/// works whether a message steers the run or waits for it: its icon
 /// lights up while Plan is on or nothing asks first.
 struct ComposerOptions: View {
     @Environment(HarloModel.self) private var model
@@ -13,9 +14,18 @@ struct ComposerOptions: View {
     var body: some View {
         let m = session.modes
         let approvals = m?.approvals ?? []
-        if !levels.isEmpty || !approvals.isEmpty {
+        if session.busy || !levels.isEmpty || !approvals.isEmpty {
             let plan = m?.plan == true, yolo = m?.approval == "yolo"
             Menu {
+                if session.busy {
+                    Picker(selection: Bindable(session).steer) {
+                        Text("Steer the current run").tag(true)
+                        Text("Queue for after it").tag(false)
+                    } label: {
+                        Label("Messages: \(session.steer ? "Steer" : "Queue")", systemImage: session.steer ? "arrow.turn.down.right" : "text.line.last.and.arrowtriangle.forward")
+                    }
+                    .pickerStyle(.menu)
+                }
                 if !levels.isEmpty {
                     Picker(selection: Binding(get: { session.info.thinking }, set: { l in Task { await model.setThinking(l) } })) {
                         ForEach(levels, id: \.self) { Text($0.capitalized).tag($0) }
@@ -43,7 +53,7 @@ struct ComposerOptions: View {
                     .overlay { Circle().strokeBorder(Color(plan || yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1) }
                     .foregroundStyle(Color(plan || yolo ? p.primary : p.muted))
             }
-            .accessibilityLabel("Options: thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off")")
+            .accessibilityLabel("Options: \(session.busy ? (session.steer ? "messages steer the run, " : "messages wait for the run, ") : "")thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off")")
         }
     }
 }

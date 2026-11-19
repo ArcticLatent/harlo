@@ -2,10 +2,12 @@ import HarloKit
 import SwiftUI
 import UIKit
 
+/// What the agent thought: shown open, so its reasoning reads along with
+/// the reply; tap "Thought" to fold it.
 struct ThinkingRow: View {
     @Environment(\.palette) private var p
     let row: Row
-    @State private var open = false
+    @State private var open = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

@@ -3,13 +3,15 @@ import SwiftUI
 import UIKit
 
 /// A tool call on a card: what it did ("Edited file"), on what, how it
-/// went (lines added and removed, or a tick and how long), and, opened, its
-/// diff or output; a command's result under it.
+/// went (lines added and removed, or a tick and how long), and, open (as
+/// it starts), its diff or output (see `ToolOutput`); a command's result
+/// under it.
 struct ToolCard: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let row: Row
-    @State private var open = false
+    /// Shown open: what it did is there to read; tap its line to fold it.
+    @State private var open = true
 
     /// The line under its name, and whether it's words: harlo's tools name
     /// the session they're about by its title (live:4 → Update the changelog).
@@ -89,38 +91,9 @@ struct ToolCard: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
             }
-            if open && !row.diff.isEmpty {
+            if open {
                 Rectangle().fill(Color(p.hairline)).frame(height: 1)
-                DiffLines(diff: row.diff, bare: true)
-            } else if open {
-                Rectangle().fill(Color(p.hairline)).frame(height: 1)
-                // (Scrolling down too only when it's taller than its box: a
-                // vertical scroll view takes all the height it's given.)
-                let output = row.shownOutput()
-                let tall = output.reduce(into: shownCommand.isEmpty ? 1 : 2) { n, c in if c == "\n" { n += 1 } } > 18
-                let axes: Axis.Set = tall ? [.horizontal, .vertical] : [.horizontal]
-                ScrollView(axes) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if !shownCommand.isEmpty {
-                            Text("$ " + shownCommand)
-                                .font(Style.mono(12))
-                                .foregroundStyle(Color(p.muted))
-                                .textSelection(.enabled)
-                        }
-                        if !row.text.isEmpty {
-                            // A command's end (its result), anything else's start.
-                            Text(output)
-                                .font(Style.mono(12))
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .padding(12)
-                }
-                .scrollIndicators(.hidden)
-                .defaultScrollAnchor(ToolName.isCommand(row.title) || !row.command.isEmpty ? .bottomLeading : .topLeading)
-                .frame(height: tall ? 320 : nil)
-                .frame(maxHeight: 320)
-                .background(Color(p.codeBackground))
+                ToolOutput(row: row, command: shownCommand)
             }
             // A command's result, under it ("12 tests passed · 1.4s").
             if symbol == "terminal" && !row.result.isEmpty {

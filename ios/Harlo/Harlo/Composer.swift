@@ -75,13 +75,13 @@ struct Composer: View {
                     .padding(.top, 4)
                 if big {
                     HStack(spacing: 0) {
-                        if session.busy { SteerSwitch(session: session) } else { ModelChip(session: session, big: big) { openSheet(.models) } }
+                        ModelChip(session: session, big: big) { openSheet(.models) }
                         Spacer(minLength: 0)
                     }
                 }
                 HStack(spacing: 6) {
                     PhotoButton(photos: $photos, size: 34)
-                    if !big { if session.busy { SteerSwitch(session: session) } else { ModelChip(session: session, big: big) { openSheet(.models) } } }
+                    if !big { ModelChip(session: session, big: big) { openSheet(.models) } }
                     ComposerOptions(session: session, levels: levels)
                     Spacer(minLength: 0)
                     MicButton(text: $session.draft, size: 34)
