@@ -16,6 +16,7 @@ pub mod cite;
 pub mod indexed;
 pub mod ledger;
 pub mod lex;
+pub mod map;
 pub mod page;
 pub mod scope;
 pub mod split;

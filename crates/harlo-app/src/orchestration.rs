@@ -125,7 +125,8 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
         if tool == harlo_core::orchestration::INSTRUCTIONS {
             // (Checked here, off the UI thread: another machine's is asked over SSH.)
             let text = result["text"].as_str().unwrap_or_default();
-            return Ok(match harlo_core::wiki::reading_note(std::path::Path::new(result["cwd"].as_str().unwrap_or_default())) {
+            let map = result["map"] != false;
+            return Ok(match harlo_core::wiki::reading_note(std::path::Path::new(result["cwd"].as_str().unwrap_or_default()), map) {
                 Some(note) => json!(format!("{text}\n\n{note}")),
                 None => json!(text),
             });

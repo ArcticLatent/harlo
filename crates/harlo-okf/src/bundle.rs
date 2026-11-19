@@ -95,7 +95,7 @@ fn entry(title: &str, target: &str, description: Option<&str>) -> String {
     }
 }
 
-fn title_of(p: &Page) -> String {
+pub(crate) fn title_of(p: &Page) -> String {
     p.front.title.clone().unwrap_or_else(|| {
         let stem = p.path.rsplit('/').next().unwrap_or(&p.path).trim_end_matches(".md");
         folder_title(stem)

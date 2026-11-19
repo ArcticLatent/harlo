@@ -3412,6 +3412,16 @@ impl Workspace {
         self.setting_str(&format!("lookup_{project}")) == "1"
     }
 
+    /// A project's agents get the wiki's map with its note: its own Wiki map
+    /// setting ("1" on, "0" off), else Settings → Wiki's (on unless "0").
+    fn wiki_map_on(&self, project: i64) -> bool {
+        match self.setting_str(&format!("wiki_map_{project}")).as_str() {
+            "1" => true,
+            "0" => false,
+            _ => self.setting_str("wiki_map") != "0",
+        }
+    }
+
     /// The environment of a session started in `cwd`: its orchestration
     /// `token`, and for Harlo its code lookup when the project has it on
     /// (on another machine, harlo's code index is put there first, off
@@ -3441,7 +3451,8 @@ impl Workspace {
             writing: self.wiki_sessions.contains(c),
             project: self.features_of(c).map(|(cwd, wiki, plan, commits)| {
                 let lookup = self.project_of(c).is_some_and(|(_, p)| self.lookup_on(p));
-                tool_calls::Project { cwd, wiki, plan, commits, lookup }
+                let map = self.project_of(c).is_some_and(|(_, p)| self.wiki_map_on(p));
+                tool_calls::Project { cwd, wiki, plan, commits, lookup, map }
             }),
         }
     }
@@ -7189,14 +7200,7 @@ impl Workspace {
             return Ok(json!(tool_calls::offered(starting, &facts)));
         }
         if tool == harlo_core::orchestration::INSTRUCTIONS {
-            let text = tool_calls::instructions(starting, &facts);
-            // (Another machine's is looked for with the note, off this thread.)
-            let wiki_found = facts.project.as_ref().is_some_and(|p| harlo_core::remote::is_remote(&p.cwd) || harlo_core::wiki::has_wiki(&p.cwd));
-            // (The wiki's note, with its out-of-date pages: worked out off this thread.)
-            return Ok(match tool_calls::reads_wiki(&facts, wiki_found) {
-                Some(cwd) => tool_calls::deferred(json!({ "cwd": cwd.to_string_lossy(), "text": text })),
-                None => json!(text),
-            });
+            return Ok(instructions_for(starting, &facts));
         }
         // Code lookup: answered off this thread (crate::orchestration).
         if tool == tool_calls::LOOKUP {
@@ -8414,6 +8418,21 @@ fn diff_key(key: &str) -> Option<(bool, &str)> {
     let rest = key.strip_prefix("diff:")?;
     let (staged, path) = rest.split_once(':')?;
     Some((staged == "1", path))
+}
+
+/// What a session is told of harlo's tools, and, when it reads its
+/// project's wiki, the wiki's note (and map, as the project has it) to add,
+/// worked out off the UI thread (another machine's is asked over SSH).
+fn instructions_for(starting: harlo_core::orchestration::Starting, facts: &tool_calls::Caller) -> serde_json::Value {
+    let text = tool_calls::instructions(starting, facts);
+    let wiki_found = facts.project.as_ref().is_some_and(|p| harlo_core::remote::is_remote(&p.cwd) || harlo_core::wiki::has_wiki(&p.cwd));
+    match tool_calls::reads_wiki(facts, wiki_found) {
+        Some(cwd) => {
+            let map = facts.project.as_ref().is_some_and(|p| p.map);
+            tool_calls::deferred(json!({ "cwd": cwd.to_string_lossy(), "text": text, "map": map }))
+        }
+        None => json!(text),
+    }
 }
 
 #[cfg(test)]

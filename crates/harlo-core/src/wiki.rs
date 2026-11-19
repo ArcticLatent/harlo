@@ -48,17 +48,41 @@ pub fn out_of_date(folder: &Path) -> Option<Vec<String>> {
     (v["exists"] == true).then(|| v["pages"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default())
 }
 
-/// [`NOTE`], with the pages that are out of date; None without a wiki.
-pub fn reading_note(folder: &Path) -> Option<String> {
+/// [`NOTE`], with the pages that are out of date and, with `map` (the
+/// project's setting), the wiki's map; None without a wiki.
+pub fn reading_note(folder: &Path, map: bool) -> Option<String> {
     let pages = out_of_date(folder)?;
-    if pages.is_empty() {
-        return Some(NOTE.to_owned());
+    let mut note = NOTE.to_owned();
+    if !pages.is_empty() {
+        let mut list = pages.iter().take(NOTE_PAGES).map(|p| format!(".okf/{p}")).collect::<Vec<_>>().join(", ");
+        if pages.len() > NOTE_PAGES {
+            list = format!("{list} and {} more", pages.len() - NOTE_PAGES);
+        }
+        note = format!("{note} Out of date (their code changed since they were written, so the code wins): {list}.");
     }
-    let mut list = pages.iter().take(NOTE_PAGES).map(|p| format!(".okf/{p}")).collect::<Vec<_>>().join(", ");
-    if pages.len() > NOTE_PAGES {
-        list = format!("{list} and {} more", pages.len() - NOTE_PAGES);
+    if map_on(map)
+        && let Some(map) = self::map(folder)
+    {
+        note = format!("{note}\n\n{map}");
     }
-    Some(format!("{NOTE} Out of date (their code changed since they were written, so the code wins): {list}."))
+    Some(note)
+}
+
+/// Whether sessions get the wiki's map: as `setting` says (on unless
+/// switched off: against no wiki −28% and −4% input for Harlo, −10% and
+/// −4% for Claude Code, and 9–13% fewer tool calls than the note alone),
+/// unless `HARLO_WIKI_MAP` is `on` or `off` (benchmarks).
+fn map_on(setting: bool) -> bool {
+    match std::env::var("HARLO_WIKI_MAP").as_deref() {
+        Ok("on") => true,
+        Ok("off") => false,
+        _ => setting,
+    }
+}
+
+/// The wiki's map ([`harlo_okf::map`]), asked on the repository's machine.
+pub fn map(folder: &Path) -> Option<String> {
+    ask(folder, json!({ "op": "map" }))["text"].as_str().map(str::to_owned)
 }
 
 /// The wiki session's tool, as offered.
@@ -260,11 +284,16 @@ mod tests {
         let answer = call_check(&root, "claude/claude-opus-5-5", &json!({})).unwrap();
         assert_eq!(answer["current"], true, "{}", answer["text"]);
         assert!(answer["text"].as_str().unwrap().starts_with("Stamped: run.md."));
-        assert_eq!(reading_note(&root).as_deref(), Some(NOTE));
+        // The note, then the map: the page, and the code it cites.
+        let map = map(&root).unwrap_or_default();
+        assert!(map.ends_with("- run.md: Runs. Runs.\n  - src/run.rs (run)\n"), "{map}");
+        assert_eq!(reading_note(&root, true), Some(format!("{NOTE}\n\n{map}")));
+        // A project with it off: the note alone.
+        assert_eq!(reading_note(&root, false).as_deref(), Some(NOTE));
         // Its code changes: other sessions are told the page is out of date.
         std::fs::write(root.join("src/run.rs"), "fn run() { go(); }\n").unwrap();
-        let note = reading_note(&root).unwrap_or_default();
-        assert!(note.ends_with("so the code wins): .okf/run.md."), "{note}");
+        let note = reading_note(&root, true).unwrap_or_default();
+        assert!(note.contains("so the code wins): .okf/run.md.\n\nWiki map"), "{note}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

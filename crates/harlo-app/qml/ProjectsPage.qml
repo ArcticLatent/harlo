@@ -315,6 +315,29 @@ ColumnLayout {
             }
             SettingRow {
                 divider: true
+                visible: featureGroup.on("wiki", true)
+                title: "Wiki map"
+                detail: "Sessions get each wiki page and the code its sections explain in their instructions, so they find code without searching."
+                more: "The default is in Settings → Wiki; here this project can differ from it either way."
+                icon: "compass-3"
+                ComboField {
+                    objectName: "projectWikiMap"
+                    width: 190
+                    // ("" follows Settings → Wiki, read again when a switch moves.)
+                    readonly property bool byDefault: featureGroup.rev >= 0 && Workspace.setting("wiki_map") !== "0"
+                    readonly property var values: ["", "1", "0"]
+                    model: [byDefault ? "As in Settings (on)" : "As in Settings (off)", "On", "Off"]
+                    function at() { return featureGroup.rev >= 0 && featureGroup.pid >= 0 ? Math.max(0, values.indexOf(Workspace.setting("wiki_map_" + featureGroup.pid))) : 0 }
+                    currentIndex: at()
+                    onActivated: i => {
+                        Workspace.setSetting("wiki_map_" + featureGroup.pid, values[i])
+                        featureGroup.rev++
+                        currentIndex = Qt.binding(() => at())
+                    }
+                }
+            }
+            SettingRow {
+                divider: true
                 title: "Code lookup"
                 detail: "Agents can look up a function or type by name: where it's declared, its signature, what it calls and what calls it, without reading files."
                 more: "From harlo's code index of this project (its own cache; nothing is written in the project). Harlo has it as a tool of its own, other agents through Harlo's tools. Off unless you switch it on: it's one more tool in every request."

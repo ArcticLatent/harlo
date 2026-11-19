@@ -49,6 +49,7 @@ pub fn answer(request: &Value) -> Value {
         "search" => search(root, text("query"), request["limit"].as_u64().map_or(12, |n| usize::try_from(n).unwrap_or(12))),
         "pageReport" => json!({ "text": page_report(root, text("path")) }),
         "outOfDate" => json!({ "exists": bundle::exists(root), "pages": out_of_date(root) }),
+        "map" => json!({ "text": crate::map::map(root) }),
         "check" => run_check(root, &request["options"]),
         "lookup" => {
             let depth = request["depth"].as_u64().and_then(|d| usize::try_from(d).ok()).unwrap_or(2);

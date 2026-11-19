@@ -797,6 +797,25 @@ Popup {
                 more: "Update first checks, with no model, whether any fact's code changed or files were added; when none did, Harlo records the update itself and no session starts. Otherwise a session of this agent updates the pages that need it."
             }
             WikiWriter { op: "update"; objectPrefix: "wikiWriter"; rev: wikiWriters.rev; onSaved: wikiWriters.rev++ }
+            SectionHeader {
+                Layout.topMargin: 28
+                title: "Reading it"
+                subtitle: "What sessions in a project with a wiki are told of it."
+                more: "Every session there is pointed to the wiki and told which pages are out of date. Each project can differ from the default here (Settings → Projects → Wiki map). Sessions started afterwards get the change."
+            }
+            Group {
+                SettingRow {
+                    title: "Give sessions the wiki's map"
+                    detail: "Each page, and the files and functions its sections explain, in the session's instructions: agents go straight to the right code instead of searching for it."
+                    more: "Measured on two projects against no wiki, Harlo used 28% and 4% fewer tokens, Claude Code 10% and 4%, with 9–13% fewer tool calls than with the note alone. The map is up to about 3,000 tokens, the same in every request (so it's cached). On unless you switch it off."
+                    icon: "compass-3"
+                    AppSwitch {
+                        objectName: "wikiMapDefault"
+                        checked: Workspace.setting("wiki_map") !== "0"
+                        onToggled: Workspace.setSetting("wiki_map", checked ? "1" : "0")
+                    }
+                }
+            }
         }
     }
 

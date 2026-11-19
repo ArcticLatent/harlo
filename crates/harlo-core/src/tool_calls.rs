@@ -41,6 +41,10 @@ pub struct Project {
     /// Its agents may look names up in the code index (Harlo with its own
     /// tool, others with harlo's: [`lookup_tool`]).
     pub lookup: bool,
+    /// Its agents are given the wiki's map with the note on it
+    /// ([`wiki::reading_note`]): the project's Wiki map setting, else the
+    /// one in Settings → Wiki.
+    pub map: bool,
 }
 
 /// The tools a session is offered.
@@ -265,7 +269,7 @@ mod tests {
     }
 
     fn project(wiki: bool, plan: bool) -> Project {
-        Project { cwd: "/p".into(), wiki, plan, commits: false, lookup: false }
+        Project { cwd: "/p".into(), wiki, plan, commits: false, lookup: false, map: true }
     }
 
     fn names(tools: &[Value]) -> Vec<&str> {

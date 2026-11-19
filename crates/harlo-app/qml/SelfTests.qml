@@ -8792,6 +8792,8 @@ Item {
             tests.check(tests.wikiTools(tests.wikiRequests).length === 0, "Wiki on (as it comes): no wiki tool reaches Harlo (" + tests.wikiTools(tests.wikiRequests).join(", ") + ")")
             tests.check(said.indexOf("This project has a wiki in .okf/") >= 0 && said.indexOf("check that code before relying on it") >= 0, "but a few lines on the wiki and when to read it")
             tests.check(said.indexOf("Out of date") < 0, "with no page out of date yet")
+            const mapAt = said.indexOf("Wiki map (.okf/)")
+            tests.check(mapAt >= 0 && said.indexOf("src/jobs.rs", mapAt) >= 0, "and the wiki's map: its pages and the code they cite (" + said.slice(mapAt, mapAt + 160).replace(/\\n/g, " | ") + ")")
             // Nothing owed: Update records that and starts no session.
             tests.wikiKeyBefore = Workspace.activeKey
             tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "update") === "", "Update starts") } }
@@ -8834,6 +8836,55 @@ Item {
         ScriptAction { script: {
             const t = tests.chatText()
             tests.check(t.indexOf("Wiki tools: none; wiki told; out of date: .okf/architecture/jobs.md") >= 0, "Claude Code is told the same, with no wiki tool (" + t.slice(t.indexOf("Wiki tools:"), t.indexOf("Wiki tools:") + 200) + ")")
+            // The map off in Settings → Wiki: the note alone.
+            settingsDialog.openPage("wiki") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const sw = tests.findName("wikiMapDefault", settingsDialog.contentItem)
+            const f = tests.findName("settingsPage", settingsDialog.contentItem)
+            if (sw && f) f.contentY = Math.max(0, Math.min(sw.mapToItem(f.contentItem, 0, 0).y - 160, f.contentHeight - f.height))
+            tests.check(sw !== null && tests.shown(sw) && sw.checked, "Settings → Wiki gives sessions the map, on as it comes (" + (sw ? sw.checked : "no switch") + ")")
+            if (sw) tests.clickItem(sw, "the wiki's map") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(Workspace.setting("wiki_map") === "0", "clicked, it's off (" + Workspace.setting("wiki_map") + ")")
+            tests.shotWindow("clicks-harlo-wiki-map-setting")
+            settingsDialog.close()
+            tests.wikiHello() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.sendByKeys("hello") }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const said = tests.wikiSaid(tests.wikiRequests)
+            tests.check(said.indexOf("This project has a wiki") >= 0 && said.indexOf("Wiki map (.okf/)") < 0, "map off: a new session gets the note without the map")
+            // This project on again, in Settings → Projects.
+            settingsDialog.projectId = tests.wikiProject
+            settingsDialog.openPage("projects") } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const c = tests.findName("projectWikiMap", settingsDialog.contentItem)
+            const f = tests.findName("settingsPage", settingsDialog.contentItem)
+            if (c && f) f.contentY = Math.max(0, Math.min(c.mapToItem(f.contentItem, 0, 0).y - 160, f.contentHeight - f.height))
+            tests.check(c !== null && tests.shown(c) && c.currentIndex === 0 && c.model[0] === "As in Settings (off)", "the project's Wiki map follows Settings, which says off (" + (c ? c.model[0] : "no choice") + ")")
+            if (c) c.activated(1) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const c = tests.findName("projectWikiMap", settingsDialog.contentItem)
+            tests.check(Workspace.setting("wiki_map_" + tests.wikiProject) === "1" && c && c.currentIndex === 1, "picked On, the project has it on (" + Workspace.setting("wiki_map_" + tests.wikiProject) + ")")
+            tests.shotWindow("clicks-harlo-wiki-map-project")
+            settingsDialog.close()
+            tests.wikiHello() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => chat.session.modelName !== "", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.sendByKeys("hello") }
+        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.wikiSaid(tests.wikiRequests).indexOf("Wiki map (.okf/)") >= 0, "on for the project: a new session gets the map again")
             // Wiki off: a new session isn't told.
             Workspace.setSetting("wiki_" + tests.wikiProject, "0")
             tests.wikiHello() } }
@@ -9473,6 +9524,10 @@ Item {
             tests.check(!(req.tools || []).some(t => /wiki/.test((t.function || t).name || "")), "with no wiki tools (" + (req.tools || []).map(t => (t.function || t).name).filter(n => /wiki/.test(n)).join(", ") + ")")
             const t = tests.lastToolResult()
             tests.check(t.length > 80 && /^---|type:|# /.test(t.trim().slice(0, 200)) && !/error|not found/i.test(t.slice(0, 120)), "and reads a page as a file (" + tests.demoBest + ": " + t.slice(0, 120) + ")")
+        } }
+        // (The reply's rows fade in as they come: the shot once they have.)
+        PauseAnimation { duration: Theme.paneMotion + 200 }
+        ScriptAction { script: {
             tests.shotWindow("wiki-demo-session")
             tests.summary(); Qt.quit() } }
     }
