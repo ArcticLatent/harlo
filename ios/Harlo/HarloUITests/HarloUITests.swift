@@ -85,6 +85,24 @@ final class HarloUITests: XCTestCase {
         e.tap()
     }
 
+    /// Drags from one point of the screen to another (fractions of its size)
+    /// slowly and holds at the end, so the list stops where it's let go
+    /// instead of flinging on.
+    func drag(from y0: CGFloat, to y1: CGFloat) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: y0))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: y1)),
+                   withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+
+    /// How much of `e` shows between the header and what's under the
+    /// conversation, in points.
+    func shown(_ e: XCUIElement) -> CGFloat {
+        let bottom = app.descendants(matching: .any).matching(identifier: "sessionBottom").firstMatch
+        let top = max(e.frame.minY, app.frame.height * 0.12)
+        let end = min(e.frame.maxY, bottom.exists ? bottom.frame.minY : app.frame.maxY)
+        return end - top
+    }
+
     /// Taps the part of `e` that shows between the header and what's under
     /// the conversation: at large text sizes a tall picture's middle can sit
     /// under the plan or a side question, and a plain tap lands there.
@@ -92,7 +110,7 @@ final class HarloUITests: XCTestCase {
         let bottom = app.descendants(matching: .any).matching(identifier: "sessionBottom").firstMatch
         let top = max(e.frame.minY, app.frame.height * 0.12)
         let end = min(e.frame.maxY, bottom.exists ? bottom.frame.minY : app.frame.maxY)
-        guard end - top > 10 else {
+        guard shown(e) > 10 else {
             XCTFail("not in view: \(e.label) (\(e.frame))", file: file, line: line)
             return
         }
@@ -357,12 +375,23 @@ final class HarloUITests: XCTestCase {
         audit("wiki-pages")
         // (Back up to the Pages/Graph switch: only while it's out of view,
         // so a swipe never pulls the sheet down.)
+        // (Slow drags that stop where they're let go: a swipe flings on, and
+        // a tap while the list still moves lands somewhere else.)
         let pick = app.descendants(matching: .any)["wikiPagesGraph"]
-        for _ in 0..<4 where !(pick.exists && pick.isHittable) { app.swipeDown() }
-        tap("Graph")
+        for _ in 0..<8 where !(pick.exists && pick.isHittable && pick.frame.minY > app.frame.height * 0.1) { drag(from: 0.35, to: 0.65) }
+        let graphTab = pick.buttons["Graph"]
+        XCTAssertTrue(graphTab.waitForExistence(timeout: 5), "the Pages/Graph switch")
+        for _ in 0..<2 where !graphTab.isSelected { graphTab.tap() }
+        XCTAssertTrue(graphTab.isSelected, "Graph is picked")
+        // (Below the wiki's summary with large text: a list makes rows as
+        // they come into view.)
+        let drawn = element("The wiki's pages and their links")
+        _ = drawn.waitForExistence(timeout: 5)
+        for _ in 0..<4 where !drawn.exists { drag(from: 0.7, to: 0.4) }
         see("The wiki's pages and their links", timeout: 15)
         shot("15d-wiki-graph")
-        tap("Pages")
+        for _ in 0..<8 where !(pick.exists && pick.isHittable && pick.frame.minY > app.frame.height * 0.1) { drag(from: 0.35, to: 0.65) }
+        pick.buttons["Pages"].tap()
         // (The page's row, once the list is back from the graph; a tap
         // while it switches can land nowhere, so again if the page isn't up.)
         let row = app.descendants(matching: .any).matching(identifier: "wikiPage")
@@ -624,10 +653,11 @@ final class HarloUITests: XCTestCase {
         XCTAssertGreaterThan(reply.frame.width, 150, "the reply's picture is big (\(reply.frame))")
         shot("26-pictures")
         audit("pictures")
-        // (At large text sizes the picture can be under the header: brought
-        // into view first.)
-        for _ in 0..<6 where reply.frame.minY < app.frame.height * 0.12 {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32)))
+        // (At large text sizes the plan and a side question leave a narrow
+        // gap: the picture is brought into it, from under the header or from
+        // under them, in small slow steps.)
+        for _ in 0..<8 where shown(reply) < min(60, reply.frame.height) {
+            if reply.frame.minY < app.frame.height * 0.12 { drag(from: 0.2, to: 0.26) } else { drag(from: 0.26, to: 0.2) }
         }
         // The viewer: at the one tapped, then across to your photo.
         tapVisible(reply)
