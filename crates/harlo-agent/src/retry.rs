@@ -29,6 +29,7 @@ const PASSING: &[&str] = &[
     "rate_limit_error",
     "overloaded",
     "overloaded_error",
+    "server_is_overloaded",
     "service_unavailable",
     "subscription_sharing_usage_unavailable",
     "subscription_sharing_user_unavailable",
@@ -82,7 +83,10 @@ pub fn transient(e: &anyhow::Error) -> Option<(&'static str, Option<u64>)> {
     }
     if let Some(f) = e.downcast_ref::<Failed>() {
         let m = f.message.to_lowercase();
-        if PASSING.contains(&f.code.as_str()) || (f.code.is_empty() && (m.contains("overloaded") || m.contains("try again"))) {
+        // (A code not known yet that says overloaded passes too; "try
+        // again" alone only without a code.)
+        let overloaded = m.contains("overloaded") && !USED_UP.contains(&f.code.as_str());
+        if PASSING.contains(&f.code.as_str()) || overloaded || (f.code.is_empty() && m.contains("try again")) {
             return Some(("the server had a problem", None));
         }
     }
@@ -126,6 +130,11 @@ mod tests {
         assert!(transient(&Dropped("closed".into(), serde_json::Value::Null).into()).is_some());
         assert!(transient(&Failed { code: "server_error".into(), message: "x".into(), usage: serde_json::Value::Null }.into()).is_some());
         assert!(transient(&Failed { code: String::new(), message: "Model is overloaded".into(), usage: serde_json::Value::Null }.into()).is_some());
+        // OpenAI's, which once ended a run at its first try.
+        let busy = |code: &str| Failed { code: code.into(), message: "Our servers are currently overloaded. Please try again later.".into(), usage: serde_json::Value::Null };
+        assert!(transient(&busy("server_is_overloaded").into()).is_some());
+        assert!(transient(&busy("some_new_code").into()).is_some());
+        assert!(transient(&Failed { code: "invalid_prompt".into(), message: "Please try again with a shorter prompt.".into(), usage: serde_json::Value::Null }.into()).is_none());
     }
 
     #[test]
