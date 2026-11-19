@@ -532,7 +532,7 @@ Rectangle {
     AppMenu {
         id: sendMenu
         AppMenuItem { objectName: "sendFollowUp"; text: "Queue as a follow-up"; hint: "Enter"; onTriggered: root.send("") }
-        AppMenuItem { objectName: "sendSteer"; text: "Steer now"; hint: "Ctrl+Enter"; onTriggered: root.send("steer") }
+        AppMenuItem { objectName: "sendSteer"; text: "Steer into this turn"; hint: "Ctrl+Enter"; onTriggered: root.send("steer") }
         AppMenuItem { objectName: "sendStopAndSend"; text: "Stop and send"; hint: "Ctrl+Shift+Enter"; onTriggered: root.send("stopAndSend") }
     }
     AppMenu {
@@ -949,7 +949,7 @@ Rectangle {
             iconName: "send-plane-2"
             tint: Theme.primary
             enabled: input.text.trim() !== ""
-            tip: root.session.status === "busy" ? "Queue as a follow-up (Enter) — Ctrl+Enter steers now, Ctrl+Shift+Enter stops it and sends; right-click for these" : "Send (Enter)"
+            tip: root.session.status === "busy" ? "Queue as a follow-up (Enter) — Ctrl+Enter steers into this turn, Ctrl+Shift+Enter stops and sends; right-click for these" : "Send (Enter)"
             onClicked: root.send("")
             TapHandler {
                 acceptedButtons: Qt.RightButton
