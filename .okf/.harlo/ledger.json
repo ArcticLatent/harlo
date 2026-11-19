@@ -1,0 +1,4569 @@
+{
+  "version": 1,
+  "claims": {
+    "architecture/agent-context.md": {
+      "append": {
+        "path": "crates/harlo-agent/src/session.rs",
+        "unit": "Log::append",
+        "hash": "261c9cb8b37de0dd",
+        "file": "8cefada4c4b0e08d"
+      },
+      "branch": {
+        "path": "crates/harlo-agent/src/session.rs",
+        "unit": "Log::load_branch",
+        "hash": "b8ed42747bded78d",
+        "file": "8cefada4c4b0e08d"
+      },
+      "carry": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::carry_over",
+        "hash": "d43916a2484f94eb",
+        "file": "4d3f009148eb1df1"
+      },
+      "clock": {
+        "path": "crates/harlo-agent/src/clock.rs",
+        "hash": "23c12c3f710fd439",
+        "file": "23c12c3f710fd439"
+      },
+      "compact": {
+        "path": "crates/harlo-agent/src/compact.rs",
+        "hash": "cb07501f9dfffbed",
+        "file": "cb07501f9dfffbed"
+      },
+      "estimate": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "hash": "4d3f009148eb1df1",
+        "file": "4d3f009148eb1df1"
+      },
+      "failed": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::failed",
+        "hash": "43358d7dbd84c716",
+        "file": "4d3f009148eb1df1"
+      },
+      "instructions": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::reread_instructions",
+        "hash": "7b15ea27fc0bf362",
+        "file": "4d3f009148eb1df1"
+      },
+      "overflow": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::turn",
+        "hash": "8586f4c200e4df82",
+        "file": "4d3f009148eb1df1"
+      },
+      "push": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::push",
+        "hash": "1566407b4075bbe2",
+        "file": "4d3f009148eb1df1"
+      },
+      "recall": {
+        "path": "crates/harlo-agent/src/tools/mod.rs",
+        "unit": "Tools::recall",
+        "hash": "671a69865cb0dc1e",
+        "file": "7974f8c326b46e7c"
+      },
+      "session": {
+        "path": "crates/harlo-agent/src/session.rs",
+        "hash": "8cefada4c4b0e08d",
+        "file": "8cefada4c4b0e08d"
+      },
+      "set-aside": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::set_aside",
+        "hash": "011f070cd6b0c24c",
+        "file": "4d3f009148eb1df1"
+      },
+      "skills": {
+        "path": "crates/harlo-agent/src/skills.rs",
+        "hash": "3d08751579ac669e",
+        "file": "3d08751579ac669e"
+      },
+      "splice": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::splice_summary",
+        "hash": "1efd2db0a9647473",
+        "file": "4d3f009148eb1df1"
+      },
+      "stubs": {
+        "path": "crates/harlo-agent/src/stubs.rs",
+        "hash": "aacc5ccefe37231e",
+        "file": "aacc5ccefe37231e"
+      },
+      "summarize": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::compact",
+        "hash": "26cab60bee471545",
+        "file": "4d3f009148eb1df1"
+      },
+      "usage": {
+        "path": "crates/harlo-agent/src/session.rs",
+        "hash": "8cefada4c4b0e08d",
+        "file": "8cefada4c4b0e08d"
+      }
+    },
+    "architecture/agent-tools.md": {
+      "approvals": {
+        "path": "crates/harlo-agent/src/rpc.rs",
+        "hash": "aa2d33a9086f8afd",
+        "file": "aa2d33a9086f8afd"
+      },
+      "bash": {
+        "path": "crates/harlo-agent/src/tools/bash.rs",
+        "hash": "0269a37f8d7c2ceb",
+        "file": "0269a37f8d7c2ceb"
+      },
+      "danger": {
+        "path": "crates/harlo-agent/src/danger.rs",
+        "hash": "82075d238ec6856a",
+        "file": "82075d238ec6856a"
+      },
+      "dispatch": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "run_calls",
+        "hash": "8afddf19e45cf5b5",
+        "file": "4d3f009148eb1df1"
+      },
+      "edits": {
+        "path": "crates/harlo-agent/src/tools/edit.rs",
+        "hash": "3adc2466a1833e37",
+        "file": "3adc2466a1833e37"
+      },
+      "fetch": {
+        "path": "crates/harlo-agent/src/fetch.rs",
+        "hash": "610b3e509f986acd",
+        "file": "610b3e509f986acd"
+      },
+      "files": {
+        "path": "crates/harlo-agent/src/tools/mod.rs",
+        "hash": "7974f8c326b46e7c",
+        "file": "7974f8c326b46e7c"
+      },
+      "generated": {
+        "path": "crates/harlo-agent/src/generated.rs",
+        "hash": "13a28280fe369b33",
+        "file": "13a28280fe369b33"
+      },
+      "hashline": {
+        "path": "crates/harlo-agent/src/hashline.rs",
+        "hash": "7add8b8ffb01a621",
+        "file": "7add8b8ffb01a621"
+      },
+      "images": {
+        "path": "crates/harlo-agent/src/images.rs",
+        "hash": "44ea5550dc139b28",
+        "file": "44ea5550dc139b28"
+      },
+      "jobs": {
+        "path": "crates/harlo-agent/src/jobs.rs",
+        "hash": "7e6bccf2b1b1f4fc",
+        "file": "7e6bccf2b1b1f4fc"
+      },
+      "lookup": {
+        "path": "crates/harlo-agent/src/lookup.rs",
+        "hash": "0347e534ee1b76d8",
+        "file": "0347e534ee1b76d8"
+      },
+      "lsp": {
+        "path": "crates/harlo-agent/src/lsp.rs",
+        "hash": "e804e29b821310d7",
+        "file": "e804e29b821310d7"
+      },
+      "outline": {
+        "path": "crates/harlo-agent/src/outline.rs",
+        "hash": "c878f988f42a5142",
+        "file": "c878f988f42a5142"
+      },
+      "patch": {
+        "path": "crates/harlo-agent/src/patch.rs",
+        "hash": "9d37bdf7ad1c3d1c",
+        "file": "9d37bdf7ad1c3d1c"
+      },
+      "patch-apply": {
+        "path": "crates/harlo-agent/src/tools/mod.rs",
+        "unit": "Tools::patch",
+        "hash": "657148f186dcea70",
+        "file": "7974f8c326b46e7c"
+      },
+      "program": {
+        "path": "crates/harlo-agent/src/program.rs",
+        "hash": "22e07aa323e0922b",
+        "file": "22e07aa323e0922b"
+      },
+      "sandbox": {
+        "path": "crates/harlo-agent/src/sandbox.rs",
+        "hash": "b8887038839ec81b",
+        "file": "b8887038839ec81b"
+      },
+      "startup": {
+        "path": "crates/harlo-agent/src/main.rs",
+        "hash": "b0f3678741766bcd",
+        "file": "b0f3678741766bcd"
+      },
+      "sys": {
+        "path": "crates/harlo-agent/src/sys.rs",
+        "hash": "44931afa78d3e500",
+        "file": "44931afa78d3e500"
+      }
+    },
+    "architecture/agent.md": {
+      "accounting": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "hash": "4d3f009148eb1df1",
+        "file": "4d3f009148eb1df1"
+      },
+      "auth": {
+        "path": "crates/harlo-agent/src/auth.rs",
+        "hash": "e2101d3ba56aa0b4",
+        "file": "e2101d3ba56aa0b4"
+      },
+      "build": {
+        "path": "crates/harlo-agent/build.rs",
+        "hash": "3ea590d720c6ab15",
+        "file": "3ea590d720c6ab15"
+      },
+      "calls": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "run_calls",
+        "hash": "8afddf19e45cf5b5",
+        "file": "4d3f009148eb1df1"
+      },
+      "entry": {
+        "path": "crates/harlo-agent/src/main.rs",
+        "hash": "b0f3678741766bcd",
+        "file": "b0f3678741766bcd"
+      },
+      "fallback": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::ask",
+        "hash": "d71e6dc023b1d90c",
+        "file": "4d3f009148eb1df1"
+      },
+      "gemini": {
+        "path": "crates/harlo-agent/src/gemini.rs",
+        "hash": "0a5bd59cf88fdd5d",
+        "file": "0a5bd59cf88fdd5d"
+      },
+      "images": {
+        "path": "crates/harlo-agent/src/images.rs",
+        "hash": "44ea5550dc139b28",
+        "file": "44ea5550dc139b28"
+      },
+      "keys": {
+        "path": "crates/harlo-agent/src/keys.rs",
+        "hash": "51d053b0e148b051",
+        "file": "51d053b0e148b051"
+      },
+      "login-tests": {
+        "path": "crates/harlo-agent/tests/login.rs",
+        "hash": "21e3a660e413ab0d",
+        "file": "21e3a660e413ab0d"
+      },
+      "loop": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::turn",
+        "hash": "8586f4c200e4df82",
+        "file": "4d3f009148eb1df1"
+      },
+      "messages": {
+        "path": "crates/harlo-agent/src/messages.rs",
+        "hash": "cd9f52bc48d662e3",
+        "file": "cd9f52bc48d662e3"
+      },
+      "presets": {
+        "path": "crates/harlo-agent/src/presets.json",
+        "hash": "b4c249cc2dba2258",
+        "file": "b4c249cc2dba2258"
+      },
+      "providers": {
+        "path": "crates/harlo-agent/src/providers.rs",
+        "hash": "6c752696ce94974e",
+        "file": "6c752696ce94974e"
+      },
+      "repeats": {
+        "path": "crates/harlo-agent/src/repeats.rs",
+        "hash": "3c57f8394d8bbf60",
+        "file": "3c57f8394d8bbf60"
+      },
+      "responses": {
+        "path": "crates/harlo-agent/src/responses.rs",
+        "hash": "525aa82dcf9a07b3",
+        "file": "525aa82dcf9a07b3"
+      },
+      "retry": {
+        "path": "crates/harlo-agent/src/retry.rs",
+        "hash": "0275c18229ed3eb4",
+        "file": "0275c18229ed3eb4"
+      },
+      "router-tests": {
+        "path": "crates/harlo-agent/tests/openrouter_login.rs",
+        "hash": "79973406165a70aa",
+        "file": "79973406165a70aa"
+      },
+      "search": {
+        "path": "crates/harlo-agent/src/search.rs",
+        "hash": "c3912d2e0f5dd4fa",
+        "file": "c3912d2e0f5dd4fa"
+      },
+      "send": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "hash": "4d3f009148eb1df1",
+        "file": "4d3f009148eb1df1"
+      },
+      "todo": {
+        "path": "crates/harlo-agent/src/todo.rs",
+        "hash": "0a8dcb381fec8769",
+        "file": "0a8dcb381fec8769"
+      },
+      "usage": {
+        "path": "crates/harlo-agent/src/usage.rs",
+        "hash": "c1bf79fc5c70a037",
+        "file": "c1bf79fc5c70a037"
+      },
+      "used": {
+        "path": "crates/harlo-agent/src/used.rs",
+        "hash": "8cc60dae73d4b062",
+        "file": "8cc60dae73d4b062"
+      }
+    },
+    "architecture/core-engines.md": {
+      "add": {
+        "path": "crates/harlo-core/src/model_servers.rs",
+        "unit": "with_server",
+        "hash": "7da271ef8081f133",
+        "file": "28c726849b5574b4"
+      },
+      "agent-host": {
+        "path": "crates/harlo-core/src/agent_host.rs",
+        "hash": "bd5011274b16c54e",
+        "file": "bd5011274b16c54e"
+      },
+      "args": {
+        "path": "crates/harlo-core/src/agents.rs",
+        "hash": "8ccc26665a020430",
+        "file": "8ccc26665a020430"
+      },
+      "catalog": {
+        "path": "crates/harlo-core/src/mcp_catalog.rs",
+        "hash": "4f5f9753791fb772",
+        "file": "4f5f9753791fb772"
+      },
+      "engine-host": {
+        "path": "crates/harlo-core/src/engine_host.rs",
+        "hash": "66b11399d2e90472",
+        "file": "66b11399d2e90472"
+      },
+      "engines": {
+        "path": "crates/harlo-core/src/engines.rs",
+        "hash": "d18e6984c249c7ee",
+        "file": "d18e6984c249c7ee"
+      },
+      "forward": {
+        "path": "crates/harlo-core/src/model_servers.rs",
+        "hash": "28c726849b5574b4",
+        "file": "28c726849b5574b4"
+      },
+      "free": {
+        "path": "crates/harlo-core/src/model_servers.rs",
+        "unit": "free_by_default",
+        "hash": "2f6012e1cb78687c",
+        "file": "28c726849b5574b4"
+      },
+      "helper": {
+        "path": "crates/harlo-core/src/bin/harlo-engines.rs",
+        "hash": "387df01991978870",
+        "file": "387df01991978870"
+      },
+      "launch": {
+        "path": "crates/harlo-core/src/servers.rs",
+        "unit": "launch",
+        "hash": "9339d8c16ee0d4ff",
+        "file": "09587710f622072a"
+      },
+      "mcp": {
+        "path": "crates/harlo-core/src/mcp.rs",
+        "hash": "43029af5205a2d9f",
+        "file": "43029af5205a2d9f"
+      },
+      "models": {
+        "path": "crates/harlo-core/src/model_servers.rs",
+        "hash": "28c726849b5574b4",
+        "file": "28c726849b5574b4"
+      },
+      "needs": {
+        "path": "crates/harlo-core/src/servers.rs",
+        "unit": "needs_start",
+        "hash": "871984d1db4793d7",
+        "file": "09587710f622072a"
+      },
+      "probe": {
+        "path": "crates/harlo-core/src/mcp_probe.rs",
+        "hash": "f91e8eccaa450aa3",
+        "file": "f91e8eccaa450aa3"
+      },
+      "providers": {
+        "path": "crates/harlo-core/src/providers.rs",
+        "hash": "48956a822d847a86",
+        "file": "48956a822d847a86"
+      },
+      "quota": {
+        "path": "crates/harlo-core/src/quota.rs",
+        "hash": "a0a183ea73eb6383",
+        "file": "a0a183ea73eb6383"
+      },
+      "remote-helper": {
+        "path": "crates/harlo-core/src/remote_helper.rs",
+        "hash": "0f021268d446d73c",
+        "file": "0f021268d446d73c"
+      },
+      "remove": {
+        "path": "crates/harlo-core/src/servers.rs",
+        "unit": "remove",
+        "hash": "e9b8e87260ada365",
+        "file": "09587710f622072a"
+      },
+      "servers": {
+        "path": "crates/harlo-core/src/servers.rs",
+        "hash": "09587710f622072a",
+        "file": "09587710f622072a"
+      },
+      "setup": {
+        "path": "crates/harlo-core/src/engine_setup.rs",
+        "hash": "c9080883563d06fc",
+        "file": "c9080883563d06fc"
+      },
+      "signin": {
+        "path": "crates/harlo-core/src/signin.rs",
+        "hash": "8d6b51377ae996f7",
+        "file": "8d6b51377ae996f7"
+      },
+      "updates": {
+        "path": "crates/harlo-core/src/updates.rs",
+        "hash": "66fdf04c85a9671d",
+        "file": "66fdf04c85a9671d"
+      },
+      "wait": {
+        "path": "crates/harlo-core/src/servers.rs",
+        "unit": "wait_up",
+        "hash": "a7a4e7756188ad45",
+        "file": "09587710f622072a"
+      }
+    },
+    "architecture/core-persistence.md": {
+      "agent-migration": {
+        "path": "crates/harlo-core/src/db.rs",
+        "unit": "Db::move_to_harlo",
+        "hash": "47817250bc73434f",
+        "file": "a0978184df224b52"
+      },
+      "claude": {
+        "path": "crates/harlo-harness/src/claude.rs",
+        "hash": "cad9dc253567cd24",
+        "file": "cad9dc253567cd24"
+      },
+      "db": {
+        "path": "crates/harlo-core/src/db.rs",
+        "hash": "a0978184df224b52",
+        "file": "a0978184df224b52"
+      },
+      "example": {
+        "path": "crates/harlo-core/examples/usage_stats.rs",
+        "hash": "20cd6507ac1184a6",
+        "file": "20cd6507ac1184a6"
+      },
+      "init": {
+        "path": "crates/harlo-core/src/db.rs",
+        "unit": "Db::init",
+        "hash": "1f9371c4d98d79df",
+        "file": "a0978184df224b52"
+      },
+      "memory": {
+        "path": "crates/harlo-core/tests/memory.rs",
+        "hash": "bb8c9b3808e6ab4e",
+        "file": "bb8c9b3808e6ab4e"
+      },
+      "migration": {
+        "path": "crates/harlo-core/src/migrate.rs",
+        "hash": "833c11f4e79d56ac",
+        "file": "833c11f4e79d56ac"
+      },
+      "mirror": {
+        "path": "crates/harlo-harness/src/mirror.rs",
+        "hash": "a51b37ec888b8e4e",
+        "file": "a51b37ec888b8e4e"
+      },
+      "pages": {
+        "path": "crates/harlo-core/src/pages.rs",
+        "hash": "d8c9b3b69eeda763",
+        "file": "d8c9b3b69eeda763"
+      },
+      "remote-scan": {
+        "path": "crates/harlo-core/src/remote_sessions.rs",
+        "hash": "0ee002762c73f449",
+        "file": "0ee002762c73f449"
+      },
+      "scanner": {
+        "path": "crates/harlo-core/src/scanner.rs",
+        "hash": "9e67e1409b19ba9c",
+        "file": "9e67e1409b19ba9c"
+      },
+      "schedules": {
+        "path": "crates/harlo-core/src/schedules.rs",
+        "hash": "f6555ec67ef447fc",
+        "file": "f6555ec67ef447fc"
+      },
+      "search": {
+        "path": "crates/harlo-core/src/search.rs",
+        "hash": "6d7ea76dab4bfea5",
+        "file": "6d7ea76dab4bfea5"
+      },
+      "shelf": {
+        "path": "crates/harlo-core/src/shelf.rs",
+        "hash": "d57aeac1b75dbef0",
+        "file": "d57aeac1b75dbef0"
+      },
+      "sidebar": {
+        "path": "crates/harlo-core/src/sidebar.rs",
+        "hash": "5bb546cc348c03d1",
+        "file": "5bb546cc348c03d1"
+      },
+      "stats": {
+        "path": "crates/harlo-core/src/stats.rs",
+        "hash": "16ee17cdd8900760",
+        "file": "16ee17cdd8900760"
+      },
+      "store": {
+        "path": "crates/harlo-harness/src/store.rs",
+        "hash": "d66b80437af2d1fb",
+        "file": "d66b80437af2d1fb"
+      },
+      "templates": {
+        "path": "crates/harlo-core/src/templates.rs",
+        "hash": "7e8de70ad094feee",
+        "file": "7e8de70ad094feee"
+      },
+      "transcript": {
+        "path": "crates/harlo-core/src/transcript.rs",
+        "unit": "Transcript::load_one",
+        "hash": "24055a3c5369bffb",
+        "file": "3bc3321c24f1f326"
+      },
+      "whole": {
+        "path": "crates/harlo-core/src/transcript.rs",
+        "unit": "whole",
+        "hash": "90a2223af71bdfb3",
+        "file": "3bc3321c24f1f326"
+      },
+      "workflow": {
+        "path": "crates/harlo-core/src/workflow.rs",
+        "hash": "72cd5900b4cebe94",
+        "file": "72cd5900b4cebe94"
+      }
+    },
+    "architecture/core.md": {
+      "actions": {
+        "path": "crates/harlo-core/src/actions.rs",
+        "hash": "6932c1f2a66127c9",
+        "file": "6932c1f2a66127c9"
+      },
+      "autostart": {
+        "path": "crates/harlo-core/src/autostart.rs",
+        "hash": "75e1c1f97afa66eb",
+        "file": "75e1c1f97afa66eb"
+      },
+      "bridge": {
+        "path": "crates/harlo-core/bridge/harlo_mcp_bridge.py",
+        "hash": "65e8f53b6714ee1c",
+        "file": "65e8f53b6714ee1c"
+      },
+      "context": {
+        "path": "crates/harlo-core/src/context.rs",
+        "hash": "0f2ec03c72fe4014",
+        "file": "0f2ec03c72fe4014"
+      },
+      "db": {
+        "path": "crates/harlo-core/src/db.rs",
+        "hash": "a0978184df224b52",
+        "file": "a0978184df224b52"
+      },
+      "dictation": {
+        "path": "crates/harlo-core/src/dictation.rs",
+        "hash": "88fd81f4b23fe151",
+        "file": "88fd81f4b23fe151"
+      },
+      "engines": {
+        "path": "crates/harlo-core/src/engines.rs",
+        "hash": "d18e6984c249c7ee",
+        "file": "d18e6984c249c7ee"
+      },
+      "example": {
+        "path": "crates/harlo-core/examples/usage_stats.rs",
+        "hash": "20cd6507ac1184a6",
+        "file": "20cd6507ac1184a6"
+      },
+      "execution": {
+        "path": "crates/harlo-core/src/lib.rs",
+        "hash": "7d552fd8a4a6e623",
+        "file": "7d552fd8a4a6e623"
+      },
+      "export": {
+        "path": "crates/harlo-core/src/export.rs",
+        "hash": "18f782e0a7f8c975",
+        "file": "18f782e0a7f8c975"
+      },
+      "facts": {
+        "path": "crates/harlo-core/src/tool_facts.rs",
+        "hash": "30a3e0898e063d73",
+        "file": "30a3e0898e063d73"
+      },
+      "files": {
+        "path": "crates/harlo-core/src/files.rs",
+        "hash": "e0196f432f53dda5",
+        "file": "e0196f432f53dda5"
+      },
+      "firewall": {
+        "path": "crates/harlo-core/src/firewall.rs",
+        "hash": "468d2ae91240dff9",
+        "file": "468d2ae91240dff9"
+      },
+      "git": {
+        "path": "crates/harlo-core/src/git.rs",
+        "hash": "fdd4e02cf32eff89",
+        "file": "fdd4e02cf32eff89"
+      },
+      "harness": {
+        "path": "crates/harlo-harness/src/lib.rs",
+        "hash": "13e5d0af182ded6b",
+        "file": "13e5d0af182ded6b"
+      },
+      "icons": {
+        "path": "crates/harlo-core/src/project_icons.rs",
+        "hash": "186e116f6f09cabc",
+        "file": "186e116f6f09cabc"
+      },
+      "lib": {
+        "path": "crates/harlo-core/src/lib.rs",
+        "hash": "7d552fd8a4a6e623",
+        "file": "7d552fd8a4a6e623"
+      },
+      "listdiff": {
+        "path": "crates/harlo-core/src/listdiff.rs",
+        "hash": "5669e1434d6beb22",
+        "file": "5669e1434d6beb22"
+      },
+      "listing": {
+        "path": "crates/harlo-core/src/listing.rs",
+        "hash": "76e1c3c588d579ff",
+        "file": "76e1c3c588d579ff"
+      },
+      "manifest": {
+        "path": "crates/harlo-core/Cargo.toml",
+        "hash": "2cefcb1e12ada719",
+        "file": "2cefcb1e12ada719"
+      },
+      "markdown": {
+        "path": "crates/harlo-core/src/markdown.rs",
+        "hash": "364d5e4ea48a586c",
+        "file": "364d5e4ea48a586c"
+      },
+      "memory": {
+        "path": "crates/harlo-core/tests/memory.rs",
+        "hash": "bb8c9b3808e6ab4e",
+        "file": "bb8c9b3808e6ab4e"
+      },
+      "notifications": {
+        "path": "crates/harlo-core/src/notifications.rs",
+        "hash": "cd6115619828c93c",
+        "file": "cd6115619828c93c"
+      },
+      "orchestration": {
+        "path": "crates/harlo-core/src/orchestration.rs",
+        "hash": "64ef43000332deff",
+        "file": "64ef43000332deff"
+      },
+      "pages": {
+        "path": "crates/harlo-core/src/pages.rs",
+        "hash": "d8c9b3b69eeda763",
+        "file": "d8c9b3b69eeda763"
+      },
+      "palette": {
+        "path": "crates/harlo-core/src/palette.rs",
+        "hash": "f0f886b51f979858",
+        "file": "f0f886b51f979858"
+      },
+      "persistence": {
+        "path": "crates/harlo-core/src/lib.rs",
+        "hash": "7d552fd8a4a6e623",
+        "file": "7d552fd8a4a6e623"
+      },
+      "phone": {
+        "path": "crates/harlo-core/src/phone.rs",
+        "hash": "d56b885c116f13ee",
+        "file": "d56b885c116f13ee"
+      },
+      "pictures": {
+        "path": "crates/harlo-core/src/pictures.rs",
+        "hash": "f8626446b71aed81",
+        "file": "f8626446b71aed81"
+      },
+      "plan": {
+        "path": "crates/harlo-core/src/plan.rs",
+        "hash": "d5cde81ba7ebc435",
+        "file": "d5cde81ba7ebc435"
+      },
+      "providers": {
+        "path": "crates/harlo-core/src/providers.rs",
+        "hash": "48956a822d847a86",
+        "file": "48956a822d847a86"
+      },
+      "remote": {
+        "path": "crates/harlo-core/src/remote.rs",
+        "hash": "e3ce229e693bf31c",
+        "file": "e3ce229e693bf31c"
+      },
+      "scratch": {
+        "path": "crates/harlo-core/src/scratch.rs",
+        "hash": "5a2ea68a0f9a64c2",
+        "file": "5a2ea68a0f9a64c2"
+      },
+      "servers": {
+        "path": "crates/harlo-core/src/servers.rs",
+        "hash": "09587710f622072a",
+        "file": "09587710f622072a"
+      },
+      "session": {
+        "path": "crates/harlo-core/src/session.rs",
+        "hash": "23f31f66e2c3a783",
+        "file": "23f31f66e2c3a783"
+      },
+      "session-features": {
+        "path": "crates/harlo-core/src/session.rs",
+        "hash": "23f31f66e2c3a783",
+        "file": "23f31f66e2c3a783"
+      },
+      "splitdiff": {
+        "path": "crates/harlo-core/src/splitdiff.rs",
+        "hash": "bc3886f78ba84d7a",
+        "file": "bc3886f78ba84d7a"
+      },
+      "starters": {
+        "path": "crates/harlo-core/src/starters.rs",
+        "hash": "6db275fc1594acf2",
+        "file": "6db275fc1594acf2"
+      },
+      "terminal": {
+        "path": "crates/harlo-core/src/terminal.rs",
+        "hash": "b4d684465281daca",
+        "file": "b4d684465281daca"
+      },
+      "tools": {
+        "path": "crates/harlo-core/src/tool_calls.rs",
+        "hash": "5684d92fc75c3165",
+        "file": "5684d92fc75c3165"
+      },
+      "transcript": {
+        "path": "crates/harlo-core/src/transcript.rs",
+        "hash": "3bc3321c24f1f326",
+        "file": "3bc3321c24f1f326"
+      },
+      "visuals": {
+        "path": "crates/harlo-core/src/visuals.rs",
+        "hash": "5b05244b9f8c42d5",
+        "file": "5b05244b9f8c42d5"
+      },
+      "wiki": {
+        "path": "crates/harlo-core/src/wiki.rs",
+        "hash": "42224d0feea89dd6",
+        "file": "42224d0feea89dd6"
+      },
+      "wiki-view": {
+        "path": "crates/harlo-core/src/wiki_view.rs",
+        "hash": "c00705966f0f6466",
+        "file": "c00705966f0f6466"
+      },
+      "workflow": {
+        "path": "crates/harlo-core/src/workflow.rs",
+        "hash": "72cd5900b4cebe94",
+        "file": "72cd5900b4cebe94"
+      },
+      "workflow-test": {
+        "path": "crates/harlo-core/tests/workflow_sim.rs",
+        "hash": "6681769a5d20aa46",
+        "file": "6681769a5d20aa46"
+      }
+    },
+    "architecture/desktop-code.md": {
+      "bridge": {
+        "path": "crates/harlo-app/cpp/harlo_codeview.h",
+        "hash": "4783c27083357f63",
+        "file": "4783c27083357f63"
+      },
+      "budget": {
+        "path": "crates/harlo-app/src/code_view.rs",
+        "hash": "18185684506f3589",
+        "file": "18185684506f3589"
+      },
+      "doc": {
+        "path": "crates/harlo-code/src/doc.rs",
+        "hash": "e4118d96a9373e34",
+        "file": "e4118d96a9373e34"
+      },
+      "fonts": {
+        "path": "crates/harlo-code/src/fonts.rs",
+        "hash": "cc49ebdc00217d7d",
+        "file": "cc49ebdc00217d7d"
+      },
+      "lang": {
+        "path": "crates/harlo-code/src/lang.rs",
+        "hash": "a3790883917f1220",
+        "file": "a3790883917f1220"
+      },
+      "lib": {
+        "path": "crates/harlo-code/src/lib.rs",
+        "hash": "6f6a80de3f33e58e",
+        "file": "6f6a80de3f33e58e"
+      },
+      "sync": {
+        "path": "crates/harlo-code/src/view.rs",
+        "unit": "View::sync",
+        "hash": "e466f56c37edf7f2",
+        "file": "cffdd8d98ff09a2f"
+      },
+      "syntax": {
+        "path": "crates/harlo-code/src/syntax.rs",
+        "hash": "6fdaca0e6164bbf0",
+        "file": "6fdaca0e6164bbf0"
+      },
+      "terminal": {
+        "path": "crates/harlo-code/src/terminal.rs",
+        "hash": "2bd71dd88ea22e7c",
+        "file": "2bd71dd88ea22e7c"
+      },
+      "text": {
+        "path": "crates/harlo-code/src/text.rs",
+        "hash": "83998692e01e4eea",
+        "file": "83998692e01e4eea"
+      },
+      "view": {
+        "path": "crates/harlo-code/src/view.rs",
+        "hash": "cffdd8d98ff09a2f",
+        "file": "cffdd8d98ff09a2f"
+      }
+    },
+    "architecture/desktop-ui.md": {
+      "binding": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "hash": "7df789dec031ab0e",
+        "file": "7df789dec031ab0e"
+      },
+      "build": {
+        "path": "crates/harlo-app/build.rs",
+        "hash": "f8ac8feab6230c0f",
+        "file": "f8ac8feab6230c0f"
+      },
+      "chat": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "hash": "7df789dec031ab0e",
+        "file": "7df789dec031ab0e"
+      },
+      "chatview": {
+        "path": "crates/harlo-app/qml/ChatView.qml",
+        "hash": "e24dc604de0b6722",
+        "file": "e24dc604de0b6722"
+      },
+      "editor": {
+        "path": "crates/harlo-app/qml/FileEditor.qml",
+        "hash": "5f5eba6a51adb24b",
+        "file": "5f5eba6a51adb24b"
+      },
+      "main": {
+        "path": "crates/harlo-app/qml/Main.qml",
+        "hash": "44a6996821313aa9",
+        "file": "44a6996821313aa9"
+      },
+      "palette": {
+        "path": "crates/harlo-app/src/code_view.rs",
+        "unit": "palette_from_json",
+        "hash": "1d038dd665ac5b38",
+        "file": "18185684506f3589"
+      },
+      "registry": {
+        "path": "crates/harlo-app/src/registry.rs",
+        "hash": "2aefe6bb3226d469",
+        "file": "2aefe6bb3226d469"
+      },
+      "rows": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "unit": "ChatSession::apply_row_changes",
+        "hash": "f6b68095dfeea411",
+        "file": "7df789dec031ab0e"
+      },
+      "theme": {
+        "path": "crates/harlo-app/qml/Theme.qml",
+        "hash": "e28a97ac12ef138e",
+        "file": "e28a97ac12ef138e"
+      },
+      "transcript": {
+        "path": "crates/harlo-app/qml/TranscriptView.qml",
+        "hash": "af38a3ad4d17675e",
+        "file": "af38a3ad4d17675e"
+      },
+      "workspace": {
+        "path": "crates/harlo-app/src/workspace.rs",
+        "hash": "03dd98c2a951a198",
+        "file": "03dd98c2a951a198"
+      }
+    },
+    "architecture/desktop.md": {
+      "assets": {
+        "path": "crates/harlo-app/src/diagrams.rs",
+        "hash": "5b86ff87c12bd1eb",
+        "file": "5b86ff87c12bd1eb"
+      },
+      "build": {
+        "path": "crates/harlo-app/build.rs",
+        "hash": "f8ac8feab6230c0f",
+        "file": "f8ac8feab6230c0f"
+      },
+      "closing": {
+        "path": "crates/harlo-app/qml/Main.qml",
+        "hash": "44a6996821313aa9",
+        "file": "44a6996821313aa9"
+      },
+      "code": {
+        "path": "crates/harlo-code/Cargo.toml",
+        "hash": "c8c8bea435322360",
+        "file": "c8c8bea435322360"
+      },
+      "crates": {
+        "path": "crates/harlo-app/Cargo.toml",
+        "hash": "551617669747df9f",
+        "file": "551617669747df9f"
+      },
+      "graphics": {
+        "path": "crates/harlo-app/src/graphics.rs",
+        "hash": "ef8311b9b63a759c",
+        "file": "ef8311b9b63a759c"
+      },
+      "logs": {
+        "path": "crates/harlo-app/src/diagnostics.rs",
+        "hash": "c415af13bc6e18fc",
+        "file": "c415af13bc6e18fc"
+      },
+      "phone": {
+        "path": "crates/harlo-app/src/phone_server.rs",
+        "hash": "fd29feee5fb04ff3",
+        "file": "fd29feee5fb04ff3"
+      },
+      "sounds": {
+        "path": "crates/harlo-app/sounds/"
+      },
+      "startup": {
+        "path": "crates/harlo-app/src/main.rs",
+        "unit": "main",
+        "hash": "8d8d3b2c73701718",
+        "file": "81c27471880e87f8"
+      },
+      "tests": {
+        "path": "crates/harlo-app/qml/SelfTests.qml",
+        "hash": "5dc73e60379e170b",
+        "file": "5dc73e60379e170b"
+      },
+      "workspace": {
+        "path": "crates/harlo-app/src/workspace.rs",
+        "hash": "03dd98c2a951a198",
+        "file": "03dd98c2a951a198"
+      }
+    },
+    "architecture/harness.md": {
+      "boundary": {
+        "path": "crates/harlo-harness/src/lib.rs",
+        "hash": "13e5d0af182ded6b",
+        "file": "13e5d0af182ded6b"
+      },
+      "branches": {
+        "path": "crates/harlo-harness/src/branches.rs",
+        "hash": "e2d7d7ad43b8a813",
+        "file": "e2d7d7ad43b8a813"
+      },
+      "claude": {
+        "path": "crates/harlo-harness/src/claude.rs",
+        "hash": "cad9dc253567cd24",
+        "file": "cad9dc253567cd24"
+      },
+      "claude-run": {
+        "path": "crates/harlo-harness/src/claude_run.rs",
+        "hash": "45a1b75932627559",
+        "file": "45a1b75932627559"
+      },
+      "demo": {
+        "path": "crates/harlo-harness/src/demo.rs",
+        "hash": "18006bdc7fc35037",
+        "file": "18006bdc7fc35037"
+      },
+      "errors": {
+        "path": "crates/harlo-harness/src/error.rs",
+        "hash": "c64322cb9d1a4bad",
+        "file": "c64322cb9d1a4bad"
+      },
+      "events": {
+        "path": "crates/harlo-harness/src/event.rs",
+        "hash": "7741e55a4630920b",
+        "file": "7741e55a4630920b"
+      },
+      "example": {
+        "path": "crates/harlo-harness/examples/list_sessions.rs",
+        "hash": "12f9a8587cfddb57",
+        "file": "12f9a8587cfddb57"
+      },
+      "files": {
+        "path": "crates/harlo-harness/src/file_blocks.rs",
+        "hash": "75b76bf2e2c853f7",
+        "file": "75b76bf2e2c853f7"
+      },
+      "fixture-tests": {
+        "path": "crates/harlo-harness/src/claude_run.rs",
+        "unit": "tests::replays_a_real_session",
+        "hash": "eadc18d387c9f5e4",
+        "file": "45a1b75932627559"
+      },
+      "framing": {
+        "path": "crates/harlo-harness/src/framing.rs",
+        "hash": "a1914815c1b148ca",
+        "file": "a1914815c1b148ca"
+      },
+      "hooks": {
+        "path": "crates/harlo-harness/src/lib.rs",
+        "hash": "13e5d0af182ded6b",
+        "file": "13e5d0af182ded6b"
+      },
+      "log": {
+        "path": "crates/harlo-harness/src/protocol_log.rs",
+        "hash": "088f34928d3f100b",
+        "file": "088f34928d3f100b"
+      },
+      "manifest": {
+        "path": "crates/harlo-harness/Cargo.toml",
+        "hash": "fe0687e15ad5bacc",
+        "file": "fe0687e15ad5bacc"
+      },
+      "mirror": {
+        "path": "crates/harlo-harness/src/mirror.rs",
+        "hash": "a51b37ec888b8e4e",
+        "file": "a51b37ec888b8e4e"
+      },
+      "plan-data": {
+        "path": "crates/harlo-harness/src/coding_plans.json",
+        "hash": "0ef41d1c54af6a24",
+        "file": "0ef41d1c54af6a24"
+      },
+      "plans": {
+        "path": "crates/harlo-harness/src/coding_plans.rs",
+        "hash": "75f33306f913b4d8",
+        "file": "75f33306f913b4d8"
+      },
+      "process": {
+        "path": "crates/harlo-harness/src/process.rs",
+        "hash": "065602fcc6c5e908",
+        "file": "065602fcc6c5e908"
+      },
+      "remote": {
+        "path": "crates/harlo-harness/src/process.rs",
+        "unit": "remote_script",
+        "hash": "adbe7156ec8fcbd9",
+        "file": "065602fcc6c5e908"
+      },
+      "store": {
+        "path": "crates/harlo-harness/src/store.rs",
+        "hash": "d66b80437af2d1fb",
+        "file": "d66b80437af2d1fb"
+      },
+      "translate": {
+        "path": "crates/harlo-harness/src/event.rs",
+        "unit": "Translator::translate",
+        "hash": "e797dd47925087e7",
+        "file": "7741e55a4630920b"
+      }
+    },
+    "architecture/knowledge.md": {
+      "brief": {
+        "path": "crates/harlo-okf/src/brief.rs",
+        "hash": "cfad0c55f0ab16a8",
+        "file": "cfad0c55f0ab16a8"
+      },
+      "bundle": {
+        "path": "crates/harlo-okf/src/bundle.rs",
+        "hash": "7b5c053b3a3795a0",
+        "file": "7b5c053b3a3795a0"
+      },
+      "check": {
+        "path": "crates/harlo-okf/src/check.rs",
+        "hash": "f4f3d00285d8f45e",
+        "file": "f4f3d00285d8f45e"
+      },
+      "cite": {
+        "path": "crates/harlo-okf/src/cite.rs",
+        "hash": "a5f519742c70abfb",
+        "file": "a5f519742c70abfb"
+      },
+      "defs": {
+        "path": "crates/harlo-index/src/defs.rs",
+        "hash": "963ad145d1b5060e",
+        "file": "963ad145d1b5060e"
+      },
+      "graph": {
+        "path": "crates/harlo-index/src/graph.rs",
+        "hash": "be06c22929c0abc7",
+        "file": "be06c22929c0abc7"
+      },
+      "index": {
+        "path": "crates/harlo-index/src/index.rs",
+        "hash": "7ffe0995458abc49",
+        "file": "7ffe0995458abc49"
+      },
+      "index-brief": {
+        "path": "crates/harlo-index/src/brief.rs",
+        "hash": "493aea9bf1d39d97",
+        "file": "493aea9bf1d39d97"
+      },
+      "index-cargo": {
+        "path": "crates/harlo-index/Cargo.toml",
+        "hash": "2a1b2e20f6a06e15",
+        "file": "2a1b2e20f6a06e15"
+      },
+      "index-lib": {
+        "path": "crates/harlo-index/src/lib.rs",
+        "hash": "59d9d00cca20b107",
+        "file": "59d9d00cca20b107"
+      },
+      "indexed": {
+        "path": "crates/harlo-okf/src/indexed.rs",
+        "hash": "63f67fe2412eccd7",
+        "file": "63f67fe2412eccd7"
+      },
+      "ledger": {
+        "path": "crates/harlo-okf/src/ledger.rs",
+        "hash": "70ac60357af4121d",
+        "file": "70ac60357af4121d"
+      },
+      "lex": {
+        "path": "crates/harlo-okf/src/lex.rs",
+        "hash": "464fa4a2c0b3c720",
+        "file": "464fa4a2c0b3c720"
+      },
+      "lookup": {
+        "path": "crates/harlo-index/src/lookup.rs",
+        "hash": "c90e43c56f625ade",
+        "file": "c90e43c56f625ade"
+      },
+      "main": {
+        "path": "crates/harlo-index/src/main.rs",
+        "hash": "96ab926f146fb4e9",
+        "file": "96ab926f146fb4e9"
+      },
+      "manifests": {
+        "path": "crates/harlo-index/src/manifests.rs",
+        "hash": "1c85a611fa8ff73d",
+        "file": "1c85a611fa8ff73d"
+      },
+      "map": {
+        "path": "crates/harlo-okf/src/map.rs",
+        "hash": "914d2588d6671024",
+        "file": "914d2588d6671024"
+      },
+      "okf-lib": {
+        "path": "crates/harlo-okf/src/lib.rs",
+        "hash": "057453df7c720ddd",
+        "file": "057453df7c720ddd"
+      },
+      "packages": {
+        "path": "crates/harlo-index/src/packages.rs",
+        "hash": "41d867af1cd1e641",
+        "file": "41d867af1cd1e641"
+      },
+      "page": {
+        "path": "crates/harlo-okf/src/page.rs",
+        "hash": "378569c43f7693ea",
+        "file": "378569c43f7693ea"
+      },
+      "rules": {
+        "path": "crates/harlo-index/src/rules.rs",
+        "hash": "2e2754cbdaa2b8a8",
+        "file": "2e2754cbdaa2b8a8"
+      },
+      "scan": {
+        "path": "crates/harlo-index/src/scan.rs",
+        "hash": "dcd46bb3efae13d9",
+        "file": "dcd46bb3efae13d9"
+      },
+      "scope": {
+        "path": "crates/harlo-okf/src/scope.rs",
+        "hash": "bfe0bc61255c84f8",
+        "file": "bfe0bc61255c84f8"
+      },
+      "split": {
+        "path": "crates/harlo-okf/src/split.rs",
+        "hash": "3c14689ed4d2ebea",
+        "file": "3c14689ed4d2ebea"
+      },
+      "stamp": {
+        "path": "crates/harlo-okf/src/stamp.rs",
+        "hash": "076e40bf6eeba36a",
+        "file": "076e40bf6eeba36a"
+      },
+      "text": {
+        "path": "crates/harlo-index/src/text.rs",
+        "hash": "a2c186d5d5a02db6",
+        "file": "a2c186d5d5a02db6"
+      },
+      "units": {
+        "path": "crates/harlo-okf/src/units.rs",
+        "hash": "0503e328753f5948",
+        "file": "0503e328753f5948"
+      },
+      "validate": {
+        "path": "crates/harlo-okf/src/validate.rs",
+        "hash": "e9dc33ef81b64e00",
+        "file": "e9dc33ef81b64e00"
+      },
+      "view": {
+        "path": "crates/harlo-okf/src/view.rs",
+        "hash": "86ec8d1a4b317fa7",
+        "file": "86ec8d1a4b317fa7"
+      },
+      "work": {
+        "path": "crates/harlo-okf/src/work.rs",
+        "hash": "f05dc65a4cf0d3ef",
+        "file": "f05dc65a4cf0d3ef"
+      }
+    },
+    "architecture/mobile-native.md": {
+      "app": {
+        "path": "ios/Harlo/Harlo/HarloApp.swift",
+        "hash": "b2b3dc1171e6bcd3",
+        "file": "b2b3dc1171e6bcd3"
+      },
+      "cache": {
+        "path": "ios/Harlo/Harlo/RichCache.swift",
+        "hash": "74d6e70e609b2f68",
+        "file": "74d6e70e609b2f68"
+      },
+      "client": {
+        "path": "ios/HarloKit/Sources/HarloKit/Client.swift",
+        "hash": "a1bac5bf4b41a604",
+        "file": "a1bac5bf4b41a604"
+      },
+      "content": {
+        "path": "ios/Harlo/Harlo/SessionContent.swift",
+        "hash": "cb28177bdcd1b1ba",
+        "file": "cb28177bdcd1b1ba"
+      },
+      "delegate": {
+        "path": "ios/Harlo/Harlo/AppDelegate.swift",
+        "hash": "bb466270901c257d",
+        "file": "bb466270901c257d"
+      },
+      "dictation": {
+        "path": "ios/Harlo/Harlo/Dictation.swift",
+        "hash": "2cc956b0042616c7",
+        "file": "2cc956b0042616c7"
+      },
+      "export": {
+        "path": "ios/Harlo/ExportOptions.plist",
+        "hash": "4fb701a9ee5fbc61",
+        "file": "4fb701a9ee5fbc61"
+      },
+      "fixture": {
+        "path": "ios/fixtures/recording.jsonl",
+        "hash": "4c6dd71196e49c4c",
+        "file": "4c6dd71196e49c4c"
+      },
+      "messages": {
+        "path": "ios/HarloKit/Sources/HarloKit/Messages.swift",
+        "hash": "a8f8486bad2f6fc2",
+        "file": "a8f8486bad2f6fc2"
+      },
+      "model": {
+        "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
+        "hash": "cb40b91b4c9d1943",
+        "file": "cb40b91b4c9d1943"
+      },
+      "package": {
+        "path": "ios/HarloKit/Package.swift",
+        "hash": "e1b87abb851976bc",
+        "file": "e1b87abb851976bc"
+      },
+      "photos": {
+        "path": "ios/Harlo/Harlo/Photos.swift",
+        "hash": "cd2c6e8d7e1319eb",
+        "file": "cd2c6e8d7e1319eb"
+      },
+      "project": {
+        "path": "ios/Harlo/project.yml",
+        "hash": "8fea2de575a38574",
+        "file": "8fea2de575a38574"
+      },
+      "rich": {
+        "path": "ios/HarloKit/Sources/HarloKit/RichText.swift",
+        "hash": "74e031e58c775c71",
+        "file": "74e031e58c775c71"
+      },
+      "root": {
+        "path": "ios/Harlo/Harlo/RootView.swift",
+        "hash": "6bc18374807257f2",
+        "file": "6bc18374807257f2"
+      },
+      "session": {
+        "path": "ios/Harlo/Harlo/SessionView.swift",
+        "hash": "fbdb37031938580c",
+        "file": "fbdb37031938580c"
+      },
+      "store": {
+        "path": "ios/HarloKit/Sources/HarloKit/Store.swift",
+        "hash": "ad13d442508fc44f",
+        "file": "ad13d442508fc44f"
+      },
+      "tabs": {
+        "path": "ios/Harlo/Harlo/MainTabs.swift",
+        "hash": "b9810ed1c41598b2",
+        "file": "b9810ed1c41598b2"
+      },
+      "types": {
+        "path": "ios/HarloKit/Sources/HarloKit/"
+      },
+      "wiki": {
+        "path": "ios/Harlo/Harlo/WikiPageView.swift",
+        "hash": "c6bd0f50c34218be",
+        "file": "c6bd0f50c34218be"
+      }
+    },
+    "architecture/mobile-notifications.md": {
+      "activities": {
+        "path": "ios/Harlo/Harlo/LiveActivities.swift",
+        "hash": "321034194fadb62d",
+        "file": "321034194fadb62d"
+      },
+      "activity-widget": {
+        "path": "ios/Harlo/HarloWidgets/SessionLiveActivity.swift",
+        "hash": "f4f218e299995be6",
+        "file": "f4f218e299995be6"
+      },
+      "app": {
+        "path": "ios/Harlo/Harlo/HarloApp.swift",
+        "hash": "b2b3dc1171e6bcd3",
+        "file": "b2b3dc1171e6bcd3"
+      },
+      "attributes": {
+        "path": "ios/Harlo/Shared/SessionActivity.swift",
+        "hash": "6b111b0c6ef1970f",
+        "file": "6b111b0c6ef1970f"
+      },
+      "crypto": {
+        "path": "ios/HarloKit/Sources/HarloKit/Crypto.swift",
+        "hash": "0df652300eff94cf",
+        "file": "0df652300eff94cf"
+      },
+      "delegate": {
+        "path": "ios/Harlo/Harlo/AppDelegate.swift",
+        "hash": "bb466270901c257d",
+        "file": "bb466270901c257d"
+      },
+      "limit-provider": {
+        "path": "ios/Harlo/HarloWidgets/LimitsProvider.swift",
+        "hash": "73df9e6070dfaac7",
+        "file": "73df9e6070dfaac7"
+      },
+      "limits": {
+        "path": "ios/HarloKit/Sources/HarloKit/LimitsSnapshot.swift",
+        "hash": "0ae74c03e17aeacc",
+        "file": "0ae74c03e17aeacc"
+      },
+      "live": {
+        "path": "ios/Harlo/HarloWidgets/Live.swift",
+        "hash": "6d3b25a7e24af23e",
+        "file": "6d3b25a7e24af23e"
+      },
+      "model": {
+        "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
+        "hash": "cb40b91b4c9d1943",
+        "file": "cb40b91b4c9d1943"
+      },
+      "notifications": {
+        "path": "ios/Harlo/Harlo/Notifications.swift",
+        "hash": "65bcc4146f0673bf",
+        "file": "65bcc4146f0673bf"
+      },
+      "project": {
+        "path": "ios/Harlo/project.yml",
+        "hash": "8fea2de575a38574",
+        "file": "8fea2de575a38574"
+      },
+      "push": {
+        "path": "ios/HarloKit/Sources/HarloKit/Push.swift",
+        "hash": "d6821e2b48a9409f",
+        "file": "d6821e2b48a9409f"
+      },
+      "service": {
+        "path": "ios/Harlo/HarloNotifications/NotificationService.swift",
+        "hash": "65f5e05a64e61e5b",
+        "file": "65f5e05a64e61e5b"
+      },
+      "session-provider": {
+        "path": "ios/Harlo/HarloWidgets/SessionsProvider.swift",
+        "hash": "d59196a0b4f2bc60",
+        "file": "d59196a0b4f2bc60"
+      },
+      "sessions": {
+        "path": "ios/HarloKit/Sources/HarloKit/WidgetSnapshot.swift",
+        "hash": "be488e83f42764e7",
+        "file": "be488e83f42764e7"
+      },
+      "shared-limits": {
+        "path": "ios/Harlo/HarloWidgets/LimitsWidget.swift",
+        "hash": "708acfd03adbc58c",
+        "file": "708acfd03adbc58c"
+      }
+    },
+    "architecture/mobile-protocol.md": {
+      "adapter": {
+        "path": "ios/HarloKit/Sources/CTweetNaCl/harlo_nacl.c",
+        "hash": "3caa33563e5dd185",
+        "file": "3caa33563e5dd185"
+      },
+      "client": {
+        "path": "ios/HarloKit/Sources/HarloKit/Client.swift",
+        "hash": "a1bac5bf4b41a604",
+        "file": "a1bac5bf4b41a604"
+      },
+      "crypto": {
+        "path": "ios/HarloKit/Sources/HarloKit/Crypto.swift",
+        "hash": "0df652300eff94cf",
+        "file": "0df652300eff94cf"
+      },
+      "model": {
+        "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
+        "hash": "cb40b91b4c9d1943",
+        "file": "cb40b91b4c9d1943"
+      },
+      "pairing": {
+        "path": "ios/HarloKit/Sources/HarloKit/Pairing.swift",
+        "hash": "296dc716d47d5495",
+        "file": "296dc716d47d5495"
+      },
+      "race": {
+        "path": "ios/HarloKit/Sources/HarloKit/Race.swift",
+        "hash": "2be09e3dab60d0af",
+        "file": "2be09e3dab60d0af"
+      },
+      "store": {
+        "path": "ios/HarloKit/Sources/HarloKit/Store.swift",
+        "hash": "ad13d442508fc44f",
+        "file": "ad13d442508fc44f"
+      },
+      "watch": {
+        "path": "ios/HarloKit/Sources/HarloKit/NetworkWatch.swift",
+        "hash": "87af76c0694d8415",
+        "file": "87af76c0694d8415"
+      }
+    },
+    "overview.md": {
+      "core": {
+        "path": "crates/harlo-core/src/lib.rs",
+        "hash": "7d552fd8a4a6e623",
+        "file": "7d552fd8a4a6e623"
+      },
+      "desktop": {
+        "path": "crates/harlo-app/src/main.rs",
+        "hash": "81c27471880e87f8",
+        "file": "81c27471880e87f8"
+      },
+      "mobile": {
+        "path": "ios/HarloKit/Package.swift",
+        "hash": "e1b87abb851976bc",
+        "file": "e1b87abb851976bc"
+      },
+      "workspace": {
+        "path": "Cargo.toml",
+        "hash": "9ad5116dea3dc9e4",
+        "file": "9ad5116dea3dc9e4"
+      }
+    },
+    "workflows/agent-orchestration.md": {
+      "config": {
+        "path": "crates/harlo-agent/src/mcp.rs",
+        "hash": "1ad8728d86a55296",
+        "file": "1ad8728d86a55296"
+      },
+      "dispatch": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "run_calls",
+        "hash": "8afddf19e45cf5b5",
+        "file": "4d3f009148eb1df1"
+      },
+      "index": {
+        "path": "crates/harlo-agent/src/mcp.rs",
+        "unit": "Mcp::index",
+        "hash": "fa4431157c1d2dcd",
+        "file": "1ad8728d86a55296"
+      },
+      "isolation": {
+        "path": "crates/harlo-agent/src/isolate.rs",
+        "hash": "fa8cb24e048214bf",
+        "file": "fa8cb24e048214bf"
+      },
+      "jobs": {
+        "path": "crates/harlo-agent/src/jobs.rs",
+        "hash": "7e6bccf2b1b1f4fc",
+        "file": "7e6bccf2b1b1f4fc"
+      },
+      "mcp": {
+        "path": "crates/harlo-agent/src/mcp.rs",
+        "hash": "1ad8728d86a55296",
+        "file": "1ad8728d86a55296"
+      },
+      "mcp-auth": {
+        "path": "crates/harlo-agent/src/mcp_auth.rs",
+        "hash": "8492b3493d1a2d2d",
+        "file": "8492b3493d1a2d2d"
+      },
+      "profiles": {
+        "path": "crates/harlo-agent/src/profiles.rs",
+        "hash": "7536015193478f9e",
+        "file": "7536015193478f9e"
+      },
+      "refresh": {
+        "path": "crates/harlo-agent/src/mcp.rs",
+        "unit": "Mcp::refresh",
+        "hash": "d9d7cfdb25a8140f",
+        "file": "1ad8728d86a55296"
+      },
+      "rpc": {
+        "path": "crates/harlo-agent/src/rpc.rs",
+        "hash": "aa2d33a9086f8afd",
+        "file": "aa2d33a9086f8afd"
+      },
+      "start": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::start_mcp",
+        "hash": "92c5760b3f40c9ba",
+        "file": "4d3f009148eb1df1"
+      },
+      "stdio": {
+        "path": "crates/harlo-agent/src/mcp.rs",
+        "unit": "Stdio::start",
+        "hash": "02f9fb0cff190f51",
+        "file": "1ad8728d86a55296"
+      },
+      "tasks": {
+        "path": "crates/harlo-agent/src/task.rs",
+        "hash": "76e0221358b8baa9",
+        "file": "76e0221358b8baa9"
+      },
+      "turn": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Agent::turn",
+        "hash": "8586f4c200e4df82",
+        "file": "4d3f009148eb1df1"
+      },
+      "usage": {
+        "path": "crates/harlo-agent/src/session.rs",
+        "hash": "8cefada4c4b0e08d",
+        "file": "8cefada4c4b0e08d"
+      }
+    },
+    "workflows/desktop-connectivity.md": {
+      "accounts": {
+        "path": "crates/harlo-app/src/accounts.rs",
+        "hash": "9cd0becf21b893d6",
+        "file": "9cd0becf21b893d6"
+      },
+      "bridge": {
+        "path": "crates/harlo-app/src/phone_bridge.rs",
+        "hash": "f3cd71095072d38d",
+        "file": "f3cd71095072d38d"
+      },
+      "client": {
+        "path": "crates/harlo-app/phone/app.js",
+        "hash": "b8febe3ce0b34b82",
+        "file": "b8febe3ce0b34b82"
+      },
+      "funnel": {
+        "path": "crates/harlo-app/src/phone_funnel.rs",
+        "hash": "27802deb01854e4e",
+        "file": "27802deb01854e4e"
+      },
+      "greet": {
+        "path": "crates/harlo-app/src/phone_server.rs",
+        "unit": "greet",
+        "hash": "b042612b7b2c7e85",
+        "file": "fd29feee5fb04ff3"
+      },
+      "install": {
+        "path": "crates/harlo-app/src/remotes.rs",
+        "unit": "Remotes::install_agent",
+        "hash": "076930c74d7f2227",
+        "file": "341e8e77af7be3b2"
+      },
+      "jobs": {
+        "path": "crates/harlo-app/src/jobs.rs",
+        "hash": "7fadba5647dd308a",
+        "file": "7fadba5647dd308a"
+      },
+      "keys": {
+        "path": "crates/harlo-app/src/cloud_keys.rs",
+        "hash": "fbfc6fe60d696f34",
+        "file": "fbfc6fe60d696f34"
+      },
+      "mcp": {
+        "path": "crates/harlo-app/src/mcp.rs",
+        "hash": "f31f353e3c4b16e7",
+        "file": "f31f353e3c4b16e7"
+      },
+      "ops": {
+        "path": "crates/harlo-app/src/phone_server.rs",
+        "unit": "session_op",
+        "hash": "06016f497829760c",
+        "file": "fd29feee5fb04ff3"
+      },
+      "push": {
+        "path": "crates/harlo-app/src/phone_push.rs",
+        "hash": "45e5fd8507abb245",
+        "file": "45e5fd8507abb245"
+      },
+      "relay": {
+        "path": "crates/harlo-app/src/phone_relay.rs",
+        "hash": "0e70e8d2353cfc7d",
+        "file": "0e70e8d2353cfc7d"
+      },
+      "remotes": {
+        "path": "crates/harlo-app/src/remotes.rs",
+        "hash": "341e8e77af7be3b2",
+        "file": "341e8e77af7be3b2"
+      },
+      "server": {
+        "path": "crates/harlo-app/src/phone_server.rs",
+        "hash": "fd29feee5fb04ff3",
+        "file": "fd29feee5fb04ff3"
+      },
+      "server-setup": {
+        "path": "crates/harlo-app/src/server_setup.rs",
+        "hash": "b4e2e5c11953c2c1",
+        "file": "b4e2e5c11953c2c1"
+      },
+      "setup": {
+        "path": "crates/harlo-app/src/setup.rs",
+        "hash": "acc500323454e6a3",
+        "file": "acc500323454e6a3"
+      },
+      "slow": {
+        "path": "crates/harlo-app/src/phone_server.rs",
+        "unit": "slow_reply",
+        "hash": "2f04820d5a6ed291",
+        "file": "fd29feee5fb04ff3"
+      },
+      "startup": {
+        "path": "crates/harlo-app/src/main.rs",
+        "hash": "81c27471880e87f8",
+        "file": "81c27471880e87f8"
+      },
+      "updates": {
+        "path": "crates/harlo-app/src/updates.rs",
+        "hash": "a0ffa6d601d26ba6",
+        "file": "a0ffa6d601d26ba6"
+      }
+    },
+    "workflows/desktop-files.md": {
+      "adapter": {
+        "path": "crates/harlo-app/src/code_view.rs",
+        "hash": "18185684506f3589",
+        "file": "18185684506f3589"
+      },
+      "browser": {
+        "path": "crates/harlo-app/src/file_browser.rs",
+        "hash": "d9fab43ec2bda54c",
+        "file": "d9fab43ec2bda54c"
+      },
+      "chat": {
+        "path": "crates/harlo-app/qml/ChatView.qml",
+        "hash": "e24dc604de0b6722",
+        "file": "e24dc604de0b6722"
+      },
+      "ci": {
+        "path": "crates/harlo-app/src/ci.rs",
+        "hash": "abd8e5ab382115e0",
+        "file": "abd8e5ab382115e0"
+      },
+      "diagrams": {
+        "path": "crates/harlo-app/src/diagrams.rs",
+        "hash": "5b86ff87c12bd1eb",
+        "file": "5b86ff87c12bd1eb"
+      },
+      "editor": {
+        "path": "crates/harlo-app/qml/FileEditor.qml",
+        "hash": "5f5eba6a51adb24b",
+        "file": "5f5eba6a51adb24b"
+      },
+      "git": {
+        "path": "crates/harlo-app/src/git_panel.rs",
+        "hash": "a91530d640f7b480",
+        "file": "a91530d640f7b480"
+      },
+      "io": {
+        "path": "crates/harlo-app/src/text_file.rs",
+        "hash": "1340f05ffe7d9135",
+        "file": "1340f05ffe7d9135"
+      },
+      "terminal": {
+        "path": "crates/harlo-app/src/terminal_session.rs",
+        "unit": "TerminalSession::start",
+        "hash": "72812229507cbd15",
+        "file": "bb87ad692f92e914"
+      },
+      "tests": {
+        "path": "crates/harlo-app/qml/SelfTests.qml",
+        "hash": "5dc73e60379e170b",
+        "file": "5dc73e60379e170b"
+      },
+      "visuals": {
+        "path": "crates/harlo-app/src/visuals.rs",
+        "hash": "8ae9280ab0b935be",
+        "file": "8ae9280ab0b935be"
+      }
+    },
+    "workflows/desktop-sessions.md": {
+      "answers": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "unit": "ChatSession::answer",
+        "hash": "2391589369f2b95d",
+        "file": "7df789dec031ab0e"
+      },
+      "binding": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "hash": "7df789dec031ab0e",
+        "file": "7df789dec031ab0e"
+      },
+      "branch": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "unit": "ChatSession::edit_and_resend",
+        "hash": "b5c1832e5d73eee5",
+        "file": "7df789dec031ab0e"
+      },
+      "dispatch": {
+        "path": "crates/harlo-app/src/workspace/workflows.rs",
+        "hash": "8a209e765074f1aa",
+        "file": "8a209e765074f1aa"
+      },
+      "orchestration": {
+        "path": "crates/harlo-app/src/orchestration.rs",
+        "hash": "fb974e8bf937995f",
+        "file": "fb974e8bf937995f"
+      },
+      "plans": {
+        "path": "crates/harlo-app/src/plans.rs",
+        "hash": "31b340af7145c278",
+        "file": "31b340af7145c278"
+      },
+      "recovery": {
+        "path": "crates/harlo-app/src/workspace/workflows.rs",
+        "unit": "Workspace::recover_workflow",
+        "hash": "0b883fe6ad20a3e6",
+        "file": "8a209e765074f1aa"
+      },
+      "send": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "unit": "ChatSession::send",
+        "hash": "fc356e9bb698f50c",
+        "file": "7df789dec031ab0e"
+      },
+      "sequence": {
+        "path": "crates/harlo-app/src/workspace/workflows.rs",
+        "hash": "8a209e765074f1aa",
+        "file": "8a209e765074f1aa"
+      },
+      "session": {
+        "path": "crates/harlo-app/src/chat_session.rs",
+        "hash": "7df789dec031ab0e",
+        "file": "7df789dec031ab0e"
+      },
+      "startup": {
+        "path": "crates/harlo-app/src/main.rs",
+        "hash": "81c27471880e87f8",
+        "file": "81c27471880e87f8"
+      },
+      "undo": {
+        "path": "crates/harlo-app/src/phone_server.rs",
+        "unit": "undo_op",
+        "hash": "7f9df28adbc638d8",
+        "file": "fd29feee5fb04ff3"
+      },
+      "workflow": {
+        "path": "crates/harlo-app/src/workspace/workflows.rs",
+        "hash": "8a209e765074f1aa",
+        "file": "8a209e765074f1aa"
+      }
+    },
+    "workflows/git-and-remote.md": {
+      "agent": {
+        "path": "crates/harlo-core/src/agent_host.rs",
+        "hash": "bd5011274b16c54e",
+        "file": "bd5011274b16c54e"
+      },
+      "bring": {
+        "path": "crates/harlo-core/src/git.rs",
+        "unit": "bring_over",
+        "hash": "291ce900f585d561",
+        "file": "fdd4e02cf32eff89"
+      },
+      "commitmsg": {
+        "path": "crates/harlo-core/src/commitmsg.rs",
+        "hash": "2daa2458540e65b7",
+        "file": "2daa2458540e65b7"
+      },
+      "git": {
+        "path": "crates/harlo-core/src/git.rs",
+        "hash": "fdd4e02cf32eff89",
+        "file": "fdd4e02cf32eff89"
+      },
+      "helper": {
+        "path": "crates/harlo-core/src/remote_helper.rs",
+        "hash": "0f021268d446d73c",
+        "file": "0f021268d446d73c"
+      },
+      "hosting": {
+        "path": "crates/harlo-core/src/git_hosting.rs",
+        "hash": "03e6f696631b32e2",
+        "file": "03e6f696631b32e2"
+      },
+      "launch": {
+        "path": "crates/harlo-harness/src/process.rs",
+        "hash": "065602fcc6c5e908",
+        "file": "065602fcc6c5e908"
+      },
+      "locking": {
+        "path": "crates/harlo-core/src/git.rs",
+        "unit": "repo_lock",
+        "hash": "50ad4fc062edf791",
+        "file": "fdd4e02cf32eff89"
+      },
+      "merge": {
+        "path": "crates/harlo-core/src/git.rs",
+        "unit": "merge_branch",
+        "hash": "4c40c1e1ed716c9f",
+        "file": "fdd4e02cf32eff89"
+      },
+      "mirror": {
+        "path": "crates/harlo-harness/src/mirror.rs",
+        "hash": "a51b37ec888b8e4e",
+        "file": "a51b37ec888b8e4e"
+      },
+      "operations": {
+        "path": "crates/harlo-core/src/git.rs",
+        "hash": "fdd4e02cf32eff89",
+        "file": "fdd4e02cf32eff89"
+      },
+      "plan": {
+        "path": "crates/harlo-core/src/plan.rs",
+        "hash": "d5cde81ba7ebc435",
+        "file": "d5cde81ba7ebc435"
+      },
+      "plan-check": {
+        "path": "crates/harlo-core/src/plan.rs",
+        "unit": "changed_since",
+        "hash": "c807158eaa63ce65",
+        "file": "d5cde81ba7ebc435"
+      },
+      "plan-commit": {
+        "path": "crates/harlo-core/src/plan.rs",
+        "unit": "commit",
+        "hash": "84511b5437b1925e",
+        "file": "d5cde81ba7ebc435"
+      },
+      "quote": {
+        "path": "crates/harlo-core/src/remote.rs",
+        "unit": "quote_path",
+        "hash": "ccb7fb4e790128f0",
+        "file": "e3ce229e693bf31c"
+      },
+      "remote": {
+        "path": "crates/harlo-core/src/remote.rs",
+        "hash": "e3ce229e693bf31c",
+        "file": "e3ce229e693bf31c"
+      },
+      "run": {
+        "path": "crates/harlo-core/src/remote.rs",
+        "hash": "e3ce229e693bf31c",
+        "file": "e3ce229e693bf31c"
+      },
+      "scan": {
+        "path": "crates/harlo-core/src/remote_sessions.rs",
+        "hash": "0ee002762c73f449",
+        "file": "0ee002762c73f449"
+      },
+      "snapshot": {
+        "path": "crates/harlo-core/src/git.rs",
+        "unit": "snapshot_worktree",
+        "hash": "9b1f6451f0a981ab",
+        "file": "fdd4e02cf32eff89"
+      },
+      "splitdiff": {
+        "path": "crates/harlo-core/src/splitdiff.rs",
+        "hash": "bc3886f78ba84d7a",
+        "file": "bc3886f78ba84d7a"
+      },
+      "ssh": {
+        "path": "crates/harlo-core/src/remote.rs",
+        "unit": "ssh_options",
+        "hash": "aa9e21077094e356",
+        "file": "e3ce229e693bf31c"
+      },
+      "turn": {
+        "path": "crates/harlo-core/src/git.rs",
+        "hash": "fdd4e02cf32eff89",
+        "file": "fdd4e02cf32eff89"
+      },
+      "undo": {
+        "path": "crates/harlo-core/src/git.rs",
+        "unit": "undo_turn",
+        "hash": "989dc64ec79050f6",
+        "file": "fdd4e02cf32eff89"
+      }
+    },
+    "workflows/mobile-probe.md": {
+      "apns-tests": {
+        "path": "crates/harlo-apns/src/lib.rs",
+        "hash": "aec0f286fa5c16e0",
+        "file": "aec0f286fa5c16e0"
+      },
+      "client": {
+        "path": "ios/HarloKit/Sources/HarloKit/Client.swift",
+        "hash": "a1bac5bf4b41a604",
+        "file": "a1bac5bf4b41a604"
+      },
+      "demo": {
+        "path": "ios/HarloKit/Sources/HarloKit/Demo.swift",
+        "hash": "936814ca7dcf2155",
+        "file": "936814ca7dcf2155"
+      },
+      "fixture": {
+        "path": "ios/fixtures/recording.jsonl",
+        "hash": "4c6dd71196e49c4c",
+        "file": "4c6dd71196e49c4c"
+      },
+      "model": {
+        "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
+        "hash": "cb40b91b4c9d1943",
+        "file": "cb40b91b4c9d1943"
+      },
+      "package": {
+        "path": "ios/HarloKit/Package.swift",
+        "hash": "e1b87abb851976bc",
+        "file": "e1b87abb851976bc"
+      },
+      "probe": {
+        "path": "ios/HarloKit/Sources/harlo-probe/main.swift",
+        "hash": "b5a5a57cd7706db7",
+        "file": "b5a5a57cd7706db7"
+      },
+      "project": {
+        "path": "ios/Harlo/project.yml",
+        "hash": "8fea2de575a38574",
+        "file": "8fea2de575a38574"
+      },
+      "relay-tests": {
+        "path": "crates/harlo-relay/src/lib.rs",
+        "hash": "e499be1c974c799e",
+        "file": "e499be1c974c799e"
+      },
+      "replay": {
+        "path": "ios/HarloKit/Sources/HarloKit/Replay.swift",
+        "hash": "a372bda33a312dbe",
+        "file": "a372bda33a312dbe"
+      },
+      "replaying": {
+        "path": "ios/Harlo/Harlo/Replaying.swift",
+        "hash": "0de990ad26af31bd",
+        "file": "0de990ad26af31bd"
+      },
+      "tests": {
+        "path": "ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift",
+        "hash": "f63f6be159a0e078",
+        "file": "f63f6be159a0e078"
+      },
+      "tour": {
+        "path": "ios/Harlo/Harlo/Tour.swift",
+        "hash": "a0b04c420811e3c3",
+        "file": "a0b04c420811e3c3"
+      },
+      "ui": {
+        "path": "ios/Harlo/HarloUITests/HarloUITests.swift",
+        "hash": "39fe8266c0c68aa3",
+        "file": "39fe8266c0c68aa3"
+      }
+    },
+    "workflows/mobile-relay-apns.md": {
+      "apns": {
+        "path": "crates/harlo-apns/src/lib.rs",
+        "hash": "aec0f286fa5c16e0",
+        "file": "aec0f286fa5c16e0"
+      },
+      "client": {
+        "path": "ios/HarloKit/Sources/HarloKit/Client.swift",
+        "hash": "a1bac5bf4b41a604",
+        "file": "a1bac5bf4b41a604"
+      },
+      "docker": {
+        "path": "crates/harlo-relay/Dockerfile",
+        "hash": "cd19b56c2f43cfd4",
+        "file": "cd19b56c2f43cfd4"
+      },
+      "main": {
+        "path": "crates/harlo-relay/src/main.rs",
+        "hash": "e440d76a2ae3d234",
+        "file": "e440d76a2ae3d234"
+      },
+      "relay": {
+        "path": "crates/harlo-relay/src/lib.rs",
+        "hash": "e499be1c974c799e",
+        "file": "e499be1c974c799e"
+      }
+    },
+    "workflows/releases.md": {
+      "app": {
+        "path": "crates/harlo-app/src/updates.rs",
+        "hash": "a0ffa6d601d26ba6",
+        "file": "a0ffa6d601d26ba6"
+      },
+      "aur-bin": {
+        "path": "packaging/aur/harlo-bin/PKGBUILD",
+        "hash": "5a5486ac20bf2e56",
+        "file": "5a5486ac20bf2e56"
+      },
+      "aur-git": {
+        "path": "packaging/aur/harlo-git/PKGBUILD",
+        "hash": "719179672a9e8a65",
+        "file": "719179672a9e8a65"
+      },
+      "aur-source": {
+        "path": "packaging/aur/harlo/PKGBUILD",
+        "hash": "01f6138f2c26c657",
+        "file": "01f6138f2c26c657"
+      },
+      "bundle": {
+        "path": "packaging/linux/bundle.sh",
+        "hash": "b00be5668f317df1",
+        "file": "b00be5668f317df1"
+      },
+      "changelog": {
+        "path": "packaging/changelog.sh",
+        "hash": "91f6c5089f131fa8",
+        "file": "91f6c5089f131fa8"
+      },
+      "container": {
+        "path": "packaging/linux/Containerfile",
+        "hash": "e7cdba7ee305479c",
+        "file": "e7cdba7ee305479c"
+      },
+      "container-build": {
+        "path": "packaging/linux/build-in-container.sh",
+        "hash": "5b5b76bf4c19aa81",
+        "file": "5b5b76bf4c19aa81"
+      },
+      "core": {
+        "path": "crates/harlo-core/src/updates.rs",
+        "hash": "66fdf04c85a9671d",
+        "file": "66fdf04c85a9671d"
+      },
+      "download": {
+        "path": "site/download.js",
+        "hash": "8e41cf9fbcd66312",
+        "file": "8e41cf9fbcd66312"
+      },
+      "install-test": {
+        "path": "packaging/linux/test-install.sh",
+        "hash": "23a1b4884ab60f92",
+        "file": "23a1b4884ab60f92"
+      },
+      "manifests": {
+        "path": "packaging/release-manifests.sh",
+        "hash": "dcc17a6ad360dcb7",
+        "file": "dcc17a6ad360dcb7"
+      },
+      "nfpm": {
+        "path": "packaging/linux/nfpm.yaml",
+        "hash": "8dbb622ef29dd215",
+        "file": "8dbb622ef29dd215"
+      },
+      "release": {
+        "path": "packaging/release.sh",
+        "hash": "53155c39d1a172ac",
+        "file": "53155c39d1a172ac"
+      },
+      "signer": {
+        "path": "crates/harlo-manifest-signer/src/main.rs",
+        "hash": "dd4bc1cdf8d37c65",
+        "file": "dd4bc1cdf8d37c65"
+      },
+      "signer-cargo": {
+        "path": "crates/harlo-manifest-signer/Cargo.toml",
+        "hash": "fa492767baa5a285",
+        "file": "fa492767baa5a285"
+      },
+      "signing": {
+        "path": "crates/harlo-update-signing/src/lib.rs",
+        "hash": "3a1aa00549471263",
+        "file": "3a1aa00549471263"
+      },
+      "site": {
+        "path": "site/README.md",
+        "hash": "af9b65d650f91387",
+        "file": "af9b65d650f91387"
+      },
+      "workflow": {
+        "path": ".github/workflows/release.yml",
+        "hash": "67af528b14a41e12",
+        "file": "67af528b14a41e12"
+      },
+      "wrangler": {
+        "path": "wrangler.jsonc",
+        "hash": "51904141c286bc8c",
+        "file": "51904141c286bc8c"
+      }
+    },
+    "workflows/sessions.md": {
+      "attach": {
+        "path": "crates/harlo-core/src/attach.rs",
+        "hash": "36193aa38e83596a",
+        "file": "36193aa38e83596a"
+      },
+      "diff": {
+        "path": "crates/harlo-core/src/transcript.rs",
+        "unit": "diff_rows",
+        "hash": "7703af59134c93f9",
+        "file": "3bc3321c24f1f326"
+      },
+      "driver": {
+        "path": "crates/harlo-core/src/session.rs",
+        "unit": "drive",
+        "hash": "ae91e58783afdb75",
+        "file": "23f31f66e2c3a783"
+      },
+      "events": {
+        "path": "crates/harlo-harness/src/event.rs",
+        "hash": "7741e55a4630920b",
+        "file": "7741e55a4630920b"
+      },
+      "git": {
+        "path": "crates/harlo-core/src/git.rs",
+        "unit": "snapshot_turn",
+        "hash": "5f15c50b201aa146",
+        "file": "fdd4e02cf32eff89"
+      },
+      "handle": {
+        "path": "crates/harlo-core/src/session.rs",
+        "hash": "23f31f66e2c3a783",
+        "file": "23f31f66e2c3a783"
+      },
+      "listdiff": {
+        "path": "crates/harlo-core/src/listdiff.rs",
+        "hash": "5669e1434d6beb22",
+        "file": "5669e1434d6beb22"
+      },
+      "markdown": {
+        "path": "crates/harlo-core/src/markdown.rs",
+        "hash": "364d5e4ea48a586c",
+        "file": "364d5e4ea48a586c"
+      },
+      "pages": {
+        "path": "crates/harlo-core/src/pages.rs",
+        "hash": "d8c9b3b69eeda763",
+        "file": "d8c9b3b69eeda763"
+      },
+      "plugins": {
+        "path": "crates/harlo-core/src/plugins.rs",
+        "hash": "1f4c16805da3805d",
+        "file": "1f4c16805da3805d"
+      },
+      "reduce": {
+        "path": "crates/harlo-core/src/transcript.rs",
+        "unit": "Transcript::apply",
+        "hash": "bce69e3ffc8775d3",
+        "file": "3bc3321c24f1f326"
+      },
+      "refs": {
+        "path": "crates/harlo-core/src/session_ref.rs",
+        "hash": "6ad6002be3014a84",
+        "file": "6ad6002be3014a84"
+      },
+      "spending": {
+        "path": "crates/harlo-core/src/spending.rs",
+        "hash": "16665ee392a33eba",
+        "file": "16665ee392a33eba"
+      },
+      "subagents": {
+        "path": "crates/harlo-core/src/subagents.rs",
+        "hash": "58b864427c638e75",
+        "file": "58b864427c638e75"
+      },
+      "typed": {
+        "path": "crates/harlo-core/src/session.rs",
+        "hash": "23f31f66e2c3a783",
+        "file": "23f31f66e2c3a783"
+      },
+      "updates": {
+        "path": "crates/harlo-core/src/session.rs",
+        "hash": "23f31f66e2c3a783",
+        "file": "23f31f66e2c3a783"
+      }
+    }
+  },
+  "files": {
+    "crates/harlo-agent/build.rs": {
+      "hash": "3ea590d720c6ab15"
+    },
+    "crates/harlo-agent/src/agent.rs": {
+      "hash": "4d3f009148eb1df1",
+      "units": "0002b22f 04ae0403 06262999 11b39c93 179ae8d8 19984a43 1c6225ec 1dc35ad7 1defff46 200424c8 210820b8 227ed832 238fa28a 2926c3b5 2c822995 329f4beb 33fbdf40 378f2462 40fa633a 48e8c74d 4c91dc1d 661ff40a 679652fd 6ba2a0e0 7cdc804e 7d1c55ef 82b2d1d2 83c63010 840a6a95 8881e515 8afb250d 9232b4d4 9282be62 94835ea2 96da6f7c 9cdff0cc a6a288b8 b4f4e201 b567b070 c51e455b ccf56ef5 d07bce04 d07fd7e3 e1e440e1 f3a645d8 f4e2b773 f9998e7b fa77a525 ff384640"
+    },
+    "crates/harlo-agent/src/auth.rs": {
+      "hash": "e2101d3ba56aa0b4",
+      "units": "0c9618e9 0cf67fc7 0f5a123f 355636d9 3b311010 462fa8f1 6a4ea1c8 86b3901e d48a617c d5714982 d93d832c de3019a5 ed5eb9a3 ef5e3ac7 f2e75812 f4696e3f fe88d3fc"
+    },
+    "crates/harlo-agent/src/chat.rs": {
+      "hash": "b315b786f22e616c",
+      "units": "1f58b914 3df9726c a20d12c5 b4b33d24 dca83e71 f5cccfb7"
+    },
+    "crates/harlo-agent/src/clock.rs": {
+      "hash": "23c12c3f710fd439",
+      "units": "1a4c4e7b 21ad34a0 25bf8e1a 8c31e6e7 c52028f3 ed5eb9a3"
+    },
+    "crates/harlo-agent/src/compact.rs": {
+      "hash": "cb07501f9dfffbed",
+      "units": "07957a14 1f58b914 378bfce5 3d7db37d 497e22fe 6ca7ea2f 7540c7fb 7911fc52 79e1d925 93b214be 9eab54ac ae94da4c afa69325 bef32d2c"
+    },
+    "crates/harlo-agent/src/danger.rs": {
+      "hash": "82075d238ec6856a",
+      "units": "20f65c28"
+    },
+    "crates/harlo-agent/src/fetch.rs": {
+      "hash": "610b3e509f986acd",
+      "units": "acba2551 c4773daf"
+    },
+    "crates/harlo-agent/src/gemini.rs": {
+      "hash": "0a5bd59cf88fdd5d",
+      "units": "1f58b914 d1b2a59f dca83e71"
+    },
+    "crates/harlo-agent/src/generated.rs": {
+      "hash": "13a28280fe369b33",
+      "units": "424fb079"
+    },
+    "crates/harlo-agent/src/hashline.rs": {
+      "hash": "7add8b8ffb01a621",
+      "units": "2a1073a6 97a5e41b 9c299759 b8d31e85 d4f02eaa"
+    },
+    "crates/harlo-agent/src/images.rs": {
+      "hash": "44ea5550dc139b28",
+      "units": "09aa4cae 14a74ddb 3642ab96 41bcc514 420a08f1 5743882a 8be193b5 9121d02c da4270e3 e183a5f0 e2df9ea6"
+    },
+    "crates/harlo-agent/src/isolate.rs": {
+      "hash": "fa8cb24e048214bf",
+      "units": "0c79a9c2 2a4c9eb5 9c7bc1e4 c893ba30 cc9ea7f7 f174806d"
+    },
+    "crates/harlo-agent/src/jobs.rs": {
+      "hash": "7e6bccf2b1b1f4fc",
+      "units": "2eca48b9 2f17a0f8 5313eabe 5c0c27df 7286e03f 7ceed6a2 8249aec5 97a649c4 ad617a0f babc1bd8 dc3a2fd5 eda77567 f4db1e48"
+    },
+    "crates/harlo-agent/src/keys.rs": {
+      "hash": "51d053b0e148b051",
+      "units": "2998b323 6ee0eb49 7e5608ab"
+    },
+    "crates/harlo-agent/src/lookup.rs": {
+      "hash": "0347e534ee1b76d8",
+      "units": "acba2551 b8d31e85 d4f02eaa f9baa17c"
+    },
+    "crates/harlo-agent/src/lsp.rs": {
+      "hash": "e804e29b821310d7",
+      "units": "073c1634 22c3b361 68d7beb6 aef7de28 b9760e6a d4f02eaa ef43bc78 f9baa17c"
+    },
+    "crates/harlo-agent/src/main.rs": {
+      "hash": "b0f3678741766bcd"
+    },
+    "crates/harlo-agent/src/mcp.rs": {
+      "hash": "1ad8728d86a55296",
+      "units": "0cf67fc7 0de9d359 251b6212 38a4fc5f 4bdaa824 53372e77 536daace 59fcefc3 681c8fcb 69c42bf2 8249aec5 87e89abb 9d696bc7 a8594b03 b7681711 d263329b d78de925 d97e8f4e e29d0a70 e5800f72 f2750785 f2bc3cd2 f5387f9b"
+    },
+    "crates/harlo-agent/src/mcp_auth.rs": {
+      "hash": "8492b3493d1a2d2d",
+      "units": "2454ad61 42882135 aef7de28 babc1bd8 d2089be6"
+    },
+    "crates/harlo-agent/src/messages.rs": {
+      "hash": "cd9f52bc48d662e3",
+      "units": "149987d3 1f58b914 d5fb777c dca83e71 f5cccfb7"
+    },
+    "crates/harlo-agent/src/outline.rs": {
+      "hash": "c878f988f42a5142",
+      "units": "28391d3b b8d31e85"
+    },
+    "crates/harlo-agent/src/patch.rs": {
+      "hash": "9d37bdf7ad1c3d1c",
+      "units": "0ab06d24 30c471f6 97a5e41b 9f33d9f6 b8d31e85 d2a46f22 d4f02eaa e2adac23"
+    },
+    "crates/harlo-agent/src/profiles.rs": {
+      "hash": "7536015193478f9e",
+      "units": "d696a35b e6640de8 efd8a003"
+    },
+    "crates/harlo-agent/src/program.rs": {
+      "hash": "22e07aa323e0922b",
+      "units": "acba2551 c15849ab d4f02eaa f9baa17c"
+    },
+    "crates/harlo-agent/src/providers.rs": {
+      "hash": "6c752696ce94974e",
+      "units": "0ad9a98f 0e455d8a 19012f49 24543857 2baeda61 2c9de003 2fe79212 42eab670 4700153d 472590ae 49dbd53f 4fc835bd 53f09ec2 5ef5ef03 5fbb4ada 7252e7ce 7d19fb0d 89e4346f a18b869b a57feec7 ac86778e afb9d57f b200471d b3db179f b60e6b74 beb1e9e1 ce111709 ce38b3ed db867fcb f0c86fbe f485f3f1 fb893a2a fcafd52f fdf09cdf"
+    },
+    "crates/harlo-agent/src/repeats.rs": {
+      "hash": "3c57f8394d8bbf60",
+      "units": "64d846fd 68e4a67b 88884f55 92ee0233 b6b7a006"
+    },
+    "crates/harlo-agent/src/responses.rs": {
+      "hash": "525aa82dcf9a07b3",
+      "units": "031a8f0f 06009681 1f58b914 27ce1d1b 37a0025a 4e1f49a9 4fb62348 6c159814 739f68fe 75f84b46 8a46fd6f 8d14f6e7 9159c825 948fe603 9f5eff6f c96c6d5b d55506f6 dca83e71 e3c06a73 fdbd5381"
+    },
+    "crates/harlo-agent/src/retry.rs": {
+      "hash": "0275c18229ed3eb4",
+      "units": "121462d9 6e16db10 b8ead431 c9315b73 d986bc5e"
+    },
+    "crates/harlo-agent/src/rpc.rs": {
+      "hash": "aa2d33a9086f8afd",
+      "units": "183f00f4 24c458cf"
+    },
+    "crates/harlo-agent/src/sandbox.rs": {
+      "hash": "b8887038839ec81b",
+      "units": "3e111815 4fcb21d6 67fc6249 6e24b9be 6ea67664 73b66bc8 823412d1 90d08e58 91604a6a 93084903 ad5f629f ba691ba0 c611981f cfe55aa5 f43e63c8 fdf09cdf"
+    },
+    "crates/harlo-agent/src/search.rs": {
+      "hash": "c3912d2e0f5dd4fa",
+      "units": "259aa8ef 8aa3c4ce d4f02eaa e33d99e6"
+    },
+    "crates/harlo-agent/src/session.rs": {
+      "hash": "8cefada4c4b0e08d",
+      "units": "037a78d4 07468360 0f9660fc 21e49eb2 297268b8 29fa2f63 31ba75d6 4813494d 5e1e2bca 67ee48da 68b7c1ef 9ccf1d05 c878a536 ca1530e8 d01476df e0e4548d eb49d4a6 f6f7a7c3 f8391613"
+    },
+    "crates/harlo-agent/src/skills.rs": {
+      "hash": "3d08751579ac669e",
+      "units": "0fc4dfc4 63b85330 6df1bb18 d6417f02 d78de925 e6640de8"
+    },
+    "crates/harlo-agent/src/stubs.rs": {
+      "hash": "aacc5ccefe37231e",
+      "units": "0682c5f2 14a2055c 497e22fe 49beb05b 5f8c8c4d 8ce33c6c 9f12fdc1 ac203c98"
+    },
+    "crates/harlo-agent/src/sys.rs": {
+      "hash": "44931afa78d3e500",
+      "units": "0368b5af 14da7dc7 17b788a7 6ee2de13"
+    },
+    "crates/harlo-agent/src/task.rs": {
+      "hash": "76e0221358b8baa9",
+      "units": "10bc96af 47dc8996 8e5b1a73 acba2551 d4f02eaa fb9cf756"
+    },
+    "crates/harlo-agent/src/todo.rs": {
+      "hash": "0a8dcb381fec8769",
+      "units": "865bbcf9 acba2551 b8d31e85 d4f02eaa"
+    },
+    "crates/harlo-agent/src/tools/bash.rs": {
+      "hash": "0269a37f8d7c2ceb",
+      "units": "157dca92 2af2c378 34ca0e76 37942026 5d347fd9 acba2551 e5552630"
+    },
+    "crates/harlo-agent/src/tools/edit.rs": {
+      "hash": "3adc2466a1833e37",
+      "units": "464c4ffd 8bf1172d 97a5e41b a116c9ed"
+    },
+    "crates/harlo-agent/src/tools/mod.rs": {
+      "hash": "7974f8c326b46e7c",
+      "units": "0bcedfcb 21ab6743 245000a5 3365adad 4e80abb5 519605a7 53b996e0 7846086a 88d759ea 8ed09f81 9c586a9b c2190d55 ea93d6a2 eeae469a f9e2cc67"
+    },
+    "crates/harlo-agent/src/usage.rs": {
+      "hash": "c1bf79fc5c70a037",
+      "units": "30c471f6 e7d3799e"
+    },
+    "crates/harlo-agent/src/used.rs": {
+      "hash": "8cc60dae73d4b062",
+      "units": "086d4a86 1ca9093d 23acc994 31bf5fde 3bceb1ac 50e6a050 585a55ba 7f91fff7 93c91c85 a338277c ae7d8dfa afaa18a7 d1d87c47 dfe95783 f88846ca f927425b"
+    },
+    "crates/harlo-apns/src/lib.rs": {
+      "hash": "aec0f286fa5c16e0",
+      "units": "0c77fe09 1aab7047 266168d1 2c134ea0 2c21d57b 354a8a7d 54a0e8c1 6766cf8c 731ce7ed 7d8441f6 873b2465 99498a5f a0e7597c ad900a91 c16bc82b c1dd5fcc c33d58fa c42c8f28 d48a617c d58764b3 f5387f9b"
+    },
+    "crates/harlo-app/build.rs": {
+      "hash": "f8ac8feab6230c0f"
+    },
+    "crates/harlo-app/cpp/harlo_audio.h": {
+      "hash": "3b6ffd01d5e9ee5f",
+      "units": "45fdcc6f 749d183b 79f5102e 805c40a0 9ae90502 aac73178 b3e8ba2c dc624a84 e1327036 ffd7a693"
+    },
+    "crates/harlo-app/cpp/harlo_codeview.h": {
+      "hash": "4783c27083357f63",
+      "units": "0061a913 037feb87 091cba88 0c07f26a 15fff2e5 1fbfec3a 32cfcf85 3e8c0098 3ebbe698 45fdcc6f 467abd7b 586cc89a 8085b2ba 8092b9c5 80c55b6f 843f5fab 9640bcad 970e46de 9c9a94c8 bb1e0101 be9f2f72 e5446b47 eb614f48 ece4c309 f70bdadb"
+    },
+    "crates/harlo-app/cpp/harlo_fonts.h": {
+      "hash": "c3fab17c1af84f92",
+      "units": "0fda6820 12eebbe4 41c3108e 45fdcc6f acac0122"
+    },
+    "crates/harlo-app/cpp/harlo_image.h": {
+      "hash": "75b97e81d2a2e039",
+      "units": "00d9c216 032b285d 122e0848 142e26b6 2508bccb 35f368e4 45fdcc6f 4b149eca 55f3278a 60b193ab 6762c31b 69264c18 72d7a0a3 7af7981f 7b7de74a 858f5c1a 93fcda28 98fe3693 99514522 9ee9afb7 a3858b96 a48808e8 a700f1ba ac38269b ad715d37 ae749086 af142b3e b01e23b9 be6bbfca ca09e7e6 d3e1cb7c ea019924 ea2961a9 eddd3b19 f436d77a f8a2119b"
+    },
+    "crates/harlo-app/cpp/harlo_platform.h": {
+      "hash": "0645a4f386a3ea24",
+      "units": "3d9d3e5a 45fdcc6f 4dec5616 4efaf907 78e6329a cf191b44 d5b1a343 de281437 e65bd538 e93147c3 f1482de7"
+    },
+    "crates/harlo-app/cpp/harlo_testinput.h": {
+      "hash": "5faf6d8dbbfbfd07",
+      "units": "16af5b50 1a32d245 45fdcc6f 58be26aa 5cf705e1 7303e944 78987de6 7ebf99e2 c69a302d ce63db4b f16aa3cb"
+    },
+    "crates/harlo-app/fonts/file-icons.py": {
+      "hash": "4159f45567ef9982",
+      "units": "0d6e4079"
+    },
+    "crates/harlo-app/phone/app.js": {
+      "hash": "b8febe3ce0b34b82"
+    },
+    "crates/harlo-app/qml/ActivityPanel.qml": {
+      "hash": "f831115c3ba7f27d",
+      "units": "15eaa752 1923547d 4027f515 8319af88 b9bfe3b6 bc18f706 c2d4b446 d7811951"
+    },
+    "crates/harlo-app/qml/AddButton.qml": {
+      "hash": "84a06cfe6ba59e2e"
+    },
+    "crates/harlo-app/qml/AddHostDialog.qml": {
+      "hash": "f723685ffc3f9661",
+      "units": "145823de caf29ad9"
+    },
+    "crates/harlo-app/qml/AddProjectDialog.qml": {
+      "hash": "0aef96dd10414d7c",
+      "units": "7a0614f9 7e9e5ac3"
+    },
+    "crates/harlo-app/qml/AgentAvatar.qml": {
+      "hash": "2acf67f18b5dac5d",
+      "units": "da4270e3"
+    },
+    "crates/harlo-app/qml/AppButtonBox.qml": {
+      "hash": "bc1e96262faaffa9"
+    },
+    "crates/harlo-app/qml/AppCheckBox.qml": {
+      "hash": "15285e3394086111"
+    },
+    "crates/harlo-app/qml/AppDialog.qml": {
+      "hash": "4d880739feff5595"
+    },
+    "crates/harlo-app/qml/AppMenu.qml": {
+      "hash": "6fd23855c66fb407"
+    },
+    "crates/harlo-app/qml/AppMenuItem.qml": {
+      "hash": "826511f58e300469"
+    },
+    "crates/harlo-app/qml/AppMenuSeparator.qml": {
+      "hash": "add57038e7b27601"
+    },
+    "crates/harlo-app/qml/AppProgressBar.qml": {
+      "hash": "a977786930798600"
+    },
+    "crates/harlo-app/qml/AppSlider.qml": {
+      "hash": "4d41213f3c25f67b"
+    },
+    "crates/harlo-app/qml/AppSwitch.qml": {
+      "hash": "3deb9d0a4af30427"
+    },
+    "crates/harlo-app/qml/AppTextField.qml": {
+      "hash": "242ebb11a0f1bc4a"
+    },
+    "crates/harlo-app/qml/AppearancePage.qml": {
+      "hash": "b90d2265266e1d12"
+    },
+    "crates/harlo-app/qml/AskPanel.qml": {
+      "hash": "96bffc843ead439b",
+      "units": "01be30bb 68c780cd 75490bd7 b59629af f1038dfa"
+    },
+    "crates/harlo-app/qml/AttachmentChip.qml": {
+      "hash": "b9c1f1d1ef0e9cdd"
+    },
+    "crates/harlo-app/qml/AvatarPicker.qml": {
+      "hash": "da49a0ae6d47373a"
+    },
+    "crates/harlo-app/qml/BranchDialog.qml": {
+      "hash": "89bbbfdb9f282f58",
+      "units": "1c633350 1d8e08fd 5a6ef928 8ce33c6c"
+    },
+    "crates/harlo-app/qml/BranchPicker.qml": {
+      "hash": "fe1aa7146d5d49f7",
+      "units": "1d8e08fd 8ce33c6c"
+    },
+    "crates/harlo-app/qml/ChangesPanel.qml": {
+      "hash": "8378a770e8597898",
+      "units": "0c6ac73f 10a69dd7 68b4c81e 69852c34 87d05cd0 c1554219 c18b86b8 e3c032d9 ea5edade f5bfb8dc"
+    },
+    "crates/harlo-app/qml/ChatView.qml": {
+      "hash": "e24dc604de0b6722",
+      "units": "08249461 13d09436 1573f149 1a4e4f7e 4486f39c 46bf01d4 4df05252 5a6ef928 5bd6d3b6 70a5e4d5 75490bd7 79311707 a5afbe5f a5fadb2c acf2ec9f b9bfe3b6 d470d7d3 d7811951 e6e21579 e762ce71"
+    },
+    "crates/harlo-app/qml/Chip.qml": {
+      "hash": "07d4cebb12c68d9d"
+    },
+    "crates/harlo-app/qml/Choice.qml": {
+      "hash": "3f886294e013e1fc"
+    },
+    "crates/harlo-app/qml/ChoicePill.qml": {
+      "hash": "c5f2952b856adb39"
+    },
+    "crates/harlo-app/qml/CloudProviderRow.qml": {
+      "hash": "bcf1c15a037eb658"
+    },
+    "crates/harlo-app/qml/CloudProviders.qml": {
+      "hash": "0ed19e212a4c038b",
+      "units": "29853fb8 5a4771fe"
+    },
+    "crates/harlo-app/qml/CodeCopy.qml": {
+      "hash": "70d2792f49a5e57b"
+    },
+    "crates/harlo-app/qml/CodeHit.qml": {
+      "hash": "97176c93fc67308d"
+    },
+    "crates/harlo-app/qml/CodeText.qml": {
+      "hash": "524bd8ce4de2d0e9",
+      "units": "01e3c989 12886f9d 12c1823e 374d5afd 8a36ac79 b52cbe02"
+    },
+    "crates/harlo-app/qml/ComboField.qml": {
+      "hash": "2c54b0b47b558688",
+      "units": "191cd18d"
+    },
+    "crates/harlo-app/qml/CommandPalette.qml": {
+      "hash": "89184e1ae46ecc95",
+      "units": "13c7d14e 234afbd5 4e6d6efe 620e45e4 683a62ce 9bf71773 d6cc0a08 d9b2fe68 dec47555 e3d11da4 e6b88623 fec257ea"
+    },
+    "crates/harlo-app/qml/Composer.qml": {
+      "hash": "759241719f672f8e",
+      "units": "17ae1b4e 2447dc36 27ce1d1b 2b77cdef 30222ee5 3323c3fa 5189a841 66e3c52a 6c45cb72 6ecc99a6 6fcabce9 70aacaa8 7aedef2b 7b25eb29 858836f4 8a01c34b 8b5a0085 8ed40ba3 9bbca118 a57a8981 c31adc18 c6a4c1ea d1fbab03 d4b1b30e e617c5a3"
+    },
+    "crates/harlo-app/qml/ComposerIconButton.qml": {
+      "hash": "6885aac3e909f067"
+    },
+    "crates/harlo-app/qml/ComposerLabelButton.qml": {
+      "hash": "f775caf4c0a2fbfa"
+    },
+    "crates/harlo-app/qml/ContextPanel.qml": {
+      "hash": "2d096396b9a99347",
+      "units": "15eaa752 4027f515 87d296ec b9bfe3b6 bad563b0 c63e082d d7811951"
+    },
+    "crates/harlo-app/qml/ControlSurface.qml": {
+      "hash": "f204e53a3d72e42d",
+      "units": "2f907a6d"
+    },
+    "crates/harlo-app/qml/CopyButton.qml": {
+      "hash": "3ec683ea6463186e"
+    },
+    "crates/harlo-app/qml/CountBadge.qml": {
+      "hash": "fed72a88a59ba92d"
+    },
+    "crates/harlo-app/qml/DelegatePopover.qml": {
+      "hash": "95529f0c13176e12",
+      "units": "096f1eef 1c633350 1fa91609 33c074c4 48559d96 5c4c1964 8922e1fe aff0cde7 cced28c6 d9298a10"
+    },
+    "crates/harlo-app/qml/DialogButton.qml": {
+      "hash": "6a3671852ae5ce13"
+    },
+    "crates/harlo-app/qml/DiffView.qml": {
+      "hash": "ce0006bede5a0765",
+      "units": "0329b690 0cf67fc7 0fd70630 1b7ffe29 5d23a08c 5ff9fcdb 689a6983 76eaa146 8aec93e8 9a726afa a28ba58e a5a8b695 b6bd0765 c5e43185 db9ed2db e9f492f3 efc14c62 f484f91f"
+    },
+    "crates/harlo-app/qml/DraftView.qml": {
+      "hash": "6b22f32b4da3c7a2",
+      "units": "01be30bb 27ce1d1b 2afbf1e5 3a21a4f3 3d81ad7b 3dcb7291 59ed65f2 6473f819 6ecc99a6 72238908 7a546e99 8d341f4e 938a5d39 9505f9bb a1773683 a4a93363 b02a399a b0eadcfc c6f9e979 d2c18e4d d6cc0a08 da918cf1"
+    },
+    "crates/harlo-app/qml/DropDownContent.qml": {
+      "hash": "e2712186204c042e",
+      "units": "e617c5a3"
+    },
+    "crates/harlo-app/qml/DropDownLayer.qml": {
+      "hash": "20f4ce1eab868841",
+      "units": "e617c5a3"
+    },
+    "crates/harlo-app/qml/DropDownPlain.qml": {
+      "hash": "4f37f57a80e0e582",
+      "units": "e617c5a3"
+    },
+    "crates/harlo-app/qml/EmptyNote.qml": {
+      "hash": "ac9cfa1e319ad582"
+    },
+    "crates/harlo-app/qml/FileEditor.qml": {
+      "hash": "5f5eba6a51adb24b",
+      "units": "13d09436 157dca92 1d86fee2 24193290 2fa108fe 4027f515 49da4fea 4cd0e21a 5c3357aa 6922ba36 70a6a6f9 858836f4 97a5e41b abc01ac1 b8a9579d cdebb5d0 e5a99b97 eb2c78e6 f2010efe f47632c9"
+    },
+    "crates/harlo-app/qml/FileIcon.qml": {
+      "hash": "d946924bb701d901"
+    },
+    "crates/harlo-app/qml/FilesPanel.qml": {
+      "hash": "0c0a351b2fc30b98",
+      "units": "2793859d 747355bd 75c75efe e3383241"
+    },
+    "crates/harlo-app/qml/FlatButton.qml": {
+      "hash": "706096be510d10db"
+    },
+    "crates/harlo-app/qml/FormLabel.qml": {
+      "hash": "a541c864e241ace8"
+    },
+    "crates/harlo-app/qml/FormNote.qml": {
+      "hash": "1c42bd29fc2fb6f2"
+    },
+    "crates/harlo-app/qml/GeneralPage.qml": {
+      "hash": "b63deeea7b57e9dd"
+    },
+    "crates/harlo-app/qml/GitHostCard.qml": {
+      "hash": "b3c0537ab741f9a2"
+    },
+    "crates/harlo-app/qml/GlassScrim.qml": {
+      "hash": "999a21cca573340b"
+    },
+    "crates/harlo-app/qml/GlassSurface.qml": {
+      "hash": "6fada2b397104c22",
+      "units": "7adb8897"
+    },
+    "crates/harlo-app/qml/Group.qml": {
+      "hash": "8742d9c85512e34f"
+    },
+    "crates/harlo-app/qml/HarnessRequestDock.qml": {
+      "hash": "abeb6e3d7ef878d8"
+    },
+    "crates/harlo-app/qml/Icon.qml": {
+      "hash": "2f45dee6ecbecadb"
+    },
+    "crates/harlo-app/qml/ImageViewer.qml": {
+      "hash": "5a4f87f2e9a5afb0",
+      "units": "3e64cc41 40ad682d 468916ce 55be7d10 6035bb0a 628f74bf 8460fad3 b9bfe3b6 bb1937c9 c9822da0 d63b314a dbbeea71 fefbfa91"
+    },
+    "crates/harlo-app/qml/InstanceSwitcher.qml": {
+      "hash": "d561ef4c39ef53b5",
+      "units": "1aca80e8 3081616c 4740ae63 4f935a0f 725fed9d 96d480db a757b331 d6cc0a08 dc37f688"
+    },
+    "crates/harlo-app/qml/KeyCap.qml": {
+      "hash": "2369caa0fc27c049"
+    },
+    "crates/harlo-app/qml/Keymap.qml": {
+      "hash": "c77c232df47ad062",
+      "units": "01be30bb 157dca92 4c102969 4f5260d7 61a0fed8 6ee0eb49 b80e0af6 c3a65985"
+    },
+    "crates/harlo-app/qml/LeftRail.qml": {
+      "hash": "938a9308e8e048ad",
+      "units": "95cc5d40"
+    },
+    "crates/harlo-app/qml/LogoMark.qml": {
+      "hash": "31c8048935e855da",
+      "units": "8570a2e1"
+    },
+    "crates/harlo-app/qml/Main.qml": {
+      "hash": "44a6996821313aa9",
+      "units": "16a55abe 174545f5 280a24c3 2c0d16a7 35ca381e 35cfe637 3655fa17 3d802999 50752fe7 549e8ddd 59aa7284 59c6331c 5e9ec869 6023397f 6049e75a 6442b0c4 69978a8b 6c26a99c 70a5e4d5 7a546e99 8c07c659 92507e74 96d480db a298c73c a7bfca26 a8160c14 acc7f36d b5f2337a b9bfe3b6 c87ecdbf ce497fac cea58d67 d460339d d7d972a5 e1404a4b"
+    },
+    "crates/harlo-app/qml/McpPage.qml": {
+      "hash": "8bd6ae40ffe86cc8",
+      "units": "1441b0e3 157dca92 27bc6795 356937a6 429b9951 60847210 71b1f5ca a757b331 af1118a7 d40a32e7 dafb8e67 e4cf73b9 ee5d7301 f4614b00 fa375c51"
+    },
+    "crates/harlo-app/qml/MiniChat.qml": {
+      "hash": "404641cc288937f8",
+      "units": "e617c5a3"
+    },
+    "crates/harlo-app/qml/MiniWindow.qml": {
+      "hash": "32077cef3973372b"
+    },
+    "crates/harlo-app/qml/MockupView.qml": {
+      "hash": "a87e0b331c34d23f"
+    },
+    "crates/harlo-app/qml/ModelServerDialog.qml": {
+      "hash": "b55fabef6669ceaf",
+      "units": "0360f6bc 0e908182 4ebf192b 7e9e5ac3 8f2b0507"
+    },
+    "crates/harlo-app/qml/ModelsPage.qml": {
+      "hash": "a18808619fbc06fd"
+    },
+    "crates/harlo-app/qml/MoreText.qml": {
+      "hash": "25857a96ca2760e9",
+      "units": "cdc2bd48 dc93c7de"
+    },
+    "crates/harlo-app/qml/NeedsPhone.qml": {
+      "hash": "9e8d66fdc0ad5f47"
+    },
+    "crates/harlo-app/qml/NotesPanel.qml": {
+      "hash": "aced5528277916c7",
+      "units": "0cf67fc7 157dca92 637a80cc e3ad4a68"
+    },
+    "crates/harlo-app/qml/NotificationsPage.qml": {
+      "hash": "b448117def451b7c",
+      "units": "157dca92 e8fe5d6c fc3de046"
+    },
+    "crates/harlo-app/qml/OptionsCards.qml": {
+      "hash": "70fd341b2a580c2c",
+      "units": "733859c1 b0e75d70 baaf5362 e904c9cc"
+    },
+    "crates/harlo-app/qml/PairDeviceDialog.qml": {
+      "hash": "974c0e9e9fd2f338",
+      "units": "2943d8aa 2f61513f 31a41f10 96d480db bf291fd3 c5e3ce27 d017a8f2 d6cc0a08"
+    },
+    "crates/harlo-app/qml/PanelButton.qml": {
+      "hash": "7ad9ac756fee434d"
+    },
+    "crates/harlo-app/qml/PanelHeader.qml": {
+      "hash": "3bfa1cc02e5b9697"
+    },
+    "crates/harlo-app/qml/PhoneFirewallToast.qml": {
+      "hash": "edbe9f6497f39119"
+    },
+    "crates/harlo-app/qml/PictureStrip.qml": {
+      "hash": "592b7502e3650177"
+    },
+    "crates/harlo-app/qml/PictureViewer.qml": {
+      "hash": "e234b5dc6eaa5320",
+      "units": "1c633350 4492464c"
+    },
+    "crates/harlo-app/qml/PlainLabel.qml": {
+      "hash": "dc8a4f02b956c931"
+    },
+    "crates/harlo-app/qml/PlanDock.qml": {
+      "hash": "5be8f6904f0cd841",
+      "units": "1ae6d239 262121c5 35306bb5 44575cf5 61ee30b2 633ccb19 c02b5734 dcb3407a"
+    },
+    "crates/harlo-app/qml/PlanLimits.qml": {
+      "hash": "03d6b867cbf924b6",
+      "units": "2740e59f 27eb5e51 60fb769a 74284d9d"
+    },
+    "crates/harlo-app/qml/ProjectIcon.qml": {
+      "hash": "22583a43a44ed8e1"
+    },
+    "crates/harlo-app/qml/ProjectsPage.qml": {
+      "hash": "eec28c07c53a2be6"
+    },
+    "crates/harlo-app/qml/PromptRail.qml": {
+      "hash": "56dfe3dad100edc2",
+      "units": "05a53824 11d7917c 310ff200 47faf9ad 50450d00 8afed313 9972b60e b1a36d25 d71127ad e36532e4 f5aeceb5"
+    },
+    "crates/harlo-app/qml/ProviderLogo.qml": {
+      "hash": "5f7dca213ea09e03"
+    },
+    "crates/harlo-app/qml/ProviderMark.qml": {
+      "hash": "ad78523a0553ead8"
+    },
+    "crates/harlo-app/qml/ProvidersPage.qml": {
+      "hash": "6742f56e7985c38a"
+    },
+    "crates/harlo-app/qml/PullRequestDialog.qml": {
+      "hash": "1d677112768ba539",
+      "units": "1c633350"
+    },
+    "crates/harlo-app/qml/QuitRunsDialog.qml": {
+      "hash": "e31fe0d917bcfb19"
+    },
+    "crates/harlo-app/qml/RefreshButton.qml": {
+      "hash": "2293d22e6041a014"
+    },
+    "crates/harlo-app/qml/RemoteFolderDialog.qml": {
+      "hash": "9ae8c1becba51898",
+      "units": "75a288c0 9505f9bb ae14569a d2886819"
+    },
+    "crates/harlo-app/qml/RemotePage.qml": {
+      "hash": "91e19e6be52efb4a",
+      "units": "157dca92 262121c5"
+    },
+    "crates/harlo-app/qml/RemoveProjectDialog.qml": {
+      "hash": "2e97769452ca0b9d",
+      "units": "2f2fc7f2 61d58cbe"
+    },
+    "crates/harlo-app/qml/RightRail.qml": {
+      "hash": "e47d55e173d5e44f"
+    },
+    "crates/harlo-app/qml/Rule.qml": {
+      "hash": "a82aee0eef5acbef"
+    },
+    "crates/harlo-app/qml/RunNode.qml": {
+      "hash": "bbcdc279f7518ae1"
+    },
+    "crates/harlo-app/qml/RunView.qml": {
+      "hash": "0873e4d65ab9e437",
+      "units": "356937a6 6c35493a a757b331 d6cc0a08"
+    },
+    "crates/harlo-app/qml/SchedulesPage.qml": {
+      "hash": "c5be627ddbe3480a",
+      "units": "15eaa752 1d8e08fd"
+    },
+    "crates/harlo-app/qml/SearchDialog.qml": {
+      "hash": "d015d8eabf21722c",
+      "units": "65fda5c9 8ce33c6c acba2551 c14c114e ded9ac57 ea3bd73e"
+    },
+    "crates/harlo-app/qml/SectionHeader.qml": {
+      "hash": "5be231ff8929018b"
+    },
+    "crates/harlo-app/qml/SectionTitle.qml": {
+      "hash": "fb15ae048dfcd68e"
+    },
+    "crates/harlo-app/qml/SegmentedControl.qml": {
+      "hash": "8fd21441c1ab1600"
+    },
+    "crates/harlo-app/qml/ServersPage.qml": {
+      "hash": "c4e9825f31f7bbea",
+      "units": "20f65c28 4a8947dc 6f5a6034 7f7c1ac5 96d480db aaf23206 b2e0b4f9 bde8ad0d c52028f3 c549779d cf38d95c"
+    },
+    "crates/harlo-app/qml/SettingRow.qml": {
+      "hash": "ba13e6441139554f"
+    },
+    "crates/harlo-app/qml/SettingsDialog.qml": {
+      "hash": "65c534d19498bbd1",
+      "units": "1a6b8ee6 2058bea9 234afbd5 45d274ad 6cf46347 d42f3382 e4de2c2f"
+    },
+    "crates/harlo-app/qml/SetupGuide.qml": {
+      "hash": "5ee89848afd48a51",
+      "units": "1c633350 42af43e3 b34f17f0"
+    },
+    "crates/harlo-app/qml/SetupServerDialog.qml": {
+      "hash": "b55b2d2b2653a457",
+      "units": "0b407281 123ba3bb 1c199eb1 2bd3d3f3 4a449fe7 4cd0e21a 592daefa 6c35493a 8ce33c6c 9872cb15 9f1b3512 b63f00e2 b6dcbea6 c365cb52 ebc5ff2b"
+    },
+    "crates/harlo-app/qml/ShortcutList.qml": {
+      "hash": "579a660f09b7c408",
+      "units": "dfca5da5"
+    },
+    "crates/harlo-app/qml/ShortcutSettings.qml": {
+      "hash": "ee0c4bf15ea492f4",
+      "units": "0b6e8308 1fe14702 468916ce 6a23813d 70aacaa8 7ab37787 b737815f"
+    },
+    "crates/harlo-app/qml/ShortcutsDialog.qml": {
+      "hash": "0fcbd5b4f2dadda8",
+      "units": "234afbd5"
+    },
+    "crates/harlo-app/qml/Sidebar.qml": {
+      "hash": "c78c364dbe34bf1e",
+      "units": "0486453f 3db55e4d 9bdecee1 a0e27f53 a433c827 b597cca4 c8e7a200 cda6258b ff9d5bd3"
+    },
+    "crates/harlo-app/qml/SignInDialog.qml": {
+      "hash": "8cc1d50f0917b7d2",
+      "units": "23fe5c03 9505f9bb e6f07d43 fe59be6d"
+    },
+    "crates/harlo-app/qml/StashesDialog.qml": {
+      "hash": "225ef8c05909ef0e",
+      "units": "0c4894c7 1d8e08fd 4027f515 68b4c81e"
+    },
+    "crates/harlo-app/qml/StatsView.qml": {
+      "hash": "dd4e15f136fe348c",
+      "units": "02cee318 53fd6d7a 61d58cbe 70f0b621 8d2ac8b5 944c27e5 b6b54201 c02b5734 d6cc0a08"
+    },
+    "crates/harlo-app/qml/StatusDot.qml": {
+      "hash": "c3b33d08409a3bcc"
+    },
+    "crates/harlo-app/qml/SubagentDialog.qml": {
+      "hash": "a0db1c027fb2311d",
+      "units": "1c633350"
+    },
+    "crates/harlo-app/qml/SubagentDock.qml": {
+      "hash": "b8284bcf294e6a4b",
+      "units": "5a8460f6"
+    },
+    "crates/harlo-app/qml/SubagentRow.qml": {
+      "hash": "3542fb883cf14fa3",
+      "units": "356937a6 c25cd44c"
+    },
+    "crates/harlo-app/qml/TabStrip.qml": {
+      "hash": "98d12b636ce3215d",
+      "units": "d53b3197"
+    },
+    "crates/harlo-app/qml/TerminalPanel.qml": {
+      "hash": "a80fa640987599c7",
+      "units": "200c7e62 2937013f 42d36e3b 77894d87 8f31f660 a2f1c8ea c0116889 c40bc810 feb2c3e4"
+    },
+    "crates/harlo-app/qml/TerminalView.qml": {
+      "hash": "d7373eb631dc744c",
+      "units": "2410abd9 2c12bb31 339f80e4 39d02b42 3ace60b0 cced28c6"
+    },
+    "crates/harlo-app/qml/Theme.qml": {
+      "hash": "e28a97ac12ef138e",
+      "units": "089e703c 0b661c3a 179d28b8 189958a8 1d075d09 1d4a1593 1d8e08fd 224b29ab 2410189b 2e8334e8 2eca8d98 2f50b839 35685f11 356937a6 3a808965 3d53f420 3e05cbde 654ebf05 6ee2cc10 727c1e41 76ea797f 793cad41 895e2e69 89d41a19 ab297827 af14f7fe cc56877b cff77b7c d488dfdc d9fed0df dd8b906b e769f55a e8b2cc93 e9e74f93 ed4561f6 f2b580fa fb6668f9 fca6f8b9"
+    },
+    "crates/harlo-app/qml/ThemeList.qml": {
+      "hash": "196ac06de6347044",
+      "units": "31779d64 65d59dcf"
+    },
+    "crates/harlo-app/qml/ToastCard.qml": {
+      "hash": "769e99401c475a27"
+    },
+    "crates/harlo-app/qml/ToastStack.qml": {
+      "hash": "0fa8305cb7a77c10",
+      "units": "75c75efe 7e5608ab"
+    },
+    "crates/harlo-app/qml/TodoDock.qml": {
+      "hash": "7b700df54e7e9a2a",
+      "units": "6201eb4d"
+    },
+    "crates/harlo-app/qml/ToolCard.qml": {
+      "hash": "92818f6911bc3f84",
+      "units": "0ad9eaa2 747355bd"
+    },
+    "crates/harlo-app/qml/TranscriptView.qml": {
+      "hash": "af38a3ad4d17675e",
+      "units": "0229b611 07391fe3 11d2f821 13266204 1647934f 1923547d 1bda62db 1c193652 1c5b404d 2054c3ce 215d3d21 2455bcba 25bf8e1a 2738ca54 2a58d0e9 2d2b1193 2f0a3edb 31aad790 396687f3 499b2eca 4b1025bf 4b8f2a5d 4f36042d 4f42753a 53fd6d7a 55a760de 5956fffd 59f006d6 5a827acd 5df6f125 6f9078f3 7b80ff45 7d4ea9a2 965a9f07 998c095a 9c0aa3f1 9dbafccb 9f85ae93 a82a709a a9b8d5e5 ab8eb993 abf52686 af0c8441 aff0b76d b27ae61f b33a73f0 b9bfe3b6 ba9c736f c980b57f d00a0da3 dc190436 ddba1cce de1617bc df4caae4 df7493a4 e4f20478 e89e6b94 f082fbdc f349f19e fee96511"
+    },
+    "crates/harlo-app/qml/TrayIcon.qml": {
+      "hash": "06e3ef7b33b8875d",
+      "units": "1beb69f2 73941782"
+    },
+    "crates/harlo-app/qml/UndoDialog.qml": {
+      "hash": "1e5d2ddf313ab911",
+      "units": "1c633350 83e51339"
+    },
+    "crates/harlo-app/qml/UpdateToasts.qml": {
+      "hash": "8d2fedf0d3ce9d52"
+    },
+    "crates/harlo-app/qml/UserAvatar.qml": {
+      "hash": "d276d48a4c70a980"
+    },
+    "crates/harlo-app/qml/ValueChip.qml": {
+      "hash": "dcdfd6dd9bc7bef9"
+    },
+    "crates/harlo-app/qml/WikiOfferToast.qml": {
+      "hash": "c848531aacf1edc0",
+      "units": "512bc532"
+    },
+    "crates/harlo-app/qml/WikiPanel.qml": {
+      "hash": "f4db8cede7678571",
+      "units": "06bb1914 0ae60173 0cb7699b 0cf67fc7 1d8e08fd 24193290 31aad790 3281d3b2 340a06c1 3c482346 44022fe8 4af1594c 4b209c37 58fe459b 736a2628 9e5377ba a3ce0b61 ab8adf5a b0098d67 b3139037 cbd6b974 cced28c6 d020a498 d9b2fe68 e3477ac9 ef571423"
+    },
+    "crates/harlo-app/qml/WikiWriter.qml": {
+      "hash": "cd7cd252c54c3905",
+      "units": "12ea12ea 157dca92 75a288c0 87b04e58 b1d6b91b d488dfdc"
+    },
+    "crates/harlo-app/qml/WorkflowCard.qml": {
+      "hash": "9ff759be3a0a887e",
+      "units": "0bef57c9 510d4a6e b3a219a7 cd3b4802"
+    },
+    "crates/harlo-app/qml/WorkflowDialog.qml": {
+      "hash": "342fe34f75366cb2",
+      "units": "1c633350 32fd1d6d 55f80e07 63198166 876a9a88 8f526401 a1773683 b347a0bf c6eaf738 c8354361 cced28c6 ed32737c ee0df222"
+    },
+    "crates/harlo-app/qml/WorkflowsPage.qml": {
+      "hash": "6b3da48822341c89",
+      "units": "9200b05e b2f2a225 c02b5734 e4a206a0 f33de68f"
+    },
+    "crates/harlo-app/qml/WorktreeDialogs.qml": {
+      "hash": "e15c802951948311",
+      "units": "67e54c88 7d7651c3 8d341f4e c193ecb1 ee5d7301"
+    },
+    "crates/harlo-app/qml/WrapButton.qml": {
+      "hash": "c65ef7cd6b325ac7"
+    },
+    "crates/harlo-app/src/accounts.rs": {
+      "hash": "9cd0becf21b893d6",
+      "units": "06742e03 07154104 0765ed0c 079c4e88 08f71b99 0adfb93e 10ba7a84 1cb7e102 30e26b00 390c7136 3b214f2f 3b76320f 3f24e4e0 4a1f2dd2 4dec3e21 4faaeae8 581c4c1a 59290730 5aeef666 5ef6a447 62f1a498 67c45f8e 76327f7f 81fb9bc7 8e612abe 8ec13a63 908fc001 9a1a982d 9fd2db32 a0eb26cb a49b13ed a7c9a4be a7f9772f b15727f2 b2c0780e b38f7a3e c1ad15a0 c39cbf5a c4257485 c4d56ac5 c7137d4f cbe26bfa cccb76b4 d1e0f001 d4f92c86 d8835364 f24fca39 f62ec7fe f9225f9a fa36834b"
+    },
+    "crates/harlo-app/src/audio.rs": {
+      "hash": "e0998d83b10b6594",
+      "units": "10c825a3"
+    },
+    "crates/harlo-app/src/chat_session.rs": {
+      "hash": "7df789dec031ab0e",
+      "units": "08bf79a0 0905635f 1a22d787 1c4af9f4 2483705e 27590f97 2c9d3f56 34172058 3d4fe3a9 3e748a48 4a00931f 4a5f4235 4d28e119 4f5886f9 5a8e7bea 64927d27 6ae9c3b4 709fae3b 72fd32eb 749fe296 7ccff141 7d44dd21 7dbbc8c0 9258a16c 9316076f 9c78ac44 9f0a4105 9fd2db32 a47a88c9 a6ae1b21 a6d37734 adc9e210 b2fd8ea8 b6b923b2 bcd83547 bf241d7c c27f5591 c8799551 c97eb3e5 ced8158a d5726033 d5a95629 da5e976c dc686262 dd15a797 dda0b123 e8599c81 ea7bc2da eae653d5 f80557a0 f9dbd627"
+    },
+    "crates/harlo-app/src/ci.rs": {
+      "hash": "abd8e5ab382115e0",
+      "units": "3316348d 52c45fa7 c97ace4c"
+    },
+    "crates/harlo-app/src/cloud_keys.rs": {
+      "hash": "fbfc6fe60d696f34",
+      "units": "11b39c93 6ee0eb49 7e5608ab 9f86d081 a330395c"
+    },
+    "crates/harlo-app/src/code_view.rs": {
+      "hash": "18185684506f3589",
+      "units": "038305ae 0b135418 1199b766 16465f3a 1e100ae4 23c190e9 250cf5ff 27ec0b57 338ee8d1 3466920f 34c83654 3c93958b 474abf10 48e98d86 49a46e64 49aa61c6 4c6a8307 4e569877 5932c779 5999c8c6 624bedf4 6477e84f 696aedcc 6aa2f0af 6b023c27 75847755 76c198bd 7df8605a 854dd851 89a23125 8b74d855 8e791d9c 8e906f4b 933b1587 9745324e 9fd2db32 a49238b5 a645329f a9a5f30d b503402b bfb66f9b c4982e58 c63787e0 cab4c04d d26cd078 d4a60ab4 d7bb6ed6 d9a06cd3 e8ef2c4d f2814456"
+    },
+    "crates/harlo-app/src/diagnostics.rs": {
+      "hash": "c415af13bc6e18fc",
+      "units": "08636566 262f0efd 44b18129 9ddbd863 af263110"
+    },
+    "crates/harlo-app/src/diagrams.rs": {
+      "hash": "5b86ff87c12bd1eb",
+      "units": "04553a7d 05986f34 1a38713a 20f65c28 220ceb77 2a12da17 2acdb583 3377e552 47a49356 5c2cce4d 926bd0d4 9a506afc 9fd2db32"
+    },
+    "crates/harlo-app/src/dictation.rs": {
+      "hash": "bbee7f66990792bb",
+      "units": "09ea09f2 165be219 39cad088 3b51b9e1 9fd2db32 ace811d6 bc13d1c1 c6bb6ffc de452613 e691a779 faf4383b"
+    },
+    "crates/harlo-app/src/file_browser.rs": {
+      "hash": "d9fab43ec2bda54c",
+      "units": "2f039685 7ecb34d1 8d7a4a85 95876d83 9fd2db32 a157a6b6 b7f15144 f86d4f36"
+    },
+    "crates/harlo-app/src/file_icon_glyphs.rs": {
+      "hash": "7011608998514a72"
+    },
+    "crates/harlo-app/src/file_icons.rs": {
+      "hash": "77f0ba88b466e58e",
+      "units": "b29c772f ed0db55a"
+    },
+    "crates/harlo-app/src/fonts.rs": {
+      "hash": "d39a9ce5aa12c698",
+      "units": "10c825a3 21ac9271 4f1f358a af4999be"
+    },
+    "crates/harlo-app/src/git_panel.rs": {
+      "hash": "a91530d640f7b480",
+      "units": "0a4e91fe 22138de8 252cd749 2afa7741 3784f7f3 3bda4499 492ce221 4a638e2e 4e6c63a0 4e80610e 504a0507 575a625b 641b55eb 644cf947 7f9a352b 86221a58 87a39067 88b36be1 8f40976b 8fd56418 968b3f2d 9fd2db32 a5d23d22 b6337341 c01ff695 c165b7fd d76be25b d8c80866 dee3139d e0657eb6 e3177487 e7970b28 e9974fa4 f9218ad6"
+    },
+    "crates/harlo-app/src/graphics.rs": {
+      "hash": "ef8311b9b63a759c",
+      "units": "3ace60b0 4037f67c 8b6df8c1 97a5e41b 9e68cbd2 a7c8a73d"
+    },
+    "crates/harlo-app/src/image_view.rs": {
+      "hash": "8371b45ff60f2ec4",
+      "units": "04d89f8c 0f90e172 1a130131 1b2cb77f 281bbf92 29fd6c2d 2acdb583 33ea42b8 44b3097a 49d9f4bd 4cb9a471 552ebd64 577a64dc 5dec93b7 5e266064 6e166243 73f3cda7 7e9181e2 7f6c0c32 84c7247f 8698be09 96a885be 987977e1 9b201c8e 9fd2db32 b2fb9266 b57925e7 b770af66 c7d999fd c8f01ff3 ca60d9a1 cc653ca3 cea07c42 d843b035 f592e46d f6b18698 ff734e10"
+    },
+    "crates/harlo-app/src/instance.rs": {
+      "hash": "d62a4883b8f8b7e5",
+      "units": "611496f4 656130e7 6f8860eb a510a560"
+    },
+    "crates/harlo-app/src/jobs.rs": {
+      "hash": "7fadba5647dd308a",
+      "units": "06a9d9f5 716ecabb 79b84728 ad617a0f cced28c6"
+    },
+    "crates/harlo-app/src/keep_above.rs": {
+      "hash": "cb0f93150a223672",
+      "units": "6ee0eb49"
+    },
+    "crates/harlo-app/src/log_format.rs": {
+      "hash": "0e0363c9d762632b",
+      "units": "56b564b7"
+    },
+    "crates/harlo-app/src/main.rs": {
+      "hash": "81c27471880e87f8",
+      "units": "d92c6a81"
+    },
+    "crates/harlo-app/src/mcp.rs": {
+      "hash": "f31f353e3c4b16e7",
+      "units": "0c270959 28532b25 45e55264 487796fa 48f5c430 4c4ba6e7 588a6ac7 6234e18a 629e9089 825bbdce 9578b923 976a2539 9ad5c313 9b0ed62f 9d6e11b2 9fd2db32 dfd7cd0d"
+    },
+    "crates/harlo-app/src/notify.rs": {
+      "hash": "d01d3397d776c613",
+      "units": "27ce1d1b 48d89ad2"
+    },
+    "crates/harlo-app/src/orchestration.rs": {
+      "hash": "fb974e8bf937995f",
+      "units": "24c458cf 584f8ba9"
+    },
+    "crates/harlo-app/src/phone.rs": {
+      "hash": "b462e54662952f78",
+      "units": "051a310d 0a0381bc 0b939114 0de2c4fe 15df9d16 1ac2f79b 259e51f0 2a040e16 40670ea6 423ae6c2 451e18a3 55634eb7 6d7f5852 9fd2db32 b08b95de c4dd5499 c90b63ad ca82efbc cf93062f f65f54f4"
+    },
+    "crates/harlo-app/src/phone_activity.rs": {
+      "hash": "60626ddd78ac76b0",
+      "units": "45e55a87 4e8664f1 87780fa5"
+    },
+    "crates/harlo-app/src/phone_bridge.rs": {
+      "hash": "f3cd71095072d38d",
+      "units": "104591f7 151e97b7 2348f998 24c458cf 31b8f40a 59f03d64 6e0065a1 7edb360f 96879611 9bf243a8 b07a47fb d93eac60 ee85e44f"
+    },
+    "crates/harlo-app/src/phone_funnel.rs": {
+      "hash": "27802deb01854e4e",
+      "units": "1310ca2c 920e413c cced28c6 fc063af0"
+    },
+    "crates/harlo-app/src/phone_push.rs": {
+      "hash": "45e5fd8507abb245",
+      "units": "239f59ed 27ce1d1b 35fbb717 44a57b22 88b6b8e3 9dc08e40 a7a9dc5b a9190076 ca00fccf f8cf83a7 fa2dcc23"
+    },
+    "crates/harlo-app/src/phone_relay.rs": {
+      "hash": "0e70e8d2353cfc7d",
+      "units": "0c77fe09 920e413c cced28c6"
+    },
+    "crates/harlo-app/src/phone_server.rs": {
+      "hash": "fd29feee5fb04ff3",
+      "units": "347fe122 3e5301c9 74c95604 a6a32dbc aef7de28 b38d9d16 cced28c6 cd9aea6c e3c4b39d f134d296"
+    },
+    "crates/harlo-app/src/plans.rs": {
+      "hash": "31b340af7145c278",
+      "units": "0415281d 2937013f 2998b323 7c9bbe5e"
+    },
+    "crates/harlo-app/src/platform.rs": {
+      "hash": "526d3f7ef155437d",
+      "units": "10c825a3"
+    },
+    "crates/harlo-app/src/provider_logos.rs": {
+      "hash": "ff5d5791c46d9ce1",
+      "units": "0415281d 14a74ddb 2995dd54"
+    },
+    "crates/harlo-app/src/qt_base.rs": {
+      "hash": "82d86732762fc01e",
+      "units": "9fd2db32"
+    },
+    "crates/harlo-app/src/registry.rs": {
+      "hash": "2aefe6bb3226d469",
+      "units": "1e22560c 2998b323 7e5608ab 8fd95728 a7272e71"
+    },
+    "crates/harlo-app/src/remotes.rs": {
+      "hash": "341e8e77af7be3b2",
+      "units": "037f6bba 0a80e057 0e9036de 1aea1525 22821887 237e9485 4c1c7951 54af5262 7cd6c25f 82bb862f 9fd2db32 c5d83265 c977d312 d8428973 d962e266 e71cc283"
+    },
+    "crates/harlo-app/src/server_setup.rs": {
+      "hash": "b4e2e5c11953c2c1",
+      "units": "6789cabc 725501c4 9fd2db32 bbb30db1 c1d7b126 c2355cc5 c7840e96 cf39158e fc551f62"
+    },
+    "crates/harlo-app/src/setup.rs": {
+      "hash": "acc500323454e6a3",
+      "units": "2f91dcd5 4e43b4bd 53e22987 56765f04 575c6b7e 5bd26fcd 65a44199 68c021e7 7c9bbe5e 9fd2db32 acba2551 afef6a41 c3788134 c57231aa e7313d20 ec72b956"
+    },
+    "crates/harlo-app/src/terminal_session.rs": {
+      "hash": "bb87ad692f92e914",
+      "units": "0de71260 11bad1d6 19f59d58 22bd2491 3c0d8148 41ec3d5d 53ca2f93 548be688 61ce1cae 632aeb8b 6cc24ac9 816051a2 9fd2db32 a37d4416 abbb382d b944ee0e bde8c63e da09e5b1 eaf13595"
+    },
+    "crates/harlo-app/src/text_file.rs": {
+      "hash": "1340f05ffe7d9135",
+      "units": "38b9d157 3f7127d1 5ff3cea5 7dd2dbf9 9fd2db32 bcf32db3"
+    },
+    "crates/harlo-app/src/themes.rs": {
+      "hash": "2a3b2f4e7fa248bc",
+      "units": "95e40d5b e1c06246 e6640de8"
+    },
+    "crates/harlo-app/src/updates.rs": {
+      "hash": "a0ffa6d601d26ba6",
+      "units": "1269da6d 197b82b2 27120b4f 7120834e 9fd2db32 b3c78220 ca4a4ead f1348ed0 f520def8 ffdc6ec9"
+    },
+    "crates/harlo-app/src/usage_stats.rs": {
+      "hash": "ea6d59ec939b3e22",
+      "units": "93de235c 9b1f0789 9fd2db32"
+    },
+    "crates/harlo-app/src/visuals.rs": {
+      "hash": "8ae9280ab0b935be",
+      "units": "2acdb583 5a735f22 9fd2db32 a1847d88 a78e5675 b3bf3c9e"
+    },
+    "crates/harlo-app/src/workspace.rs": {
+      "hash": "03dd98c2a951a198",
+      "units": "00146b86 00cc407c 0156a2e4 02d10b38 03b4a7d2 052b103b 056f6dfb 06139412 08168ba3 08204b2d 085d44ce 0ca44fe9 0ed2bf8e 0fd36107 11981a87 126f592c 135ea80f 14ed437d 1889b464 1bbc62f9 1e3b9cb8 1f96a7fb 226aeda2 2659f2e4 27c988ee 29b9987f 319e121a 31e18ec2 333b92b7 3445409e 34bab0bb 35a4ab8b 35deeee0 36adfc40 380a9385 3906ad00 3a9ac9e0 3aac9597 3bf6f00b 3c1e47cf 3e87baef 3f0691ce 3fbecab0 3fde7814 40b40f39 40c7baae 40f63429 459be187 46ce639d 480182ef 4a30fc49 4af38519 4ccd073f 4cd02646 4d15c970 4d401da5 4e14a5cc 4f216526 4f345b04 4fa2c8b1 51a78346 5378019a 54bd3cfd 559c4847 56833054 574788ae 57553c8e 5916bbb7 592e6343 59308cf4 5df9edfc 607c09bf 60cf12de 64834bff 667268a8 66c49796 6c1c9b58 6c4714cb 6cc43b74 6ceaaec4 71cca80a 727ecc27 72eeac05 73ab981f 744fbc4d 74ede3c6 765a3207 76a16bed 76fd3802 782d9bc1 79cd0ab0 7b6e00c2 7e034d38 7e932db5 7fed2c51 80ad39f7 80bc7b4e 86099655 86f7008e 87c3f788 87cb7191 8870f730 88cd4770 88e480dc 88e6af9d 88ea2fc0 8ac1b5fa 8be97aca 8ca41f67 9262f9d3 93c23208 94673764 95213ad3 961ebd94 9683fbc3 968ed32b 981cd357 9943167c 9a43cdb3 9ac19fdd 9c459bd5 9e8c8c33 9ea80b87 9ef09096 9fd2db32 a2dae31d a5844068 a6e3c030 aa55fa34 ab65ce45 ac729d0e ad79d38b ae2c2651 afcc1d68 b150ab51 b151e003 b1538d8b b5305cca b65b301f b7450f51 b79ebe02 b7d06061 b8428653 ba144895 bd09dd3b bdb5330f bdcd02b9 bf1a677c bf824468 c0070fa3 c0cd1f94 c68977d7 c6c0f207 c73f52d1 c7e32521 c9643c0c c9727862 cec50f44 cf1d7c9a d0f02daa d1f7ce81 d6134d33 d6cf15cc d8cd46c1 da9b52a7 dbf0caa2 dde36d3e df159d58 df685708 df9bca7d e039098e e45a78c6 e665bff6 e73ae4cc e8708b35 e9e2b9dd ea0b4343 eadbbfba eaf37f5c ed1f8852 ee54be24 efe46ccc f19073f6 f2b9a352 f37f46bb f3bfdb59 f4ce45fa f4e8ce78 f6b8c253 f799340a fa7a30b5 fbb601ef fe29bf6a ff5306d6 ffa1a1f6"
+    },
+    "crates/harlo-app/src/workspace/workflows.rs": {
+      "hash": "8a209e765074f1aa",
+      "units": "0384fc1e 0f268c58 0fabf8a0 406523b7 4e045008 51df6b13 5a08ccd2 6dfb5f8c 8ad4c2a2 928d6aa7 a52908ca a5e8a21f ab07bd72 aef52260 b5bb88ad c205c87f d4cbdc22 e2073645 e4edce7c e717c899 ed078a6d ee1a90f3"
+    },
+    "crates/harlo-code/src/doc.rs": {
+      "hash": "e4118d96a9373e34",
+      "units": "000b0396 01229f5f 05693ed9 05af1762 0970258d 187d4477 195a4c00 1ef40ce5 24807993 27e621f0 41d38825 43733ab9 49f4e57c 4f6ba144 5a7b3dad 649d64ff 6b4763a6 8249b3dd 88a5979d 91cf141f 93afa0d1 9d3c9cec a42be50c a641dc1a aaf22e47 b0ef11bc bfdc64d5 c222403e cc8ef5ef db277440 db36f507 dd2aa0eb df9d171a e246dc62 e483073e f3221fb2 f46a3560 f5387f9b f5e456ec fb6b7078 fb86dca9 fd060400"
+    },
+    "crates/harlo-code/src/fonts.rs": {
+      "hash": "cc49ebdc00217d7d",
+      "units": "0c030586 3680fcad 4261433e"
+    },
+    "crates/harlo-code/src/lang.rs": {
+      "hash": "a3790883917f1220",
+      "units": "260669c9 27af9321 3f1c859c"
+    },
+    "crates/harlo-code/src/lib.rs": {
+      "hash": "6f6a80de3f33e58e"
+    },
+    "crates/harlo-code/src/syntax.rs": {
+      "hash": "6fdaca0e6164bbf0",
+      "units": "0110c4d6 2da94164 40203af0 4b461e58 a3b50c47 b83fb4da cb582c50 dc7115af e43516c3 ee2c515f f20bafdd"
+    },
+    "crates/harlo-code/src/terminal.rs": {
+      "hash": "2bd71dd88ea22e7c",
+      "units": "0509e687 18862815 61f7b932 71f98bd7 8a5680cc ba9033b0 bb4f6432 e6ee4c8b f504dcae"
+    },
+    "crates/harlo-code/src/text.rs": {
+      "hash": "83998692e01e4eea",
+      "units": "206aa5e5 22580526 2719b159 29f60b8c 41a21c7e 4d17048c 50f8852a 71988c4d 737bf079 8d2b5cd5 9c866e2a 9d05fa90 b4a891f1 b528730c c0d81458 d7852cd0 e3749b28 ef1e69d2 f6e9b6a1 f760b952"
+    },
+    "crates/harlo-code/src/view.rs": {
+      "hash": "cffdd8d98ff09a2f",
+      "units": "11b782bf 125432fb 141c32e4 16e42e2f 18dcce34 1fe12306 223a4f6c 27a1ccf1 29238233 30a0dc93 47786665 5afe33e6 69f9f4ef 74289e67 7aa2d077 8127f8d4 85794eff 8c55252b 916263b2 91a16f71 95110d74 9d33d98c a0ee84b7 a4db4638 abe8398c ac2bd4a4 b44364bb bbf987b7 ca0acff9 dcc839a4 dcccd2e1 dd3cae75 e4c52fac e93c2768 f0e9f1c1 f7ecd4c3 fcd3ddae ff12a9de"
+    },
+    "crates/harlo-core/bridge/harlo_mcp_bridge.py": {
+      "hash": "65e8f53b6714ee1c",
+      "units": "2f2fc7f2 5782b186"
+    },
+    "crates/harlo-core/examples/usage_stats.rs": {
+      "hash": "20cd6507ac1184a6"
+    },
+    "crates/harlo-core/src/actions.rs": {
+      "hash": "6932c1f2a66127c9",
+      "units": "0b27c158 21e49eb2 34a04005 836ff184 c817532b c943fd04 cfaa4071"
+    },
+    "crates/harlo-core/src/agent_host.rs": {
+      "hash": "bd5011274b16c54e",
+      "units": "29a1af58 5bb9b544 6abcbd5a b19f3cfa bbe93f8c d9f1536d"
+    },
+    "crates/harlo-core/src/agents.rs": {
+      "hash": "8ccc26665a020430",
+      "units": "1aca80e8 6f2f2de0 7663090b b141f7cb e845fddf"
+    },
+    "crates/harlo-core/src/attach.rs": {
+      "hash": "36193aa38e83596a",
+      "units": "37932e60 45666d97 6a9be867 8de5abaa"
+    },
+    "crates/harlo-core/src/autostart.rs": {
+      "hash": "75e1c1f97afa66eb",
+      "units": "6ee0eb49 923fe539 95d8e032 eecec09c"
+    },
+    "crates/harlo-core/src/bin/harlo-engines.rs": {
+      "hash": "387df01991978870"
+    },
+    "crates/harlo-core/src/commitmsg.rs": {
+      "hash": "2daa2458540e65b7",
+      "units": "10be0bc7 238fa28a 24cacf50 3b066804 d0b4ba23"
+    },
+    "crates/harlo-core/src/context.rs": {
+      "hash": "0f2ec03c72fe4014",
+      "units": "2705d83f 548e9ef6 5b7d4d87 679652fd 7749321e 845e9183 dca3bc8f e543855d eb8c9a64"
+    },
+    "crates/harlo-core/src/db.rs": {
+      "hash": "a0978184df224b52",
+      "units": "053a7d39 066303a5 0a276e36 10466b32 10989033 13d9bc32 14c1185c 1b1e9829 1f5dad2c 23d7c079 28ccf71d 2b5775bd 2f5fbcff 33742409 3839d7c4 401a2898 40493e4d 40c6fe38 4256b51e 489d99b4 4a9d0e16 502513b4 54b5fdd9 55379214 56a15339 63176262 6ac9d325 6edf58c6 7783e4d9 7fc1f8f4 8d4032fb 93f94d83 98595978 a728b2c9 ad0276da b84783ca c64ca161 ce55232c d3199a8c d7ddd302 dbd3abb4 e012cdc0 e20945c2 e90f1749 e9f73afc ed1383aa f22e4eab f34c17eb"
+    },
+    "crates/harlo-core/src/dictation.rs": {
+      "hash": "88fd81f4b23fe151",
+      "units": "0633044b 0c6f5f1a 0fbe5a9d 2fd31ba6 68ff63fb 7963b283 9015b5c2 9ff871b9 ff9a12a7"
+    },
+    "crates/harlo-core/src/engine_host.rs": {
+      "hash": "66b11399d2e90472",
+      "units": "02bd175f 2374d917 8fb6d5f3 9b2ed259 acba2551"
+    },
+    "crates/harlo-core/src/engine_setup.rs": {
+      "hash": "c9080883563d06fc",
+      "units": "13588e33 14d204c6 2937013f 35759b3c 3ca69bb1 4e1f49a9 652f5501 6de8c4a9 8fb6d5f3 a623db3a acba2551 ae760639 b5107d76 b6ce788d c505ab6d c5de4af1 ca47eab4 ef8547ac f0444739 f6d74ab3"
+    },
+    "crates/harlo-core/src/engines.rs": {
+      "hash": "d18e6984c249c7ee",
+      "units": "00621be1 006428f6 021e9395 0946e38e 143d32e3 1577beaf 197d745e 1a70f2bc 1ae3192e 1d23ea89 1d6bb708 1d8cd1fc 27c89e31 2e6a5184 4644f606 5926b855 5aed351b 5b5bae52 5e675645 6007f8d9 64879f7d 68dbc611 68ff63fb 6964a7d1 6a0a08d4 6f8e43b6 71f13cc8 7975300f 79a3d5d6 79a4359f 7c582575 80d298c9 84eb1b45 87e24b55 8bf1eee0 8ceb1624 8d987712 8e75ebbd 92f42f9f 93131860 9dd93240 9eb33b58 9f3fdf46 a179dfc6 a2b68829 a51a6c19 a797c329 a8a556ee b084fe2c b1bb5e54 b256f680 b55a1c4b b81b1daf bc315a98 bcb35090 cfacfd3e d9acd786 da4270e3 e2e5baf9 e490ad9e f6f4851a f8b32f4e fde202f0 ff2e5fd8 ff35da97"
+    },
+    "crates/harlo-core/src/export.rs": {
+      "hash": "18f782e0a7f8c975",
+      "units": "12eb016a 1375c8d5 170322a3 bc18f706 e91db1ec"
+    },
+    "crates/harlo-core/src/files.rs": {
+      "hash": "e0196f432f53dda5",
+      "units": "0422b4c9 303f86b4 52add4d6 57e2ffe2 952d8b06 c9306860 e36b7651 e6f4359c fc31e6b6"
+    },
+    "crates/harlo-core/src/firewall.rs": {
+      "hash": "468d2ae91240dff9",
+      "units": "0c445d04 1744b964 230d740d 23a5f1e3 32d88fc8 34ec67fc 3e78b4f0 41008373 77f6a166 ca6cc4d2 cfacfd3e f5387f9b"
+    },
+    "crates/harlo-core/src/git.rs": {
+      "hash": "fdd4e02cf32eff89",
+      "units": "00e2faa2 03163f4a 073c1634 0a0a8a8f 0be30b20 1213344c 166a8c8b 19e7f6d3 20e9a7b2 2d4fae3e 2eee037c 3469aed0 35546a66 41e16a7e 44777ca5 490df587 49af96cf 55c5c311 563c0092 56c4d10d 57847d25 59c1f2fb 5ab9db5d 687acb7b 79ed4b93 7e07fe9b 7ee95225 80a804f9 80bce96e 83ad4131 85672de5 8671ea11 8c0457ce 8d5e78b2 9505cacb 9644cb7d 96e442d9 977ab0cb 998cf097 9c58a6ee 9f131dd9 a1a4cd8c a35aa0b0 b8c009d6 b902ca9d ba9cc823 c05ecf34 c4b45632 c4cb9b5b c5f5571c c65f165f c893ba30 cb3be2dc cd9de50b cfd4c26b d0c64688 d107ea36 d2a46f22 d2e55b8a d4117f0f d6027e39 d70f5ac5 d897ae7e d9c435e1 dce19053 dd18bbf5 dedd3659 e5358990 eadff9ef ec3c2ac2 ec7fa3a8 ed94d0d0 f3f3f342 fd3272a0 fedb2248"
+    },
+    "crates/harlo-core/src/git_hosting.rs": {
+      "hash": "03e6f696631b32e2",
+      "units": "00410fd6 01274c83 03b411ef 097f3c67 0c8333b1 1710acce 1aca80e8 1d732d4d 28f934e3 3855213e 5137f12c 59f9c82f 5fa4d667 64bc7f4e 764a23ec 7e42af64 80eb49bf 93b1d240 99bb8840 a7f36443 b17bc226 be61ed15 d3d5b314 d8997656 de07d072 e6a8cd4f e9579f8c f4e62146 fe891289"
+    },
+    "crates/harlo-core/src/lib.rs": {
+      "hash": "7d552fd8a4a6e623"
+    },
+    "crates/harlo-core/src/listdiff.rs": {
+      "hash": "5669e1434d6beb22",
+      "units": "578ab84a 97a5e41b c4a439cd"
+    },
+    "crates/harlo-core/src/listing.rs": {
+      "hash": "76e1c3c588d579ff",
+      "units": "2bcb43cb 3057bdd5 446f03ee 6e90c6ce 982d9e3e ada6dbaa ceaa340b d8742933 d90e83bf e38a97c0 e7bf32a8 f8ae74e8"
+    },
+    "crates/harlo-core/src/markdown.rs": {
+      "hash": "364d5e4ea48a586c",
+      "units": "2232f028 46f101d6 5cbc1f4b 611bb1f6 6c339218 7ae6c491 8570a2e1 89ceabcc ae408e76 b0ea8852 b1821994 b5f2f193 bcc1a095 c088b098 dc2c5be1 e11e4347 e7a0f069 eb2d1476"
+    },
+    "crates/harlo-core/src/mcp.rs": {
+      "hash": "43029af5205a2d9f",
+      "units": "0234c470 03a88d0b 0cf67fc7 157dca92 2dfdbe17 2e0e960a 3d19d030 3f3667f5 468b9a5e 629a3d69 681c8fcb 78797afd 7e5608ab 8a70a247 8d811932 923fe539 a57d5e99 b073f6c6 be10dc7c d7c2ace9 dc78d85d fc7f1aa2"
+    },
+    "crates/harlo-core/src/mcp_catalog.rs": {
+      "hash": "4f5f9753791fb772",
+      "units": "073c1634 2937013f 2998b323 4813494d 5e1e2bca 725fed9d 77bc06c5 84fc0e0e 862bc427 8aa0b393 95e7004b 970f2993 a51a6c19 b2547aa0 e9337253 e9463dcc e97166b5 e9d8992f"
+    },
+    "crates/harlo-core/src/mcp_probe.rs": {
+      "hash": "f91e8eccaa450aa3",
+      "units": "11bebab5 3bd51ab9 ba9c736f d78de925"
+    },
+    "crates/harlo-core/src/migrate.rs": {
+      "hash": "833c11f4e79d56ac",
+      "units": "04be2de7 679b85a9 c0cea2dd"
+    },
+    "crates/harlo-core/src/model_servers.rs": {
+      "hash": "28c726849b5574b4",
+      "units": "00b020e1 06decca0 08ebaa27 0b57b8f5 2ddf5b5e 33c6db3c 37a9669c 3b9c358f 41ffd8b7 4ce6bc1f 677fe21b 7e5608ab 7e9e5ac3 8a01df72 8e3dc1af 99e98d85 9b9c1991 9c6725dc a7c9a4be ad95d5fa aef7de28 b0ee315f b461fd9d b4a27519 e6640de8 eb7705cc ed4561f6 f3bb0f32 fc7f1aa2 fe81f939 ff4b3f46"
+    },
+    "crates/harlo-core/src/notifications.rs": {
+      "hash": "cd6115619828c93c",
+      "units": "17e1147d 1bcd4dd2 33c7b666 41763756 4f2ccbce 61526984 74a883a0 761b7ad8 887270d0 a5008731 a5a5b349 c0ebb7d6 ed62547b"
+    },
+    "crates/harlo-core/src/orchestration.rs": {
+      "hash": "64ef43000332deff",
+      "units": "0e1d625f 196c71fd 2cdc4536 2d376685 2e0644cb 30c9177e 3201c60f 55f8cb89 5ee0e6af 5f9b6bbe 5fa15899 70696229 74829911 7931fcfe 7c968fb7 7f3aa3fc 8019e62a 8e49205d 90ec502e 9b0c660b 9dc178b1 9e1f595b a1ceee69 ac2c598b ae24a153 aeed4d26 b6ce788d c56f54b1 d38448c8 dbadfe22 e2845db3 f903ee77 f9d35d43 fe6467a9 ff384640"
+    },
+    "crates/harlo-core/src/pages.rs": {
+      "hash": "d8c9b3b69eeda763",
+      "units": "3fa1df59 5501199f 69417fa0 9046da16 96291cfe 9c62dbf6 e16c3ece f10fe12d"
+    },
+    "crates/harlo-core/src/palette.rs": {
+      "hash": "f0f886b51f979858",
+      "units": "5a8460f6"
+    },
+    "crates/harlo-core/src/phone.rs": {
+      "hash": "d56b885c116f13ee",
+      "units": "0282cf11 0307b2b4 0529a711 0cf57c63 17292aaf 21b2eed1 2b64c6d9 2c5c3864 3c6297d7 3d31722e 426abd52 44863b03 48770af2 4ba5121d 4d49baa3 54e2c785 58349d30 59accddf 5bc608ac 5e5f9c26 6959b415 6ba0bdec 70b76c75 712ea8d8 7c77d7b0 861a13e8 87132990 8a46fd6f 8f5007db 999f23fc 9ff1083d a30099d8 a4e2b9c3 a899f887 bc078f76 cabc65db ce4683e7 dc5d2158 e891121d e8bccfef ea25b57d"
+    },
+    "crates/harlo-core/src/pictures.rs": {
+      "hash": "f8626446b71aed81",
+      "units": "181fdd46 2a7a97f6 49cf3247 51c55fa5 6d749d78 781654aa 9334fbeb baaf5362"
+    },
+    "crates/harlo-core/src/plan.rs": {
+      "hash": "d5cde81ba7ebc435",
+      "units": "16a0eeb0 238fa28a 27869e1d 3dc2d33d 4c1eb859 4c297978 5270b553 53134086 5bf4d10d 6ad27bd4 6bb202fa 6bbce0b2 6cd886e0 750ad310 82065d14 8a961e1c 8e6a6cca 920e413c 9505cacb 9c3489de b0330874 b89585dd bac6fbe5 be0228eb c0eb88e8 c11f248c c74fe64c ccb143c2 d8b22b98 daa29721 dcf52878 de19c0eb e1563f4d f9d35d43 fa8ed0bd"
+    },
+    "crates/harlo-core/src/plugins.rs": {
+      "hash": "1f4c16805da3805d",
+      "units": "30c471f6 5d347fd9 9368a7d2 9696dea3 acba2551 b6a7c95e baaf5362 d0b4ba23"
+    },
+    "crates/harlo-core/src/project_icons.rs": {
+      "hash": "186e116f6f09cabc",
+      "units": "baaf5362"
+    },
+    "crates/harlo-core/src/providers.rs": {
+      "hash": "48956a822d847a86",
+      "units": "1310ca2c 20f65c28 2e36c61a 5ca4f385 86187207 920e413c bd7af0a6"
+    },
+    "crates/harlo-core/src/quota.rs": {
+      "hash": "a0a183ea73eb6383",
+      "units": "20e67926 233cd9dd 255b7a54 32d07324 39448afc 58cec2c9 5f79501c 6645dbdc 6b9b0ae4 751032df 921deabb c73e7c21 c857d09d e3e7a185 edc4742e f39b4536"
+    },
+    "crates/harlo-core/src/remote.rs": {
+      "hash": "e3ce229e693bf31c",
+      "units": "10fd874b 12a7bd86 1444e129 15c35048 16132e20 20f65c28 216171c5 2391b889 2649e082 269f636c 3045acd9 3316348d 447194c2 4740ae63 4a823118 4ea14058 4f1e6661 4f8a2cc3 4f935a0f 58393216 58790917 5d347fd9 604ecb2d 6327245c 7a0866fa 7fede5b7 89791a9f 929cfd07 952d8b06 98e30f82 a9d4c6b5 abf5ffa9 abfc412c ac3145f2 acba2551 ad1a6405 ad5aabc9 af5b5959 b069e2c2 bdc37ef0 be570ac4 c00f55f0 c2223672 c6acf4c0 c7f10220 cea5a32c da7fbddb ddceecfd dfbb889c e06da304 f538a7f7 f95eb335"
+    },
+    "crates/harlo-core/src/remote_helper.rs": {
+      "hash": "0f021268d446d73c",
+      "units": "037b83eb 176b05a6 398fca5e a3bae79e a4e6aacd b3387e49 ce793a72 fb390a63"
+    },
+    "crates/harlo-core/src/remote_sessions.rs": {
+      "hash": "0ee002762c73f449",
+      "units": "0fffc00c 29f48365 3ec3b320 a5f003e1"
+    },
+    "crates/harlo-core/src/scanner.rs": {
+      "hash": "9e67e1409b19ba9c",
+      "units": "7010eee4 71d4cf95 d3509cba dc7823e9"
+    },
+    "crates/harlo-core/src/schedules.rs": {
+      "hash": "f6555ec67ef447fc",
+      "units": "0898bf90 10f39703 247381fc 5308ad65 57fca379 97f7ef63 aeb73fd7 b3fd25dc b6b7a006 bc1bafbe c15ac92f c5175669 da3f8721 dc14a37e f4830a1d"
+    },
+    "crates/harlo-core/src/scratch.rs": {
+      "hash": "5a2ea68a0f9a64c2",
+      "units": "93d1d350 abe50eeb d3e8d9f4"
+    },
+    "crates/harlo-core/src/search.rs": {
+      "hash": "6d7ea76dab4bfea5",
+      "units": "0f6f9ca2 45ee9ae3 4cabc573 6927b0dd 8a043f55 8d4032fb 8f5d9c50 91e71527 9703a4f5 99f988fe d87e8c93 e4f8f500 ea605791"
+    },
+    "crates/harlo-core/src/servers.rs": {
+      "hash": "09587710f622072a",
+      "units": "039aa800 0c0257a3 0fbe5a9d 10f5f77e 1424d4c4 1473c426 14a927a0 3172c8ea 322ff72d 390a7f59 46ec7cfb 4fa88427 58169c73 64b45b40 66760f21 672bc8b0 764a23ec 7e5608ab 85b0a22b a330395c a5226bc1 a82c588c abfc412c ac55e613 b381c9d6 b3fc44e6 b6d9feb9 be632e5f c44f1582 c7018d63 e29430a7 e343d78f f14886e9 f643cf6b f906e371 fb65f413"
+    },
+    "crates/harlo-core/src/session.rs": {
+      "hash": "23f31f66e2c3a783",
+      "units": "02df34d1 0d98bd64 10c3ffdc 16620ef3 1fa7d4c0 2278b7fc 2d00ca5c 32059ee7 3a99d065 3e7242e5 3ff7299b 41ed1d93 44e9483b 4e2f5ca6 72cf1828 74bee7f7 7682594d 7def8489 843f1012 920e8d16 947b7936 99004830 a1caa71e ae672c9c b5286edc bd158b59 bff482db c182b246 c6e312a5 d703f81b e194dbeb e5181e0f e96770bd ee204db7 f0b5722c f31e23b2 f8ec78d8 fa48cd7f"
+    },
+    "crates/harlo-core/src/session_ref.rs": {
+      "hash": "6ad6002be3014a84",
+      "units": "1c608be7 3c469e9d 3e04d838 496aca80 5e1e2bca 6081c652 ba159dbf c51e455b d78de925 e6640de8"
+    },
+    "crates/harlo-core/src/shelf.rs": {
+      "hash": "d57aeac1b75dbef0",
+      "units": "16cc62ee 2be23c58 90a124b0 9b71d655 aff0766a d6c9c7da feb5d20a"
+    },
+    "crates/harlo-core/src/sidebar.rs": {
+      "hash": "5bb546cc348c03d1",
+      "units": "0b281479 17fe8b11 261df8e1 3081596b 44575cf5 6c37cbd1 76394eda adf9fd48 b188a028 ba1196c1 c3632472 e3ef0df7 e89a89a4"
+    },
+    "crates/harlo-core/src/signin.rs": {
+      "hash": "8d6b51377ae996f7",
+      "units": "86cbd2c0 a116c9ed cf07194e e61a595c"
+    },
+    "crates/harlo-core/src/spending.rs": {
+      "hash": "16665ee392a33eba",
+      "units": "31f8a6a5 357222bb 43ffb5a8 5b30f952 60b30e49 6b25d005 6c89d51d a32a17d0 bdc86556 ccb6af95 cfe2771a dffb64dc ee69eb4a f1a7f090"
+    },
+    "crates/harlo-core/src/splitdiff.rs": {
+      "hash": "bc3886f78ba84d7a",
+      "units": "32afaa78 75fa3863 95110d74 ad1a6405"
+    },
+    "crates/harlo-core/src/starters.rs": {
+      "hash": "6db275fc1594acf2",
+      "units": "02bd175f 262b4ff6 d6038403 e6640de8 f0a28992"
+    },
+    "crates/harlo-core/src/stats.rs": {
+      "hash": "16ee17cdd8900760",
+      "units": "07034456 072a01bc 6885c27d 845e9183 bae9264d fc82fafc"
+    },
+    "crates/harlo-core/src/subagents.rs": {
+      "hash": "58b864427c638e75",
+      "units": "3f8f09c8 aa8ac420 b1d77a98 da447380"
+    },
+    "crates/harlo-core/src/templates.rs": {
+      "hash": "7e8de70ad094feee",
+      "units": "0575f29d 157dca92 30c471f6 61975955 6b0c6fb0 d2c0efbd"
+    },
+    "crates/harlo-core/src/terminal.rs": {
+      "hash": "b4d684465281daca",
+      "units": "0a34fa91 0bde806f 1c9889e5 2fe3d241 3c789bc4 3df9ea1e 519f170c 5c36b67e 642f0c35 6e56137e 71545d53 75fa3863 7b42cc4e 85794eff 93a43727 9852417e 9b339ac0 9d54d315 a041efcf a057ffcf a9b3baa2 ab1c9668 b1b66e9a bda9421c e0926fda ef85b1fb"
+    },
+    "crates/harlo-core/src/tool_calls.rs": {
+      "hash": "5684d92fc75c3165",
+      "units": "034a0062 0af96a8e 1d07f483 238fa28a 32c9a568 3d3937ef 535cf4ed 68ed2938 7a54bf96 98595978 9bc9b83c 9be03c3e a7060160 aaf23206 d4f0bc5a f26ad23a f38785e4 f9baa17c"
+    },
+    "crates/harlo-core/src/tool_facts.rs": {
+      "hash": "30a3e0898e063d73",
+      "units": "0694aacb 491d6f84"
+    },
+    "crates/harlo-core/src/transcript.rs": {
+      "hash": "3bc3321c24f1f326",
+      "units": "1afd9b60 2499d2c2 25c00d64 2cd89cea 40d72a96 4df78591 5093ff95 54ee6c69 5803dc00 5d04f2b4 5d5766cf 68a3c2d9 721164f0 8f479688 8f5efa1c 95110d74 9ba0cafd 9bb04d22 9f0af407 9fadae7f af02f55b b91bc3ab c518932a e16e2a5d ee491a20"
+    },
+    "crates/harlo-core/src/updates.rs": {
+      "hash": "66fdf04c85a9671d",
+      "units": "04963513 0f7d6e9f 1170edc3 21c118b4 2f007cf3 30991f82 4fadaaff 5b5d8712 5e1e2bca 68ff63fb 796376d7 804f51f7 8569f1c8 ae126875 bcaee9d9 bf4f3d57 d765dfb1 df50f680 e020e3c6"
+    },
+    "crates/harlo-core/src/visuals.rs": {
+      "hash": "5b05244b9f8c42d5",
+      "units": "2a12da17 686f1b5b a793ab8f c187e609 ef4ca753 efa0389a fd4724e9"
+    },
+    "crates/harlo-core/src/wiki.rs": {
+      "hash": "42224d0feea89dd6",
+      "units": "09f5789b 0efd92a3 2b6af0be 316e093c 32129d3d 50c9c4ae 60be9861 79a54787 889ee7f3 90aa3026 a79482c6 c3f21814 e03506b2 e8b82e0e eb68b90c"
+    },
+    "crates/harlo-core/src/wiki_view.rs": {
+      "hash": "c00705966f0f6466",
+      "units": "24193290 2849497b 29a1af58 2f2fc7f2 4ba69735 5392246d 69adbd38 e9113ff0"
+    },
+    "crates/harlo-core/src/workflow.rs": {
+      "hash": "72cd5900b4cebe94",
+      "units": "00d60e31 0c62f876 11b39c93 1ff57a29 2649e082 26b83994 30519775 3093d807 3e64cc41 4d8da403 4e1f49a9 4e80abb5 59f03d64 617b4212 627c6da4 64cff131 721bcaf9 7fef9479 800ac84e 800d3f96 80f50dd6 85054a9b 862bc427 9813fafb a370505d a3b50c47 a6c7a84b ba40ff24 ba609fe6 bfb4ae08 c2c8b72e c893ba30 cda49910 da355142 de838855 e9463dcc ea388aad ea4c9238 ec3915f5 ed5b8120 f41d18b0 fd824a0f fe63b698"
+    },
+    "crates/harlo-harness/examples/list_sessions.rs": {
+      "hash": "12f9a8587cfddb57"
+    },
+    "crates/harlo-harness/src/branches.rs": {
+      "hash": "e2d7d7ad43b8a813",
+      "units": "1e1ed465 20e9a7b2 3a7cc706 5fae856e 8790b148 a3c759e2 acdb6ad5 b3c017a3 dce19053 e9f50f5c"
+    },
+    "crates/harlo-harness/src/claude.rs": {
+      "hash": "cad9dc253567cd24",
+      "units": "081f89aa 0dff3cb6 1e5d5f97 21a3fb62 259aa8ef 2a7a97f6 305dfaca 38bcd746 414af441 50dd47b8 51bd2a28 53c2fba7 5bbc793e 5e2c614c 62d4805f 6a3772f9 6ba5d668 6f581f3b 77607d73 8570a2e1 8edcc26c 93d2d13a 9a80cb54 a09928ce a6706d54 bccc0fa2 c2a3a896 c5297eb5 c54457d8 c76ad4e6 d298391b d640c742 d81c55f4 da699aaa dd8672f4 e4f8f500 e84d7999 ea9cc74b f00f7fac f0add6e3 f2e75812 fbd0722e"
+    },
+    "crates/harlo-harness/src/claude_run.rs": {
+      "hash": "45a1b75932627559",
+      "units": "0de9d359 11c7c782 a04afb36 af70528b c12ecc34"
+    },
+    "crates/harlo-harness/src/coding_plans.rs": {
+      "hash": "75f33306f913b4d8",
+      "units": "18f3d6bf 20f65c28 2c70e12b 39a11020 444e79ff 54ad7f6c 60f27473 61ca5e2f 96d99ca6 a02e4f90 c3464f1c c404dc69 cde0fb0d e6640de8 fa8ed0bd"
+    },
+    "crates/harlo-harness/src/demo.rs": {
+      "hash": "18006bdc7fc35037",
+      "units": "a04afb36"
+    },
+    "crates/harlo-harness/src/error.rs": {
+      "hash": "c64322cb9d1a4bad",
+      "units": "18ec28a2 1fe370c9 29575afa 299c937a 39a3398d 5271fea2 54a0e8c1 9414886b a6e600a1 c7bfb1d7 cdd9e070 f2525d21"
+    },
+    "crates/harlo-harness/src/event.rs": {
+      "hash": "7741e55a4630920b",
+      "units": "1f096f96 2d4aa984 57a33c65 5bb143c6 73be52d9 75bd029c 7a6bcc40 9f73344e ac2df551 c51593d1 e6fe8ee2 ecdab652"
+    },
+    "crates/harlo-harness/src/file_blocks.rs": {
+      "hash": "75b76bf2e2c853f7",
+      "units": "2708b276 2b811fd7 b91e0a97 de62cf9d"
+    },
+    "crates/harlo-harness/src/framing.rs": {
+      "hash": "a1914815c1b148ca",
+      "units": "216960ab 617e3e3c aa973514 b526cee1 ba1f9bba"
+    },
+    "crates/harlo-harness/src/lib.rs": {
+      "hash": "13e5d0af182ded6b",
+      "units": "0b103ae9 149b32e4 1adcdcdd 28bb3552 53f691d2 6842ec31 6abcbd5a 7f82f080 884983fd bd0e4684 bf806569 dc88eabf f5eea7d3"
+    },
+    "crates/harlo-harness/src/mirror.rs": {
+      "hash": "a51b37ec888b8e4e",
+      "units": "2b64c6d9 babc1bd8 d6cc0a08 d9d48979 ffa63583"
+    },
+    "crates/harlo-harness/src/process.rs": {
+      "hash": "065602fcc6c5e908",
+      "units": "03494afd 07e87c64 0f92b564 19219808 261d8757 290f1b76 331551b0 3619cf0b 367fd4df 57824fe1 5f310ff8 66499d8a 8249aec5 8fe033f3 986a068f 9f4d8d52 b19ab952 b2a3aa60 b5d02fed c9ab95c1 cad10335 cca390b5 dad6029f de07f932 e3b5b459 e3f9416d e87ba7a0 e9d1b99a f04ce07a"
+    },
+    "crates/harlo-harness/src/protocol_log.rs": {
+      "hash": "088f34928d3f100b",
+      "units": "021575b1 2b64c6d9 3ea21bc8 e3d42f32 eaac547d f5491f67"
+    },
+    "crates/harlo-harness/src/store.rs": {
+      "hash": "d66b80437af2d1fb",
+      "units": "0907f8de 26dd32c1 2dfe2411 3a0b93e3 3ca4186d 53c2fba7 5aee214b 5df38c8c 61ea9b8f 6d20b260 70eb76d5 742f29fe 7d73fc0f 808db386 870d8a9f 884eee6c a0ada4f1 a6706d54 af99b960 c4a576ec d989ace8 dd8672f4 e4f8f500 ea4f9062 ea9cc74b ecb8da85 fbd0722e"
+    },
+    "crates/harlo-index/src/brief.rs": {
+      "hash": "493aea9bf1d39d97",
+      "units": "5c1d27ca 60deb77d 6ac9a32c a6a32dbc be3702e3"
+    },
+    "crates/harlo-index/src/defs.rs": {
+      "hash": "963ad145d1b5060e",
+      "units": "78028b0a"
+    },
+    "crates/harlo-index/src/graph.rs": {
+      "hash": "be06c22929c0abc7",
+      "units": "0f82fe72 20375a70 32ab018f 56e430ed 5ea2c38e 6e1b0f84 725f01d5 8dd637b1 94d5b101 9b6e88e8 c2274ec7 d34b6ceb eff684da f525c31e fa795581"
+    },
+    "crates/harlo-index/src/index.rs": {
+      "hash": "7ffe0995458abc49",
+      "units": "1bc04b52 34c2e80e 39c3be11 54a0e8c1 729b855c"
+    },
+    "crates/harlo-index/src/lang.rs": {
+      "hash": "9d1bf597437eced6",
+      "units": "2f725ddc 5cf7d7ec f60d718a fa89a879"
+    },
+    "crates/harlo-index/src/lib.rs": {
+      "hash": "59d9d00cca20b107",
+      "units": "2cff9baa 3c99f1f3 52add4d6 65bd8b50 711595f1 ba0e4afa d3df8f60 d6e645b7 dd3e615a e2194392 f5387f9b"
+    },
+    "crates/harlo-index/src/lookup.rs": {
+      "hash": "c90e43c56f625ade",
+      "units": "29a1af58 b80a3756"
+    },
+    "crates/harlo-index/src/main.rs": {
+      "hash": "96ab926f146fb4e9"
+    },
+    "crates/harlo-index/src/manifests.rs": {
+      "hash": "1c85a611fa8ff73d",
+      "units": "05b3abf2"
+    },
+    "crates/harlo-index/src/packages.rs": {
+      "hash": "41d867af1cd1e641",
+      "units": "00565b43 26688f50 2fbb6fd8 40a20853 4562c539 7dfb4cf6 9987d9c0 d548a803 f35409dc"
+    },
+    "crates/harlo-index/src/rules.rs": {
+      "hash": "2e2754cbdaa2b8a8",
+      "units": "210dbd2c 45666d97 7791eaea 86ff4e2c 92ca4c0c 982d9e3e 9960bf58 ac4afe8f af53b123 e05eb8a4"
+    },
+    "crates/harlo-index/src/scan.rs": {
+      "hash": "dcd46bb3efae13d9",
+      "units": "08ee52ae 0bf47489 118a1de5 379b7b26 3a7efb1f 50697da6 586abb54 59ad1b2f 5ea44c39 67905ad3 7c842630 b771724d f175cddf fcc0fc8f"
+    },
+    "crates/harlo-index/src/text.rs": {
+      "hash": "a2c186d5d5a02db6",
+      "units": "59ad1b2f"
+    },
+    "crates/harlo-manifest-signer/src/main.rs": {
+      "hash": "dd4bc1cdf8d37c65"
+    },
+    "crates/harlo-okf/examples/scan.rs": {
+      "hash": "d6605be72e713aa3"
+    },
+    "crates/harlo-okf/src/brief.rs": {
+      "hash": "cfad0c55f0ab16a8",
+      "units": "29a8825b"
+    },
+    "crates/harlo-okf/src/bundle.rs": {
+      "hash": "7b5c053b3a3795a0",
+      "units": "0cf67fc7 4e1f49a9 68b546ca 6b4f65cf 836ff184 8729ca25 87e5aa44 8a8fe1c8 ad5aabc9 f2daa188"
+    },
+    "crates/harlo-okf/src/check.rs": {
+      "hash": "f4f3d00285d8f45e",
+      "units": "1709305c 20f65c28 845e9183 a1c5ae7b c2e53865"
+    },
+    "crates/harlo-okf/src/cite.rs": {
+      "hash": "a5f519742c70abfb",
+      "units": "ad1a6405 b0ee315f c61d02ef"
+    },
+    "crates/harlo-okf/src/indexed.rs": {
+      "hash": "63f67fe2412eccd7",
+      "units": "00d3cd39 03ab5a7e 1a9e64b4 29a1af58 2c944de1 4826cfad 5c1d27ca 6ac9a32c 928194c0 b9beafca bb683d99 e81d3b0e f21d8bf7"
+    },
+    "crates/harlo-okf/src/ledger.rs": {
+      "hash": "70ac60357af4121d",
+      "units": "10fd874b 1256146f 313d8112 3316348d 4ca41db0 6adc722e 7c05a965 8894cf30 997b7b2d ee69eb4a"
+    },
+    "crates/harlo-okf/src/lex.rs": {
+      "hash": "464fa4a2c0b3c720",
+      "units": "48bf9b4f aa64f738"
+    },
+    "crates/harlo-okf/src/lib.rs": {
+      "hash": "057453df7c720ddd"
+    },
+    "crates/harlo-okf/src/map.rs": {
+      "hash": "914d2588d6671024",
+      "units": "40ae0d76 60be9861"
+    },
+    "crates/harlo-okf/src/page.rs": {
+      "hash": "378569c43f7693ea",
+      "units": "06024b9d 0a30a815 0d3b9731 276d3ef2 2910b6d7 30c471f6 3b9c358f 48306fd0 4c69c12e 768207cf a6175902 da3a456b"
+    },
+    "crates/harlo-okf/src/scope.rs": {
+      "hash": "bfe0bc61255c84f8",
+      "units": "28fa91c2 3d7db37d e375f980"
+    },
+    "crates/harlo-okf/src/split.rs": {
+      "hash": "3c14689ed4d2ebea",
+      "units": "12df7f0e 34ca0e76 4096dda0"
+    },
+    "crates/harlo-okf/src/stamp.rs": {
+      "hash": "076e40bf6eeba36a",
+      "units": "4e80abb5 96ff042d acba2551 d0db8b5e f4012f14"
+    },
+    "crates/harlo-okf/src/units.rs": {
+      "hash": "0503e328753f5948",
+      "units": "0bf47489 4e545960 59ad1b2f 5cf7d7ec 749585ba cedf6984 d04b98f4 d3df8f60 f5387f9b f60d718a"
+    },
+    "crates/harlo-okf/src/validate.rs": {
+      "hash": "e9dc33ef81b64e00",
+      "units": "133c8eb8 5113110b 6c73b4c5 8281292c b6ce788d"
+    },
+    "crates/harlo-okf/src/view.rs": {
+      "hash": "86ec8d1a4b317fa7",
+      "units": "0db52f40 24193290 3660315a 4ba69735 5392246d 79bfb0e2 889ee7f3 c3f21814"
+    },
+    "crates/harlo-okf/src/work.rs": {
+      "hash": "f05dc65a4cf0d3ef",
+      "units": "00e13ed7 104ab921 1956aace 1be08f54 3cc0d43f 454fb886 652bcc3a 94c60b48 a26663ba b11c9047 d3ceee22 de3bc50e"
+    },
+    "crates/harlo-relay/src/lib.rs": {
+      "hash": "e499be1c974c799e",
+      "units": "074f4b4b 24c458cf 731ce7ed 74c95604 87e89abb cdd8707e dffb64dc"
+    },
+    "crates/harlo-relay/src/main.rs": {
+      "hash": "e440d76a2ae3d234"
+    },
+    "crates/harlo-update-signing/src/lib.rs": {
+      "hash": "3a1aa00549471263",
+      "units": "3eff622d 80d298c9 855fee33 a12dd3a7 deb96893 f3fb90fb fda4e2c3 fff1ce9d"
+    },
+    "ios/Harlo/Harlo/AccountLimits.swift": {
+      "hash": "9896db3349129fbd",
+      "units": "4aac1e04 6901f8dc"
+    },
+    "ios/Harlo/Harlo/ActionLogRow.swift": {
+      "hash": "6ecaf70a219c9fe0",
+      "units": "3db17002"
+    },
+    "ios/Harlo/Harlo/ActionLogView.swift": {
+      "hash": "9532dbaccae6b52e",
+      "units": "3e8e77bb 9901d78e e50bd9aa"
+    },
+    "ios/Harlo/Harlo/ActivityBar.swift": {
+      "hash": "970b128a4edc9acc",
+      "units": "40def2cc"
+    },
+    "ios/Harlo/Harlo/ActivityLine.swift": {
+      "hash": "a4db51cc0f5756f3",
+      "units": "1fba4cbc"
+    },
+    "ios/Harlo/Harlo/ActivityView.swift": {
+      "hash": "8651d80e055bf908",
+      "units": "464e9737 d55f0068 efaf0a7f f6fea213"
+    },
+    "ios/Harlo/Harlo/AgentAvatar.swift": {
+      "hash": "9c40b62ffb3255bf",
+      "units": "a52858c4"
+    },
+    "ios/Harlo/Harlo/AgentHead.swift": {
+      "hash": "d50de0f17b1039c3",
+      "units": "5956fffd"
+    },
+    "ios/Harlo/Harlo/AgentModelMenu.swift": {
+      "hash": "1832839d17d2760e",
+      "units": "66db6b7b"
+    },
+    "ios/Harlo/Harlo/AgentTag.swift": {
+      "hash": "975272d26962e60e",
+      "units": "71d01739"
+    },
+    "ios/Harlo/Harlo/AgentTile.swift": {
+      "hash": "9c59ed4ce6ddf1dc",
+      "units": "8e9fdfa3 f9f2351d"
+    },
+    "ios/Harlo/Harlo/AppDelegate.swift": {
+      "hash": "bb466270901c257d",
+      "units": "2dd41baa e177b2c4 e9055299"
+    },
+    "ios/Harlo/Harlo/AppHeader.swift": {
+      "hash": "04f203518c20b837",
+      "units": "e792d307"
+    },
+    "ios/Harlo/Harlo/AppTab.swift": {
+      "hash": "29a0b6df5a31b16f",
+      "units": "92b5a77d"
+    },
+    "ios/Harlo/Harlo/ApprovalButtons.swift": {
+      "hash": "61bb1afe2624eb2f",
+      "units": "0d130464 479634c7 80075094 d39de735"
+    },
+    "ios/Harlo/Harlo/ApprovalCard.swift": {
+      "hash": "ab7adee7449d30f2",
+      "units": "9ccdf643"
+    },
+    "ios/Harlo/Harlo/ApprovalsView.swift": {
+      "hash": "97368d13686b49fb",
+      "units": "d6483656"
+    },
+    "ios/Harlo/Harlo/AsideCard.swift": {
+      "hash": "1200ce48e8d9282f",
+      "units": "13ecc1c5"
+    },
+    "ios/Harlo/Harlo/BackgroundNotice.swift": {
+      "hash": "72b3c0b2ade08598",
+      "units": "2e2c2de2"
+    },
+    "ios/Harlo/Harlo/BigTitle.swift": {
+      "hash": "23333bc094207f30",
+      "units": "deb2e54d"
+    },
+    "ios/Harlo/Harlo/BlockView.swift": {
+      "hash": "14d2e14de71c8bd3",
+      "units": "1fcee1b8"
+    },
+    "ios/Harlo/Harlo/BranchesView.swift": {
+      "hash": "e1494f049d4ad8df",
+      "units": "0bb6abc7 3c47dd53 4c429314 87de10a3 d9f0670c"
+    },
+    "ios/Harlo/Harlo/CameraCapture.swift": {
+      "hash": "f29db62503d8433a",
+      "units": "f594812d"
+    },
+    "ios/Harlo/Harlo/CameraView.swift": {
+      "hash": "8cdf427933c1813f",
+      "units": "3b6cb84d 4f70bdd4 7df38746 9f33c93f b6a4c60b e4c7cf99 f7213d91 fd84ada8"
+    },
+    "ios/Harlo/Harlo/CappedWords.swift": {
+      "hash": "c5852a88ae111ca4",
+      "units": "8c4411ec"
+    },
+    "ios/Harlo/Harlo/CardUnless.swift": {
+      "hash": "58c1076663f9d6a5",
+      "units": "37af50a7 add0f5fd"
+    },
+    "ios/Harlo/Harlo/ChangesView.swift": {
+      "hash": "0f71659ce1cd5df8",
+      "units": "ac6d5f24 d56912b3"
+    },
+    "ios/Harlo/Harlo/Chip.swift": {
+      "hash": "4458351d93a59e3f",
+      "units": "72238908"
+    },
+    "ios/Harlo/Harlo/CodeBlock.swift": {
+      "hash": "f10abeaeee988026",
+      "units": "60ba3cb6"
+    },
+    "ios/Harlo/Harlo/CodeLines.swift": {
+      "hash": "fc19615171eae866",
+      "units": "3aa07404 8fe91c26 aad753cd"
+    },
+    "ios/Harlo/Harlo/CodeScroll.swift": {
+      "hash": "81d5dda7b2d3dbbd",
+      "units": "e6667855"
+    },
+    "ios/Harlo/Harlo/CodeWrap.swift": {
+      "hash": "c3a7998ef2c8475b",
+      "units": "848e225e"
+    },
+    "ios/Harlo/Harlo/Color+RGBA.swift": {
+      "hash": "f40547c4d5f9c46c",
+      "units": "ad1b43ee"
+    },
+    "ios/Harlo/Harlo/CompactLine.swift": {
+      "hash": "cb09bc60a8c48eec",
+      "units": "9d580988"
+    },
+    "ios/Harlo/Harlo/Composer.swift": {
+      "hash": "5e631548e9c87875",
+      "units": "9cb2832c b39315db f57d9a21"
+    },
+    "ios/Harlo/Harlo/ComposerOptions.swift": {
+      "hash": "f5d1fa338949d99d",
+      "units": "4336aa95"
+    },
+    "ios/Harlo/Harlo/ConnectionBanner.swift": {
+      "hash": "a8505d3e2a5175e1",
+      "units": "f0241324"
+    },
+    "ios/Harlo/Harlo/ContextBar.swift": {
+      "hash": "6d5b908a305a9418",
+      "units": "2da74617"
+    },
+    "ios/Harlo/Harlo/DashboardRow.swift": {
+      "hash": "8354b6315f3b047f",
+      "units": "c8b57257"
+    },
+    "ios/Harlo/Harlo/DashboardView.swift": {
+      "hash": "53ed6235393e838e",
+      "units": "16aa3601 56835358 7d96ef49 8a48952d 8ffac587 a3d43fc5"
+    },
+    "ios/Harlo/Harlo/DemoBanner.swift": {
+      "hash": "b91d51257a6cd9be",
+      "units": "d6b7ed2e"
+    },
+    "ios/Harlo/Harlo/DiagramBlock.swift": {
+      "hash": "5c7570ac66f2de43",
+      "units": "4c278072 e449b953"
+    },
+    "ios/Harlo/Harlo/DiagramZoom.swift": {
+      "hash": "feab3eb0f8b69d66",
+      "units": "64236973"
+    },
+    "ios/Harlo/Harlo/Dictation.swift": {
+      "hash": "2cc956b0042616c7",
+      "units": "175459ae 1a9d1476 25ce1a09 49647fd9 5df8a0a1 68b15e17"
+    },
+    "ios/Harlo/Harlo/DiffLines.swift": {
+      "hash": "32a2555c697dff5b",
+      "units": "105a3e0c"
+    },
+    "ios/Harlo/Harlo/DiffView.swift": {
+      "hash": "cadafe141d14f21a",
+      "units": "0888226a 5e06e8f5 623a2a82 865d1acf e7b10563 e9ff8bec"
+    },
+    "ios/Harlo/Harlo/EnvironmentValues+OpenPicture.swift": {
+      "hash": "c7d88a20c9f5fe24"
+    },
+    "ios/Harlo/Harlo/EnvironmentValues+Palette.swift": {
+      "hash": "89ec86bfe5aaf639"
+    },
+    "ios/Harlo/Harlo/FileList.swift": {
+      "hash": "5e2c8fc73ac7765f",
+      "units": "407e79e1"
+    },
+    "ios/Harlo/Harlo/FileRow.swift": {
+      "hash": "5fce000dd1f879da",
+      "units": "8e8ce039"
+    },
+    "ios/Harlo/Harlo/FileView.swift": {
+      "hash": "757bf2688e9677d0",
+      "units": "69e12c6c ef8a7607 f231dffe"
+    },
+    "ios/Harlo/Harlo/Flow.swift": {
+      "hash": "b814db08ae0335cb",
+      "units": "32519613 88308693 f1273dc7"
+    },
+    "ios/Harlo/Harlo/FoldLine.swift": {
+      "hash": "068fdae3ed9dc352",
+      "units": "1ba0e3af"
+    },
+    "ios/Harlo/Harlo/FollowsTheEnd.swift": {
+      "hash": "7ed61514bba197eb",
+      "units": "11d9d0c6 3a58f401 9e865385"
+    },
+    "ios/Harlo/Harlo/Greeting.swift": {
+      "hash": "baba00358e19208a",
+      "units": "2f35055d"
+    },
+    "ios/Harlo/Harlo/HangingIndent.swift": {
+      "hash": "3b8b326d99c8ad4e",
+      "units": "162bfc55 71ec920e 949c3e6c b2f532e0"
+    },
+    "ios/Harlo/Harlo/HarloApp.swift": {
+      "hash": "b2b3dc1171e6bcd3",
+      "units": "e07d5762"
+    },
+    "ios/Harlo/Harlo/HarloLogo.swift": {
+      "hash": "d70318e04a7ced78",
+      "units": "3b00ba64"
+    },
+    "ios/Harlo/Harlo/HarloMessage.swift": {
+      "hash": "5424647cd0514a99",
+      "units": "7285366d"
+    },
+    "ios/Harlo/Harlo/IconSquare.swift": {
+      "hash": "17846f12c43c24d6",
+      "units": "9bdcfa21"
+    },
+    "ios/Harlo/Harlo/InboxView.swift": {
+      "hash": "e1a616164d734055",
+      "units": "2bfec0b2"
+    },
+    "ios/Harlo/Harlo/ItemMenu.swift": {
+      "hash": "9b2bbad3f1800869",
+      "units": "03a94d2d 4219398c"
+    },
+    "ios/Harlo/Harlo/ItemView.swift": {
+      "hash": "f032c7899eb2626d",
+      "units": "f1bef16f"
+    },
+    "ios/Harlo/Harlo/LimitLine.swift": {
+      "hash": "afab426ce5243977",
+      "units": "20e4e0a0 58a8b1f6 bf8b4061"
+    },
+    "ios/Harlo/Harlo/LiveActivities.swift": {
+      "hash": "321034194fadb62d",
+      "units": "21e98ea5 29f493a6 c67769cd e1b20222"
+    },
+    "ios/Harlo/Harlo/MainTabs.swift": {
+      "hash": "b9810ed1c41598b2",
+      "units": "8175528e 8290e7d6 f65a3123"
+    },
+    "ios/Harlo/Harlo/Meter.swift": {
+      "hash": "e19e93091bfb3cf7",
+      "units": "2293b30e"
+    },
+    "ios/Harlo/Harlo/MicButton.swift": {
+      "hash": "1fde58f6cb9102c3",
+      "units": "3522d7ec a844e09a"
+    },
+    "ios/Harlo/Harlo/MockupBlock.swift": {
+      "hash": "780a2a5a2107524a",
+      "units": "4e268405"
+    },
+    "ios/Harlo/Harlo/ModelChip.swift": {
+      "hash": "4c21302503b40c99",
+      "units": "d3866c85"
+    },
+    "ios/Harlo/Harlo/ModelPicker.swift": {
+      "hash": "2aca1e2a3d58a186",
+      "units": "e1915567"
+    },
+    "ios/Harlo/Harlo/ModelServersView.swift": {
+      "hash": "6bb149e08aef62e6",
+      "units": "1c591813 32df6ad5 69a86348 9809e0b2"
+    },
+    "ios/Harlo/Harlo/NewSessionView.swift": {
+      "hash": "d33b48edec9d50e4",
+      "units": "55db1e11 5863c5dc 83318c29 8d88a95e c24da030 c55d9827 d76f20bf"
+    },
+    "ios/Harlo/Harlo/Notifications.swift": {
+      "hash": "65bcc4146f0673bf",
+      "units": "402c1869 5b64919e 78801183 aa83ed27"
+    },
+    "ios/Harlo/Harlo/OptionsBlock.swift": {
+      "hash": "b51e9663d78e846e",
+      "units": "1a9730bc 24001ad8 4d018ade 5f0ec687"
+    },
+    "ios/Harlo/Harlo/PagesGraph.swift": {
+      "hash": "c337baf90b66110e",
+      "units": "ade4bc11 b3cdab3e ca599eb7 d031a15d"
+    },
+    "ios/Harlo/Harlo/PairView.swift": {
+      "hash": "5c384923072fcd29",
+      "units": "dd22984d"
+    },
+    "ios/Harlo/Harlo/PasteLinkButton.swift": {
+      "hash": "781a06fa2bc8bf86",
+      "units": "e3bf88bf"
+    },
+    "ios/Harlo/Harlo/PermissionsMenu.swift": {
+      "hash": "5707e61c468822e5",
+      "units": "fb743aa8"
+    },
+    "ios/Harlo/Harlo/PhotoButton.swift": {
+      "hash": "ce6647e4a1b52df7",
+      "units": "dbb69671"
+    },
+    "ios/Harlo/Harlo/PhotoStrip.swift": {
+      "hash": "50cd0c8a0ad03373",
+      "units": "14b6011d"
+    },
+    "ios/Harlo/Harlo/Photos.swift": {
+      "hash": "cd2c6e8d7e1319eb",
+      "units": "16eedf60 5e3147ab"
+    },
+    "ios/Harlo/Harlo/PictureFit.swift": {
+      "hash": "7674c64bbec15db2",
+      "units": "3fabb4e5 f092d07f"
+    },
+    "ios/Harlo/Harlo/PictureGrid.swift": {
+      "hash": "1d2d6a0d90f9ed30",
+      "units": "32a421ee"
+    },
+    "ios/Harlo/Harlo/PictureGridCell.swift": {
+      "hash": "2c1de4debb71a72c",
+      "units": "cf72c62a"
+    },
+    "ios/Harlo/Harlo/PictureOpening.swift": {
+      "hash": "0e0bcd0aefd7f3c0",
+      "units": "f5e7eee5"
+    },
+    "ios/Harlo/Harlo/PicturePage.swift": {
+      "hash": "c6429bfc922393b5",
+      "units": "d5297ba3"
+    },
+    "ios/Harlo/Harlo/PictureStrip.swift": {
+      "hash": "b61ab00623dd8a97",
+      "units": "efb89e90"
+    },
+    "ios/Harlo/Harlo/PictureTile.swift": {
+      "hash": "d08a30dadcd608db",
+      "units": "7374bb06"
+    },
+    "ios/Harlo/Harlo/PictureViewer.swift": {
+      "hash": "d712ebd6af797bc8",
+      "units": "5511394c 775e2891 ecc4c77f"
+    },
+    "ios/Harlo/Harlo/PlacePicker.swift": {
+      "hash": "b31ec24338b352fd",
+      "units": "16cc5eeb 814c97c5"
+    },
+    "ios/Harlo/Harlo/PlanLimitsCard.swift": {
+      "hash": "483bdc725f264db4",
+      "units": "a4d7c879"
+    },
+    "ios/Harlo/Harlo/PlanLine.swift": {
+      "hash": "f0782529ce282f0e",
+      "units": "ea90e9b4"
+    },
+    "ios/Harlo/Harlo/PlanSheet.swift": {
+      "hash": "48d441f89e2037cb",
+      "units": "01d456cd 067d56fd 5c6e76f9 acc315c2 dd51a780 e603fca8 fc39136d"
+    },
+    "ios/Harlo/Harlo/PlanStepRow.swift": {
+      "hash": "f4a2a74695412424",
+      "units": "37f92be8"
+    },
+    "ios/Harlo/Harlo/ProgressRing.swift": {
+      "hash": "849f78cf78637e05",
+      "units": "96bd2334"
+    },
+    "ios/Harlo/Harlo/PulsingDot.swift": {
+      "hash": "3670d91cf545cea9",
+      "units": "d5561494"
+    },
+    "ios/Harlo/Harlo/QRScanner.swift": {
+      "hash": "d705b81f4d0a04af",
+      "units": "01587407 25bdd15c 31b3c22e"
+    },
+    "ios/Harlo/Harlo/Replaying.swift": {
+      "hash": "0de990ad26af31bd",
+      "units": "7d1f32a3 f414cc10"
+    },
+    "ios/Harlo/Harlo/ReplyPicture.swift": {
+      "hash": "cee636177c59d673",
+      "units": "b838a2ed"
+    },
+    "ios/Harlo/Harlo/RequestCard.swift": {
+      "hash": "2be7a26ae130c147",
+      "units": "70850250 7c307dfe b39d1eac e822e3d7 f1fb4d9c"
+    },
+    "ios/Harlo/Harlo/ResultBadge.swift": {
+      "hash": "5f28843699c767f1",
+      "units": "1cae70aa"
+    },
+    "ios/Harlo/Harlo/RichCache.swift": {
+      "hash": "74d6e70e609b2f68",
+      "units": "92b25bb4 f6a0aa7f"
+    },
+    "ios/Harlo/Harlo/RichTextView.swift": {
+      "hash": "dea62c963934db2d",
+      "units": "1c80dbbe"
+    },
+    "ios/Harlo/Harlo/RootView.swift": {
+      "hash": "6bc18374807257f2",
+      "units": "887ce6a5"
+    },
+    "ios/Harlo/Harlo/RowView.swift": {
+      "hash": "55b09bd64111d68f",
+      "units": "4bff9cce"
+    },
+    "ios/Harlo/Harlo/RunView.swift": {
+      "hash": "b1780f2cb73f75c6",
+      "units": "6bbb1977"
+    },
+    "ios/Harlo/Harlo/ScaledFont.swift": {
+      "hash": "b57d4cc9afe7659c",
+      "units": "40ab5c19 5339db73 84776ce2 aaacf223"
+    },
+    "ios/Harlo/Harlo/ScanSheet.swift": {
+      "hash": "4063ef5ee8f7be8e",
+      "units": "bc8df838"
+    },
+    "ios/Harlo/Harlo/ScannerController.swift": {
+      "hash": "9e4e4bcc53c1d2be",
+      "units": "0f60d851 2ecffee7 4dbecad4 5a82d3c6 6d67dcb3 afb8cf0c"
+    },
+    "ios/Harlo/Harlo/Screen.swift": {
+      "hash": "b48df47d7e688b0e",
+      "units": "6e56137e 820d71a3"
+    },
+    "ios/Harlo/Harlo/SectionLabel.swift": {
+      "hash": "54739c4ec1ab3fff",
+      "units": "bad563b0"
+    },
+    "ios/Harlo/Harlo/Selectable.swift": {
+      "hash": "9b963e800825ebc8",
+      "units": "46b3e149 f84a01b2"
+    },
+    "ios/Harlo/Harlo/SessionCard.swift": {
+      "hash": "aeeea929e74618ca",
+      "units": "472d457e d931f019"
+    },
+    "ios/Harlo/Harlo/SessionContent.swift": {
+      "hash": "cb28177bdcd1b1ba",
+      "units": "1e695dba 3008170c 399360fa 558d1967 5c05b456 b9df844a c02e6048"
+    },
+    "ios/Harlo/Harlo/SessionSheet.swift": {
+      "hash": "e4e04f9a3a3a2a75",
+      "units": "2c6f3d19"
+    },
+    "ios/Harlo/Harlo/SessionView.swift": {
+      "hash": "fbdb37031938580c",
+      "units": "cff9f8d9"
+    },
+    "ios/Harlo/Harlo/SessionsTourBackground.swift": {
+      "hash": "7436e02a463416f0",
+      "units": "db182662"
+    },
+    "ios/Harlo/Harlo/SettingsView.swift": {
+      "hash": "74349b56e9800a0b",
+      "units": "9331b5e9"
+    },
+    "ios/Harlo/Harlo/ShareSheet.swift": {
+      "hash": "07e69e692a492942",
+      "units": "22b24c6a 6d3918c9 a8622750"
+    },
+    "ios/Harlo/Harlo/SlashList.swift": {
+      "hash": "1ce9a1d5228ee5d9",
+      "units": "9aae9b14"
+    },
+    "ios/Harlo/Harlo/SplashView.swift": {
+      "hash": "7013ec65d3b462fc",
+      "units": "2ba18dda"
+    },
+    "ios/Harlo/Harlo/StatusDot.swift": {
+      "hash": "ba3a8b3abbd0bdcf",
+      "units": "0c34923c 95364123"
+    },
+    "ios/Harlo/Harlo/StatusPill.swift": {
+      "hash": "76ad96ff6120b290",
+      "units": "3a5dda94 57b4ff1a"
+    },
+    "ios/Harlo/Harlo/StepEditor.swift": {
+      "hash": "8e5e046b176e2404",
+      "units": "000d6479 b5dee64c"
+    },
+    "ios/Harlo/Harlo/StepMark.swift": {
+      "hash": "2192128ad954c52c",
+      "units": "0a37c5dd"
+    },
+    "ios/Harlo/Harlo/String+LeftPadded.swift": {
+      "hash": "b28480d829468ebd",
+      "units": "b42d173b"
+    },
+    "ios/Harlo/Harlo/Style.swift": {
+      "hash": "265bb9e1d3832161",
+      "units": "08dbe9b8 0972f520 0ad02668 0fc6d8f5 2ab31c77 49027cc1 5c5cb060 7e744141 88758a69 925af505 92f9eb15 a1dba937 a5a9a5d5 b7d0bcaf be687ee1 cd0d34f4 de7f46f1 f7f4a526"
+    },
+    "ios/Harlo/Harlo/SubagentLine.swift": {
+      "hash": "9c2924a17ba1bed9",
+      "units": "ab8aa4da"
+    },
+    "ios/Harlo/Harlo/TemplateStrip.swift": {
+      "hash": "853fa0665882a3b4",
+      "units": "a945dbc7"
+    },
+    "ios/Harlo/Harlo/Themed.swift": {
+      "hash": "43af401453c2f850",
+      "units": "489ac184 52ebd9a9"
+    },
+    "ios/Harlo/Harlo/ThinkingRow.swift": {
+      "hash": "a458244857787c90",
+      "units": "b056626a"
+    },
+    "ios/Harlo/Harlo/TimelineStep.swift": {
+      "hash": "978400bc8a6eb400",
+      "units": "dc12f766"
+    },
+    "ios/Harlo/Harlo/ToolCard.swift": {
+      "hash": "2fa7fe46aaf587ce",
+      "units": "fa3cac01"
+    },
+    "ios/Harlo/Harlo/ToolOutput.swift": {
+      "hash": "c7ee854fb9403566",
+      "units": "3d860520 6eb48fac a0420815 c86f9458"
+    },
+    "ios/Harlo/Harlo/Tour.swift": {
+      "hash": "a0b04c420811e3c3",
+      "units": "3ade5e26 3fcab9b2 c0323ea2 cd305ba6"
+    },
+    "ios/Harlo/Harlo/TourView.swift": {
+      "hash": "7cd8700a63cbcc0a",
+      "units": "d1a7b2aa"
+    },
+    "ios/Harlo/Harlo/Transcript.swift": {
+      "hash": "4cdb6866635c3a40",
+      "units": "721164f0"
+    },
+    "ios/Harlo/Harlo/TranscriptRow.swift": {
+      "hash": "a903e532e34ccb38",
+      "units": "90504712"
+    },
+    "ios/Harlo/Harlo/UndoSheet.swift": {
+      "hash": "62b810875417e5a6",
+      "units": "53b19544"
+    },
+    "ios/Harlo/Harlo/UserAvatar.swift": {
+      "hash": "06274cc66488fdad",
+      "units": "6e48ab24"
+    },
+    "ios/Harlo/Harlo/UserBubble.swift": {
+      "hash": "266c618edb65940a",
+      "units": "30508017 7e15cfa1 8df2f353"
+    },
+    "ios/Harlo/Harlo/View+PlainRow.swift": {
+      "hash": "c4079ee1bc563296",
+      "units": "c04bea1f"
+    },
+    "ios/Harlo/Harlo/View+ScaledFont.swift": {
+      "hash": "d06872a4128d9343",
+      "units": "7dc405ef"
+    },
+    "ios/Harlo/Harlo/View+Screen.swift": {
+      "hash": "8750fbbed558552a",
+      "units": "15534491 3d8139fd dee06f59"
+    },
+    "ios/Harlo/Harlo/View+ShortOrCut.swift": {
+      "hash": "e70ec3e92aaaa176",
+      "units": "2e0dcd75"
+    },
+    "ios/Harlo/Harlo/ViewMenu.swift": {
+      "hash": "edf55a595cb7c488",
+      "units": "e388fb86"
+    },
+    "ios/Harlo/Harlo/VisualToggle.swift": {
+      "hash": "4c0e3a1ebef241f0",
+      "units": "2c7020ec"
+    },
+    "ios/Harlo/Harlo/WidgetTour.swift": {
+      "hash": "99968c2ea2e36134",
+      "units": "564bc842 8d94c352"
+    },
+    "ios/Harlo/Harlo/WikiBlock.swift": {
+      "hash": "1a9ac383800b622f",
+      "units": "10447008"
+    },
+    "ios/Harlo/Harlo/WikiCodeCard.swift": {
+      "hash": "e1bc8ace52f40a39",
+      "units": "115d8b98"
+    },
+    "ios/Harlo/Harlo/WikiCodeRow.swift": {
+      "hash": "410ead7bc7d7d6c4",
+      "units": "8f784f1d"
+    },
+    "ios/Harlo/Harlo/WikiFile.swift": {
+      "hash": "495258827ea39581",
+      "units": "039dbb24"
+    },
+    "ios/Harlo/Harlo/WikiFootnotes.swift": {
+      "hash": "cf689f7c34fe065c",
+      "units": "89002e34 b35f7ef6"
+    },
+    "ios/Harlo/Harlo/WikiLink.swift": {
+      "hash": "247dc9af7263908a",
+      "units": "8d60876f"
+    },
+    "ios/Harlo/Harlo/WikiPageView.swift": {
+      "hash": "c6bd0f50c34218be",
+      "units": "12348a35 77d13a3e c063f4cc f2068f54 f534c74d"
+    },
+    "ios/Harlo/Harlo/WikiSection.swift": {
+      "hash": "50fc43613559c92b",
+      "units": "379395e2 d6417c1c"
+    },
+    "ios/Harlo/Harlo/WikiSheet.swift": {
+      "hash": "7c801b69474576b5",
+      "units": "43d81f7e 91a183bf"
+    },
+    "ios/Harlo/Harlo/WikiView.swift": {
+      "hash": "09019aad209dce3d",
+      "units": "1503fd0a 5fdd7f58 69d5c601 8e5a8cea b46d4f7a"
+    },
+    "ios/Harlo/Harlo/WorkflowLine.swift": {
+      "hash": "cf65048152a835ea",
+      "units": "3cdd3ae4"
+    },
+    "ios/Harlo/Harlo/WorkflowNoteRow.swift": {
+      "hash": "66a60281fe6dd786",
+      "units": "d4cb07a3"
+    },
+    "ios/Harlo/Harlo/WorkflowRunRow.swift": {
+      "hash": "4389de28351f5ef9",
+      "units": "d858ac36"
+    },
+    "ios/Harlo/Harlo/WorkflowRunsView.swift": {
+      "hash": "005a2c2137b5b5e0",
+      "units": "75dbd15a"
+    },
+    "ios/Harlo/Harlo/WorkflowSheet.swift": {
+      "hash": "0326cb1d20450dd3",
+      "units": "0ad3468d 23b4bc46 39adbbc5 59c4cb20 5beea049 6f6811a6 82c56ed0 8a253af7 8c1617aa 99f5f811 af579e51 f078dd06"
+    },
+    "ios/Harlo/Harlo/WorkflowStageMark.swift": {
+      "hash": "205589621c66a47e",
+      "units": "c9d3b3f8"
+    },
+    "ios/Harlo/Harlo/WorkflowStageStrip.swift": {
+      "hash": "e8a55173848d313d",
+      "units": "1a36f83b dd5f3fe9"
+    },
+    "ios/Harlo/Harlo/WrappedLine.swift": {
+      "hash": "bf324f47ccbd67a8",
+      "units": "4fe80bba"
+    },
+    "ios/Harlo/Harlo/ZoomableImage.swift": {
+      "hash": "37ee40172acb0b9d",
+      "units": "04c713c8 13628e0b 1e71ca97 37258a5c 7028d826 702ced44 718f21d5 77a7087d c5ce781a ca877edc d6a56166 ebf7f7ae ed558fd4 f4d8a433 f6853e73 f866bf55"
+    },
+    "ios/Harlo/Harlo/ZoomedPicture.swift": {
+      "hash": "c24d2c70e61dd9e0",
+      "units": "f5cad07c"
+    },
+    "ios/Harlo/HarloNotifications/NotificationService.swift": {
+      "hash": "65f5e05a64e61e5b",
+      "units": "79107139 f002e2e0"
+    },
+    "ios/Harlo/HarloWidgets/HarloWidgets.swift": {
+      "hash": "8bf7a3e03b55babc",
+      "units": "fbc187e6"
+    },
+    "ios/Harlo/HarloWidgets/LimitsEntry.swift": {
+      "hash": "649ac441e0e90f63",
+      "units": "74c2b9a7"
+    },
+    "ios/Harlo/HarloWidgets/LimitsProvider.swift": {
+      "hash": "73df9e6070dfaac7",
+      "units": "1ac88be0 2d1ffb0f 5cc0636e 938e0b41 feaeb5ec"
+    },
+    "ios/Harlo/HarloWidgets/LimitsWidget.swift": {
+      "hash": "708acfd03adbc58c",
+      "units": "39bf9c53"
+    },
+    "ios/Harlo/HarloWidgets/Live.swift": {
+      "hash": "6d3b25a7e24af23e",
+      "units": "14c4b8a7 1afa3595 464a2f2e 89dc3253 a9705e20 b64ac05f d7e6dadb e86352af e88c6c04"
+    },
+    "ios/Harlo/HarloWidgets/LockScreenView.swift": {
+      "hash": "36166ba1038e50a3",
+      "units": "41a92f39"
+    },
+    "ios/Harlo/HarloWidgets/SessionLiveActivity.swift": {
+      "hash": "f4f218e299995be6",
+      "units": "61279e11"
+    },
+    "ios/Harlo/HarloWidgets/SessionsBackground.swift": {
+      "hash": "f92be66b62ed35ff",
+      "units": "e9d08b6a"
+    },
+    "ios/Harlo/HarloWidgets/SessionsEntry.swift": {
+      "hash": "027dd3eadf9012ce",
+      "units": "c6820a6a"
+    },
+    "ios/Harlo/HarloWidgets/SessionsProvider.swift": {
+      "hash": "d59196a0b4f2bc60",
+      "units": "0b5fa09f 4a56b7ed 63a760db cdb1439f d34c12e1"
+    },
+    "ios/Harlo/HarloWidgets/SessionsWidget.swift": {
+      "hash": "ce12e33dec76eb7b",
+      "units": "16f59675"
+    },
+    "ios/Harlo/Shared/AgentMark.swift": {
+      "hash": "aca445d08ba98971",
+      "units": "d7e198a4"
+    },
+    "ios/Harlo/Shared/LimitsBar.swift": {
+      "hash": "2011f6db1712c9f3",
+      "units": "06156d6b"
+    },
+    "ios/Harlo/Shared/LimitsWidgetView.swift": {
+      "hash": "f320b2bf2893b624",
+      "units": "18246e9c 43a69c72 6dcbd664 980332f1 ccd0f1a1 cd8d4dfa da5ddcb2 df24114d"
+    },
+    "ios/Harlo/Shared/SessionActivity.swift": {
+      "hash": "6b111b0c6ef1970f",
+      "units": "016746d3 6ce431a6"
+    },
+    "ios/Harlo/Shared/SessionsWidgetView.swift": {
+      "hash": "b021769c53f9394a",
+      "units": "1073a8a7 199264e7 25c113a9 6293b2ca 699bc9c1 b62a2219 d1c64431 d20c0c76"
+    },
+    "ios/HarloKit/Package.swift": {
+      "hash": "e1b87abb851976bc"
+    },
+    "ios/HarloKit/Sources/CTweetNaCl/harlo_nacl.c": {
+      "hash": "3caa33563e5dd185",
+      "units": "16c76fff 2beb3f75 6df85dab ce307b7e deb96893"
+    },
+    "ios/HarloKit/Sources/CTweetNaCl/include/harlo_nacl.h": {
+      "hash": "c059147c5c1c68d4"
+    },
+    "ios/HarloKit/Sources/CTweetNaCl/tweetnacl.c": {
+      "hash": "02e65bc3013ff216",
+      "units": "00a136ab 02665e75 07369743 08f27188 0a4ab1dc 0ba74619 0d45f5fd 0dd65498 14b89b1b 1506e6f4 1a91deb3 1e942bdb 1fb3510f 2d7647ce 375306bd 3903275b 3a5c05be 3d18f9e7 479d4e09 4862f447 4b431efb 4c7e98bf 4d0eb5c9 4d5e688c 559aead0 58113808 5a81e600 5e88d900 631ffaaf 7e9e5ac3 820f329b 888cd05e 8a73c1a0 8cb59f63 8de0b3c4 913173a0 94ef0b68 98e19f09 a9945065 b2437b12 b30b3339 bbeebd87 c7a5bb85 c89951a2 ca3f9e0c cf26894e d7649d42 dbd17bca e23afead e8150c40 f483ab42 fa44a5d0 fc144b5f"
+    },
+    "ios/HarloKit/Sources/CTweetNaCl/tweetnacl.h": {
+      "hash": "43f29ad721d9927b"
+    },
+    "ios/HarloKit/Sources/HarloKit/Client.swift": {
+      "hash": "a1bac5bf4b41a604",
+      "units": "0117cd77 02681bff 0293e387 09b6cdf9 0a5ef2b0 0e88d1d5 13a616ac 14cc0b7f 15c24da6 160c6c46 1761b349 1e127679 267a88dc 2ae78cf0 2d2bb711 335cfe46 36938341 376a6dcd 391c0c26 40874474 447f221c 4895549c 568b7a85 57b0e849 5d3a7d4c 5fa7aac5 5fe2ec00 62cb928f 68b5fb9f 71d38e89 7516c8d3 79fbdbce 7be45907 7eb887db 7fcd8976 824885ab 84698f1a 8531a1ef 85db22ab 87ffba4d 8c609cf5 8d8a43a9 90474aed 9c2079fc 9e1523b0 a5eb790f a751dee9 a956a89a ae89beb4 af181b1d b04e8266 bd6a16ea c565a8af c57c543f cc969911 ce0a465a cee13607 d2b30e95 d390e096 d7139fef d88f6d83 ddb7fb89 e0c7361b e1e3e20c e67d9480 e86adb73 f0690d0e f0c0b318 f13c0896 f5411c11 f91e48c6 f9e9d351"
+    },
+    "ios/HarloKit/Sources/HarloKit/Crypto.swift": {
+      "hash": "0df652300eff94cf",
+      "units": "0df9af12 12b528ba 1dbe11dc 23656cf6 41954734 512fd3c6 684bccfc 81a9323d 83094de9 90eda628 afe8b7e3 bc94231b c87fa42f ce4683e7 d6355232 f03d8fe5 f9ac7029"
+    },
+    "ios/HarloKit/Sources/HarloKit/DefaultTheme.swift": {
+      "hash": "da285f35e49db835"
+    },
+    "ios/HarloKit/Sources/HarloKit/Demo.swift": {
+      "hash": "936814ca7dcf2155",
+      "units": "3559ccce 40acb167 4da77d32 670c15bf 7837af0f 900b7f49 a4546cd2 a80c7f49 ac2e7772 c6f1593b c7f7fea6 de951775"
+    },
+    "ios/HarloKit/Sources/HarloKit/Features.swift": {
+      "hash": "3bcd602d82bf239d",
+      "units": "0129e14c 02fcf003 0920b609 0986478f 11b39c93 1235a0f4 124802a9 17488e01 1a7f34f5 1d2d22e0 1d2dac0e 1fa7d4c0 22f89b9f 23e746f8 26dd32c1 2fd3cf78 32adf6c2 37579056 37841a34 3aa281d9 3e3b6fbc 3efcf720 3f65e63e 3fc693d1 411322b3 44bb653b 4681bbbd 49d4f6bf 49f6ff41 4df99b5b 4e0f33cc 4e4012c2 538a15f8 5a65aa43 5dcddd1a 63cd97a0 643f6510 65ded6a0 66faeae1 696f1daf 6d64056a 75e3dc7d 7672d1b4 776e777c 78bddc45 79c15336 7d86ced2 7eea0b7c 81917ea1 81d46a6d 8261436f 852e7fbc 85794eff 8671ea11 88f8f0b1 895f6ebe 8b06c7bb 91a9f99d 98595978 98e802c1 99a9f713 a4b2ad83 a9c4bc5a abe31db8 ac754a1a afec228f b3178022 b660f58b bbd4b6a8 bd4d1559 be6b2425 c0adc887 c39cbf5a c45382fe c7509d6c c92accf8 c9b74dfe ce793a72 cfded1dd d6cb4188 d84eebad e9c29ff5 eadff9ef ecf68137 edc0ebbc efb52e71 f572fe29 f668e8a4 fb44bdd2 fefa8be4"
+    },
+    "ios/HarloKit/Sources/HarloKit/Files.swift": {
+      "hash": "62fdfe0d75627e02",
+      "units": "21974d33 269749e2 27b3939b 2eee037c 36a40f54 4574e355 70d4fc96 76bce6c8 8d19ed1c 9d7c7744 9fdd6894 a3c8b56e b0ea3054 c1942ec1 d3321b2d d820d8de d92d2176"
+    },
+    "ios/HarloKit/Sources/HarloKit/JSON.swift": {
+      "hash": "d02315bc42bfd562",
+      "units": "0bbe229e 3ee3e650 77d52822 db1a21a0 f4773d03"
+    },
+    "ios/HarloKit/Sources/HarloKit/Limits.swift": {
+      "hash": "e21fdbd33ff245aa",
+      "units": "075e8b05 0b91b773 1d4c3cfa 68bfc639 6b9242aa 913ac602 9d85fdba a9d1d9bb bf5f29ad e62fee24"
+    },
+    "ios/HarloKit/Sources/HarloKit/LimitsSnapshot.swift": {
+      "hash": "0ae74c03e17aeacc",
+      "units": "1f2c24d8 2210fc42 448f693e 65f6c74c 7acdf94b 7c5112f5 8f19ba24 b13fc292 e7e9a12d f15ceae8 f4eab2d6 f5938d9d f7186bd3 fa5f285c ff4b3b42"
+    },
+    "ios/HarloKit/Sources/HarloKit/Messages.swift": {
+      "hash": "a8f8486bad2f6fc2",
+      "units": "0b0fd623 0feb6c48 197fbb4e 206526eb 2d6bc384 31f3eb1f 4d6e4c2e 4e1f49a9 66c28504 6aa51a41 6e8b9c22 7b7ab65a 939aa72a 95110d74 ac35a988 c008215c cc1cb89c da1ba461 dc80f1c7 e9d1b99a ee491a20 efd59089 f50010f5"
+    },
+    "ios/HarloKit/Sources/HarloKit/Model.swift": {
+      "hash": "cb40b91b4c9d1943",
+      "units": "020ae0a8 03241211 09040b11 0a46018e 0b5df15e 0bcff4fd 0cd60ce9 0e8d965c 0f5d8c54 158dc456 191e5623 1c6f5276 21c3bb47 21f26c35 2350337d 297e9d79 323a90ce 34539d01 34b51f68 3985d744 3a99a0cb 3e87cb75 4081366c 43f63a68 46067e22 46d5e173 47ff7e2e 48406a2e 4a116aa4 4df91ba9 4f7a18f4 51ea5ef7 5213992c 56e26a8c 5945f975 5999e86f 5ab6aff5 64ee759a 66d238a7 6ee9798e 6f05b16f 6fbf7f9b 742c59be 744b812b 7600a713 7999da26 7cdeea3a 81b8d533 84c4c3ac 8718d4ee 8b77e5e5 8c1144fb 8cd2e492 8d51fdae 8d66dd5f 982c9e6d 9c9fd568 9d60be65 9ed632f7 9ffb7203 a2417441 a313c7e0 a32e389a a6722e1e a82d7c8f ab1f45b8 ab38af5a ad609373 aece0fc5 afefae16 b0a836bd b0d4080c b16c4878 b170aa25 b3a48cf4 b73907d4 b844597f c23d02a5 c7315dd2 c836b422 c83d3195 c987f312 cf22e773 cfc9a9df d019f98b d155d124 d939290a db545bd8 dbe74860 e3bff4e6 e60c869a e6a12ab0 e7c17de3 e7e8421c eb3a8aec ecbfac9b ed560fdb f0a6f5ac f17aaab8 f6c3ee00 fec43dcb"
+    },
+    "ios/HarloKit/Sources/HarloKit/NetworkWatch.swift": {
+      "hash": "87af76c0694d8415",
+      "units": "7b963935 d2217ef0"
+    },
+    "ios/HarloKit/Sources/HarloKit/Pairing.swift": {
+      "hash": "296dc716d47d5495",
+      "units": "153a27dd 1efc3012 34c16b17 44863b03 9dfb0ee2 ab4e0e99 b5c46fbc d7266f70 d784c0c1 d81aa1b5 f5a298fd fce7fec2"
+    },
+    "ios/HarloKit/Sources/HarloKit/ProjectFeatures.swift": {
+      "hash": "208def1f3e7b3ada",
+      "units": "054fc61d 0d0a1b5c 27cbcb66 2d9dcb02 53af4111 62202e48 6fe63d3f 964e3d0c 97718784 9a81efe0 b0d99198 bcfeedef c1318e97 c78ef036 cd60087b d754c2c2 ee69ee3d f9b0078b fa8ed0bd"
+    },
+    "ios/HarloKit/Sources/HarloKit/Push.swift": {
+      "hash": "d6821e2b48a9409f",
+      "units": "3f913240 4c391f60 78229ee4 8e6945e3 bbb86506 bf8321cb cb04f6eb d373e765 d40213c6 f7143451 fdc7395c"
+    },
+    "ios/HarloKit/Sources/HarloKit/QueuedMessage.swift": {
+      "hash": "b64638137a0a71ba",
+      "units": "3bb2f9eb 631ad1c2"
+    },
+    "ios/HarloKit/Sources/HarloKit/Race.swift": {
+      "hash": "2be09e3dab60d0af",
+      "units": "73134ce1 99ebe6d2 ab0e95b8 ad32dc3a cf60f930 d613fb31 e4027b09"
+    },
+    "ios/HarloKit/Sources/HarloKit/Replay.swift": {
+      "hash": "a372bda33a312dbe",
+      "units": "0c7f8692 272e2dd9 3678985a 62f26098 77e9b21d 7ed6e836 8c3aa65c 901cb80d 950e2010 b984d066 bc912465 c819a9e7 c8dae637 d188202f f4b67852"
+    },
+    "ios/HarloKit/Sources/HarloKit/RichText.swift": {
+      "hash": "74e031e58c775c71",
+      "units": "1fa6b63e 399282d0 40a0fee8 4237efb8 4f4f7f58 503afb42 5b0e83c1 5b675dc8 5ddb0bea 65fec3b5 82c28d49 937b6d99 95ec57a2 97a86fca 9c06ef72 a390d828 b6158a48 bad1243b c71a947d d049af23 da78549c e9337253 f9380821 fcef0008 feaa06a8"
+    },
+    "ios/HarloKit/Sources/HarloKit/Row+Workflow.swift": {
+      "hash": "224b36acf500d6a3"
+    },
+    "ios/HarloKit/Sources/HarloKit/Sample.swift": {
+      "hash": "9d9f25e7ab63a3c0",
+      "units": "35b12d26 7791c444 83fe2280 b333aa02 bc228b26"
+    },
+    "ios/HarloKit/Sources/HarloKit/Store.swift": {
+      "hash": "ad13d442508fc44f",
+      "units": "1b5047d5 57d1d764 58b6ae37 61a0a0c0 7ee71594 8780c8f7 90dd1359 adac5434 cf6d8eb2 d7da0174 e39a519d"
+    },
+    "ios/HarloKit/Sources/HarloKit/ToolCode.swift": {
+      "hash": "68b2bc6d5b89f548",
+      "units": "306cad39 3f6f9a3c 72f7410c d5b0fcaf"
+    },
+    "ios/HarloKit/Sources/HarloKit/Tools.swift": {
+      "hash": "671bb2e17e75d5ef",
+      "units": "13dc2f8c 3e0c1202 4c090b43 4c53b788 86216238 c3edb067 ded54730 e9a8f682 f5681628 f6b0f346"
+    },
+    "ios/HarloKit/Sources/HarloKit/Visuals.swift": {
+      "hash": "24530797e238ec31",
+      "units": "0f239da5 2d032c43 35589219 37120f67 3d609a27 5305743b 5338d6db 5ea12d5f 5f96fc83 73762348 75bad671 9a1c54f5 a06be35e b759ad13 b9060685 ee6dc8ca eeaeb621 efa0389a f9872e36"
+    },
+    "ios/HarloKit/Sources/HarloKit/WidgetSnapshot.swift": {
+      "hash": "be488e83f42764e7",
+      "units": "26c409df 2ec722b5 42ea498b 552ef1f5 69a9bd89 884ddbf2 8f089441 bc2a7fd5 cfcc0a68 d1d00d3e e33f6c7e"
+    },
+    "ios/HarloKit/Sources/HarloKit/Wiki.swift": {
+      "hash": "f3ea322a806178c8",
+      "units": "0b0dfd26 13d20e91 2d318e9d 2f873d23 4a1de501 4f14f40a 6352c844 63ec69fd 7056d513 7e22beda 7e23f745 8cc4ea9d 940db7f2 9a566359 9ce54018 9ddb54c3 a6fceb70 b4c16fea c62adc86 cd63ebdb da522aed ddc64f6a eaa9d40f f2db4293 f54083bd"
+    },
+    "ios/HarloKit/Sources/HarloKit/WorkflowReport.swift": {
+      "hash": "a666fee9ec373529",
+      "units": "61d880ca"
+    },
+    "ios/HarloKit/Sources/HarloKit/Workflows.swift": {
+      "hash": "bfb2c1488e1dd129",
+      "units": "08fd1a7b 12edc39a 4775c6fd 485ec7ed 598f5018 5a01c5eb 777cbf11 bae733a3 bbf5b70b e12e8631 e82c8dd8 e82de0b1 f9ecf8a6"
+    },
+    "ios/HarloKit/Sources/harlo-probe/main.swift": {
+      "hash": "b5a5a57cd7706db7",
+      "units": "20f65c28 45509199 5b8a8b56 5dddfdd3 6a74a570 70ce871f 8a880f63 acba2551 dd5ace9e"
+    },
+    "packaging/linux/build-in-container.sh": {
+      "hash": "5b5b76bf4c19aa81"
+    },
+    "packaging/linux/bundle.sh": {
+      "hash": "b00be5668f317df1",
+      "units": "e7d3799e"
+    },
+    "packaging/linux/test-install.sh": {
+      "hash": "23a1b4884ab60f92"
+    },
+    "packaging/release-manifests.sh": {
+      "hash": "dcc17a6ad360dcb7",
+      "units": "d600474b ffdcc4ba"
+    },
+    "packaging/release.sh": {
+      "hash": "53155c39d1a172ac",
+      "units": "3e64cc41 51280dab 894a5713"
+    },
+    "site/download.js": {
+      "hash": "8e41cf9fbcd66312"
+    },
+    "site/motion.js": {
+      "hash": "cb12dcfcaced4099"
+    },
+    "site/theme.js": {
+      "hash": "4e9a80d164aed7f9"
+    }
+  },
+  "leave": {},
+  "pages": {
+    "architecture/agent-context.md": "396051b57be23bf2",
+    "architecture/agent-tools.md": "68f83b1d6f33a233",
+    "architecture/agent.md": "08f4e1b0151e0fb2",
+    "architecture/core-engines.md": "3b88a6ef64bb9dec",
+    "architecture/core-persistence.md": "42928b70a7d04037",
+    "architecture/core.md": "13d0eb9a30c2fa6c",
+    "architecture/desktop-code.md": "85da0ecfaf0937f7",
+    "architecture/desktop-ui.md": "2df258f43091c28c",
+    "architecture/desktop.md": "e8149f9c7071f972",
+    "architecture/harness.md": "d68a764e61e94e4f",
+    "architecture/knowledge.md": "b71e3f395ea7cb95",
+    "architecture/mobile-native.md": "a275fbbd9bc2ec45",
+    "architecture/mobile-notifications.md": "bacf10d639502531",
+    "architecture/mobile-protocol.md": "60903de1181c0887",
+    "overview.md": "838ccfc0beb8e933",
+    "workflows/agent-orchestration.md": "af1c3417b1022d5c",
+    "workflows/desktop-connectivity.md": "1529b98b7b31ef71",
+    "workflows/desktop-files.md": "83dd4c9fd46189d7",
+    "workflows/desktop-sessions.md": "3349e6085f07f731",
+    "workflows/git-and-remote.md": "36c1c531e23a8604",
+    "workflows/mobile-probe.md": "31a8f9be98bb7b85",
+    "workflows/mobile-relay-apns.md": "a8710ac58f4ae592",
+    "workflows/releases.md": "d8f36a63dc55cd94",
+    "workflows/sessions.md": "4d5fcf9fcfafacb6"
+  }
+}
