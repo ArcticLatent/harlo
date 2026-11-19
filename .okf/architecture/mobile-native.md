@@ -4,7 +4,7 @@ title: Native mobile app and HarloKit
 description: How the iPhone UI, observable model, protocol client, and native rendering share responsibility.
 covers:
   - ios/
-generated: { by: harlo/gpt-6-astra, at: "2026-11-19T00:51:01Z" }
+generated: { by: harlo/gpt-6-luna, at: "2026-11-19T18:56:17Z" }
 sources:
   - id: package
     resource: "repo://ios/HarloKit/Package.swift"
@@ -32,6 +32,9 @@ sources:
     resource: "repo://ios/HarloKit/Sources/HarloKit/Client.swift"
   - id: messages
     resource: "repo://ios/HarloKit/Sources/HarloKit/Messages.swift"
+  - id: mode
+    resource: "repo://ios/HarloKit/Sources/HarloKit/Model.swift"
+    title: fn HarloModel.mode
   - id: store
     resource: "repo://ios/HarloKit/Sources/HarloKit/Store.swift"
   - id: types
@@ -42,6 +45,9 @@ sources:
     resource: "repo://ios/Harlo/Harlo/RichCache.swift"
   - id: wiki
     resource: "repo://ios/Harlo/Harlo/WikiPageView.swift"
+  - id: wiki-graph
+    resource: "repo://ios/HarloKit/Sources/HarloKit/Wiki.swift"
+    title: fn Wiki.graph
   - id: photos
     resource: "repo://ios/Harlo/Harlo/Photos.swift"
   - id: dictation
@@ -66,7 +72,7 @@ This page is the directory-level map for `ios/`: `Harlo/` contains the app, shar
 
 The `@MainActor @Observable` model owns list-level sessions, features, limits, theme, push registration and one `OpenSession`. The latter owns transcript rows, requests, queues, draft, plan, helpers and workflow state. Neither object is a durable copy of the computer's session database: the store retains identity, host, preferences and widget snapshots, while reconnect refreshes remote state.[^model][^store]
 
-A list key is not necessarily the live key returned by `open`. While that reply is pending, `OpenSession` buffers early events; after the live key arrives it applies matching events and discards other sessions' events. `reset` replaces rows, `rows` applies changes, and dedicated events update status, metadata, requests, queues, todos, subagents and side answers. Reopening clears old requests, todos and subagents so a background interval does not leave completed work looking active.[^model][^messages]
+A list key is not necessarily the live key returned by `open`. While that reply is pending, `OpenSession` buffers early events; after the live key arrives it applies matching events and discards other sessions' events. `reset` replaces rows, `rows` applies changes, and dedicated events update status, metadata, requests, queues, todos, subagents and side answers. Reopening clears old requests, todos and subagents so a background interval does not leave completed work looking active. The model chooses normal, steering, follow-up or stop-and-send mode from busy state and the user's selected action, rather than leaving this decision to each view.[^model][^messages][^mode]
 
 The client assigns request IDs and resumes the corresponding continuation when a reply arrives. Unsolicited messages become an `AsyncStream<Event>` consumed by the model. Typed wrappers turn JSON into domain types and usually promote a reply's `error` into a thrown error; the generic `call` deliberately returns error objects unchanged. The model's operation helper converts thrown failures into an alert. Feature flags from `ready` gate optional capabilities such as plans, helpers, pictures, wiki and workflow operations rather than assuming every desktop version supports them.[^client][^model]
 
@@ -77,6 +83,8 @@ Sending chooses normal mode when idle, steering or follow-up when busy. An `unse
 Transcript runs group contiguous rows by their supplied group key. Active groups default open; completed groups default folded, with explicit user overrides retained. `SessionContent` uses a non-lazy vertical stack intentionally: streaming height changes and estimated offscreen heights previously made end-following unreliable. The UI displays an earlier-message count instead of implying the phone has the whole transcript.[^model][^content]
 
 Desktop HTML is parsed into `RichBlock`/`Span` values for native paragraphs, lists, quotes, tables, images and highlighted code; unknown tags retain their text. `RichCache` caches by HTML and adds file links. Wiki pages have their own blocks, footnote/code navigation and page-link handling; diagrams and pictures are requested through HarloKit rather than executed as arbitrary embedded page content.[^rich][^cache][^wiki][^client]
+
+For large wikis, the page graph narrows to the overview and its incoming/outgoing neighbors instead of drawing every page; smaller graphs retain the full page set. On full overview graphs, overview links are omitted except when that overview was the last page read, reducing edges that merely connect everything to the index.[^wiki-graph]
 
 Camera/library images are resized to a maximum side of 1568 pixels and encoded as JPEG at quality 0.8 before sending. Dictation appends recognized text to the existing draft, requests microphone and speech permissions, and prefers on-device recognition only when supported; otherwise it can use Apple's recognition service. It must not be described as always offline.[^photos][^dictation]
 
@@ -100,10 +108,12 @@ Camera/library images are resized to a maximum side of 1568 pixels and encoded a
 [^model]: ios/HarloKit/Sources/HarloKit/Model.swift
 [^client]: ios/HarloKit/Sources/HarloKit/Client.swift
 [^messages]: ios/HarloKit/Sources/HarloKit/Messages.swift
+[^mode]: ios/HarloKit/Sources/HarloKit/Model.swift, fn HarloModel.mode
 [^store]: ios/HarloKit/Sources/HarloKit/Store.swift
 [^types]: ios/HarloKit/Sources/HarloKit/
 [^rich]: ios/HarloKit/Sources/HarloKit/RichText.swift
 [^cache]: ios/Harlo/Harlo/RichCache.swift
 [^wiki]: ios/Harlo/Harlo/WikiPageView.swift
+[^wiki-graph]: ios/HarloKit/Sources/HarloKit/Wiki.swift, fn Wiki.graph
 [^photos]: ios/Harlo/Harlo/Photos.swift
 [^dictation]: ios/Harlo/Harlo/Dictation.swift

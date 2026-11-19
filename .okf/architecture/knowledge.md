@@ -5,7 +5,7 @@ description: How the code index supplies declarations and call evidence, and how
 covers:
   - crates/harlo-okf/
   - crates/harlo-index/
-generated: { by: harlo/gpt-6-astra, at: "2026-11-19T00:54:36Z" }
+generated: { by: harlo/gpt-6-luna, at: "2026-11-19T18:56:17Z" }
 sources:
   - id: index-lib
     resource: "repo://crates/harlo-index/src/lib.rs"
@@ -21,6 +21,27 @@ sources:
     resource: "repo://crates/harlo-index/src/text.rs"
   - id: index
     resource: "repo://crates/harlo-index/src/index.rs"
+  - id: named
+    resource: "repo://crates/harlo-index/src/lang.rs"
+    title: fn named
+  - id: structural
+    resource: "repo://crates/harlo-index/src/structural.rs"
+    title: "fn run::search"
+  - id: okf-structural
+    resource: "repo://crates/harlo-okf/src/indexed.rs"
+    title: fn structural
+  - id: search-type
+    resource: "repo://crates/harlo-index/src/structural.rs"
+    title: struct Search
+  - id: found-type
+    resource: "repo://crates/harlo-index/src/structural.rs"
+    title: struct Found
+  - id: rewritten-type
+    resource: "repo://crates/harlo-index/src/structural.rs"
+    title: struct Rewritten
+  - id: structural-type
+    resource: "repo://crates/harlo-index/src/structural.rs"
+    title: struct Structural
   - id: manifests
     resource: "repo://crates/harlo-index/src/manifests.rs"
   - id: packages
@@ -97,7 +118,9 @@ The normal evidence path is **working-tree bytes → indexed symbols or fallback
 
 `FileIndex` contains a language plus ordered symbols, imports, and calls. A `Symbol` has a qualified name, kind, inclusive 1-based line span, signature, optional first documentation line, visibility/test flags, parent index, and hash. Imports retain their text and line; calls retain the short callee name, optional receiver text, 1-based line, 0-based byte column, and enclosing symbol index. These are source observations, not compiler-resolved types.[^index-lib][^graph]
 
-The grammar-backed languages are Rust, Python, Go, JavaScript, TypeScript/TSX, Java, C, C++, C#, Ruby, PHP, Swift, Kotlin, Scala, Julia, Bash, Lua, and QML. YAML is indexed as mapping keys two levels deep; SQL recognizes `CREATE` declarations, including tables/views, functions/procedures/triggers, types, and schemas. YAML/SQL indexes contain no imports or calls.[^index-lib][^text]
+The grammar-backed languages are Rust, Python, Go, JavaScript, TypeScript/TSX, Java, C, C++, C#, Ruby, PHP, Swift, Kotlin, Scala, Julia, Bash, Lua, and QML. YAML is indexed as mapping keys two levels deep; SQL recognizes `CREATE` declarations, including tables/views, functions/procedures/triggers, types, and schemas. YAML/SQL indexes contain no imports or calls. Language names accepted by the helper also include common aliases such as `py`, `ts`, `c++`, and `shell`.[^index-lib][^text][^named]
+
+The optional structural search accepts code-shaped patterns with metavariables, parses them separately for each selected language, and can return proposed rewrites without writing files. Its search describes pattern, rewrite, language, paths and result limit; matches retain source positions/text and optional replacement, while rewritten files carry the full proposed text. It excludes comments and strings by matching syntax nodes; invalid patterns are reported per language, while rewrites return changed file text for the caller to apply.[^search-type][^found-type][^rewritten-type][^structural-type][^structural][^okf-structural]
 
 `scan` reuses a common syntax-tree walk with language-specific declaration and call rules. Tree-sitter recovery can produce useful results from incomplete code rather than requiring a successful build. Signatures are capped at 240 characters, documentation lines at 200, and receivers at 80; a card is consequently a navigation aid rather than a complete source listing.[^scan][^defs][^rules]
 
@@ -202,6 +225,13 @@ The wiki map is built from live pages and their section citations, not from a mo
 [^rules]: crates/harlo-index/src/rules.rs
 [^text]: crates/harlo-index/src/text.rs
 [^index]: crates/harlo-index/src/index.rs
+[^named]: crates/harlo-index/src/lang.rs, fn named
+[^structural]: crates/harlo-index/src/structural.rs, fn run::search
+[^okf-structural]: crates/harlo-okf/src/indexed.rs, fn structural
+[^search-type]: crates/harlo-index/src/structural.rs, struct Search
+[^found-type]: crates/harlo-index/src/structural.rs, struct Found
+[^rewritten-type]: crates/harlo-index/src/structural.rs, struct Rewritten
+[^structural-type]: crates/harlo-index/src/structural.rs, struct Structural
 [^manifests]: crates/harlo-index/src/manifests.rs
 [^packages]: crates/harlo-index/src/packages.rs
 [^graph]: crates/harlo-index/src/graph.rs

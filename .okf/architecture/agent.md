@@ -4,7 +4,7 @@ title: Agent execution and model streams
 description: How harlo-agent turns provider streams into a replayable, bounded tool execution loop.
 covers:
   - crates/harlo-agent/
-generated: { by: harlo/gpt-6-astra, at: "2026-11-19T00:51:01Z" }
+generated: { by: harlo/gpt-6-luna, at: "2026-11-19T18:59:56Z" }
 sources:
   - id: entry
     resource: "repo://crates/harlo-agent/src/main.rs"
@@ -55,6 +55,105 @@ sources:
     resource: "repo://crates/harlo-agent/src/search.rs"
   - id: todo
     resource: "repo://crates/harlo-agent/src/todo.rs"
+  - id: todo-open-note
+    resource: "repo://crates/harlo-agent/src/todo.rs"
+    title: fn open_note
+  - id: todo-open
+    resource: "repo://crates/harlo-agent/src/todo.rs"
+    title: fn open
+  - id: advisor
+    resource: "repo://crates/harlo-agent/src/advisor.rs"
+    title: fn transcript
+  - id: advisor-env
+    resource: "repo://crates/harlo-agent/src/advisor.rs"
+    title: fn from_env
+  - id: advisor-advice
+    resource: "repo://crates/harlo-agent/src/advisor.rs"
+    title: fn advice
+  - id: advisor-note
+    resource: "repo://crates/harlo-agent/src/advisor.rs"
+    title: fn note
+  - id: effort-type
+    resource: "repo://crates/harlo-agent/src/effort.rs"
+    title: struct Word
+  - id: effort-method
+    resource: "repo://crates/harlo-agent/src/effort.rs"
+    title: "fn Word::effort"
+  - id: effort-note
+    resource: "repo://crates/harlo-agent/src/effort.rs"
+    title: "fn Word::note"
+  - id: instructions-in-input
+    resource: "repo://crates/harlo-agent/src/responses.rs"
+    title: fn instructions_in_input
+  - id: inbox-next
+    resource: "repo://crates/harlo-agent/src/agent.rs"
+    title: "fn Inbox::next"
+  - id: inbox-take
+    resource: "repo://crates/harlo-agent/src/agent.rs"
+    title: "fn Inbox::take"
+  - id: effort-word
+    resource: "repo://crates/harlo-agent/src/effort.rs"
+    title: fn word
+  - id: effort-auto
+    resource: "repo://crates/harlo-agent/src/effort.rs"
+    title: fn auto
+  - id: effort-judged
+    resource: "repo://crates/harlo-agent/src/effort.rs"
+    title: fn judged
+  - id: memory-on
+    resource: "repo://crates/harlo-agent/src/memory.rs"
+    title: fn on
+  - id: memory-spec
+    resource: "repo://crates/harlo-agent/src/memory.rs"
+    title: fn spec
+  - id: memory-loaded
+    resource: "repo://crates/harlo-agent/src/memory.rs"
+    title: fn loaded
+  - id: memory-call
+    resource: "repo://crates/harlo-agent/src/memory.rs"
+    title: fn call
+  - id: cache-monitor
+    resource: "repo://crates/harlo-agent/src/kv.rs"
+    title: struct Monitor
+  - id: cache-observe
+    resource: "repo://crates/harlo-agent/src/kv.rs"
+    title: "fn Monitor::observe"
+  - id: cache-miss
+    resource: "repo://crates/harlo-agent/src/kv.rs"
+    title: enum Miss
+  - id: cache-report
+    resource: "repo://crates/harlo-agent/src/kv.rs"
+    title: struct Report
+  - id: miss-id
+    resource: "repo://crates/harlo-agent/src/kv.rs"
+    title: "fn Miss::id"
+  - id: miss-detail
+    resource: "repo://crates/harlo-agent/src/kv.rs"
+    title: "fn Miss::detail"
+  - id: miss-harness
+    resource: "repo://crates/harlo-agent/src/kv.rs"
+    title: "fn Miss::harness_caused"
+  - id: socket-on
+    resource: "repo://crates/harlo-agent/src/socket.rs"
+    title: fn on
+  - id: wire
+    resource: "repo://crates/harlo-agent/src/socket.rs"
+    title: struct Wire
+  - id: unusable
+    resource: "repo://crates/harlo-agent/src/socket.rs"
+    title: struct Unusable
+  - id: fell-back
+    resource: "repo://crates/harlo-agent/src/socket.rs"
+    title: fn fell_back
+  - id: fall-back
+    resource: "repo://crates/harlo-agent/src/socket.rs"
+    title: fn fall_back
+  - id: replied
+    resource: "repo://crates/harlo-agent/src/socket.rs"
+    title: fn replied
+  - id: socket-stream
+    resource: "repo://crates/harlo-agent/src/socket.rs"
+    title: fn stream
   - resource: "repo://crates/harlo-agent/"
 ---
 # Agent execution and model streams
@@ -70,6 +169,10 @@ The loop keeps pi-shaped messages rather than a provider's request body. Each re
 The adapters are not interchangeable JSON wrappers. Responses sends the history with `store: false`; its completed output can supply encrypted reasoning omitted from earlier item events. Messages places cache markers on the system prompt and conversation end, and returns thinking only to its originating provider/model when thinking is enabled. Gemini preserves signatures on their original parts for the originating provider/model and uses Google's placeholder for foreign calls. Model switching must therefore rebuild requests, not replay another provider's raw response.[^responses][^messages][^gemini]
 
 Provider resolution is repeated for requests, so configuration changes can affect an existing session. User `providers.json` entries replace same-named bundled presets; model metadata controls context windows, image support, thinking mappings, output limits and pricing. Unknown pricing is distinct from explicitly free service: a local address alone must not be treated as proof that a proxy charges nothing.[^providers][^presets]
+
+For Codex Responses requests, Harlo places the base instructions in the input as a leading developer message: the endpoint does not serve top-level `instructions` from its prompt cache, while the input form was measured to reuse the cached prefix. Other provider request shapes keep their own adapters.[^instructions-in-input]
+
+Codex Responses can also use one WebSocket per session. When the next request exactly extends the prior input and its returned message, it sends only the new items with the prior response id; an unusable connection falls back to HTTPS for that session.[^socket-on][^wire][^unusable][^fell-back][^fall-back][^replied][^socket-stream]
 
 ## The execution boundary is a complete reply
 
@@ -89,6 +192,10 @@ An optional fallback is eligible for exhausted quota or transient failures that 
 
 The loop also caps tool rounds (200 by default), warns near the cap, and detects identical tool/arguments/result/error combinations. It nudges at the third repetition and stops at the fifth; a successful file change resets repetition tracking, so testing another attempted fix is not confused with polling a dead end.[^loop][^repeats]
 
+Steering and follow-up messages are held in separate queues. An idle run starts with the earliest steering message when one exists, otherwise the earliest follow-up; removing a queued message matches its text within the requested queue rather than treating its visible position as identity.[^inbox-next][^inbox-take]
+
+Turn-level effort can be chosen by an explicit effort word in the prompt. The words set a per-turn level (or direct the agent to orchestrate subagents) and add a corresponding instruction note. When automatic judging is enabled, a small tool-free request can instead classify a bounded view of the task and choose the level for that turn; the session's configured effort is restored afterward.[^effort-word][^effort-auto][^effort-judged][^effort-type][^effort-method][^effort-note]
+
 Accounting covers ordinary replies and auxiliary requests, including compaction, searches, side questions and subagents. Request attempts reserve shared budget room; failed or stopped attempts retain usage already reported by the server. Missing usage can be estimated rather than silently treated as free, while monetary cost retains its known/unknown distinction. Codex plan-window percentages are a separate signal from per-request token and cost accounting.[^accounting][^used][^usage]
 
 ## Supporting inputs and services
@@ -96,6 +203,14 @@ Accounting covers ordinary replies and auxiliary requests, including compaction,
 Authentication separates the registered ChatGPT app flow from the opt-in Codex sign-in. Refresh tokens rotate, so refreshes lock across processes and reread credentials under that lock. Saved provider keys arrive on stdin rather than command-line arguments. Integration tests exercise pasted-callback completion with stdin still open and a local OpenRouter PKCE/key-exchange stand-in; they do not require a live provider account.[^auth][^keys][^login-tests][^router-tests]
 
 Image inputs from prompts, file reads and MCP are fitted to bounded dimensions/bytes and kept as canonical image blocks; adapters can substitute a note when the selected model cannot accept images. Web search is a separate model request whose findings become a tool result, avoiding the provider's search instructions in every ordinary request. The optional todo tool records whole-list updates and reconstructs the latest successful list for the UI; it is off by default.[^images][^search][^todo]
+
+The UI can request the current todo list or open a particular item as a note in the session.[^todo-open-note][^todo-open]
+
+An optional turn advisor runs only when configured. It receives the user's request, a bounded summary of assistant/tool steps, the final answer and a capped working-tree diff; its short critique is returned as hidden context for one more attempt, while an `OK` response leaves the turn complete. This review request is separate from tool dispatch and spends its own model request.[^advisor][^advisor-env][^advisor-advice][^advisor-note]
+
+An optional memory tool stores short project-wide or user-wide notes for later sessions. Saved notes are included in instructions only when `HARLO_AGENT_MEMORY=on`; they cost prompt tokens, are advisory rather than trusted facts, and should be checked against the code before use.[^memory-on][^memory-spec][^memory-loaded][^memory-call]
+
+When measured usage includes cache counts, the agent compares each request against the previous request's model, provider, instructions, tools and history prefix. It logs classified misses and warns for harness-caused changes; other causes are shown only with `HARLO_AGENT_CACHE_NOTE`.[^cache-monitor][^cache-observe][^cache-miss][^cache-report][^miss-id][^miss-detail][^miss-harness]
 
 [^entry]: crates/harlo-agent/src/main.rs
 [^build]: crates/harlo-agent/build.rs
@@ -120,3 +235,36 @@ Image inputs from prompts, file reads and MCP are fitted to bounded dimensions/b
 [^images]: crates/harlo-agent/src/images.rs
 [^search]: crates/harlo-agent/src/search.rs
 [^todo]: crates/harlo-agent/src/todo.rs
+[^todo-open-note]: crates/harlo-agent/src/todo.rs, fn open_note
+[^todo-open]: crates/harlo-agent/src/todo.rs, fn open
+[^advisor]: crates/harlo-agent/src/advisor.rs, fn transcript
+[^advisor-env]: crates/harlo-agent/src/advisor.rs, fn from_env
+[^advisor-advice]: crates/harlo-agent/src/advisor.rs, fn advice
+[^advisor-note]: crates/harlo-agent/src/advisor.rs, fn note
+[^effort-type]: crates/harlo-agent/src/effort.rs, struct Word
+[^effort-method]: crates/harlo-agent/src/effort.rs, fn Word::effort
+[^effort-note]: crates/harlo-agent/src/effort.rs, fn Word::note
+[^instructions-in-input]: crates/harlo-agent/src/responses.rs, fn instructions_in_input
+[^inbox-next]: crates/harlo-agent/src/agent.rs, fn Inbox::next
+[^inbox-take]: crates/harlo-agent/src/agent.rs, fn Inbox::take
+[^effort-word]: crates/harlo-agent/src/effort.rs, fn word
+[^effort-auto]: crates/harlo-agent/src/effort.rs, fn auto
+[^effort-judged]: crates/harlo-agent/src/effort.rs, fn judged
+[^memory-on]: crates/harlo-agent/src/memory.rs, fn on
+[^memory-spec]: crates/harlo-agent/src/memory.rs, fn spec
+[^memory-loaded]: crates/harlo-agent/src/memory.rs, fn loaded
+[^memory-call]: crates/harlo-agent/src/memory.rs, fn call
+[^cache-monitor]: crates/harlo-agent/src/kv.rs, struct Monitor
+[^cache-observe]: crates/harlo-agent/src/kv.rs, fn Monitor::observe
+[^cache-miss]: crates/harlo-agent/src/kv.rs, enum Miss
+[^cache-report]: crates/harlo-agent/src/kv.rs, struct Report
+[^miss-id]: crates/harlo-agent/src/kv.rs, fn Miss::id
+[^miss-detail]: crates/harlo-agent/src/kv.rs, fn Miss::detail
+[^miss-harness]: crates/harlo-agent/src/kv.rs, fn Miss::harness_caused
+[^socket-on]: crates/harlo-agent/src/socket.rs, fn on
+[^wire]: crates/harlo-agent/src/socket.rs, struct Wire
+[^unusable]: crates/harlo-agent/src/socket.rs, struct Unusable
+[^fell-back]: crates/harlo-agent/src/socket.rs, fn fell_back
+[^fall-back]: crates/harlo-agent/src/socket.rs, fn fall_back
+[^replied]: crates/harlo-agent/src/socket.rs, fn replied
+[^socket-stream]: crates/harlo-agent/src/socket.rs, fn stream

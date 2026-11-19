@@ -9,12 +9,27 @@ covers:
   - crates/harlo-agent/src/task.rs
   - crates/harlo-agent/src/isolate.rs
   - crates/harlo-agent/src/profiles.rs
-generated: { by: harlo/gpt-6-astra, at: "2026-11-19T00:51:01Z" }
+generated: { by: harlo/gpt-6-luna, at: "2026-11-19T18:59:56Z" }
 sources:
   - id: rpc
     resource: "repo://crates/harlo-agent/src/rpc.rs"
   - id: tasks
     resource: "repo://crates/harlo-agent/src/task.rs"
+  - id: wait
+    resource: "repo://crates/harlo-agent/src/task.rs"
+    title: fn wait
+  - id: background-on
+    resource: "repo://crates/harlo-agent/src/task.rs"
+    title: fn background_on
+  - id: running
+    resource: "repo://crates/harlo-agent/src/task.rs"
+    title: struct Running
+  - id: background
+    resource: "repo://crates/harlo-agent/src/task.rs"
+    title: struct Background
+  - id: wait-spec
+    resource: "repo://crates/harlo-agent/src/task.rs"
+    title: fn wait_spec
   - id: dispatch
     resource: "repo://crates/harlo-agent/src/agent.rs"
     title: fn run_calls
@@ -74,7 +89,7 @@ Remote MCP authentication discovers resource/authorization metadata, supports dy
 
 ## Delegate with bounded capability and explicit merge behavior
 
-A `task` call accepts up to eight tasks and runs at most four concurrently, returning final results in request order. Each gets an agent and its own log. No local task receives `task` or Harlo's orchestration tools, so it cannot recursively create more local tasks or helper sessions. Approvals route through the parent gate, cancellation reaches all children, and background bash is refused for subagents.[^tasks][^dispatch]
+A `task` call accepts up to eight tasks and runs at most four concurrently, returning final results in request order. Each gets an agent and its own log. No local task receives `task` or Harlo's orchestration tools, so it cannot recursively create more local tasks or helper sessions. Approvals route through the parent gate, cancellation reaches all children, and background bash is refused for subagents. Optional background task calls return a `bg-…` id; `wait` takes selected results, while any not explicitly waited for are collected before the parent turn ends.[^tasks][^running][^background][^dispatch][^wait][^wait-spec][^background-on]
 
 A same-model task can fork the parent's request prefix to reuse context/cache. Tasks on another model/profile, and parallel writers isolated into worktrees, start fresh with instructions rather than pretending the inherited conversation describes their distinct environment. Profiles can narrow general-task tools and add instructions/model preference, but cannot grant capabilities outside that ceiling; unknown tool names are dropped.[^tasks][^profiles]
 
@@ -86,6 +101,11 @@ Progress frames distinguish child lifecycle from tool progress, and saved result
 
 [^rpc]: crates/harlo-agent/src/rpc.rs
 [^tasks]: crates/harlo-agent/src/task.rs
+[^wait]: crates/harlo-agent/src/task.rs, fn wait
+[^background-on]: crates/harlo-agent/src/task.rs, fn background_on
+[^running]: crates/harlo-agent/src/task.rs, struct Running
+[^background]: crates/harlo-agent/src/task.rs, struct Background
+[^wait-spec]: crates/harlo-agent/src/task.rs, fn wait_spec
 [^dispatch]: crates/harlo-agent/src/agent.rs, fn run_calls
 [^turn]: crates/harlo-agent/src/agent.rs, fn Agent::turn
 [^jobs]: crates/harlo-agent/src/jobs.rs

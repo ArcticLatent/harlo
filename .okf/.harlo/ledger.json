@@ -6,19 +6,22 @@
         "path": "crates/harlo-agent/src/session.rs",
         "unit": "Log::append",
         "hash": "261c9cb8b37de0dd",
-        "file": "8cefada4c4b0e08d"
+        "file": "77e054e5d5f86505",
+        "locator": "fn Log::append"
       },
       "branch": {
         "path": "crates/harlo-agent/src/session.rs",
         "unit": "Log::load_branch",
-        "hash": "b8ed42747bded78d",
-        "file": "8cefada4c4b0e08d"
+        "hash": "4b5ae78cc9e54511",
+        "file": "77e054e5d5f86505",
+        "locator": "fn Log::load_branch"
       },
       "carry": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::carry_over",
-        "hash": "d43916a2484f94eb",
-        "file": "4d3f009148eb1df1"
+        "hash": "d4fb3ae090d9e758",
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::carry_over"
       },
       "clock": {
         "path": "crates/harlo-agent/src/clock.rs",
@@ -27,54 +30,67 @@
       },
       "compact": {
         "path": "crates/harlo-agent/src/compact.rs",
-        "hash": "cb07501f9dfffbed",
-        "file": "cb07501f9dfffbed"
+        "hash": "6e7a8f6dc8d2b67d",
+        "file": "6e7a8f6dc8d2b67d"
+      },
+      "elide": {
+        "path": "crates/harlo-agent/src/compact.rs",
+        "unit": "elide",
+        "hash": "0e3b4a47517bb873",
+        "file": "6e7a8f6dc8d2b67d",
+        "locator": "fn elide"
       },
       "estimate": {
         "path": "crates/harlo-agent/src/agent.rs",
-        "hash": "4d3f009148eb1df1",
-        "file": "4d3f009148eb1df1"
+        "hash": "abd18474d0741563",
+        "file": "abd18474d0741563"
       },
       "failed": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::failed",
         "hash": "43358d7dbd84c716",
-        "file": "4d3f009148eb1df1"
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::failed"
       },
       "instructions": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::reread_instructions",
         "hash": "7b15ea27fc0bf362",
-        "file": "4d3f009148eb1df1"
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::reread_instructions"
       },
       "overflow": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::turn",
-        "hash": "8586f4c200e4df82",
-        "file": "4d3f009148eb1df1"
+        "hash": "8a468acebe0f2915",
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::turn"
       },
       "push": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::push",
         "hash": "1566407b4075bbe2",
-        "file": "4d3f009148eb1df1"
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::push"
       },
       "recall": {
         "path": "crates/harlo-agent/src/tools/mod.rs",
         "unit": "Tools::recall",
         "hash": "671a69865cb0dc1e",
-        "file": "7974f8c326b46e7c"
+        "file": "33c719a99e7fa7e3",
+        "locator": "fn Tools::recall"
       },
       "session": {
         "path": "crates/harlo-agent/src/session.rs",
-        "hash": "8cefada4c4b0e08d",
-        "file": "8cefada4c4b0e08d"
+        "hash": "77e054e5d5f86505",
+        "file": "77e054e5d5f86505"
       },
       "set-aside": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::set_aside",
         "hash": "011f070cd6b0c24c",
-        "file": "4d3f009148eb1df1"
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::set_aside"
       },
       "skills": {
         "path": "crates/harlo-agent/src/skills.rs",
@@ -84,8 +100,9 @@
       "splice": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::splice_summary",
-        "hash": "1efd2db0a9647473",
-        "file": "4d3f009148eb1df1"
+        "hash": "0114ca83cbcdeeb7",
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::splice_summary"
       },
       "stubs": {
         "path": "crates/harlo-agent/src/stubs.rs",
@@ -96,35 +113,114 @@
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::compact",
         "hash": "26cab60bee471545",
-        "file": "4d3f009148eb1df1"
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::compact"
       },
       "usage": {
         "path": "crates/harlo-agent/src/session.rs",
-        "hash": "8cefada4c4b0e08d",
-        "file": "8cefada4c4b0e08d"
+        "hash": "77e054e5d5f86505",
+        "file": "77e054e5d5f86505"
       }
     },
     "architecture/agent-tools.md": {
+      "adopt": {
+        "path": "crates/harlo-agent/src/jobs.rs",
+        "unit": "Jobs::adopt",
+        "hash": "1cb76659c8d9a0ac",
+        "file": "8ac8e06e82426dfe",
+        "locator": "fn Jobs::adopt"
+      },
       "approvals": {
         "path": "crates/harlo-agent/src/rpc.rs",
-        "hash": "aa2d33a9086f8afd",
-        "file": "aa2d33a9086f8afd"
+        "hash": "87c4a7ca32861c64",
+        "file": "87c4a7ca32861c64"
+      },
+      "aside": {
+        "path": "crates/harlo-agent/src/tools/bash.rs",
+        "unit": "Aside",
+        "hash": "23ae347c614966cf",
+        "file": "5aad14803a6da13c",
+        "locator": "struct Aside"
+      },
+      "ast": {
+        "path": "crates/harlo-agent/src/ast.rs",
+        "unit": "find",
+        "hash": "261d6be219ff7148",
+        "file": "22534053e271b047",
+        "locator": "fn find"
+      },
+      "ast-edit-spec": {
+        "path": "crates/harlo-agent/src/ast.rs",
+        "unit": "edit_spec",
+        "hash": "c2159efd22b963f7",
+        "file": "22534053e271b047",
+        "locator": "fn edit_spec"
+      },
+      "ast-grep-spec": {
+        "path": "crates/harlo-agent/src/ast.rs",
+        "unit": "grep_spec",
+        "hash": "bdb66ff28fda729a",
+        "file": "22534053e271b047",
+        "locator": "fn grep_spec"
+      },
+      "ast-offered": {
+        "path": "crates/harlo-agent/src/ast.rs",
+        "unit": "offered",
+        "hash": "9564c7b7a4bafaa9",
+        "file": "22534053e271b047",
+        "locator": "fn offered"
+      },
+      "ast-on": {
+        "path": "crates/harlo-agent/src/ast.rs",
+        "unit": "on",
+        "hash": "bf8ecfc41a3f37dc",
+        "file": "22534053e271b047",
+        "locator": "fn on"
       },
       "bash": {
         "path": "crates/harlo-agent/src/tools/bash.rs",
-        "hash": "0269a37f8d7c2ceb",
-        "file": "0269a37f8d7c2ceb"
+        "hash": "5aad14803a6da13c",
+        "file": "5aad14803a6da13c"
       },
       "danger": {
         "path": "crates/harlo-agent/src/danger.rs",
         "hash": "82075d238ec6856a",
         "file": "82075d238ec6856a"
       },
+      "debug-call": {
+        "path": "crates/harlo-agent/src/debug.rs",
+        "unit": "Debugger::call",
+        "hash": "a6ef9faac119093f",
+        "file": "e43079d1ea737a6d",
+        "locator": "fn Debugger::call"
+      },
+      "debug-on": {
+        "path": "crates/harlo-agent/src/debug.rs",
+        "unit": "on",
+        "hash": "5f46ad479dde92e7",
+        "file": "e43079d1ea737a6d",
+        "locator": "fn on"
+      },
+      "debug-spec": {
+        "path": "crates/harlo-agent/src/debug.rs",
+        "unit": "spec",
+        "hash": "761b2c232ca878ed",
+        "file": "e43079d1ea737a6d",
+        "locator": "fn spec"
+      },
+      "debugger": {
+        "path": "crates/harlo-agent/src/debug.rs",
+        "unit": "Debugger",
+        "hash": "13215a143b6ae4ab",
+        "file": "e43079d1ea737a6d",
+        "locator": "struct Debugger"
+      },
       "dispatch": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "run_calls",
-        "hash": "8afddf19e45cf5b5",
-        "file": "4d3f009148eb1df1"
+        "hash": "89052f877e2bf3c0",
+        "file": "abd18474d0741563",
+        "locator": "fn run_calls"
       },
       "edits": {
         "path": "crates/harlo-agent/src/tools/edit.rs",
@@ -138,18 +234,60 @@
       },
       "files": {
         "path": "crates/harlo-agent/src/tools/mod.rs",
-        "hash": "7974f8c326b46e7c",
-        "file": "7974f8c326b46e7c"
+        "hash": "33c719a99e7fa7e3",
+        "file": "33c719a99e7fa7e3"
+      },
+      "formats": {
+        "path": "crates/harlo-agent/src/tools/formats.rs",
+        "unit": "text",
+        "hash": "e0844318e40d6f3d",
+        "file": "5d69cdf85b7dc922",
+        "locator": "fn text"
       },
       "generated": {
         "path": "crates/harlo-agent/src/generated.rs",
         "hash": "13a28280fe369b33",
         "file": "13a28280fe369b33"
       },
+      "glob": {
+        "path": "crates/harlo-agent/src/rules.rs",
+        "unit": "glob",
+        "hash": "054ed2df960abb32",
+        "file": "474ebf7f2b5b948b",
+        "locator": "fn glob"
+      },
+      "glob-matches": {
+        "path": "crates/harlo-agent/src/rules.rs",
+        "unit": "GlobRule::matches",
+        "hash": "7f0e4018f44964c4",
+        "file": "474ebf7f2b5b948b",
+        "locator": "fn GlobRule::matches"
+      },
+      "glob-rule": {
+        "path": "crates/harlo-agent/src/rules.rs",
+        "unit": "GlobRule",
+        "hash": "d96e2efacf8a34b4",
+        "file": "474ebf7f2b5b948b",
+        "locator": "struct GlobRule"
+      },
+      "glob-rules": {
+        "path": "crates/harlo-agent/src/rules.rs",
+        "unit": "glob_rules",
+        "hash": "ef8b207be1768a85",
+        "file": "474ebf7f2b5b948b",
+        "locator": "fn glob_rules"
+      },
       "hashline": {
         "path": "crates/harlo-agent/src/hashline.rs",
         "hash": "7add8b8ffb01a621",
         "file": "7add8b8ffb01a621"
+      },
+      "hits": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "hits",
+        "hash": "46e41928ad176729",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn hits"
       },
       "images": {
         "path": "crates/harlo-agent/src/images.rs",
@@ -158,8 +296,50 @@
       },
       "jobs": {
         "path": "crates/harlo-agent/src/jobs.rs",
-        "hash": "7e6bccf2b1b1f4fc",
-        "file": "7e6bccf2b1b1f4fc"
+        "hash": "8ac8e06e82426dfe",
+        "file": "8ac8e06e82426dfe"
+      },
+      "keywords": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "keywords",
+        "hash": "ff0c12ddf01ba3b3",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn keywords"
+      },
+      "kind": {
+        "path": "crates/harlo-agent/src/tools/formats.rs",
+        "unit": "kind",
+        "hash": "22d43aa42cab4c5e",
+        "file": "5d69cdf85b7dc922",
+        "locator": "fn kind"
+      },
+      "kind-type": {
+        "path": "crates/harlo-agent/src/tools/formats.rs",
+        "unit": "Kind",
+        "hash": "88210b7b003306aa",
+        "file": "5d69cdf85b7dc922",
+        "locator": "enum Kind"
+      },
+      "locate-files": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "files",
+        "hash": "0da98d106995e4eb",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn files"
+      },
+      "locate-on": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "on",
+        "hash": "d9b6262b4c524182",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn on"
+      },
+      "locate-spec": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "spec",
+        "hash": "a81c3ab08eb02b57",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn spec"
       },
       "lookup": {
         "path": "crates/harlo-agent/src/lookup.rs",
@@ -168,8 +348,8 @@
       },
       "lsp": {
         "path": "crates/harlo-agent/src/lsp.rs",
-        "hash": "e804e29b821310d7",
-        "file": "e804e29b821310d7"
+        "hash": "2f3957f57d727eb2",
+        "file": "2f3957f57d727eb2"
       },
       "outline": {
         "path": "crates/harlo-agent/src/outline.rs",
@@ -178,41 +358,147 @@
       },
       "patch": {
         "path": "crates/harlo-agent/src/patch.rs",
-        "hash": "9d37bdf7ad1c3d1c",
-        "file": "9d37bdf7ad1c3d1c"
+        "hash": "42e7e76c273e6065",
+        "file": "42e7e76c273e6065"
       },
       "patch-apply": {
         "path": "crates/harlo-agent/src/tools/mod.rs",
         "unit": "Tools::patch",
         "hash": "657148f186dcea70",
-        "file": "7974f8c326b46e7c"
+        "file": "33c719a99e7fa7e3",
+        "locator": "fn Tools::patch"
       },
       "program": {
         "path": "crates/harlo-agent/src/program.rs",
-        "hash": "22e07aa323e0922b",
-        "file": "22e07aa323e0922b"
+        "hash": "3731c09641a8935b",
+        "file": "3731c09641a8935b"
+      },
+      "question": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "question",
+        "hash": "0db8ee7121f8e164",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn question"
+      },
+      "range": {
+        "path": "crates/harlo-agent/src/tools/formats.rs",
+        "unit": "Range",
+        "hash": "cbf3b40cb15ba135",
+        "file": "5d69cdf85b7dc922",
+        "locator": "enum Range"
+      },
+      "ready": {
+        "path": "crates/harlo-agent/src/jobs.rs",
+        "unit": "Jobs::ready",
+        "hash": "bd6a21fe5d5a3631",
+        "file": "8ac8e06e82426dfe",
+        "locator": "fn Jobs::ready"
+      },
+      "refused": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "refused",
+        "hash": "a278773ed14039fc",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn refused"
+      },
+      "rename": {
+        "path": "crates/harlo-agent/src/lsp.rs",
+        "unit": "Servers::rename",
+        "hash": "0377a9c461d02f67",
+        "file": "2f3957f57d727eb2",
+        "locator": "fn Servers::rename"
+      },
+      "rename-spec": {
+        "path": "crates/harlo-agent/src/lsp.rs",
+        "unit": "rename_spec",
+        "hash": "dc5639abf67e2312",
+        "file": "2f3957f57d727eb2",
+        "locator": "fn rename_spec"
+      },
+      "room": {
+        "path": "crates/harlo-agent/src/jobs.rs",
+        "unit": "Jobs::has_room",
+        "hash": "fa2b5204d4870252",
+        "file": "8ac8e06e82426dfe",
+        "locator": "fn Jobs::has_room"
       },
       "sandbox": {
         "path": "crates/harlo-agent/src/sandbox.rs",
-        "hash": "b8887038839ec81b",
-        "file": "b8887038839ec81b"
+        "hash": "965eafad9194ae44",
+        "file": "965eafad9194ae44"
+      },
+      "selector": {
+        "path": "crates/harlo-agent/src/tools/formats.rs",
+        "unit": "selector",
+        "hash": "4ab111ee03977a6c",
+        "file": "5d69cdf85b7dc922",
+        "locator": "fn selector"
       },
       "startup": {
         "path": "crates/harlo-agent/src/main.rs",
-        "hash": "b0f3678741766bcd",
-        "file": "b0f3678741766bcd"
+        "hash": "db18f5ef7723f66e",
+        "file": "db18f5ef7723f66e"
       },
       "sys": {
         "path": "crates/harlo-agent/src/sys.rs",
         "hash": "44931afa78d3e500",
         "file": "44931afa78d3e500"
+      },
+      "window": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "Window",
+        "hash": "1a987b363fb45466",
+        "file": "1be58360cbf0e0f3",
+        "locator": "struct Window"
+      },
+      "windows": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "windows",
+        "hash": "f0023a15aa46f12a",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn windows"
+      },
+      "words": {
+        "path": "crates/harlo-agent/src/locate.rs",
+        "unit": "words",
+        "hash": "dbe26017e66a98da",
+        "file": "1be58360cbf0e0f3",
+        "locator": "fn words"
       }
     },
     "architecture/agent.md": {
       "accounting": {
         "path": "crates/harlo-agent/src/agent.rs",
-        "hash": "4d3f009148eb1df1",
-        "file": "4d3f009148eb1df1"
+        "hash": "abd18474d0741563",
+        "file": "abd18474d0741563"
+      },
+      "advisor": {
+        "path": "crates/harlo-agent/src/advisor.rs",
+        "unit": "transcript",
+        "hash": "72d79bd776850031",
+        "file": "dc6d7ec5c7e98d45",
+        "locator": "fn transcript"
+      },
+      "advisor-advice": {
+        "path": "crates/harlo-agent/src/advisor.rs",
+        "unit": "advice",
+        "hash": "1cc99e796b80189e",
+        "file": "dc6d7ec5c7e98d45",
+        "locator": "fn advice"
+      },
+      "advisor-env": {
+        "path": "crates/harlo-agent/src/advisor.rs",
+        "unit": "from_env",
+        "hash": "2aaed779f3b8373a",
+        "file": "dc6d7ec5c7e98d45",
+        "locator": "fn from_env"
+      },
+      "advisor-note": {
+        "path": "crates/harlo-agent/src/advisor.rs",
+        "unit": "note",
+        "hash": "debb3e9f0cfcc90f",
+        "file": "dc6d7ec5c7e98d45",
+        "locator": "fn note"
       },
       "auth": {
         "path": "crates/harlo-agent/src/auth.rs",
@@ -224,22 +510,108 @@
         "hash": "3ea590d720c6ab15",
         "file": "3ea590d720c6ab15"
       },
+      "cache-miss": {
+        "path": "crates/harlo-agent/src/kv.rs",
+        "unit": "Miss",
+        "hash": "9d8f9d3b7c578a9d",
+        "file": "4e41485b1d736279",
+        "locator": "enum Miss"
+      },
+      "cache-monitor": {
+        "path": "crates/harlo-agent/src/kv.rs",
+        "unit": "Monitor",
+        "hash": "f51b5413174bfde0",
+        "file": "4e41485b1d736279",
+        "locator": "struct Monitor"
+      },
+      "cache-observe": {
+        "path": "crates/harlo-agent/src/kv.rs",
+        "unit": "Monitor::observe",
+        "hash": "5a1501449df46f94",
+        "file": "4e41485b1d736279",
+        "locator": "fn Monitor::observe"
+      },
+      "cache-report": {
+        "path": "crates/harlo-agent/src/kv.rs",
+        "unit": "Report",
+        "hash": "1d479ef245623034",
+        "file": "4e41485b1d736279",
+        "locator": "struct Report"
+      },
       "calls": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "run_calls",
-        "hash": "8afddf19e45cf5b5",
-        "file": "4d3f009148eb1df1"
+        "hash": "89052f877e2bf3c0",
+        "file": "abd18474d0741563",
+        "locator": "fn run_calls"
+      },
+      "effort-auto": {
+        "path": "crates/harlo-agent/src/effort.rs",
+        "unit": "auto",
+        "hash": "0e214424a2d90da6",
+        "file": "c04417bdeeafb61c",
+        "locator": "fn auto"
+      },
+      "effort-judged": {
+        "path": "crates/harlo-agent/src/effort.rs",
+        "unit": "judged",
+        "hash": "eac3e396ad205cde",
+        "file": "c04417bdeeafb61c",
+        "locator": "fn judged"
+      },
+      "effort-method": {
+        "path": "crates/harlo-agent/src/effort.rs",
+        "unit": "Word::effort",
+        "hash": "a8fe6bc366079551",
+        "file": "c04417bdeeafb61c",
+        "locator": "fn Word::effort"
+      },
+      "effort-note": {
+        "path": "crates/harlo-agent/src/effort.rs",
+        "unit": "Word::note",
+        "hash": "0b94152ac38d17f4",
+        "file": "c04417bdeeafb61c",
+        "locator": "fn Word::note"
+      },
+      "effort-type": {
+        "path": "crates/harlo-agent/src/effort.rs",
+        "unit": "Word",
+        "hash": "79f7a3335fec7ef6",
+        "file": "c04417bdeeafb61c",
+        "locator": "struct Word"
+      },
+      "effort-word": {
+        "path": "crates/harlo-agent/src/effort.rs",
+        "unit": "word",
+        "hash": "ff7f43371921f7b3",
+        "file": "c04417bdeeafb61c",
+        "locator": "fn word"
       },
       "entry": {
         "path": "crates/harlo-agent/src/main.rs",
-        "hash": "b0f3678741766bcd",
-        "file": "b0f3678741766bcd"
+        "hash": "db18f5ef7723f66e",
+        "file": "db18f5ef7723f66e"
+      },
+      "fall-back": {
+        "path": "crates/harlo-agent/src/socket.rs",
+        "unit": "fall_back",
+        "hash": "b1e3ac397c7f277d",
+        "file": "f50123932dd49f11",
+        "locator": "fn fall_back"
       },
       "fallback": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::ask",
-        "hash": "d71e6dc023b1d90c",
-        "file": "4d3f009148eb1df1"
+        "hash": "eaf170f2e5202289",
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::ask"
+      },
+      "fell-back": {
+        "path": "crates/harlo-agent/src/socket.rs",
+        "unit": "fell_back",
+        "hash": "d7a615801e77ef19",
+        "file": "f50123932dd49f11",
+        "locator": "fn fell_back"
       },
       "gemini": {
         "path": "crates/harlo-agent/src/gemini.rs",
@@ -250,6 +622,27 @@
         "path": "crates/harlo-agent/src/images.rs",
         "hash": "44ea5550dc139b28",
         "file": "44ea5550dc139b28"
+      },
+      "inbox-next": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Inbox::next",
+        "hash": "62ffa0857079804a",
+        "file": "abd18474d0741563",
+        "locator": "fn Inbox::next"
+      },
+      "inbox-take": {
+        "path": "crates/harlo-agent/src/agent.rs",
+        "unit": "Inbox::take",
+        "hash": "9b3bb33ea1c6741f",
+        "file": "abd18474d0741563",
+        "locator": "fn Inbox::take"
+      },
+      "instructions-in-input": {
+        "path": "crates/harlo-agent/src/responses.rs",
+        "unit": "instructions_in_input",
+        "hash": "10cafd3e75a4bd7a",
+        "file": "0dc48737e038797a",
+        "locator": "fn instructions_in_input"
       },
       "keys": {
         "path": "crates/harlo-agent/src/keys.rs",
@@ -264,13 +657,63 @@
       "loop": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::turn",
-        "hash": "8586f4c200e4df82",
-        "file": "4d3f009148eb1df1"
+        "hash": "8a468acebe0f2915",
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::turn"
+      },
+      "memory-call": {
+        "path": "crates/harlo-agent/src/memory.rs",
+        "unit": "call",
+        "hash": "684c22209fae93e0",
+        "file": "b8bcedece3d049da",
+        "locator": "fn call"
+      },
+      "memory-loaded": {
+        "path": "crates/harlo-agent/src/memory.rs",
+        "unit": "loaded",
+        "hash": "c94a01d345507b11",
+        "file": "b8bcedece3d049da",
+        "locator": "fn loaded"
+      },
+      "memory-on": {
+        "path": "crates/harlo-agent/src/memory.rs",
+        "unit": "on",
+        "hash": "1f0b943f8b5aa38a",
+        "file": "b8bcedece3d049da",
+        "locator": "fn on"
+      },
+      "memory-spec": {
+        "path": "crates/harlo-agent/src/memory.rs",
+        "unit": "spec",
+        "hash": "d9ea7745a3f162ed",
+        "file": "b8bcedece3d049da",
+        "locator": "fn spec"
       },
       "messages": {
         "path": "crates/harlo-agent/src/messages.rs",
         "hash": "cd9f52bc48d662e3",
         "file": "cd9f52bc48d662e3"
+      },
+      "miss-detail": {
+        "path": "crates/harlo-agent/src/kv.rs",
+        "unit": "Miss::detail",
+        "hash": "f1b1724ffd62e59d",
+        "file": "4e41485b1d736279",
+        "locator": "fn Miss::detail"
+      },
+      "miss-harness": {
+        "path": "crates/harlo-agent/src/kv.rs",
+        "unit": "Miss::harness_caused",
+        "hash": "5896989c361d5c81",
+        "file": "4e41485b1d736279",
+        "locator": "fn Miss::harness_caused"
+      },
+      "miss-id": {
+        "path": "crates/harlo-agent/src/kv.rs",
+        "unit": "Miss::id",
+        "hash": "095638147466758e",
+        "file": "4e41485b1d736279",
+        "locator": "fn Miss::id"
       },
       "presets": {
         "path": "crates/harlo-agent/src/presets.json",
@@ -287,10 +730,17 @@
         "hash": "3c57f8394d8bbf60",
         "file": "3c57f8394d8bbf60"
       },
+      "replied": {
+        "path": "crates/harlo-agent/src/socket.rs",
+        "unit": "replied",
+        "hash": "b0f13dd78bedd930",
+        "file": "f50123932dd49f11",
+        "locator": "fn replied"
+      },
       "responses": {
         "path": "crates/harlo-agent/src/responses.rs",
-        "hash": "525aa82dcf9a07b3",
-        "file": "525aa82dcf9a07b3"
+        "hash": "0dc48737e038797a",
+        "file": "0dc48737e038797a"
       },
       "retry": {
         "path": "crates/harlo-agent/src/retry.rs",
@@ -309,13 +759,48 @@
       },
       "send": {
         "path": "crates/harlo-agent/src/agent.rs",
-        "hash": "4d3f009148eb1df1",
-        "file": "4d3f009148eb1df1"
+        "hash": "abd18474d0741563",
+        "file": "abd18474d0741563"
+      },
+      "socket-on": {
+        "path": "crates/harlo-agent/src/socket.rs",
+        "unit": "on",
+        "hash": "a64fe5aa96bd952a",
+        "file": "f50123932dd49f11",
+        "locator": "fn on"
+      },
+      "socket-stream": {
+        "path": "crates/harlo-agent/src/socket.rs",
+        "unit": "stream",
+        "hash": "328e3d867e6529c4",
+        "file": "f50123932dd49f11",
+        "locator": "fn stream"
       },
       "todo": {
         "path": "crates/harlo-agent/src/todo.rs",
-        "hash": "0a8dcb381fec8769",
-        "file": "0a8dcb381fec8769"
+        "hash": "62d8bd47f6cecc9e",
+        "file": "62d8bd47f6cecc9e"
+      },
+      "todo-open": {
+        "path": "crates/harlo-agent/src/todo.rs",
+        "unit": "open",
+        "hash": "cba57cd77e13627c",
+        "file": "62d8bd47f6cecc9e",
+        "locator": "fn open"
+      },
+      "todo-open-note": {
+        "path": "crates/harlo-agent/src/todo.rs",
+        "unit": "open_note",
+        "hash": "75dba847bcfcfa36",
+        "file": "62d8bd47f6cecc9e",
+        "locator": "fn open_note"
+      },
+      "unusable": {
+        "path": "crates/harlo-agent/src/socket.rs",
+        "unit": "Unusable",
+        "hash": "15886314bab98daa",
+        "file": "f50123932dd49f11",
+        "locator": "struct Unusable"
       },
       "usage": {
         "path": "crates/harlo-agent/src/usage.rs",
@@ -326,6 +811,13 @@
         "path": "crates/harlo-agent/src/used.rs",
         "hash": "8cc60dae73d4b062",
         "file": "8cc60dae73d4b062"
+      },
+      "wire": {
+        "path": "crates/harlo-agent/src/socket.rs",
+        "unit": "Wire",
+        "hash": "1292810412c93f32",
+        "file": "f50123932dd49f11",
+        "locator": "struct Wire"
       }
     },
     "architecture/core-engines.md": {
@@ -333,7 +825,8 @@
         "path": "crates/harlo-core/src/model_servers.rs",
         "unit": "with_server",
         "hash": "7da271ef8081f133",
-        "file": "28c726849b5574b4"
+        "file": "28c726849b5574b4",
+        "locator": "fn with_server"
       },
       "agent-host": {
         "path": "crates/harlo-core/src/agent_host.rs",
@@ -342,8 +835,8 @@
       },
       "args": {
         "path": "crates/harlo-core/src/agents.rs",
-        "hash": "8ccc26665a020430",
-        "file": "8ccc26665a020430"
+        "hash": "902d352927603037",
+        "file": "902d352927603037"
       },
       "catalog": {
         "path": "crates/harlo-core/src/mcp_catalog.rs",
@@ -369,7 +862,8 @@
         "path": "crates/harlo-core/src/model_servers.rs",
         "unit": "free_by_default",
         "hash": "2f6012e1cb78687c",
-        "file": "28c726849b5574b4"
+        "file": "28c726849b5574b4",
+        "locator": "fn free_by_default"
       },
       "helper": {
         "path": "crates/harlo-core/src/bin/harlo-engines.rs",
@@ -380,7 +874,8 @@
         "path": "crates/harlo-core/src/servers.rs",
         "unit": "launch",
         "hash": "9339d8c16ee0d4ff",
-        "file": "09587710f622072a"
+        "file": "09587710f622072a",
+        "locator": "fn launch"
       },
       "mcp": {
         "path": "crates/harlo-core/src/mcp.rs",
@@ -396,7 +891,8 @@
         "path": "crates/harlo-core/src/servers.rs",
         "unit": "needs_start",
         "hash": "871984d1db4793d7",
-        "file": "09587710f622072a"
+        "file": "09587710f622072a",
+        "locator": "fn needs_start"
       },
       "probe": {
         "path": "crates/harlo-core/src/mcp_probe.rs",
@@ -422,7 +918,8 @@
         "path": "crates/harlo-core/src/servers.rs",
         "unit": "remove",
         "hash": "e9b8e87260ada365",
-        "file": "09587710f622072a"
+        "file": "09587710f622072a",
+        "locator": "fn remove"
       },
       "servers": {
         "path": "crates/harlo-core/src/servers.rs",
@@ -448,7 +945,8 @@
         "path": "crates/harlo-core/src/servers.rs",
         "unit": "wait_up",
         "hash": "a7a4e7756188ad45",
-        "file": "09587710f622072a"
+        "file": "09587710f622072a",
+        "locator": "fn wait_up"
       }
     },
     "architecture/core-persistence.md": {
@@ -456,7 +954,8 @@
         "path": "crates/harlo-core/src/db.rs",
         "unit": "Db::move_to_harlo",
         "hash": "47817250bc73434f",
-        "file": "a0978184df224b52"
+        "file": "a0978184df224b52",
+        "locator": "fn Db::move_to_harlo"
       },
       "claude": {
         "path": "crates/harlo-harness/src/claude.rs",
@@ -477,7 +976,8 @@
         "path": "crates/harlo-core/src/db.rs",
         "unit": "Db::init",
         "hash": "1f9371c4d98d79df",
-        "file": "a0978184df224b52"
+        "file": "a0978184df224b52",
+        "locator": "fn Db::init"
       },
       "memory": {
         "path": "crates/harlo-core/tests/memory.rs",
@@ -548,13 +1048,15 @@
         "path": "crates/harlo-core/src/transcript.rs",
         "unit": "Transcript::load_one",
         "hash": "24055a3c5369bffb",
-        "file": "3bc3321c24f1f326"
+        "file": "b96bb61d4dbebffd",
+        "locator": "fn Transcript::load_one"
       },
       "whole": {
         "path": "crates/harlo-core/src/transcript.rs",
         "unit": "whole",
         "hash": "90a2223af71bdfb3",
-        "file": "3bc3321c24f1f326"
+        "file": "b96bb61d4dbebffd",
+        "locator": "fn whole"
       },
       "workflow": {
         "path": "crates/harlo-core/src/workflow.rs",
@@ -627,6 +1129,13 @@
         "path": "crates/harlo-core/src/firewall.rs",
         "hash": "468d2ae91240dff9",
         "file": "468d2ae91240dff9"
+      },
+      "freshness": {
+        "path": "crates/harlo-core/src/wiki.rs",
+        "unit": "Freshness",
+        "hash": "53bc543037f9d723",
+        "file": "11e64cd240a3f26e",
+        "locator": "enum Freshness"
       },
       "git": {
         "path": "crates/harlo-core/src/git.rs",
@@ -735,13 +1244,13 @@
       },
       "session": {
         "path": "crates/harlo-core/src/session.rs",
-        "hash": "23f31f66e2c3a783",
-        "file": "23f31f66e2c3a783"
+        "hash": "412198a92c2a77cc",
+        "file": "412198a92c2a77cc"
       },
       "session-features": {
         "path": "crates/harlo-core/src/session.rs",
-        "hash": "23f31f66e2c3a783",
-        "file": "23f31f66e2c3a783"
+        "hash": "412198a92c2a77cc",
+        "file": "412198a92c2a77cc"
       },
       "splitdiff": {
         "path": "crates/harlo-core/src/splitdiff.rs",
@@ -765,8 +1274,8 @@
       },
       "transcript": {
         "path": "crates/harlo-core/src/transcript.rs",
-        "hash": "3bc3321c24f1f326",
-        "file": "3bc3321c24f1f326"
+        "hash": "b96bb61d4dbebffd",
+        "file": "b96bb61d4dbebffd"
       },
       "visuals": {
         "path": "crates/harlo-core/src/visuals.rs",
@@ -775,8 +1284,8 @@
       },
       "wiki": {
         "path": "crates/harlo-core/src/wiki.rs",
-        "hash": "42224d0feea89dd6",
-        "file": "42224d0feea89dd6"
+        "hash": "11e64cd240a3f26e",
+        "file": "11e64cd240a3f26e"
       },
       "wiki-view": {
         "path": "crates/harlo-core/src/wiki_view.rs",
@@ -829,7 +1338,8 @@
         "path": "crates/harlo-code/src/view.rs",
         "unit": "View::sync",
         "hash": "e466f56c37edf7f2",
-        "file": "cffdd8d98ff09a2f"
+        "file": "cffdd8d98ff09a2f",
+        "locator": "fn View::sync"
       },
       "syntax": {
         "path": "crates/harlo-code/src/syntax.rs",
@@ -855,8 +1365,8 @@
     "architecture/desktop-ui.md": {
       "binding": {
         "path": "crates/harlo-app/src/chat_session.rs",
-        "hash": "7df789dec031ab0e",
-        "file": "7df789dec031ab0e"
+        "hash": "98edcf4bf58cf94f",
+        "file": "98edcf4bf58cf94f"
       },
       "build": {
         "path": "crates/harlo-app/build.rs",
@@ -865,13 +1375,13 @@
       },
       "chat": {
         "path": "crates/harlo-app/src/chat_session.rs",
-        "hash": "7df789dec031ab0e",
-        "file": "7df789dec031ab0e"
+        "hash": "98edcf4bf58cf94f",
+        "file": "98edcf4bf58cf94f"
       },
       "chatview": {
         "path": "crates/harlo-app/qml/ChatView.qml",
-        "hash": "e24dc604de0b6722",
-        "file": "e24dc604de0b6722"
+        "hash": "27ebfdde41e19ccc",
+        "file": "27ebfdde41e19ccc"
       },
       "editor": {
         "path": "crates/harlo-app/qml/FileEditor.qml",
@@ -880,14 +1390,15 @@
       },
       "main": {
         "path": "crates/harlo-app/qml/Main.qml",
-        "hash": "44a6996821313aa9",
-        "file": "44a6996821313aa9"
+        "hash": "36b61be566030a5a",
+        "file": "36b61be566030a5a"
       },
       "palette": {
         "path": "crates/harlo-app/src/code_view.rs",
         "unit": "palette_from_json",
         "hash": "1d038dd665ac5b38",
-        "file": "18185684506f3589"
+        "file": "18185684506f3589",
+        "locator": "fn palette_from_json"
       },
       "registry": {
         "path": "crates/harlo-app/src/registry.rs",
@@ -898,22 +1409,23 @@
         "path": "crates/harlo-app/src/chat_session.rs",
         "unit": "ChatSession::apply_row_changes",
         "hash": "f6b68095dfeea411",
-        "file": "7df789dec031ab0e"
+        "file": "98edcf4bf58cf94f",
+        "locator": "fn ChatSession::apply_row_changes"
       },
       "theme": {
         "path": "crates/harlo-app/qml/Theme.qml",
-        "hash": "e28a97ac12ef138e",
-        "file": "e28a97ac12ef138e"
+        "hash": "0abb6c16187180d2",
+        "file": "0abb6c16187180d2"
       },
       "transcript": {
         "path": "crates/harlo-app/qml/TranscriptView.qml",
-        "hash": "af38a3ad4d17675e",
-        "file": "af38a3ad4d17675e"
+        "hash": "91d2e712495df852",
+        "file": "91d2e712495df852"
       },
       "workspace": {
         "path": "crates/harlo-app/src/workspace.rs",
-        "hash": "03dd98c2a951a198",
-        "file": "03dd98c2a951a198"
+        "hash": "073aa84aa207e564",
+        "file": "073aa84aa207e564"
       }
     },
     "architecture/desktop.md": {
@@ -929,8 +1441,8 @@
       },
       "closing": {
         "path": "crates/harlo-app/qml/Main.qml",
-        "hash": "44a6996821313aa9",
-        "file": "44a6996821313aa9"
+        "hash": "36b61be566030a5a",
+        "file": "36b61be566030a5a"
       },
       "code": {
         "path": "crates/harlo-code/Cargo.toml",
@@ -964,17 +1476,18 @@
         "path": "crates/harlo-app/src/main.rs",
         "unit": "main",
         "hash": "8d8d3b2c73701718",
-        "file": "81c27471880e87f8"
+        "file": "81c27471880e87f8",
+        "locator": "fn main"
       },
       "tests": {
         "path": "crates/harlo-app/qml/SelfTests.qml",
-        "hash": "5dc73e60379e170b",
-        "file": "5dc73e60379e170b"
+        "hash": "74008ad3a7d26275",
+        "file": "74008ad3a7d26275"
       },
       "workspace": {
         "path": "crates/harlo-app/src/workspace.rs",
-        "hash": "03dd98c2a951a198",
-        "file": "03dd98c2a951a198"
+        "hash": "073aa84aa207e564",
+        "file": "073aa84aa207e564"
       }
     },
     "architecture/harness.md": {
@@ -995,8 +1508,8 @@
       },
       "claude-run": {
         "path": "crates/harlo-harness/src/claude_run.rs",
-        "hash": "45a1b75932627559",
-        "file": "45a1b75932627559"
+        "hash": "7f3a0b73cfa60eaa",
+        "file": "7f3a0b73cfa60eaa"
       },
       "demo": {
         "path": "crates/harlo-harness/src/demo.rs",
@@ -1010,8 +1523,8 @@
       },
       "events": {
         "path": "crates/harlo-harness/src/event.rs",
-        "hash": "7741e55a4630920b",
-        "file": "7741e55a4630920b"
+        "hash": "34cd459c9640292b",
+        "file": "34cd459c9640292b"
       },
       "example": {
         "path": "crates/harlo-harness/examples/list_sessions.rs",
@@ -1027,7 +1540,8 @@
         "path": "crates/harlo-harness/src/claude_run.rs",
         "unit": "tests::replays_a_real_session",
         "hash": "eadc18d387c9f5e4",
-        "file": "45a1b75932627559"
+        "file": "7f3a0b73cfa60eaa",
+        "locator": "fn replays_a_real_session"
       },
       "framing": {
         "path": "crates/harlo-harness/src/framing.rs",
@@ -1066,14 +1580,15 @@
       },
       "process": {
         "path": "crates/harlo-harness/src/process.rs",
-        "hash": "065602fcc6c5e908",
-        "file": "065602fcc6c5e908"
+        "hash": "32cf5e06e65dcc4f",
+        "file": "32cf5e06e65dcc4f"
       },
       "remote": {
         "path": "crates/harlo-harness/src/process.rs",
         "unit": "remote_script",
         "hash": "adbe7156ec8fcbd9",
-        "file": "065602fcc6c5e908"
+        "file": "32cf5e06e65dcc4f",
+        "locator": "fn remote_script"
       },
       "store": {
         "path": "crates/harlo-harness/src/store.rs",
@@ -1083,15 +1598,16 @@
       "translate": {
         "path": "crates/harlo-harness/src/event.rs",
         "unit": "Translator::translate",
-        "hash": "e797dd47925087e7",
-        "file": "7741e55a4630920b"
+        "hash": "bc5592017871384a",
+        "file": "34cd459c9640292b",
+        "locator": "fn Translator::translate"
       }
     },
     "architecture/knowledge.md": {
       "brief": {
         "path": "crates/harlo-okf/src/brief.rs",
-        "hash": "cfad0c55f0ab16a8",
-        "file": "cfad0c55f0ab16a8"
+        "hash": "11ab882cd6082820",
+        "file": "11ab882cd6082820"
       },
       "bundle": {
         "path": "crates/harlo-okf/src/bundle.rs",
@@ -1113,6 +1629,13 @@
         "hash": "963ad145d1b5060e",
         "file": "963ad145d1b5060e"
       },
+      "found-type": {
+        "path": "crates/harlo-index/src/structural.rs",
+        "unit": "Found",
+        "hash": "e4f9e5130ae93246",
+        "file": "7ec100fbea7874c7",
+        "locator": "struct Found"
+      },
       "graph": {
         "path": "crates/harlo-index/src/graph.rs",
         "hash": "be06c22929c0abc7",
@@ -1120,8 +1643,8 @@
       },
       "index": {
         "path": "crates/harlo-index/src/index.rs",
-        "hash": "7ffe0995458abc49",
-        "file": "7ffe0995458abc49"
+        "hash": "c36387fa587ba590",
+        "file": "c36387fa587ba590"
       },
       "index-brief": {
         "path": "crates/harlo-index/src/brief.rs",
@@ -1130,23 +1653,23 @@
       },
       "index-cargo": {
         "path": "crates/harlo-index/Cargo.toml",
-        "hash": "2a1b2e20f6a06e15",
-        "file": "2a1b2e20f6a06e15"
+        "hash": "0ebb5fa971a8f59f",
+        "file": "0ebb5fa971a8f59f"
       },
       "index-lib": {
         "path": "crates/harlo-index/src/lib.rs",
-        "hash": "59d9d00cca20b107",
-        "file": "59d9d00cca20b107"
+        "hash": "304514ca5525047d",
+        "file": "304514ca5525047d"
       },
       "indexed": {
         "path": "crates/harlo-okf/src/indexed.rs",
-        "hash": "63f67fe2412eccd7",
-        "file": "63f67fe2412eccd7"
+        "hash": "93c46681a2cde2f9",
+        "file": "93c46681a2cde2f9"
       },
       "ledger": {
         "path": "crates/harlo-okf/src/ledger.rs",
-        "hash": "70ac60357af4121d",
-        "file": "70ac60357af4121d"
+        "hash": "99e1a644030b236f",
+        "file": "99e1a644030b236f"
       },
       "lex": {
         "path": "crates/harlo-okf/src/lex.rs",
@@ -1160,8 +1683,8 @@
       },
       "main": {
         "path": "crates/harlo-index/src/main.rs",
-        "hash": "96ab926f146fb4e9",
-        "file": "96ab926f146fb4e9"
+        "hash": "537878f99a9358ef",
+        "file": "537878f99a9358ef"
       },
       "manifests": {
         "path": "crates/harlo-index/src/manifests.rs",
@@ -1173,10 +1696,24 @@
         "hash": "914d2588d6671024",
         "file": "914d2588d6671024"
       },
+      "named": {
+        "path": "crates/harlo-index/src/lang.rs",
+        "unit": "named",
+        "hash": "86b2477d78065c8c",
+        "file": "b57454a6a77ff48c",
+        "locator": "fn named"
+      },
       "okf-lib": {
         "path": "crates/harlo-okf/src/lib.rs",
         "hash": "057453df7c720ddd",
         "file": "057453df7c720ddd"
+      },
+      "okf-structural": {
+        "path": "crates/harlo-okf/src/indexed.rs",
+        "unit": "structural",
+        "hash": "e56420fb2e74aef7",
+        "file": "93c46681a2cde2f9",
+        "locator": "fn structural"
       },
       "packages": {
         "path": "crates/harlo-index/src/packages.rs",
@@ -1187,6 +1724,13 @@
         "path": "crates/harlo-okf/src/page.rs",
         "hash": "378569c43f7693ea",
         "file": "378569c43f7693ea"
+      },
+      "rewritten-type": {
+        "path": "crates/harlo-index/src/structural.rs",
+        "unit": "Rewritten",
+        "hash": "c9d89d5b5694e84b",
+        "file": "7ec100fbea7874c7",
+        "locator": "struct Rewritten"
       },
       "rules": {
         "path": "crates/harlo-index/src/rules.rs",
@@ -1203,6 +1747,13 @@
         "hash": "bfe0bc61255c84f8",
         "file": "bfe0bc61255c84f8"
       },
+      "search-type": {
+        "path": "crates/harlo-index/src/structural.rs",
+        "unit": "Search",
+        "hash": "7aa7c46b91f0e03f",
+        "file": "7ec100fbea7874c7",
+        "locator": "struct Search"
+      },
       "split": {
         "path": "crates/harlo-okf/src/split.rs",
         "hash": "3c14689ed4d2ebea",
@@ -1212,6 +1763,20 @@
         "path": "crates/harlo-okf/src/stamp.rs",
         "hash": "076e40bf6eeba36a",
         "file": "076e40bf6eeba36a"
+      },
+      "structural": {
+        "path": "crates/harlo-index/src/structural.rs",
+        "unit": "run::search",
+        "hash": "53e475478c9449ed",
+        "file": "7ec100fbea7874c7",
+        "locator": "fn run::search"
+      },
+      "structural-type": {
+        "path": "crates/harlo-index/src/structural.rs",
+        "unit": "Structural",
+        "hash": "5566f47e394e6782",
+        "file": "7ec100fbea7874c7",
+        "locator": "struct Structural"
       },
       "text": {
         "path": "crates/harlo-index/src/text.rs",
@@ -1230,13 +1795,13 @@
       },
       "view": {
         "path": "crates/harlo-okf/src/view.rs",
-        "hash": "86ec8d1a4b317fa7",
-        "file": "86ec8d1a4b317fa7"
+        "hash": "4466ac700d515443",
+        "file": "4466ac700d515443"
       },
       "work": {
         "path": "crates/harlo-okf/src/work.rs",
-        "hash": "f05dc65a4cf0d3ef",
-        "file": "f05dc65a4cf0d3ef"
+        "hash": "6abfa2017040a317",
+        "file": "6abfa2017040a317"
       }
     },
     "architecture/mobile-native.md": {
@@ -1282,13 +1847,20 @@
       },
       "messages": {
         "path": "ios/HarloKit/Sources/HarloKit/Messages.swift",
-        "hash": "a8f8486bad2f6fc2",
-        "file": "a8f8486bad2f6fc2"
+        "hash": "285a0faf6a4bca43",
+        "file": "285a0faf6a4bca43"
+      },
+      "mode": {
+        "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
+        "unit": "HarloModel.mode",
+        "hash": "9a2c0f7b664b01a2",
+        "file": "d0a6ce8183bebb1b",
+        "locator": "fn HarloModel.mode"
       },
       "model": {
         "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
-        "hash": "cb40b91b4c9d1943",
-        "file": "cb40b91b4c9d1943"
+        "hash": "d0a6ce8183bebb1b",
+        "file": "d0a6ce8183bebb1b"
       },
       "package": {
         "path": "ios/HarloKit/Package.swift",
@@ -1337,6 +1909,13 @@
         "path": "ios/Harlo/Harlo/WikiPageView.swift",
         "hash": "c6bd0f50c34218be",
         "file": "c6bd0f50c34218be"
+      },
+      "wiki-graph": {
+        "path": "ios/HarloKit/Sources/HarloKit/Wiki.swift",
+        "unit": "Wiki.graph",
+        "hash": "a7ff87c7d67c062c",
+        "file": "eebe5e2498cf1396",
+        "locator": "fn Wiki.graph"
       }
     },
     "architecture/mobile-notifications.md": {
@@ -1387,8 +1966,8 @@
       },
       "model": {
         "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
-        "hash": "cb40b91b4c9d1943",
-        "file": "cb40b91b4c9d1943"
+        "hash": "d0a6ce8183bebb1b",
+        "file": "d0a6ce8183bebb1b"
       },
       "notifications": {
         "path": "ios/Harlo/Harlo/Notifications.swift",
@@ -1444,8 +2023,8 @@
       },
       "model": {
         "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
-        "hash": "cb40b91b4c9d1943",
-        "file": "cb40b91b4c9d1943"
+        "hash": "d0a6ce8183bebb1b",
+        "file": "d0a6ce8183bebb1b"
       },
       "pairing": {
         "path": "ios/HarloKit/Sources/HarloKit/Pairing.swift",
@@ -1486,11 +2065,25 @@
       },
       "workspace": {
         "path": "Cargo.toml",
-        "hash": "9ad5116dea3dc9e4",
-        "file": "9ad5116dea3dc9e4"
+        "hash": "806b4d3525a1ca9f",
+        "file": "806b4d3525a1ca9f"
       }
     },
     "workflows/agent-orchestration.md": {
+      "background": {
+        "path": "crates/harlo-agent/src/task.rs",
+        "unit": "Background",
+        "hash": "d0c873e4caf723ec",
+        "file": "8187f4b13567ebc5",
+        "locator": "struct Background"
+      },
+      "background-on": {
+        "path": "crates/harlo-agent/src/task.rs",
+        "unit": "background_on",
+        "hash": "3d3150e5afec692d",
+        "file": "8187f4b13567ebc5",
+        "locator": "fn background_on"
+      },
       "config": {
         "path": "crates/harlo-agent/src/mcp.rs",
         "hash": "1ad8728d86a55296",
@@ -1499,14 +2092,16 @@
       "dispatch": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "run_calls",
-        "hash": "8afddf19e45cf5b5",
-        "file": "4d3f009148eb1df1"
+        "hash": "89052f877e2bf3c0",
+        "file": "abd18474d0741563",
+        "locator": "fn run_calls"
       },
       "index": {
         "path": "crates/harlo-agent/src/mcp.rs",
         "unit": "Mcp::index",
         "hash": "fa4431157c1d2dcd",
-        "file": "1ad8728d86a55296"
+        "file": "1ad8728d86a55296",
+        "locator": "fn Mcp::index"
       },
       "isolation": {
         "path": "crates/harlo-agent/src/isolate.rs",
@@ -1515,8 +2110,8 @@
       },
       "jobs": {
         "path": "crates/harlo-agent/src/jobs.rs",
-        "hash": "7e6bccf2b1b1f4fc",
-        "file": "7e6bccf2b1b1f4fc"
+        "hash": "8ac8e06e82426dfe",
+        "file": "8ac8e06e82426dfe"
       },
       "mcp": {
         "path": "crates/harlo-agent/src/mcp.rs",
@@ -1537,40 +2132,65 @@
         "path": "crates/harlo-agent/src/mcp.rs",
         "unit": "Mcp::refresh",
         "hash": "d9d7cfdb25a8140f",
-        "file": "1ad8728d86a55296"
+        "file": "1ad8728d86a55296",
+        "locator": "fn Mcp::refresh"
       },
       "rpc": {
         "path": "crates/harlo-agent/src/rpc.rs",
-        "hash": "aa2d33a9086f8afd",
-        "file": "aa2d33a9086f8afd"
+        "hash": "87c4a7ca32861c64",
+        "file": "87c4a7ca32861c64"
+      },
+      "running": {
+        "path": "crates/harlo-agent/src/task.rs",
+        "unit": "Running",
+        "hash": "db95c24ed8cc4db6",
+        "file": "8187f4b13567ebc5",
+        "locator": "struct Running"
       },
       "start": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::start_mcp",
         "hash": "92c5760b3f40c9ba",
-        "file": "4d3f009148eb1df1"
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::start_mcp"
       },
       "stdio": {
         "path": "crates/harlo-agent/src/mcp.rs",
         "unit": "Stdio::start",
         "hash": "02f9fb0cff190f51",
-        "file": "1ad8728d86a55296"
+        "file": "1ad8728d86a55296",
+        "locator": "fn Stdio::start"
       },
       "tasks": {
         "path": "crates/harlo-agent/src/task.rs",
-        "hash": "76e0221358b8baa9",
-        "file": "76e0221358b8baa9"
+        "hash": "8187f4b13567ebc5",
+        "file": "8187f4b13567ebc5"
       },
       "turn": {
         "path": "crates/harlo-agent/src/agent.rs",
         "unit": "Agent::turn",
-        "hash": "8586f4c200e4df82",
-        "file": "4d3f009148eb1df1"
+        "hash": "8a468acebe0f2915",
+        "file": "abd18474d0741563",
+        "locator": "fn Agent::turn"
       },
       "usage": {
         "path": "crates/harlo-agent/src/session.rs",
-        "hash": "8cefada4c4b0e08d",
-        "file": "8cefada4c4b0e08d"
+        "hash": "77e054e5d5f86505",
+        "file": "77e054e5d5f86505"
+      },
+      "wait": {
+        "path": "crates/harlo-agent/src/task.rs",
+        "unit": "wait",
+        "hash": "cb6b09c03ddca0d6",
+        "file": "8187f4b13567ebc5",
+        "locator": "fn wait"
+      },
+      "wait-spec": {
+        "path": "crates/harlo-agent/src/task.rs",
+        "unit": "wait_spec",
+        "hash": "31e4770da6bb34ab",
+        "file": "8187f4b13567ebc5",
+        "locator": "fn wait_spec"
       }
     },
     "workflows/desktop-connectivity.md": {
@@ -1598,13 +2218,15 @@
         "path": "crates/harlo-app/src/phone_server.rs",
         "unit": "greet",
         "hash": "b042612b7b2c7e85",
-        "file": "fd29feee5fb04ff3"
+        "file": "fd29feee5fb04ff3",
+        "locator": "fn greet"
       },
       "install": {
         "path": "crates/harlo-app/src/remotes.rs",
         "unit": "Remotes::install_agent",
         "hash": "076930c74d7f2227",
-        "file": "341e8e77af7be3b2"
+        "file": "341e8e77af7be3b2",
+        "locator": "fn Remotes::install_agent"
       },
       "jobs": {
         "path": "crates/harlo-app/src/jobs.rs",
@@ -1625,7 +2247,8 @@
         "path": "crates/harlo-app/src/phone_server.rs",
         "unit": "session_op",
         "hash": "06016f497829760c",
-        "file": "fd29feee5fb04ff3"
+        "file": "fd29feee5fb04ff3",
+        "locator": "fn session_op"
       },
       "push": {
         "path": "crates/harlo-app/src/phone_push.rs",
@@ -1661,7 +2284,8 @@
         "path": "crates/harlo-app/src/phone_server.rs",
         "unit": "slow_reply",
         "hash": "2f04820d5a6ed291",
-        "file": "fd29feee5fb04ff3"
+        "file": "fd29feee5fb04ff3",
+        "locator": "fn slow_reply"
       },
       "startup": {
         "path": "crates/harlo-app/src/main.rs",
@@ -1687,8 +2311,8 @@
       },
       "chat": {
         "path": "crates/harlo-app/qml/ChatView.qml",
-        "hash": "e24dc604de0b6722",
-        "file": "e24dc604de0b6722"
+        "hash": "27ebfdde41e19ccc",
+        "file": "27ebfdde41e19ccc"
       },
       "ci": {
         "path": "crates/harlo-app/src/ci.rs",
@@ -1719,12 +2343,13 @@
         "path": "crates/harlo-app/src/terminal_session.rs",
         "unit": "TerminalSession::start",
         "hash": "72812229507cbd15",
-        "file": "bb87ad692f92e914"
+        "file": "bb87ad692f92e914",
+        "locator": "fn TerminalSession::start"
       },
       "tests": {
         "path": "crates/harlo-app/qml/SelfTests.qml",
-        "hash": "5dc73e60379e170b",
-        "file": "5dc73e60379e170b"
+        "hash": "74008ad3a7d26275",
+        "file": "74008ad3a7d26275"
       },
       "visuals": {
         "path": "crates/harlo-app/src/visuals.rs",
@@ -1737,18 +2362,20 @@
         "path": "crates/harlo-app/src/chat_session.rs",
         "unit": "ChatSession::answer",
         "hash": "2391589369f2b95d",
-        "file": "7df789dec031ab0e"
+        "file": "98edcf4bf58cf94f",
+        "locator": "fn ChatSession::answer"
       },
       "binding": {
         "path": "crates/harlo-app/src/chat_session.rs",
-        "hash": "7df789dec031ab0e",
-        "file": "7df789dec031ab0e"
+        "hash": "98edcf4bf58cf94f",
+        "file": "98edcf4bf58cf94f"
       },
       "branch": {
         "path": "crates/harlo-app/src/chat_session.rs",
         "unit": "ChatSession::edit_and_resend",
         "hash": "b5c1832e5d73eee5",
-        "file": "7df789dec031ab0e"
+        "file": "98edcf4bf58cf94f",
+        "locator": "fn ChatSession::edit_and_resend"
       },
       "dispatch": {
         "path": "crates/harlo-app/src/workspace/workflows.rs",
@@ -1769,13 +2396,15 @@
         "path": "crates/harlo-app/src/workspace/workflows.rs",
         "unit": "Workspace::recover_workflow",
         "hash": "0b883fe6ad20a3e6",
-        "file": "8a209e765074f1aa"
+        "file": "8a209e765074f1aa",
+        "locator": "fn Workspace::recover_workflow"
       },
       "send": {
         "path": "crates/harlo-app/src/chat_session.rs",
         "unit": "ChatSession::send",
-        "hash": "fc356e9bb698f50c",
-        "file": "7df789dec031ab0e"
+        "hash": "3628a05d6b212523",
+        "file": "98edcf4bf58cf94f",
+        "locator": "fn ChatSession::send"
       },
       "sequence": {
         "path": "crates/harlo-app/src/workspace/workflows.rs",
@@ -1784,8 +2413,8 @@
       },
       "session": {
         "path": "crates/harlo-app/src/chat_session.rs",
-        "hash": "7df789dec031ab0e",
-        "file": "7df789dec031ab0e"
+        "hash": "98edcf4bf58cf94f",
+        "file": "98edcf4bf58cf94f"
       },
       "startup": {
         "path": "crates/harlo-app/src/main.rs",
@@ -1796,7 +2425,8 @@
         "path": "crates/harlo-app/src/phone_server.rs",
         "unit": "undo_op",
         "hash": "7f9df28adbc638d8",
-        "file": "fd29feee5fb04ff3"
+        "file": "fd29feee5fb04ff3",
+        "locator": "fn undo_op"
       },
       "workflow": {
         "path": "crates/harlo-app/src/workspace/workflows.rs",
@@ -1814,7 +2444,8 @@
         "path": "crates/harlo-core/src/git.rs",
         "unit": "bring_over",
         "hash": "291ce900f585d561",
-        "file": "fdd4e02cf32eff89"
+        "file": "fdd4e02cf32eff89",
+        "locator": "fn bring_over"
       },
       "commitmsg": {
         "path": "crates/harlo-core/src/commitmsg.rs",
@@ -1838,20 +2469,22 @@
       },
       "launch": {
         "path": "crates/harlo-harness/src/process.rs",
-        "hash": "065602fcc6c5e908",
-        "file": "065602fcc6c5e908"
+        "hash": "32cf5e06e65dcc4f",
+        "file": "32cf5e06e65dcc4f"
       },
       "locking": {
         "path": "crates/harlo-core/src/git.rs",
         "unit": "repo_lock",
         "hash": "50ad4fc062edf791",
-        "file": "fdd4e02cf32eff89"
+        "file": "fdd4e02cf32eff89",
+        "locator": "fn repo_lock"
       },
       "merge": {
         "path": "crates/harlo-core/src/git.rs",
         "unit": "merge_branch",
         "hash": "4c40c1e1ed716c9f",
-        "file": "fdd4e02cf32eff89"
+        "file": "fdd4e02cf32eff89",
+        "locator": "fn merge_branch"
       },
       "mirror": {
         "path": "crates/harlo-harness/src/mirror.rs",
@@ -1872,19 +2505,22 @@
         "path": "crates/harlo-core/src/plan.rs",
         "unit": "changed_since",
         "hash": "c807158eaa63ce65",
-        "file": "d5cde81ba7ebc435"
+        "file": "d5cde81ba7ebc435",
+        "locator": "fn changed_since"
       },
       "plan-commit": {
         "path": "crates/harlo-core/src/plan.rs",
         "unit": "commit",
         "hash": "84511b5437b1925e",
-        "file": "d5cde81ba7ebc435"
+        "file": "d5cde81ba7ebc435",
+        "locator": "fn commit"
       },
       "quote": {
         "path": "crates/harlo-core/src/remote.rs",
         "unit": "quote_path",
         "hash": "ccb7fb4e790128f0",
-        "file": "e3ce229e693bf31c"
+        "file": "e3ce229e693bf31c",
+        "locator": "fn quote_path"
       },
       "remote": {
         "path": "crates/harlo-core/src/remote.rs",
@@ -1905,7 +2541,8 @@
         "path": "crates/harlo-core/src/git.rs",
         "unit": "snapshot_worktree",
         "hash": "9b1f6451f0a981ab",
-        "file": "fdd4e02cf32eff89"
+        "file": "fdd4e02cf32eff89",
+        "locator": "fn snapshot_worktree"
       },
       "splitdiff": {
         "path": "crates/harlo-core/src/splitdiff.rs",
@@ -1916,7 +2553,8 @@
         "path": "crates/harlo-core/src/remote.rs",
         "unit": "ssh_options",
         "hash": "aa9e21077094e356",
-        "file": "e3ce229e693bf31c"
+        "file": "e3ce229e693bf31c",
+        "locator": "fn ssh_options"
       },
       "turn": {
         "path": "crates/harlo-core/src/git.rs",
@@ -1927,7 +2565,8 @@
         "path": "crates/harlo-core/src/git.rs",
         "unit": "undo_turn",
         "hash": "989dc64ec79050f6",
-        "file": "fdd4e02cf32eff89"
+        "file": "fdd4e02cf32eff89",
+        "locator": "fn undo_turn"
       }
     },
     "workflows/mobile-probe.md": {
@@ -1953,8 +2592,8 @@
       },
       "model": {
         "path": "ios/HarloKit/Sources/HarloKit/Model.swift",
-        "hash": "cb40b91b4c9d1943",
-        "file": "cb40b91b4c9d1943"
+        "hash": "d0a6ce8183bebb1b",
+        "file": "d0a6ce8183bebb1b"
       },
       "package": {
         "path": "ios/HarloKit/Package.swift",
@@ -1988,8 +2627,8 @@
       },
       "tests": {
         "path": "ios/HarloKit/Tests/HarloKitTests/HarloKitTests.swift",
-        "hash": "f63f6be159a0e078",
-        "file": "f63f6be159a0e078"
+        "hash": "684de0256fb7af5f",
+        "file": "684de0256fb7af5f"
       },
       "tour": {
         "path": "ios/Harlo/Harlo/Tour.swift",
@@ -1998,8 +2637,8 @@
       },
       "ui": {
         "path": "ios/Harlo/HarloUITests/HarloUITests.swift",
-        "hash": "39fe8266c0c68aa3",
-        "file": "39fe8266c0c68aa3"
+        "hash": "cac158b1597762a2",
+        "file": "cac158b1597762a2"
       }
     },
     "workflows/mobile-relay-apns.md": {
@@ -2141,29 +2780,32 @@
         "path": "crates/harlo-core/src/transcript.rs",
         "unit": "diff_rows",
         "hash": "7703af59134c93f9",
-        "file": "3bc3321c24f1f326"
+        "file": "b96bb61d4dbebffd",
+        "locator": "fn diff_rows"
       },
       "driver": {
         "path": "crates/harlo-core/src/session.rs",
         "unit": "drive",
         "hash": "ae91e58783afdb75",
-        "file": "23f31f66e2c3a783"
+        "file": "412198a92c2a77cc",
+        "locator": "fn drive"
       },
       "events": {
         "path": "crates/harlo-harness/src/event.rs",
-        "hash": "7741e55a4630920b",
-        "file": "7741e55a4630920b"
+        "hash": "34cd459c9640292b",
+        "file": "34cd459c9640292b"
       },
       "git": {
         "path": "crates/harlo-core/src/git.rs",
         "unit": "snapshot_turn",
         "hash": "5f15c50b201aa146",
-        "file": "fdd4e02cf32eff89"
+        "file": "fdd4e02cf32eff89",
+        "locator": "fn snapshot_turn"
       },
       "handle": {
         "path": "crates/harlo-core/src/session.rs",
-        "hash": "23f31f66e2c3a783",
-        "file": "23f31f66e2c3a783"
+        "hash": "412198a92c2a77cc",
+        "file": "412198a92c2a77cc"
       },
       "listdiff": {
         "path": "crates/harlo-core/src/listdiff.rs",
@@ -2189,7 +2831,8 @@
         "path": "crates/harlo-core/src/transcript.rs",
         "unit": "Transcript::apply",
         "hash": "bce69e3ffc8775d3",
-        "file": "3bc3321c24f1f326"
+        "file": "b96bb61d4dbebffd",
+        "locator": "fn Transcript::apply"
       },
       "refs": {
         "path": "crates/harlo-core/src/session_ref.rs",
@@ -2208,13 +2851,13 @@
       },
       "typed": {
         "path": "crates/harlo-core/src/session.rs",
-        "hash": "23f31f66e2c3a783",
-        "file": "23f31f66e2c3a783"
+        "hash": "412198a92c2a77cc",
+        "file": "412198a92c2a77cc"
       },
       "updates": {
         "path": "crates/harlo-core/src/session.rs",
-        "hash": "23f31f66e2c3a783",
-        "file": "23f31f66e2c3a783"
+        "hash": "412198a92c2a77cc",
+        "file": "412198a92c2a77cc"
       }
     }
   },
@@ -2222,9 +2865,17 @@
     "crates/harlo-agent/build.rs": {
       "hash": "3ea590d720c6ab15"
     },
+    "crates/harlo-agent/src/advisor.rs": {
+      "hash": "dc6d7ec5c7e98d45",
+      "units": "02c97447 54e6289e d5eef8c0 edb46562"
+    },
     "crates/harlo-agent/src/agent.rs": {
-      "hash": "4d3f009148eb1df1",
-      "units": "0002b22f 04ae0403 06262999 11b39c93 179ae8d8 19984a43 1c6225ec 1dc35ad7 1defff46 200424c8 210820b8 227ed832 238fa28a 2926c3b5 2c822995 329f4beb 33fbdf40 378f2462 40fa633a 48e8c74d 4c91dc1d 661ff40a 679652fd 6ba2a0e0 7cdc804e 7d1c55ef 82b2d1d2 83c63010 840a6a95 8881e515 8afb250d 9232b4d4 9282be62 94835ea2 96da6f7c 9cdff0cc a6a288b8 b4f4e201 b567b070 c51e455b ccf56ef5 d07bce04 d07fd7e3 e1e440e1 f3a645d8 f4e2b773 f9998e7b fa77a525 ff384640"
+      "hash": "abd18474d0741563",
+      "units": "0002b22f 04ae0403 06262999 085d3853 11b39c93 1772aaf2 179ae8d8 19984a43 1c6225ec 1dc35ad7 1defff46 200424c8 210820b8 227ed832 238fa28a 2926c3b5 2c822995 329f4beb 33fbdf40 378f2462 40fa633a 48e8c74d 4c91dc1d 661ff40a 679652fd 6ba2a0e0 7cdc804e 7d1c55ef 82b2d1d2 83c63010 840a6a95 8881e515 8afb250d 9232b4d4 9282be62 94835ea2 96da6f7c 9cdff0cc a6a288b8 b4f4e201 b567b070 c51e455b ccf56ef5 d07bce04 d07fd7e3 e1e440e1 f3a645d8 f4e2b773 f9998e7b fa77a525 ff384640"
+    },
+    "crates/harlo-agent/src/ast.rs": {
+      "hash": "22534053e271b047",
+      "units": "56547a7c a6f614f5 b8d31e85 d0b4ba23 d3abe277 e6640de8 f9baa17c"
     },
     "crates/harlo-agent/src/auth.rs": {
       "hash": "e2101d3ba56aa0b4",
@@ -2239,12 +2890,20 @@
       "units": "1a4c4e7b 21ad34a0 25bf8e1a 8c31e6e7 c52028f3 ed5eb9a3"
     },
     "crates/harlo-agent/src/compact.rs": {
-      "hash": "cb07501f9dfffbed",
-      "units": "07957a14 1f58b914 378bfce5 3d7db37d 497e22fe 6ca7ea2f 7540c7fb 7911fc52 79e1d925 93b214be 9eab54ac ae94da4c afa69325 bef32d2c"
+      "hash": "6e7a8f6dc8d2b67d",
+      "units": "07957a14 1f58b914 378bfce5 3d7db37d 497e22fe 6ca7ea2f 7540c7fb 7911fc52 79e1d925 93b214be 9eab54ac ae94da4c afa69325 bdfdf1cc bef32d2c"
     },
     "crates/harlo-agent/src/danger.rs": {
       "hash": "82075d238ec6856a",
       "units": "20f65c28"
+    },
+    "crates/harlo-agent/src/debug.rs": {
+      "hash": "e43079d1ea737a6d",
+      "units": "1b0b9a70 54f8a784 b8d31e85 d4f02eaa"
+    },
+    "crates/harlo-agent/src/effort.rs": {
+      "hash": "c04417bdeeafb61c",
+      "units": "3a2860ec 929260ad 98c1eb4e b5cbb993 cd0461f6 e1414f0d"
     },
     "crates/harlo-agent/src/fetch.rs": {
       "hash": "610b3e509f986acd",
@@ -2271,23 +2930,31 @@
       "units": "0c79a9c2 2a4c9eb5 9c7bc1e4 c893ba30 cc9ea7f7 f174806d"
     },
     "crates/harlo-agent/src/jobs.rs": {
-      "hash": "7e6bccf2b1b1f4fc",
-      "units": "2eca48b9 2f17a0f8 5313eabe 5c0c27df 7286e03f 7ceed6a2 8249aec5 97a649c4 ad617a0f babc1bd8 dc3a2fd5 eda77567 f4db1e48"
+      "hash": "8ac8e06e82426dfe",
+      "units": "0895ceeb 2eca48b9 2f17a0f8 3b390a80 5313eabe 5c0c27df 7286e03f 7ceed6a2 8249aec5 97a649c4 ad617a0f babc1bd8 dc3a2fd5 df300c96 eda77567 f4db1e48"
     },
     "crates/harlo-agent/src/keys.rs": {
       "hash": "51d053b0e148b051",
       "units": "2998b323 6ee0eb49 7e5608ab"
+    },
+    "crates/harlo-agent/src/kv.rs": {
+      "hash": "4e41485b1d736279",
+      "units": "0317c92a 36ad09ef 4970e97f 4c2e1df4 b6ce788d ca879a0a d32b6069"
+    },
+    "crates/harlo-agent/src/locate.rs": {
+      "hash": "1be58360cbf0e0f3",
+      "units": "19734a1b 1f5087db 340d6003 3d7db37d 62f51d29 67de0d10 83c874d3 b8d31e85 d4f02eaa dba36bff"
     },
     "crates/harlo-agent/src/lookup.rs": {
       "hash": "0347e534ee1b76d8",
       "units": "acba2551 b8d31e85 d4f02eaa f9baa17c"
     },
     "crates/harlo-agent/src/lsp.rs": {
-      "hash": "e804e29b821310d7",
-      "units": "073c1634 22c3b361 68d7beb6 aef7de28 b9760e6a d4f02eaa ef43bc78 f9baa17c"
+      "hash": "2f3957f57d727eb2",
+      "units": "073c1634 22c3b361 68d7beb6 aef7de28 b9760e6a d4f02eaa edc188a7 eed165ff ef43bc78 f9baa17c"
     },
     "crates/harlo-agent/src/main.rs": {
-      "hash": "b0f3678741766bcd"
+      "hash": "db18f5ef7723f66e"
     },
     "crates/harlo-agent/src/mcp.rs": {
       "hash": "1ad8728d86a55296",
@@ -2296,6 +2963,10 @@
     "crates/harlo-agent/src/mcp_auth.rs": {
       "hash": "8492b3493d1a2d2d",
       "units": "2454ad61 42882135 aef7de28 babc1bd8 d2089be6"
+    },
+    "crates/harlo-agent/src/memory.rs": {
+      "hash": "b8bcedece3d049da",
+      "units": "2cab953f 7edb360f b8d31e85 d4f02eaa"
     },
     "crates/harlo-agent/src/messages.rs": {
       "hash": "cd9f52bc48d662e3",
@@ -2306,7 +2977,7 @@
       "units": "28391d3b b8d31e85"
     },
     "crates/harlo-agent/src/patch.rs": {
-      "hash": "9d37bdf7ad1c3d1c",
+      "hash": "42e7e76c273e6065",
       "units": "0ab06d24 30c471f6 97a5e41b 9f33d9f6 b8d31e85 d2a46f22 d4f02eaa e2adac23"
     },
     "crates/harlo-agent/src/profiles.rs": {
@@ -2314,8 +2985,8 @@
       "units": "d696a35b e6640de8 efd8a003"
     },
     "crates/harlo-agent/src/program.rs": {
-      "hash": "22e07aa323e0922b",
-      "units": "acba2551 c15849ab d4f02eaa f9baa17c"
+      "hash": "3731c09641a8935b",
+      "units": "8a716159 acba2551 c15849ab d4f02eaa ed1c8fa2 f9baa17c"
     },
     "crates/harlo-agent/src/providers.rs": {
       "hash": "6c752696ce94974e",
@@ -2326,19 +2997,23 @@
       "units": "64d846fd 68e4a67b 88884f55 92ee0233 b6b7a006"
     },
     "crates/harlo-agent/src/responses.rs": {
-      "hash": "525aa82dcf9a07b3",
-      "units": "031a8f0f 06009681 1f58b914 27ce1d1b 37a0025a 4e1f49a9 4fb62348 6c159814 739f68fe 75f84b46 8a46fd6f 8d14f6e7 9159c825 948fe603 9f5eff6f c96c6d5b d55506f6 dca83e71 e3c06a73 fdbd5381"
+      "hash": "0dc48737e038797a",
+      "units": "031a8f0f 036bdd71 06009681 0a6ce487 1f58b914 27ce1d1b 37a0025a 4e1f49a9 4fb62348 6c159814 739f68fe 75f84b46 83c874d3 8a46fd6f 8d14f6e7 9159c825 948fe603 9f5eff6f c2a116aa c96c6d5b d55506f6 dca83e71 e3c06a73 fdbd5381"
     },
     "crates/harlo-agent/src/retry.rs": {
       "hash": "0275c18229ed3eb4",
       "units": "121462d9 6e16db10 b8ead431 c9315b73 d986bc5e"
     },
     "crates/harlo-agent/src/rpc.rs": {
-      "hash": "aa2d33a9086f8afd",
+      "hash": "87c4a7ca32861c64",
       "units": "183f00f4 24c458cf"
     },
+    "crates/harlo-agent/src/rules.rs": {
+      "hash": "474ebf7f2b5b948b",
+      "units": "11bb4a85 28720365 28c2dec1 49cbcc00 aa58cda7 c0d2856b c9a10cde"
+    },
     "crates/harlo-agent/src/sandbox.rs": {
-      "hash": "b8887038839ec81b",
+      "hash": "965eafad9194ae44",
       "units": "3e111815 4fcb21d6 67fc6249 6e24b9be 6ea67664 73b66bc8 823412d1 90d08e58 91604a6a 93084903 ad5f629f ba691ba0 c611981f cfe55aa5 f43e63c8 fdf09cdf"
     },
     "crates/harlo-agent/src/search.rs": {
@@ -2346,12 +3021,16 @@
       "units": "259aa8ef 8aa3c4ce d4f02eaa e33d99e6"
     },
     "crates/harlo-agent/src/session.rs": {
-      "hash": "8cefada4c4b0e08d",
+      "hash": "77e054e5d5f86505",
       "units": "037a78d4 07468360 0f9660fc 21e49eb2 297268b8 29fa2f63 31ba75d6 4813494d 5e1e2bca 67ee48da 68b7c1ef 9ccf1d05 c878a536 ca1530e8 d01476df e0e4548d eb49d4a6 f6f7a7c3 f8391613"
     },
     "crates/harlo-agent/src/skills.rs": {
       "hash": "3d08751579ac669e",
       "units": "0fc4dfc4 63b85330 6df1bb18 d6417f02 d78de925 e6640de8"
+    },
+    "crates/harlo-agent/src/socket.rs": {
+      "hash": "f50123932dd49f11",
+      "units": "149987d3 3e058de1 465a972d 4a7861fd 4e686cee b8d31e85 dca83e71"
     },
     "crates/harlo-agent/src/stubs.rs": {
       "hash": "aacc5ccefe37231e",
@@ -2362,23 +3041,27 @@
       "units": "0368b5af 14da7dc7 17b788a7 6ee2de13"
     },
     "crates/harlo-agent/src/task.rs": {
-      "hash": "76e0221358b8baa9",
-      "units": "10bc96af 47dc8996 8e5b1a73 acba2551 d4f02eaa fb9cf756"
+      "hash": "8187f4b13567ebc5",
+      "units": "10bc96af 47dc8996 671f7ebc 716ecabb 8e5b1a73 91090f9d acba2551 d4f02eaa ea2b8a87 f4ccae29 fb9cf756"
     },
     "crates/harlo-agent/src/todo.rs": {
-      "hash": "0a8dcb381fec8769",
-      "units": "865bbcf9 acba2551 b8d31e85 d4f02eaa"
+      "hash": "62d8bd47f6cecc9e",
+      "units": "2348f998 865bbcf9 9df04588 acba2551 b8d31e85 d4f02eaa"
     },
     "crates/harlo-agent/src/tools/bash.rs": {
-      "hash": "0269a37f8d7c2ceb",
-      "units": "157dca92 2af2c378 34ca0e76 37942026 5d347fd9 acba2551 e5552630"
+      "hash": "5aad14803a6da13c",
+      "units": "157dca92 2af2c378 34ca0e76 37942026 5d347fd9 939aa72a acba2551 e5552630"
     },
     "crates/harlo-agent/src/tools/edit.rs": {
       "hash": "3adc2466a1833e37",
       "units": "464c4ffd 8bf1172d 97a5e41b a116c9ed"
     },
+    "crates/harlo-agent/src/tools/formats.rs": {
+      "hash": "5d69cdf85b7dc922",
+      "units": "0b27c158 5de74a81 982d9e3e c7567ce6 f5387f9b"
+    },
     "crates/harlo-agent/src/tools/mod.rs": {
-      "hash": "7974f8c326b46e7c",
+      "hash": "33c719a99e7fa7e3",
       "units": "0bcedfcb 21ab6743 245000a5 3365adad 4e80abb5 519605a7 53b996e0 7846086a 88d759ea 8ed09f81 9c586a9b c2190d55 ea93d6a2 eeae469a f9e2cc67"
     },
     "crates/harlo-agent/src/usage.rs": {
@@ -2502,7 +3185,7 @@
       "units": "0c6ac73f 10a69dd7 68b4c81e 69852c34 87d05cd0 c1554219 c18b86b8 e3c032d9 ea5edade f5bfb8dc"
     },
     "crates/harlo-app/qml/ChatView.qml": {
-      "hash": "e24dc604de0b6722",
+      "hash": "27ebfdde41e19ccc",
       "units": "08249461 13d09436 1573f149 1a4e4f7e 4486f39c 46bf01d4 4df05252 5a6ef928 5bd6d3b6 70a5e4d5 75490bd7 79311707 a5afbe5f a5fadb2c acf2ec9f b9bfe3b6 d470d7d3 d7811951 e6e21579 e762ce71"
     },
     "crates/harlo-app/qml/Chip.qml": {
@@ -2525,7 +3208,7 @@
       "hash": "70d2792f49a5e57b"
     },
     "crates/harlo-app/qml/CodeHit.qml": {
-      "hash": "97176c93fc67308d"
+      "hash": "2b86d43822471543"
     },
     "crates/harlo-app/qml/CodeText.qml": {
       "hash": "524bd8ce4de2d0e9",
@@ -2540,7 +3223,7 @@
       "units": "13c7d14e 234afbd5 4e6d6efe 620e45e4 683a62ce 9bf71773 d6cc0a08 d9b2fe68 dec47555 e3d11da4 e6b88623 fec257ea"
     },
     "crates/harlo-app/qml/Composer.qml": {
-      "hash": "759241719f672f8e",
+      "hash": "d6ac612ec13efe5c",
       "units": "17ae1b4e 2447dc36 27ce1d1b 2b77cdef 30222ee5 3323c3fa 5189a841 66e3c52a 6c45cb72 6ecc99a6 6fcabce9 70aacaa8 7aedef2b 7b25eb29 858836f4 8a01c34b 8b5a0085 8ed40ba3 9bbca118 a57a8981 c31adc18 c6a4c1ea d1fbab03 d4b1b30e e617c5a3"
     },
     "crates/harlo-app/qml/ComposerIconButton.qml": {
@@ -2579,7 +3262,7 @@
       "units": "01be30bb 27ce1d1b 2afbf1e5 3a21a4f3 3d81ad7b 3dcb7291 59ed65f2 6473f819 6ecc99a6 72238908 7a546e99 8d341f4e 938a5d39 9505f9bb a1773683 a4a93363 b02a399a b0eadcfc c6f9e979 d2c18e4d d6cc0a08 da918cf1"
     },
     "crates/harlo-app/qml/DropDownContent.qml": {
-      "hash": "e2712186204c042e",
+      "hash": "87d021cce689d429",
       "units": "e617c5a3"
     },
     "crates/harlo-app/qml/DropDownLayer.qml": {
@@ -2659,7 +3342,7 @@
       "units": "8570a2e1"
     },
     "crates/harlo-app/qml/Main.qml": {
-      "hash": "44a6996821313aa9",
+      "hash": "36b61be566030a5a",
       "units": "16a55abe 174545f5 280a24c3 2c0d16a7 35ca381e 35cfe637 3655fa17 3d802999 50752fe7 549e8ddd 59aa7284 59c6331c 5e9ec869 6023397f 6049e75a 6442b0c4 69978a8b 6c26a99c 70a5e4d5 7a546e99 8c07c659 92507e74 96d480db a298c73c a7bfca26 a8160c14 acc7f36d b5f2337a b9bfe3b6 c87ecdbf ce497fac cea58d67 d460339d d7d972a5 e1404a4b"
     },
     "crates/harlo-app/qml/McpPage.qml": {
@@ -2750,7 +3433,7 @@
       "hash": "ad78523a0553ead8"
     },
     "crates/harlo-app/qml/ProvidersPage.qml": {
-      "hash": "6742f56e7985c38a"
+      "hash": "2910a728912ae2a4"
     },
     "crates/harlo-app/qml/PullRequestDialog.qml": {
       "hash": "1d677112768ba539",
@@ -2852,7 +3535,7 @@
       "units": "02cee318 53fd6d7a 61d58cbe 70f0b621 8d2ac8b5 944c27e5 b6b54201 c02b5734 d6cc0a08"
     },
     "crates/harlo-app/qml/StatusDot.qml": {
-      "hash": "c3b33d08409a3bcc"
+      "hash": "cbf6d7082af1ffd9"
     },
     "crates/harlo-app/qml/SubagentDialog.qml": {
       "hash": "a0db1c027fb2311d",
@@ -2863,7 +3546,7 @@
       "units": "5a8460f6"
     },
     "crates/harlo-app/qml/SubagentRow.qml": {
-      "hash": "3542fb883cf14fa3",
+      "hash": "84e6ccbd1ed5ad12",
       "units": "356937a6 c25cd44c"
     },
     "crates/harlo-app/qml/TabStrip.qml": {
@@ -2879,7 +3562,7 @@
       "units": "2410abd9 2c12bb31 339f80e4 39d02b42 3ace60b0 cced28c6"
     },
     "crates/harlo-app/qml/Theme.qml": {
-      "hash": "e28a97ac12ef138e",
+      "hash": "0abb6c16187180d2",
       "units": "089e703c 0b661c3a 179d28b8 189958a8 1d075d09 1d4a1593 1d8e08fd 224b29ab 2410189b 2e8334e8 2eca8d98 2f50b839 35685f11 356937a6 3a808965 3d53f420 3e05cbde 654ebf05 6ee2cc10 727c1e41 76ea797f 793cad41 895e2e69 89d41a19 ab297827 af14f7fe cc56877b cff77b7c d488dfdc d9fed0df dd8b906b e769f55a e8b2cc93 e9e74f93 ed4561f6 f2b580fa fb6668f9 fca6f8b9"
     },
     "crates/harlo-app/qml/ThemeList.qml": {
@@ -2902,7 +3585,7 @@
       "units": "0ad9eaa2 747355bd"
     },
     "crates/harlo-app/qml/TranscriptView.qml": {
-      "hash": "af38a3ad4d17675e",
+      "hash": "91d2e712495df852",
       "units": "0229b611 07391fe3 11d2f821 13266204 1647934f 1923547d 1bda62db 1c193652 1c5b404d 2054c3ce 215d3d21 2455bcba 25bf8e1a 2738ca54 2a58d0e9 2d2b1193 2f0a3edb 31aad790 396687f3 499b2eca 4b1025bf 4b8f2a5d 4f36042d 4f42753a 53fd6d7a 55a760de 5956fffd 59f006d6 5a827acd 5df6f125 6f9078f3 7b80ff45 7d4ea9a2 965a9f07 998c095a 9c0aa3f1 9dbafccb 9f85ae93 a82a709a a9b8d5e5 ab8eb993 abf52686 af0c8441 aff0b76d b27ae61f b33a73f0 b9bfe3b6 ba9c736f c980b57f d00a0da3 dc190436 ddba1cce de1617bc df4caae4 df7493a4 e4f20478 e89e6b94 f082fbdc f349f19e fee96511"
     },
     "crates/harlo-app/qml/TrayIcon.qml": {
@@ -2927,7 +3610,7 @@
       "units": "512bc532"
     },
     "crates/harlo-app/qml/WikiPanel.qml": {
-      "hash": "f4db8cede7678571",
+      "hash": "8ba016525c80d114",
       "units": "06bb1914 0ae60173 0cb7699b 0cf67fc7 1d8e08fd 24193290 31aad790 3281d3b2 340a06c1 3c482346 44022fe8 4af1594c 4b209c37 58fe459b 736a2628 9e5377ba a3ce0b61 ab8adf5a b0098d67 b3139037 cbd6b974 cced28c6 d020a498 d9b2fe68 e3477ac9 ef571423"
     },
     "crates/harlo-app/qml/WikiWriter.qml": {
@@ -2962,7 +3645,7 @@
       "units": "10c825a3"
     },
     "crates/harlo-app/src/chat_session.rs": {
-      "hash": "7df789dec031ab0e",
+      "hash": "98edcf4bf58cf94f",
       "units": "08bf79a0 0905635f 1a22d787 1c4af9f4 2483705e 27590f97 2c9d3f56 34172058 3d4fe3a9 3e748a48 4a00931f 4a5f4235 4d28e119 4f5886f9 5a8e7bea 64927d27 6ae9c3b4 709fae3b 72fd32eb 749fe296 7ccff141 7d44dd21 7dbbc8c0 9258a16c 9316076f 9c78ac44 9f0a4105 9fd2db32 a47a88c9 a6ae1b21 a6d37734 adc9e210 b2fd8ea8 b6b923b2 bcd83547 bf241d7c c27f5591 c8799551 c97eb3e5 ced8158a d5726033 d5a95629 da5e976c dc686262 dd15a797 dda0b123 e8599c81 ea7bc2da eae653d5 f80557a0 f9dbd627"
     },
     "crates/harlo-app/src/ci.rs": {
@@ -3133,7 +3816,7 @@
       "units": "2acdb583 5a735f22 9fd2db32 a1847d88 a78e5675 b3bf3c9e"
     },
     "crates/harlo-app/src/workspace.rs": {
-      "hash": "03dd98c2a951a198",
+      "hash": "073aa84aa207e564",
       "units": "00146b86 00cc407c 0156a2e4 02d10b38 03b4a7d2 052b103b 056f6dfb 06139412 08168ba3 08204b2d 085d44ce 0ca44fe9 0ed2bf8e 0fd36107 11981a87 126f592c 135ea80f 14ed437d 1889b464 1bbc62f9 1e3b9cb8 1f96a7fb 226aeda2 2659f2e4 27c988ee 29b9987f 319e121a 31e18ec2 333b92b7 3445409e 34bab0bb 35a4ab8b 35deeee0 36adfc40 380a9385 3906ad00 3a9ac9e0 3aac9597 3bf6f00b 3c1e47cf 3e87baef 3f0691ce 3fbecab0 3fde7814 40b40f39 40c7baae 40f63429 459be187 46ce639d 480182ef 4a30fc49 4af38519 4ccd073f 4cd02646 4d15c970 4d401da5 4e14a5cc 4f216526 4f345b04 4fa2c8b1 51a78346 5378019a 54bd3cfd 559c4847 56833054 574788ae 57553c8e 5916bbb7 592e6343 59308cf4 5df9edfc 607c09bf 60cf12de 64834bff 667268a8 66c49796 6c1c9b58 6c4714cb 6cc43b74 6ceaaec4 71cca80a 727ecc27 72eeac05 73ab981f 744fbc4d 74ede3c6 765a3207 76a16bed 76fd3802 782d9bc1 79cd0ab0 7b6e00c2 7e034d38 7e932db5 7fed2c51 80ad39f7 80bc7b4e 86099655 86f7008e 87c3f788 87cb7191 8870f730 88cd4770 88e480dc 88e6af9d 88ea2fc0 8ac1b5fa 8be97aca 8ca41f67 9262f9d3 93c23208 94673764 95213ad3 961ebd94 9683fbc3 968ed32b 981cd357 9943167c 9a43cdb3 9ac19fdd 9c459bd5 9e8c8c33 9ea80b87 9ef09096 9fd2db32 a2dae31d a5844068 a6e3c030 aa55fa34 ab65ce45 ac729d0e ad79d38b ae2c2651 afcc1d68 b150ab51 b151e003 b1538d8b b5305cca b65b301f b7450f51 b79ebe02 b7d06061 b8428653 ba144895 bd09dd3b bdb5330f bdcd02b9 bf1a677c bf824468 c0070fa3 c0cd1f94 c68977d7 c6c0f207 c73f52d1 c7e32521 c9643c0c c9727862 cec50f44 cf1d7c9a d0f02daa d1f7ce81 d6134d33 d6cf15cc d8cd46c1 da9b52a7 dbf0caa2 dde36d3e df159d58 df685708 df9bca7d e039098e e45a78c6 e665bff6 e73ae4cc e8708b35 e9e2b9dd ea0b4343 eadbbfba eaf37f5c ed1f8852 ee54be24 efe46ccc f19073f6 f2b9a352 f37f46bb f3bfdb59 f4ce45fa f4e8ce78 f6b8c253 f799340a fa7a30b5 fbb601ef fe29bf6a ff5306d6 ffa1a1f6"
     },
     "crates/harlo-app/src/workspace/workflows.rs": {
@@ -3187,7 +3870,7 @@
       "units": "29a1af58 5bb9b544 6abcbd5a b19f3cfa bbe93f8c d9f1536d"
     },
     "crates/harlo-core/src/agents.rs": {
-      "hash": "8ccc26665a020430",
+      "hash": "902d352927603037",
       "units": "1aca80e8 6f2f2de0 7663090b b141f7cb e845fddf"
     },
     "crates/harlo-core/src/attach.rs": {
@@ -3361,7 +4044,7 @@
       "units": "039aa800 0c0257a3 0fbe5a9d 10f5f77e 1424d4c4 1473c426 14a927a0 3172c8ea 322ff72d 390a7f59 46ec7cfb 4fa88427 58169c73 64b45b40 66760f21 672bc8b0 764a23ec 7e5608ab 85b0a22b a330395c a5226bc1 a82c588c abfc412c ac55e613 b381c9d6 b3fc44e6 b6d9feb9 be632e5f c44f1582 c7018d63 e29430a7 e343d78f f14886e9 f643cf6b f906e371 fb65f413"
     },
     "crates/harlo-core/src/session.rs": {
-      "hash": "23f31f66e2c3a783",
+      "hash": "412198a92c2a77cc",
       "units": "02df34d1 0d98bd64 10c3ffdc 16620ef3 1fa7d4c0 2278b7fc 2d00ca5c 32059ee7 3a99d065 3e7242e5 3ff7299b 41ed1d93 44e9483b 4e2f5ca6 72cf1828 74bee7f7 7682594d 7def8489 843f1012 920e8d16 947b7936 99004830 a1caa71e ae672c9c b5286edc bd158b59 bff482db c182b246 c6e312a5 d703f81b e194dbeb e5181e0f e96770bd ee204db7 f0b5722c f31e23b2 f8ec78d8 fa48cd7f"
     },
     "crates/harlo-core/src/session_ref.rs": {
@@ -3417,7 +4100,7 @@
       "units": "0694aacb 491d6f84"
     },
     "crates/harlo-core/src/transcript.rs": {
-      "hash": "3bc3321c24f1f326",
+      "hash": "b96bb61d4dbebffd",
       "units": "1afd9b60 2499d2c2 25c00d64 2cd89cea 40d72a96 4df78591 5093ff95 54ee6c69 5803dc00 5d04f2b4 5d5766cf 68a3c2d9 721164f0 8f479688 8f5efa1c 95110d74 9ba0cafd 9bb04d22 9f0af407 9fadae7f af02f55b b91bc3ab c518932a e16e2a5d ee491a20"
     },
     "crates/harlo-core/src/updates.rs": {
@@ -3429,8 +4112,8 @@
       "units": "2a12da17 686f1b5b a793ab8f c187e609 ef4ca753 efa0389a fd4724e9"
     },
     "crates/harlo-core/src/wiki.rs": {
-      "hash": "42224d0feea89dd6",
-      "units": "09f5789b 0efd92a3 2b6af0be 316e093c 32129d3d 50c9c4ae 60be9861 79a54787 889ee7f3 90aa3026 a79482c6 c3f21814 e03506b2 e8b82e0e eb68b90c"
+      "hash": "11e64cd240a3f26e",
+      "units": "09f5789b 0efd92a3 2b6af0be 316e093c 32129d3d 50c9c4ae 60be9861 79a54787 889ee7f3 90aa3026 a79482c6 c3f21814 cde4eb3c e03506b2 e8b82e0e eb68b90c"
     },
     "crates/harlo-core/src/wiki_view.rs": {
       "hash": "c00705966f0f6466",
@@ -3452,7 +4135,7 @@
       "units": "081f89aa 0dff3cb6 1e5d5f97 21a3fb62 259aa8ef 2a7a97f6 305dfaca 38bcd746 414af441 50dd47b8 51bd2a28 53c2fba7 5bbc793e 5e2c614c 62d4805f 6a3772f9 6ba5d668 6f581f3b 77607d73 8570a2e1 8edcc26c 93d2d13a 9a80cb54 a09928ce a6706d54 bccc0fa2 c2a3a896 c5297eb5 c54457d8 c76ad4e6 d298391b d640c742 d81c55f4 da699aaa dd8672f4 e4f8f500 e84d7999 ea9cc74b f00f7fac f0add6e3 f2e75812 fbd0722e"
     },
     "crates/harlo-harness/src/claude_run.rs": {
-      "hash": "45a1b75932627559",
+      "hash": "7f3a0b73cfa60eaa",
       "units": "0de9d359 11c7c782 a04afb36 af70528b c12ecc34"
     },
     "crates/harlo-harness/src/coding_plans.rs": {
@@ -3468,7 +4151,7 @@
       "units": "18ec28a2 1fe370c9 29575afa 299c937a 39a3398d 5271fea2 54a0e8c1 9414886b a6e600a1 c7bfb1d7 cdd9e070 f2525d21"
     },
     "crates/harlo-harness/src/event.rs": {
-      "hash": "7741e55a4630920b",
+      "hash": "34cd459c9640292b",
       "units": "1f096f96 2d4aa984 57a33c65 5bb143c6 73be52d9 75bd029c 7a6bcc40 9f73344e ac2df551 c51593d1 e6fe8ee2 ecdab652"
     },
     "crates/harlo-harness/src/file_blocks.rs": {
@@ -3488,7 +4171,7 @@
       "units": "2b64c6d9 babc1bd8 d6cc0a08 d9d48979 ffa63583"
     },
     "crates/harlo-harness/src/process.rs": {
-      "hash": "065602fcc6c5e908",
+      "hash": "32cf5e06e65dcc4f",
       "units": "03494afd 07e87c64 0f92b564 19219808 261d8757 290f1b76 331551b0 3619cf0b 367fd4df 57824fe1 5f310ff8 66499d8a 8249aec5 8fe033f3 986a068f 9f4d8d52 b19ab952 b2a3aa60 b5d02fed c9ab95c1 cad10335 cca390b5 dad6029f de07f932 e3b5b459 e3f9416d e87ba7a0 e9d1b99a f04ce07a"
     },
     "crates/harlo-harness/src/protocol_log.rs": {
@@ -3512,15 +4195,15 @@
       "units": "0f82fe72 20375a70 32ab018f 56e430ed 5ea2c38e 6e1b0f84 725f01d5 8dd637b1 94d5b101 9b6e88e8 c2274ec7 d34b6ceb eff684da f525c31e fa795581"
     },
     "crates/harlo-index/src/index.rs": {
-      "hash": "7ffe0995458abc49",
-      "units": "1bc04b52 34c2e80e 39c3be11 54a0e8c1 729b855c"
+      "hash": "c36387fa587ba590",
+      "units": "1bc04b52 34c2e80e 39c3be11 54a0e8c1 729b855c a6883d9b"
     },
     "crates/harlo-index/src/lang.rs": {
-      "hash": "9d1bf597437eced6",
-      "units": "2f725ddc 5cf7d7ec f60d718a fa89a879"
+      "hash": "b57454a6a77ff48c",
+      "units": "2f725ddc 5cf7d7ec a157d36a f60d718a fa89a879"
     },
     "crates/harlo-index/src/lib.rs": {
-      "hash": "59d9d00cca20b107",
+      "hash": "304514ca5525047d",
       "units": "2cff9baa 3c99f1f3 52add4d6 65bd8b50 711595f1 ba0e4afa d3df8f60 d6e645b7 dd3e615a e2194392 f5387f9b"
     },
     "crates/harlo-index/src/lookup.rs": {
@@ -3528,7 +4211,7 @@
       "units": "29a1af58 b80a3756"
     },
     "crates/harlo-index/src/main.rs": {
-      "hash": "96ab926f146fb4e9"
+      "hash": "537878f99a9358ef"
     },
     "crates/harlo-index/src/manifests.rs": {
       "hash": "1c85a611fa8ff73d",
@@ -3546,6 +4229,10 @@
       "hash": "dcd46bb3efae13d9",
       "units": "08ee52ae 0bf47489 118a1de5 379b7b26 3a7efb1f 50697da6 586abb54 59ad1b2f 5ea44c39 67905ad3 7c842630 b771724d f175cddf fcc0fc8f"
     },
+    "crates/harlo-index/src/structural.rs": {
+      "hash": "7ec100fbea7874c7",
+      "units": "49c266ba 82ca798c b0ee315f c4afea9a f9af38e6"
+    },
     "crates/harlo-index/src/text.rs": {
       "hash": "a2c186d5d5a02db6",
       "units": "59ad1b2f"
@@ -3557,7 +4244,7 @@
       "hash": "d6605be72e713aa3"
     },
     "crates/harlo-okf/src/brief.rs": {
-      "hash": "cfad0c55f0ab16a8",
+      "hash": "11ab882cd6082820",
       "units": "29a8825b"
     },
     "crates/harlo-okf/src/bundle.rs": {
@@ -3573,11 +4260,11 @@
       "units": "ad1a6405 b0ee315f c61d02ef"
     },
     "crates/harlo-okf/src/indexed.rs": {
-      "hash": "63f67fe2412eccd7",
-      "units": "00d3cd39 03ab5a7e 1a9e64b4 29a1af58 2c944de1 4826cfad 5c1d27ca 6ac9a32c 928194c0 b9beafca bb683d99 e81d3b0e f21d8bf7"
+      "hash": "93c46681a2cde2f9",
+      "units": "00d3cd39 03ab5a7e 1a9e64b4 29a1af58 2c944de1 4826cfad 5c1d27ca 6ac9a32c 928194c0 adf0d3f5 b9beafca bb683d99 e81d3b0e f21d8bf7"
     },
     "crates/harlo-okf/src/ledger.rs": {
-      "hash": "70ac60357af4121d",
+      "hash": "99e1a644030b236f",
       "units": "10fd874b 1256146f 313d8112 3316348d 4ca41db0 6adc722e 7c05a965 8894cf30 997b7b2d ee69eb4a"
     },
     "crates/harlo-okf/src/lex.rs": {
@@ -3616,11 +4303,11 @@
       "units": "133c8eb8 5113110b 6c73b4c5 8281292c b6ce788d"
     },
     "crates/harlo-okf/src/view.rs": {
-      "hash": "86ec8d1a4b317fa7",
+      "hash": "4466ac700d515443",
       "units": "0db52f40 24193290 3660315a 4ba69735 5392246d 79bfb0e2 889ee7f3 c3f21814"
     },
     "crates/harlo-okf/src/work.rs": {
-      "hash": "f05dc65a4cf0d3ef",
+      "hash": "6abfa2017040a317",
       "units": "00e13ed7 104ab921 1956aace 1be08f54 3cc0d43f 454fb886 652bcc3a 94c60b48 a26663ba b11c9047 d3ceee22 de3bc50e"
     },
     "crates/harlo-relay/src/lib.rs": {
@@ -3771,7 +4458,7 @@
       "units": "9d580988"
     },
     "ios/Harlo/Harlo/Composer.swift": {
-      "hash": "5e631548e9c87875",
+      "hash": "6cc825c6ee97fd4a",
       "units": "9cb2832c b39315db f57d9a21"
     },
     "ios/Harlo/Harlo/ComposerOptions.swift": {
@@ -3933,7 +4620,7 @@
       "units": "1a9730bc 24001ad8 4d018ade 5f0ec687"
     },
     "ios/Harlo/Harlo/PagesGraph.swift": {
-      "hash": "c337baf90b66110e",
+      "hash": "9992b484a4b840b2",
       "units": "ade4bc11 b3cdab3e ca599eb7 d031a15d"
     },
     "ios/Harlo/Harlo/PairView.swift": {
@@ -4085,7 +4772,7 @@
       "units": "46b3e149 f84a01b2"
     },
     "ios/Harlo/Harlo/SessionCard.swift": {
-      "hash": "aeeea929e74618ca",
+      "hash": "183fb058e7b99155",
       "units": "472d457e d931f019"
     },
     "ios/Harlo/Harlo/SessionContent.swift": {
@@ -4165,7 +4852,7 @@
       "units": "dc12f766"
     },
     "ios/Harlo/Harlo/ToolCard.swift": {
-      "hash": "2fa7fe46aaf587ce",
+      "hash": "b6507a1cac3f2f65",
       "units": "fa3cac01"
     },
     "ios/Harlo/Harlo/ToolOutput.swift": {
@@ -4429,12 +5116,12 @@
       "units": "1f2c24d8 2210fc42 448f693e 65f6c74c 7acdf94b 7c5112f5 8f19ba24 b13fc292 e7e9a12d f15ceae8 f4eab2d6 f5938d9d f7186bd3 fa5f285c ff4b3b42"
     },
     "ios/HarloKit/Sources/HarloKit/Messages.swift": {
-      "hash": "a8f8486bad2f6fc2",
+      "hash": "285a0faf6a4bca43",
       "units": "0b0fd623 0feb6c48 197fbb4e 206526eb 2d6bc384 31f3eb1f 4d6e4c2e 4e1f49a9 66c28504 6aa51a41 6e8b9c22 7b7ab65a 939aa72a 95110d74 ac35a988 c008215c cc1cb89c da1ba461 dc80f1c7 e9d1b99a ee491a20 efd59089 f50010f5"
     },
     "ios/HarloKit/Sources/HarloKit/Model.swift": {
-      "hash": "cb40b91b4c9d1943",
-      "units": "020ae0a8 03241211 09040b11 0a46018e 0b5df15e 0bcff4fd 0cd60ce9 0e8d965c 0f5d8c54 158dc456 191e5623 1c6f5276 21c3bb47 21f26c35 2350337d 297e9d79 323a90ce 34539d01 34b51f68 3985d744 3a99a0cb 3e87cb75 4081366c 43f63a68 46067e22 46d5e173 47ff7e2e 48406a2e 4a116aa4 4df91ba9 4f7a18f4 51ea5ef7 5213992c 56e26a8c 5945f975 5999e86f 5ab6aff5 64ee759a 66d238a7 6ee9798e 6f05b16f 6fbf7f9b 742c59be 744b812b 7600a713 7999da26 7cdeea3a 81b8d533 84c4c3ac 8718d4ee 8b77e5e5 8c1144fb 8cd2e492 8d51fdae 8d66dd5f 982c9e6d 9c9fd568 9d60be65 9ed632f7 9ffb7203 a2417441 a313c7e0 a32e389a a6722e1e a82d7c8f ab1f45b8 ab38af5a ad609373 aece0fc5 afefae16 b0a836bd b0d4080c b16c4878 b170aa25 b3a48cf4 b73907d4 b844597f c23d02a5 c7315dd2 c836b422 c83d3195 c987f312 cf22e773 cfc9a9df d019f98b d155d124 d939290a db545bd8 dbe74860 e3bff4e6 e60c869a e6a12ab0 e7c17de3 e7e8421c eb3a8aec ecbfac9b ed560fdb f0a6f5ac f17aaab8 f6c3ee00 fec43dcb"
+      "hash": "d0a6ce8183bebb1b",
+      "units": "020ae0a8 03241211 09040b11 0a46018e 0b5df15e 0bcff4fd 0cd60ce9 0e8d965c 0f5d8c54 158dc456 191e5623 1c6f5276 21c3bb47 21f26c35 2350337d 297e9d79 323a90ce 34539d01 34b51f68 3985d744 3a99a0cb 3e87cb75 4081366c 43f63a68 46067e22 46d5e173 47ff7e2e 48406a2e 4a116aa4 4df91ba9 4f7a18f4 51ea5ef7 5213992c 56e26a8c 5945f975 5999e86f 5ab6aff5 64ee759a 66d238a7 6ee9798e 6f05b16f 6fbf7f9b 742c59be 744b812b 7600a713 7999da26 7cdeea3a 81b8d533 84c4c3ac 8718d4ee 8b77e5e5 8c1144fb 8cd2e492 8d51fdae 8d66dd5f 982c9e6d 9c9fd568 9cae5d88 9d60be65 9ed632f7 9ffb7203 a2417441 a313c7e0 a32e389a a6722e1e a82d7c8f ab1f45b8 ab38af5a ad609373 aece0fc5 afefae16 b0a836bd b0d4080c b16c4878 b170aa25 b3a48cf4 b73907d4 b844597f c23d02a5 c7315dd2 c836b422 c83d3195 c987f312 cf22e773 cfc9a9df d019f98b d155d124 d939290a db545bd8 dbe74860 e3bff4e6 e60c869a e6a12ab0 e7c17de3 e7e8421c eb3a8aec ecbfac9b ed560fdb f0a6f5ac f17aaab8 f6c3ee00 fec43dcb"
     },
     "ios/HarloKit/Sources/HarloKit/NetworkWatch.swift": {
       "hash": "87af76c0694d8415",
@@ -4484,7 +5171,7 @@
       "units": "306cad39 3f6f9a3c 72f7410c d5b0fcaf"
     },
     "ios/HarloKit/Sources/HarloKit/Tools.swift": {
-      "hash": "671bb2e17e75d5ef",
+      "hash": "23730185e07f0a7b",
       "units": "13dc2f8c 3e0c1202 4c090b43 4c53b788 86216238 c3edb067 ded54730 e9a8f682 f5681628 f6b0f346"
     },
     "ios/HarloKit/Sources/HarloKit/Visuals.swift": {
@@ -4496,8 +5183,8 @@
       "units": "26c409df 2ec722b5 42ea498b 552ef1f5 69a9bd89 884ddbf2 8f089441 bc2a7fd5 cfcc0a68 d1d00d3e e33f6c7e"
     },
     "ios/HarloKit/Sources/HarloKit/Wiki.swift": {
-      "hash": "f3ea322a806178c8",
-      "units": "0b0dfd26 13d20e91 2d318e9d 2f873d23 4a1de501 4f14f40a 6352c844 63ec69fd 7056d513 7e22beda 7e23f745 8cc4ea9d 940db7f2 9a566359 9ce54018 9ddb54c3 a6fceb70 b4c16fea c62adc86 cd63ebdb da522aed ddc64f6a eaa9d40f f2db4293 f54083bd"
+      "hash": "eebe5e2498cf1396",
+      "units": "0b0dfd26 13d20e91 2d318e9d 2f873d23 4a1de501 4f14f40a 6352c844 63ec69fd 7056d513 7e22beda 7e23f745 8cc4ea9d 940db7f2 9a566359 9ce54018 9ddb54c3 a6fceb70 b1e3bc60 b4c16fea c62adc86 cd63ebdb da522aed ddc64f6a eaa9d40f f2db4293 f54083bd"
     },
     "ios/HarloKit/Sources/HarloKit/WorkflowReport.swift": {
       "hash": "a666fee9ec373529",
@@ -4539,24 +5226,36 @@
       "hash": "4e9a80d164aed7f9"
     }
   },
-  "leave": {},
+  "leave": {
+    "crates/harlo-agent/src/ast.rs#changes": "output formatter for documented structural rewrite",
+    "crates/harlo-agent/src/ast.rs#listed": "output formatter for documented structural search",
+    "crates/harlo-agent/src/program.rs#Kernel": "private run_code runtime process plumbing",
+    "crates/harlo-agent/src/program.rs#Kernels": "private run_code runtime process plumbing",
+    "crates/harlo-agent/src/responses.rs#handle": "shared Responses event parser",
+    "crates/harlo-agent/src/responses.rs#new_turn": "transport bookkeeping for per-turn affinity state",
+    "crates/harlo-agent/src/responses.rs#refused": "shared provider refusal parser",
+    "crates/harlo-agent/src/rules.rs#field": "private scoped-rule frontmatter parser",
+    "crates/harlo-agent/src/rules.rs#frontmatter": "private scoped-rule frontmatter parser",
+    "crates/harlo-agent/src/rules.rs#top": "helper that chooses the rule-file root",
+    "crates/harlo-index/src/index.rs#vendored": "private source-tree path exclusion helper"
+  },
   "pages": {
-    "architecture/agent-context.md": "396051b57be23bf2",
-    "architecture/agent-tools.md": "68f83b1d6f33a233",
-    "architecture/agent.md": "08f4e1b0151e0fb2",
-    "architecture/core-engines.md": "3b88a6ef64bb9dec",
+    "architecture/agent-context.md": "878e49f1cdcc14e1",
+    "architecture/agent-tools.md": "da1fef3a83ac1159",
+    "architecture/agent.md": "8cb776a141600211",
+    "architecture/core-engines.md": "baa1ae625e6b853e",
     "architecture/core-persistence.md": "42928b70a7d04037",
-    "architecture/core.md": "13d0eb9a30c2fa6c",
+    "architecture/core.md": "6a5f9718c1e16cd5",
     "architecture/desktop-code.md": "85da0ecfaf0937f7",
     "architecture/desktop-ui.md": "2df258f43091c28c",
     "architecture/desktop.md": "e8149f9c7071f972",
     "architecture/harness.md": "d68a764e61e94e4f",
-    "architecture/knowledge.md": "b71e3f395ea7cb95",
-    "architecture/mobile-native.md": "a275fbbd9bc2ec45",
+    "architecture/knowledge.md": "4c8d28fc78463d34",
+    "architecture/mobile-native.md": "95c8a2d0af9cc591",
     "architecture/mobile-notifications.md": "bacf10d639502531",
     "architecture/mobile-protocol.md": "60903de1181c0887",
     "overview.md": "838ccfc0beb8e933",
-    "workflows/agent-orchestration.md": "af1c3417b1022d5c",
+    "workflows/agent-orchestration.md": "b311c8724dc9ee1d",
     "workflows/desktop-connectivity.md": "1529b98b7b31ef71",
     "workflows/desktop-files.md": "83dd4c9fd46189d7",
     "workflows/desktop-sessions.md": "3349e6085f07f731",

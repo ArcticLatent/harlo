@@ -4,7 +4,7 @@ title: Core application ownership and subsystem map
 description: The UI-independent coordination layer, its invariants, and the complete responsibility map for harlo-core.
 covers:
   - crates/harlo-core/
-generated: { by: harlo/gpt-6-astra, at: "2026-11-19T00:51:01Z" }
+generated: { by: harlo/gpt-6-luna, at: "2026-11-19T18:56:17Z" }
 sources:
   - id: lib
     resource: "repo://crates/harlo-core/src/lib.rs"
@@ -84,6 +84,9 @@ sources:
     resource: "repo://crates/harlo-core/src/project_icons.rs"
   - id: wiki
     resource: "repo://crates/harlo-core/src/wiki.rs"
+  - id: freshness
+    resource: "repo://crates/harlo-core/src/wiki.rs"
+    title: enum Freshness
   - id: wiki-view
     resource: "repo://crates/harlo-core/src/wiki_view.rs"
   - id: persistence
@@ -158,7 +161,7 @@ These modules are deliberately reusable for saved as well as live messages; do n
 
 ## Wiki integration is orchestration, not a second wiki engine
 
-`wiki` supplies project discovery, reading notes, writer prompts, and `wiki_check`; the actual OKF engine is delegated to `harlo-okf`. A writer edits Markdown with ordinary file tools, while checks validate/stamp qualifying pages and report outstanding work. `wiki_view` reads the wiki on its repository's machine, lays out Markdown for readers, and offers updates as the default branch moves. Remote reads route through the agent rather than assuming a local `.okf` copy.[^wiki][^wiki-view]
+`wiki` supplies project discovery, reading notes, writer prompts, and `wiki_check`; the actual OKF engine is delegated to `harlo-okf`. Its read-only freshness query distinguishes pages with outstanding work from an unchecked wiki, so a failed check is not presented as proof that all pages are current. A writer edits Markdown with ordinary file tools, while checks validate/stamp qualifying pages and report outstanding work. `wiki_view` reads the wiki on its repository's machine, lays out Markdown for readers, and offers updates as the default branch moves. Remote reads route through the agent rather than assuming a local `.okf` copy.[^wiki][^freshness][^wiki-view]
 
 ## Complete folder responsibility map
 
@@ -213,6 +216,7 @@ Preserve the separation between a pure decision and the action that fulfills it:
 [^palette]: crates/harlo-core/src/palette.rs
 [^icons]: crates/harlo-core/src/project_icons.rs
 [^wiki]: crates/harlo-core/src/wiki.rs
+[^freshness]: crates/harlo-core/src/wiki.rs, enum Freshness
 [^wiki-view]: crates/harlo-core/src/wiki_view.rs
 [^persistence]: crates/harlo-core/src/lib.rs
 [^execution]: crates/harlo-core/src/lib.rs

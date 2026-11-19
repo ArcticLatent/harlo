@@ -9,7 +9,7 @@ covers:
   - crates/harlo-agent/src/skills.rs
   - crates/harlo-agent/src/clock.rs
   - crates/harlo-agent/src/used.rs
-generated: { by: harlo/gpt-6-astra, at: "2026-11-19T00:51:01Z" }
+generated: { by: harlo/gpt-6-luna, at: "2026-11-19T18:56:17Z" }
 sources:
   - id: session
     resource: "repo://crates/harlo-agent/src/session.rs"
@@ -31,6 +31,9 @@ sources:
     resource: "repo://crates/harlo-agent/src/agent.rs"
   - id: compact
     resource: "repo://crates/harlo-agent/src/compact.rs"
+  - id: elide
+    resource: "repo://crates/harlo-agent/src/compact.rs"
+    title: fn elide
   - id: stubs
     resource: "repo://crates/harlo-agent/src/stubs.rs"
   - id: overflow
@@ -92,6 +95,8 @@ A successful compaction is appended before the in-memory prefix is replaced; its
 
 For eligible Responses providers, the agent can first request native server compaction and fall back to textual summarization. Native opaque state belongs to its originating provider/model. On switching away, the new model can summarize the pre-compaction conversation recovered from the log, constrained to its available window and supplemented by the retained request note. If that cannot be done, the note remains; opaque state is not assumed portable.[^summarize][^carry]
 
+After compaction, a successful whole-file read kept in the recent tail is replaced by a short reference when that same path is successfully read whole again later. Range reads, failed reads and the latest successful whole read retain their output; this trims superseded evidence without hiding the newest observation.[^elide]
+
 ## Instructions are context too
 
 Skills are discovered from user/project folders and enabled Claude plugin installations, deduplicated with project/nearer definitions taking precedence. The prompt lists bounded descriptions and paths rather than eagerly including every skill body. Explicit `/skill:` expansion can include a body; skills marked for manual invocation are not automatically advertised in the same way.[^skills]
@@ -106,6 +111,7 @@ The agent rereads its project instructions when a summary is spliced in, and reb
 [^failed]: crates/harlo-agent/src/agent.rs, fn Agent::failed
 [^estimate]: crates/harlo-agent/src/agent.rs
 [^compact]: crates/harlo-agent/src/compact.rs
+[^elide]: crates/harlo-agent/src/compact.rs, fn elide
 [^stubs]: crates/harlo-agent/src/stubs.rs
 [^overflow]: crates/harlo-agent/src/agent.rs, fn Agent::turn
 [^set-aside]: crates/harlo-agent/src/agent.rs, fn Agent::set_aside

@@ -19,7 +19,7 @@ covers:
   - crates/harlo-core/src/mcp.rs
   - crates/harlo-core/src/mcp_catalog.rs
   - crates/harlo-core/src/mcp_probe.rs
-generated: { by: harlo/gpt-6-astra, at: "2026-11-19T00:51:01Z" }
+generated: { by: harlo/gpt-6-luna, at: "2026-11-19T18:56:17Z" }
 sources:
   - id: providers
     resource: "repo://crates/harlo-core/src/providers.rs"
@@ -80,7 +80,7 @@ An **agent** executes a conversation through a harness; an **inference engine** 
 
 ## Agent boundary
 
-Harlo launch arguments encode its own tools and sandbox/network choices; other agents do not receive Harlo-specific flags. Provider checks use a curated Claude model list and a short ephemeral Harlo RPC run that sends no prompt. A discovery probe therefore differs from starting a persisted user session.[^args][^providers]
+Harlo launch arguments encode its own tools and sandbox/network choices; other agents do not receive Harlo-specific flags. Harlo may also receive configured task-model, fallback and advisor choices on launch. Provider checks use a curated Claude model list and a short ephemeral Harlo RPC run that sends no prompt. A discovery probe therefore differs from starting a persisted user session.[^args][^providers]
 
 Sign-in handling parses the agents' own command output into links, codes, and prompts. Agents retain their credentials; the core presents the interaction rather than becoming the credential authority. Quota queries likewise use the agent's own paths: Harlo's usage command/live reports and Claude's own usage operation. The updates module checks Claude's published npm version and delegates installation to the agent's update command.[^signin][^quota][^updates]
 
