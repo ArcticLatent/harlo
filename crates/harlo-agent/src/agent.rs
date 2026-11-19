@@ -591,6 +591,8 @@ pub struct Agent {
     logged: (Option<String>, Option<String>),
     /// Totals of this process's requests.
     pub totals: Used,
+    /// Watches the prompt cache and says why a request missed it.
+    cache: crate::kv::Monitor,
     /// What the session's requests have used and cost, all of them (read
     /// from its log when it's opened): what its stats say.
     pub spend: Arc<Mutex<Used>>,
@@ -683,6 +685,7 @@ impl Agent {
             log,
             logged: (past.model, past.effort),
             totals: Used::default(),
+            cache: crate::kv::Monitor::default(),
             spend: Arc::new(Mutex::new(spent)),
             side: Arc::default(),
             unsettled: Arc::default(),
@@ -1403,6 +1406,20 @@ impl Agent {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
                 let _ = writeln!(f, "{line}");
+            }
+        }
+        // (Why a request read less from the prompt cache than its warm
+        // prefix should have given: logged always, shown when it's the
+        // harness's own fault, or under HARLO_AGENT_CACHE_NOTE for anything.)
+        if usage["input_tokens"].is_u64() {
+            let (provider, _) = self.model.split_once('/').unwrap_or((providers::CHATGPT, &self.model));
+            if let Some(r) = self.cache.observe(&self.model, provider, &system, &specs, &self.history, used.input, used.cached) {
+                let _ = self.log.append(json!({ "type": "harlo_cache_miss", "reason": r.reason.id(), "detail": r.reason.detail(), "missed": r.missed, "harnessCaused": r.reason.harness_caused() }));
+                if r.reason.harness_caused() {
+                    show(Shown::Notice { level: "warning", text: &format!("Prompt cache miss: {} ({} tokens) — this shouldn't happen, it's a harness bug.", r.reason.detail(), r.missed) });
+                } else if std::env::var_os("HARLO_AGENT_CACHE_NOTE").is_some() {
+                    show(Shown::Notice { level: "info", text: &format!("Prompt cache miss: {} ({} tokens).", r.reason.detail(), r.missed) });
+                }
             }
         }
         self.last_usage = usage;

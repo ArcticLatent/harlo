@@ -55,6 +55,7 @@ mod images;
 mod isolate;
 mod jobs;
 mod keys;
+mod kv;
 mod lookup;
 mod lsp;
 mod mcp;

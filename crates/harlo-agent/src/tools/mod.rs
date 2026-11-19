@@ -997,26 +997,24 @@ impl Tools {
             ));
         }
         let (max, max_bytes) = if preview { (PREVIEW_LINES, PREVIEW_BYTES) } else { (limit.map_or(READ_LINES, |l| usize::try_from(l).unwrap_or(usize::MAX).clamp(1, READ_LINES)), READ_BYTES) };
-        let mut out = String::new();
-        let mut n = 0;
         let anchored = crate::hashline::on();
+        let mut rendered: Vec<String> = Vec::new();
+        let mut bytes = 0;
         for l in &lines[start..] {
-            if n >= max || out.len() + l.len() + 1 > max_bytes {
+            if rendered.len() >= max || bytes + l.len() + 1 > max_bytes {
                 break;
             }
-            if anchored {
-                out.push_str(&crate::hashline::annotate(start + n + 1, l));
-            } else {
-                out.push_str(l);
-            }
-            out.push('\n');
-            n += 1;
+            bytes += l.len() + 1;
+            rendered.push(if anchored { crate::hashline::annotate(start + rendered.len() + 1, l) } else { (*l).to_owned() });
         }
-        if n == 0 {
+        let mut out = if rendered.is_empty() {
             // One line longer than the limit: its start, said so.
-            out = long_line(path, start + 1, lines[start], lines[start].len());
-            n = 1;
-        }
+            rendered.push(String::new());
+            long_line(path, start + 1, lines[start], lines[start].len())
+        } else {
+            rendered.join("\n")
+        };
+        let n = rendered.len();
         let end = start + n;
         if preview {
             return ok(format!(
@@ -1028,7 +1026,7 @@ impl Tools {
             ));
         }
         if end < lines.len() {
-            let _ = write!(out, "\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, lines.len(), end + 1);
+            let _ = write!(out, "\n\n[Lines {}-{} of {}. Read on with offset={}.]", start + 1, end, lines.len(), end + 1);
         }
         ok(out.trim_end_matches('\n').to_owned())
     }
