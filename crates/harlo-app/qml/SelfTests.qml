@@ -6058,6 +6058,37 @@ Item {
         ScriptAction { script: { const d = JSON.parse(Workspace.quotaJson); tests.log("accounts:", d.accounts.length, "error:", d.error, "first:", d.accounts.length ? d.accounts[0].provider + " " + d.accounts[0].plan + " " + d.accounts[0].windows.map(w => w.label + " " + Math.round(w.usedFraction * 100) + "%").join(", ") : "-"); Qt.quit() } }
     }
 
+    // Committed but not pushed, said in the commit box with Push beside it;
+    // and Commit and push. `--cwd`: a repo whose main is one commit ahead
+    // of its (local, bare) origin, with an untracked notes.md.
+    SequentialAnimation {
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickscommitpush"
+        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")); Workspace.newSession(1, "demo"); if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")) } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: { windowSettings.rightMode = "changes"; git.refresh(true) } }
+        PauseAnimation { duration: 1200 }
+        ScriptAction { script: {
+            const line = tests.findName("unpushed")
+            tests.check(git.ahead === 1 && git.upstream !== "", "one commit ahead of its upstream (" + git.ahead + ", " + git.upstream + ")")
+            tests.check(line !== null && tests.findText("1 commit not pushed", line) !== null, "the commit box says it isn't pushed")
+            tests.check(tests.findName("commitPush") !== null && tests.findText("Commit & push") !== null, "Commit and push beside Commit all")
+            tests.shotWindow("clicks-commit-unpushed")
+            tests.clickItem(tests.findName("unpushedPush"), "Push") } }
+        PauseAnimation { duration: 2500 }
+        ScriptAction { script: {
+            tests.check(git.ahead === 0 && tests.findName("unpushed") === null, "Push sends it: the line goes (" + git.ahead + ", " + git.message + ")")
+            tests.clickItem(tests.findName("commitMessage"), "commit message")
+            TestInput.typeText("add notes") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.clickItem(tests.findName("commitPush"), "Commit and push") }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: {
+            tests.check(changes.changedCount === 0 && changes.commitText === "", "Commit and push commits (" + changes.changedCount + ", " + git.message + ")")
+            tests.check(git.ahead === 0 && tests.findName("unpushed") === null, "…and pushes: nothing left to push (" + git.ahead + ")")
+            tests.shotWindow("clicks-commit-pushed")
+            tests.summary(); Qt.quit() } }
+    }
+
     // Branch switching by real clicks and typing (steps C–G of the manual
     // test). `--cwd`: a repo on main with an untracked notes.md and a
     // branch checked out in another worktree (`wt-branch`).

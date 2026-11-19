@@ -54,6 +54,8 @@ Rectangle {
     }
     // Clear the message only once the commit succeeded.
     property bool committing: false
+    // Commit and push: the push follows a commit that succeeded.
+    property bool pushAfterCommit: false
     // Test hook.
     property alias commitText: commitMessage.text
     Connections {
@@ -61,8 +63,13 @@ Rectangle {
         function onBusyChanged() {
             if (!root.git.busy && root.committing) {
                 root.committing = false
-                if (!root.git.error)
+                const push = root.pushAfterCommit
+                root.pushAfterCommit = false
+                if (!root.git.error) {
                     commitMessage.text = ""
+                    if (push)
+                        root.git.push()
+                }
             }
         }
     }
@@ -718,30 +725,83 @@ Rectangle {
                 }
             }
             RowLayout {
+                id: commitRow
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
-                Label {
+                Item {
                     Layout.fillWidth: true
+                    visible: !countsLabel.visible
+                }
+                Label {
+                    id: countsLabel
+                    Layout.fillWidth: true
+                    // (Narrow: the buttons keep the room; the list above
+                    // already counts the changes.)
+                    visible: commitRow.width - commitButton.implicitWidth - commitRow.spacing - (commitPushButton.visible ? commitPushButton.implicitWidth + commitRow.spacing : 0) >= implicitWidth
                     elide: Text.ElideRight
                     text: root.git.stagedCount + " staged · " + root.git.unstagedCount + " unstaged"
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
                 }
                 FlatButton {
+                    id: commitPushButton
+                    objectName: "commitPush"
+                    visible: !commitButton.nothing
+                    text: root.git.upstream === "" ? "Commit & publish" : "Commit & push"
+                    enabled: commitButton.enabled
+                    opacity: enabled ? 1 : 0.45
+                    ToolTip.visible: hovered && enabled
+                    ToolTip.text: root.git.upstream === "" ? "Commit, then publish this branch to its remote" : "Commit, then push to " + root.git.upstream
+                    onClicked: {
+                        root.pushAfterCommit = true
+                        commitButton.commit()
+                    }
+                }
+                FlatButton {
                     id: commitButton
                     // Nothing staged: commit everything, as most git UIs do.
                     readonly property bool all: root.git.stagedCount === 0 && root.git.unstagedCount > 0
                     readonly property bool nothing: root.git.stagedCount + root.git.unstagedCount === 0
+                    function commit() {
+                        root.committing = true
+                        all ? root.git.commitAll(commitMessage.text.trim()) : root.git.commit(commitMessage.text.trim())
+                    }
                     text: nothing ? "Nothing to commit" : all ? "Commit all" : "Commit"
                     accent: Theme.primary
                     enabled: !nothing && commitMessage.text.trim() !== "" && !root.git.busy
                     opacity: enabled ? 1 : 0.45
                     ToolTip.visible: hovered && !enabled && !nothing
                     ToolTip.text: "Write a commit message first"
-                    onClicked: {
-                        root.committing = true
-                        all ? root.git.commitAll(commitMessage.text.trim()) : root.git.commit(commitMessage.text.trim())
-                    }
+                    onClicked: commit()
+                }
+            }
+            // Committed but not pushed: said in words, with Push beside it.
+            RowLayout {
+                objectName: "unpushed"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                visible: root.git.upstream !== "" && root.git.ahead > 0
+                spacing: 8
+                Icon {
+                    name: "git-commit"
+                    color: Theme.warning
+                    implicitWidth: 15
+                    implicitHeight: 15
+                }
+                Label {
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                    text: (root.git.ahead === 1 ? "1 commit not pushed" : root.git.ahead + " commits not pushed")
+                        + (root.git.behind > 0 ? ", " + root.git.behind + " to pull" : "")
+                    color: Theme.text
+                    font.pixelSize: Theme.px(12)
+                }
+                FlatButton {
+                    objectName: "unpushedPush"
+                    text: "Push"
+                    accent: Theme.primary
+                    enabled: !root.git.busy
+                    onClicked: root.git.push()
                 }
             }
         }
