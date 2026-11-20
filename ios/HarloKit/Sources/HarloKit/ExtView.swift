@@ -21,6 +21,8 @@ public struct ExtView: Equatable, Sendable, Identifiable {
     public var toolCallId: String
     /// The custom message it draws, by the message's time (0 none).
     public var timestamp: Int64
+    /// The extension's own entry it draws, by the entry's id ("" none).
+    public var entryId: String
     /// Widgets: "aboveEditor" or "belowEditor".
     public var placement: String
     public var hidden: Bool
@@ -37,6 +39,7 @@ public struct ExtView: Equatable, Sendable, Identifiable {
         resultBlocks = ExtBlock.list(v["resultBlocks"], lines: result)
         toolCallId = v["toolCallId"].text
         timestamp = v["timestamp"].int ?? 0
+        entryId = v["entryId"].text
         placement = v["placement"].text
         hidden = v["hidden"].bool ?? false
     }

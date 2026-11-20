@@ -246,6 +246,18 @@ final class HarloUITests: XCTestCase {
         shot("14-mcp-tool")
     }
 
+    /// An extension's own drawing: its card's Markdown as text (code in a
+    /// well) and its picture, and the entry it keeps.
+    func test08bExtension() {
+        launch("extension")
+        openMain()
+        see("Checked: tests and the release build", timeout: 10)
+        see("keeps its place")
+        see("./build.sh --release")
+        XCTAssertTrue(app.images["A picture from an extension"].waitForExistence(timeout: 8), "its picture")
+        shot("14b-extension-card")
+    }
+
     /// The project's wiki from the session menu: what it owes the code, its
     /// pages by folder, a page (what it owes, a diagram drawn, code in a
     /// well, its footnotes), the pages' graph, and a search that opens its
@@ -653,7 +665,7 @@ final class HarloUITests: XCTestCase {
         // Done: its implementation session's line opens it.
         launch("workflow")
         let session = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@ AND identifier != 'workflowRun'", task)).firstMatch
+            .matching(NSPredicate(format: "label CONTAINS %@ AND NOT label CONTAINS 'Review:' AND identifier != 'workflowRun'", task)).firstMatch
         XCTAssertTrue(session.waitForExistence(timeout: 8), "its implementation session")
         session.tap()
         let line = app.buttons["workflowLine"]
@@ -662,6 +674,7 @@ final class HarloUITests: XCTestCase {
         shot("31-workflow-line")
         // The workflow's message to the agent: one line, its words folded.
         let note = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Sent the task")).firstMatch
+        _ = note.waitForExistence(timeout: 8)
         for _ in 0..<4 where !note.exists { app.swipeDown() }
         XCTAssertTrue(note.exists, "the workflow's message to the agent as one line")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "call report_done")).firstMatch.exists, "its words folded")

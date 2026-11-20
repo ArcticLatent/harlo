@@ -163,6 +163,8 @@ enum Role {
     User,
     Assistant,
     Notice(NoticeLevel),
+    /// An extension's own entry, shown only as it draws it.
+    Entry,
     Other,
 }
 
@@ -577,6 +579,34 @@ impl Transcript {
         true
     }
 
+    /// An extension's own entry (`pi.appendEntry`): an empty row titled
+    /// "entry", shown only when the extension draws it (its view found by
+    /// the entry's id, the row's `subtitle`).
+    fn upsert_entry(&mut self, id: &str, message: &Value) -> bool {
+        if self.by_id.contains_key(id) {
+            return false;
+        }
+        let time = message["timestamp"]
+            .as_str()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map_or_else(|| message_time(message), |t| t.timestamp_millis());
+        self.by_id.insert(id.to_owned(), self.items.len());
+        self.items.push(Item {
+            id: id.to_owned(),
+            role: Role::Entry,
+            blocks: vec![Block::Text(message["entryId"].as_str().unwrap_or_default().to_owned())],
+            done: true,
+            error: None,
+            rev: 0,
+            rows: None,
+            settled: false,
+            paged: None,
+            time,
+            model: String::new(),
+        });
+        true
+    }
+
     fn upsert_custom(&mut self, id: &str, message: &Value) -> bool {
         if message["display"] == false {
             return false;
@@ -643,6 +673,7 @@ impl Transcript {
             }
             // omp's own messages (background job results, notes from its
             // modes): hidden ones stay hidden, the rest show as a notice.
+            Some("custom") if message["entry"] == true => return self.upsert_entry(id, message),
             Some("custom") => return self.upsert_custom(id, message),
             _ => Role::Other,
         };
@@ -955,6 +986,14 @@ impl Transcript {
 
         match item.role {
             Role::User => rows.push(Arc::new(user_row(&id, &item.blocks, &row))),
+            Role::Entry => {
+                let mut r = row(format!("{id}:e"), RowKind::Notice);
+                r.title = "entry".into();
+                if let Some(Block::Text(entry)) = item.blocks.first() {
+                    r.subtitle.clone_from(entry);
+                }
+                rows.push(Arc::new(r));
+            }
             Role::Notice(level) => {
                 let mut r = row(format!("{id}:n"), RowKind::Notice);
                 r.title = match level {
@@ -1719,6 +1758,20 @@ mod tests {
         assert_eq!(rows[0].kind, RowKind::Notice);
         assert_eq!(rows[0].title, "info");
         assert_eq!(rows[0].text, "2 background jobs have completed.");
+    }
+
+    /// An extension's own entry: an empty row titled "entry" with its id,
+    /// where its drawing goes; once only.
+    #[test]
+    fn an_extensions_entry_is_a_row_at_its_time() {
+        let mut t = Transcript::default();
+        let entry = json!({"role":"custom","entry":true,"entryId":"a1b2","customType":"stamp","timestamp":"2026-11-20T10:00:00.123Z"});
+        t.apply(&HarnessEvent::MessageEnd { id: "e1".into(), message: entry.clone() });
+        t.apply(&HarnessEvent::MessageEnd { id: "e1".into(), message: entry });
+        let rows = t.rows();
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].kind, rows[0].title.as_str(), rows[0].text.as_str(), rows[0].subtitle.as_str()), (RowKind::Notice, "entry", "", "a1b2"));
+        assert_eq!(rows[0].time, 1_795_168_800_123);
     }
 
     /// A long session's latest rows come first; the whole list then only adds

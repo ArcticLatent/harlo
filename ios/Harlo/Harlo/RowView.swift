@@ -78,6 +78,9 @@ struct RowView: View {
         case "notice" where extMessage != nil:
             // A custom message a pi extension draws.
             ExtBlocks(lines: extMessage?.lines ?? [], blocks: extMessage?.blocks ?? [])
+        case "notice" where row.title == "entry":
+            // An extension's own entry: nothing until it draws it.
+            EmptyView()
         case "images":
             // (Its pictures only: under it, the ones its reply doesn't show.)
             EmptyView()
@@ -89,10 +92,14 @@ struct RowView: View {
         }
     }
 
-    /// A pi extension's drawing of this custom message (by its time).
+    /// A pi extension's drawing of this custom message (by its time) or of
+    /// its own entry (by the entry's id).
     var extMessage: ExtView? {
+        if row.title == "entry" {
+            return model.session?.extViews.first { $0.kind == "message" && $0.entryId == row.subtitle && !row.subtitle.isEmpty && !$0.lines.isEmpty }
+        }
         guard row.time > 0 else { return nil }
-        return model.session?.extViews.first { $0.kind == "message" && $0.timestamp == row.time && !$0.lines.isEmpty }
+        return model.session?.extViews.first { $0.kind == "message" && $0.entryId.isEmpty && $0.timestamp == row.time && !$0.lines.isEmpty }
     }
 
     var codeSpans: [Span] {

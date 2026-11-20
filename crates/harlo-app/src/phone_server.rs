@@ -583,7 +583,7 @@ fn ext_event(key: &str, frame: &Value, sent: &mut std::collections::HashMap<Stri
             };
             let mut view = json!({ "id": id, "kind": kind, "lines": if shown { plain(&frame["lines"]) } else { Vec::new() }, "result": if shown { plain(&frame["result"]) } else { Vec::new() },
                 "blocks": blocks(&frame["blocks"]), "resultBlocks": blocks(&frame["resultBlocks"]),
-                "toolCallId": frame["toolCallId"], "timestamp": frame["timestamp"], "placement": frame["placement"], "hidden": frame["hidden"] == true });
+                "toolCallId": frame["toolCallId"], "timestamp": frame["timestamp"], "entryId": frame["entryId"], "placement": frame["placement"], "hidden": frame["hidden"] == true });
             let text = view.to_string();
             if sent.get(id) == Some(&text) {
                 return None;

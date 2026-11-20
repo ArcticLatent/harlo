@@ -4624,6 +4624,7 @@ Item {
     // A colour as the lines set it (24-bit SGR), from "#rrggbb".
     function sgr(hex) { return "38;2;" + [1, 3, 5].map(i => parseInt(String(hex).substr(i, 2), 16)).join(";") + "m" }
     function blockKinds(v) { return (v ? v.blocks : []).map(b => b.kind).join(",") }
+    property int foldedRows: 0
     property string piExtMode: ""
     property string piExtAccent: ""
     SequentialAnimation {
@@ -4770,10 +4771,23 @@ Item {
             tests.check(pic && pic.status === Image.Ready && Math.abs(pic.width - most) < 1 && Math.abs(pic.width / pic.height - 1.6) < 0.05, "the picture drawn, no wider than itself or the extension allows (" + (pic ? pic.width + "×" + pic.height : "none") + ", at most " + most + ")")
             const said = tests.findAllNames("extMarkdown", card).filter(m => tests.shown(m)).map(m => m.getText(0, m.length)).join(" | ")
             tests.check(/A card with bold words/.test(said), "its Markdown drawn (" + said.slice(0, 60) + ")")
+            // Its link: found where it's drawn, and opened by a click.
+            const prose = tests.findAllNames("extMarkdown", card).find(m => /a link/.test(m.getText(0, m.length)))
+            let at = null
+            for (let y = 2; prose && y < prose.height && !at; y += 3)
+                for (let x = 2; x < prose.width && !at; x += 4)
+                    if (prose.linkAt(x, y) !== "") at = { x: x + 2, y: y }
+            tests.check(at !== null && card.linkAt(prose.mapToItem(card, at.x, at.y).x, prose.mapToItem(card, at.x, at.y).y) === "https://example.com/docs", "its link is where it's drawn")
+            if (at) { const w = prose.mapToItem(null, at.x, at.y); TestInput.click(w.x, w.y) }
             const bg = card.blocks.find(b => b.kind === "markdown").bg
             tests.check(bg === Theme.piColors.bg.customMessageBg, "on its Box's background (" + bg + ")")
             chat.transcript.listView.positionViewAtIndex(chat.transcript.listView.count - 1, ListView.Contain)
-            tests.shotWindow("clicks-piext-card")
+            tests.shotWindow("clicks-piext-card") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            // (Offscreen, Qt opens no browser: the view says what it opened.)
+            const card = tests.findAllNames("messageExtView", chat.transcript)[1]
+            tests.check(card.opened === "https://example.com/docs", "a click on it opens it (" + card.opened + ")")
             tests.sendCommandByKeys("/pick") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extPanel("screen").length === 1, 20000) }
@@ -4794,6 +4808,25 @@ Item {
         PauseAnimation { duration: 50 }
         ScriptAction { script: {
             tests.check(tests.chatText().indexOf("picked: brick") >= 0, "Enter picks it")
+            tests.foldedRows = tests.findAllNames("messageExtView", chat.transcript).length
+            tests.sendCommandByKeys("/stamp") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.findAllNames("messageExtView", chat.transcript).some(v => /stamp drawn: 1/.test(tests.extLines(v).join(" "))), 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            // Two entries: each a row, only the one it draws shown.
+            const lv = chat.transcript.listView
+            lv.positionViewAtIndex(lv.count - 1, ListView.Contain)
+            const views = tests.findAllNames("messageExtView", chat.transcript)
+            const stamp = views.find(v => /stamp drawn: 1/.test(tests.extLines(v).join(" ")))
+            tests.check(!!stamp && views.length === tests.foldedRows + 1, "an entry drawn by its renderer, the other not (" + views.length + " views)")
+            let entries = 0, shown = 0
+            for (let i = 0; i < lv.count; i++) {
+                const it = lv.itemAtIndex(i)
+                if (it && it.entry === true) { entries++; if (it.height > 0) shown++ }
+            }
+            tests.check(entries === 2 && shown === 1, "both are rows, only the drawn one takes room (" + entries + " rows, " + shown + " shown)")
+            tests.shotWindow("clicks-piext-entry")
             // (The other colour mode: drawn again in its colours.)
             tests.piExtMode = Workspace.themeMode
             tests.piExtAccent = Theme.piColors.fg.accent
@@ -4890,6 +4923,19 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(tests.modelRequests().some(b => (b.messages || []).some(m => m.role === "tool" && JSON.stringify(m.content).indexOf("The user said no") >= 0)), "Deny: not run there")
+            // The Claude subscription there: put on box (its Claude Code
+            // there), its models offered.
+            const there = win.selftestDir + "/sshd/home/.cache/harlo/pi-claude-bridge/0.0.1-sdk-0/node_modules/pi-claude-bridge/package.json"
+            tests.check(TestInput.readFile(there).indexOf("pi-claude-bridge") >= 0, "the Claude subscription's extension put on box")
+            tests.clickItem(tests.findName("modelButton"), "the model button") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => tests.findText("CLAUDE SUBSCRIPTION") !== null, 15000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            const listed = tests.findName("modelList").model.map(m => m.group + ": " + m.name)
+            tests.check(listed.indexOf("Claude subscription: Claude Opus 5.5") >= 0, "pi on box offers the Claude subscription's models (" + listed + ")")
+            tests.shotWindow("clicks-pi-remote-claude")
+            TestInput.key(Qt.Key_Escape, 0)
             tests.summary(); Qt.quit() } }
     }
 
@@ -6277,7 +6323,11 @@ Item {
         PauseAnimation { duration: 200 }
         ScriptAction { script: tests.waitUntil(memLongSteps, () => tests.memShowing(1000), 120000) }
         PauseAnimation { duration: 4000 }
-        ScriptAction { script: { tests.memMark("opened"); tests.log("rows:", chat.transcript.listView.count); if (win.argValue("--warm=")) Qt.quit(); else Workspace.setSetting("claude_path", win.argValue("--fake-claude=")) } }
+        ScriptAction { script: {
+            tests.memMark("opened"); tests.log("rows:", chat.transcript.listView.count)
+            if (win.argValue("--warm=")) Qt.quit()
+            // (The heavy turns' commands and edit aren't asked about.)
+            else Workspace.setApprovalMode(chat.session.key, "yolo") } }
         PauseAnimation { duration: 500 }
         SequentialAnimation {
             loops: Number(win.argValue("--turns=") || 30)
@@ -10842,7 +10892,19 @@ Item {
             const out = String(((req.messages || []).filter(m => m.role === "tool").slice(-1)[0] || {}).content || "")
             const found = (/\(found: ([^)]*)\)/.exec(out) || ["", ""])[1]
             tests.check(found.indexOf("ctx_execute") >= 0 && found.indexOf("ctx_upgrade") < 0 && found.indexOf("ctx_doctor") < 0, "offered its tools but the two hidden (" + found + ")")
+            // pi's own drawing of the call: folded, saying a click opens it.
+            const result = tests.findName("toolExtResult", chat.transcript)
+            // (pi cuts the line to the width: "… click t…" at the narrowest.)
+            tests.check(/more lines,\s+click/.test(tests.extLines(result).join(" ")), "pi's folded result says a click opens it (" + tests.extLines(result).filter(l => /more lines/.test(l)).join(" ") + ")")
+            tests.foldedRows = tests.extLines(result).length
             tests.shotWindow("clicks-catalog-session")
+            tests.clickItem(result, "pi's folded result") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(catalogSteps, () => tests.extLines(tests.findName("toolExtResult", chat.transcript)).length > tests.foldedRows, 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const rows = tests.extLines(tests.findName("toolExtResult", chat.transcript))
+            tests.check(rows.length > tests.foldedRows && !/to expand/.test(rows.join(" ")), "and a click opens it (" + tests.foldedRows + " → " + rows.length + " lines)")
             settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: tests.clickItem(tests.findName("mcpCatalogToggle-context-mode", settingsDialog.contentItem), "turn off") }

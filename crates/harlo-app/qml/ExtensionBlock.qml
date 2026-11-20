@@ -16,6 +16,12 @@ Item {
     required property var colors
     readonly property string kind: modelData.kind
     readonly property real inset: (modelData.pad || 0) * cellW
+    /// The link at `x`, `y` (this item's), or "".
+    function linkAt(x, y) {
+        if (kind !== "markdown") return ""
+        const p = markdown.mapFromItem(block, x, y)
+        return markdown.linkAt(p.x, p.y)
+    }
     implicitHeight: kind === "lines" ? (modelData.rows || 0) * cellH
                   : kind === "markdown" ? markdown.implicitHeight + cellH
                   : picture.height + cellH

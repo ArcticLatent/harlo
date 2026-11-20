@@ -192,6 +192,12 @@ impl Translator {
                 let id = self.message_id(false);
                 E::MessageEnd { id, message: take(frame, "message") }
             }
+            // An extension's own entry (`pi.appendEntry`): a row that shows
+            // only when the extension draws it.
+            "entry_appended" if frame["entry"]["type"] == "custom" => E::MessageEnd {
+                id: format!("{}-e{}", self.kind.as_str(), frame["entry"]["id"].as_str().unwrap_or_default()),
+                message: crate::store::entry_message(&frame["entry"]),
+            },
             "message_update" => {
                 let id = self.message_id(false);
                 match translate_block_event(id, &frame["assistantMessageEvent"]) {

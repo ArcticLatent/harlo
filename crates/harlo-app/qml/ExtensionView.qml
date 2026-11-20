@@ -39,6 +39,8 @@ Item {
     Accessible.role: Accessible.StaticText
     Accessible.name: root.lines.length > 0 ? qsTr("An extension's view, %n line(s)", "", root.lines.length) : ""
 
+    /// The link it last opened (self-tests).
+    property string opened: ""
     function send(op) { if (root.view) root.session.extInput(root.view.id, JSON.stringify(op)) }
 
     // (Its width, once it settles: the extension draws for it.)
@@ -85,6 +87,17 @@ Item {
                 colors: screen.colors
             }
         }
+    }
+    // The link in its Markdown at `x`, `y` (the view's), or "".
+    function linkAt(x, y) {
+        if (!inBlocks) return ""
+        for (let i = 0; i < blockList.count; i++) {
+            const it = blockList.itemAt(i)
+            if (!it) continue
+            const p = it.mapFromItem(root, x, y)
+            if (p.y >= 0 && p.y < it.height) return it.linkAt(p.x, p.y)
+        }
+        return ""
     }
     // The row among the lines at `y` (the view's): in a grid of lines, its
     // own; in Markdown or a picture, as far down its rows as `y` is down it.
@@ -134,8 +147,12 @@ Item {
             root.send({ op: "mouse", event: e, part: root.part })
             last = c
         }
+        // (A link pressed: opened on release, not passed on.)
+        property string pressedLink: ""
         onPressed: m => {
             root.forceActiveFocus()
+            pressedLink = root.linkAt(m.x, m.y)
+            if (pressedLink !== "") return
             const now = Date.now()
             const c = cell(m)
             clicks = now - lastClick < 400 && pressedAt && pressedAt.x === c.x && pressedAt.y === c.y ? clicks + 1 : 1
@@ -143,13 +160,27 @@ Item {
             pressedAt = c
             event("press", m, { button: button(m.button) })
         }
+        cursorShape: overLink ? Qt.PointingHandCursor : Qt.ArrowCursor
+        property bool overLink: false
         onReleased: m => {
+            // (A link in its Markdown opens, as a reply's does: web links.)
+            if (pressedLink !== "") {
+                const link = pressedLink
+                pressedLink = ""
+                if (root.linkAt(m.x, m.y) === link && /^https?:\/\//.test(link)) {
+                    root.opened = link
+                    Qt.openUrlExternally(link)
+                }
+                return
+            }
             const c = cell(m)
             event("release", m, { button: button(m.button) })
             if (pressedAt && pressedAt.x === c.x && pressedAt.y === c.y) event("click", m, { button: button(m.button), clickCount: clicks })
         }
         // (Moves only when they reach another cell.)
         onPositionChanged: m => {
+            overLink = root.linkAt(m.x, m.y) !== ""
+            if (pressed && pressedLink !== "") return
             const c = cell(m)
             if (last && last.x === c.x && last.y === c.y) return
             event(pressed ? "drag" : "move", m, { button: pressed ? button(pressedButtons & Qt.LeftButton ? Qt.LeftButton : pressedButtons & Qt.RightButton ? Qt.RightButton : Qt.MiddleButton) : "none" })

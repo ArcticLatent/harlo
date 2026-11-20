@@ -223,6 +223,7 @@ fn connect_agents() {
     });
     harlo_harness::set_remote_start(harlo_core::model_servers::forward_to);
     harlo_harness::set_remote_helper(harlo_core::agent_host::remote_helper);
+    harlo_harness::set_pi_extensions_on_host(pi_extensions::bridge_on_host);
 }
 
 /// Starts the work done once in the background: forwards, MCP servers, and old files swept.

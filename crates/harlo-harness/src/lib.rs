@@ -17,7 +17,7 @@ pub mod store;
 
 pub use error::Error;
 pub use event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel, Translator};
-pub use process::{Answer, Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program, set_pi_extensions};
+pub use process::{Answer, Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program, set_pi_extensions, set_pi_extensions_on_host, PiExtensionsOnHost, PiExtra};
 pub use store::SessionInfo;
 
 /// The thinking level of `available` nearest `want`.

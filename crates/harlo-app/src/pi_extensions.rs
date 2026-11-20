@@ -125,6 +125,28 @@ struct Bridge {
     in_pi: bool,
 }
 
+/// harlo's Claude subscription extension (`here`: loaded here) on `host`,
+/// for a pi session there: put there, with the Claude Code there that it
+/// starts. None when the machine has no Claude Code of its own or its pi
+/// has the extension already; nor when it can't be put there (said in the
+/// log: the session starts without it).
+pub fn bridge_on_host(host: &str, here: &[String]) -> harlo_harness::PiExtra {
+    let mut extra = harlo_harness::PiExtra::default();
+    for path in here {
+        match pi_bridge::on_host(host, std::path::Path::new(path)) {
+            Ok(Some((there, claude))) => {
+                extra.0.push(there);
+                extra.1.push(("HARLO_CLAUDE".to_owned(), claude));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::event!(name: "pi.bridge.host.failed", tracing::Level::WARN, server.address = %host, error.message = %format_args!("{e:#}"), "Claude subscription on {{server.address}}: {{error.message}}");
+            }
+        }
+    }
+    extra
+}
+
 fn bridge_on() -> bool {
     harlo_core::db::Db::open(&harlo_core::db::default_path()).ok().and_then(|d| d.get(&format!("settings.{}", pi_bridge::SETTING)).ok().flatten()).is_none_or(|v| v != "0")
 }

@@ -520,7 +520,7 @@ const PI_EXTENSION: &str = include_str!("../pi/harlo.ts");
 static PI_EXTRA: std::sync::RwLock<PiExtra> = std::sync::RwLock::new((Vec::new(), Vec::new()));
 
 /// Extension paths, and environment.
-type PiExtra = (Vec<String>, Vec<(String, String)>);
+pub type PiExtra = (Vec<String>, Vec<(String, String)>);
 
 /// Sets the extensions (paths, `-e`) and environment every pi started on
 /// this computer from now on gets, besides harlo's own.
@@ -528,6 +528,17 @@ pub fn set_pi_extensions(paths: Vec<String>, env: Vec<(String, String)>) {
     if let Ok(mut extra) = PI_EXTRA.write() {
         *extra = (paths, env);
     }
+}
+
+/// Puts this computer's extensions (their paths here) on a host, for a pi
+/// started there: the ones there, with their environment there.
+pub type PiExtensionsOnHost = fn(host: &str, here: &[String]) -> PiExtra;
+static PI_EXTRA_ON_HOST: std::sync::OnceLock<PiExtensionsOnHost> = std::sync::OnceLock::new();
+
+/// Sets what puts the extensions of [`set_pi_extensions`] on a host (none
+/// set: pi there gets harlo's own only).
+pub fn set_pi_extensions_on_host(f: PiExtensionsOnHost) {
+    let _ = PI_EXTRA_ON_HOST.set(f);
 }
 
 /// pi: loads harlo's extension, and gives it harlo's tool bridge (while
@@ -544,14 +555,16 @@ fn pi_extension(cfg: &HarnessConfig, args: &mut Vec<String>, env: &mut Vec<(Stri
         None => (pi_extension_here()?, None),
     };
     args.extend(["-e".to_owned(), file]);
-    if cfg.remote.is_none()
-        && let Ok(extra) = PI_EXTRA.read()
-    {
-        for path in &extra.0 {
-            args.extend(["-e".to_owned(), path.clone()]);
-        }
-        env.extend(extra.1.iter().cloned());
+    let here = PI_EXTRA.read().map(|e| e.clone()).unwrap_or_default();
+    let (paths, more) = match &cfg.remote {
+        None => here,
+        Some(_) if here.0.is_empty() => PiExtra::default(),
+        Some(remote) => PI_EXTRA_ON_HOST.get().map(|put| put(&remote.host, &here.0)).unwrap_or_default(),
+    };
+    for path in paths {
+        args.extend(["-e".to_owned(), path]);
     }
+    env.extend(more);
     // (harlo's helper, for its sandbox and its check for commands that
     // can't be undone: the one shipped with harlo, or put on the host.)
     let helper = match &cfg.remote {

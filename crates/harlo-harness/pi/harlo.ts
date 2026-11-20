@@ -21,7 +21,7 @@
 //   harlo draws itself), with harlo's keys, clicks and widths coming back.
 
 import { AgentSession, type ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { Box, Container, getKeybindings, HStack, Image, Markdown, Spacer, VStack } from "@earendil-works/pi-tui";
+import { Box, Container, getKeybindings, HStack, Image, Markdown, Spacer, Text, VStack } from "@earendil-works/pi-tui";
 import { execFile, execFileSync } from "node:child_process";
 import { connect } from "node:net";
 import { homedir } from "node:os";
@@ -216,6 +216,18 @@ function useLook() {
   }
 }
 
+/** pi's expand key, as its renderers name it in their hints ("… more
+ * lines, ctrl+o to expand"): a click, which is what opens a tool's
+ * result in harlo. (Its keys only: matching keys goes another way.) */
+function clickToExpand() {
+  const kb = getKeybindings() as unknown as Record<string | symbol, any>;
+  const mark = Symbol.for("harlo.expand");
+  if (kb[mark]) return;
+  kb[mark] = true;
+  const getKeys = kb.getKeys.bind(kb);
+  kb.getKeys = (id: string) => (id === "app.tools.expand" ? ["click"] : getKeys(id));
+}
+
 // -- blocks: the Markdown and pictures among a view's lines -----------------
 
 type Block = Record<string, unknown> & { kind: string; rows: number };
@@ -306,7 +318,7 @@ function hostUi() {
   proto[mark] = true;
   const bind = proto.bindExtensions;
   let current: UiHost | undefined;
-  proto.bindExtensions = function (this: { extensionRunner: Runner; subscribe(l: (e: any) => void): () => void }, bindings: Record<string, any>) {
+  proto.bindExtensions = function (this: { extensionRunner: Runner; sessionManager?: { getBranch?(): Record<string, any>[] }; subscribe(l: (e: any) => void): () => void }, bindings: Record<string, any>) {
     if (bindings?.mode !== "rpc" || !bindings.uiContext) return bind.call(this, bindings);
     current?.dispose();
     const host = new UiHost(bindings.uiContext, () => this.extensionRunner);
@@ -314,6 +326,11 @@ function hostUi() {
     host.unsubscribe = this.subscribe((e) => host.event(e));
     return bind.call(this, { ...bindings, uiContext: host.ui, mode: "tui" }).then((r: unknown) => {
       host.hello();
+      try {
+        host.entries(this.sessionManager?.getBranch?.() ?? []);
+      } catch {
+        // (None to draw.)
+      }
       return r;
     });
   };
@@ -377,12 +394,15 @@ class UiHost {
       case "message_end":
         if (e.message?.role === "custom") this.message(e.message);
         return;
+      case "entry_appended":
+        return this.entry(e.entry);
     }
   }
 
   hello() {
-    // (A session bound again may have set pi's theme anew.)
+    // (A session bound again may have set pi's theme and keys anew.)
     useLook();
+    clickToExpand();
     let shortcuts: string[] = [];
     try {
       shortcuts = [...this.runner().getShortcuts(getKeybindings().getResolvedBindings()).keys()].map(String);
@@ -654,8 +674,9 @@ class UiHost {
   /** pi's key hints for renderers, saying what works in harlo: a click
    * opens or folds a tool's result. */
   hints() {
+    clickToExpand();
     const kb = getKeybindings();
-    const keyText = (id: string) => (id === "app.tools.expand" ? "click" : (kb.getKeys(id) ?? []).join("/"));
+    const keyText = (id: string) => (kb.getKeys(id) ?? []).join("/");
     return { keyText, keyHint: (id: string, description: string) => `${keyText(id)} ${description}` };
   }
 
@@ -765,6 +786,41 @@ class UiHost {
     };
     view.target = () => comp;
     this.redraw(view);
+  }
+
+  /** An extension's own entry (`pi.appendEntry`) it draws itself: drawn
+   * as a custom message is, harlo's row for it found by its id. */
+  entry(e: Record<string, any> | undefined) {
+    if (e?.type !== "custom") return;
+    let renderer: any;
+    try {
+      renderer = this.runner().getEntryRenderer?.(String(e.customType ?? ""));
+    } catch {
+      return;
+    }
+    const timestamp = Date.parse(String(e.timestamp ?? ""));
+    if (!renderer || !Number.isFinite(timestamp)) return;
+    const id = `entry:${e.id}`;
+    const view = this.views.get(id) ?? this.newView("message", id);
+    view.meta = { timestamp, entryId: String(e.id ?? ""), customType: e.customType };
+    let comp: Lines | undefined;
+    view.draw = (w) => {
+      try {
+        comp = renderer(e, { expanded: this.expandedOf(view), ...this.hints() }, this.base.theme) ?? comp;
+      } catch (error) {
+        comp = new Text(this.base.theme.fg("error", `[${e.customType}] renderer failed: ${error instanceof Error ? error.message : String(error)}`), 0, 0);
+      }
+      const lines = comp ? comp.render(w) : [];
+      return { lines, blocks: blocksOf(comp, w, lines) };
+    };
+    view.target = () => comp;
+    this.redraw(view);
+  }
+
+  /** The entries already on the session's branch (a session opened or
+   * switched to). */
+  entries(branch: readonly Record<string, any>[]) {
+    for (const e of branch) if (e?.type === "custom") this.entry(e);
   }
 
   // -- the UI context -----------------------------------------------------

@@ -701,6 +701,15 @@ func record(_ link: String, to path: String) async {
     _ = await model.changes()
     rec.scene("end")
 
+    // An extension's own drawing: a card (Markdown and a picture) and an
+    // entry it keeps.
+    let carded = await turn("/notes Release notes", 20) { s in
+        s.extViews.contains { $0.kind == "message" && $0.entryId.isEmpty && $0.blocks.contains { if case .picture = $0 { true } else { false } } }
+            && s.extViews.contains { $0.kind == "message" && !$0.entryId.isEmpty && !$0.lines.isEmpty }
+    }
+    check(carded, "an extension's card and entry, drawn (\(s.extViews.map { "\($0.kind) \($0.entryId) \($0.blocks.count)" }))")
+    rec.scene("extension")
+
     // Pictures: a photo from the phone, and the one the reply shows; the
     // phone asks for each as a thumbnail and fitted to its screen.
     if let file = ProcessInfo.processInfo.environment["HARLO_RECORD_PHOTO"], let jpeg = FileManager.default.contents(atPath: file) {

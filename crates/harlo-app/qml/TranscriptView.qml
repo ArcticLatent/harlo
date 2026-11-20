@@ -66,13 +66,15 @@ Item {
         return ""
     }
     /// A subagent under a task tool row: view (or steer) it.
-    // A pi extension's drawing of a tool call (`t:` + its id) or of a
-    // custom message (`m:` + its time), by its view's last frame.
+    // A pi extension's drawing of a tool call (`t:` + its id), of a custom
+    // message (`m:` + its time) or of its own entry (`e:` + the entry's id),
+    // by its view's last frame.
     readonly property var extDrawn: {
         const m = {}
         const all = session.extViewsJson !== "" ? JSON.parse(session.extViewsJson) : []
         for (const v of all) {
             if (v.kind === "tool") m["t:" + v.toolCallId] = v
+            else if (v.kind === "message" && v.entryId) m["e:" + v.entryId] = v
             else if (v.kind === "message") m["m:" + v.timestamp] = v
         }
         return m
@@ -1815,7 +1817,10 @@ Item {
                     required property string label
                     required property real rowTime
                     // Drawn by a pi extension (a custom message's renderer).
-                    readonly property var ext: rowTime > 0 ? (root.extDrawn["m:" + rowTime] || null) : null
+                    // An extension's own entry: nothing until it draws it.
+                    readonly property bool entry: title === "entry"
+                    readonly property var ext: entry ? (root.extDrawn["e:" + subtitle] || null)
+                                             : rowTime > 0 ? (root.extDrawn["m:" + rowTime] || null) : null
                     // harlo's message to the agent (a workflow's note, …): it
                     // opens a turn, as harlo's; `subtitle` is the session
                     // it's about.
@@ -1825,9 +1830,9 @@ Item {
                     readonly property bool long: harlo ? text.split("\n").length > 2 || text.length > 200 : text.length > 240 || text.split("\n").length > 3
                     readonly property bool open: harlo ? view.expanded[rowKey] === true : !long || view.expanded[rowKey] === true
                     readonly property real gap: root.gapAbove(harlo ? "harlo" : "notice", ListView.previousSection)
-                    HeadSlot { replyModel: noticeRow.rowModel; active: !noticeRow.harlo && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
+                    HeadSlot { replyModel: noticeRow.rowModel; active: !noticeRow.harlo && !noticeRow.entry && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
                     width: view.width
-                    implicitHeight: (harlo ? harloSlot.height + 6 : ext ? extSlot.height + 4 : noticeText.implicitHeight + 4) + gap
+                    implicitHeight: entry && !ext ? 0 : (harlo ? harloSlot.height + 6 : ext ? extSlot.height + 4 : noticeText.implicitHeight + 4) + gap
                     // (Each kind made only for its own notices.)
                     Loader {
                         id: extSlot
@@ -1844,7 +1849,7 @@ Item {
                     }
                     PlainLabel {
                         id: noticeText
-                        visible: !noticeRow.harlo && !noticeRow.ext
+                        visible: !noticeRow.harlo && !noticeRow.ext && !noticeRow.entry
                         x: view.columnX
                         y: noticeRow.gap
                         width: view.columnWidth

@@ -9,12 +9,24 @@ Column {
     required property var parts
     spacing: 6
     Accessible.role: Accessible.StaticText
+    /// The link at `x`, `y` (this item's), or "".
+    function linkAt(x, y) {
+        for (let i = 0; i < partList.count; i++) {
+            const it = partList.itemAt(i)
+            if (!it || it.code) continue
+            const p = it.prose.mapFromItem(md, x, y)
+            if (p.x >= 0 && p.y >= 0 && p.x < it.prose.width && p.y < it.prose.height) return it.prose.linkAt(p.x, p.y)
+        }
+        return ""
+    }
     Repeater {
+        id: partList
         model: md.parts
         Item {
             id: part
             required property var modelData
             readonly property bool code: modelData.kind === "code"
+            readonly property alias prose: prose
             width: md.width
             implicitHeight: code ? codeWell.height : prose.implicitHeight
             TextEdit {

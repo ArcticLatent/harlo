@@ -1485,7 +1485,7 @@ final class RecordingTests: XCTestCase {
 
     func testEveryScene() async throws {
         let text = try XCTUnwrap(Self.text)
-        XCTAssertEqual(Replay.scenes(in: text), ["session", "approval", "working", "mcp", "wiki", "end", "pictures", "workflow-asks", "workflow-check", "workflow"])
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "approval", "working", "mcp", "wiki", "end", "extension", "pictures", "workflow-asks", "workflow-check", "workflow"])
         let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
 
         var (m, s) = try await open("session")
@@ -1686,5 +1686,8 @@ final class QueuedMessageTests: XCTestCase {
         XCTAssertEqual(v.resultBlocks[2], .pictureTooBig)
         XCTAssertEqual(v.resultBlocks[3], .lines(["more", "end"]))
         XCTAssertEqual(v.resultBlocks[4], .lines(["end"]), "rows past the end: the lines there are")
+        // An extension's own entry: its view says whose.
+        let entry = ExtView(try JSON.parse(#"{"id": "entry:a1", "kind": "message", "lines": ["stamp"], "timestamp": 5, "entryId": "a1"}"#))
+        XCTAssertEqual([entry.entryId, v.entryId], ["a1", ""])
     }
 }

@@ -213,8 +213,141 @@ pub fn installed_in_pi(settings: &Value) -> bool {
     })
 }
 
+/// Where a host keeps it: `~/.cache/harlo/pi-claude-bridge/<version>`.
+const HOST_DIR: &str = ".cache/harlo/pi-claude-bridge";
+
+/// The extension on `host_name`, for a pi session there: put there first if
+/// this version of `prepared` (what [`prepare`] returned) isn't yet.
+///
+/// Its path there, and the Claude Code there it starts (signed in there:
+/// the account it uses). None when the machine has no Claude Code, or its
+/// pi has the extension installed already. Blocking: the first time, an
+/// upload of about 10 MB.
+///
+/// # Errors
+///
+/// When the machine can't be reached or the extension can't be put there.
+pub fn on_host(host_name: &str, prepared: &Path) -> anyhow::Result<Option<(String, String)>> {
+    use anyhow::{Context as _, bail};
+    let host = crate::remote::host(host_name).with_context(|| format!("unknown machine {host_name}"))?;
+    let tree = prepared.parent().and_then(Path::parent).context("not an extension's folder")?;
+    let id = tree_id(tree);
+    let out = crate::remote::run(&host, &host_look_script(&id), Duration::from_secs(30))?;
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    let mut lines = said.lines().map(str::trim);
+    let (home, claude, own, state) = (lines.next().unwrap_or_default(), lines.next().unwrap_or_default(), lines.next(), lines.next());
+    if home.is_empty() {
+        bail!("{host_name} didn't say where its home folder is.");
+    }
+    if claude.is_empty() || own == Some("own") {
+        return Ok(None);
+    }
+    if state != Some("ready") {
+        let packed = Command::new("tar").arg("-czf").arg("-").arg("-C").arg(tree).arg("node_modules").output().context("tar")?;
+        if !packed.status.success() {
+            bail!("packing it failed: {}", String::from_utf8_lossy(&packed.stderr).trim());
+        }
+        let out = crate::remote::run_with_input(&host, &host_put_script(&id), Some(&packed.stdout), Duration::from_secs(600))?;
+        if !out.status.success() {
+            bail!("it couldn't be put on {host_name}: {}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+    }
+    Ok(Some((format!("{home}/{HOST_DIR}/{id}/node_modules/{PACKAGE}"), claude.to_owned())))
+}
+
+/// A prepared tree's version: the extension's and the Agent SDK's.
+fn tree_id(tree: &Path) -> String {
+    let version = |p: &str| {
+        std::fs::read_to_string(tree.join("node_modules").join(p).join("package.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .map(|v| s(&v, "version").to_owned())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "0".to_owned())
+    };
+    format!("{}-sdk-{}", version(PACKAGE), version("@anthropic-ai/claude-agent-sdk"))
+}
+
+/// What a host has: its home, its Claude Code (none: ""), whether its pi
+/// has the extension ("own") and whether version `id` is there ("ready").
+/// (Run by the login shell, zsh too: no word splitting.)
+// (HARLO_TEST_HIDE_AGENTS: the test host's Claude Code hidden.)
+fn host_look_script(id: &str) -> String {
+    format!(
+        r#"printf '%s\n' "$HOME"; c=""; for p in "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude"; do if [ -n "$p" ] && [ -x "$p" ]; then c="$p"; break; fi; done; case ":${{HARLO_TEST_HIDE_AGENTS:-}}:" in *":claude:"*) c="";; esac; printf '%s\n' "$c"; if grep -qs '{PACKAGE}' "$HOME/.pi/agent/settings.json"; then echo own; else echo none; fi; if [ -f "$HOME/{HOST_DIR}/{id}/.ready" ]; then echo ready; else echo missing; fi"#
+    )
+}
+
+/// Unpacks its input (the tree, gzipped tar) into a folder of its own, then
+/// in place; the stand-in for the SDK's Claude Code also under an ARM
+/// machine's name; the other versions go (not ones being put there now).
+fn host_put_script(id: &str) -> String {
+    format!(
+        r#"d="$HOME/{HOST_DIR}"; p="$d/{id}"; t="$d/.part.$$"; rm -rf "$t"; mkdir -p "$t" && tar -xzf - -C "$t" && s="$t/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64" && if [ -d "$s" ]; then cp -R "$s" "$t/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64" && sed 's/linux-x64/linux-arm64/' "$s/package.json" > "$t/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/package.json"; fi && touch "$t/.ready" && rm -rf "$p" && mv "$t" "$p" || {{ rm -rf "$t"; exit 1; }}; for f in "$d"/*; do [ "$f" = "$p" ] || rm -rf "$f"; done; find "$d" -maxdepth 1 -name '.part.*' -mmin +30 -exec rm -rf {{}} + 2>/dev/null; true"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    /// The host's scripts, run here in a scratch home: what it has, then
+    /// the tree unpacked in place (an ARM stand-in beside), older versions
+    /// gone.
+    #[test]
+    fn the_extension_goes_on_a_host_once_per_version() {
+        let dir = std::env::temp_dir().join(format!("harlo-bridge-host-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (home, tree) = (dir.join("home"), dir.join("tree"));
+        let sdk = tree.join("node_modules/@anthropic-ai/claude-agent-sdk-linux-x64");
+        std::fs::create_dir_all(&sdk).unwrap();
+        std::fs::create_dir_all(tree.join("node_modules").join(PACKAGE)).unwrap();
+        std::fs::write(tree.join("node_modules").join(PACKAGE).join("package.json"), r#"{"version":"1.2.3"}"#).unwrap();
+        std::fs::write(sdk.join("package.json"), r#"{"name":"@anthropic-ai/claude-agent-sdk-linux-x64"}"#).unwrap();
+        std::fs::create_dir_all(home.join(HOST_DIR).join("0.9-sdk-0")).unwrap();
+        std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+        let id = tree_id(&tree);
+        assert_eq!(id, "1.2.3-sdk-0");
+        let sh = |script: &str, input: Option<&[u8]>| {
+            use std::io::Write as _;
+            let mut child = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .env("HOME", &home)
+                .env("PATH", "/usr/bin:/bin")
+                .env_remove("HARLO_TEST_HIDE_AGENTS")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(input.unwrap_or_default()).unwrap();
+            drop(stdin);
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success());
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let lines = |s: String| s.lines().skip(1).map(str::to_owned).collect::<Vec<_>>();
+        // (No Claude Code yet, unless one is on this computer's PATH.)
+        let none = lines(sh(&host_look_script(&id), None));
+        assert_eq!(none[1..], ["none", "missing"]);
+        std::fs::write(home.join(".local/bin/claude"), "#!/bin/sh\n").unwrap();
+        Command::new("chmod").arg("+x").arg(home.join(".local/bin/claude")).status().unwrap();
+        let has = lines(sh(&host_look_script(&id), None));
+        assert!(has[0].ends_with("claude"), "{has:?}");
+
+        let packed = Command::new("tar").arg("-czf").arg("-").arg("-C").arg(&tree).arg("node_modules").output().unwrap();
+        sh(&host_put_script(&id), Some(&packed.stdout));
+        let there = home.join(HOST_DIR).join(&id);
+        assert!(there.join("node_modules").join(PACKAGE).join("package.json").is_file());
+        let arm = std::fs::read_to_string(there.join("node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/package.json")).unwrap();
+        assert!(arm.contains("linux-arm64"), "{arm}");
+        assert!(!home.join(HOST_DIR).join("0.9-sdk-0").exists(), "the older version gone");
+        assert_eq!(lines(sh(&host_look_script(&id), None))[2], "ready");
+        std::fs::create_dir_all(home.join(".pi/agent")).unwrap();
+        std::fs::write(home.join(".pi/agent/settings.json"), r#"{"packages":["npm:pi-claude-bridge"]}"#).unwrap();
+        assert_eq!(lines(sh(&host_look_script(&id), None))[1], "own", "pi's own copy there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
     use serde_json::json;
 

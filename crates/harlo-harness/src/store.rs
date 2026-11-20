@@ -533,10 +533,19 @@ fn branch_message(mut e: Value) -> Option<Value> {
         Some("custom_message") => Some(serde_json::json!({
             "role": "custom", "customType": e["customType"], "content": e["content"], "display": e["display"].as_bool().unwrap_or(true),
         })),
+        Some("custom") => Some(entry_message(&e)),
         Some("compaction") => Some(serde_json::json!({"role": "compactionSummary", "summary": e["summary"]})),
         Some("branch_summary") => Some(serde_json::json!({"role": "branchSummary", "summary": e["summary"]})),
         _ => None,
     }
+}
+
+/// An extension's own entry (`pi.appendEntry`), as a message.
+///
+/// The transcript gives it a row that shows only when the extension draws it,
+/// its view found by the entry's id (`entryId`).
+pub(crate) fn entry_message(e: &Value) -> Value {
+    serde_json::json!({ "role": "custom", "entry": true, "entryId": e["id"], "customType": e["customType"], "timestamp": e["timestamp"] })
 }
 
 /// Where a file's complete lines end (after its last newline).
@@ -722,6 +731,18 @@ mod tests {
         assert_eq!(at(&format!("{header}\n{change}\n{reply}"), None), "openai-codex/gpt-6", "the latest wins");
         // (A long file: its end is the later.)
         assert_eq!(at(&format!("{header}\n{reply}"), Some(change)), "opencode-go/glm-5.3");
+    }
+
+    /// A saved extension entry comes back as one (its type and time), and
+    /// live as the same message.
+    #[test]
+    fn an_extensions_entry_is_read_as_a_message() {
+        let saved = serde_json::json!({"type":"custom","id":"e1","customType":"stamp","data":{"n":1},"timestamp":"2026-11-20T10:00:00.123Z"});
+        let want = serde_json::json!({"role":"custom","entry":true,"entryId":"e1","customType":"stamp","timestamp":"2026-11-20T10:00:00.123Z"});
+        assert_eq!(branch_message(saved.clone()), Some(want.clone()));
+        let mut t = crate::event::Translator::new(HarnessKind::Pi);
+        let live = t.translate(serde_json::json!({"type":"entry_appended","entry":saved}));
+        assert!(matches!(live.as_slice(), [crate::event::HarnessEvent::MessageEnd { message, .. }] if *message == want), "{live:?}");
     }
 
     #[test]
