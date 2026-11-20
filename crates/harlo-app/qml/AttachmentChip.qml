@@ -20,7 +20,7 @@ Rectangle {
 
     implicitHeight: picture ? 52 : 26
     implicitWidth: Math.min(260, row.implicitWidth + 16)
-    radius: 6
+    radius: 2
     color: hover.hovered ? Theme.selected : Theme.elevated
     border.color: Theme.border
     HoverHandler { id: hover }
@@ -63,7 +63,7 @@ Rectangle {
             padding: 2
             onClicked: chip.removeClicked()
             contentItem: Icon { name: "close"; color: removeButton.hovered ? Theme.foreground : Theme.muted }
-            background: Rectangle { radius: 4; color: removeButton.hovered ? Theme.hover : "transparent" }
+            background: Rectangle { radius: 2; color: removeButton.hovered ? Theme.hover : "transparent" }
         }
     }
 }

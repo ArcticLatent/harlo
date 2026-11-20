@@ -275,7 +275,7 @@ AppDialog {
                     objectName: "firewallNote"
                     visible: dlg.fwBlocks
                     Layout.fillWidth: true
-                    radius: 8
+                    radius: 3
                     color: Theme.subtle
                     border.color: Theme.warning
                     implicitHeight: fwCol.implicitHeight + 20
@@ -350,7 +350,7 @@ AppDialog {
                     objectName: "firewallOtherNote"
                     visible: dlg.fwOtherBlocks
                     Layout.fillWidth: true
-                    radius: 8
+                    radius: 3
                     color: Theme.subtle
                     border.color: Theme.warning
                     implicitHeight: fwOtherCol.implicitHeight + 20
@@ -413,7 +413,7 @@ AppDialog {
                     Layout.alignment: Qt.AlignHCenter
                     implicitWidth: 236
                     implicitHeight: 236
-                    radius: 10
+                    radius: 4
                     color: "#ffffff"
                     Image {
                         objectName: "pairQr"

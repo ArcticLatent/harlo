@@ -75,7 +75,7 @@ RowLayout {
                 readonly property bool acts: !!modelData.run
                 Layout.fillWidth: true
                 implicitHeight: 34
-                radius: 6
+                radius: 2
                 color: acts && rowHover.hovered ? Theme.hover : "transparent"
                 HoverHandler { id: rowHover; enabled: row.acts; cursorShape: Qt.PointingHandCursor }
                 TapHandler { enabled: row.acts; onTapped: root.activated(row.modelData.run) }

@@ -107,7 +107,7 @@ Popup {
     padding: 8
     modal: true
     focus: true
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
 
     Timer { id: debounce; interval: 150; onTriggered: root.run() }
@@ -214,7 +214,7 @@ Popup {
                     Rectangle {
                         readonly property bool chosen: rowLoader.modelData.item === root.current
                         implicitHeight: snippet.implicitHeight + 12
-                        radius: 6
+                        radius: 2
                         color: chosen ? Theme.selected : hitHover.hovered ? Theme.hover : "transparent"
                         HoverHandler { id: hitHover }
                         TapHandler { onTapped: root.pick(rowLoader.modelData.item) }
@@ -254,7 +254,7 @@ Popup {
                     Rectangle {
                         readonly property bool chosen: rowLoader.modelData.item === root.current
                         implicitHeight: 32
-                        radius: 6
+                        radius: 2
                         color: chosen ? Theme.selected : recentHover.hovered ? Theme.hover : "transparent"
                         HoverHandler { id: recentHover }
                         TapHandler { onTapped: root.pick(rowLoader.modelData.item) }

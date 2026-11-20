@@ -1,4 +1,4 @@
-//! Orchestration: agents drive harlo.
+//! harlo's tools for agents.
 //!
 //! harlo's tools reach an agent as an MCP server: `harlo --mcp-bridge`, a
 //! stdio server the agent starts like any other. It answers the protocol
@@ -11,7 +11,6 @@
 
 // Rust guideline compliant 2026-10-09
 
-use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
@@ -32,59 +31,10 @@ pub fn socket_path() -> PathBuf {
     }
 }
 
-/// When agents start helpers (Settings → Teamwork).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Starting {
-    /// Only when the user asks (or with the Delegate button).
-    WhenAsked,
-    /// They offer a split ([`propose_helpers`](tools)); the user decides.
-    Offer,
-    /// On their own, when it helps.
-    OnTheirOwn,
-}
-
-impl Starting {
-    /// From the setting: "1" on their own, "asked" only when asked, else
-    /// (the default) they offer.
-    pub fn from_setting(value: &str) -> Starting {
-        match value {
-            "1" => Starting::OnTheirOwn,
-            "asked" => Starting::WhenAsked,
-            _ => Starting::Offer,
-        }
-    }
-
-    /// For a helper (a session another one started, reporting back to
-    /// it): it doesn't offer splits of its own part (the split was
-    /// planned above it; a part too big goes back by ask_parent), so
-    /// "offer" is "only when asked" there.
-    #[must_use]
-    pub fn for_session(self, helper: bool) -> Starting {
-        match self {
-            Starting::Offer if helper => Starting::WhenAsked,
-            other => other,
-        }
-    }
-}
-
-/// When agents may start sessions (see [`Starting`]).
-pub fn when_to_start(starting: Starting) -> &'static str {
-    match starting {
-        Starting::OnTheirOwn => "Start one when another agent's work would help: a second opinion, work in parallel, a different model or agent.",
-        Starting::WhenAsked => "Start one only when the user asks for another agent or session (a handoff, a second opinion, a helper, a committee), or their message is a harlo Delegate request. Otherwise do the work yourself (with your own subagents, if you have them).",
-        Starting::Offer => "Start one when the user asks for another agent or session (a handoff, a second opinion, a helper, a committee), or their message is a harlo Delegate request. When a big task splits into parts that could be done at the same time (each one substantial, and not editing the same files), or a part is better done by another agent or model, don't start them yourself: offer the split with propose_helpers, and the user decides. Otherwise do the work yourself (with your own subagents, if you have them).",
-    }
-}
-
-/// The tools, as MCP lists them (`starting`: see [`when_to_start`]).
-pub fn tools(starting: Starting) -> Value {
+/// The tools, as MCP lists them.
+pub fn tools() -> Value {
     let s = |props: Value, required: &[&str]| json!({ "type": "object", "properties": props, "required": required });
-    let mut tools = json!([
-        {
-            "name": "list_agents",
-            "description": "The coding agents harlo can start sessions with: ids and whether they're installed.",
-            "inputSchema": s(json!({}), &[]),
-        },
+    json!([
         {
             "name": "list_sessions",
             "description": "harlo's open sessions: id, title, agent, status (busy / idle / waiting for input), folder, who started it. With query: past sessions (your folder's, or everywhere) whose messages match, with the passages.",
@@ -92,29 +42,6 @@ pub fn tools(starting: Starting) -> Value {
                 "query": { "type": "string", "description": "Words to find in past sessions' messages." },
                 "everywhere": { "type": "boolean", "description": "Every folder's sessions, not just yours." }
             }), &[]),
-        },
-        {
-            "name": "start_session",
-            "description": format!("Starts a harlo session with a coding agent and sends it a first prompt (when to: see harlo's instructions). It becomes your helper, in your permission mode, shown under your session; harlo sends you its report when it finishes (unless notify is false), its questions, and when it waits for the user. Start every independent helper, then end your turn: harlo wakes you; don't poll. It has none of your context: make the prompt a self-contained briefing. A second opinion or committee member only analyses: end its prompt, and each later message to it, with {NO_EDITS}. Committee members get the same prompt; where they disagree, pass each the other's arguments with send_message until they agree."),
-            "inputSchema": s(json!({
-                "agent": { "type": "string", "description": "harlo or claude (see list_agents)." },
-                "prompt": { "type": "string", "description": "The task, its context, the relevant files, what's done and what's left." },
-                "title": { "type": "string", "description": "A short name." },
-                "model": { "type": "string", "description": "provider/model, if not the agent's default." },
-                "thinking": { "type": "string", "description": "low, medium or high, if not the agent's default." },
-                "folder": { "type": "string", "description": "Where it works (default: yours)." },
-                "worktree": { "type": "string", "description": "A new git worktree on this branch, apart from your checkout." },
-                "notify": { "type": "boolean", "description": "Its report and questions come to you (default true); false for a handoff." },
-                "budget": { "type": "string", "description": "Harlo sessions: the most tokens it may use (sent and received, cache hits not counted, its subagents' included), as 400k or 2m; past it, it stops and you're told. Default: the user's per-helper budget." }
-            }), &["agent", "prompt"]),
-        },
-        {
-            "name": "send_message",
-            "description": "Sends a harlo session a message (queued if it's busy): more work for a helper, or an answer to its question. \"helpers\" sends it to all your open helpers (a change of plan, stop and report).",
-            "inputSchema": s(json!({
-                "session": { "type": "string", "description": "Its id, or \"helpers\"." },
-                "message": { "type": "string" }
-            }), &["session", "message"]),
         },
         {
             "name": "read_session",
@@ -125,16 +52,6 @@ pub fn tools(starting: Starting) -> Value {
             }), &["session"]),
         },
         {
-            "name": "bring_over",
-            "description": "Brings a helper's work from its worktree into your folder as uncommitted changes (its commits, uncommitted and new files since it started). Files where you or another helper changed the same lines are left alone and named: merge those by hand. Look over its work first; a helper in your own folder has nothing to bring.",
-            "inputSchema": s(json!({ "session": { "type": "string", "description": "Your helper's id." } }), &["session"]),
-        },
-        {
-            "name": "stop_session",
-            "description": "Stops what a harlo session is doing (it stays open; send_message continues it).",
-            "inputSchema": s(json!({ "session": { "type": "string" } }), &["session"]),
-        },
-        {
             "name": "request_approval",
             "description": "Asks the user to decide something only they may (a risky or irreversible step, or a choice that's theirs). harlo shows it in your session and on their phone and notifies them; no agent can answer it. Then end your turn: their answer comes as a message.",
             "inputSchema": s(json!({
@@ -142,125 +59,17 @@ pub fn tools(starting: Starting) -> Value {
                 "options": { "type": "array", "items": { "type": "string" }, "description": "Their choices (default: Approve, Reject)." }
             }), &["question"]),
         }
-    ]);
-    if starting == Starting::Offer
-        && let Some(list) = tools.as_array_mut()
-    {
-        list.push(json!({
-            "name": "propose_helpers",
-            "description": format!("Offers the user a split of your task into helpers working at the same time (at most {MAX_PROPOSED}). harlo shows why and what each would do; if they agree, harlo starts them as start_session would (your helpers, your permission mode, reporting to you). Then end your turn: harlo tells you their answer (with the helpers' ids) and sends their reports as they finish; don't poll. If they say no, do the work yourself."),
-            "inputSchema": s(json!({
-                "why": { "type": "string", "description": "Why splitting helps, in a sentence or two (for the user)." },
-                "helpers": {
-                    "type": "array",
-                    "description": "One per part.",
-                    "items": s(json!({
-                        "title": { "type": "string", "description": "A short name for the part." },
-                        "prompt": { "type": "string", "description": "Its first message, a self-contained briefing: the part, the relevant files, what \"done\" looks like, what not to touch." },
-                        "agent": { "type": "string", "description": "harlo or claude; leave it and model out for the user's usual helpers, unless a part needs another." },
-                        "model": { "type": "string", "description": "provider/model, if not the agent's default." },
-                        "worktree": { "type": "string", "description": "A new git worktree on this branch (for parts that edit files)." }
-                    }), &["title", "prompt"])
-                }
-            }), &["why", "helpers"]),
-        }));
-    }
-    tools
+    ])
 }
 
-/// The most helpers one proposal may start.
-pub const MAX_PROPOSED: usize = 6;
-
-/// A helper an agent proposes (`propose_helpers`).
-#[derive(Clone, Debug, PartialEq)]
-pub struct Proposed {
-    pub title: String,
-    pub prompt: String,
-    /// "" for the proposer's own.
-    pub agent: String,
-    pub model: String,
-    pub worktree: String,
-}
-
-/// `propose_helpers`' arguments: why, and its helpers.
-///
-/// # Errors
-///
-/// When `why` or the helpers are missing, there are too many, or one lacks its
-/// task.
-pub fn parse_proposal(args: &Value) -> anyhow::Result<(String, Vec<Proposed>)> {
-    let text = |v: &Value, k: &str| v[k].as_str().map(str::trim).unwrap_or_default().to_owned();
-    let why = text(args, "why");
-    if why.is_empty() {
-        return Err(anyhow::Error::msg("Say why splitting helps (why)."));
-    }
-    let helpers: Vec<Proposed> = args["helpers"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|h| Proposed { title: text(h, "title"), prompt: text(h, "prompt"), agent: text(h, "agent").to_lowercase(), model: text(h, "model"), worktree: text(h, "worktree") })
-        .collect();
-    if helpers.is_empty() {
-        return Err(anyhow::Error::msg("Give the helpers."));
-    }
-    if helpers.len() > MAX_PROPOSED {
-        return Err(anyhow::anyhow!("At most {MAX_PROPOSED} helpers: combine some parts."));
-    }
-    if let Some(h) = helpers.iter().find(|h| h.title.is_empty() || h.prompt.is_empty()) {
-        return Err(anyhow::anyhow!("Each helper needs a title and a prompt{}.", if h.title.is_empty() { String::new() } else { format!(" (\"{}\" has no prompt)", h.title) }));
-    }
-    Ok((why, helpers))
-}
-
-/// The title of the user's card for a proposal.
-pub const PROPOSAL_TITLE: &str = "Split into helpers?";
-/// Its choices: the first starts them.
-pub const PROPOSAL_OPTIONS: [&str; 2] = ["Start helpers", "Do it yourself"];
-
-/// What the user's card says: why, and each helper (`agent`: its label).
-pub fn proposal_question(why: &str, helpers: &[(String, String, String, String)]) -> String {
-    let mut text = format!("{}\n", why.trim());
-    for (title, agent, model, worktree) in helpers {
-        let mut how = vec![agent.clone()];
-        if !model.is_empty() {
-            how.push(model.rsplit('/').next().unwrap_or(model).to_owned());
-        }
-        // (A worktree, in words: its own copy of the project, on a branch.)
-        if !worktree.is_empty() {
-            how.push(format!("on its own copy, branch {worktree}"));
-        }
-        let _ = write!(text, "\n• {title}: {}", how.join(" · "));
-    }
-    text
-}
-
-/// What the proposer is told of the user's answer: `started`, each helper's
-/// title and what became of it (Ok: where it is; Err: why it didn't start),
-/// or None when they said no.
-pub fn proposal_answer(started: Option<&[(String, anyhow::Result<String>)]>) -> String {
-    let Some(started) = started else {
-        return "[harlo] The user turned down your split (propose_helpers): do the work yourself, in this session, without helpers.".into();
-    };
-    let ok: Vec<String> = started.iter().filter_map(|(t, r)| r.as_ref().ok().map(|w| format!("\"{t}\" ({w})"))).collect();
-    let failed: Vec<String> = started.iter().filter_map(|(t, r)| r.as_ref().err().map(|e| format!("\"{t}\": {e}"))).collect();
-    let mut text = String::from("[harlo] The user agreed to your split.");
-    if !ok.is_empty() {
-        let _ = write!(text, " harlo started your helpers: {}. Their reports come to you as they finish: end your turn now (don't poll), then check their work and combine it (a helper's in a worktree: bring its changes over with bring_over; don't retype them).", ok.join(", "));
-    }
-    if !failed.is_empty() {
-        let _ = write!(text, " These didn't start: {}. Do those parts yourself, or start them with start_session once the problem is fixed.", failed.join("; "));
-    }
-    text
-}
-
-/// The tools of a session another session started (its helper), besides
-/// [`tools`].
+/// The tools of a session harlo started for a job (a workflow's step, a
+/// wiki run), besides [`tools`]: its report and its questions go back.
 pub fn helper_tools() -> Value {
     let s = |props: Value, required: &[&str]| json!({ "type": "object", "properties": props, "required": required });
     json!([
         {
             "name": "report_done",
-            "description": "Reports your task's result to the session that started you: once, when you're done (or can't go on), then end your turn.",
+            "description": "Reports your task's result to harlo: once, when you're done (or can't go on), then end your turn.",
             "inputSchema": s(json!({
                 "outcome": { "type": "string", "enum": ["succeeded", "failed"], "description": "failed if the task isn't done: never hide a failure in the summary." },
                 "summary": { "type": "string", "description": "Three sentences: what you did, what you found, what's left." },
@@ -270,13 +79,13 @@ pub fn helper_tools() -> Value {
         },
         {
             "name": "ask_parent",
-            "description": "Asks the session that started you a question the task doesn't settle. Then end your turn: harlo wakes you with its answer. (For what only the user may decide, ask the user instead.)",
+            "description": "Asks a question the task doesn't settle. Then end your turn: harlo wakes you with its answer. (For what only the user may decide, ask the user instead.)",
             "inputSchema": s(json!({ "question": { "type": "string" } }), &["question"]),
         }
     ])
 }
 
-/// A helper's report (`report_done`).
+/// A session's report (`report_done`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Report {
     pub succeeded: bool,
@@ -308,93 +117,6 @@ impl Report {
     }
 }
 
-/// What a helper's first message starts with: what it is, and how its
-/// result goes back (harlo's tools). `own_ask`: it asks the user with its
-/// own ask tool (a Harlo session), not request_approval.
-pub fn helper_brief(parent: &str, task: &str, own_ask: bool) -> String {
-    let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
-    let user = if own_ask { "ask them with ask (it waits for their answer)" } else { "call request_approval, then end your turn" };
-    format!(
-        "[harlo] You're a helper: another agent's session{parent} started you with the task below, and harlo sends it your result.\n\
-         - Do only this task, yourself: start no helper sessions unless it asks.\n\
-         - When the task leaves a decision open, call harlo's ask_parent tool with your question, then end your turn: the answer comes to you as a message.\n\
-         - For what only the user may decide (going ahead with a risky or irreversible step, a choice that's theirs), {user}.\n\
-         - When you're done, or can't go on, call report_done once: outcome succeeded or failed (never hide a failure in the summary), a three-sentence summary (what you did, what you found, what's left), and the files you changed. Then end your turn.\n\n\
-         The task:\n\n{task}"
-    )
-}
-
-/// What the reviewer of a plan's step is told, in a run with helpers.
-///
-/// The step (`task`, as its helper got it), what the helper said it did and
-/// changed, and where to see the changes (`base`: the commit the step started
-/// from, "" when unknown). It reports its verdict with report_done.
-pub fn review_brief(parent: &str, task: &str, summary: &str, files: &[String], base: &str) -> String {
-    let parent = if parent.trim().is_empty() { String::new() } else { format!(" (\"{}\")", parent.trim()) };
-    let files = if files.is_empty() { String::new() } else { format!("\nFiles it says it changed: {}.", files.join(", ")) };
-    let see = if base.trim().is_empty() {
-        "See the changes with `git status`, `git diff` and, for commits it made, `git log`.".to_owned()
-    } else {
-        format!("See the changes with `git diff {base}` (the step started at {base}; commits it made are in `git log {base}..`) and `git status` for new files.", base = base.trim())
-    };
-    format!(
-        "[harlo] You review one step of a plan that another agent's session{parent} runs with helpers. A helper has just done the step, in this folder.\n\
-         - Check that it does what the step asks, and look for bugs, missed cases, behaviour it broke elsewhere and tests that don't test it. Run the tests that apply.\n\
-         - Don't change any files, and start no helpers: you only report.\n\
-         - Then call report_done once: outcome succeeded when the step is right (mention small things in the summary), failed when something must be fixed. When it failed, the summary lists each problem with its file and line, most serious first: the helper is given it to fix. Then end your turn.\n\n\
-         The step, as the helper was given it:\n\n{task}\n\n\
-         What the helper said it did: {summary}{files}\n\n{see}",
-        summary = if summary.trim().is_empty() { "(nothing)" } else { summary.trim() },
-    )
-}
-
-/// What a step's helper is told when its review found problems: fix them,
-/// then report again.
-pub fn review_fix_message(problems: &str) -> String {
-    format!(
-        "[harlo] A review of your step found problems. Fix them here, run the tests again, then call report_done again (succeeded or failed) with what you did. The review:\n\n{}",
-        problems.trim()
-    )
-}
-
-/// What a helper in a new worktree on `branch` is told of where it works
-/// (`root`: the project's main checkout, which its task may name).
-pub fn worktree_note(branch: &str, root: &str) -> String {
-    format!(
-        "\n\nWhere you work: a new git worktree on branch {branch}, your own copy of the project apart from its main checkout ({root}). Make your changes in your working folder: where this task names files under {root}, use the same paths in yours. Leave the main checkout alone; the session that started you combines the work."
-    )
-}
-
-/// What a parent is told when its helper `title` (`agent`, `key`) finished.
-///
-/// Its report, else its last reply (`reply`), or its error; and what it used
-/// (`used`: its model, requests and tokens, cost), when known.
-pub fn finished_message(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>, used: Option<&str>) -> String {
-    let text = finished_text(agent, title, key, report, reply, error);
-    match used.map(str::trim).filter(|u| !u.is_empty()) {
-        Some(u) => format!("{text}\n\nUsed: {u}"),
-        None => text,
-    }
-}
-
-fn finished_text(agent: &str, title: &str, key: &str, report: Option<&Report>, reply: Option<&str>, error: Option<&str>) -> String {
-    let head = format!("[harlo] The {agent} session \"{title}\" ({key})");
-    match report {
-        Some(r) => {
-            let mut text = format!("{head} finished and reported: {}.\n\n{}", if r.succeeded { "succeeded" } else { "FAILED" }, r.summary);
-            if !r.files.is_empty() {
-                let _ = write!(text, "\n\nFiles changed: {}", r.files.join(", "));
-            }
-            text
-        }
-        None => match (reply.map(str::trim).filter(|r| !r.is_empty()), error) {
-            (Some(reply), _) => format!("{head} finished without reporting (report_done). Its last reply:\n\n{reply}"),
-            (None, Some(e)) => format!("{head} stopped with an error, without reporting: {e}"),
-            (None, None) => format!("{head} finished without a reply or a report."),
-        },
-    }
-}
-
 /// harlo's message to an agent, in a line, as the user reads it in the chat.
 ///
 /// Without its "[harlo] " prefix: what happened, without the session keys and
@@ -409,47 +131,6 @@ pub fn said_plainly(said: &str) -> String {
             None => line.to_owned(),
         }
     };
-    let quoted = |t: &str| -> Option<(String, String)> {
-        // "\"Title\" (key) rest" → (title, rest)
-        let t = t.strip_prefix('"')?;
-        let end = t.find("\" (")?;
-        let rest = &t[end + 3..];
-        let close = rest.find(')')?;
-        Some((t[..end].to_owned(), rest[close + 1..].trim_start().to_owned()))
-    };
-    // A helper's news: "The <agent> session "<title>" (<key>) …".
-    if let Some(rest) = said.strip_prefix("The ").and_then(|r| r.find(" session \"").map(|i| &r[i + 9..]))
-        && let Some((title, rest)) = quoted(rest) {
-            let after = |p: &str| rest.strip_prefix(p).map(str::trim);
-            if let Some(r) = after("finished and reported: succeeded.") {
-                return format!("{title} finished: {}", first(r));
-            }
-            if let Some(r) = after("finished and reported: FAILED.") {
-                return format!("{title} couldn't finish: {}", first(r));
-            }
-            if let Some(r) = after("finished without reporting (report_done). Its last reply:") {
-                return format!("{title} finished. Its last reply: {}", first(r));
-            }
-            if let Some(r) = after("stopped with an error, without reporting:") {
-                return format!("{title} stopped with an error: {}", first(r));
-            }
-            if after("finished without a reply or a report.").is_some() {
-                return format!("{title} finished without a reply.");
-            }
-            if let Some(r) = after("asks you:") {
-                return format!("{title} asks: {}", first(r));
-            }
-            if let Some(r) = after("is waiting for the user") {
-                let what = first(r.trim_start_matches(':'));
-                return if what.is_empty() { format!("{title} is waiting for you.") } else { format!("{title} is waiting for you: {what}") };
-            }
-        }
-    if said.starts_with("The user turned down your split") {
-        return "You turned down the split: the agent does the work itself.".into();
-    }
-    if said.starts_with("The user agreed to your split.") {
-        return "You agreed to the split: the helpers are working.".into();
-    }
     if let Some(r) = said.strip_prefix("The user answered your approval request (\"")
         && let Some(end) = r.find("\"): ") {
             return format!("You answered \"{}\": {}", &r[..end], first(&r[end + 4..]));
@@ -458,129 +139,11 @@ pub fn said_plainly(said: &str) -> String {
         && let Some(end) = r.find("\")") {
             return format!("You dismissed \"{}\".", &r[..end]);
         }
-    if let Some(r) = said.strip_prefix("Your helper \"")
-        && let Some(end) = r.find("\" didn't start") {
-            return format!("{} didn't start: its worktree couldn't be made.", &r[..end]);
-        }
-    if let Some(r) = said.strip_prefix("Your plan ran with helpers and has finished: ") {
-        return format!("The plan has finished: {}", first(r).split(". Read each step").next().unwrap_or_default());
-    }
-    if said.starts_with("A review of your step found problems.") {
-        let review = said.split_once("The review:").map(|(_, r)| r).unwrap_or_default();
-        return format!("The review found problems: {}", first(review));
-    }
     // A wiki run harlo started (wiki::run_prompt).
     if let Some(line) = crate::wiki::prompt_summary(said) {
         return line.into();
     }
-    if said.starts_with("You're a helper:") {
-        return "Started as a helper, with the task below.".into();
-    }
-    if said.starts_with("You review one step of a plan") {
-        return "Started to review a step of the plan.".into();
-    }
     first(said)
-}
-
-/// To an agent whose helper (`title`) couldn't start: its worktree on
-/// `branch` couldn't be made.
-pub fn worktree_failed(title: &str, branch: &str, error: &str) -> String {
-    format!(
-        "[harlo] Your helper \"{title}\" didn't start: its worktree on {branch} couldn't be made ({error}). A branch can be checked out in one worktree only (yours, if you're in one, counts): start it again on a new branch name, or without a worktree."
-    )
-}
-
-/// Added to a worktree helper's finished message when the branch it
-/// started from moved on meanwhile ("" when it didn't).
-pub fn drift_note(branch: &str, base: &str, behind: u32) -> String {
-    match behind {
-        0 => String::new(),
-        n => format!(
-            "\n\nIt worked on {branch}, in a worktree; {base} has moved on by {n} commit{} since it started, so merging it may conflict: merge {base} into it (or rebase) and check first.",
-            if n == 1 { "" } else { "s" }
-        ),
-    }
-}
-
-/// Tokens as people write them: `400k`, `2m`, `1.5m`, `400000` (None: not
-/// a count).
-#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
-pub fn parse_tokens(s: &str) -> Option<u64> {
-    let s = s.trim().to_lowercase().replace(['_', ','], "");
-    let (num, times) = if let Some(n) = s.strip_suffix('k') {
-        (n, 1e3)
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, 1e6)
-    } else {
-        (s.as_str(), 1.0)
-    };
-    let v: f64 = num.trim().parse().ok()?;
-    (v > 0.0).then(|| (v * times).round() as u64)
-}
-
-/// Added to a worktree helper's finished message: how its work comes over.
-pub fn bring_over_note(branch: &str, key: &str) -> String {
-    format!("\n\nIts work is in its worktree (branch {branch}): once you've looked it over, bring it to your folder with bring_over (session {key}).")
-}
-
-/// What a parent is told of `bring_over` (`brought`: the files applied and
-/// those left alone; `helper`: its worktree).
-pub fn brought_text(applied: &[String], clashed: &[String], helper: &str) -> String {
-    match (applied.is_empty(), clashed.is_empty()) {
-        (true, true) => "The helper changed nothing since its worktree started: there's nothing to bring over.".into(),
-        (false, true) => format!("Brought over, uncommitted: {}.", applied.join(", ")),
-        (applied_none, false) => format!(
-            "{}Not brought over, because they don't fit your version (the same lines changed here): {}. Merge those by hand from the helper's worktree ({helper}).",
-            if applied_none { String::new() } else { format!("Brought over, uncommitted: {}. ", applied.join(", ")) },
-            clashed.join(", ")
-        ),
-    }
-}
-
-/// What a parent is told when its helper asks it something.
-pub fn question_message(agent: &str, title: &str, key: &str, question: &str) -> String {
-    format!(
-        "[harlo] The {agent} session \"{title}\" ({key}) asks you:\n\n{}\n\n\
-         Answer it with send_message (session \"{key}\") when the answer follows from its task or the user's instructions; otherwise ask the user first.",
-        question.trim()
-    )
-}
-
-/// What a parent is told when its helper waits for the user (an approval,
-/// its question, or one it asked with request_approval).
-pub fn waiting_message(agent: &str, title: &str, key: &str, what: &str) -> String {
-    let what = what.trim();
-    let what = if what.is_empty() { String::new() } else { format!(": {what}") };
-    format!(
-        "[harlo] The {agent} session \"{title}\" ({key}) is waiting for the user{what}\n\n\
-         It can't go on until they answer it in harlo (no agent can). Tell the user if they should know, or go on with other work; harlo tells you when it finishes."
-    )
-}
-
-/// What a waiting request asks, in short (for the parent): an approval as
-/// "approval to use <tool>: <its first line>", else its question's first line.
-pub fn waiting_what(title: &str, question: &str, approval: bool) -> String {
-    let short = |t: &str| {
-        let line = t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default();
-        match line.char_indices().nth(100) {
-            Some((i, _)) => format!("{}…", line[..i].trim_end()),
-            None => line.to_owned(),
-        }
-    };
-    if !approval {
-        return short(question);
-    }
-    // (Details under the title: the question is the title.)
-    let question = match question.strip_prefix(title.lines().next().unwrap_or_default()) {
-        Some(rest) if question.starts_with("Allow tool:") => rest,
-        _ => question,
-    };
-    let tool = title.lines().next().unwrap_or_default().trim().trim_start_matches("Allow tool:").trim();
-    match (tool, short(question)) {
-        ("", what) => format!("an approval: {what}"),
-        (tool, what) if what.is_empty() => format!("approval to use {tool}"),
-        (tool, what) => format!("approval to use {tool} ({what})"),
-    }
 }
 
 /// What a session is told when the user answered its approval request.
@@ -593,15 +156,15 @@ pub fn approval_answer(question: &str, answer: &Value) -> String {
     }
 }
 
-/// What the bridge asks to learn whether orchestration is on.
+/// What the bridge asks to learn whether harlo's tools are on.
 pub const ENABLED: &str = "_enabled";
 /// What the bridge asks for a session's tools.
 pub const TOOLS: &str = "_tools";
 /// What the bridge asks for what a session's tools are for.
 pub const INSTRUCTIONS: &str = "_instructions";
 
-/// What harlo's tools are for, before a project's wiki and plan.
-pub const BASE_INSTRUCTIONS: &str = "harlo's sessions: start other coding agents, send them messages, read their replies.";
+/// What harlo's tools are for, before a project's wiki.
+pub const BASE_INSTRUCTIONS: &str = "harlo's sessions: read past sessions' messages, and ask the user to decide what only they may.";
 
 /// What the bridge sends harlo for a tool call (one line), and harlo's
 /// answer (one line): `{ok, result}` or `{ok: false, error}`.
@@ -639,8 +202,8 @@ pub fn run_bridge() {
         let Some(id) = msg.get("id").cloned() else { continue };
         let reply = |result: Value| json!({ "jsonrpc": "2.0", "id": id, "result": result });
         let answer = match msg["method"].as_str().unwrap_or_default() {
-            // What this session's tools are for (the project's wiki and
-            // plan add to it).
+            // What this session's tools are for (the project's wiki adds
+            // to it).
             "initialize" => {
                 let said = ask_harlo(&call_line(&session, INSTRUCTIONS, &json!({}))).filter(|a| a["ok"] == true);
                 reply(json!({
@@ -703,86 +266,6 @@ pub fn remove_old_skills() {
             Err(e) => tracing::event!(name: "orchestration.skill.remove.failed", tracing::Level::WARN, file.path = %dir.display(), error.message = %e, "orchestration: removing {{file.path}}: {{error.message}}"),
         }
     }
-}
-
-/// An agent to delegate to (the composer's Delegate menu).
-#[derive(Debug)]
-pub struct Member {
-    /// "Claude"
-    pub label: String,
-    /// "claude"
-    pub agent: String,
-    /// "" for its default.
-    pub model: String,
-}
-
-impl Member {
-    fn describe(&self) -> String {
-        match self.model.trim() {
-            "" => format!("{} (agent \"{}\", its default model)", self.label, self.agent),
-            m => format!("{} (agent \"{}\", model \"{m}\")", self.label, self.agent),
-        }
-    }
-}
-
-const NO_EDITS: &str = "\"This is analysis only. Do NOT edit, create, or delete any files. Do NOT write code.\"";
-
-/// What the Delegate menu sends the session's agent: the skill's
-/// instructions in a few lines, so nothing has to be installed. `action`:
-/// handoff, advisor or committee (two members).
-pub fn delegate_prompt(action: &str, members: &[Member], note: &str, worktree: bool) -> Option<String> {
-    let note = note.trim();
-    let text = match (action, members) {
-        ("handoff", [m, ..]) => {
-            let place = if worktree { ", in a new git worktree (pass a short branch name taken from the task as `worktree`)" } else { "" };
-            let mut t = format!(
-                "Hand this task off to a new session: {}, started with harlo's start_session tool{place}.\n\
-                 It has none of our context, so make its prompt a self-contained briefing: the task, why it exists, the relevant files (by path), what's done and what isn't, what was tried and why it failed, the decisions made, what \"done\" looks like, and the constraints. Keep my intent exactly: an investigation stays an investigation.\n\
-                 Title it \"[Handoff] <the task>\". Don't wait for it: tell me it's started, and stop.",
-                m.describe()
-            );
-            if !note.is_empty() {
-                let _ = write!(t, "\n\nAlso: {note}");
-            }
-            t
-        }
-        ("advisor", [m, ..]) => format!(
-            "Get a second opinion from {}: start it with harlo's start_session tool, titled \"[Advisor] <the topic>\".\n\
-             It has none of our context, so make its prompt a self-contained briefing: the question, what you've considered and ruled out, the relevant files (by path, for it to read), and the ask: \"Give me a recommendation, with your reasoning.\" End the prompt with: {NO_EDITS}\n\
-             Then end your turn. Its report comes back to you as a [harlo] message; don't poll for it. Then give me its verdict and your own recommendation.\n\n\
-             The question: {}",
-            m.describe(),
-            if note.is_empty() { "the approach we're taking on the current task." } else { note }
-        ),
-        ("committee", [a, b, ..]) => format!(
-            "Form a committee to step back, find the root cause and agree on a plan. With harlo's start_session tool, start two sessions with the same prompt, each titled \"[Committee] <the task>\":\n\
-             - {}\n\
-             - {}\n\
-             The prompt is about the problem, not your theory: the goal, the symptoms, what's been tried, the relevant files (by path), and the question \"What's the root cause, and what's the plan?\" End it, and every later message to them, with: {NO_EDITS}\n\
-             Then end your turn. Their reports come back to you as [harlo] messages; don't poll or hurry them. Where they disagree, send each the other's arguments with send_message, until they agree. Then give me the agreed plan, where they disagreed, and how that was settled.\n\n\
-             The problem: {}",
-            a.describe(),
-            b.describe(),
-            if note.is_empty() { "what we're stuck on in the current task." } else { note }
-        ),
-        ("split", [m, ..]) => {
-            let place = if worktree { ", each in its own new git worktree (pass a short branch name taken from its part as `worktree`)" } else { "" };
-            // (Their files are in their worktrees, which you can read: taken
-            // as they are, not written out again.)
-            let combine = if worktree { " (bring their changes over from their worktrees with harlo's bring_over tool: don't retype them)" } else { "" };
-            format!(
-                "Split this task into helpers that work at the same time. Find the parts that can be done independently (each one substantial, and not editing the same files; two to four is usually right), and start a helper for each with harlo's start_session tool: {}{place}, titled \"[Split] <the part>\". Keep for yourself what depends on the other parts, and do it once they've reported.\n\
-                 Each helper has none of our context, so make its prompt a self-contained briefing: its part, why it exists, the relevant files (by path), what \"done\" looks like, and what not to touch (the other parts).\n\
-                 If the task doesn't split well, tell me why and do it yourself.\n\
-                 Then end your turn. Their reports come back to you as [harlo] messages; don't poll. When they've all reported, check their work, combine it{combine}, and tell me what each did and what's left.\n\n\
-                 The task: {}",
-                m.describe(),
-                if note.is_empty() { "the current task." } else { note }
-            )
-        }
-        _ => return None,
-    };
-    Some(text)
 }
 
 // Remote hosts: their agents reach this harlo through its socket, forwarded
@@ -880,86 +363,15 @@ fn remove_old_skills_on(name: &str) -> String {
 mod tests {
     use super::*;
 
-    fn m(label: &str, agent: &str, model: &str) -> Member {
-        Member { label: label.into(), agent: agent.into(), model: model.into() }
-    }
-
-    #[test]
-    fn a_review_is_told_the_step_and_where_its_changes_are() {
-        let b = review_brief("Build it", "Do step 2 of 3 of a plan: parser", "Wrote the parser.", &["src/parse.rs".into()], "abc123");
-        assert!(b.starts_with("[harlo] You review one step") && b.contains("(\"Build it\")"));
-        assert!(b.contains("Do step 2 of 3 of a plan: parser") && b.contains("Wrote the parser.") && b.contains("src/parse.rs"));
-        assert!(b.contains("git diff abc123") && b.contains("report_done") && b.contains("Don't change any files"));
-        let b = review_brief("", "t", "", &[], "");
-        assert!(b.contains("`git status`, `git diff`") && b.contains("(nothing)") && !b.contains("session (\""));
-        let m = review_fix_message("  a.rs:3 off by one \n");
-        assert!(m.starts_with("[harlo] A review of your step found problems") && m.ends_with("a.rs:3 off by one") && m.contains("report_done again"));
-    }
-
-    #[test]
-    fn delegate_prompts() {
-        let h = delegate_prompt("handoff", &[m("Claude", "claude", "")], "  keep the API  ", true).unwrap();
-        assert!(h.contains("Claude (agent \"claude\", its default model)") && h.contains("as `worktree`") && h.ends_with("Also: keep the API"));
-        let a = delegate_prompt("advisor", &[m("Harlo", "harlo", "openai/gpt-5")], "", false).unwrap();
-        assert!(a.contains("model \"openai/gpt-5\"") && a.contains("Do NOT write code.") && a.ends_with("the current task."));
-        let c = delegate_prompt("committee", &[m("Claude", "claude", ""), m("Harlo", "harlo", "google/gemini")], "flaky tests", false).unwrap();
-        assert!(c.contains("- Claude (agent") && c.contains("- Harlo (agent \"harlo\", model \"google/gemini\")") && c.ends_with("The problem: flaky tests"));
-        let s = delegate_prompt("split", &[m("Claude", "claude", "")], "", true).unwrap();
-        assert!(s.contains("don't retype them"), "{s}");
-        assert!(s.contains("start a helper for each") && s.contains("each in its own new git worktree") && s.contains("[Split] <the part>") && s.ends_with("The task: the current task."));
-        // A committee needs two.
-        assert!(delegate_prompt("committee", &[m("Claude", "claude", "")], "", false).is_none());
-        assert!(delegate_prompt("nope", &[m("Claude", "claude", "")], "", false).is_none());
-    }
-
-    #[test]
-    fn token_counts() {
-        assert_eq!([parse_tokens("400k"), parse_tokens(" 2M "), parse_tokens("1.5m"), parse_tokens("400000"), parse_tokens("lots"), parse_tokens("-3")], [Some(400_000), Some(2_000_000), Some(1_500_000), Some(400_000), None, None]);
-    }
-
-    #[test]
-    fn what_bring_over_says() {
-        let s = |v: &[&str]| v.iter().map(std::string::ToString::to_string).collect::<Vec<_>>();
-        assert!(brought_text(&[], &[], "/w").contains("nothing to bring over"));
-        assert_eq!(brought_text(&s(&["a.rs", "b.rs"]), &[], "/w"), "Brought over, uncommitted: a.rs, b.rs.");
-        let both = brought_text(&s(&["a.rs"]), &s(&["c.rs"]), "/w");
-        assert!(both.starts_with("Brought over, uncommitted: a.rs. Not brought over") && both.contains("c.rs") && both.contains("(/w)"), "{both}");
-        assert!(tools(Starting::Offer).as_array().unwrap().iter().any(|t| t["name"] == "bring_over"));
-        assert!(bring_over_note("feat", "k1").contains("bring_over (session k1)"));
-    }
-
-    #[test]
-    fn a_moved_base_is_noted() {
-        assert!(worktree_failed("Drift", "helper/x", "already exists").contains("\"Drift\" didn't start: its worktree on helper/x couldn't be made (already exists)"));
-        assert_eq!(drift_note("helper/x", "main", 0), "");
-        assert!(drift_note("helper/x", "main", 1).contains("main has moved on by 1 commit since"));
-        assert!(drift_note("helper/x", "main", 3).contains("by 3 commits"));
-    }
-
     #[test]
     fn harlos_messages_read_plainly() {
-        let said = |m: String| said_plainly(m.strip_prefix("[harlo] ").unwrap());
-        let report = Report { succeeded: true, summary: "Wrote helper.txt.\nAnd more.".into(), files: vec![], attempt: None };
-        assert_eq!(said(finished_message("Harlo", "Helper", "live:3", Some(&report), None, None, None)), "Helper finished: Wrote helper.txt.");
-        let failed = Report { succeeded: false, ..report.clone() };
-        assert_eq!(said(finished_message("Claude", "Fix", "k1", Some(&failed), None, None, None)), "Fix couldn't finish: Wrote helper.txt.");
-        assert_eq!(said(finished_message("Claude", "Helper", "live:2", None, Some("Hello there.\nMore"), None, None)), "Helper finished. Its last reply: Hello there.");
-        assert_eq!(said(finished_message("Claude", "Helper", "live:2", None, None, Some("it crashed"), None)), "Helper stopped with an error: it crashed");
-        assert_eq!(said(finished_message("Claude", "Helper", "live:2", None, None, None, None)), "Helper finished without a reply.");
-        assert_eq!(said(question_message("Harlo", "Helper", "live:2", "Which port?")), "Helper asks: Which port?");
-        assert_eq!(said(waiting_message("Harlo", "Helper", "live:2", "approval to use bash: ls")), "Helper is waiting for you: approval to use bash: ls");
-        assert_eq!(said(proposal_answer(None)), "You turned down the split: the agent does the work itself.");
-        assert_eq!(said(worktree_failed("Helper", "b1", "busy")), "Helper didn't start: its worktree couldn't be made.");
-        assert!(!said(helper_brief("Main", "Do it", false)).contains("harlo sends"));
-        // Nothing internal left in any of them.
-        for m in [finished_message("Claude", "Helper", "live:2", None, Some("Hi"), None, None), question_message("Harlo", "H", "live:9", "Q")] {
-            let plain = said(m);
-            assert!(!plain.contains("live:") && !plain.contains("report_done"), "{plain}");
-        }
+        assert_eq!(said_plainly("The user answered your approval request (\"Merge?\"): Approve"), "You answered \"Merge?\": Approve");
+        assert_eq!(said_plainly("The user dismissed your approval request (\"Merge?\") without choosing."), "You dismissed \"Merge?\".");
+        assert_eq!(said_plainly("Something else\nmore"), "Something else");
     }
 
     #[test]
-    fn helpers_report_back() {
+    fn sessions_report_back() {
         // A report: its outcome, summary and files.
         let r = Report::parse(&json!({ "outcome": "failed", "summary": " Tried. ", "files": ["a.rs", " ", "b.rs"] })).unwrap();
         assert_eq!(r, Report { succeeded: false, summary: "Tried.".into(), files: vec!["a.rs".into(), "b.rs".into()], attempt: None });
@@ -968,68 +380,12 @@ mod tests {
         assert_eq!(Report::parse(&json!({ "outcome": "succeeded", "summary": "x", "attempt": " 3" })).unwrap().attempt, Some(3));
         Report::parse(&json!({ "outcome": "done", "summary": "x" })).unwrap_err();
         Report::parse(&json!({ "outcome": "succeeded", "summary": "  " })).unwrap_err();
-        let m = finished_message("Claude", "Fix", "k1", Some(&r), Some("ignored"), None, None);
-        assert!(m.starts_with("[harlo] The Claude session \"Fix\" (k1) finished and reported: FAILED.") && m.ends_with("Files changed: a.rs, b.rs"));
-        // None: its last reply, else its error.
-        assert!(finished_message("harlo", "T", "k", None, Some("hi"), None, None).contains("without reporting (report_done). Its last reply:\n\nhi"));
-        assert!(finished_message("harlo", "T", "k", None, Some(" "), Some("boom"), Some(" ")).ends_with("without reporting: boom"));
-        // What it used, last.
-        let m = finished_message("Harlo", "T", "k", Some(&r), None, None, Some("gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"));
-        assert!(m.ends_with("Files changed: a.rs, b.rs\n\nUsed: gpt-6.1-sol: 3 requests, 9.1k tokens in (70% cached), 400 out"), "{m}");
-        // The brief: what it is, harlo's tools, then the task.
-        let b = helper_brief("Lead", "Do X", false);
-        assert!(b.contains("session (\"Lead\") started you") && b.contains("report_done") && b.contains("call request_approval") && b.ends_with("The task:\n\nDo X"));
-        assert!(!helper_brief("", "Do X", false).contains("session ("));
-        // (A Harlo helper asks the user with its own ask.)
-        let b = helper_brief("Lead", "Do X", true);
-        assert!(b.contains("ask them with ask") && !b.contains("request_approval"));
-        assert!(worktree_note("helper/x", "/p").contains("a new git worktree on branch helper/x, your own copy of the project apart from its main checkout (/p)"));
         assert!(approval_answer("Merge?", &json!({ "value": "Approve" })).ends_with("(\"Merge?\"): Approve"));
         assert!(approval_answer("Merge?", &json!({ "cancelled": true })).contains("dismissed"));
-        // What it waits for, in short.
-        let long = format!("echo {} && find . -type f | wc -l\nsecond line", "x".repeat(150));
-        let w = waiting_what("Allow tool: Bash", &long, true);
-        assert!(w.starts_with("approval to use Bash (echo xxx") && w.ends_with("…)") && !w.contains("second line"), "{w}");
-        assert_eq!(waiting_what("Question", "Which one?\nmore", false), "Which one?");
-        let t = "Allow tool: write\nPath: a.py\nContent: x";
-        assert_eq!(waiting_what(t, t, true), "approval to use write (Path: a.py)");
-        // When to start sessions: as the setting says.
-        // (In harlo's instructions only: start_session's description doesn't repeat it.)
-        assert!(when_to_start(Starting::WhenAsked).contains("only when the user asks") && !when_to_start(Starting::OnTheirOwn).contains("only when"));
-        assert!(when_to_start(Starting::Offer).contains("offer the split with propose_helpers"));
-        let start = |st: Starting| tools(st).as_array().unwrap().iter().find(|t| t["name"] == "start_session").unwrap()["description"].as_str().unwrap().to_owned();
-        assert!([Starting::WhenAsked, Starting::Offer, Starting::OnTheirOwn].iter().all(|st| !start(*st).contains(when_to_start(*st))));
-        // A helper doesn't offer splits of its own part.
-        assert_eq!(Starting::Offer.for_session(true), Starting::WhenAsked);
-        assert_eq!(Starting::Offer.for_session(false), Starting::Offer);
-        assert_eq!(Starting::OnTheirOwn.for_session(true), Starting::OnTheirOwn);
-        assert!(!tools(Starting::Offer.for_session(true)).as_array().unwrap().iter().any(|t| t["name"] == "propose_helpers"));
-        // The split offer: only when they offer.
-        let proposes = |st: Starting| tools(st).as_array().unwrap().iter().any(|t| t["name"] == "propose_helpers");
-        assert!(proposes(Starting::Offer) && !proposes(Starting::WhenAsked) && !proposes(Starting::OnTheirOwn));
-        assert_eq!(Starting::from_setting(""), Starting::Offer);
-        assert_eq!(Starting::from_setting("1"), Starting::OnTheirOwn);
-        assert_eq!(Starting::from_setting("asked"), Starting::WhenAsked);
-    }
-
-    #[test]
-    fn agents_offer_splits() {
-        let args = json!({ "why": " Two parts. ", "helpers": [
-            { "title": "API", "prompt": "Do the API", "agent": "Claude", "worktree": "split/api" },
-            { "title": "UI", "prompt": "Do the UI", "model": "openai/gpt-5" }
-        ] });
-        let (why, helpers) = parse_proposal(&args).unwrap();
-        assert_eq!(why, "Two parts.");
-        assert_eq!(helpers[0], Proposed { title: "API".into(), prompt: "Do the API".into(), agent: "claude".into(), model: String::new(), worktree: "split/api".into() });
-        parse_proposal(&json!({ "why": "x", "helpers": [] })).unwrap_err();
-        parse_proposal(&json!({ "why": "", "helpers": [{ "title": "a", "prompt": "b" }] })).unwrap_err();
-        assert!(parse_proposal(&json!({ "why": "x", "helpers": [{ "title": "a", "prompt": " " }] })).unwrap_err().to_string().contains("\"a\" has no prompt"));
-        let many: Vec<Value> = (0..=MAX_PROPOSED).map(|i| json!({ "title": i.to_string(), "prompt": "p" })).collect();
-        parse_proposal(&json!({ "why": "x", "helpers": many })).unwrap_err();
-        let q = proposal_question("Two parts.", &[("API".into(), "Claude".into(), String::new(), "split/api".into()), ("UI".into(), "Harlo".into(), "openai/gpt-5".into(), String::new())]);
-        assert_eq!(q, "Two parts.\n\n• API: Claude · on its own copy, branch split/api\n• UI: Harlo · gpt-5");
-        assert!(proposal_answer(None).contains("do the work yourself"));
-        let a = proposal_answer(Some(&[("API".into(), Ok("k1".into())), ("UI".into(), Err(anyhow::Error::msg("Harlo is turned off")))]));
-        assert!(a.contains("started your helpers: \"API\" (k1).") && a.contains("These didn't start: \"UI\": Harlo is turned off."), "{a}");
+        // Reading sessions and asking the user: nothing starts or steers another session.
+        let names: Vec<String> = tools().as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(names, ["list_sessions", "read_session", "request_approval"]);
+        let helper: Vec<String> = helper_tools().as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(helper, ["report_done", "ask_parent"]);
     }
 }

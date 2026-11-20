@@ -148,17 +148,6 @@ impl Row {
     }
 }
 
-/// The session a message of harlo's is about: `(key)` after a session's
-/// title (a helper that finished, stopped or asks).
-fn about_session(text: &str) -> String {
-    let Some(at) = text.find("\" (") else { return String::new() };
-    let rest = &text[at + 3..];
-    match rest.find(')') {
-        Some(end) if end > 0 && !rest[..end].contains(char::is_whitespace) => rest[..end].to_owned(),
-        _ => String::new(),
-    }
-}
-
 /// Now, in unix ms.
 fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -593,32 +582,11 @@ impl Transcript {
             return false;
         }
         let raw = content_text(&message["content"]);
-        let mut text = raw.replace("<system-notice>", "").replace("</system-notice>", "").trim().to_owned();
+        let text = raw.replace("<system-notice>", "").replace("</system-notice>", "").trim().to_owned();
         if text.is_empty() {
             return false;
         }
-        // A background command's end is written for the agent (where its
-        // whole output is, how to read it); people get it in plain words.
-        let mut level = NoticeLevel::Info;
-        // (A `/plugin` run that failed.)
-        if message["customType"] == "harlo_plugin" && message["failed"] == true {
-            level = NoticeLevel::Error;
-        }
-        // (An advisor's note: what it said, not how the agent was told; a
-        // saved session keeps only the latter, so it's read from that.)
-        if message["customType"] == "harlo_advisor_note" {
-            let said = text.split_once("says: ").map_or(text.as_str(), |(_, a)| a).split("\nCheck this against the code").next().unwrap_or_default().trim().to_owned();
-            let advice = message["advice"].as_str().map_or(said, str::to_owned);
-            let model = message["advisor"].as_str().and_then(|m| m.rsplit('/').next()).filter(|m| !m.is_empty());
-            text = format!("Advisor{}: {advice}", model.map(|m| format!(" ({m})")).unwrap_or_default());
-        }
-        if message["customType"] == "harlo_job"
-            && let Some((plain, failed)) = job_notice_for_people(&text) {
-                text = plain;
-                if failed {
-                    level = NoticeLevel::Warning;
-                }
-            }
+        let level = NoticeLevel::Info;
         // A subagent's report: a line saying whose, then the report itself
         // (drawn as Markdown, as the subagent wrote it).
         let blocks = if message["customType"] == "subagent-report" {
@@ -997,16 +965,6 @@ impl Transcript {
                 .into();
                 if let Some(Block::Text(t)) = item.blocks.first() {
                     r.text.clone_from(t);
-                    // A command harlo ran, or a background command that
-                    // ended: what it was and how it went, drawn as such
-                    // (`text` stays the plain line).
-                    if let Some((headline, detail, command, output, state)) = crate::plugins::parse_notice(t, level == NoticeLevel::Error) {
-                        r.title = "command".into();
-                        (r.label, r.subtitle, r.command, r.result, r.state) = (headline, detail, command, output, state.into());
-                    } else if let Some(b) = background_notice(t) {
-                        r.title = "command".into();
-                        (r.label, r.subtitle, r.command, r.result, r.state) = (b.headline, b.detail, b.command, b.output, b.state.into());
-                    }
                 }
                 rows.push(Arc::new(r));
                 // A subagent's report under its line, as text it wrote.
@@ -1159,8 +1117,8 @@ impl Transcript {
     }
 }
 
-/// A message of the user's as its row (harlo's own, a helper's report: a
-/// harlo row).
+/// A message of the user's as its row (harlo's own, an approval's answer:
+/// a harlo row).
 fn user_row(id: &str, blocks: &[Block], row: &dyn Fn(String, RowKind) -> Row) -> Row {
     let text: Vec<&str> = blocks
         .iter()
@@ -1171,21 +1129,19 @@ fn user_row(id: &str, blocks: &[Block], row: &dyn Fn(String, RowKind) -> Row) ->
         .collect();
     let pictures: Vec<String> = blocks.iter().filter_map(|b| if let Block::Image(p) = b { p.clone() } else { None }).collect();
     let images = blocks.iter().filter(|b| matches!(b, Block::Image(_))).count();
-    // harlo's own (a helper's report, …): a harlo row, the
-    // session it's about to open.
+    // harlo's own (an approval's answer, …): a harlo row.
     let joined = text.join("\n");
     if let Some(said) = joined.strip_prefix(HARLO_PREFIX) {
         let mut r = row(format!("{id}:u"), RowKind::Notice);
         r.title = FROM_HARLO.into();
         said.trim().clone_into(&mut r.text);
         r.label = crate::orchestration::said_plainly(said);
-        r.subtitle = about_session(said);
         return r;
     }
     let mut r = row(format!("{id}:u"), RowKind::User);
     // Attached files (`<file>` blocks) show as names, not contents.
     let (files, rest) = crate::attach::split_blocks(&text.join("\n"));
-    let (rest, starter) = crate::starters::strip(&rest);
+    let rest = crate::starters::strip(&rest);
     let (rest, ask_first) = harlo_harness::file_blocks::strip_ask_first(rest);
     let (rest, plan) = harlo_harness::file_blocks::strip_plan(rest);
     rest.clone_into(&mut r.text);
@@ -1197,9 +1153,6 @@ fn user_row(id: &str, blocks: &[Block], row: &dyn Fn(String, RowKind) -> Row) ->
     let mut tags = Vec::new();
     if images > 0 && files.is_empty() && r.images.is_empty() {
         tags.push(format!("{images} image{}", if images == 1 { "" } else { "s" }));
-    }
-    if let Some(s) = starter {
-        tags.push(s.label.to_owned());
     }
     if plan {
         tags.push("Plan".to_owned());
@@ -1635,451 +1588,17 @@ pub fn diff_rows(old: &[Arc<Row>], new: &[Arc<Row>]) -> Vec<RowChange> {
     diff_by(old, new, |a, b| a.key == b.key, |a, b| Arc::ptr_eq(a, b) || **a == **b)
 }
 
-/// harlo-agent's note to the agent when a background command ends
-/// ("Background job j1 ended, exit code 0, after 3 s.\nCommand: …\nIts last
-/// lines:\n…\nWhole output: <log> (read or grep it, or jobs output).") in
-/// plain words: what ended and how, and its last few lines. Whether it
-/// failed, too. None when it isn't one.
-fn job_notice_for_people(text: &str) -> Option<(String, bool)> {
-    let mut lines = text.lines();
-    let first = lines.next()?.strip_prefix("Background job ")?;
-    let how = first.split_once(' ')?.1.trim_end_matches('.');
-    let command = lines.next()?.strip_prefix("Command: ")?.trim();
-    if lines.next()? != "Its last lines:" {
-        return None;
-    }
-    let output: Vec<&str> = lines.take_while(|l| !l.starts_with("Whole output: ")).filter(|l| !l.trim().is_empty()).collect();
-    let (what, after) = how.rsplit_once(", after ").unwrap_or((how, ""));
-    let after = if after.is_empty() { String::new() } else { format!(" after {after}") };
-    let (said, failed) = match what.strip_prefix("ended, exit code ") {
-        Some("0") => (format!("finished{after}"), false),
-        Some(code) => (format!("failed{after} (exit code {code})"), true),
-        None if what == "stopped: it timed out" => (format!("was stopped{after} (it ran too long)"), true),
-        None if what == "ended by a signal" => (format!("was stopped by a signal{after}"), true),
-        None => (format!("{what}{after}"), true),
-    };
-    let mut out = format!("The background command {said}: {command}");
-    let shown = &output[output.len().saturating_sub(5)..];
-    if !shown.is_empty() && shown != ["(no output)"] {
-        out.push_str("\nLast lines:");
-        for l in shown {
-            out.push_str("\n  ");
-            out.push_str(l.trim());
-        }
-    }
-    Some((out, failed))
-}
-
-/// A background command's end, as a notice row shows it.
-#[derive(Debug, PartialEq)]
-struct Background {
-    /// "Background command finished" / "… failed" / "… stopped".
-    headline: String,
-    /// "exit code 1 · after 3 s" ("" when nothing more is known).
-    detail: String,
-    command: String,
-    /// Its last lines (harlo-agent's say; Claude's don't).
-    output: String,
-    /// `done`, `error` or `stopped`.
-    state: &'static str,
-}
-
-/// The notice of a background command's end, in either agent's words:
-/// harlo-agent's (`job_notice_for_people`: "The background command
-/// finished after 3 s: cmd\nLast lines:\n  …") or Claude Code's
-/// ("Background command \"cmd\" completed (exit code 0)").
-fn background_notice(text: &str) -> Option<Background> {
-    let exit = |s: &str| s.split("exit code ").nth(1).map(|c| c.chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect::<String>()).filter(|c| !c.is_empty());
-    let after = |s: &str| s.split(" after ").nth(1).map(|a| a.split(" (").next().unwrap_or(a).trim().to_owned()).filter(|a| !a.is_empty());
-    let (command, how, output) = if let Some(rest) = text.strip_prefix("The background command ") {
-        let (how, rest) = rest.split_once(": ")?;
-        let (command, output) = match rest.split_once("\nLast lines:\n") {
-            Some((c, o)) => (c, o.lines().map(str::trim).collect::<Vec<_>>().join("\n")),
-            None => (rest, String::new()),
-        };
-        (command.trim().to_owned(), how.to_owned(), output)
-    } else {
-        let rest = text.strip_prefix("Background command \"")?;
-        let (command, how) = rest.rsplit_once("\" ")?;
-        (command.trim().to_owned(), how.trim().to_owned(), String::new())
-    };
-    if command.is_empty() {
-        return None;
-    }
-    let code = exit(&how);
-    let state = if how.starts_with("was stopped") || how.contains("killed") || how.starts_with("stopped") {
-        "stopped"
-    } else if how.starts_with("failed") || code.as_deref().is_some_and(|c| c != "0") {
-        "error"
-    } else if how.starts_with("finished") || how.starts_with("completed") {
-        "done"
-    } else {
-        return None;
-    };
-    let headline = format!("Background command {}", match state { "done" => "finished", "error" => "failed", _ => "stopped" });
-    let mut detail = Vec::new();
-    if let Some(c) = code.filter(|c| state != "done" || c != "0") {
-        detail.push(format!("exit code {c}"));
-    }
-    if how.contains("ran too long") {
-        detail.push("it ran too long".to_owned());
-    } else if how.contains("by a signal") {
-        detail.push("by a signal".to_owned());
-    }
-    if let Some(a) = after(&how) {
-        detail.push(format!("after {a}"));
-    }
-    Some(Background { headline, detail: detail.join(" · "), command, output, state })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Both agents' notices of a background command's end read the same:
-    /// how it went, the command, its last lines; anything else stays a plain
-    /// notice.
+    /// An action's arguments read as the action and its words.
     #[test]
-    fn background_command_notices() {
-        let b = |headline: &str, detail: &str, command: &str, output: &str, state| {
-            Some(Background { headline: headline.into(), detail: detail.into(), command: command.into(), output: output.into(), state })
-        };
-        assert_eq!(
-            background_notice("Background command \"cd /x; python3 - <<'EOF'\nprint(\"hi\")\nEOF\" completed (exit code 0)"),
-            b("Background command finished", "", "cd /x; python3 - <<'EOF'\nprint(\"hi\")\nEOF", "", "done")
-        );
-        assert_eq!(background_notice("Background command \"make\" failed with exit code 2"), b("Background command failed", "exit code 2", "make", "", "error"));
-        assert_eq!(background_notice("Background command \"sleep 99\" was stopped"), b("Background command stopped", "", "sleep 99", "", "stopped"));
-        assert_eq!(
-            background_notice("The background command failed after 3 s (exit code 1): cargo test\nLast lines:\n  test a ... FAILED\n  error: 1 failed"),
-            b("Background command failed", "exit code 1 · after 3 s", "cargo test", "test a ... FAILED\nerror: 1 failed", "error")
-        );
-        assert_eq!(background_notice("The background command finished after 1 s: sleep 1; echo built-ok"), b("Background command finished", "after 1 s", "sleep 1; echo built-ok", "", "done"));
-        assert_eq!(
-            background_notice("The background command was stopped after 10 min (it ran too long): npm run dev"),
-            b("Background command stopped", "it ran too long · after 10 min", "npm run dev", "", "stopped")
-        );
-        // (Through the rows too: a job's notice from harlo-agent.)
-        let mut t = Transcript::default();
-        t.apply(&HarnessEvent::MessageEnd { id: "j".into(), message: json!({ "role": "custom", "customType": "task-notification", "display": true, "content": "Background command \"make all\" failed with exit code 2" }) });
-        let rows = t.rows();
-        assert_eq!((rows[0].title.as_str(), rows[0].label.as_str(), rows[0].subtitle.as_str(), rows[0].command.as_str(), rows[0].state.as_str()), ("command", "Background command failed", "exit code 2", "make all", "error"));
-        for other in ["Background shell command didn't finish before the previous session ended", "A background task ended.", "Retrying (2 of 5)"] {
-            assert_eq!(background_notice(other), None, "{other}");
-        }
-    }
-
-    /// Replies far enough back let go of what their rows were made from;
-    /// the rows stay the same, and a message of theirs brings it back.
-    #[test]
-    fn settled_replies_keep_their_rows() {
-        let reply = |i: usize| json!({ "role": "assistant", "content": [
-            { "type": "thinking", "thinking": format!("thought {i}") },
-            { "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("echo {i} && cargo test"), "description": "Run it" } },
-            { "type": "toolCall", "id": format!("e{i}"), "name": "edit", "arguments": { "path": "a.rs", "oldText": "x", "newText": format!("y{i}") } }] });
-        let mut messages = Vec::new();
-        for i in 0..20 {
-            messages.push(json!({ "role": "user", "content": format!("go {i}") }));
-            messages.push(reply(i));
-            messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": format!("{i}\ntest result: ok. 3 passed") }] }));
-            messages.push(json!({ "role": "toolResult", "toolCallId": format!("e{i}"), "content": [{ "type": "text", "text": "Edited a.rs" }] }));
-        }
-        let mut t = Transcript::new();
-        t.load_messages(&messages);
-        let before: Vec<Row> = t.rows().iter().map(|r| (**r).clone()).collect();
-        let first = t.by_id["h1"];
-        assert!(t.items[first].settled);
-        assert!(t.items[first].blocks.iter().all(|b| match b {
-            Block::Tool { name, args, .. } if name == "bash" => args["command"].is_null() && args["description"] == "Run it",
-            Block::Tool { args, .. } => args["newText"] == "y0",
-            Block::Thinking(text) => text.is_empty(),
-            _ => true,
-        }));
-        assert!(t.tools["c0"].dropped && t.tools["c0"].output.is_empty(), "its row has it");
-        let last = t.by_id[&format!("h{}", messages.len() - 3)];
-        assert!(!t.items[last].settled, "the latest stay as they are");
-        // Touched, it's as it was; its message again, made anew, the same.
-        t.apply(&HarnessEvent::ToolEnd { call_id: "c0".into(), result: json!({ "content": [{ "type": "text", "text": "0\ntest result: ok. 3 passed" }] }), is_error: false });
-        assert_eq!(t.rows().iter().map(|r| (**r).clone()).collect::<Vec<_>>(), before);
-        t.apply(&HarnessEvent::MessageEnd { id: "h1".into(), message: reply(0) });
-        t.apply(&HarnessEvent::MessageEnd { id: "h2".into(), message: messages[2].clone() });
-        assert!(!t.items[first].settled || t.items[first].rows.is_some());
-        let again: Vec<Row> = t.rows().iter().map(|r| (**r).clone()).collect();
-        assert_eq!(again, before);
-        let row = again.iter().find(|r| r.call_id == "e0").unwrap();
-        assert!(!row.diff.is_empty() && row.result == "+1 −1", "{row:?}");
-        assert!(again.iter().any(|r| r.kind == RowKind::Thinking && r.text == "thought 0"));
-    }
-
-    /// A settled reply takes whatever comes for it later as if it had never
-    /// settled: a corrected result, more thinking, a block made anew.
-    #[test]
-    fn settled_replies_take_late_events() {
-        let reply = |i: usize| json!({ "role": "assistant", "content": [
-            { "type": "thinking", "thinking": format!("thought {i}") },
-            { "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("echo {i} && cargo test") } }] });
-        let load = || {
-            let mut messages = Vec::new();
-            for i in 0..20 {
-                messages.push(json!({ "role": "user", "content": format!("go {i}") }));
-                messages.push(reply(i));
-                messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": format!("{i}\ntest result: ok. 3 passed") }] }));
-            }
-            for (n, m) in messages.iter_mut().enumerate() {
-                m["timestamp"] = json!(1_000 + n);
-            }
-            let mut settled = Transcript::new();
-            settled.load_messages(&messages);
-            settled.rows();
-            assert!(settled.items[settled.by_id["h1"]].settled);
-            // The same, never settled (each row built once, as it came).
-            let mut plain = Transcript::new();
-            for (n, m) in messages.iter().enumerate() {
-                plain.apply(&HarnessEvent::MessageEnd { id: format!("h{n}"), message: m.clone() });
-            }
-            (settled, plain)
-        };
-        let rows = |t: &mut Transcript| t.rows().iter().map(|r| (**r).clone()).collect::<Vec<Row>>();
-        let corrected = json!({ "content": [{ "type": "text", "text": "CORRECTED RESULT" }] });
-        let cases: Vec<(&str, Vec<HarnessEvent>)> = vec![
-            ("a corrected result", vec![HarnessEvent::ToolEnd { call_id: "c0".into(), result: corrected.clone(), is_error: true }]),
-            ("a corrected result message", vec![HarnessEvent::MessageEnd {
-                id: "late".into(),
-                message: json!({ "role": "toolResult", "toolCallId": "c0", "isError": true, "content": corrected["content"] }),
-            }]),
-            ("more thinking", vec![HarnessEvent::BlockDelta { id: "h1".into(), index: 0, kind: BlockKind::Thinking, delta: " and more".into() }]),
-            ("its thinking made anew", vec![
-                HarnessEvent::BlockStart { id: "h1".into(), index: 0, kind: BlockKind::Thinking, tool: None },
-                HarnessEvent::BlockEnd { id: "h1".into(), index: 0, kind: BlockKind::Thinking, content: json!("thought again") },
-            ]),
-        ];
-        for (what, events) in cases {
-            let (mut settled, mut plain) = load();
-            for e in &events {
-                settled.apply(e);
-                plain.apply(e);
-            }
-            let (got, want) = (rows(&mut settled), rows(&mut plain));
-            assert_eq!(got, want, "{what}");
-            let tool = got.iter().find(|r| r.call_id == "c0").unwrap();
-            assert_eq!(tool.command, "echo 0 && cargo test", "{what}");
-        }
-        let (mut settled, _) = load();
-        settled.apply(&HarnessEvent::ToolEnd { call_id: "c0".into(), result: corrected, is_error: true });
-        let tool = rows(&mut settled).into_iter().find(|r| r.call_id == "c0").unwrap();
-        assert_eq!((tool.text.as_str(), tool.state.as_str()), ("CORRECTED RESULT", "error"));
-        let (mut settled, _) = load();
-        settled.apply(&HarnessEvent::BlockDelta { id: "h1".into(), index: 0, kind: BlockKind::Thinking, delta: " and more".into() });
-        assert!(rows(&mut settled).iter().any(|r| r.kind == RowKind::Thinking && r.text == "thought 0 and more"));
-    }
-
-    /// A paged-out reply reads back as it was, takes what comes for it
-    /// later as if it never left, and its page goes with the last row of it.
-    #[test]
-    fn rows_past_their_text_budget_page_out_however_few() {
-        // 24 replies with a 1 MiB output each: far fewer rows than kept,
-        // but more text than kept whole.
-        let mut messages = Vec::new();
-        for i in 0..24 {
-            messages.push(json!({ "role": "user", "content": format!("go {i}") }));
-            messages.push(json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("run {i}") } }] }));
-            messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": format!("{i} {}", "y".repeat(1 << 20)) }] }));
-        }
-        let dir = std::env::temp_dir().join(format!("harlo-pages-budget-{}", std::process::id()));
-        let mut t = Transcript::new();
-        t.set_pages_dir(dir.clone());
-        t.load_messages(&messages);
-        let before: Vec<Row> = t.rows().iter().map(|r| (**r).clone()).collect();
-        assert!(before.len() < 1000);
-        assert!(t.page_out(1000));
-        let rows = t.rows();
-        let whole_text: usize = rows.iter().filter(|r| r.paged.is_none()).map(|r| long_text(r)).sum();
-        assert!(rows.iter().any(|r| r.paged.is_some()), "the oldest paged");
-        assert!(whole_text <= KEPT_TEXT + (2 << 20), "about the budget kept whole: {whole_text}");
-        assert!(rows.last().is_some_and(|r| r.paged.is_none()), "the latest whole");
-        let back: Vec<Row> = rows.iter().map(|r| (*whole(r)).clone()).collect();
-        assert_eq!(back.iter().map(|r| (&r.key, r.full.as_ref().map(|f| f.0.len()))).collect::<Vec<_>>(), before.iter().map(|r| (&r.key, r.full.as_ref().map(|f| f.0.len()))).collect::<Vec<_>>());
-        drop((t, rows, back));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    /// A reply the cursors pass while it waits for a result, and one paged
-    /// out then brought back by a late result, are paged once they can be,
-    /// however many turns come after.
-    #[test]
-    fn late_changing_replies_page_out_after_all() {
-        let dir = std::env::temp_dir().join(format!("harlo-pages-late-{}", std::process::id()));
-        let mut t = Transcript::new();
-        t.set_pages_dir(dir.clone());
-        let mut n = 0;
-        let mut send = |t: &mut Transcript, message: Value| {
-            t.apply(&HarnessEvent::MessageEnd { id: format!("h{n}"), message });
-            n += 1;
-            format!("h{}", n - 1)
-        };
-        let result = |id: &str, text: &str| json!({ "role": "toolResult", "toolCallId": id, "content": [{ "type": "text", "text": text }] });
-        let turn = |t: &mut Transcript, send: &mut dyn FnMut(&mut Transcript, Value) -> String, i: usize| {
-            send(t, json!({ "role": "user", "content": format!("go {i}") }));
-            send(t, json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": format!("run {i}") } }] }));
-            send(t, result(&format!("c{i}"), &format!("ran {i}")));
-            t.rows();
-            t.page_out(20);
-        };
-        let paged = |t: &Transcript, id: &str| t.items[t.by_id[id]].paged.is_some();
-        // One waits for its result while the cursors pass it.
-        send(&mut t, json!({ "role": "user", "content": "start the server" }));
-        let waiting = send(&mut t, json!({ "role": "assistant", "content": [{ "type": "toolCall", "id": "w", "name": "bash", "arguments": { "command": "serve" } }] }));
-        for i in 0..40 {
-            turn(&mut t, &mut send, i);
-        }
-        assert!(!paged(&t, &waiting), "waiting: stays");
-        let early = t.by_id["h3"];
-        assert!(t.items[early].paged.is_some(), "the replies around it page out");
-        // Its result comes: paged once more turns go by.
-        send(&mut t, result("w", "stopped"));
-        for i in 40..80 {
-            turn(&mut t, &mut send, i);
-        }
-        assert!(paged(&t, &waiting), "its result came: paged after all");
-        // A paged one brought back by a late result: paged again.
-        t.apply(&HarnessEvent::ToolEnd { call_id: "c0".into(), result: json!({ "content": [{ "type": "text", "text": "CORRECTED" }] }), is_error: false });
-        t.rows();
-        assert!(!paged(&t, "h3"), "brought back");
-        for i in 80..120 {
-            turn(&mut t, &mut send, i);
-        }
-        assert!(paged(&t, "h3"), "brought back, then paged again");
-        assert!(t.again.is_empty(), "nothing left to look at: {:?}", t.again);
-        drop(t);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn paged_replies_read_back_whole() {
-        let long = |what: &str, i: usize| format!("{what} {i} {}", "x".repeat(400));
-        let reply = |i: usize| json!({ "role": "assistant", "content": [
-            { "type": "thinking", "thinking": long("thought", i) },
-            { "type": "text", "text": long("said", i) },
-            { "type": "toolCall", "id": format!("c{i}"), "name": "bash", "arguments": { "command": long("echo", i) } },
-            { "type": "toolCall", "id": format!("e{i}"), "name": "edit", "arguments": { "path": "a.rs", "oldText": "x", "newText": long("y", i) } }] });
-        let mut messages = Vec::new();
-        for i in 0..30 {
-            messages.push(json!({ "role": "user", "content": format!("go {i}") }));
-            messages.push(reply(i));
-            // (Some cut for display, their whole output kept with the row.)
-            let out = if i % 3 == 0 { long("out", i).repeat(20) } else { long("out", i) };
-            messages.push(json!({ "role": "toolResult", "toolCallId": format!("c{i}"), "content": [{ "type": "text", "text": out }] }));
-            messages.push(json!({ "role": "toolResult", "toolCallId": format!("e{i}"), "content": [{ "type": "text", "text": "Edited a.rs" }] }));
-        }
-        for (n, m) in messages.iter_mut().enumerate() {
-            m["timestamp"] = json!(1_000 + n);
-        }
-        let dir = std::env::temp_dir().join(format!("harlo-pages-test-{}", std::process::id()));
-        let load = || {
-            let mut t = Transcript::new();
-            t.set_pages_dir(dir.clone());
-            t.load_messages(&messages);
-            t.rows();
-            t
-        };
-        // (Whole outputs compared by what they say.)
-        let rows = |t: &mut Transcript| {
-            t.rows().iter().map(|r| {
-                let mut r = (*whole(r)).clone();
-                let full = r.full.take().map(|f| f.0.to_string());
-                (r, full)
-            }).collect::<Vec<_>>()
-        };
-        let mut t = load();
-        let before = rows(&mut t);
-        assert!(t.page_out(20));
-        let paged = t.rows();
-        let first = t.by_id["h1"];
-        assert!(t.items[first].paged.is_some() && t.items[first].blocks.is_empty());
-        assert!(before.iter().any(|(r, full)| r.call_id == "c0" && full.is_some()) && t.tools["c0"].output.is_empty(), "a whole output goes with its row");
-        assert!(paged.iter().filter(|r| r.paged.is_some()).all(|r| r.text.is_empty() && r.html.is_empty() && r.command.is_empty() && r.diff.is_empty()));
-        assert!(paged.iter().filter(|r| r.paged.is_some()).count() > 50, "most rows far back");
-        assert!(paged[paged.len() - 20..].iter().all(|r| r.paged.is_none()), "the latest stay whole");
-        assert!(!t.page_out(20), "once");
-        assert_eq!(rows(&mut t), before);
-        // Paged as it loads, as a session file is opened: the same rows.
-        let mut streamed = Transcript::new();
-        streamed.set_pages_dir(dir.clone());
-        streamed.begin_load();
-        for (i, m) in messages.iter().enumerate() {
-            streamed.load_one(i, m);
-            if i % 7 == 6 {
-                streamed.rows();
-                streamed.page_out(20);
-            }
-        }
-        streamed.rows();
-        streamed.page_out(20);
-        assert!(streamed.rows().iter().filter(|r| r.paged.is_some()).count() > 50);
-        assert_eq!(rows(&mut streamed), before);
-        // What comes later for one: as if it was never paged.
-        let corrected = json!({ "content": [{ "type": "text", "text": "CORRECTED RESULT" }] });
-        let cases: Vec<(&str, Vec<HarnessEvent>)> = vec![
-            ("a corrected result", vec![HarnessEvent::ToolEnd { call_id: "c0".into(), result: corrected.clone(), is_error: true }]),
-            ("more thinking", vec![HarnessEvent::BlockDelta { id: "h1".into(), index: 0, kind: BlockKind::Thinking, delta: " and more".into() }]),
-            ("its message again", vec![HarnessEvent::MessageEnd { id: "h1".into(), message: reply(0) }]),
-        ];
-        for (what, events) in cases {
-            let (mut paged, mut plain) = (load(), Transcript::new());
-            paged.page_out(20);
-            for (n, m) in messages.iter().enumerate() {
-                plain.apply(&HarnessEvent::MessageEnd { id: format!("h{n}"), message: m.clone() });
-            }
-            for e in &events {
-                paged.apply(e);
-                plain.apply(e);
-            }
-            assert_eq!(rows(&mut paged), rows(&mut plain), "{what}");
-            assert!(paged.items[paged.by_id["h1"]].paged.is_none(), "{what}");
-        }
-        // Its page goes when nothing points into it: loaded again, the old
-        // rows still read back until they go.
-        let file = t.pages.path().unwrap();
-        let kept = paged.clone();
-        t.load_messages(&messages);
-        assert!(file.exists() && whole(&kept[1]).text == before[1].0.text);
-        drop((kept, paged));
-        assert!(!file.exists());
-        drop(t);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn an_advisors_note_shows_what_it_said() {
-        let mut t = Transcript::default();
-        let note = serde_json::json!({ "role": "custom", "customType": "harlo_advisor_note", "content": "[harlo] A reviewer read your work and says: The test is missing.\nCheck this…",
-                                       "advice": "The test is missing.", "advisor": "openai-codex/gpt-6.2-sol", "display": true });
-        assert!(t.upsert_custom("a1", &note));
-        assert!(matches!(t.items[0].blocks.as_slice(), [Block::Text(s)] if s == "Advisor (gpt-6.2-sol): The test is missing."));
-        // (Reopened: the log has only how the agent was told.)
-        let saved = serde_json::json!({ "role": "custom", "customType": "harlo_advisor_note", "content": "[harlo] A reviewer read your work and says: The test is missing.\nCheck this against the code; fix what's right about it, then finish.", "display": true });
-        assert!(t.upsert_custom("a2", &saved));
-        assert!(matches!(t.items[1].blocks.as_slice(), [Block::Text(s)] if s == "Advisor: The test is missing."), "{:?}", t.items[1].blocks);
-        assert_eq!(summarize_args(&serde_json::json!({ "action": "launch", "program": "app.py", "breakpoints": ["app.py:3"] })), "launch app.py");
+    fn summarized_args() {
         assert_eq!(summarize_args(&serde_json::json!({ "action": "continue" })), "continue");
         assert_eq!(summarize_args(&serde_json::json!({ "action": "add", "text": "Tests run with make check." })), "add Tests run with make check.");
     }
 
-    #[test]
-    fn job_notices_read_plainly() {
-        let ok = "Background job j1 ended, exit code 0, after 3 s.\nCommand: ./build.sh\nIts last lines:\na\nb\nc\nd\nCompiling harlo v0.4.0\nFinished release in 41.2s\nWhole output: /tmp/harlo-agent/jobs-1/j1.log (read or grep it, or jobs output).";
-        let (t, failed) = job_notice_for_people(ok).unwrap();
-        assert!(!failed);
-        assert_eq!(t, "The background command finished after 3 s: ./build.sh\nLast lines:\n  b\n  c\n  d\n  Compiling harlo v0.4.0\n  Finished release in 41.2s");
-        let bad = "Background job j2 ended, exit code 101, after 1m 2s.\nCommand: cargo test\nIts last lines:\n(no output)\nWhole output: /tmp/x.log (read or grep it, or jobs output).";
-        assert_eq!(job_notice_for_people(bad).unwrap(), ("The background command failed after 1m 2s (exit code 101): cargo test".to_owned(), true));
-        let slow = "Background job j3 stopped: it timed out, after 30m.\nCommand: sleep 9999\nIts last lines:\n\nWhole output: /tmp/x.log (read or grep it, or jobs output).";
-        assert_eq!(job_notice_for_people(slow).unwrap().0, "The background command was stopped after 30m (it ran too long): sleep 9999");
-        assert!(job_notice_for_people("Something else").is_none());
-        let mut t = Transcript::default();
-        assert!(t.upsert_custom("n1", &serde_json::json!({ "role": "custom", "customType": "harlo_job", "content": bad, "display": true })));
-        assert!(matches!(t.items[0].role, Role::Notice(NoticeLevel::Warning)));
-    }
     use serde_json::json;
 
     fn apply_changes(rows: &mut Vec<Arc<Row>>, changes: Vec<RowChange>) {
@@ -2254,13 +1773,13 @@ mod tests {
 
     #[test]
     fn harlos_messages_show_as_harlos() {
-        let report = "[harlo] The Harlo session \"Helper\" (live:3) finished and reported: succeeded.\n\nWrote helper.txt.";
+        let answer = "[harlo] The user answered your approval request (\"Merge?\"): Approve";
         let messages = vec![
-            json!({"role":"user","content":"split it please","timestamp":1}),
-            json!({"role":"assistant","content":[{"type":"text","text":"Offered."}],"timestamp":2}),
-            json!({"role":"user","content":[{"type":"text","text":report}],"timestamp":3}),
-            json!({"role":"assistant","content":[{"type":"text","text":"Brought over."}],"timestamp":4}),
-            json!({"role":"user","content":"[harlo] The user turned down your split.","timestamp":5}),
+            json!({"role":"user","content":"merge it please","timestamp":1}),
+            json!({"role":"assistant","content":[{"type":"text","text":"Asked."}],"timestamp":2}),
+            json!({"role":"user","content":[{"type":"text","text":answer}],"timestamp":3}),
+            json!({"role":"assistant","content":[{"type":"text","text":"Merged."}],"timestamp":4}),
+            json!({"role":"user","content":"[harlo] Something else.\nMore.","timestamp":5}),
         ];
         let mut t = Transcript::default();
         t.load_messages(&messages);
@@ -2268,16 +1787,13 @@ mod tests {
         let harlo: Vec<_> = rows.iter().filter(|r| r.from_harlo()).collect();
         assert_eq!(harlo.len(), 2, "{rows:?}");
         assert_eq!(harlo[0].kind, RowKind::Notice);
-        assert!(harlo[0].text.starts_with("The Harlo session \"Helper\" (live:3) finished"), "{}", harlo[0].text);
-        assert_eq!(harlo[0].subtitle, "live:3", "the helper to open");
-        assert_eq!(harlo[0].label, "Helper finished: Wrote helper.txt.", "said plainly");
-        assert_eq!(harlo[1].subtitle, "", "about no session");
+        assert!(harlo[0].text.starts_with("The user answered your approval request"), "{}", harlo[0].text);
+        assert_eq!(harlo[0].label, "You answered \"Merge?\": Approve", "said plainly");
+        assert_eq!(harlo[1].label, "Something else.");
         assert_eq!(harlo[0].section(), "harlo");
         // Yours stay yours; all three are sent messages (turns), in order.
         assert_eq!(rows.iter().filter(|r| r.kind == RowKind::User).count(), 1);
         assert_eq!(rows.iter().filter(|r| r.is_sent()).count(), 3);
-        // A message that only mentions harlo is yours.
-        assert_eq!(about_session("no (session) here"), "");
     }
 
     #[test]

@@ -170,10 +170,9 @@ impl Remotes {
                 json!({
                     "name": h.name, "ssh": ssh_text(h), "state": s.state, "message": s.message, "ping": s.ping,
                     "os": s.info.os, "home": s.info.home,
-                    "claude": s.info.claude, "versions": s.info.versions, "claudeAuth": s.info.claude_auth,
+                    "pi": s.info.pi, "versions": s.info.versions,
                     "bwrap": s.info.bwrap,
-                    // (Harlo: harlo puts its agent there; or why it can't, once checked.)
-                    "harlo": if !s.info.os.is_empty() && s.info.has("harlo") { "harlo's own" } else { "" },
+                    // (Why harlo's helper, pi's sandbox there, can't run, once checked.)
                     "harloWhy": if s.info.os.is_empty() { None } else { harlo_core::agent_host::not_there(&s.info) },
                     "install": remote::AGENTS.iter().map(|a| (a.to_string(), json!(remote::install_command(a)))).collect::<serde_json::Map<_, _>>(),
                     "installs": remote::AGENTS

@@ -56,7 +56,7 @@ ApplicationWindow {
         Component {
             id: tipBackground
             // The pills' own surface (fill, border, top light line, shadow).
-            ControlSurface { control: null; radius: 8 }
+            ControlSurface { control: null; radius: 3 }
         }
         Component {
             id: tipText
@@ -98,6 +98,16 @@ ApplicationWindow {
     }
     // What draws the window (GraphicsInfo attaches to items, not windows).
     Item { id: graphicsInfo; readonly property int api: GraphicsInfo.api }
+    // harlo's built-in Claude subscription extension for pi: got ready (the
+    // first time, Anthropic's Agent SDK fetched) once pi is on.
+    function piBridge() {
+        const pi = JSON.parse(Workspace.providersJson()).find(p => p.id === "pi")
+        if (pi && pi.enabled && pi.state === "ready") PiExtensions.prepareBridge()
+    }
+    Connections { target: Workspace; function onProvidersRevisionChanged() { win.piBridge() } }
+    // (pi's extensions changed here: its models may have, e.g. Claude's.)
+    // (And Claude Code's sign-in: harlo may have just downloaded its copy.)
+    Connections { target: PiExtensions; function onChanged(host) { if (host === "") { Workspace.refreshProviders(); Accounts.refresh("claude") } } }
     // The first frame: the graphics choice works (see graphics.rs).
     property bool drawnOnce: false
     Connections {
@@ -465,8 +475,8 @@ ApplicationWindow {
                     onManageInstancesRequested: settingsDialog.openPage("remote")
                     onProjectSettingsRequested: projectId => settingsDialog.openProject(projectId)
                     onSettingsPageRequested: page => settingsDialog.openPage(page)
-                    onDraftWorkflowStarted: chat.draftView.workflowStarted()
                     onNewSessionRequested: projectId => win.openDraft(projectId)
+                    onNewWorkflowRequested: projectId => win.openWorkflow(projectId)
                     onExportRequested: (key, title) => win.exportMarkdown(key, title)
                     onSearchMessagesRequested: text => searchDialog.openSearch(text)
                 }
@@ -484,10 +494,7 @@ ApplicationWindow {
             ChatView {
                 id: chat
                 onAddProjectRequested: sidebar.openAddProject()
-                onWorkflowRequested: (projectId, task, agent, model) => {
-                    const p = JSON.parse(Workspace.projectsJson()).find(x => x.id === projectId)
-                    if (p) sidebar.workflowDialog.showFor(p.id, p.name, p.harness, task, agent, model)
-                }
+                onWorkflowSettingsRequested: settingsDialog.openPage("workflows")
                 onSignInOnHost: (agent, host) => signInDialog.openFor(agent + "@" + host, Theme.harnessLabel(agent) + " on " + host)
                 SplitView.fillHeight: true
                 SplitView.minimumHeight: 200
@@ -653,6 +660,11 @@ ApplicationWindow {
         chat.draftView.openFor(projectId === -2 ? win.lastProjectId : projectId)
     }
     function newSessionHere() { win.openDraft(-2) }
+    /// The New workflow page, for a project (-2: the last one worked in).
+    function openWorkflow(projectId) {
+        Workspace.open("view:workflow")
+        chat.workflowView.openFor(projectId === -2 ? win.lastProjectId : projectId)
+    }
     property int lastProjectId: -1
     // The notes panel follows the active session's project.
     property int notesProject: -1
@@ -692,6 +704,7 @@ ApplicationWindow {
             { id: "prevTab", seq: Keymap.seq("prevTab"), label: "Previous tab", group: sess, icon: "arrow-left-s", run: () => Workspace.nextTab(-1) },
             { id: "prevTabAlt", seq: Keymap.seq("prevTabAlt"), label: "Previous tab", group: sess, icon: "arrow-left-s", run: () => Workspace.nextTab(-1) },
             { id: "newSession", seq: Keymap.seq("newSession"), label: "New session", group: sess, icon: "chat-new", run: () => win.newSessionHere() },
+            { id: "newWorkflow", seq: Keymap.seq("newWorkflow"), label: "New workflow", group: sess, icon: "list-check-2", run: () => win.openWorkflow(-2) },
             { id: "closeTab", seq: Keymap.seq("closeTab"), label: "Close tab", group: sess, icon: "close", run: () => chat.requestCloseTab(Workspace.activeKey) },
             { id: "toggleSidebar", seq: Keymap.seq("toggleSidebar"), label: "Toggle sidebar", group: ui, icon: "layout-column", run: () => win.toggleSidebar() },
             { id: "settings", seq: Keymap.seq("settings"), label: "Settings", group: ui, icon: "settings", run: () => settingsDialog.open() },
@@ -728,7 +741,6 @@ ApplicationWindow {
         { seq: "Esc", label: "Leave the expanded composer", group: "Composer", icon: "fullscreen-exit" },
         { seq: "↑", label: "Recall an earlier prompt", group: "Composer", icon: "history" },
         { seq: "↓", label: "Recall an earlier prompt", group: "Composer", icon: "history" },
-        { seq: "Tab", label: "Build / Plan", group: "Composer", icon: "target" },
         { seq: "/", label: "Commands", group: "Composer", icon: "code-box" },
         { seq: "@", label: "Mention a file", group: "Composer", icon: "attachment-2" },
         // In a run (reached with "Go to the session's runs", or a click).
@@ -818,8 +830,6 @@ ApplicationWindow {
         acts.push({ title: "Search all sessions", icon: "search", hint: Keymap.seq("searchAll"), run: () => searchDialog.openSearch() })
         acts.push({ title: "Drop-down window", icon: "window", run: () => win.toggleDropDown() })
         acts.push({ title: "Mini chat window", icon: "chat-thread", hint: Keymap.seq("miniChat"), run: () => win.toggleMiniChat() })
-        for (const r of JSON.parse(Workspace.runsJson()).slice(0, 8))
-            acts.push({ title: "Run: " + r.title + (r.kept !== null && r.kept !== undefined ? " (kept)" : ""), icon: "terminal-box", run: () => Workspace.open("view:run:" + r.id) })
         acts.push({ title: "Usage", icon: "stats", run: () => Workspace.open("view:stats") })
         acts.push({ title: "Settings", icon: "settings", hint: Keymap.seq("settings"), run: () => settingsDialog.open() })
         acts.push({ title: "Setup guide…", icon: "book-open", run: () => win.openSetupGuide() })
@@ -879,13 +889,17 @@ ApplicationWindow {
     PairDeviceDialog { id: pairDeviceDialog }
     SignInDialog {
         id: signInDialog
+        onRunInTerminalRequested: command => {
+            settingsDialog.close()
+            if (!windowSettings.terminalOpen) win.toggleTerminal()
+            Qt.callLater(() => terminal.runInNewTab(command))
+        }
         // Signed in on a host: what it can use now.
         onSignedInOnHost: {
             if (chat.isDraft) chat.draftView.loadHostModels()
             else chat.session.recheckModels()
         }
         // Signed in to an MCP server: tested again.
-        onMcpSignedIn: (scope, server) => Mcp.test(scope, server)
     }
     // The firewall stops a paired phone on one of harlo's addresses.
     // Merged work the wiki describes: an offer to update it, above.
@@ -961,8 +975,6 @@ ApplicationWindow {
         onSetupRequested: win.openSetupGuide()
         onPairDeviceRequested: pairDeviceDialog.open()
         onSignInRequested: (agent, label) => signInDialog.openFor(agent, label)
-        onProviderSignInRequested: (agent, provider, name) => signInDialog.openForProvider(agent, provider, name)
-        onMcpSignInRequested: (scope, server) => signInDialog.openForMcp(scope, server)
         onTrayToggled: on => win.setTrayEnabled(on)
         onPromptRailToggled: on => chat.transcript.promptRail = on
         onOpenFileRequested: path => {
@@ -990,7 +1002,7 @@ ApplicationWindow {
         color: Theme.foreground
         font.family: Theme.mono
         font.pixelSize: Theme.px(12)
-        background: Rectangle { color: Theme.elevated; border.color: Theme.primary; radius: 6 }
+        background: Rectangle { color: Theme.elevated; border.color: Theme.primary; radius: 2 }
         text: "window " + win.width + "×" + win.height + "  content " + page.width + "×" + page.height
             + "\nscreen " + win.screen.width + "×" + win.screen.height + " @" + win.screen.devicePixelRatio
             + "  (" + win.screen.name + ")"

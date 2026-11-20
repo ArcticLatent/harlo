@@ -1,4 +1,4 @@
-//! JSONL framing of the pi protocol (harlo-agent's RPC).
+//! JSONL framing of the pi protocol (`pi --mode rpc`).
 //!
 //! Records are split on LF only. Generic line readers that also split on
 //! U+2028/U+2029 would corrupt valid JSON strings (see pi `rpc.md`).

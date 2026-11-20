@@ -92,7 +92,7 @@ Rectangle {
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: GlassSurface { radius: 12 }
+        background: GlassSurface { radius: 4 }
         contentItem: ColumnLayout {
             spacing: 8
             Label {
@@ -123,7 +123,7 @@ Rectangle {
                     placeholderText: "What should the agent change here? (Ctrl+Enter)"
                     placeholderTextColor: Theme.textFaint
                     font.pixelSize: Theme.px(13)
-                    background: Rectangle { radius: 8; color: Theme.background; border.color: commentText.activeFocus ? Theme.accent : Theme.border }
+                    background: Rectangle { radius: 3; color: Theme.background; border.color: commentText.activeFocus ? Theme.accent : Theme.border }
                     Keys.onPressed: event => {
                         if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
                             commentBox.save()
@@ -607,7 +607,7 @@ Rectangle {
                                     }
                                 }
                                 background: Rectangle {
-                                    radius: 6
+                                    radius: 2
                                     color: hunkButton.down ? Theme.pressed : hunkButton.hovered ? Theme.hover : Theme.elevated
                                     border.color: hunkButton.visualFocus ? Theme.accent : Theme.border
                                 }
@@ -763,7 +763,7 @@ Rectangle {
             Icon { anchors.centerIn: parent; name: ti.iconName; color: ti.on ? Theme.accent : Theme.foreground; implicitWidth: 16; implicitHeight: 16; opacity: ti.enabled ? 1 : 0.35 }
         }
         background: Rectangle {
-            radius: 6
+            radius: 2
             color: ti.down ? Theme.pressed : ti.on ? Theme.selected : ti.hovered ? Theme.hover : "transparent"
             border.color: ti.visualFocus ? Theme.accent : "transparent"
             Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
@@ -985,7 +985,7 @@ Rectangle {
                 height: root.noteRows * pane.lineHeight - 6
                 y: 8 + modelData.row * pane.lineHeight - editor.contentY + 3
                 visible: y > -height && y < pane.height
-                radius: 8
+                radius: 3
                 color: noteHover.hovered ? Theme.hover : Theme.raised
                 border.color: Theme.hairline
                 Rectangle { width: 3; height: parent.height - 12; y: 6; x: 0; radius: 1.5; color: Theme.accent }

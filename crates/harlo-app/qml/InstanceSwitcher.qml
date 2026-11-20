@@ -119,7 +119,7 @@ Item {
             }
             Icon { name: "arrow-down-s"; color: Theme.muted; implicitWidth: 12; implicitHeight: 12 }
         }
-        background: ControlSurface { control: button; variant: menu.opened ? "selected" : "outline"; radius: 7 }
+        background: ControlSurface { control: button; variant: menu.opened ? "selected" : "outline"; radius: 3 }
         ToolTip.visible: hovered && !menu.opened
         ToolTip.text: "Instance: " + root.label(root.current) + " — " + root.statusText(root.current)
         ToolTip.delay: 500
@@ -132,7 +132,7 @@ Item {
         width: Math.max(root.width, 340)
         padding: 0
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-        background: GlassSurface { radius: 12 }
+        background: GlassSurface { radius: 4 }
         onOpened: root.refresh()
         onClosed: root.stopAsked = ""
 
@@ -178,7 +178,7 @@ Item {
                     Layout.rightMargin: 8
                     Layout.topMargin: index === 0 ? 8 : 4
                     implicitHeight: rowCol.implicitHeight + 18
-                    radius: 9
+                    radius: 3
                     color: isCurrent ? Theme.selected : rowHover.hovered ? Theme.hover : "transparent"
                     HoverHandler { id: rowHover }
                     TapHandler { onTapped: root.choose(row.modelData) }
@@ -198,7 +198,7 @@ Item {
                                     visible: row.isCurrent
                                     implicitWidth: curLabel.implicitWidth + 10
                                     implicitHeight: 16
-                                    radius: 4
+                                    radius: 2
                                     color: Theme.subtle
                                     border.color: Theme.border
                                     Label { id: curLabel; anchors.centerIn: parent; text: "Current"; color: Theme.foreground; font.pixelSize: Theme.px(10) }
@@ -207,7 +207,7 @@ Item {
                                     visible: row.modelData !== ""
                                     implicitWidth: sshLabel.implicitWidth + 10
                                     implicitHeight: 16
-                                    radius: 4
+                                    radius: 2
                                     color: Qt.rgba(Theme.info.r, Theme.info.g, Theme.info.b, 0.15)
                                     Label { id: sshLabel; anchors.centerIn: parent; text: "SSH"; color: Theme.info; font.pixelSize: Theme.px(10) }
                                 }
@@ -273,7 +273,7 @@ Item {
                     Layout.fillWidth: true
                     implicitHeight: 38
                     leftPadding: 14
-                    background: Rectangle { color: parent.hovered ? Theme.hover : "transparent"; radius: 10 }
+                    background: Rectangle { color: parent.hovered ? Theme.hover : "transparent"; radius: 4 }
                     contentItem: Label { text: "+  Add instance"; color: Theme.foreground; font.pixelSize: Theme.px(12.5); verticalAlignment: Text.AlignVCenter }
                     onClicked: { menu.close(); addHost.open() }
                 }

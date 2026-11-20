@@ -12,7 +12,7 @@ CheckBox {
         implicitHeight: 16
         x: cb.leftPadding
         y: (cb.height - height) / 2
-        radius: 4
+        radius: 2
         color: cb.checked ? Theme.primary : Theme.background
         border.color: cb.checked ? Theme.primary : cb.hovered ? Theme.muted : Theme.border
         Label {

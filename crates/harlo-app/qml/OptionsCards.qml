@@ -48,7 +48,7 @@ GridLayout {
             required property int index
             readonly property bool picked: cards.chosenIndex === index
             implicitHeight: body.implicitHeight + 22 + (choose.visible ? choose.height + 12 : 0)
-            radius: 6
+            radius: 2
             color: Theme.raised
             border.width: picked ? 2 : 1
             border.color: picked || (modelData.recommended && cards.chosenIndex < 0) ? Theme.primary : Theme.hairline

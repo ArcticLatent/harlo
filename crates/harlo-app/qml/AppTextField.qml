@@ -13,7 +13,7 @@ TextField {
     rightPadding: 10
     implicitHeight: 32
     background: Rectangle {
-        radius: 6
+        radius: 2
         color: Theme.background
         border.color: field.activeFocus ? Theme.primary : Theme.border
     }

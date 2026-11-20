@@ -16,7 +16,7 @@ Popup {
     signal signInRequested(string agent, string label)
     property int step: 0
     readonly property var steps: [
-        { title: "Agents", subtitle: "Install the coding agents you want, sign them in, and pick the one new sessions start with." },
+        { title: "Agent", subtitle: "Harlo runs pi. Install it, sign it in to a provider, and pick the model new sessions start with." },
         { title: "Git", subtitle: "Pick where your repositories live and sign git in, so pushing and pulling just work." },
         { title: "Theme", subtitle: "How Harlo looks. Everything here is in Settings → Appearance too." },
     ]
@@ -32,7 +32,7 @@ Popup {
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
     onOpened: { Workspace.refreshProviders(); Setup.refreshGit(); contentItem.forceActiveFocus() }
     // Escape skips it, as the button does.
@@ -175,9 +175,9 @@ Popup {
         ColumnLayout {
             id: agents
             spacing: 12
-            readonly property var list: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []
-            property string chosen: Workspace.setting("default_harness")
-            readonly property var defaultAgent: list.find(p => p.id === chosen) || null
+            // (pi: harlo's only agent.)
+            readonly property var list: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).filter(p => p.id === "pi") : []
+            readonly property var defaultAgent: list[0] || null
             Item { implicitHeight: 6 }
             Repeater {
                 model: agents.list
@@ -188,19 +188,16 @@ Popup {
                     readonly property var inst: Setup.revision >= 0 && Setup.installState(id) !== "" ? JSON.parse(Setup.installState(id)) : null
                     readonly property bool installing: inst !== null && inst.state === "running"
                     readonly property bool installed: modelData.state !== "missing"
-                    readonly property bool usable: installed && modelData.canChat
                     readonly property var acct: Accounts.revision >= 0 ? JSON.parse(Accounts.status(id)) : ({ accounts: [] })
                     readonly property string signedIn: (acct.accounts || []).map(a => a.label).join(", ")
-                    readonly property bool isDefault: agents.chosen === id
                     objectName: "setupAgent-" + id
                     Layout.fillWidth: true
                     Layout.leftMargin: 24
                     Layout.rightMargin: 24
                     implicitHeight: agentRow.implicitHeight + 26
-                    radius: 12
+                    radius: 4
                     color: Theme.raised
-                    border.color: isDefault ? Theme.accent : Theme.hairline
-                    border.width: isDefault ? 2 : 1
+                    border.color: Theme.hairline
                     onInstChanged: if (inst && inst.state === "done") Workspace.refreshProviders()
                     Component.onCompleted: if (installed) Accounts.refresh(id)
                     RowLayout {
@@ -247,22 +244,10 @@ Popup {
                             font.pixelSize: Theme.px(12)
                             onClicked: root.signInRequested(agentCard.id, agentCard.modelData.label)
                         }
-                        FlatButton {
-                            objectName: "setupDefault-" + agentCard.id
-                            visible: agentCard.usable
-                            text: agentCard.isDefault ? "Default" : "Use by default"
-                            variant: agentCard.isDefault ? "selected" : "outline"
-                            font.pixelSize: Theme.px(12)
-                            onClicked: {
-                                if (!agentCard.modelData.enabled) Workspace.setProviderEnabled(agentCard.id, true)
-                                Workspace.setSetting("default_harness", agentCard.id)
-                                agents.chosen = agentCard.id
-                            }
-                        }
                     }
                 }
             }
-            // The model new sessions with the default agent start with.
+            // The model new sessions start with.
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: 24
@@ -277,7 +262,7 @@ Popup {
                 id: modelPick
                 Heading {
                     title: "Model"
-                    subtitle: agents.defaultAgent ? "New " + agents.defaultAgent.label + " sessions start with this one; you can still pick another for each session." : ""
+                    subtitle: "New sessions start with this one; you can still pick another for each session."
                 }
                 ComboField {
                     objectName: "setupModel"
@@ -300,17 +285,6 @@ Popup {
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12.5)
                 }
-            }
-            Label {
-                visible: agents.defaultAgent === null
-                Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                Layout.bottomMargin: 20
-                wrapMode: Text.Wrap
-                text: "No default picked: Harlo starts the first installed agent. Pick one above to choose its model too."
-                color: Theme.textMuted
-                font.pixelSize: Theme.px(12.5)
             }
         }
     }
@@ -377,7 +351,7 @@ Popup {
                         readonly property bool chosen: Workspace.themeMode === modelData[0]
                         Layout.fillWidth: true
                         implicitHeight: 118
-                        radius: 12
+                        radius: 4
                         color: schemeHover.hovered ? Theme.rowHover : Theme.raised
                         border.color: chosen ? Theme.accent : Theme.hairline
                         border.width: chosen ? 2 : 1

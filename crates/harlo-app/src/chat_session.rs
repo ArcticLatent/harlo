@@ -28,9 +28,6 @@ pub mod qobject {
         #[qproperty(QString, key)]
         #[qproperty(QString, status)]
         #[qproperty(QString, harness)]
-        /// Plan mode (set from the workspace's per-session state): messages
-        /// ask for a plan, not changes.
-        #[qproperty(bool, plan_mode, cxx_name = "planMode")]
         /// A new turn's snapshot is being taken: its message isn't sent
         /// yet, and Stop drops it.
         #[qproperty(bool, preparing)]
@@ -87,15 +84,8 @@ pub mod qobject {
         #[qproperty(QString, approval_row, cxx_name = "approvalRow")]
         /// The whole request as JSON (`ask` questions, `select` option details).
         #[qproperty(QString, request_json, cxx_name = "requestJson")]
-        /// Subagents of this session: the `get_subagents` list as JSON.
-        #[qproperty(QString, subagents_json, cxx_name = "subagentsJson")]
-        /// Result of the last subagent action (cancel, steer), for a toast.
-        #[qproperty(QString, subagent_message, cxx_name = "subagentMessage")]
         /// Todo phases as JSON (`[{ name, tasks: [{ content, status }] }]`).
         #[qproperty(QString, todos_json, cxx_name = "todosJson")]
-        /// A side question (`/btw`) and its answer so far, as JSON
-        /// `{ question, text, done, error }`; "" for none.
-        #[qproperty(QString, aside_json, cxx_name = "asideJson")]
         /// Undo a turn: your messages with a snapshot from before them, as
         /// JSON `{ <row key>: { snapshot, next: <your next message's row
         /// key, "" for the latest turn>, files: <what the latest turn
@@ -111,6 +101,17 @@ pub mod qobject {
         /// How many pictures the chat shows (`sessionPictures`), for the
         /// header's Pictures button.
         #[qproperty(i32, picture_count, cxx_name = "pictureCount")]
+        /// pi extensions' views (see `HarnessEvent::ExtUi`): JSON list of
+        /// their last `view` frames, oldest first: `{ id, kind (screen,
+        /// overlay, widget, footer, header, tool, message), lines (ANSI),
+        /// result (a tool's result lines), focus, placement, toolCallId,
+        /// timestamp, … }`.
+        #[qproperty(QString, ext_views_json, cxx_name = "extViewsJson")]
+        /// Keys pi's extensions bound (`ctrl+shift+x`…): harlo passes them on.
+        #[qproperty(QStringList, ext_shortcuts, cxx_name = "extShortcuts")]
+        /// What an extension says the agent is doing (`setWorkingMessage`);
+        /// "" for harlo's own words.
+        #[qproperty(QString, ext_working, cxx_name = "extWorking")]
         type ChatSession = super::ChatSessionRust;
     }
 
@@ -191,17 +192,6 @@ pub mod qobject {
         /// `{ id, selectedOptions, customInput? }`, one per question.
         #[qinvokable]
         fn answer_ask(self: Pin<&mut ChatSession>, answers: &QString);
-        /// Puts the side question's card away.
-        #[qinvokable]
-        fn dismiss_aside(self: Pin<&mut ChatSession>);
-        /// Re-reads the subagent list.
-        #[qinvokable]
-        fn refresh_subagents(self: Pin<&mut ChatSession>);
-        #[qinvokable]
-        fn cancel_subagent(self: Pin<&mut ChatSession>, id: &QString);
-        /// Sends `message` to a running subagent as its user.
-        #[qinvokable]
-        fn steer_subagent(self: Pin<&mut ChatSession>, id: &QString, message: &QString);
         /// Branching from one of your messages (`row`: its transcript row):
         /// a forked session; the message's text comes back in
         /// `editRequested` to edit and resend.
@@ -271,6 +261,13 @@ pub mod qobject {
         /// Refreshes `contextJson`.
         #[qinvokable]
         fn load_context(self: Pin<&mut ChatSession>);
+        /// Input for a pi extension's view (`view` "" for the session):
+        /// `op` is a JSON object, `{ op: "key", data }`, `{ op: "mouse",
+        /// event, part }`, `{ op: "size", width, rows }`, `{ op: "close" }`,
+        /// `{ op: "expand", expanded }`, `{ op: "shortcut", key }`…
+        #[qinvokable]
+        #[cxx_name = "extInput"]
+        fn ext_input(self: &ChatSession, view: &QString, op: &QString);
     }
 
     unsafe extern "RustQt" {
@@ -283,10 +280,15 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "unsentReturned"]
         fn unsent_returned(self: Pin<&mut ChatSession>, text: &QString);
-        /// A message wasn't sent: why (its text goes back in the composer).
+        /// A message wasn't sent (its text goes back in the composer), or
+        /// one can't be branched from: why.
         #[qsignal]
         #[cxx_name = "sendFailed"]
         fn send_failed(self: Pin<&mut ChatSession>, message: &QString);
+        /// A pi extension asks to open a link (http or https only).
+        #[qsignal]
+        #[cxx_name = "extOpenUrl"]
+        fn ext_open_url(self: Pin<&mut ChatSession>, url: &QString);
         /// A tool call ended (or came in ended): files may have changed.
         #[qsignal]
         #[cxx_name = "toolEnded"]
@@ -343,16 +345,11 @@ use std::collections::{HashMap, VecDeque};
 /// The entry id of a session's `ordinal`-th user message (counting from 0),
 /// from its file's current branch: what `branch` and `fork` take. Blocking:
 /// a remote host's is read over SSH.
-pub fn user_entry_id(file: Option<PathBuf>, harness: &str, ordinal: usize) -> Option<String> {
-    file.and_then(|f| match harness {
-        // (A remote host's transcript: its copy here, brought up to date.)
-        "claude" if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().map(|c| harlo_harness::claude::user_entries(&c)),
-        "claude" => Some(harlo_harness::claude::user_entries(&f)),
-        // (Harlo: a remote host's file, from its copy here.)
-        _ if harlo_core::remote::is_remote(&f) => harlo_core::remote::local_copy(&f).ok().and_then(|c| harlo_harness::branches::current_user_entries(&c).ok()),
-        _ => harlo_harness::branches::current_user_entries(&f).ok(),
-    })
-    .and_then(|ids| ids.get(ordinal).cloned())
+pub fn user_entry_id(file: Option<PathBuf>, ordinal: usize) -> Option<String> {
+    let file = file?;
+    // (A remote host's file, from its copy here.)
+    let read = if harlo_core::remote::is_remote(&file) { harlo_core::remote::local_copy(&file).ok()? } else { file };
+    harlo_harness::branches::current_user_entries(&read).ok()?.get(ordinal).cloned()
 }
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -390,6 +387,9 @@ const ROLE_LABEL: i32 = 0x110;
 const ROLE_COMMAND: i32 = 0x111;
 /// A row's pictures to show (files, a line each).
 const ROLE_IMAGES: i32 = 0x112;
+/// When it started (unix ms; 0 unknown): a pi extension draws a custom
+/// message it knows by that time.
+const ROLE_TIME: i32 = 0x113;
 
 /// A remote session's file: when it was asked for, and its text once it came.
 type HostFile = (std::time::Instant, Option<Arc<str>>);
@@ -416,7 +416,6 @@ pub struct ChatSessionRust {
     key: QString,
     status: QString,
     harness: QString,
-    plan_mode: bool,
     preparing: bool,
     model_name: QString,
     model_id: QString,
@@ -450,15 +449,7 @@ pub struct ChatSessionRust {
     request_is_approval: bool,
     approval_row: QString,
     request_json: QString,
-    subagents_json: QString,
-    /// Subagents as their events describe them, and as `get_subagents` lists them.
-    subagent_events: Vec<Value>,
-    subagents_listed: Vec<Value>,
-    subagent_message: QString,
-    /// A subagent list refresh is already scheduled.
-    subagents_due: bool,
     todos_json: QString,
-    aside_json: QString,
     undo_json: QString,
     undo_plan: QString,
     /// The session's file, once the harness has reported it.
@@ -469,6 +460,8 @@ pub struct ChatSessionRust {
     rows: Vec<Arc<Row>>,
     requests: VecDeque<UiRequest>,
     status_entries: Vec<(String, String)>,
+    /// pi extensions' open views: their last `view` frame, by id.
+    ext_views: Vec<(String, Value)>,
     live: Option<(LiveRef, u64)>,
     /// Bumped on every bind; updates for an earlier binding are dropped.
     generation: u64,
@@ -477,6 +470,9 @@ pub struct ChatSessionRust {
     mentions: Vec<(String, HarnessKind, PathBuf)>,
     files_read: i32,
     picture_count: i32,
+    ext_views_json: QString,
+    ext_shortcuts: QStringList,
+    ext_working: QString,
     /// Files on a host that edits were numbered from: when each was asked
     /// for, and its text once it came.
     host_files: std::cell::RefCell<std::collections::HashMap<String, HostFile>>,
@@ -728,6 +724,10 @@ impl ChatSession {
         };
         self.as_mut().rust_mut().requests.clear();
         self.as_mut().rust_mut().status_entries.clear();
+        self.as_mut().rust_mut().ext_views.clear();
+        self.as_mut().set_ext_views_json(QString::from("[]"));
+        self.as_mut().set_ext_shortcuts(QStringList::default());
+        self.as_mut().set_ext_working(QString::default());
         self.as_mut().show_front_request();
         for setter in [
             Self::set_model_name,
@@ -764,12 +764,7 @@ impl ChatSession {
         self.as_mut().set_activity_json(QString::default());
         self.as_mut().set_key(key.clone());
 
-        self.as_mut().set_subagents_json(QString::default());
-        self.as_mut().rust_mut().subagent_events.clear();
-        self.as_mut().rust_mut().subagents_listed.clear();
-        self.as_mut().set_subagent_message(QString::default());
         self.as_mut().set_todos_json(QString::default());
-        self.as_mut().set_aside_json(QString::default());
         self.as_mut().rust_mut().queue_raw.clear();
         self.as_mut().rust_mut().session_file = None;
 
@@ -820,18 +815,17 @@ impl ChatSession {
     fn with_user_entry(self: Pin<&mut Self>, row: i32, then: impl FnOnce(Pin<&mut Self>, String) + Send + 'static) {
         let Some(ordinal) = self.user_ordinal(row) else { return };
         let file = self.session_file.clone().or_else(|| Some(PathBuf::from(self.key.to_string())).filter(|p| p.is_file()));
-        let harness = self.harness.to_string();
         // (Off the UI thread: a remote session's are read over SSH.)
         let (thread, generation) = (self.qt_thread(), self.generation);
         crate::runtime().spawn_blocking(move || {
-            let entry = user_entry_id(file, &harness, ordinal);
+            let entry = user_entry_id(file, ordinal);
             let _ = thread.queue(move |mut this| {
                 if this.generation != generation {
                     return;
                 }
                 match entry {
                     Some(id) => then(this, id),
-                    None => this.as_mut().set_subagent_message(QString::from("That message can't be branched from yet.")),
+                    None => this.as_mut().send_failed(&QString::from("That message can't be branched from yet.")),
                 }
             });
         });
@@ -940,103 +934,6 @@ impl ChatSession {
         self.request_then(json!({ "type": "promote_queued_message", "message": text }), |_, _| {});
     }
 
-    pub fn refresh_subagents(self: Pin<&mut Self>) {
-        self.request_then(json!({ "type": "get_subagents" }), |mut this, data| {
-            let listed = data.get("subagents").and_then(Value::as_array).cloned().unwrap_or_default();
-            this.as_mut().rust_mut().subagents_listed = listed;
-            this.show_subagents();
-        });
-    }
-
-    /// Subagents the session's file records (a reopened session has no
-    /// live events for them), read off the UI thread. Live events update
-    /// them by id afterwards.
-    fn load_saved_subagents(self: Pin<&mut Self>, file: PathBuf) {
-        let thread = self.qt_thread();
-        let generation = self.generation;
-        let harness = self.harness.to_string();
-        crate::runtime().spawn_blocking(move || {
-            // (A remote session's: from its host.)
-            let remote = harlo_core::remote::is_remote(&file);
-            let saved = match harness.as_str() {
-                "claude" if remote => harlo_core::subagents::claude_on_host(&file),
-                "claude" => harlo_harness::claude::subagents(&file),
-                _ => harlo_core::subagents::from_session_file(&file),
-            };
-            if saved.is_empty() {
-                return;
-            }
-            let _ = thread.queue(move |mut this| {
-                if this.generation != generation {
-                    return;
-                }
-                let events = std::mem::take(&mut this.as_mut().rust_mut().subagent_events);
-                let mut list: Vec<Value> = saved.into_iter().map(|s| events.iter().find(|e| e["id"] == s["id"]).cloned().unwrap_or(s)).collect();
-                let extra: Vec<Value> = events.into_iter().filter(|e| !list.iter().any(|l| l["id"] == e["id"])).collect();
-                list.extend(extra);
-                this.as_mut().rust_mut().subagent_events = list;
-                this.show_subagents();
-            });
-        });
-    }
-
-    /// `get_subagents` misses detached (background) subagents; the events
-    /// cover them, so the view shows both.
-    fn show_subagents(self: Pin<&mut Self>) {
-        let mut all = harlo_core::subagents::merged(&self.subagent_events, &self.subagents_listed);
-        // A remote agent reports its own paths: keep transcripts on its host.
-        if let Some(host) = harlo_core::remote::host_of(std::path::Path::new(&self.cwd.to_string())) {
-            for a in &mut all {
-                if let Some(f) = a["sessionFile"].as_str().filter(|f| f.starts_with('/')) {
-                    a["sessionFile"] = json!(harlo_core::remote::join(&host, f).to_string_lossy());
-                }
-            }
-        }
-        self.set_subagents_json(QString::from(&Value::Array(all).to_string()));
-    }
-
-    /// Coalesces bursts of subagent frames into one refresh.
-    fn schedule_subagents(mut self: Pin<&mut Self>) {
-        if self.subagents_due {
-            return;
-        }
-        self.as_mut().rust_mut().subagents_due = true;
-        let thread = self.qt_thread();
-        crate::runtime().spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let _ = thread.queue(|mut this| {
-                this.as_mut().rust_mut().subagents_due = false;
-                this.refresh_subagents();
-            });
-        });
-    }
-
-    pub fn cancel_subagent(self: Pin<&mut Self>, id: &QString) {
-        let id = id.to_string();
-        self.request_then(json!({ "type": "cancel_subagent", "subagentId": id }), move |mut this, data| {
-            let done = data.get("cancelled").and_then(serde_json::Value::as_bool).unwrap_or(false);
-            this.as_mut().set_subagent_message(QString::from(&if done { format!("Cancelled {id}") } else { format!("{id} was not running") }));
-            this.refresh_subagents();
-        });
-    }
-
-    pub fn steer_subagent(self: Pin<&mut Self>, id: &QString, message: &QString) {
-        let (id, message) = (id.to_string(), message.to_string());
-        if message.trim().is_empty() {
-            return;
-        }
-        let Some(handle) = self.handle().cloned() else { return };
-        let thread = self.qt_thread();
-        crate::runtime().spawn(async move {
-            let result = handle.request(json!({ "type": "steer_subagent", "subagentId": id, "message": message })).await;
-            let text = match result {
-                Ok(_) => format!("Sent to {id}"),
-                Err(e) => format!("Could not reach {id}: {e}"),
-            };
-            let _ = thread.queue(move |this| this.set_subagent_message(QString::from(&text)));
-        });
-    }
-
     fn handle(&self) -> Option<&Arc<SessionHandle>> {
         self.live.as_ref().map(|(l, _)| &l.handle)
     }
@@ -1054,14 +951,8 @@ impl ChatSession {
         };
         let Some(h) = self.handle().cloned() else { return };
         let original = text.clone();
-        // Plan mode: a plan first, no changes. (Not for a side question.)
-        let text = if self.plan_mode && mode == SendMode::Normal && !text.trim_start().starts_with("/btw") {
-            format!("{text}{}", harlo_harness::file_blocks::PLAN_NOTE)
-        } else {
-            text
-        };
         // (As typed: what Stop gives back if it comes before it's sent.)
-        let typed = Some(harlo_core::Typed { words: original.clone(), files: self.attachments.iter().map(std::string::ToString::to_string).collect(), by_you: true });
+        let typed = Some(harlo_core::Typed { words: original.clone(), files: self.attachments.iter().map(std::string::ToString::to_string).collect() });
         let paths: Vec<PathBuf> = self.attachments.iter().map(|p| PathBuf::from(p.to_string())).collect();
         // Sessions it mentions (picked from the `@` list): read when it's sent.
         let named = harlo_core::session_ref::tokens(&text);
@@ -1107,7 +998,7 @@ impl ChatSession {
             let sessions: String = mentioned
                 .iter()
                 .filter_map(|(kind, path)| harlo_harness::store::read_session(*kind, path))
-                .map(|info| harlo_core::session_ref::block(&info, &harlo_core::session_ref::messages_of(info.harness, &info.path)))
+                .map(|info| harlo_core::session_ref::block(&info, &harlo_core::session_ref::messages_of(&info.path)))
                 .collect();
             h.prompt_typed(&format!("{sessions}{}{text}", prepared.prefix), prepared.images, mode, typed);
         });
@@ -1507,10 +1398,6 @@ impl ChatSession {
         }
     }
 
-    pub fn dismiss_aside(self: Pin<&mut Self>) {
-        self.set_aside_json(QString::default());
-    }
-
     pub fn cancel_request(self: Pin<&mut Self>) {
         self.answer(json!({ "cancelled": true }));
     }
@@ -1605,38 +1492,15 @@ impl ChatSession {
                 let reasoning = if m["reasoning"].as_bool() == Some(true) { "1" } else { "0" };
                 // Served on this computer or the local network.
                 let local = if m["baseUrl"].as_str().is_some_and(harlo_harness::is_local_url) { "1" } else { "0" };
-                // (A coding plan's model: the plan's name, its group in the picker.)
-                let plan = if m["plan"] == true { s("providerName") } else { String::new() };
+                // pi's Claude subscription extension's: grouped as the plan
+                // they're on.
+                let plan = if m["provider"] == "claude-bridge" { "Claude subscription".to_owned() } else { String::new() };
                 list.append(QString::from(&format!("{}\t{}\t{}\t{}\t{}\t{}", s("provider"), s("id"), s("name"), reasoning, local, plan)));
             }
             this.as_mut().set_models(list);
             this.as_mut().set_models_answered(true);
         };
-        // Claude on another machine lists its models signed in or not, and
-        // refuses the first message: none of its own to pick there until it's signed in.
-        let host = (self.harness.to_string() == "claude")
-            .then(|| harlo_core::remote::host_of(&PathBuf::from(self.cwd.to_string())).and_then(|h| harlo_core::remote::host(&h)))
-            .flatten();
-        let Some(host) = host else {
-            self.request_or(json!({ "type": "get_available_models" }), answer, |this| this.set_models_answered(true));
-            return;
-        };
-        let (thread, generation) = (self.qt_thread(), self.generation);
-        crate::runtime().spawn(async move {
-            let signed_in = tokio::task::spawn_blocking(move || harlo_core::providers::claude_signed_in_on(&host)).await.ok().flatten();
-            let _ = thread.queue(move |this| {
-                if this.generation != generation {
-                    return;
-                }
-                if signed_in == Some(false) {
-                    // (Not signed in there: only its coding plans, which
-                    // need no Claude account.)
-                    answer(this, json!({ "models": harlo_core::coding_plans::models_json() }));
-                } else {
-                    this.request_or(json!({ "type": "get_available_models" }), answer, |this| this.set_models_answered(true));
-                }
-            });
-        });
+        self.request_or(json!({ "type": "get_available_models" }), answer, |this| this.set_models_answered(true));
     }
 
     pub fn set_model(self: Pin<&mut Self>, provider: &QString, id: &QString) {
@@ -1691,6 +1555,7 @@ impl ChatSession {
 
     fn apply_updates(mut self: Pin<&mut Self>, updates: Vec<SessionUpdate>) {
         let mut pictures = false;
+        let mut ext_views = false;
         for update in updates {
             pictures |= match &update {
                 SessionUpdate::Reset(_) => true,
@@ -1713,10 +1578,7 @@ impl ChatSession {
                     if let Some(file) = m.session_file.clone()
                         && self.session_file.as_ref() != Some(&file)
                     {
-                        self.as_mut().rust_mut().session_file = Some(file.clone());
-                        if matches!(self.harness.to_string().as_str(), "harlo" | "claude") {
-                            self.as_mut().load_saved_subagents(file);
-                        }
+                        self.as_mut().rust_mut().session_file = Some(file);
                     }
                     self.as_mut().set_needs_login(m.needs_login);
                     self.as_mut().set_limit_refused(m.limit_refused);
@@ -1756,13 +1618,7 @@ impl ChatSession {
                     self.as_mut().rust_mut().queue_raw = raw;
                     self.as_mut().set_queued(list);
                 }
-                SessionUpdate::SubagentActivity(frame) => {
-                    harlo_core::subagents::apply_event(&mut self.as_mut().rust_mut().subagent_events, &frame);
-                    self.as_mut().show_subagents();
-                    self.as_mut().schedule_subagents();
-                }
                 SessionUpdate::Todos(todos) => self.as_mut().set_todos_json(QString::from(&todos.to_string())),
-                SessionUpdate::Aside(a) => self.as_mut().set_aside_json(QString::from(&a.to_string())),
                 SessionUpdate::Preparing(on) => self.as_mut().set_preparing(on),
                 // Stopped before it was sent: the words back to edit.
                 SessionUpdate::Unsent(held) => {
@@ -1773,7 +1629,7 @@ impl ChatSession {
                 }
                 // (The workspace notifies.)
                 // (The workspace has these.)
-                SessionUpdate::Notable(_) | SessionUpdate::Limits(_) | SessionUpdate::GateAnswered { .. } | SessionUpdate::Stopped | SessionUpdate::HarloCall { .. } => {}
+                SessionUpdate::Notable(_) | SessionUpdate::GateAnswered { .. } | SessionUpdate::Stopped => {}
                 SessionUpdate::UiRequest(req) => {
                     self.as_mut().rust_mut().requests.push_back(req);
                     self.as_mut().show_front_request();
@@ -1783,7 +1639,12 @@ impl ChatSession {
                     self.as_mut().show_front_request();
                 }
                 SessionUpdate::StatusEntry { key, text } => self.as_mut().set_status_entry(key, text),
+                SessionUpdate::ExtUi(frame) => ext_views = self.as_mut().ext_ui(&frame) || ext_views,
             }
+        }
+        if ext_views {
+            let json = Value::Array(self.ext_views.iter().map(|(_, f)| f.clone()).collect()).to_string();
+            self.as_mut().set_ext_views_json(QString::from(&json));
         }
         if pictures {
             self.as_mut().count_pictures();
@@ -1818,6 +1679,67 @@ impl ChatSession {
         let n = i32::try_from(all.len()).unwrap_or(i32::MAX);
         if n != self.picture_count {
             self.as_mut().set_picture_count(n);
+        }
+    }
+
+    /// Takes in a pi extension's `harlo_ui` frame; true when the views
+    /// changed (`extViewsJson` is written once per batch: a screen that
+    /// animates sends a frame every few milliseconds).
+    fn ext_ui(mut self: Pin<&mut Self>, frame: &Value) -> bool {
+        let id = frame["id"].as_str().unwrap_or_default();
+        match frame["op"].as_str().unwrap_or_default() {
+            "view" => {
+                let mut this = self.as_mut().rust_mut();
+                let mut frame = frame.clone();
+                let old = this.ext_views.iter().find(|(i, _)| i == id).map(|(_, f)| f);
+                markdown_parts(&mut frame, old);
+                match this.ext_views.iter_mut().find(|(i, _)| i == id) {
+                    Some(v) => v.1 = frame,
+                    None => this.ext_views.push((id.to_owned(), frame)),
+                }
+                true
+            }
+            "close" => {
+                let mut this = self.as_mut().rust_mut();
+                let before = this.ext_views.len();
+                this.ext_views.retain(|(i, _)| i != id);
+                this.ext_views.len() != before
+            }
+            "hello" => {
+                let keys: QStringList = frame["shortcuts"].as_array().into_iter().flatten().filter_map(Value::as_str).map(QString::from).collect();
+                self.as_mut().set_ext_shortcuts(keys);
+                // (A new binding: the views of the one before are gone.)
+                let had = !self.ext_views.is_empty();
+                self.as_mut().rust_mut().ext_views.clear();
+                had
+            }
+            "editor" => {
+                let text = QString::from(frame["text"].as_str().unwrap_or_default());
+                self.as_mut().edit_requested(&text);
+                false
+            }
+            "url" => {
+                let url = frame["url"].as_str().unwrap_or_default();
+                if url.starts_with("https://") || url.starts_with("http://") {
+                    self.as_mut().ext_open_url(&QString::from(url));
+                }
+                false
+            }
+            "working" => {
+                // `{ message }` sets the words (absent: harlo's own);
+                // `{ visible: false }` hides them.
+                let text = if frame["visible"] == false { "" } else { frame["message"].as_str().unwrap_or_default() };
+                self.as_mut().set_ext_working(QString::from(&harlo_core::session::strip_ansi(text)));
+                false
+            }
+            _ => false,
+        }
+    }
+
+    pub fn ext_input(&self, view: &QString, op: &QString) {
+        let Ok(op) = serde_json::from_str::<Value>(&op.to_string()) else { return };
+        if let Some(h) = self.handle() {
+            h.send_raw(json!({ "type": "extension_ui_response", "id": format!("harlo:{view}"), "harlo": op }));
         }
     }
 
@@ -1991,6 +1913,8 @@ impl ChatSession {
             ROLE_LABEL => s(&row.label),
             ROLE_COMMAND => s(&row.command),
             ROLE_IMAGES => s(&self.shown_pictures(row).join("\n")),
+            #[expect(clippy::cast_precision_loss, reason = "unix milliseconds stay well inside a double's exact integers")]
+            ROLE_TIME => QVariant::from(&(row.time as f64)),
             _ => QVariant::default(),
         }
     }
@@ -2017,6 +1941,7 @@ impl ChatSession {
             (ROLE_LABEL, "label"),
             (ROLE_COMMAND, "command"),
             (ROLE_IMAGES, "images"),
+            (ROLE_TIME, "rowTime"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }
@@ -2066,6 +1991,39 @@ fn compact_note(tokens: u64, compact_at: u64) -> String {
     }
 }
 
+/// Gives each Markdown block of a pi extension's view (`blocks`, a
+/// tool's `resultBlocks`) its `parts`: prose and code, as a reply's are
+/// drawn (`{kind, html, code, lang}`).
+///
+/// A block whose text the view's previous frame (`old`) already had keeps
+/// those parts, so a screen redrawn every few milliseconds isn't rendered
+/// again each time.
+pub(crate) fn markdown_parts(frame: &mut Value, old: Option<&Value>) {
+    for key in ["blocks", "resultBlocks"] {
+        let Some(blocks) = frame.get_mut(key).and_then(Value::as_array_mut) else { continue };
+        for block in blocks.iter_mut().filter(|b| b["kind"] == "markdown") {
+            let text = block["text"].as_str().unwrap_or_default();
+            let known = old
+                .and_then(|o| o[key].as_array())
+                .and_then(|bs| bs.iter().find(|b| b["kind"] == "markdown" && b["text"].as_str() == Some(text)))
+                .map(|b| b["parts"].clone());
+            let parts = known.unwrap_or_else(|| {
+                let rendered = harlo_core::markdown::MarkdownRenderer::default().render(text);
+                Value::Array(
+                    rendered
+                        .iter()
+                        .map(|b| {
+                            let kind = if b.kind == harlo_core::markdown::MdBlockKind::Code { "code" } else { "prose" };
+                            json!({ "kind": kind, "html": b.html, "code": b.code, "lang": b.lang })
+                        })
+                        .collect(),
+                )
+            });
+            block["parts"] = parts;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2079,7 +2037,7 @@ mod tests {
             text: text.into(),
             images: Vec::new(),
             mode: SendMode::Normal,
-            typed: Some(Typed { words: words.into(), files: files.iter().map(std::string::ToString::to_string).collect(), by_you: true }),
+            typed: Some(Typed { words: words.into(), files: files.iter().map(std::string::ToString::to_string).collect() }),
         };
         let png = json!({ "type": "image", "mimeType": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(b"\x89PNG picture") });
         // A (plan mode, a file read in front), then 20 more, two with the
@@ -2167,5 +2125,27 @@ mod tests {
         // A row naming pictures has them looked at again on any change.
         let named = Row { mentions: vec!["shot.png".into()], ..old.clone() };
         assert_eq!(changed_roles(&named, &Row { result: "ok".into(), ..named.clone() }), vec![ROLE_RESULT, ROLE_IMAGES]);
+    }
+
+    #[test]
+    fn an_extensions_markdown_comes_in_parts() {
+        let mut frame = json!({ "op": "view", "lines": ["x"], "resultBlocks": [
+            { "kind": "lines", "row": 0, "rows": 1 },
+            { "kind": "markdown", "text": "Some **bold** words.\n\n```rust\nfn main() {}\n```", "rows": 5 },
+        ] });
+        markdown_parts(&mut frame, None);
+        let parts = frame["resultBlocks"][1]["parts"].as_array().expect("its parts");
+        assert_eq!(parts.iter().map(|p| p["kind"].as_str().unwrap_or_default()).collect::<Vec<_>>(), ["prose", "code"]);
+        assert!(parts[0]["html"].as_str().unwrap_or_default().contains(">bold<"), "{}", parts[0]["html"]);
+        assert_eq!((&parts[1]["code"], &parts[1]["lang"]), (&json!("fn main() {}"), &json!("rust")));
+        assert!(frame["resultBlocks"][0].get("parts").is_none(), "lines have none");
+
+        // The same text in the next frame keeps what was rendered.
+        let mut kept = frame.clone();
+        kept["resultBlocks"][1]["parts"] = json!(null);
+        let mut old = frame.clone();
+        old["resultBlocks"][1]["parts"] = json!(["from before"]);
+        markdown_parts(&mut kept, Some(&old));
+        assert_eq!(kept["resultBlocks"][1]["parts"], json!(["from before"]));
     }
 }

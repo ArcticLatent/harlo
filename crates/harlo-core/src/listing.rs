@@ -221,9 +221,10 @@ fn numbered_search(words: &[String]) -> bool {
 /// the wiki's note on an out-of-date page (`[Wiki: …]`).
 const READ_NOTES: [&str; 2] = ["\n\n[Rules from ", "\n\n[Wiki: "];
 
-/// A read's output without the notes after its lines.
+/// A read's output without the notes after its lines (and the blank lines
+/// before them: pi's file ends in a newline before the note).
 pub(crate) fn without_notes(output: &str) -> &str {
-    READ_NOTES.iter().filter_map(|n| output.find(n)).min().map_or(output, |i| &output[..i])
+    READ_NOTES.iter().filter_map(|n| output.find(n)).min().map_or(output, |i| output[..i].trim_end_matches('\n'))
 }
 
 /// A read tool's plain lines, numbered as a numbered read's are.

@@ -10,8 +10,6 @@ import harlo
 ColumnLayout {
     id: providersView
     signal signInRequested(string agent, string label)
-    /// Straight to signing `agent` in to `provider` (OpenRouter).
-    signal providerSignInRequested(string agent, string provider, string name)
     spacing: 0
     SectionHeader {
         // (Here: the page's own title says it.)
@@ -29,8 +27,8 @@ ColumnLayout {
         readonly property var host: Remotes.revision >= 0 ? (JSON.parse(Remotes.hostsJson()).find(h => h.name === Workspace.instance) || null) : null
         readonly property var updates: Updates.entriesJson !== "" ? JSON.parse(Updates.entriesJson) : []
         readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []
-        // The agent whose sign-ins there are shown below ("" none).
-        property string open: ""
+        // pi's extensions there shown below.
+        property bool extensions: false
         Component.onCompleted: if (visible && host && host.state !== "connected" && host.state !== "connecting") Remotes.connectHost(Workspace.instance)
         Label {
             visible: !hostAgents.host || hostAgents.host.state !== "connected"
@@ -44,7 +42,7 @@ ColumnLayout {
         Group {
             visible: hostAgents.host !== null && hostAgents.host.state === "connected"
             Repeater {
-                model: ["harlo", "claude"]
+                model: ["pi"]
                 SettingRow {
                     id: hostAgent
                     required property string modelData
@@ -59,21 +57,20 @@ ColumnLayout {
                     divider: index > 0
                     icon: "harness-" + modelData
                     title: Theme.harnessLabel(modelData)
-                    // (Harlo: harlo puts its agent there when it's needed.)
-                    detail: modelData === "harlo" ? (found ? "Harlo puts its agent there as sessions start"
-                            + (Workspace.setting("harlo_sandbox") === "0" ? "" : h.bwrap === "no" ? " · Sandbox: needs bubblewrap" : h.bwrap === "blocked" ? " · Sandbox: bubblewrap can't run there" : "")
-                        : (h.harloWhy || "Not checked yet"))
-                        : install && install.state === "running" ? install.message
+                    // (With what harlo's sandbox there lacks, when it's on.)
+                    readonly property string sandbox: Workspace.setting("harlo_sandbox") === "0" ? ""
+                        : h.harloWhy ? " · Sandbox: " + h.harloWhy
+                        : h.bwrap === "no" ? " · Sandbox: needs bubblewrap" : h.bwrap === "blocked" ? " · Sandbox: bubblewrap can't run there" : ""
+                    detail: install && install.state === "running" ? install.message
                         : !found ? (install && install.state === "failed" ? install.message : "Not installed there")
                         : (version !== "" ? "Version " + version : "Installed") + (h[modelData] ? " · " + h[modelData] : "")
-                          + (modelData === "claude" && h.claudeAuth === "no" ? " · not signed in" : "")
-                          + (update && update.state === "available" ? " · " + update.latest + " available" : "")
+                          + (update && update.state === "available" ? " · " + update.latest + " available" : "") + sandbox
                     detailColor: install && install.state === "failed" && !found ? Theme.error : Theme.muted
                     RowLayout {
                         spacing: 6
                         FlatButton {
                             objectName: "hostProviderInstall-" + hostAgent.modelData
-                            visible: !hostAgent.found && hostAgent.modelData !== "harlo" && !(hostAgent.install && hostAgent.install.state === "running")
+                            visible: !hostAgent.found && !(hostAgent.install && hostAgent.install.state === "running")
                             text: "Install"
                             font.pixelSize: Theme.px(12)
                             onClicked: Remotes.installAgent(Workspace.instance, hostAgent.modelData)
@@ -86,22 +83,11 @@ ColumnLayout {
                             onClicked: Updates.update(hostAgent.update.key)
                         }
                         FlatButton {
-                            objectName: "hostProviderAccounts-" + hostAgent.modelData
-                            visible: hostAgent.found
-                            text: hostAgents.open === hostAgent.modelData ? "Hide accounts" : "Accounts"
+                            objectName: "hostPiExtensions"
+                            visible: hostAgent.found && hostAgent.modelData === "pi"
+                            text: hostAgents.extensions ? "Hide extensions" : "Extensions"
                             font.pixelSize: Theme.px(12)
-                            onClicked: {
-                                hostAgents.open = hostAgents.open === hostAgent.modelData ? "" : hostAgent.modelData
-                                if (hostAgents.open !== "") Accounts.refresh(hostAgents.open + "@" + Workspace.instance)
-                            }
-                        }
-                        FlatButton {
-                            visible: hostAgent.found && hostAgent.modelData === "claude" && hostAgent.h.claudeAuth === "no"
-                            text: "Sign in"
-                            font.pixelSize: Theme.px(12)
-                            ToolTip.visible: hovered
-                            ToolTip.text: "Claude isn't signed in on " + Workspace.instance + "."
-                            onClicked: providersView.signInRequested("claude@" + Workspace.instance, "Claude on " + Workspace.instance)
+                            onClicked: hostAgents.extensions = !hostAgents.extensions
                         }
                         AppSwitch {
                             checked: hostAgent.local.enabled
@@ -111,71 +97,11 @@ ColumnLayout {
                 }
             }
         }
-        // One agent's sign-ins on that machine (its own logins there).
-        ColumnLayout {
-            id: hostAccounts
-            visible: hostAgents.open !== "" && hostAgents.host !== null && hostAgents.host.state === "connected"
+        PiExtensionsSection {
+            visible: hostAgents.extensions && hostAgents.host !== null && hostAgents.host.state === "connected" && (hostAgents.host.pi || "") !== ""
             Layout.fillWidth: true
             Layout.topMargin: 10
-            spacing: 6
-            readonly property string agent: hostAgents.open + "@" + Workspace.instance
-            readonly property var st: Accounts.revision >= 0 && hostAgents.open !== "" ? JSON.parse(Accounts.status(agent)) : ({ accounts: [] })
-            property string signOutError: ""
-            Label {
-                text: Theme.harnessLabel(hostAgents.open) + "'s accounts on " + Workspace.instance
-                color: Theme.foreground
-                font.pixelSize: Theme.px(12.5)
-                font.weight: Font.Medium
-            }
-            Repeater {
-                model: hostAccounts.st.accounts || []
-                RowLayout {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Icon { name: "checkbox-circle"; color: Theme.success; implicitWidth: 13; implicitHeight: 13 }
-                    Label { text: modelData.label; color: Theme.foreground; font.pixelSize: Theme.px(12.5) }
-                    Label { Layout.fillWidth: true; text: modelData.detail || ""; elide: Text.ElideRight; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                    FlatButton {
-                        visible: modelData.signOut === true
-                        text: "Sign out"
-                        padding: 3
-                        font.pixelSize: Theme.px(11)
-                        onClicked: hostAccounts.signOutError = Accounts.signOut(hostAccounts.agent, modelData.id)
-                    }
-                }
-            }
-            Label {
-                visible: hostAccounts.st.state === "ready" && (hostAccounts.st.error || "") === "" && (hostAccounts.st.accounts || []).length === 0
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: "Not signed in to anything there yet."
-                color: Theme.warning
-                font.pixelSize: Theme.px(12)
-            }
-            Label {
-                visible: (hostAccounts.st.error || "") !== "" || hostAccounts.signOutError !== ""
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: hostAccounts.signOutError !== "" ? hostAccounts.signOutError : (hostAccounts.st.error || "")
-                color: Theme.error
-                font.pixelSize: Theme.px(12)
-            }
-            RowLayout {
-                spacing: 8
-                FlatButton {
-                    text: (hostAccounts.st.accounts || []).length > 0 ? "Sign in to another…" : "Sign in…"
-                    accent: Theme.primary
-                    font.pixelSize: Theme.px(12)
-                    onClicked: providersView.signInRequested(hostAccounts.agent, Theme.harnessLabel(hostAgents.open) + " on " + Workspace.instance)
-                }
-                Label {
-                    visible: hostAccounts.st.state === "loading"
-                    text: "Checking…"
-                    color: Theme.muted
-                    font.pixelSize: Theme.px(12)
-                }
-            }
+            host: Workspace.instance
         }
         RowLayout {
             Layout.topMargin: 8
@@ -216,7 +142,7 @@ ColumnLayout {
                         leftPadding: 14
                         rightPadding: 14
                         onClicked: providerList.open = prov.expanded ? "" : prov.modelData.id
-                        background: Rectangle { color: provRow.hovered ? Theme.hover : "transparent"; radius: 10 }
+                        background: Rectangle { color: provRow.hovered ? Theme.hover : "transparent"; radius: 4 }
                         contentItem: RowLayout {
                             spacing: 10
                             Icon { name: prov.expanded ? "arrow-down-s" : "arrow-right-s"; color: Theme.muted; implicitWidth: 14; implicitHeight: 14 }
@@ -366,6 +292,19 @@ ColumnLayout {
                                 }
                             }
                         }
+                        // pi: its extensions.
+                        PiExtensionsSection {
+                            objectName: "piExtensions"
+                            visible: prov.modelData.id === "pi" && prov.modelData.state !== "missing" && prov.expanded
+                            Layout.fillWidth: true
+                            Layout.topMargin: 6
+                            readonly property var claudeAccounts: Accounts.revision >= 0 ? JSON.parse(Accounts.status("claude")) : ({})
+                            claudeSignedIn: claudeAccounts.state !== "ready" ? "" : (claudeAccounts.accounts || []).length > 0 ? "yes" : "no"
+                            claudeAccount: ((claudeAccounts.accounts || [])[0] || {}).label || ""
+                            onVisibleChanged: if (visible) Accounts.refresh("claude")
+                            onClaudeSignInRequested: providersView.signInRequested("claude", "Claude")
+                            onClaudeSignOutRequested: Accounts.signOut("claude", "claude")
+                        }
                         FlatButton {
                             objectName: "providerModels-" + prov.modelData.id
                             visible: prov.modelData.models.length > 0
@@ -383,7 +322,7 @@ ColumnLayout {
                                     required property string modelData
                                     implicitWidth: modelName.implicitWidth + 14
                                     implicitHeight: 22
-                                    radius: 6
+                                    radius: 2
                                     color: Theme.controlFill
                                     border.color: Theme.controlBorder
                                     Label { id: modelName; anchors.centerIn: parent; text: Theme.modelLabel(parent.modelData); color: Theme.muted; font.pixelSize: Theme.px(11) }
@@ -407,14 +346,13 @@ ColumnLayout {
     }
     Rule { }
     SectionHeader {
-        title: "Harlo"
-        subtitle: harloModels.ids.length === 0 ? "Its model choices fill in once it's signed in (Sign in… above)." : ""
+        title: "Sandbox"
     }
     Group {
         SettingRow {
             title: "Sandbox commands"
-            detail: "Harlo's commands can change the project and nothing else, and can't see your keys or sign-ins."
-            more: "The system and your home folder are read-only: commands can change the project, /tmp and tool caches, and can't see SSH and GPG keys, credentials, sign-ins or browser profiles. Harlo's file tools keep to the same. A command that needs more asks you before it runs outside the sandbox. Needs bubblewrap (bwrap) on the machine the session runs on; MCP servers and Harlo's tools aren't sandboxed. Applies to Harlo sessions started afterwards."
+            detail: "pi's commands can change the project and nothing else, and can't see your keys or sign-ins."
+            more: "The system and your home folder are read-only: commands can change the project, /tmp and tool caches, and can't see SSH and GPG keys, credentials, sign-ins or browser profiles. pi's file tools keep to the same. A command it needs outside the sandbox is left to you. Needs bubblewrap (bwrap) on the machine the session runs on; MCP servers and Harlo's tools aren't sandboxed. Applies to sessions started afterwards."
             icon: "shield-check"
             AppSwitch {
                 id: harloSandboxSwitch
@@ -434,149 +372,6 @@ ColumnLayout {
                 objectName: "harloSandboxNet"
                 checked: Workspace.setting("harlo_sandbox_net") !== "0"
                 onToggled: Workspace.setSetting("harlo_sandbox_net", checked ? "1" : "0")
-            }
-        }
-        // Harlo's models (provider/model), for the two pickers below.
-        QtObject {
-            id: harloModels
-            readonly property var prov: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(p => p.id === "harlo") || null : null
-            readonly property var ids: prov ? prov.modelIds || [] : []
-            readonly property string none: ids.length === 0 ? " Harlo lists its models once it's signed in." : ""
-            // The ids to offer: Harlo's, and the saved one if it no longer lists it.
-            function choices(saved) { return saved === "" || ids.indexOf(saved) >= 0 ? ids : ids.concat([saved]) }
-            // Names as the model picker shows them, with the provider where two share one.
-            function labels(list) {
-                const names = list.map(id => { const i = ids.indexOf(id); return i >= 0 ? Theme.modelLabel((prov.models || [])[i] || id) : id })
-                return names.map((n, i) => names.indexOf(n) !== names.lastIndexOf(n) ? n + " · " + list[i].split("/")[0] : n)
-            }
-        }
-        SettingRow {
-            id: taskModelRow
-            divider: true
-            property string saved: Workspace.setting("harlo_task_model")
-            readonly property var choices: harloModels.choices(saved)
-            title: "Its own helpers' model"
-            detail: "What Harlo's own helpers run on when the task doesn't name a model."
-            more: "Its own helpers are its task tool's. A smaller model often does searches and simple edits as well, for less. Applies to Harlo sessions started afterwards."
-            icon: "robot-2"
-            ComboField {
-                objectName: "harloTaskModel"
-                // (Nothing to pick before sign-in: said once, at the heading.)
-                enabled: taskModelRow.choices.length > 0
-                width: 240
-                model: ["The session's model"].concat(harloModels.labels(taskModelRow.choices))
-                currentIndex: taskModelRow.choices.indexOf(taskModelRow.saved) + 1
-                onActivated: i => {
-                    taskModelRow.saved = i === 0 ? "" : taskModelRow.choices[i - 1]
-                    Workspace.setSetting("harlo_task_model", taskModelRow.saved)
-                }
-            }
-        }
-        SettingRow {
-            id: fallbackRow
-            divider: true
-            property string saved: Workspace.setting("harlo_fallback")
-            readonly property var choices: harloModels.choices(saved)
-            title: "When the plan's limit is reached"
-            detail: "Stop, or go on with another model and say so."
-            more: "When the model's plan says its usage limit is reached, or the server stays busy after its retries. Harlo tries the plan's model again after the limit resets. Applies to Harlo sessions started afterwards."
-            icon: "refresh"
-            ComboField {
-                objectName: "harloFallback"
-                enabled: fallbackRow.choices.length > 0
-                width: 240
-                model: ["Stop"].concat(harloModels.labels(fallbackRow.choices).map(n => "Go on with " + n))
-                currentIndex: fallbackRow.choices.indexOf(fallbackRow.saved) + 1
-                onActivated: i => {
-                    fallbackRow.saved = i === 0 ? "" : fallbackRow.choices[i - 1]
-                    Workspace.setSetting("harlo_fallback", fallbackRow.saved)
-                }
-            }
-        }
-        SettingRow {
-            id: budgetRow
-            divider: true
-            property string saved: Workspace.setting("harlo_helper_budget")
-            // (A value set some other way is kept as a choice.)
-            readonly property var choices: ["", "500k", "1m", "2m", "5m", "10m"].concat(["", "500k", "1m", "2m", "5m", "10m"].indexOf(saved) >= 0 ? [] : [saved])
-            title: "Token budget per helper"
-            detail: "The most a Harlo helper session may use, in tokens sent and received."
-            more: "A helper session is one another session starts; its own helpers count too. A helper's coding task often takes a few hundred thousand. Past it, it makes no more requests and its parent is told."
-            icon: "scales-3"
-            ComboField {
-                objectName: "harloHelperBudget"
-                width: 240
-                model: budgetRow.choices.map(v => v === "" ? "No limit" : v.replace(/m$/, "M") + " tokens")
-                currentIndex: budgetRow.choices.indexOf(budgetRow.saved)
-                onActivated: i => {
-                    budgetRow.saved = budgetRow.choices[i]
-                    Workspace.setSetting("harlo_helper_budget", budgetRow.saved)
-                }
-            }
-        }
-        SettingRow {
-            id: advisorRow
-            divider: true
-            property string saved: Workspace.setting("harlo_advisor")
-            readonly property var choices: harloModels.choices(saved)
-            title: qsTr("Reviewer before it finishes")
-            detail: qsTr("A second model reads each turn's work and diff, and sends it back once with a note when something's wrong or missing.")
-            more: qsTr("It costs a request every turn, so it's off unless a model is picked. Its notes show in the chat. Applies to Harlo sessions started afterwards.")
-            icon: "search-eye"
-            ComboField {
-                objectName: "harloAdvisor"
-                enabled: advisorRow.choices.length > 0
-                width: 240
-                model: [qsTr("Off")].concat(harloModels.labels(advisorRow.choices))
-                currentIndex: advisorRow.choices.indexOf(advisorRow.saved) + 1
-                onActivated: i => {
-                    advisorRow.saved = i === 0 ? "" : advisorRow.choices[i - 1]
-                    Workspace.setSetting("harlo_advisor", advisorRow.saved)
-                }
-            }
-        }
-        SettingRow {
-            id: steeringRow
-            divider: true
-            property string saved: Workspace.setting("harlo_steering")
-            title: qsTr("Messages sent while it works")
-            detail: qsTr("Go in right away, or wait until it finishes what it's doing.")
-            more: qsTr("Right away: Harlo reads a message at its next step, stopping a wait or putting a long command in the background so it can. Waiting: the message starts the next turn. Applies to Harlo sessions started afterwards.")
-            icon: "send-plane"
-            ComboField {
-                objectName: "harloSteering"
-                width: 240
-                model: [qsTr("Right away"), qsTr("When it finishes")]
-                currentIndex: steeringRow.saved === "wait" ? 1 : 0
-                onActivated: i => {
-                    steeringRow.saved = i === 1 ? "wait" : ""
-                    Workspace.setSetting("harlo_steering", steeringRow.saved)
-                }
-            }
-        }
-        Repeater {
-            model: [
-                { key: "harlo_memory", icon: "bookmark", title: qsTr("Notes between sessions"),
-                  detail: qsTr("Harlo keeps what it learns about a project (a command that works, a pitfall) and the next sessions start with it.") },
-                { key: "harlo_debug", icon: "bug", title: qsTr("Debugger"),
-                  detail: qsTr("Harlo can run a program under a debugger: breakpoints, stepping, the stack and variables (Python, Go, C, C++, Rust).") },
-                { key: "harlo_ast", icon: "node-tree", title: qsTr("Structural search and edit"),
-                  detail: qsTr("Harlo can find and rewrite code by its shape, as patterns over the syntax tree.") },
-                { key: "harlo_background", icon: "ai-agent", title: qsTr("Helpers in the background"),
-                  detail: qsTr("Harlo's own helpers can work while it goes on, and it waits for them when it needs their results.") }
-            ]
-            delegate: SettingRow {
-                required property var modelData
-                divider: true
-                title: modelData.title
-                detail: modelData.detail
-                more: qsTr("Off by default: each adds to every request. Applies to Harlo sessions started afterwards.")
-                icon: modelData.icon
-                AppSwitch {
-                    objectName: modelData.key
-                    checked: Workspace.setting(modelData.key) === "1"
-                    onToggled: Workspace.setSetting(modelData.key, checked ? "1" : "0")
-                }
             }
         }
     }

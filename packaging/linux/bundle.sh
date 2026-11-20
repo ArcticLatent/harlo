@@ -25,12 +25,11 @@ cargo build --release --locked -p harlo-app
 # (The helper harlo puts on another machine to run model servers there:
 # without dictation, so it needs no C++ library there.)
 cargo build --release --locked -p harlo-core --bin harlo-engines --no-default-features
-# Harlo, harlo's own agent (one optimized unit: smaller, less memory).
-cargo build --profile agent --locked -p harlo-agent
-# And the copy harlo puts on other machines: static (musl), so it runs
-# whatever C library they have. (ring's bits of C: the system's gcc does.)
+# harlo's helper for pi (its sandbox, the check for commands that can't be
+# undone, the wiki's commands): static (musl), so the same copy runs here
+# and on other machines whatever C library they have.
 rustup target add x86_64-unknown-linux-musl 2>/dev/null || true
-CC_x86_64_unknown_linux_musl=${CC_x86_64_unknown_linux_musl:-gcc} cargo build --profile agent --locked -p harlo-agent --target x86_64-unknown-linux-musl
+CC_x86_64_unknown_linux_musl=${CC_x86_64_unknown_linux_musl:-gcc} cargo build --profile agent --locked -p harlo-helper --target x86_64-unknown-linux-musl
 # The code index (its grammars make it big, so it's a program of its own):
 # static too, the one copy serving here and other machines alike.
 CC_x86_64_unknown_linux_musl=${CC_x86_64_unknown_linux_musl:-gcc} cargo build --profile agent --locked -p harlo-index --target x86_64-unknown-linux-musl
@@ -84,12 +83,13 @@ export PATH="$QTDIR/bin:$PATH"
 # The helper harlo puts on another machine to run model servers there: as
 # built (after linuxdeploy, which changes the programs it finds), stripped.
 install -Dm755 -s "${CARGO_TARGET_DIR:-target}/release/harlo-engines" "$APPDIR/usr/lib/harlo/harlo-engines"
-# Harlo's agent, which harlo looks for in lib/harlo beside its own bin.
-install -Dm755 -s "${CARGO_TARGET_DIR:-target}/agent/harlo-agent" "$APPDIR/usr/lib/harlo/harlo-agent"
-# Its copy for other machines, x86_64 and (built on one) ARM.
-install -Dm755 -s "${CARGO_TARGET_DIR:-target}/x86_64-unknown-linux-musl/agent/harlo-agent" "$APPDIR/usr/lib/harlo/harlo-agent-x86_64"
-if [ -f "$OUT/helpers/harlo-agent-aarch64" ]; then
-    install -Dm755 "$OUT/helpers/harlo-agent-aarch64" "$APPDIR/usr/lib/harlo/harlo-agent-aarch64"
+# The helper, which harlo looks for in lib/harlo beside its own bin: for
+# here (harlo-helper) and for other machines (harlo-helper-<arch>), x86_64
+# and (built on one) ARM.
+install -Dm755 -s "${CARGO_TARGET_DIR:-target}/x86_64-unknown-linux-musl/agent/harlo-helper" "$APPDIR/usr/lib/harlo/harlo-helper"
+install -Dm755 -s "${CARGO_TARGET_DIR:-target}/x86_64-unknown-linux-musl/agent/harlo-helper" "$APPDIR/usr/lib/harlo/harlo-helper-x86_64"
+if [ -f "$OUT/helpers/harlo-helper-aarch64" ]; then
+    install -Dm755 "$OUT/helpers/harlo-helper-aarch64" "$APPDIR/usr/lib/harlo/harlo-helper-aarch64"
 fi
 # The code index, for here and other machines (harlo-okf and harlo look for
 # harlo-index-<arch> in lib/harlo), x86_64 and (built on one) ARM.
@@ -101,6 +101,9 @@ fi
 if [ -f "$OUT/helpers/harlo-engines-aarch64" ]; then
     install -Dm755 "$OUT/helpers/harlo-engines-aarch64" "$APPDIR/usr/lib/harlo/harlo-engines-aarch64"
 fi
+# The built-in Claude subscription extension for pi (harlo fetches
+# Anthropic's Agent SDK for it on first use).
+sh packaging/pi-claude-bridge/build.sh "$APPDIR/usr/lib/harlo/pi-claude-bridge"
 echo "appimage" > "$APPDIR/usr/install-kind"
 # The AppImage's own icon: a PNG and .DirIcon at its root (appimagetool no
 # longer takes the SVG linuxdeploy links there).

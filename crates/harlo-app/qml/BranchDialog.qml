@@ -39,7 +39,7 @@ Popup {
         const b = branches[i]
         if (!b) return
         const preview = Workspace.branchPreviewFile(file, b.leaf)
-        if (preview !== "") previewSession.bindFile(preview, harness !== "" ? harness : "harlo", cwd)
+        if (preview !== "") previewSession.bindFile(preview, harness !== "" ? harness : "pi", cwd)
     }
     signal continued(string key)
     property alias previewSession: previewSession
@@ -51,7 +51,7 @@ Popup {
     padding: 0
     modal: true
     focus: true
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
     onClosed: previewSession.bind("")
 
@@ -66,7 +66,7 @@ Popup {
             Layout.fillHeight: true
             Layout.preferredWidth: 300
             color: Theme.sidebar
-            radius: 11
+            radius: 4
             Rectangle { anchors.right: parent.right; width: 12; height: parent.height; color: parent.color }
             Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.border }
             ColumnLayout {
@@ -101,7 +101,7 @@ Popup {
                         readonly property bool chosen: root.selected === index
                         width: ListView.view.width
                         implicitHeight: branchCol.implicitHeight + 14
-                        radius: 7
+                        radius: 3
                         color: chosen ? Theme.selected : branchHover.hovered ? Theme.hover : "transparent"
                         border.color: chosen ? Theme.primary : "transparent"
                         HoverHandler { id: branchHover }
@@ -184,7 +184,7 @@ Popup {
                     implicitHeight: 30
                     onClicked: root.close()
                     contentItem: Icon { name: "close"; color: closeButton.hovered ? Theme.foreground : Theme.muted }
-                    background: Rectangle { radius: 6; color: closeButton.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: closeButton.hovered ? Theme.hover : "transparent" }
                 }
             }
             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }

@@ -36,7 +36,7 @@ Rectangle {
     // An approval shown on its tool row: just a reminder here.
     readonly property bool inlineApproval: requestDock.session.requestIsApproval && requestDock.session.approvalRow !== ""
     implicitHeight: reqCol.implicitHeight + 24
-    radius: 10
+    radius: 4
     color: Theme.elevated
     border.color: requestDock.session.requestIsApproval ? Theme.warning : Theme.primary
     ColumnLayout {
@@ -124,7 +124,7 @@ Rectangle {
                             visible: reqBlock.modelData.kind === "code"
                             width: parent.width
                             height: visible ? reqCodeText.implicitHeight + 16 : 0
-                            radius: 6
+                            radius: 2
                             color: Theme.codeBg
                             TextEdit {
                                 id: reqCodeText
@@ -153,7 +153,7 @@ Rectangle {
             text: requestDock.session.requestPrefill
             color: Theme.foreground
             wrapMode: TextEdit.Wrap
-            background: Rectangle { radius: 5; color: Theme.background; border.color: Theme.border }
+            background: Rectangle { radius: 2; color: Theme.background; border.color: Theme.border }
         }
         // Options with descriptions: one row each.
         Repeater {
@@ -164,7 +164,7 @@ Rectangle {
                 required property int index
                 Layout.fillWidth: true
                 implicitHeight: detailCol.implicitHeight + 14
-                radius: 7
+                radius: 3
                 color: detailHover.hovered ? Theme.hover : "transparent"
                 border.color: detailHover.hovered ? Theme.primary : Theme.border
                 HoverHandler { id: detailHover; cursorShape: Qt.PointingHandCursor }

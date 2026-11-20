@@ -117,12 +117,12 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public static func sample(now: Date = Date.now) -> WidgetSnapshot {
         let t = Int64(now.timeIntervalSince1970)
         return WidgetSnapshot(host: "archlinux", items: [
-            Item(key: "s1", title: "Fix the session list", harness: "claude", status: "busy", modified: t - 30),
-            Item(key: "s2", title: "Relay load test", harness: "harlo", status: "busy", modified: t - 90),
-            Item(key: "s3", title: "Phone photos", harness: "harlo", status: "input", modified: t - 300),
-            Item(key: "s4", title: "Release notes", harness: "claude", status: "unread", modified: t - 1200),
-            Item(key: "s5", title: "Tidy the README", harness: "claude", status: "", modified: t - 7200),
-            Item(key: "s6", title: "Benchmark markdown", harness: "harlo", status: "", modified: t - 86400),
+            Item(key: "s1", title: "Fix the session list", harness: "pi", status: "busy", modified: t - 30),
+            Item(key: "s2", title: "Relay load test", harness: "pi", status: "busy", modified: t - 90),
+            Item(key: "s3", title: "Phone photos", harness: "pi", status: "input", modified: t - 300),
+            Item(key: "s4", title: "Release notes", harness: "pi", status: "unread", modified: t - 1200),
+            Item(key: "s5", title: "Tidy the README", harness: "pi", status: "", modified: t - 7200),
+            Item(key: "s6", title: "Benchmark markdown", harness: "pi", status: "", modified: t - 86400),
         ], working: 2, waiting: 1, total: 6, updated: now)
     }
 }

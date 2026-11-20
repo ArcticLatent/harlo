@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for the Agent SDK's own copy of Claude Code: starts the Claude Code
+# harlo found (HARLO_CLAUDE), else the one on PATH.
+exec "${HARLO_CLAUDE:-claude}" "$@"

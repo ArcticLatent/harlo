@@ -20,7 +20,7 @@ Rectangle {
 
     implicitWidth: row.implicitWidth + 4
     implicitHeight: row.implicitHeight + 4
-    radius: 8
+    radius: 3
     color: Theme.controlFill
     border.color: Theme.controlBorder
 
@@ -40,7 +40,7 @@ Rectangle {
                 checked: index === seg.current
                 outlined: checked
                 variant: "selected"
-                radius: 6
+                radius: 2
                 padding: seg.segmentPadding
                 horizontalPadding: 9 + (seg.segmentPadding - 3) * 2
                 font.pixelSize: seg.fontSize

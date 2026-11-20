@@ -6,7 +6,7 @@
 use serde_json::{Value, json};
 
 /// The events, in the order Settings shows them.
-pub const EVENTS: [&str; 5] = ["completion", "subagent", "error", "question", "limits"];
+pub const EVENTS: [&str; 4] = ["completion", "error", "question", "limits"];
 
 /// Template variables, in the order Settings lists them.
 pub const VARIABLES: [&str; 7] = ["project_name", "worktree", "branch", "session_name", "agent_name", "model_name", "last_message"];
@@ -14,7 +14,7 @@ pub const VARIABLES: [&str; 7] = ["project_name", "worktree", "branch", "session
 /// Default (title, message) per event.
 pub fn default_template(event: &str) -> (&'static str, &'static str) {
     match event {
-        "completion" | "subagent" => ("{agent_name} is ready", "{model_name} completed the task"),
+        "completion" => ("{agent_name} is ready", "{model_name} completed the task"),
         "error" => ("Tool error", "{last_message}"),
         "question" => ("Input needed", "{last_message}"),
         _ => ("", ""),

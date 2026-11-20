@@ -4,18 +4,18 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Settings → Models: the providers an agent knows (Harlo's, here or on a
-// machine; Claude Code's coding plans), each with its API key. An API
+// Settings → Models: the providers an agent knows (here or on a machine),
+// each with its API key. An API
 // variant sharing another's key goes inside that one's row.
 ColumnLayout {
     id: cloud
-    /// "harlo", "harlo@<host>" for a machine's agent, or "claude".
-    property string agent: "harlo"
+    /// "pi", or "pi@<host>" for a machine's agent.
+    property string agent: "pi"
     /// The providers with a key first, the rest behind Add a provider (a
     /// long list otherwise).
     property bool folded: false
-    /// OpenRouter's sign-in for `agent`.
-    signal providerSignInRequested(string agent, string provider, string name)
+    /// pi's key: `command` in harlo's terminal.
+    signal runInTerminalRequested(string command)
 
     readonly property var st: Accounts.revision >= 0 ? JSON.parse(Accounts.cloud(agent)) : ({ list: [], results: {} })
     readonly property var list: st.list || []
@@ -28,7 +28,7 @@ ColumnLayout {
     property string search: ""
     /// The ones most people have a key for, offered first (the rest under
     /// More providers, or found by searching).
-    readonly property var common: ["anthropic", "openrouter", "gemini", "xai", "deepseek"]
+    readonly property var common: ["anthropic", "openai", "openrouter", "deepseek", "xai"]
     property bool everyProvider: false
     readonly property bool commonOnly: !everyProvider && search.trim() === "" && rest.filter(p => common.indexOf(p.id) >= 0).length > 0
     readonly property var found: {
@@ -51,7 +51,7 @@ ColumnLayout {
     Label {
         visible: cloud.list.length === 0 && cloud.st.state === "loading"
         Layout.topMargin: 6
-        text: qsTr("Reading Harlo's providers…")
+        text: qsTr("Reading pi's providers…")
         color: Theme.muted
         font.pixelSize: Theme.px(12)
     }
@@ -72,7 +72,7 @@ ColumnLayout {
             result: (cloud.st.results || {})[modelData.id] || null
             variants: cloud.variantsOf(modelData.id)
             onToggled: cloud.open = expanded ? "" : modelData.id
-            onSignInRequested: cloud.providerSignInRequested(cloud.agent, modelData.id, modelData.name)
+            onRunInTerminalRequested: command => cloud.runInTerminalRequested(command)
         }
     }
     Group {
@@ -98,7 +98,7 @@ ColumnLayout {
             spacing: 8
             Label {
                 Layout.fillWidth: true
-                text: cloud.keyed.length > 0 ? qsTr("Add a provider") : qsTr("No provider has a key yet. Pick the one you pay for and paste its key.")
+                text: cloud.keyed.length > 0 ? qsTr("Add a provider") : (cloud.agent === "pi" || cloud.agent.indexOf("pi@") === 0 ? qsTr("No provider has a key yet. Pick the one you pay for and set its key.") : qsTr("No provider has a key yet. Pick the one you pay for and paste its key."))
                 wrapMode: Text.Wrap
                 color: cloud.keyed.length > 0 ? Theme.foreground : Theme.muted
                 font.pixelSize: Theme.px(12.5)

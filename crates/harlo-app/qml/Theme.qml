@@ -152,11 +152,11 @@ QtObject {
     readonly property int paneMotion: Math.round(motion * 1.4)
     /// Corners, by size: chips and inline code 4, fields and code wells 6,
     /// buttons and cards 8, docks and toasts 10, dialogs 12.
-    readonly property int radiusXs: 4
-    readonly property int radiusSm: 6
-    readonly property int radiusMd: 8
-    readonly property int radiusLg: 10
-    readonly property int radiusXl: 12
+    readonly property int radiusXs: 2
+    readonly property int radiusSm: 2
+    readonly property int radiusMd: 3
+    readonly property int radiusLg: 4
+    readonly property int radiusXl: 5
     /// Under what floats over the window (only that casts a shadow); the
     /// draft page's composer, on the darker stage, a stronger one.
     readonly property color shadow: Qt.rgba(0, 0, 0, isLight ? 0.18 : 0.45)
@@ -244,20 +244,9 @@ QtObject {
         }
         return quant !== "" ? name + " · " + quant : name
     }
-    /// A helper (a subagent or a helper session), in words: who or what
-    /// kind it is ("Claude Code", "Explore"), its model as the picker
-    /// names it, and its status as the sidebar says it.
-    function helperKind(k) {
-        // (One form for all: a name, in sentence case: "Explore", "Web fetch".)
-        const l = String(k || "task").toLowerCase()
-        const named = ({ harlo: "Harlo", claude: "Claude Code", pi: "pi", scout: "Explore", task: "Task", general: "Task",
-                         "general-purpose": "Task", reviewer: "Review" })[l]
-        if (named) return named
-        const words = String(k).replace(/[-_]+/g, " ").trim()
-        return words.charAt(0).toUpperCase() + words.slice(1)
-    }
-    // (Read once per change: each helper's row asks for its model's name.)
+    // (Read once per change: each row asks for its model's name.)
     readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : []
+    // A model's name as the agent's picker says it.
     function helperModel(agent, model) {
         if (!model) return ""
         const p = providers.find(x => x.id === agent)
@@ -267,9 +256,6 @@ QtObject {
         const id = String(model).split("/").pop()
         const c = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(\[1m\])?$/.exec(id)
         return c ? c[1].charAt(0).toUpperCase() + c[1].slice(1) + " " + c[2] + (c[3] ? "." + c[3] : "") + (c[4] ? " 1M" : "") : modelLabel(id)
-    }
-    function helperStatus(st) {
-        return ({ running: "working", pending: "starting", completed: "finished", aborted: "stopped", waiting: "needs you", asking: "needs you" })[st] || st || ""
     }
     /// Who serves a model, from its id: "provider/model".
     function providerOf(id) {
@@ -295,35 +281,27 @@ QtObject {
         return sv ? sv.engine : ""
     }
     function toolLabel(name) {
-        // harlo's own (Claude's "mcp__harlo__x", others' "harlo_x", Harlo's
-        // own "x"): what it does.
+        // harlo's own ("mcp__harlo__x", or "harlo_x"): what it does.
         const h = /^(?:mcp__harlo__|harlo_)?(.+)$/.exec(name || "")
         if (h && harloTools[h[1]]) return harloTools[h[1]]
         const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name || "")
         return m ? m[1] + " " + m[2].replace(/_/g, " ") : name
     }
     readonly property var harloTools: ({
-        propose_helpers: "Harlo: offer a split",
-        start_session: "Harlo: start a session",
-        send_message: "Harlo: message a session",
         read_session: "Harlo: read a session",
         list_sessions: "Harlo: list sessions",
-        list_agents: "Harlo: list agents",
-        stop_session: "Harlo: stop a session",
         request_approval: "Harlo: ask you to approve",
         report_done: "Harlo: report back",
         ask_parent: "Harlo: ask the session that started it",
-        bring_over: "Harlo: bring over a helper's changes",
     })
     // What a harlo tool's call is busy with before its arguments are in: the
     // agent writing them (a briefing can take a minute).
     function toolWriting(name) {
         const h = /^(?:mcp__harlo__|harlo_)?(.+)$/.exec(name || "")
-        return h ? ({ propose_helpers: "writing each helper's briefing…", start_session: "writing its briefing…", send_message: "writing the message…",
-                      request_approval: "writing the question…", report_done: "writing the report…", ask_parent: "writing the question…" })[h[1]] || "" : ""
+        return h ? ({ request_approval: "writing the question…", report_done: "writing the report…", ask_parent: "writing the question…" })[h[1]] || "" : ""
     }
     function harnessLabel(id) {
-        return ({ harlo: "Harlo", claude: "Claude", demo: "Demo" })[id] || id
+        return ({ claude: "Claude", pi: "pi", demo: "Demo" })[id] || id
     }
     // Text on a primary-coloured fill (buttons, check marks).
     readonly property color textOnPrimary: luminance(primary) > 0.55 ? "#1a1a1a" : (isLight ? "#ffffff" : "#1a1310")
@@ -355,6 +333,53 @@ QtObject {
     function luminance(col) { return 0.2126 * col.r + 0.7152 * col.g + 0.0722 * col.b }
     // Qt rich text wants #RRGGBB (alpha dropped).
     function rgb(col) { return "#" + [col.r, col.g, col.b].map(v => Math.round(v * 255).toString(16).padStart(2, "0")).join("") }
+    // A terminal's colours on `background` (the terminal pane, a pi
+    // extension's views): 16 ANSI colours from the theme, then foreground,
+    // background, cursor, selection.
+    function terminalColors(background) {
+        const light = isLight
+        const bright = c => light ? Qt.darker(c, 1.15) : Qt.lighter(c, 1.25)
+        const magenta = light ? "#a626a4" : "#c678dd"
+        const cyan = light ? "#0184bc" : "#56b6c2"
+        const base = [light ? "#24292f" : "#3b3b3b", error, success, warning, info, magenta, cyan, light ? "#6e7781" : "#c8c8c8"]
+        const brights = [muted, bright(error), bright(success), bright(warning), bright(info), bright(magenta), bright(cyan), light ? "#8c959f" : "#ffffff"]
+        return base.concat(brights).map(c => rgb(Qt.color(c)))
+            .concat([rgb(foreground), rgb(background), rgb(primary), rgb(Qt.tint(background, selection))])
+    }
+
+    // pi's theme tokens in harlo's colours ("#rrggbb" by token): what pi
+    // extensions draw with in harlo (harlo.ts builds pi's Theme from them).
+    readonly property var piColors: {
+        const s = c.syntax.base, m = c.markdown || {}
+        const hex = col => rgb(Qt.color(col))
+        const on = (col, t) => hex(blend(codeBg, Qt.color(col), t))
+        const fg = {
+            accent: primary, border: border, borderAccent: primary, borderMuted: hairline,
+            success: success, error: error, warning: warning,
+            muted: textMuted, dim: textFaint, text: foreground, thinkingText: textMuted,
+            scrollbarTrack: hairline, scrollbarThumb: textFaint, searchMatchText: foreground,
+            userMessageText: foreground, customMessageText: foreground, customMessageLabel: primary,
+            toolTitle: foreground, toolOutput: textMuted,
+            mdHeading: foreground, mdLink: m.link || primary, mdLinkUrl: textFaint, mdCode: m.inlineCode || primary,
+            mdCodeBlock: foreground, mdCodeBlockBorder: border, mdQuote: m.blockquote || textMuted,
+            mdQuoteBorder: m.blockquoteBorder || border, mdHr: m.hr || border, mdListBullet: m.listMarker || primary,
+            toolDiffAdded: diffAdd, toolDiffRemoved: diffRemove, toolDiffContext: textMuted,
+            syntaxComment: s.comment || textFaint, syntaxKeyword: s.keyword || primary, syntaxFunction: s.function || foreground,
+            syntaxVariable: s.variable || foreground, syntaxString: s.string || success, syntaxNumber: s.number || warning,
+            syntaxType: s.type || info, syntaxOperator: s.operator || textMuted, syntaxPunctuation: textMuted,
+            thinkingOff: textFaint, thinkingMinimal: textFaint, thinkingLow: info, thinkingMedium: primary,
+            thinkingHigh: warning, thinkingXhigh: error, thinkingMax: error, bashMode: success
+        }
+        const bg = {
+            selectedBg: blend(codeBg, Qt.color(primary), isLight ? 0.14 : 0.2), searchMatchBg: on(warning, 0.25),
+            userMessageBg: userBubble, customMessageBg: codeBg,
+            toolPendingBg: codeBg, toolSuccessBg: on(success, 0.07), toolErrorBg: on(error, 0.09)
+        }
+        const out = { mode: isLight ? "light" : "dark", fg: {}, bg: {} }
+        for (const k in fg) out.fg[k] = hex(fg[k])
+        for (const k in bg) out.bg[k] = hex(bg[k])
+        return out
+    }
 
     // "#aarrggbb", as CodeView takes a colour (`a`: its alpha scaled).
     function argb(col, a) {

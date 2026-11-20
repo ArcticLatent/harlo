@@ -10,9 +10,9 @@ import harlo
 AppDialog {
     id: dlg
     objectName: "modelServerDialog"
-    /// The agents it can go to: Harlo, where installed.
+    /// The agents it can go to: pi, where installed.
     readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-        .filter(p => p.id === "harlo" && p.state !== "missing")
+        .filter(p => p.id === "pi" && p.state !== "missing")
     /// The ones chosen (ids).
     property var chosen: []
     /// A server was added.

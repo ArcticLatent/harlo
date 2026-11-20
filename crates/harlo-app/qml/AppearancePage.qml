@@ -33,7 +33,7 @@ ColumnLayout {
                 readonly property bool chosen: Workspace.themeMode === modelData[0]
                 Layout.fillWidth: true
                 implicitHeight: 136
-                radius: 12
+                radius: 4
                 color: schemeHover.hovered ? Theme.rowHover : Theme.raised
                 Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                 border.color: chosen ? Theme.accent : Theme.hairline
@@ -264,7 +264,7 @@ ColumnLayout {
                         Rectangle {
                             implicitWidth: 32
                             implicitHeight: 32
-                            radius: 9
+                            radius: 3
                             color: Theme.controlFill
                             Icon { anchors.centerIn: parent; name: fontPick.modelData.icon; color: Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
                         }
@@ -307,7 +307,7 @@ ColumnLayout {
                     Layout.rightMargin: 16
                     Layout.bottomMargin: 14
                     implicitHeight: fontPick.ui ? uiSample.implicitHeight + 24 : codeSample.implicitHeight + 20
-                    radius: 10
+                    radius: 4
                     color: fontPick.ui ? Theme.canvas : Theme.codeBg
                     border.color: Theme.hairline
                     Label {

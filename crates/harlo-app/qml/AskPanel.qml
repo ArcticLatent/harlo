@@ -81,7 +81,7 @@ Rectangle {
     readonly property int secondsLeft: deadline > 0 ? Math.max(0, Math.ceil((deadline - now) / 1000)) : -1
 
     implicitHeight: col.implicitHeight + 24
-    radius: 10
+    radius: 4
     color: Theme.elevated
     border.color: Theme.primary
     Keys.onPressed: event => {
@@ -105,7 +105,7 @@ Rectangle {
             Rectangle {
                 implicitWidth: 26
                 implicitHeight: 26
-                radius: 7
+                radius: 3
                 color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
                 Icon { anchors.centerIn: parent; name: "question"; color: Theme.primary; implicitWidth: 16; implicitHeight: 16 }
             }
@@ -190,7 +190,7 @@ Rectangle {
                                 readonly property bool recommended: qBlock.q.recommended !== undefined && qBlock.q.recommended === index
                                 Layout.fillWidth: true
                                 implicitHeight: optCol.implicitHeight + 14
-                                radius: 7
+                                radius: 3
                                 color: chosen ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.10) : optHover.hovered ? Theme.hover : "transparent"
                                 border.color: chosen ? Theme.primary : Theme.border
                                 HoverHandler {
@@ -277,7 +277,7 @@ Rectangle {
             Layout.fillWidth: true
             visible: root.previewText !== ""
             implicitHeight: Math.min(previewLabel.implicitHeight + 16, 160)
-            radius: 6
+            radius: 2
             color: Theme.codeBg
             border.color: Theme.border
             clip: true

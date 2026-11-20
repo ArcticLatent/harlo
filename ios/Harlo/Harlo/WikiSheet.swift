@@ -48,6 +48,6 @@ struct WikiSheet: View {
     /// Opens the session writing the wiki.
     func show(_ key: String) {
         dismiss()
-        _ = model.openHelper(key)
+        _ = model.openSession(key)
     }
 }

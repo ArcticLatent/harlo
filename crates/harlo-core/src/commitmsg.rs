@@ -1,8 +1,8 @@
 //! Commit messages written by a model.
 //!
-//! The request and the diff go to Harlo in one-shot print mode on stdin (`-p -
-//! --no-session --no-tools`), or to Claude Code (`claude -p`, no tools, nothing
-//! saved) when Harlo can't, and the printed answer is the message.
+//! The request and the diff go to pi in one-shot print mode on stdin (`pi -p
+//! --no-session --no-tools`, nothing else loaded that would only cost
+//! tokens), and the printed answer is the message.
 
 // Rust guideline compliant 2026-10-09
 
@@ -100,13 +100,6 @@ fn request(recent: &[String], diff: &str) -> String {
     format!("{}\nThe diff:\n\n{diff}", instructions(recent))
 }
 
-/// The model Claude Code is asked for: the setting when it names one of
-/// Claude's, else a small one (a commit message needs no more).
-fn claude_model(model: &str) -> &str {
-    let m = model.trim();
-    if m.starts_with("claude-") || ["opus", "sonnet", "haiku", "fable"].contains(&m) { m } else { "haiku" }
-}
-
 /// Tidies the model's answer: trims, drops code fences and wrapping quotes.
 pub fn clean(answer: &str) -> String {
     let mut text = answer.trim();
@@ -124,18 +117,17 @@ pub fn clean(answer: &str) -> String {
     text.trim().to_owned()
 }
 
-/// Asks a model for a commit message: Harlo's, else Claude Code's.
+/// Asks pi for a commit message.
 ///
-/// Harlo is `harlo` (its program, from Settings), else the one shipped with
-/// harlo. `model` (may be empty) is Harlo's, and Claude's when it names one of
-/// Claude's. A remote repository's are asked on its machine. Blocks for up to a
-/// few minutes; run it off the UI thread.
+/// pi is `pi` (its program, from Settings), else the installed one. `model`
+/// (may be empty: pi's default) is a pi model id. A remote repository's is
+/// asked of pi on its machine. Blocks for up to a few minutes; run it off the
+/// UI thread.
 ///
 /// # Errors
 ///
-/// When there are no changes, or neither agent can write one (each one's
-/// error).
-pub fn generate(harlo: Option<PathBuf>, model: &str, root: &Path, staged_only: bool) -> Result<String> {
+/// When there are no changes, or pi can't write one (its error).
+pub fn generate(pi: Option<PathBuf>, model: &str, root: &Path, staged_only: bool) -> Result<String> {
     let diff = changes(root, staged_only);
     if diff.trim().is_empty() {
         bail!("There are no changes to describe.");
@@ -144,28 +136,18 @@ pub fn generate(harlo: Option<PathBuf>, model: &str, root: &Path, staged_only: b
     if let Some((host, _)) = crate::remote::split(root) {
         return finish(run_on(&host, model, &text));
     }
-    let tried = match harlo.or_else(|| harlo_harness::resolve_program(HarnessKind::Harlo)) {
-        Some(program) => match finish(run(Command::new(&program).args(harlo_args(model)).current_dir(root), &text)) {
-            Ok(message) => return Ok(message),
-            Err(e) => format!("Harlo: {e:#}"),
-        },
-        None => "Harlo isn't installed".to_owned(),
-    };
-    let Some(claude) = harlo_harness::resolve_program(HarnessKind::Claude) else { bail!("{tried}, and Claude Code isn't either.") };
-    finish(run(Command::new(claude).args(claude_args(model)).current_dir(root), &text)).map_err(|e| anyhow::anyhow!("{tried}; Claude: {e:#}"))
+    let program = pi.or_else(|| harlo_harness::resolve_program(HarnessKind::Pi)).context("pi isn't installed")?;
+    finish(run(Command::new(&program).args(pi_args(model)).current_dir(root), &text))
 }
 
-fn harlo_args(model: &str) -> Vec<String> {
-    let mut a: Vec<String> = ["-p", "-", "--no-session", "--no-tools", "--thinking", "off"].map(str::to_owned).to_vec();
+/// pi in print mode, the request on stdin: nothing saved, no tools, skills,
+/// context files or prompt templates (a commit message needs none of them).
+fn pi_args(model: &str) -> Vec<String> {
+    let mut a: Vec<String> = ["-p", "--no-session", "--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates", "--thinking", "off"].map(str::to_owned).to_vec();
     if !model.trim().is_empty() {
         a.extend(["--model".to_owned(), model.trim().to_owned()]);
     }
     a
-}
-
-/// (The request on stdin; `--tools ""` turns its tools off.)
-fn claude_args(model: &str) -> Vec<String> {
-    ["-p", "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--model", claude_model(model)].map(str::to_owned).to_vec()
 }
 
 fn finish(answer: Result<String>) -> Result<String> {
@@ -176,19 +158,13 @@ fn finish(answer: Result<String>) -> Result<String> {
     Ok(message)
 }
 
-/// The same on the repository's machine: Harlo's copy there (put there
-/// first when needed), else its Claude Code, with the request on stdin.
+/// The same on the repository's machine, by pi there (on its PATH or where
+/// pi installs itself).
 fn run_on(host: &str, model: &str, text: &str) -> Result<String> {
     let q = crate::remote::quote;
-    let line = |program: &str, args: Vec<String>| format!("{} {}", q(program), args.iter().map(|a| q(a)).collect::<Vec<_>>().join(" "));
-    let harlo = crate::agent_host::program_on(host).ok();
     let host = crate::remote::host(host).with_context(|| format!("unknown remote host {host}"))?;
-    let claude = line("claude", claude_args(model));
-    // (Harlo first; Claude Code when Harlo fails or isn't there.)
-    let script = match &harlo {
-        Some(p) => format!(r#"f=$(mktemp "${{TMPDIR:-/tmp}}/harlo-commit-XXXXXX") || exit 1; cat > "$f"; cd "${{TMPDIR:-/tmp}}"; {h} < "$f" 2>"$f.err"; rc=$?; if [ $rc -ne 0 ] && command -v claude >/dev/null 2>&1; then {claude} < "$f"; rc=$?; else cat "$f.err" >&2; fi; rm -f "$f" "$f.err"; exit $rc"#, h = line(p, harlo_args(model))),
-        None => format!(r#"command -v claude >/dev/null 2>&1 || {{ echo "Neither Harlo nor Claude Code can run on {name}" >&2; exit 127; }}; cd "${{TMPDIR:-/tmp}}"; {claude}"#, name = host.name),
-    };
+    let pi = format!("pi {}", pi_args(model).iter().map(|a| q(a)).collect::<Vec<_>>().join(" "));
+    let script = format!(r#"PATH="$HOME/.pi/agent/bin:$HOME/.local/bin:$PATH"; command -v pi >/dev/null 2>&1 || {{ echo "pi isn't installed on {name}" >&2; exit 127; }}; cd "${{TMPDIR:-/tmp}}"; {pi}"#, name = host.name);
     let out = crate::remote::run_with_input(&host, &script, Some(text.as_bytes()), TIMEOUT)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
@@ -256,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_with_a_stand_in_harlo() {
+    fn generates_with_a_stand_in_pi() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("harlo-commitmsg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -275,26 +251,23 @@ mod tests {
         assert!(all.contains("+two") && all.contains("New file new.txt"), "{all}");
         assert!(changes(&dir, true).is_empty(), "nothing staged");
 
-        // A stand-in for Harlo: checks its arguments and stdin, prints a
+        // A stand-in for pi: checks its arguments and stdin, prints a
         // fenced answer.
-        let fake = dir.join("fake-harlo");
-        std::fs::write(&fake, "#!/bin/sh\n[ \"$*\" = '-p - --no-session --no-tools --thinking off --model m' ] || exit 3\ngrep -q '^+two' || exit 4\nprintf '```\\nAdd the second line\\n```\\n'\n").unwrap();
+        let fake = dir.join("fake-pi");
+        std::fs::write(&fake, "#!/bin/sh\n[ \"$*\" = '-p --no-session --no-tools --no-skills --no-context-files --no-prompt-templates --thinking off --model m' ] || exit 3\ngrep -q '^+two' || exit 4\nprintf '```\\nAdd the second line\\n```\\n'\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let msg = generate(Some(fake.clone()), "m", &dir, false).unwrap();
         assert_eq!(msg, "Add the second line");
         assert!(generate(Some(fake), "m", &dir, true).is_err(), "no staged changes");
-        assert_eq!(claude_args("")[..5], ["-p", "--no-session-persistence", "--tools", "", "--strict-mcp-config"]);
-        assert_eq!((claude_model("codex/gpt-6.1-sol"), claude_model("sonnet"), claude_model("claude-opus-5-5")), ("haiku", "sonnet", "claude-opus-5-5"));
         assert!(instructions(&recent_subjects(&dir)).contains("- Start the project"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Live (not run by default): a real repository's message by Harlo
-    /// (HARLO_AGENT_BIN, HARLO_LIVE_MODEL), then by Claude Code when Harlo
-    /// fails. Spends a little of both plans.
+    /// Live (not run by default): a real repository's message by pi
+    /// (`HARLO_LIVE_MODEL`, else pi's default). Spends a little of a plan.
     #[test]
-    #[ignore = "spends real model plans"]
-    fn live_harlo_then_claude() {
+    #[ignore = "spends a real model plan"]
+    fn live_pi() {
         let dir = std::env::temp_dir().join(format!("harlo-commitmsg-live-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -304,21 +277,15 @@ mod tests {
         git(&["add", "."]);
         git(&["commit", "-qm", "Add greet"]);
         std::fs::write(dir.join("greet.py"), "def greet(name, loud=False):\n    text = 'hi ' + name\n    return text.upper() if loud else text\n").unwrap();
-        let harlo = std::env::var_os("HARLO_AGENT_BIN").map(PathBuf::from);
-        let model = std::env::var("HARLO_LIVE_MODEL").unwrap_or_default();
-        let by_harlo = generate(harlo, &model, &dir, false).unwrap();
-        eprintln!("Harlo: {by_harlo}");
-        let by_claude = generate(Some(PathBuf::from("/bin/false")), &model, &dir, false).unwrap();
-        eprintln!("Claude: {by_claude}");
-        assert!(!by_harlo.is_empty() && !by_claude.is_empty());
+        let by_pi = generate(None, &std::env::var("HARLO_LIVE_MODEL").unwrap_or_default(), &dir, false).unwrap();
+        eprintln!("pi: {by_pi}");
+        assert!(!by_pi.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Live on a machine over SSH (not run by default; the static agent
-    /// built first): `HARLO_TEST_SSH="$(scripts/test-sshd.sh start /tmp/x)"
+    /// Live on a machine over SSH with pi signed in there (not run by
+    /// default): `HARLO_TEST_SSH="$(scripts/test-sshd.sh start /tmp/x)"
     /// HARLO_LIVE_MODEL=… cargo test -p harlo-core -- --ignored live_on_a_host`.
-    /// Harlo's copy there writes it; with a model it doesn't have, Claude
-    /// Code there does.
     #[test]
     #[ignore = "needs a real SSH host and spends real model plans"]
     fn live_on_a_host() {
@@ -336,10 +303,8 @@ mod tests {
         crate::remote::set_hosts(vec![host.clone()]);
         crate::remote::check(&host).unwrap();
         let root = crate::remote::join("t", &dir.to_string_lossy());
-        let by_harlo = generate(None, &std::env::var("HARLO_LIVE_MODEL").unwrap_or_default(), &root, false).unwrap();
-        eprintln!("Harlo there: {by_harlo}");
-        let by_claude = generate(None, "nowhere/none", &root, false).unwrap();
-        eprintln!("Claude there: {by_claude}");
+        let by_pi = generate(None, &std::env::var("HARLO_LIVE_MODEL").unwrap_or_default(), &root, false).unwrap();
+        eprintln!("pi there: {by_pi}");
         crate::remote::disconnect(&host);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -25,7 +25,7 @@ const SCHEME: &str = "ssh://";
 
 /// Folders where agents usually live, ahead of the remote PATH (a
 /// non-interactive SSH command gets a minimal one).
-pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.bun/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
+pub const PATH_PREFIX: &str = "$HOME/.local/bin:$HOME/.pi/agent/bin:$HOME/.bun/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/usr/local/bin";
 
 /// A shell's PATH with the folders of [`PATH_PREFIX`] in front.
 ///
@@ -506,14 +506,11 @@ pub struct HostInfo {
     /// `uname -m`, as harlo names machines (x86_64, aarch64…).
     pub arch: String,
     pub home: String,
-    /// Claude Code's path on the host ("" when missing).
-    pub claude: String,
+    /// pi's ("" when missing).
+    pub pi: String,
     /// Their versions (`program` → "1.0.4").
     pub versions: std::collections::BTreeMap<String, String>,
-    /// Claude's sign-in there: "yes" (its credentials file), "keychain"
-    /// (macOS keeps it where SSH can't look), "no".
-    pub claude_auth: String,
-    /// bubblewrap there, for Harlo's sandbox: "yes", "no" (not installed),
+    /// bubblewrap there, for harlo's sandbox: "yes", "no" (not installed),
     /// "blocked" (it can't make a sandbox), "" (not checked).
     pub bwrap: String,
 }
@@ -529,33 +526,30 @@ pub fn launch(host: &Host) -> harlo_harness::RemoteLaunch {
     }
 }
 
-/// The agents harlo finds on a host, as the host check names them (it
-/// brings Harlo itself).
-pub const AGENTS: [&str; 1] = ["claude"];
+/// The agents harlo finds on a host, as the host check names them.
+pub const AGENTS: [&str; 1] = ["pi"];
 
 /// How to install each agent (its official one-line installer).
 pub fn install_command(agent: &str) -> &'static str {
     match agent {
-        "claude" => "curl -fsSL https://claude.ai/install.sh | bash",
+        "pi" => "curl -fsSL https://pi.dev/install.sh | sh",
         _ => "",
     }
 }
 
-/// The host check: the system, home, each agent (path and `--version`, 10 s
-/// at most each) and Claude's sign-in. (Run by the user's login shell, zsh
+/// The host check: the system, home, pi (path and `--version`, 10 s at
+/// most) and bubblewrap. (Run by the user's login shell, zsh
 /// included: no word splitting of variables.)
 // (HARLO_TEST_HOME: the click tests' scratch home on the test host;
 // HARLO_TEST_HIDE_AGENTS: agents, or bwrap, it doesn't have.)
 const CHECK_SCRIPT: &str = r#"printf 'os=%s\narch=%s\nhome=%s\n' "$(uname -s)" "$(uname -m)" "${HARLO_TEST_HOME:-$HOME}"
 ver() { if command -v timeout >/dev/null 2>&1; then timeout 10 "$@"; else "$@"; fi; }
-for p in claude; do
+for p in pi; do
   w=$(command -v "$p" 2>/dev/null || true)
   case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":$p:"*) w="";; esac
   printf '%s=%s\n' "$p" "$w"
   if [ -n "$w" ]; then printf '%s_version=%s\n' "$p" "$(ver "$w" --version 2>/dev/null </dev/null | head -n 1)"; fi
 done
-c="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-if [ -s "$c/.credentials.json" ]; then echo claude_auth=yes; elif [ "$(uname -s)" = Darwin ]; then echo claude_auth=keychain; else echo claude_auth=no; fi
 case ":${HARLO_TEST_HIDE_AGENTS:-}:" in *":bwrap:"*) echo bwrap=no;;
 *) if command -v bwrap >/dev/null 2>&1; then if bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc true </dev/null >/dev/null 2>&1; then echo bwrap=yes; else echo bwrap=blocked; fi; else echo bwrap=no; fi;;
 esac"#;
@@ -584,8 +578,7 @@ fn parse_check(text: &str) -> HostInfo {
                 "os" => v.clone_into(&mut info.os),
                 "arch" => info.arch = crate::remote_helper::normal_arch(v),
                 "home" => v.clone_into(&mut info.home),
-                "claude" => v.clone_into(&mut info.claude),
-                "claude_auth" => v.clone_into(&mut info.claude_auth),
+                "pi" => v.clone_into(&mut info.pi),
                 "bwrap" => v.clone_into(&mut info.bwrap),
                 k if k.ends_with("_version") => {
                     let number = crate::providers::version_number(v);
@@ -616,9 +609,7 @@ impl HostInfo {
     /// The agent is there.
     pub fn has(&self, agent: &str) -> bool {
         match agent {
-            "claude" => !self.claude.is_empty(),
-            // (harlo brings it.)
-            "harlo" => crate::agent_host::not_there(self).is_none(),
+            "pi" => !self.pi.is_empty(),
             _ => false,
         }
     }
@@ -885,7 +876,7 @@ pub fn trash(path: &Path) -> Result<()> {
     let Some((name, f)) = split(path) else {
         match Command::new("gio").arg("trash").arg("--").arg(path).output() {
             Ok(out) if out.status.success() => {
-                harlo_harness::claude::forget_cached(path);
+                harlo_harness::cache::forget(path);
                 return Ok(());
             }
             Ok(out) => bail!("Could not move {} to the trash: {}", path.display(), String::from_utf8_lossy(&out.stderr).trim()),
@@ -953,8 +944,8 @@ mod tests {
         assert!(["yes", "no", "blocked"].contains(&here.as_str()), "{here}");
         // (The click tests' host without it.)
         assert_eq!(parse_check(&run(&path, "opencode:bwrap")).bwrap, "no");
-        let info = parse_check("os=Linux\narch=x86_64\nclaude_auth=no\nbwrap=blocked\n");
-        assert_eq!((info.os.as_str(), info.claude_auth.as_str(), info.bwrap.as_str()), ("Linux", "no", "blocked"));
+        let info = parse_check("os=Linux\narch=x86_64\npi=/usr/bin/pi\nbwrap=blocked\n");
+        assert_eq!((info.os.as_str(), info.pi.as_str(), info.bwrap.as_str()), ("Linux", "/usr/bin/pi", "blocked"));
     }
 
     #[test]

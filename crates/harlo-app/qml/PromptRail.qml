@@ -214,7 +214,7 @@ Item {
         y: (rail.height - height) / 2
         width: Math.min(320, rail.maxPanelWidth)
         height: rows * rowH + 8
-        radius: 12
+        radius: 4
         color: Theme.elevated
         border.color: Theme.border
 
@@ -270,7 +270,7 @@ Item {
                         height: panel.rowH - 8
                         Rectangle {
                             anchors.fill: parent
-                            radius: 8
+                            radius: 3
                             color: entry.active ? Qt.tint(Theme.elevated, Theme.selection) : entry.lit ? Theme.hover : "transparent"
                         }
                         Label {

@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use harlo_core::transcript::Transcript;
-use harlo_harness::{branches, claude, store};
+use harlo_harness::{branches, store};
 
 struct Counting;
 
@@ -120,17 +120,6 @@ fn pi_session(path: &Path) -> usize {
     count + 2
 }
 
-/// A Claude transcript mostly of Claude Code's records of its requests, which
-/// parse to many times their size.
-fn claude_session(path: &Path) {
-    let record = serde_json::json!({ "type": "api-request", "id": "r", "body": { "messages": vec![serde_json::json!({ "a": 1 }); 4000] } }).to_string();
-    write_lines(path, |i| match i % 20 {
-        0 => format!(r#"{{"type":"user","uuid":"u{i}","isSidechain":false,"message":{{"role":"user","content":"prompt {i}"}}}}"#),
-        1 => format!(r#"{{"type":"assistant","isSidechain":false,"message":{{"id":"a{i}","model":"m","content":[{{"type":"text","text":"answer {i}"}}]}}}}"#),
-        _ => record.clone(),
-    });
-}
-
 #[test]
 fn listing_branches_holds_no_more_than_their_outline() {
     let _serial = SERIAL.lock().unwrap();
@@ -174,7 +163,7 @@ fn a_long_branch_streams_a_message_at_a_time() {
     });
     let ((n, saved), peak) = peak_of(|| {
         let mut n = 0;
-        let saved = store::stream_saved_for(harlo_harness::HarnessKind::Harlo, &path, &mut |_| n += 1).unwrap();
+        let saved = store::stream_saved_for(&path, &mut |_| n += 1).unwrap();
         (n, saved)
     });
     assert!(n > 1000 && saved.messages.is_empty(), "{n}");
@@ -182,34 +171,27 @@ fn a_long_branch_streams_a_message_at_a_time() {
 }
 
 #[test]
-fn a_claude_transcript_costs_only_its_conversation() {
-    let _serial = SERIAL.lock().unwrap();
-    let temp = Temp::new("claude");
-    let path = temp.file();
-    claude_session(&path);
-    let (saved, peak) = peak_of(|| claude::saved_file(&path).unwrap());
-    assert!(saved.messages.len() > 100);
-    assert!(peak < ALLOWED, "opening held {} MB", peak / MB);
-    let (part, peak) = peak_of(|| claude::read_part(&path, None).unwrap());
-    assert_eq!(part.messages.len(), saved.messages.len());
-    assert!(peak < ALLOWED, "indexing held {} MB", peak / MB);
-    let (entries, peak) = peak_of(|| claude::user_entries(&path));
-    assert!(!entries.is_empty());
-    assert!(peak < ALLOWED, "its prompts held {} MB", peak / MB);
-}
-
-#[test]
-fn a_grown_transcript_is_read_from_its_last_prompt() {
+fn a_grown_session_is_read_from_where_it_was() {
     let _serial = SERIAL.lock().unwrap();
     let temp = Temp::new("grown");
     let path = temp.file();
-    claude_session(&path);
-    let first = claude::read_part(&path, None).unwrap();
+    let padding = "x".repeat(16 * 1024);
+    let mut last = 0;
+    write_lines(&path, |i| {
+        last = i;
+        match i {
+            0 => r#"{"type":"session","version":3,"id":"s","timestamp":"2026-11-01T08:00:00Z","cwd":"/tmp"}"#.to_owned(),
+            1 => pi_entry(1, "null", "user", "first"),
+            _ => pi_entry(i, &format!(r#""m{}""#, i - 1), if i % 2 == 0 { "assistant" } else { "user" }, &padding),
+        }
+    });
+    let first = store::read_part(&path, None).unwrap();
+    assert!(first.messages.len() > 100);
     let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
-    writeln!(file, r#"{{"type":"assistant","isSidechain":false,"message":{{"id":"new","model":"m","content":[{{"type":"text","text":"more"}}]}}}}"#).unwrap();
-    let (next, peak) = peak_of(|| claude::read_part(&path, Some(&first.resume)).unwrap());
+    writeln!(file, "{}", pi_entry(last + 1, &format!(r#""m{last}""#), "assistant", "more")).unwrap();
+    let (next, peak) = peak_of(|| store::read_part(&path, Some(&first.resume)).unwrap());
     assert!(next.first_index > 0);
-    assert!(next.messages.len() < 5, "{} messages", next.messages.len());
+    assert_eq!(next.messages.len(), 1, "only what was added");
     assert!(peak < ALLOWED, "held {} MB", peak / MB);
 }
 

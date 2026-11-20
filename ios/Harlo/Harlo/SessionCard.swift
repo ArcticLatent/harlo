@@ -10,8 +10,6 @@ struct SessionCard: View {
     var unread = false
     /// Its project shows (the recent ones, or grouped by day).
     var showProject = false
-    /// A helper shown under the session that started it.
-    var nested = false
     @State private var now = Date.now
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -42,13 +40,8 @@ struct SessionCard: View {
         return session.host.isEmpty ? session.project : session.project + " on " + session.host
     }
 
-    /// Whose helper it is, and how it ended.
-    var extra: String {
-        var parts: [String] = []
-        if !nested && !session.helperOf.isEmpty { parts.append("Helper of “\(session.helperOf)”") }
-        if !session.settled.isEmpty { parts.append(session.settled) }
-        return parts.joined(separator: " · ")
-    }
+    /// How it ended.
+    var extra: String { session.settled }
 
     /// A detail with its kind as a symbol (a folder for the project, a
     /// chip for the model, a branch), so they don't read as one sentence.
@@ -84,7 +77,7 @@ struct SessionCard: View {
         }
     }
 
-    /// Its branch, then whose helper it is and how it ended.
+    /// Its branch, then how it ended.
     @ViewBuilder var more: some View {
         if !session.branch.isEmpty || !extra.isEmpty {
             HStack(spacing: 8) {
@@ -104,15 +97,9 @@ struct SessionCard: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            AgentTile(harness: session.harness, maker: session.maker, size: 46, ring: p.raised)
+            AgentTile(harness: session.harness, maker: session.maker, size: 46)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    if nested {
-                        Image(systemName: "arrow.turn.down.right")
-                            .scaledFont(11, .semibold)
-                            .foregroundStyle(Color(p.muted))
-                            .accessibilityLabel("Helper of \(session.helperOf)")
-                    }
                     if session.pinned {
                         Image(systemName: "pin.fill")
                             .scaledFont(10)

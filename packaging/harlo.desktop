@@ -2,7 +2,7 @@
 Type=Application
 Name=harlo
 GenericName=Coding agent workspace
-Comment=Desktop app for coding agents: Harlo (its own) and Claude Code
+Comment=Desktop app for the pi coding agent
 Exec=harlo
 Icon=harlo
 Terminal=false

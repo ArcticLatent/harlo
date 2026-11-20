@@ -9,7 +9,7 @@ use std::time::Duration;
 /// The npm package each agent is published as.
 fn package(agent: &str) -> Option<&'static str> {
     match agent {
-        "claude" => Some("@anthropic-ai/claude-code"),
+        "pi" => Some("@earendil-works/pi-coding-agent"),
         _ => None,
     }
 }
@@ -22,13 +22,14 @@ fn latest_url(agent: &str) -> Option<String> {
 /// The agent's command to update itself (arguments after the program).
 pub fn update_args(agent: &str) -> &'static [&'static str] {
     match agent {
-        "claude" => &["update"],
+        // (pi itself, not its extensions.)
+        "pi" => &["update", "self"],
         _ => &[],
     }
 }
 
 /// The newest published version of an agent, or None (offline, say).
-/// `HARLO_TEST_LATEST=claude=2.1.300,…` answers for the tests.
+/// `HARLO_TEST_LATEST=pi=0.80.0,…` answers for the tests.
 pub fn latest(agent: &str) -> Option<String> {
     if let Ok(test) = std::env::var("HARLO_TEST_LATEST") {
         return test.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == agent).map(|(_, v)| v.to_owned()));

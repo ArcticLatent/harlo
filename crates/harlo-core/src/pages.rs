@@ -83,7 +83,7 @@ impl Pages {
             return None;
         }
         if self.page.is_none() {
-            let dir = self.dir.clone().or_else(|| harlo_harness::claude::cache_dir().map(|d| d.join("pages")));
+            let dir = self.dir.clone().or_else(|| harlo_harness::cache::dir().map(|d| d.join("pages")));
             match dir.ok_or_else(|| std::io::Error::other("no cache folder")).and_then(|d| harlo_harness::store::own_file(&d, "pages")) {
                 Ok((path, file)) => self.page = Some(Arc::new(PageFile { path, file })),
                 Err(e) => {

@@ -75,8 +75,9 @@ struct RowView: View {
             ToolCard(row: row)
         case "notice" where row.fromHarlo:
             HarloMessage(row: row)
-        case "notice" where row.title == "command":
-            BackgroundNotice(row: row)
+        case "notice" where extMessage != nil:
+            // A custom message a pi extension draws.
+            ExtBlocks(lines: extMessage?.lines ?? [], blocks: extMessage?.blocks ?? [])
         case "images":
             // (Its pictures only: under it, the ones its reply doesn't show.)
             EmptyView()
@@ -86,6 +87,12 @@ struct RowView: View {
                 .foregroundStyle(Color(row.title == "error" ? p.error : row.title == "warning" ? p.warning : p.muted))
                 .textSelection(.enabled)
         }
+    }
+
+    /// A pi extension's drawing of this custom message (by its time).
+    var extMessage: ExtView? {
+        guard row.time > 0 else { return nil }
+        return model.session?.extViews.first { $0.kind == "message" && $0.timestamp == row.time && !$0.lines.isEmpty }
     }
 
     var codeSpans: [Span] {

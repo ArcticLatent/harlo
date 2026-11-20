@@ -67,7 +67,7 @@ MenuItem {
         }
     }
     background: Rectangle {
-        radius: 6
+        radius: 2
         color: !item.enabled || !item.highlighted ? "transparent"
             : item.danger ? Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.14) : Theme.selected
     }

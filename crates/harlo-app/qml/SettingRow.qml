@@ -28,7 +28,7 @@ Item {
         y: settingRow.stacked ? 13 : (settingRow.height - height) / 2
         width: 32
         height: 32
-        radius: 9
+        radius: 3
         color: Theme.controlFill
         Icon { anchors.centerIn: parent; name: settingRow.icon; color: Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
     }

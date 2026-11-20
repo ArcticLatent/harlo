@@ -261,7 +261,7 @@ Rectangle {
                     rightPadding: 8
                     onClicked: root.git.selectRepo(modelData.root)
                     background: Rectangle {
-                        radius: 8
+                        radius: 3
                         color: repoRow.active ? Theme.rowSelected : repoRow.hovered ? Theme.rowHover : "transparent"
                         Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                     }
@@ -328,7 +328,7 @@ Rectangle {
                 verticalPadding: 0  // (the style's 12 px would push the content low)
                 leftPadding: 8
                 onClicked: repoList.showClean = !repoList.showClean
-                background: Rectangle { radius: 8; color: parent.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+                background: Rectangle { radius: 3; color: parent.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
                 contentItem: Label {
                     text: repoList.showClean ? "Hide those without changes" : repoList.clean.length + (repoList.clean.length === 1 ? " without changes" : " without changes") + "…"
                     color: Theme.textMuted
@@ -363,7 +363,7 @@ Rectangle {
                 visible: root.git.isRepo
                 implicitWidth: branchRow.implicitWidth + 20
                 implicitHeight: 26
-                radius: 8
+                radius: 3
                 color: chipHover.hovered || picker.opened ? Theme.controlFillHover : Theme.controlFill
                 Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                 border.color: Theme.hairline
@@ -395,7 +395,7 @@ Rectangle {
                 visible: root.git.isRepo
                 implicitWidth: stashRow.implicitWidth + 12
                 implicitHeight: 26
-                radius: 8
+                radius: 3
                 color: stashTap.pressed ? Theme.controlFillDown : stashHover.hovered ? Theme.controlFillHover : "transparent"
                 Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                 border.color: Theme.hairline
@@ -628,7 +628,7 @@ Rectangle {
                             topPadding: 0
                             bottomPadding: 0
                             // A soft pill, as the sidebar's rows.
-                            background: Rectangle { radius: 8; color: row.selected ? Theme.rowSelected : row.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+                            background: Rectangle { radius: 3; color: row.selected ? Theme.rowSelected : row.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
                             contentItem: RowLayout {
                                 spacing: 8
                                 Label { text: entry.code; color: root.codeColor(entry.code); font.family: Theme.mono; font.pixelSize: Theme.mpx(12); Layout.preferredWidth: 12 }
@@ -687,7 +687,7 @@ Rectangle {
                 color: Theme.text
                 wrapMode: TextEdit.Wrap
                 font.pixelSize: Theme.px(13)
-                background: Rectangle { radius: 12; color: Theme.raised; border.color: commitMessage.activeFocus ? Theme.accent : Theme.hairline }
+                background: Rectangle { radius: 4; color: Theme.raised; border.color: commitMessage.activeFocus ? Theme.accent : Theme.hairline }
                 Keys.onPressed: event => {
                     if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
                         commitButton.clicked()
@@ -705,7 +705,7 @@ Rectangle {
                     implicitHeight: 28
                     flat: true
                     enabled: !root.git.generating && root.git.stagedCount + root.git.unstagedCount > 0
-                    onClicked: root.git.generateMessage(Workspace.setting("harlo_path"), Workspace.setting("commit_model"), root.git.stagedCount > 0)
+                    onClicked: root.git.generateMessage(Workspace.setting("pi_path"), Workspace.setting("commit_model"), root.git.stagedCount > 0)
                     contentItem: Icon {
                         name: root.git.generating ? "loader-4" : "sparkling"
                         color: root.git.generating ? Theme.primary : writeButton.hovered ? Theme.primary : Theme.muted
@@ -713,7 +713,7 @@ Rectangle {
                         RotationAnimation on rotation { running: root.git.generating; from: 0; to: 360; duration: 900; loops: Animation.Infinite }
                         onVisibleChanged: rotation = 0
                     }
-                    background: Rectangle { radius: 6; color: writeButton.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: writeButton.hovered ? Theme.hover : "transparent" }
                     ToolTip.visible: hovered
                     ToolTip.delay: 300
                     ToolTip.text: root.git.generating ? "Writing a commit message…"

@@ -60,11 +60,8 @@ pub fn candidates<'a>(sessions: impl IntoIterator<Item = &'a SessionInfo>, cwd: 
 }
 
 /// A session's messages, oldest first.
-pub fn messages_of(kind: HarnessKind, path: &Path) -> Vec<Value> {
-    match kind {
-        HarnessKind::Claude => harlo_harness::claude::saved_file(path).map(|s| s.messages).unwrap_or_default(),
-        _ => harlo_harness::store::read_messages(path).unwrap_or_default(),
-    }
+pub fn messages_of(path: &Path) -> Vec<Value> {
+    harlo_harness::store::read_messages(path).unwrap_or_default()
 }
 
 /// What a message said, for the excerpt (None: nothing to show).
@@ -171,7 +168,7 @@ pub fn expand(text: &str, find: impl Fn(&str) -> Option<SessionInfo>) -> String 
     let mut blocks = String::new();
     for t in tokens(text) {
         if let Some(info) = find(&t) {
-            blocks.push_str(&block(&info, &messages_of(info.harness, &info.path)));
+            blocks.push_str(&block(&info, &messages_of(&info.path)));
         }
     }
     format!("{blocks}{text}")
@@ -186,7 +183,7 @@ mod tests {
 
     fn info(id: &str, cwd: &str, name: &str, secs: u64) -> SessionInfo {
         SessionInfo {
-            harness: HarnessKind::Harlo,
+            harness: HarnessKind::Pi,
             path: PathBuf::from(format!("/s/{id}.jsonl")),
             id: id.into(),
             cwd: PathBuf::from(cwd),

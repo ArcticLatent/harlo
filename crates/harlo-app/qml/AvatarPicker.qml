@@ -10,7 +10,7 @@ Popup {
     id: picker
     padding: 14
     margins: 8
-    background: GlassSurface { radius: 12 }
+    background: GlassSurface { radius: 4 }
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Math.round(Theme.motion * 0.56) }
         NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: Math.round(Theme.motion * 0.56); easing.type: Easing.OutCubic }

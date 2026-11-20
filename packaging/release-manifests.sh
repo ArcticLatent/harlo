@@ -8,7 +8,7 @@
 #                        with their SHA-256 sums and addresses: what harlo
 #                        reads to update itself
 #   SHA256SUMS           every file's checksum, for people (the static
-#                        harlo-agent and harlo-index for CI too)
+#                        harlo-helper and harlo-index for CI too)
 #
 # The manifest is signed with HARLO_UPDATE_SIGNING_KEY (crates/harlo-
 # manifest-signer) and then checked against the public key built into

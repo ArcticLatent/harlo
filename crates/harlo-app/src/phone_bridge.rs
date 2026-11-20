@@ -54,21 +54,6 @@ pub fn watch_limits() -> watch::Receiver<Value> {
     limits().subscribe()
 }
 
-/// Bumped when a session's shared plan changes (phones with one open ask
-/// for it again).
-fn plans() -> &'static watch::Sender<u64> {
-    static P: OnceLock<watch::Sender<u64>> = OnceLock::new();
-    P.get_or_init(|| watch::channel(0).0)
-}
-
-pub fn plans_changed() {
-    plans().send_modify(|n| *n += 1);
-}
-
-pub fn watch_plans() -> watch::Receiver<u64> {
-    plans().subscribe()
-}
-
 /// Bumped when a workflow run changes (phones with its card open ask for
 /// it again).
 fn workflows() -> &'static watch::Sender<u64> {

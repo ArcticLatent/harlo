@@ -1,50 +1,16 @@
 //! Provider plan limits, per account its plan and each limit window's use.
 //!
-//! Harlo's ChatGPT plan's (`harlo-agent usage --json`, and what a running
-//! session says), and Claude Code's (its `/usage`, which Claude Code reads with
-//! its own sign-in).
+//! The Claude account's behind pi's Claude subscription (Claude Code's
+//! `/usage`, which Claude Code reads with its own sign-in).
 
 // Rust guideline compliant 2026-10-09
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-
-/// Harlo's Codex sign-in's usage (`<harlo-agent> usage --json`, up to 20
-/// s), as `apply_live` takes it; None when that sign-in isn't there.
-///
-/// # Errors
-///
-/// When the agent can't be run or doesn't answer in time.
-pub fn fetch_harlo(agent: &Path) -> Result<Option<Value>> {
-    let mut child = Command::new(agent)
-        .args(["usage", "--json"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("running {} usage", agent.display()))?;
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while child.try_wait()?.is_none() {
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            bail!("Harlo's usage took too long");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        if err.contains("Not signed in") {
-            return Ok(None);
-        }
-        bail!("Harlo's usage: {}", err.lines().last().unwrap_or("").trim().trim_start_matches("harlo-agent: "));
-    }
-    Ok(Some(serde_json::from_slice(&out.stdout).context("reading Harlo's usage")?))
-}
 
 /// Claude Code's plan limits, as Claude Code itself reports them.
 ///
@@ -63,27 +29,6 @@ pub fn claude(program: &Path, config_dir: &Path) -> Result<Option<Value>> {
     let Some(usage) = claude_usage(cmd, Duration::from_secs(45))? else { return Ok(None) };
     let plan = claude_plan(usage["subscription_type"].as_str().unwrap_or_default());
     Ok(Some(parse_claude(&usage["rate_limits"], &plan, &claude_account(config_dir))))
-}
-
-/// The same of Claude Code on another machine, over its SSH connection
-/// (blocking). Its address comes from `claude auth status` there.
-///
-/// # Errors
-///
-/// When the machine can't be reached, or Claude Code there can't be started or
-/// doesn't answer in time.
-pub fn claude_on(host: &crate::remote::Host) -> Result<Option<Value>> {
-    let args: Vec<String> = CLAUDE_USAGE_ARGS.iter().map(|a| crate::remote::quote(a)).collect();
-    // (Its input ends with the connection, so it ends there too.)
-    let cmd = crate::remote::command(host, &format!("cd /tmp 2>/dev/null; exec claude {}", args.join(" ")));
-    let Some(usage) = claude_usage(cmd, Duration::from_secs(60))? else { return Ok(None) };
-    let plan = claude_plan(usage["subscription_type"].as_str().unwrap_or_default());
-    let account = crate::remote::run(host, "claude auth status --json </dev/null", Duration::from_secs(20))
-        .ok()
-        .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok())
-        .and_then(|v| v["email"].as_str().map(str::to_owned))
-        .unwrap_or_default();
-    Ok(Some(parse_claude(&usage["rate_limits"], &plan, &account)))
 }
 
 /// Claude Code with no prompt: its control channel only, no hooks, no
@@ -204,143 +149,12 @@ pub fn parse_claude(body: &Value, plan: &str, account: &str) -> Value {
 /// From this much of a window used, harlo warns, and says when it resets.
 pub const NEARLY: f64 = 0.9;
 
-/// A running Claude session's word on its limits, into its account in
-/// `accounts`.
-///
-/// From `rate_limit_info`, after each request; the account is added when
-/// there's none yet. The 5-hour and weekly windows, the rest as they were.
-/// Returns the windows that have just run out.
-pub fn apply_claude_live(accounts: &mut Vec<Value>, info: &Value) -> Vec<String> {
-    let mut seen: Vec<(&str, &Value)> = Vec::new();
-    for (key, label) in [("five_hour", "Session (5 h)"), ("seven_day", "Weekly")] {
-        let w = &info["unifiedWindows"][key];
-        if w["utilization"].is_number() {
-            seen.push((label, w));
-        } else if info["rateLimitType"] == key && info["utilization"].is_number() {
-            seen.push((label, info));
-        }
-    }
-    if seen.is_empty() {
-        return Vec::new();
-    }
-    let at = match accounts.iter().position(|a| a["provider"] == "Claude") {
-        Some(i) => i,
-        None => {
-            accounts.insert(0, json!({ "provider": "Claude", "plan": "", "account": "", "limitReached": false, "windows": [] }));
-            0
-        }
-    };
-    let account = &mut accounts[at];
-    // (Anything but a list of windows is replaced by one.)
-    let mut windows = match account["windows"].take() {
-        Value::Array(w) => w,
-        _ => Vec::new(),
-    };
-    let mut ran_out = Vec::new();
-    for (label, w) in seen {
-        let used = w["utilization"].as_f64().unwrap_or(0.0);
-        let out = used >= 1.0 || w["status"] == "rejected";
-        let reset = w["resetsAt"].as_i64().map(|s| s * 1000);
-        let window = json!({ "label": label, "usedFraction": used, "used": (used * 100.0).round(), "limit": 100, "unit": "percent",
-                             "resetsAt": reset, "status": if out { "exhausted" } else { "ok" } });
-        match windows.iter_mut().find(|x| x["label"] == label) {
-            Some(x) => {
-                if out && x["status"] != "exhausted" {
-                    ran_out.push(label.to_owned());
-                }
-                *x = window;
-            }
-            None => {
-                if out {
-                    ran_out.push(label.to_owned());
-                }
-                let place = if label == "Weekly" { windows.len().min(1) } else { 0 };
-                windows.insert(place, window);
-            }
-        }
-    }
-    let reached = windows.iter().any(|w| w["status"] == "exhausted" || w["usedFraction"].as_f64().unwrap_or(0.0) >= 1.0);
-    account["windows"] = Value::Array(windows);
-    account["limitReached"] = json!(reached);
-    ran_out
-}
-
 /// A limit window's name for its length ("5 hours", "7 days").
 #[expect(clippy::cast_possible_truncation, reason = "whole pixels, sizes and times from floats: `as` rounds toward zero and saturates, as wanted here")]
 pub fn window_label(minutes: i64) -> String {
     let secs = minutes.max(0) * 60;
     let (n, unit) = if secs >= 86_400 { ((secs as f64 / 86_400.0).round() as i64, "day") } else { (((secs as f64 / 3600.0).round() as i64).max(1), "hour") };
     format!("{n} {unit}{}", if n == 1 { "" } else { "s" })
-}
-
-/// A Harlo session's word on its plan's limits, into that account in
-/// `accounts`.
-///
-/// From the response's headers: `{ provider, account, windows: [{
-/// windowMinutes, usedPercent, resetsAt (s) }] }`. The account is the one for
-/// the same provider and email (or without either known), else a new one.
-/// Each window replaces the one of its name; the rest stay as they were.
-/// Returns the windows that have just run out.
-pub fn apply_live(accounts: &mut Vec<Value>, info: &Value) -> Vec<String> {
-    let provider = info["provider"].as_str().unwrap_or_default();
-    let email = info["account"].as_str().unwrap_or_default();
-    let seen: Vec<(String, Value)> = info["windows"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|w| {
-            let used = (w["usedPercent"].as_f64()? / 100.0).clamp(0.0, 1.0);
-            let label = w["windowMinutes"].as_i64().map_or_else(|| "limit".to_owned(), window_label);
-            // (Seconds, or milliseconds already.)
-            let reset = w["resetsAt"].as_i64().map(|r| if r > 1_000_000_000_000 { r } else { r * 1000 });
-            let out = used >= 1.0;
-            Some((label.clone(), json!({ "label": label, "usedFraction": used, "used": (used * 100.0).round(), "limit": 100, "unit": "percent",
-                                         "resetsAt": reset, "status": if out { "exhausted" } else { "ok" } })))
-        })
-        .collect();
-    if provider.is_empty() || seen.is_empty() {
-        return Vec::new();
-    }
-    let at = match accounts.iter().position(|a| a["provider"] == provider && (email.is_empty() || a["account"].as_str().is_none_or(|e| e.is_empty() || e == email))) {
-        Some(i) => i,
-        None => {
-            accounts.push(json!({ "provider": provider, "plan": "", "account": email, "limitReached": false, "windows": [] }));
-            accounts.len() - 1
-        }
-    };
-    let account = &mut accounts[at];
-    if let Some(plan) = info["plan"].as_str().filter(|p| !p.is_empty())
-        && account["plan"].as_str().is_none_or(str::is_empty)
-    {
-        account["plan"] = json!(plan);
-    }
-    // (Anything but a list of windows is replaced by one.)
-    let mut windows = match account["windows"].take() {
-        Value::Array(w) => w,
-        _ => Vec::new(),
-    };
-    let mut ran_out = Vec::new();
-    for (label, window) in seen {
-        let out = window["status"] == "exhausted";
-        match windows.iter_mut().find(|x| x["label"] == label.as_str()) {
-            Some(x) => {
-                if out && x["status"] != "exhausted" {
-                    ran_out.push(label);
-                }
-                *x = window;
-            }
-            None => {
-                if out {
-                    ran_out.push(label);
-                }
-                windows.push(window);
-            }
-        }
-    }
-    let reached = windows.iter().any(|w| w["status"] == "exhausted" || w["usedFraction"].as_f64().unwrap_or(0.0) >= 1.0);
-    account["windows"] = Value::Array(windows);
-    account["limitReached"] = json!(reached);
-    ran_out
 }
 
 /// The windows (provider, label, when) that were nearly or fully used and
@@ -359,18 +173,13 @@ pub fn resets_due(accounts: &[Value], since: i64, now: i64) -> Vec<(String, Stri
     out
 }
 
-/// Whose limits a session draws on: Claude's sign-in, or Harlo's ChatGPT
-/// plan; "" for one without plan limits (Claude Code on a coding plan, whose
-/// limits harlo can't read).
+/// Whose limits a session draws on: Claude's sign-in; "" for one without
+/// plan limits.
 pub fn session_provider(harness: &str, model_id: &str) -> String {
-    if harness == "claude" {
-        let on_plan = model_id.split_once('/').is_some_and(|(p, _)| crate::coding_plans::find(p).is_some());
-        return if on_plan { String::new() } else { "Claude".to_owned() };
-    }
-    // Harlo: the plan's through the Codex sign-in ("codex/…"), which says
-    // its usage; the official sign-in, API keys and other servers say none.
-    if harness == "harlo" {
-        return if model_id.split('/').next() == Some("codex") { "openai-codex".to_owned() } else { String::new() };
+    // pi: Claude's models through the Claude subscription extension
+    // (Claude Code, on the plan); pi's own `anthropic/…` say none.
+    if harness == "pi" && model_id.split('/').next() == Some("claude-bridge") {
+        return "Claude".to_owned();
     }
     String::new()
 }
@@ -412,20 +221,10 @@ pub fn mark_reset(accounts: &mut [Value], provider: &str, label: &str) {
     }
 }
 
-/// When a limit resets (unix ms), as a notification says it: "18:30", or
-/// "Thu 09:00" further off than a day.
-pub fn reset_time(at: i64) -> String {
-    use chrono::TimeZone;
-    let Some(t) = chrono::Local.timestamp_millis_opt(at).single() else { return String::new() };
-    if t - chrono::Local::now() > chrono::Duration::hours(20) { t.format("%a %H:%M").to_string() } else { t.format("%H:%M").to_string() }
-}
-
 /// How a provider's limit reads in a notification: "Claude's 5-hour limit".
 pub fn limit_name(provider: &str, label: &str) -> String {
     let who = match provider {
         "Claude" | "anthropic" => "Claude",
-        "openai-codex" => "ChatGPT",
-        "google-gemini-cli" | "google-antigravity" => "Gemini",
         p => p,
     };
     let what = match label {
@@ -439,32 +238,20 @@ pub fn limit_name(provider: &str, label: &str) -> String {
 
 /// The limits shown after a refresh, from what each source answered.
 ///
-/// `previous` is what was shown. A source not asked (`None`) adds nothing,
-/// except Claude's last accounts when `keep_claude`. One that failed keeps
-/// its last accounts and adds its error. The time of the update is `now_ms`
-/// when nothing failed, else the previous one.
-pub fn refreshed(previous: &Value, claude: Option<Result<Option<Value>>>, keep_claude: bool, harlo: Option<Result<Option<Value>>>, now_ms: i64) -> Value {
-    let kept = |claude: bool| -> Vec<Value> {
-        previous["accounts"].as_array().into_iter().flatten().filter(|a| (a["provider"] == "Claude") == claude).cloned().collect()
-    };
+/// `previous` is what was shown. Claude not asked (`None`) adds nothing,
+/// except its last accounts when `keep_claude`. When it failed, it keeps its
+/// last accounts and adds its error. The time of the update is `now_ms` when
+/// nothing failed, else the previous one.
+pub fn refreshed(previous: &Value, claude: Option<Result<Option<Value>>>, keep_claude: bool, now_ms: i64) -> Value {
+    let kept = || -> Vec<Value> { previous["accounts"].as_array().into_iter().flatten().filter(|a| a["provider"] == "Claude").cloned().collect() };
     let (mut accounts, mut errors) = (Vec::new(), Vec::new());
     match claude {
         Some(Ok(Some(a))) => accounts.push(a),
-        None if keep_claude => accounts.extend(kept(true)),
+        None if keep_claude => accounts.extend(kept()),
         Some(Ok(None)) | None => {}
         Some(Err(e)) => {
-            accounts.extend(kept(true));
+            accounts.extend(kept());
             errors.push(format!("Claude: {e:#}"));
-        }
-    }
-    match harlo {
-        Some(Ok(Some(usage))) => {
-            apply_live(&mut accounts, &usage);
-        }
-        Some(Ok(None)) | None => {}
-        Some(Err(e)) => {
-            accounts.extend(kept(false));
-            errors.push(format!("{e:#}"));
         }
     }
     let updated = if errors.is_empty() { json!(now_ms) } else { previous["updatedAt"].clone() };
@@ -496,42 +283,12 @@ pub fn due_resumes(resumes: &serde_json::Map<String, Value>, now: i64) -> Vec<(S
 #[cfg(test)]
 mod tests {
     #[test]
-    fn harlos_live_limits() {
+    fn names_windows_and_limits() {
         use super::*;
         assert_eq!((window_label(300), window_label(10080), window_label(1440), window_label(30), window_label(60)), ("5 hours".into(), "7 days".into(), "1 day".into(), "1 hour".into(), "1 hour".into()));
-        // omp's account for the same email: its weekly window replaced, the 5-hour one added.
-        let mut accounts = vec![
-            json!({ "provider": "Claude", "account": "", "windows": [] }),
-            json!({ "provider": "openai-codex", "plan": "plus", "account": "a@b", "limitReached": false,
-                    "windows": [{ "label": "7 days", "usedFraction": 0.2, "status": "ok", "resetsAt": 5 }] }),
-        ];
-        let info = |p5: f64, p7: f64| json!({ "provider": "openai-codex", "account": "a@b", "windows": [
-            { "windowMinutes": 300, "usedPercent": p5, "resetsAt": 1792300303 },
-            { "windowMinutes": 10080, "usedPercent": p7, "resetsAt": null }] });
-        assert!(apply_live(&mut accounts, &info(12.5, 40.0)).is_empty());
-        assert_eq!(accounts.len(), 2);
-        let w = &accounts[1]["windows"];
-        assert_eq!((w[0]["label"].as_str(), w[0]["usedFraction"].as_f64(), w[1]["label"].as_str(), w[1]["resetsAt"].as_i64()), (Some("7 days"), Some(0.4), Some("5 hours"), Some(1792300303000)));
-        assert_eq!(accounts[1]["plan"], "plus");
-        // Running out is told once.
-        assert_eq!(apply_live(&mut accounts, &info(100.0, 40.0)), ["5 hours"]);
-        assert_eq!(accounts[1]["limitReached"], true);
-        assert!(apply_live(&mut accounts, &info(100.0, 40.0)).is_empty());
-        // Another account: its own entry.
-        let other = json!({ "provider": "openai-codex", "account": "c@d", "windows": [{ "windowMinutes": 300, "usedPercent": 1 }] });
-        apply_live(&mut accounts, &other);
-        assert_eq!((accounts.len(), accounts[2]["account"].as_str()), (3, Some("c@d")));
-        // None known yet: added, with its plan.
-        let mut none = Vec::new();
-        let mut with_plan = other.clone();
-        with_plan["plan"] = json!("pro");
-        apply_live(&mut none, &with_plan);
-        assert_eq!((none[0]["windows"][0]["label"].as_str(), none[0]["plan"].as_str()), (Some("5 hours"), Some("pro")));
-        assert!(apply_live(&mut none, &json!({ "provider": "openai-codex", "windows": [] })).is_empty());
-        assert_eq!((session_provider("harlo", "codex/gpt-6.1-sol"), session_provider("harlo", "chatgpt/gpt-6.1-sol"), session_provider("harlo", "llamacpp/x")), ("openai-codex".into(), String::new(), String::new()));
-        assert_eq!((session_provider("claude", "anthropic/claude-sonnet-5-5"), session_provider("claude", "glm-coding/glm-5.3[1m]")), ("Claude".into(), String::new()), "a coding plan isn't Claude's limits");
-        assert_eq!(limit_name("openai-codex", "5 hours"), "ChatGPT's 5-hour limit");
-        assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's weekly limit");
+        assert_eq!(session_provider("claude", "anthropic/claude-sonnet-5-5"), "", "Claude Code's old sessions draw on nothing harlo shows");
+        assert_eq!(session_provider("harlo", "codex/gpt-6"), "", "nor do the old agent's");
+        assert_eq!(limit_name("Claude", "7 days"), "Claude's weekly limit");
     }
 
     #[test]
@@ -541,45 +298,27 @@ mod tests {
                 { "label": "Session (5 h)", "usedFraction": 1.0, "status": "exhausted", "resetsAt": 2000 },
                 { "label": "Weekly", "usedFraction": 0.95, "status": "ok", "resetsAt": 9000 },
             ] }),
-            json!({ "provider": "openai-codex", "windows": [{ "label": "Weekly", "usedFraction": 0.5, "status": "ok", "resetsAt": 5000 }] }),
         ];
-        let claude = session_limit(&accounts, "claude", "").unwrap();
+        let claude = session_limit(&accounts, "pi", "claude-bridge/claude-opus-5-5").unwrap();
         assert_eq!((claude["label"].as_str(), claude["out"].as_bool(), claude["resetAt"].as_i64()), (Some("Session (5 h)"), Some(true), Some(2000)));
-        // Under 90%, an agent without plan limits, a provider with none here.
-        assert!(session_limit(&accounts, "harlo", "codex/gpt-6").is_none());
-        assert!(session_limit(&accounts, "harlo", "llama/x").is_none());
-        assert_eq!(session_provider("harlo", "codex/gpt-6"), "openai-codex");
+        // A model without plan limits.
+        assert!(session_limit(&accounts, "pi", "llama/x").is_none());
+        assert_eq!((session_provider("pi", "claude-bridge/claude-opus-5-5"), session_provider("pi", "anthropic/claude-opus-5-5")), ("Claude".into(), String::new()), "pi on the plan through Claude Code; pi's own Anthropic isn't");
     }
 
     use super::*;
 
     #[test]
-    fn a_running_session_says_its_limits() {
-        let info = |five: f64, status: &str| json!({ "status": status, "rateLimitType": "five_hour", "unifiedWindows": {
-            "five_hour": { "utilization": five, "resetsAt": 1793653800, "status": status },
-            "seven_day": { "utilization": 0.06, "resetsAt": 1794229200, "status": "allowed" } } });
-        // None asked for yet: the account comes from it.
-        let mut accounts = vec![json!({ "provider": "openai-codex", "windows": [] })];
-        assert!(apply_claude_live(&mut accounts, &info(0.92, "allowed_warning")).is_empty());
-        let a = &accounts[0];
-        assert_eq!(a["provider"], "Claude");
-        assert_eq!(a["windows"][0]["label"], "Session (5 h)");
-        assert_eq!(a["windows"][0]["usedFraction"], 0.92);
-        assert_eq!(a["windows"][0]["resetsAt"], 1793653800000_i64);
-        assert_eq!(a["windows"][1]["label"], "Weekly");
-        assert_eq!(a["limitReached"], false);
-        // Asked for earlier: its per-model windows stay.
-        accounts[0]["windows"].as_array_mut().unwrap().push(json!({ "label": "Weekly · Opus", "usedFraction": 0.3, "status": "ok" }));
-        assert_eq!(apply_claude_live(&mut accounts, &info(1.01, "rejected")), ["Session (5 h)"]);
-        assert_eq!(accounts[0]["windows"].as_array().unwrap().len(), 3);
-        assert_eq!(accounts[0]["windows"][0]["status"], "exhausted");
-        assert_eq!(accounts[0]["limitReached"], true);
-        assert!(apply_claude_live(&mut accounts, &info(1.02, "rejected")).is_empty(), "said once");
-        assert!(apply_claude_live(&mut accounts, &json!({ "status": "allowed" })).is_empty());
-        assert_eq!(accounts.len(), 2);
-
-        // It resets: said once it's past, then nothing's used until fresh numbers.
+    fn a_used_up_window_resets() {
         let at = 1793653800000_i64;
+        let mut accounts = vec![
+            json!({ "provider": "Claude", "limitReached": true, "windows": [
+                { "label": "Session (5 h)", "usedFraction": 1.01, "status": "exhausted", "resetsAt": at },
+                { "label": "Weekly", "usedFraction": 0.06, "status": "ok", "resetsAt": 1794229200000_i64 },
+                { "label": "Weekly · Opus", "usedFraction": 0.3, "status": "ok" },
+            ] }),
+        ];
+        // It resets: said once it's past, then nothing's used until fresh numbers.
         assert!(resets_due(&accounts, 0, at - 1).is_empty());
         assert_eq!(resets_due(&accounts, 0, at), [("Claude".to_owned(), "Session (5 h)".to_owned(), at)]);
         assert!(resets_due(&accounts, at, at + 10).is_empty(), "not one that reset before harlo started");
@@ -589,7 +328,6 @@ mod tests {
         assert!(resets_due(&accounts, 0, at + 10).is_empty());
         // (A window hardly used resets without a word.)
         assert_eq!(limit_name("Claude", "Session (5 h)"), "Claude's 5-hour limit");
-        assert_eq!(limit_name("openai-codex", "7 days"), "ChatGPT's weekly limit");
         assert_eq!(limit_name("Claude", "Weekly · Opus"), "Claude's weekly Opus limit");
     }
 
@@ -627,8 +365,8 @@ mod tests {
     #[test]
     #[ignore = "asks this machine's own Claude Code"]
     fn claude_here() {
-        let dir = harlo_harness::claude::config_dir().unwrap();
-        let program = harlo_harness::resolve_program(harlo_harness::HarnessKind::Claude).unwrap();
+        let dir = crate::claude::config_dir().unwrap();
+        let program = crate::claude::program().unwrap();
         let a = claude(&program, &dir).unwrap().expect("signed in with claude.ai");
         for w in a["windows"].as_array().unwrap() {
             println!("{} {}: {:.0}% (resets {})", a["plan"], w["label"], w["usedFraction"].as_f64().unwrap() * 100.0, w["resetsAt"]);
@@ -648,13 +386,13 @@ mod tests {
     #[test]
     fn a_failed_source_keeps_its_last_limits() {
         use serde_json::json;
-        let previous = json!({ "accounts": [{ "provider": "Claude", "plan": "max" }, { "provider": "ChatGPT", "plan": "plus" }], "updatedAt": 5 });
+        let previous = json!({ "accounts": [{ "provider": "Claude", "plan": "max" }], "updatedAt": 5 });
         let fresh = json!({ "provider": "Claude", "plan": "pro" });
-        let got = super::refreshed(&previous, Some(Ok(Some(fresh.clone()))), false, Some(Err(anyhow::anyhow!("offline"))), 9);
-        assert_eq!(got, json!({ "accounts": [fresh, { "provider": "ChatGPT", "plan": "plus" }], "updatedAt": 5, "error": "offline" }));
-        let kept = super::refreshed(&previous, None, true, None, 9);
+        let got = super::refreshed(&previous, Some(Ok(Some(fresh.clone()))), false, 9);
+        assert_eq!(got, json!({ "accounts": [fresh], "updatedAt": 9, "error": "" }));
+        let kept = super::refreshed(&previous, None, true, 9);
         assert_eq!(kept, json!({ "accounts": [{ "provider": "Claude", "plan": "max" }], "updatedAt": 9, "error": "" }));
-        let failed = super::refreshed(&previous, Some(Err(anyhow::anyhow!("no sign-in"))), false, Some(Ok(None)), 9);
-        assert_eq!(failed["error"], "Claude: no sign-in");
+        let failed = super::refreshed(&previous, Some(Err(anyhow::anyhow!("no sign-in"))), false, 9);
+        assert_eq!(failed, json!({ "accounts": [{ "provider": "Claude", "plan": "max" }], "updatedAt": 5, "error": "Claude: no sign-in" }));
     }
 }

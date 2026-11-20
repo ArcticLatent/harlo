@@ -16,7 +16,7 @@ import harlo
 // the window. Only lower layers are captured, so nothing blurs itself.
 Item {
     id: glass
-    property real radius: 10
+    property real radius: 4
     /// "menu" (menus, pickers, popovers) or "dialog".
     property string kind: "menu"
     readonly property bool dialog: kind === "dialog"

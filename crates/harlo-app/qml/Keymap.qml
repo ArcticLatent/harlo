@@ -36,6 +36,24 @@ QtObject {
     /// The action's key ("" when unassigned).
     function seq(id) { return overrides[id] !== undefined ? overrides[id] : (defaults[id] || "") }
     /// " (Ctrl+N)" for tooltips, or "" when unassigned.
+    // A pi key id ("ctrl+shift+x", "alt+enter", "f5") as a key sequence
+    // ("Ctrl+Shift+X"); "" for one Qt has no name for.
+    function fromPiKey(id) {
+        const names = { escape: "Esc", esc: "Esc", enter: "Return", return: "Return", tab: "Tab", space: "Space", backspace: "Backspace",
+                        delete: "Del", insert: "Ins", up: "Up", down: "Down", left: "Left", right: "Right", home: "Home", end: "End",
+                        pageup: "PgUp", pagedown: "PgDown" }
+        const mods = { ctrl: "Ctrl", control: "Ctrl", shift: "Shift", alt: "Alt", meta: "Meta", super: "Meta" }
+        const parts = String(id).split("+")
+        const key = parts.pop().toLowerCase()
+        const out = []
+        for (const p of parts) {
+            const m = mods[p.toLowerCase()]
+            if (!m) return ""
+            out.push(m)
+        }
+        const name = names[key] || (/^f([1-9]|1[0-2])$/.test(key) ? key.toUpperCase() : key.length === 1 ? key.toUpperCase() : "")
+        return name === "" ? "" : out.concat([name]).join("+")
+    }
     function hint(id) { const s = seq(id); return s !== "" ? " (" + s + ")" : "" }
     function isCustom(id) { return overrides[id] !== undefined && overrides[id] !== defaults[id] }
     /// The action already on `key`, if any (other than `except`).

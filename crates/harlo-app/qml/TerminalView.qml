@@ -29,17 +29,7 @@ Rectangle {
     readonly property real cellW: Math.max(1, term.cellWidth)
     readonly property real cellH: Math.max(1, term.cellHeight)
 
-    // 16 ANSI colours from the theme, then foreground, background, cursor, selection.
-    readonly property var termColors: {
-        const light = Theme.isLight
-        const bright = c => light ? Qt.darker(c, 1.15) : Qt.lighter(c, 1.25)
-        const magenta = light ? "#a626a4" : "#c678dd"
-        const cyan = light ? "#0184bc" : "#56b6c2"
-        const base = [light ? "#24292f" : "#3b3b3b", Theme.error, Theme.success, Theme.warning, Theme.info, magenta, cyan, light ? "#6e7781" : "#c8c8c8"]
-        const brights = [Theme.muted, bright(Theme.error), bright(Theme.success), bright(Theme.warning), bright(Theme.info), bright(magenta), bright(cyan), light ? "#8c959f" : "#ffffff"]
-        return base.concat(brights).map(c => Theme.rgb(Qt.color(c)))
-            .concat([Theme.rgb(Theme.foreground), Theme.rgb(root.background), Theme.rgb(Theme.primary), Theme.rgb(Qt.tint(root.background, Theme.selection))])
-    }
+    readonly property var termColors: Theme.terminalColors(root.background)
     onTermColorsChanged: term.setPalette(termColors)
 
     // The screen and its cursor (under the mouse area below).
@@ -180,7 +170,7 @@ Rectangle {
         anchors.bottomMargin: 10
         implicitWidth: exitRow.implicitWidth + 20
         implicitHeight: 34
-        radius: 8
+        radius: 3
         color: Theme.elevated
         border.color: Theme.border
         Row {

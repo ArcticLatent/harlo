@@ -804,7 +804,7 @@ impl Workspace {
         let Some(harness) = HarnessKind::parse(&agent.harness) else {
             return self.workflow_event(&run.id, Event::StartFailed { seq, why: format!("harlo doesn't know the agent {}", agent.harness) });
         };
-        let key = self.as_mut().start_session_budget(harness, tree.place.path.clone(), &agent.model, "", activate, None);
+        let key = self.as_mut().start_session_with(harness, tree.place.path.clone(), &agent.model, activate);
         self.as_mut().rust_mut().workflows.keys.insert(key.clone(), WorkflowSession { run: run.id.clone(), seq, kind, report: None });
         if let Some(live) = registry::get(&key) {
             live.handle.send_raw(json!({ "type": "set_session_name", "name": title }));
@@ -814,7 +814,7 @@ impl Workspace {
         if !run.approval.is_empty() {
             self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&run.approval));
         }
-        let first = FirstPrompt { text: prompt, attachments: Vec::new(), server: Some((agent.harness.clone(), agent.model.clone())), by_you: false };
+        let first = FirstPrompt { text: prompt, attachments: Vec::new(), server: Some((agent.harness.clone(), agent.model.clone())) };
         send_first_prompt(&key, first, Some(self.qt_thread()));
         self.as_mut().workflow_event(&run.id, Event::Started { seq });
     }
@@ -841,6 +841,11 @@ impl Workspace {
             self.as_mut().set_approval_mode(&QString::from(&key), &QString::from(&run.approval));
         }
         let busy = self.live.get(&key).is_some_and(|e| e.info.status == harlo_core::SessionStatus::Busy);
+        // (An agent started before the run took the session on lacks
+        // report_done: started again, it lists harlo's tools again.)
+        if !busy && self.tools_changed(&key) {
+            live.handle.restart_if_idle();
+        }
         live.handle.prompt(text, Vec::new(), if busy { harlo_harness::SendMode::FollowUp } else { harlo_harness::SendMode::Normal });
         self.as_mut().workflow_event(&run.id, Event::Started { seq });
     }

@@ -1,11 +1,10 @@
-# The Rust tests of Harlo's agent (harlo-agent), harlo's core (harlo-core),
+# The Rust tests of harlo's helper for pi (harlo-helper), the harness adapters, harlo's core (harlo-core),
 # the code index (harlo-index) and the wiki (harlo-okf) on every push to main and every pull request: plain
 # `cargo test`, no Qt, no model, no network service of ours. Then clippy, with
 # warnings as errors, on every crate that builds without Qt (all but
 # harlo-app). A separate job checks the dependencies: known
 # vulnerabilities and unsound versions (cargo-audit) and unused ones
-# (cargo-machete). The click tests and the agent's end-to-end tests run on a
-# desktop, with stand-in models.
+# (cargo-machete). The click tests run on a desktop, with stand-in models.
 name: tests
 
 on:
@@ -33,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential cmake pkg-config libclang-dev bubblewrap
-          # Harlo's sandbox (bubblewrap) needs user namespaces, which Ubuntu
+          # The helper's sandbox (bubblewrap) needs user namespaces, which Ubuntu
           # limits by default; without them its tests only check arguments.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # Pinned so a new clippy's lints arrive with a deliberate update, not
@@ -43,8 +42,8 @@ jobs:
           toolchain: 1.98.1
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: harlo-agent and harlo-core
-        run: cargo test --locked -p harlo-agent -p harlo-core
+      - name: Helper, core and harness protocols
+        run: cargo test --locked -p harlo-helper -p harlo-core -p harlo-harness
       # (The wiki's tests run the built index helper too.)
       - name: harlo-index and harlo-okf
         run: |
@@ -52,6 +51,34 @@ jobs:
           cargo test --locked -p harlo-index -p harlo-okf
       - name: clippy
         run: cargo clippy --locked --workspace --exclude harlo-app --all-targets -- -D warnings
+
+  desktop-protocol:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      QT_VERSION: "6.12.0"
+      QT_QPA_PLATFORM: offscreen
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Qt and native build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake clang libclang-dev pkg-config libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libfontconfig1-dev libfreetype6-dev libdbus-1-dev libpulse0 libasound2
+          pip install --user aqtinstall
+          python3 -m aqt install-qt linux desktop "$QT_VERSION" linux_gcc_64 -O "$RUNNER_TEMP/Qt" -m qtmultimedia qtimageformats qtshadertools
+          echo "QMAKE=$RUNNER_TEMP/Qt/$QT_VERSION/gcc_64/bin/qmake" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/Qt/$QT_VERSION/gcc_64/lib" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Desktop phone protocol
+        run: |
+          export CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" HOME="$(mktemp -d)"
+          export XDG_CONFIG_HOME="$HOME/config" XDG_DATA_HOME="$HOME/data" XDG_CACHE_HOME="$HOME/cache"
+          cargo test --locked -p harlo-app phone_server::tests::
 
   dependencies:
     runs-on: ubuntu-24.04

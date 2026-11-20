@@ -9,7 +9,6 @@ ColumnLayout {
     id: remotes
     property bool compact
     signal runInTerminalRequested(string command)
-    signal signInRequested(string agent, string label)
     spacing: 0
     readonly property var hosts: Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []
     /// The host being edited ("" new, null none).
@@ -26,7 +25,7 @@ ColumnLayout {
     SectionHeader {
         title: "SSH connections"
         subtitle: "Work on other machines over SSH, each with its own projects and sessions."
-        more: "Switch to one from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. Harlo signs in with your SSH keys or agent. Each connected machine shows whether it has Claude Code, installs it for you, and signs Claude in there; Harlo brings Harlo itself."
+        more: "Switch to one from the instance menu at the top of the sidebar, then + Project adds its folders; its chats, terminal, git and files work there. Harlo signs in with your SSH keys or agent. Each connected machine shows whether it has pi and installs it for you."
         AddButton { objectName: "addRemoteHost"; text: "Add SSH connection"; enabled: remotes.editing === null; onClicked: addHostDialog.open() }
     }
     // Add: from ~/.ssh/config, or typed (also the instance menu's).
@@ -144,7 +143,7 @@ ColumnLayout {
             }
             // The agents on it: each with its version, or a way to
             // install it (in the background, its output a click
-            // away); Claude's sign-in (in a terminal there).
+            // away).
             Flow {
                 id: agentsFlow
                 visible: hostRow.st === "connected"
@@ -155,20 +154,19 @@ ColumnLayout {
                 spacing: 6
                 readonly property string folder: "ssh://" + hostBox.modelData.name + (hostBox.modelData.home || "")
                 Repeater {
-                    model: ["claude"]
+                    model: ["pi"]
                     Rectangle {
                         id: agentChip
                         required property string modelData
                         readonly property var host: hostBox.modelData
                         readonly property bool found: (host[modelData] || "") !== ""
-                        readonly property bool signIn: found && modelData === "claude" && host.claudeAuth === "no"
                         readonly property bool installing: ((host.installs || {})[modelData] || {}).state === "running"
                         objectName: "hostAgent-" + host.name + "-" + modelData
                         implicitWidth: chipRow.implicitWidth + 14
                         implicitHeight: 30
-                        radius: 7
+                        radius: 3
                         color: Theme.elevated
-                        border.color: found && !signIn ? Theme.border : Theme.warning
+                        border.color: found ? Theme.border : Theme.warning
                         Row {
                             id: chipRow
                             anchors.centerIn: parent
@@ -215,17 +213,6 @@ ColumnLayout {
                                         duration: 1100
                                     }
                                 }
-                            }
-                            FlatButton {
-                                objectName: "hostSignIn-" + agentChip.host.name + "-" + agentChip.modelData
-                                visible: agentChip.signIn
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "Sign in"
-                                padding: 3
-                                font.pixelSize: Theme.px(11)
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Claude isn't signed in on " + agentChip.host.name + "."
-                                onClicked: remotes.signInRequested("claude@" + agentChip.host.name, "Claude on " + agentChip.host.name)
                             }
                         }
                     }

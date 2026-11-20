@@ -80,6 +80,8 @@ struct RequestCard: View {
                 }
             }
             content
+                // (While its answer is on its way: one answer per request.)
+                .disabled(model.answering.contains(request.id))
         }
         .onAppear(perform: reset)
     }
@@ -201,9 +203,10 @@ struct RequestCard: View {
     }
 
     func answer(_ value: JSON) {
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
         Task {
-            if let key { await model.answer(request, value, in: key) } else { await model.answer(request, value) }
+            let taken = if let key { await model.answer(request, value, in: key) } else { await model.answer(request, value) }
+            // (Felt once harlo has it: an answer that didn't get there stays.)
+            if taken { UINotificationFeedbackGenerator().notificationOccurred(.success) }
         }
     }
 }

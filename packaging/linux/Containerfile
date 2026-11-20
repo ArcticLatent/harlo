@@ -5,7 +5,7 @@ FROM docker.io/library/ubuntu:22.04
 ARG QT_VERSION=6.12.0
 ARG NFPM_VERSION=2.43.0
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git python3-pip \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git python3-pip nodejs npm \
       build-essential cmake clang libclang-dev pkg-config librsvg2-bin file patchelf desktop-file-utils \
       libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libfreetype6-dev \
       libdbus-1-dev libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \

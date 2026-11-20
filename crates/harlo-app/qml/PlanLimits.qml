@@ -4,18 +4,15 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Provider plan limits, from Claude Code's sign-in and Harlo's ChatGPT plan:
-// per account its plan and a bar per limit window, with when it resets.
-// `host`: another machine's, from its own Claude Code and Harlo sessions.
+// Provider plan limits, from the Claude sign-in pi's Claude subscription
+// uses: per account its plan and a bar per limit window, with when it
+// resets.
 ColumnLayout {
     id: root
-    property string host: ""
-    // "Plan limits", or "… on this PC" when other machines are listed too.
-    property string title: host !== "" ? "Plan limits on " + host : "Plan limits"
+    property string title: "Plan limits"
     readonly property var report: {
         try {
-            if (host === "") return JSON.parse(Workspace.quotaJson || "{}")
-            return JSON.parse(Workspace.hostLimitsJson || "{}")[host] || {}
+            return JSON.parse(Workspace.quotaJson || "{}")
         } catch (e) { return {} }
     }
     readonly property var accounts: report.accounts || []
@@ -52,7 +49,7 @@ ColumnLayout {
             objectName: "limitsRefresh"
             tip: "Refresh the limits"
             enabled: !root.report.loading
-            onClicked: root.host === "" ? Workspace.refreshQuota() : Workspace.refreshHostQuota(root.host)
+            onClicked: Workspace.refreshQuota()
         }
     }
     Label {
@@ -69,7 +66,7 @@ ColumnLayout {
         Layout.topMargin: 4
         visible: root.accounts.length === 0 && !root.report.error && !root.report.loading
         implicitHeight: noLimits.implicitHeight + 32
-        radius: 12
+        radius: 4
         color: Theme.raised
         border.color: Theme.hairline
         Label {
@@ -77,9 +74,7 @@ ColumnLayout {
             x: 16
             y: 16
             width: parent.width - 32
-            text: root.host === ""
-                ? "No limits to show. They come from Claude Code (signed in with a Claude plan) and from Harlo (signed in with a ChatGPT plan)."
-                : "No limits from " + root.host + " yet. They come from its own Claude Code (signed in with a Claude plan) once it's connected, and from Harlo's sessions there."
+            text: "No limits to show. They come from pi's Claude subscription, signed in with a Claude plan."
             color: Theme.textMuted
             font.pixelSize: Theme.px(12.5)
             wrapMode: Text.Wrap
@@ -96,7 +91,7 @@ ColumnLayout {
             FontMetrics { id: labelMetrics; font.pixelSize: Theme.px(12) }
             Layout.fillWidth: true
             implicitHeight: accCol.implicitHeight + 20
-            radius: 8
+            radius: 3
             color: Theme.elevated
             border.color: acc.limitReached ? Theme.error : Theme.border
             ColumnLayout {
@@ -108,7 +103,7 @@ ColumnLayout {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    // Claude Code's sign-in: its mark; Harlo's plan: the provider's logo.
+                    // The Claude sign-in: Claude's mark; Harlo's plan: the provider's logo.
                     ProviderMark { visible: card.acc.provider === "Claude"; provider: "claude"; tip: ""; color: Theme.foreground }
                     ProviderLogo { visible: card.acc.provider !== "Claude"; provider: card.acc.provider; implicitWidth: 14; implicitHeight: 14 }
                     Label { text: card.acc.provider; color: Theme.foreground; font.bold: true; font.pixelSize: Theme.px(13) }
@@ -138,7 +133,7 @@ ColumnLayout {
                             implicitHeight: 6
                             radius: 3
                             color: Theme.subtle
-                            Rectangle { width: parent.width * win_.f; height: parent.height; radius: 3; color: root.color(win_.f, card.acc.limitReached && win_.f >= 0.99) }
+                            Rectangle { width: parent.width * win_.f; height: parent.height; radius: 2; color: root.color(win_.f, card.acc.limitReached && win_.f >= 0.99) }
                         }
                         Label {
                             text: Math.round(win_.f * 100) + "% used"

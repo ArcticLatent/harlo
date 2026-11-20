@@ -1,10 +1,9 @@
 //! MCP servers harlo installs with a click (Settings → Tools for agents → Ready to
-//! install): turned on or off, for Harlo and Claude, and updated from their
-//! own releases.
+//! install): turned on or off for pi, and updated from their own releases.
 //!
 //! Turning one on the first time downloads its newest GitHub release (its
 //! published SHA-256 checked) into harlo's data folder, `mcp/<id>/<version>`;
-//! the agents' entries (global, this computer) run it through a `current`
+//! pi's entry (global, this computer) runs it through a `current`
 //! link, so they keep one path while it's updated. Update takes a newer
 //! release and keeps the one before for sessions still running it.
 //!
@@ -17,7 +16,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use harlo_harness::HarnessKind;
 use serde_json::{Value, json};
 
 use crate::mcp::{self, Form, Scope};
@@ -36,9 +34,9 @@ pub struct Offered {
     /// The script Node runs, in the bundle, and its arguments.
     pub entry: &'static str,
     pub args: &'static [&'static str],
-    /// Tools Harlo doesn't offer the model: the server's own updating and
+    /// Tools pi doesn't offer the model: the server's own updating and
     /// set-up checks, which change other agents' settings (harlo updates it).
-    pub hidden_for_harlo: &'static [&'static str],
+    pub hidden: &'static [&'static str],
     pub license: &'static str,
 }
 
@@ -50,9 +48,9 @@ pub const OFFERED: [Offered; 1] = [Offered {
     asset: "context-mode.tar.gz",
     entry: "server.mjs",
     // (It asks which agent runs it, to find the project: Claude's way
-    // takes the folder it's started in, as both agents start it.)
+    // takes the folder it's started in, as pi starts it.)
     args: &["--agent", "claude-code"],
-    hidden_for_harlo: &["ctx_upgrade", "ctx_doctor"],
+    hidden: &["ctx_upgrade", "ctx_doctor"],
     license: "Elastic License 2.0",
 }];
 
@@ -327,60 +325,32 @@ pub fn which(form: &Form, place: &Place) -> Option<Offered> {
     OFFERED.iter().copied().find(|b| form.name == b.id && runs(b, &root, &form.command))
 }
 
-/// The agents it's on for there (global), and whether a server of its name
-/// that isn't harlo's is in the way.
-fn agents_on(b: &Offered, place: &Place) -> (Vec<HarnessKind>, bool) {
+/// Whether it's on there (global), and whether a server of its name that
+/// isn't harlo's is in the way.
+fn is_on(b: &Offered, place: &Place) -> (bool, bool) {
     let (root, scope) = (place.root(), place.scope());
-    let mut on = Vec::new();
-    let mut taken = false;
-    for kind in mcp::HARNESSES {
-        if let Ok(Some(entry)) = mcp::entry(kind, &scope, b.id) {
-            let form = Form::from_entry(kind, b.id, &entry);
-            if !runs(b, &root, &form.command) {
-                taken = true;
-            } else if form.enabled {
-                on.push(kind);
-            }
+    match mcp::entry(&scope, b.id) {
+        Ok(Some(entry)) => {
+            let form = Form::from_entry(b.id, &entry);
+            let ours = runs(b, &root, &form.command);
+            (ours && form.enabled, !ours)
         }
-    }
-    (on, taken)
-}
-
-fn agents_key(b: &Offered, place: &Place) -> String {
-    match place {
-        Place::Here => format!("settings.mcp_catalog.{}.agents", b.id),
-        Place::Host(h) => format!("settings.mcp_catalog.{}.agents@{h}", b.id),
+        _ => (false, false),
     }
 }
 
-fn db() -> Option<crate::db::Db> {
-    crate::db::Db::open(&crate::db::default_path()).ok()
-}
-
-/// The agents chosen for it there last (kept while it's off; none yet:
-/// empty).
-fn chosen(b: &Offered, place: &Place) -> Vec<HarnessKind> {
-    let saved = db().and_then(|d| d.get(&agents_key(b, place)).ok().flatten()).unwrap_or_default();
-    mcp::HARNESSES.into_iter().filter(|k| saved.split(',').any(|s| s == k.as_str())).collect()
-}
-
-/// Keeps the agents chosen (for when it's turned on again).
-pub fn choose(b: &Offered, place: &Place, kinds: &[HarnessKind]) {
-    if let Some(d) = db() {
-        let _ = d.set(&agents_key(b, place), &kinds.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(","));
-    }
-}
-
-/// Its entries there for `kinds` (global; removed from the others' files).
-fn write_entries(b: &Offered, place: &Place, node: &Path, kinds: &[HarnessKind]) -> anyhow::Result<()> {
+/// Its entry there (global), running on `node`.
+fn write_entries(b: &Offered, place: &Place, node: &Path) -> anyhow::Result<()> {
     let copy = current(&place.root(), b);
     let mut command = vec![node.to_string_lossy().into_owned(), copy.join(b.entry).to_string_lossy().into_owned()];
     command.extend(b.args.iter().map(std::string::ToString::to_string));
     let form = Form { name: b.id.into(), enabled: true, transport: "stdio".into(), command, ..Form::default() };
     let scope = place.scope();
-    mcp::save(&scope, b.id, &form, kinds).map_err(|e| anyhow::anyhow!("{e:#}"))?;
-    if kinds.contains(&HarnessKind::Harlo) {
-        mcp::set_field(HarnessKind::Harlo, &scope, b.id, "hiddenTools", Some(json!(b.hidden_for_harlo))).map_err(|e| anyhow::anyhow!("{e:#}"))?;
+    mcp::save(&scope, b.id, &form).map_err(|e| anyhow::anyhow!("{e:#}"))?;
+    // (pi hides them with its `toolExposure`.)
+    if !b.hidden.is_empty() {
+        let hidden: serde_json::Map<String, serde_json::Value> = b.hidden.iter().map(|t| ((*t).to_owned(), json!("hidden"))).collect();
+        mcp::set_field(&scope, b.id, "toolExposure", Some(serde_json::Value::Object(hidden))).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     }
     Ok(())
 }
@@ -393,47 +363,38 @@ fn servers_there(place: &Place) -> String {
     }
 }
 
-/// Turns it on there for `kinds` (empty: the ones chosen before),
-/// downloading it first if it isn't yet (blocking; `progress`: bytes so far,
-/// of all).
+/// Turns it on there, downloading it first if it isn't yet (blocking;
+/// `progress`: bytes so far, of all).
 ///
 /// # Errors
 ///
-/// When the download or its check fails, Node isn't there, or an agent's config
+/// When the download or its check fails, Node isn't there, or pi's config
 /// can't be written.
-pub fn enable(b: &Offered, place: &Place, kinds: &[HarnessKind], progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<()> {
-    let kinds = if kinds.is_empty() { chosen(b, place) } else { kinds.to_vec() };
-    let (_, taken) = agents_on(b, place);
+pub fn enable(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) -> anyhow::Result<()> {
+    let (_, taken) = is_on(b, place);
     if taken {
         return Err(anyhow::anyhow!("You already have a server called {} in {}: remove it first, so harlo's doesn't replace it.", b.id, servers_there(place)));
-    }
-    if kinds.is_empty() {
-        return Err(anyhow::Error::msg("Tick at least one agent."));
     }
     let need = match installed_at(place, b)? {
         Some((_, need)) => need,
         None => install_latest_at(place, b, false, progress)?.2,
     };
     let node = find_node_at(place, need)?;
-    write_entries(b, place, &node.path, &kinds)?;
-    choose(b, place, &kinds);
-    Ok(())
+    write_entries(b, place, &node.path)
 }
 
-/// Turns it off there: its entries go (its copy stays), and `kinds` are the
-/// agents chosen for turning it on again.
+/// Turns it off there: its entry goes (its copy stays).
 ///
 /// # Errors
 ///
-/// When an agent's config can't be read or written.
-pub fn disable(b: &Offered, place: &Place, kinds: &[HarnessKind]) -> anyhow::Result<()> {
-    choose(b, place, kinds);
-    let (on, taken) = agents_on(b, place);
-    if on.is_empty() && taken {
+/// When pi's config can't be read or written.
+pub fn disable(b: &Offered, place: &Place) -> anyhow::Result<()> {
+    let (on, taken) = is_on(b, place);
+    if taken {
         return Err(anyhow::anyhow!("The server called {} isn't harlo's: change it in your servers below.", b.id));
     }
-    for kind in on {
-        mcp::put_entry(kind, &place.scope(), None, b.id).map_err(|e| anyhow::anyhow!("{e:#}"))?;
+    if on {
+        mcp::put_entry(&place.scope(), None, b.id).map_err(|e| anyhow::anyhow!("{e:#}"))?;
     }
     Ok(())
 }
@@ -445,17 +406,18 @@ pub fn on_start() {
     let place = Place::Here;
     for b in OFFERED {
         let root = root();
-        let (on, _) = agents_on(&b, &place);
-        let Some(kind) = on.first() else { continue };
-        let Ok(Some(entry)) = mcp::entry(*kind, &Scope::Global, b.id) else { continue };
-        let node = Form::from_entry(*kind, b.id, &entry).command.first().map(PathBuf::from).unwrap_or_default();
+        if !is_on(&b, &place).0 {
+            continue;
+        }
+        let Ok(Some(entry)) = mcp::entry(&Scope::Global, b.id) else { continue };
+        let node = Form::from_entry(b.id, &entry).command.first().map(PathBuf::from).unwrap_or_default();
         let need = needs_node(&current(&root, &b));
         if node_version(&node).is_some_and(|v| need.is_none_or(|n| v >= n)) {
             continue;
         }
         match find_node(need) {
             Ok(n) => {
-                if let Err(e) = write_entries(&b, &place, &n.path, &on) {
+                if let Err(e) = write_entries(&b, &place, &n.path) {
                     tracing::event!(name: "mcp.catalog.node.write.failed", tracing::Level::WARN, mcp.server = %b.name, error.message = %e, "{{mcp.server}}: {{error.message}}");
                 }
             }
@@ -613,11 +575,10 @@ pub fn update(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) ->
         return Ok(format!("{} {version} is the newest.", b.name));
     }
     // (Its entries name the Node it needs now.)
-    let (on, _) = agents_on(b, place);
-    if !on.is_empty()
+    if is_on(b, place).0
         && let Ok(node) = find_node_at(place, need)
     {
-        write_entries(b, place, &node.path, &on)?;
+        write_entries(b, place, &node.path)?;
     }
     Ok(match before {
         Some(old) => format!("{} is updated{}: {old} → {version}. New sessions use it.", b.name, place.on()),
@@ -627,8 +588,8 @@ pub fn update(b: &Offered, place: &Place, progress: &mut dyn FnMut(u64, u64)) ->
 
 /// What Settings → Tools for agents shows for it there.
 ///
-/// `{ id, name, about, license, repo, version ("": not installed), agents,
-/// chosen, taken, needs, node, nodeError }` (`error`: the host couldn't be
+/// `{ id, name, about, license, repo, version ("": not installed), on,
+/// taken, needs, node, nodeError }` (`error`: the host couldn't be
 /// reached).
 pub fn status(b: &Offered, place: &Place) -> Value {
     let mut out = json!({ "id": b.id, "name": b.name, "about": b.about, "license": b.license, "repo": b.repo });
@@ -640,13 +601,12 @@ pub fn status(b: &Offered, place: &Place) -> Value {
             return out;
         }
     };
-    let (on, taken) = agents_on(b, place);
+    let (on, taken) = is_on(b, place);
     // (Not installed yet: any Node will do until its release says.)
     let need = installed.as_ref().and_then(|(_, n)| *n);
     let node = find_node_at(place, need);
     out["version"] = json!(installed.map(|(v, _)| v).unwrap_or_default());
-    out["agents"] = json!(on.iter().map(|k| k.as_str()).collect::<Vec<_>>());
-    out["chosen"] = json!(chosen(b, place).iter().map(|k| k.as_str()).collect::<Vec<_>>());
+    out["on"] = json!(on);
     out["taken"] = json!(taken);
     out["needs"] = json!(need.map(show_version).unwrap_or_default());
     out["node"] = json!(node.as_ref().map(|n| show_version(n.version)).unwrap_or_default());
@@ -719,7 +679,6 @@ mod tests {
         // A host's copies, as its agents name them.
         assert_eq!(Place::of(&Scope::Global), Some(Place::Here));
         assert_eq!(Place::of(&Scope::Project("/p".into())), None);
-        assert_eq!(agents_key(&B, &Place::Host("nas".into())), "settings.mcp_catalog.context-mode.agents@nas");
     }
 
     #[test]

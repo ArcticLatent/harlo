@@ -3,8 +3,8 @@
 //! It's harlo's own build of it for that machine's kind (x86_64 or aarch64),
 //! stripped and gzipped once, sent over SSH when that build isn't there yet,
 //! and kept in harlo's cache there (`~/.cache/harlo/<name>-<build>`; older
-//! builds go). harlo-engines (model servers there) and harlo-agent (Harlo's
-//! sessions there) go so.
+//! builds go). harlo-engines (model servers there), harlo-helper (pi's
+//! sandbox and the wiki there) and harlo-index go so.
 
 // Rust guideline compliant 2026-10-09
 
@@ -183,25 +183,25 @@ mod tests {
     #[test]
     fn where_a_helper_is_looked_for() {
         let engines = Helper::new("harlo-engines", false, "engines helper", "version");
-        let agent = Helper::new("harlo-agent", true, "agent", "--version");
+        let helper = Helper::new("harlo-helper", true, "helper", "--version");
         let dir = Path::new("/opt/harlo/bin");
         let here = std::env::consts::ARCH;
         let other = if here == "x86_64" { "aarch64" } else { "x86_64" };
         // This computer's kind: its own build; another: `-<arch>`.
         assert_eq!(engines.candidates(dir, here), [dir.join("harlo-engines"), dir.join("../lib/harlo/harlo-engines")]);
         assert_eq!(engines.candidates(dir, other)[1], dir.join(format!("../lib/harlo/harlo-engines-{other}")));
-        // The agent: always a static one, also from a build's musl folder.
-        let c = agent.candidates(Path::new("/w/target/debug"), here);
-        assert_eq!(c[0], Path::new("/w/target/debug").join(format!("harlo-agent-{here}")));
-        assert_eq!(c[1], Path::new("/w/target/debug/../lib/harlo").join(format!("harlo-agent-{here}")));
-        assert_eq!(c[2], Path::new(&format!("/w/target/debug/../{here}-unknown-linux-musl/agent/harlo-agent")));
+        // The helper: always a static one, also from a build's musl folder.
+        let c = helper.candidates(Path::new("/w/target/debug"), here);
+        assert_eq!(c[0], Path::new("/w/target/debug").join(format!("harlo-helper-{here}")));
+        assert_eq!(c[1], Path::new("/w/target/debug/../lib/harlo").join(format!("harlo-helper-{here}")));
+        assert_eq!(c[2], Path::new(&format!("/w/target/debug/../{here}-unknown-linux-musl/agent/harlo-helper")));
         assert_eq!(c.len(), 5);
         assert_eq!(normal_arch("arm64"), "aarch64");
     }
 
     #[test]
     fn putting_it_there_keeps_others_being_put() {
-        let s = put_script("harlo-agent", "harlo-agent-00ff", "--version");
+        let s = put_script("harlo-helper", "harlo-helper-00ff", "--version");
         assert!(s.contains(r#"t="$p.tmp.$$""#) && s.contains(r"*.tmp.*) ;;") && s.ends_with(r#""$p" --version"#), "{s}");
         // A POSIX shell takes it.
         let ok = std::process::Command::new("sh").args(["-n", "-c", &s]).status().unwrap();

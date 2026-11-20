@@ -1,6 +1,6 @@
 // Tool calls named as the desktop names them (crates/harlo-app/qml/Theme.qml
-// `toolLabel`, TranscriptView's `toolName`), for every agent: Harlo's and
-// Claude Code's tools, an MCP server's, harlo's own and the shared plan's.
+// `toolLabel`, TranscriptView's `toolName`): pi's tools and its extensions',
+// an MCP server's and harlo's own.
 
 import Foundation
 
@@ -8,22 +8,11 @@ public enum ToolName {
     /// harlo's own tools (Claude's `mcp__harlo__x`, others' `harlo_x`,
     /// Harlo's own `x`): what they do.
     static let harlo: [String: String] = [
-        "propose_helpers": "harlo: offer a split",
-        "start_session": "harlo: start a session",
-        "send_message": "harlo: message a session",
         "read_session": "harlo: read a session",
         "list_sessions": "harlo: list sessions",
-        "list_agents": "harlo: list agents",
-        "stop_session": "harlo: stop a session",
         "request_approval": "harlo: ask you to approve",
         "report_done": "harlo: report back",
         "ask_parent": "harlo: ask the session that started it",
-        "bring_over": "harlo: bring over a helper's changes",
-    ]
-
-    /// The shared plan's tools.
-    static let plan: [String: String] = [
-        "plan_set": "Plan", "plan_read": "Read the plan", "plan_start": "Start a step", "plan_done": "Finish a step",
     ]
 
     /// The project wiki's tool (a wiki session's).
@@ -54,7 +43,7 @@ public enum ToolName {
     /// "context-mode ctx execute", "harlo: start a session".
     public static func words(_ tool: String, running: Bool) -> String {
         let h = harloTool(tool)
-        if let said = plan[h] ?? wiki[h] ?? harlo[h] { return said }
+        if let said = wiki[h] ?? harlo[h] { return said }
         if let m = mcp(tool) { return m.server + " " + m.tool.replacing("_", with: " ") }
         let pick = { (now: String, done: String) in running ? now : done }
         switch tool.lowercased() {
@@ -97,7 +86,6 @@ public enum ToolName {
     /// Its SF Symbol.
     public static func symbol(_ tool: String) -> String {
         let h = harloTool(tool)
-        if plan[h] != nil { return "checklist" }
         if wiki[h] != nil { return "book" }
         if harlo[h] != nil { return "person.2" }
         if mcp(tool) != nil { return "puzzlepiece.extension" }
@@ -125,11 +113,10 @@ public enum ToolName {
         }
     }
 
-    /// Whether the line under its name is words (a question, a plan's
-    /// steps, a subagent's task), not a path or a command: shown in the
-    /// text font, cut at its end rather than in the middle.
+    /// Whether the line under its name is words (a question, a plan, a
+    /// subagent's task), not a path or a command: shown in the text font,
+    /// cut at its end rather than in the middle.
     public static func saysWords(_ tool: String) -> Bool {
-        if plan[harloTool(tool)] != nil { return true }
         switch tool.lowercased() {
         case "ask", "askuserquestion", "task", "agent", "subagent", "todo", "todowrite", "exitplanmode",
              "web_search", "websearch", "skill":
@@ -139,7 +126,7 @@ public enum ToolName {
         }
     }
 
-    /// One of harlo's own tools (start a session, bring over a helper, …).
+    /// One of harlo's own tools (read a session, report a workflow stage, …).
     public static func isHarlo(_ tool: String) -> Bool { harlo[harloTool(tool)] != nil }
 
     /// The line under a tool's name, and whether it's words: harlo's own

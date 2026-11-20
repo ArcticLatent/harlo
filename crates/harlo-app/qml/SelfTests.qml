@@ -71,8 +71,6 @@ Item {
         console.log("selftest:", ok ? "PASS" : "FAIL", what)
     }
     function shown(it) { return it && it.visible && it.opacity > 0 && it.width > 0 && it.height > 0 }
-    /// The draft's Run as workflow: labelled when wide, an icon when narrow.
-    function draftWorkflow() { const b = findName("draftWorkflowButton"); return shown(b) ? b : findName("draftWorkflowIcon") }
     /// The first shown item (depth first) whose `text` is `text`, under
     /// `root` (default: the whole window, popups included).
     // The window's content and its popup layer (an ApplicationWindow keeps
@@ -622,100 +620,6 @@ Item {
     // request counted, the session's limit stopping it, the context
     // panel's cost; then an online server's price typed in Settings.
     property string harloSpendKey: ""
-    SequentialAnimation {
-        id: harloSpendSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlospend"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            tests.check(Accounts.setServerPrice("harlo", "fake", 100, 1000) === "", "the scripted model gets a price")
-            Workspace.setSpendLimits(0.25, 0)
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: tests.harloSpendKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSpendSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendByKeys("hello there") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSpendSteps, () => (tests.spend().costs || {})[tests.harloSpendKey] > 0 && chat.session.status !== "busy", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            const cost = tests.spend().costs[tests.harloSpendKey]
-            tests.check(Math.abs(cost - 0.14) < 1e-6 && !tests.spend().held[tests.harloSpendKey], "one request priced: $0.14, under the limit ($" + cost + ")")
-            tests.check(chat.session.contextText.indexOf("$0.14") >= 0, "the context line says it (" + chat.session.contextText + ")")
-            tests.sendByKeys("/btw what did I say?") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSpendSteps, () => chat.session.asideJson !== "" && JSON.parse(chat.session.asideJson).done, 10000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.sendByKeys("and once more") }
-        PauseAnimation { duration: 300 }
-        // ($0.14 each: the prompt, the side question, this one.)
-        ScriptAction { script: tests.waitUntil(harloSpendSteps, () => !!tests.spend().held[tests.harloSpendKey], 10000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const why = tests.spend().held[tests.harloSpendKey] || ""
-            tests.check(why === "This session has cost $0.42, over its $0.25 limit.", "the side question counted, and past the limit it's held (" + why + ")")
-            tests.check(tests.findName("spendBanner") !== null, "the chat says so")
-            chat.session.loadContext() } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const r = chat.session.contextJson ? JSON.parse(chat.session.contextJson) : {}
-            tests.check(r.costKind === "priced" && Math.abs(r.cost - 0.42) < 1e-6, "the context report has it, priced (" + r.costKind + ", " + r.cost + ")")
-            Workspace.setSpendLimits(0, 0)
-            settingsDialog.openPage("servers") } }
-        PauseAnimation { duration: 800 }
-        // An online server: no price yet, so it says what that means.
-        ScriptAction { script: {
-            // (Its file said nothing of free: harlo said it when it started.)
-            const fakeFree = tests.findName("serverFree-fake")
-            tests.check(fakeFree !== null && fakeFree.visible && fakeFree.checked, "a server on this computer that takes no key is marked free")
-            tests.check(tests.findName("serverFree-gw") === null || !tests.findName("serverFree-gw").visible, "an online one isn't offered as free")
-            const row = tests.findName("serverPrice-gw")
-            tests.check(row !== null && row.visible, "an online server has one")
-            tests.check(tests.findText("No price: what Harlo's sessions on it cost isn't known, so spending limits can't count it.") !== null, "and says what no price means")
-            tests.shotPopup(settingsDialog, "clicks-harlo-spend-servers")
-            tests.clickItem(tests.findName("serverPriceIn-gw"), "price in")
-            TestInput.typeText("3")
-            TestInput.key(Qt.Key_Return, 0) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.clickItem(tests.findName("serverPriceOut-gw"), "price out")
-            TestInput.typeText("15")
-            TestInput.key(Qt.Key_Return, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSpendSteps, () => JSON.parse(Accounts.servers("harlo")).some(s => s.name === "gw" && JSON.stringify(s.prices) === "[[3,15]]"), 5000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const gw = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "gw")
-            tests.check(gw && JSON.stringify(gw.prices) === "[[3,15]]", "the price is kept for its models (" + (gw ? JSON.stringify(gw.prices) : "no gw") + ")")
-            tests.check(tests.findText("Harlo counts what its sessions cost at this price.") !== null, "and it says it counts")
-            tests.shotPopup(settingsDialog, "clicks-harlo-spend-priced")
-            tests.clickItem(tests.findName("serverFree-fake"), "free") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const fake = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "fake")
-            tests.check(fake && fake.free === false, "unticked, it isn't free any more (" + (fake ? fake.free : "no fake") + ")")
-            // Added again, under another name: on this computer, no key: free.
-            tests.clickItem(tests.findName("addModelServer"), "Connect…") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.findName("modelServerAddress").text = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "fake").baseUrl
-            tests.clickItem(tests.findName("modelServerFind"), "Find models") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSpendSteps, () => Accounts.serverSearch.indexOf("\"ready\"") >= 0, 8000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const box = tests.findName("modelServerFree")
-            tests.check(box !== null && box.checked, "adding one here with no key: Free is ticked (" + (box ? box.checked : "no box") + ")")
-            tests.findName("modelServerName").text = "again"
-            tests.clickItem(tests.findName("modelServerAdd"), "add") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const again = JSON.parse(Accounts.servers("harlo")).find(s => s.name === "again")
-            tests.check(again && again.free === true, "and it's saved as free (" + (again ? again.free : "not added") + ")")
-            tests.summary(); Qt.quit() } }
-    }
 
     // A long session (8500 turns, about 51,000 rows): how long it takes to
     // open, and the longest frame while it opens, while a long reply streams
@@ -736,7 +640,7 @@ Item {
     // streams: each request carries the whole 20 MB history.)
     property bool longBusy: false
     Connections {
-        target: win.argValue("--scenario=") === "clicksharlolong" ? chat.transcript : null
+        target: win.argValue("--scenario=") === "clickslongsession" ? chat.transcript : null
         function onCountChanged() {
             const n = chat.transcript.count
             if (tests.longTimes.shown === undefined && n > 0) tests.longTimes.shown = Date.now() - tests.longAt
@@ -745,7 +649,7 @@ Item {
     }
     property bool longDone: false
     Connections {
-        target: win.argValue("--scenario=") === "clicksharlolong" ? chat.session : null
+        target: win.argValue("--scenario=") === "clickslongsession" ? chat.session : null
         function onStatusChanged() {
             if (chat.session.status === "busy") tests.longBusy = true
             else if (tests.longBusy && chat.session.status === "idle") tests.longDone = true
@@ -763,7 +667,7 @@ Item {
     }
     SequentialAnimation {
         id: harloLongSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlolong"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickslongsession"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
@@ -775,7 +679,7 @@ Item {
             longTick.reset(); longTick.start(); tests.longAt = Date.now()
             // (After this step: opening takes a moment, and the steps after
             // a long one are caught up at once, a wait among them.)
-            const path = win.selftestDir + "/data/harlo-agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/long0000-0000-0000-0000-000000000000.jsonl"
+            const path = win.selftestDir + "/home/.pi/agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/long0000-0000-0000-0000-000000000000.jsonl"
             Qt.callLater(() => Workspace.open(path)) } }
         // (Longer than opening blocks: the wait isn't caught up past.)
         PauseAnimation { duration: 1500 }
@@ -815,7 +719,7 @@ Item {
             tests.check(tests.longTimes.all < 5000, "it opens in time (all rows in " + tests.longTimes.all + " ms)")
             tests.check(tests.longTimes.streamWorst < 150, "frames keep coming while the reply streams (longest " + tests.longTimes.streamWorst + " ms)")
             tests.check(tests.longTimes.scrollSlow < 30 && tests.longTimes.scrollWorst < 150, "and while it scrolls up (" + tests.longTimes.scrollSlow + " of " + tests.longTimes.scrollTicks + " frames over 50 ms, longest " + tests.longTimes.scrollWorst + " ms)")
-            tests.shot("clicks-harlo-long-session")
+            tests.shot("clicks-long-session")
             tests.summary(); Qt.quit() } }
     }
 
@@ -829,10 +733,10 @@ Item {
     property int bigOpen: 0
     function bigPath(k) {
         const cwd = win.argValue("--cwd=")
-        return win.selftestDir + "/data/harlo-agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/long000" + k + "-0000-0000-0000-000000000000.jsonl"
+        return win.selftestDir + "/home/.pi/agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/long000" + k + "-0000-0000-0000-000000000000.jsonl"
     }
     Connections {
-        target: win.argValue("--scenario=") === "clicksharlobig" ? chat.session : null
+        target: win.argValue("--scenario=") === "clicksbigsessions" ? chat.session : null
         function onStatusChanged() {
             if (chat.session.status === "busy") tests.longBusy = true
             else if (tests.longBusy && chat.session.status === "idle") tests.longDone = true
@@ -840,7 +744,7 @@ Item {
     }
     SequentialAnimation {
         id: harloBigSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlobig"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksbigsessions"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
@@ -906,13 +810,13 @@ Item {
     property string stopKey: ""
     SequentialAnimation {
         id: harloStopSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlostop"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksstop"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
-        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
+        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(harloStopSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
@@ -935,7 +839,7 @@ Item {
             chat.session.send("same", "")
             chat.composerItem.text = "a draft typed meanwhile"
             tests.stopKey = chat.session.key
-            Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
+            Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(harloStopSteps, () => chat.session.key !== tests.stopKey && chat.session.key !== "", 3000) }
         PauseAnimation { duration: 50 }
@@ -955,7 +859,7 @@ Item {
             const back = Array.from(chat.session.attachments, String).map(f => f.split("/").slice(-2).join("/")).sort()
             tests.check(back.join() === "repo/README.md,repo/notes.md,wt/README.md", "and their files are attached again, the first one's too (" + back + ")")
             tests.check(tests.findText("Stopped before they were sent: your messages are back in the box.") !== null, "the chat says so")
-            tests.shot("clicks-harlo-stop-unsent") } }
+            tests.shot("clicks-stop-unsent") } }
         // (Past the snapshot's 5 s: it ends, and still nothing is sent.)
         PauseAnimation { duration: 5500 }
         ScriptAction { script: {
@@ -991,7 +895,7 @@ Item {
             tests.check(chat.composerItem.text === "keep this queued orca", "Stop gives the queued message back to the box (" + JSON.stringify(chat.composerItem.text) + ")")
             tests.check(chat.session.queued.length === 0, "and nothing stays queued (" + chat.session.queued.join(" | ") + ")")
             tests.check(!tests.modelGot("keep this queued orca"), "the model never got it")
-            tests.shot("clicks-harlo-stop-queue-back")
+            tests.shot("clicks-stop-stop-queue-back")
             chat.composerItem.text = ""
             // Stop and send: the run stops, and the message starts the next.
             tests.requestsBefore = tests.modelRequests().length
@@ -1008,7 +912,7 @@ Item {
         ScriptAction { script: {
             const items = ["sendFollowUp", "sendSteer", "sendStopAndSend"].map(n => tests.findName(n))
             tests.check(items.every(i => i !== null && tests.shown(i)), "the send button's menu offers follow-up, steer, and stop and send")
-            tests.shotWindow("clicks-harlo-send-menu")
+            tests.shotWindow("clicks-stop-send-menu")
             TestInput.key(Qt.Key_Escape, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -1024,7 +928,7 @@ Item {
             tests.check(Date.now() - tests.stopSentAt < 4500, "before the command it stopped would have ended (" + (Date.now() - tests.stopSentAt) + " ms)")
             tests.check(tests.chatText().indexOf("Done waiting.") < 0, "the stopped run didn't go on")
             tests.check(chat.composerItem.text === "", "the box is empty (" + JSON.stringify(chat.composerItem.text) + ")")
-            tests.shot("clicks-harlo-stop-and-send")
+            tests.shot("clicks-stop-stop-and-send")
             tests.summary(); Qt.quit() } }
     }
     property real stopSentAt: 0
@@ -1236,44 +1140,6 @@ Item {
         ScriptAction { script: { tests.check(!terminal.visible, "Ctrl+Shift+W on the last tab closes the panel"); tests.summary(); Qt.quit() } }
     }
 
-    // Subagents: View on a running one, steer it by typing, Esc, Cancel in the tree.
-    property var subRow: null
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickssubagents"
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { Workspace.newSession(-1, "demo"); if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")) } }
-        PauseAnimation { duration: 1000 }
-        ScriptAction { script: tests.sendByKeys("start some subagents") }
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            const row = tests.ancestorWith(tests.findText("BuildOtter", chat.transcript), "viewRequested")
-            tests.check(row !== null, "BuildOtter shows under the task row")
-            tests.subRow = row
-            // Narrow: a running subagent offers Steer (which opens the same view) in place of View.
-            tests.clickText(tests.findText("View", row) !== null ? "View" : "Steer", row) } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { tests.check(chat.subagentDialog.visible, "View opens its transcript")
-            // (The list is read again a few times a second while they run.)
-            tests.check(tests.ancestorWith(tests.findText("BuildOtter", chat.transcript), "viewRequested") === tests.subRow && chat.subagentDock.running > 0, "a running helper's row stays the same row as its list is read again")
-            tests.clickItem(tests.findName("steerField"), "steer field"); TestInput.typeText("Only run the unit tests") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { tests.shotPopup(chat.subagentDialog, "clicks-subagent-dialog"); tests.clickText("Steer", chat.subagentDialog.contentItem) } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { tests.check(chat.session.subagentMessage.indexOf("BuildOtter") >= 0, "Steer sends it (" + chat.session.subagentMessage + ")"); TestInput.key(Qt.Key_Escape, 0) } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: { tests.check(!chat.subagentDialog.visible, "Esc closes the dialog"); tests.shotWindow("clicks-subagent-tree")
-            {
-                // Each row's dot is level with its name.
-                const name = tests.findText("ScoutLark", chat.transcript), row = tests.ancestorWith(name, "viewRequested"), dot = tests.findName("subagentDot", row)
-                const dy = Math.abs(dot.mapToItem(null, 0, dot.height / 2).y - name.mapToItem(null, 0, name.height / 2).y)
-                tests.check(dy <= 1, "a helper's dot is level with its name (" + dy.toFixed(1) + " px off)")
-                const nm = tests.findName("subagentName", row)
-                tests.check(nm.width >= Math.floor(nm.implicitWidth), "a helper's name keeps its whole width while the line has room (" + nm.width + " of " + nm.implicitWidth.toFixed(1) + ")")
-            }
- tests.clickText("Cancel", tests.ancestorWith(tests.findText("BuildOtter", chat.transcript), "viewRequested")) } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { const a = chat.subagentDock.agents.find(x => x.id === "BuildOtter"); tests.check(a && a.status === "aborted", "Cancel in the tree aborts it"); tests.summary(); Qt.quit() } }
-    }
 
     // Shortcut rebinding in Settings → Shortcuts, by clicks and key presses.
     function keyOf(label, cap) {
@@ -1601,7 +1467,6 @@ Item {
         PauseAnimation { duration: 1000 }
         ScriptAction { script: {
             Workspace.renameSession(tests.plainKey, "Fix the <div> overflow")
-            Workspace.planEdit(tests.plainKey, JSON.stringify({ op: "add", title: "Render <b>bold</b> titles" }))
             chat.submit("show the todos", "") } }
         ScriptAction { script: tests.waitUntil(plainSteps, () => chat.session.todosJson.indexOf("<div>") >= 0 && chat.session.status === "idle", 10000) }
         PauseAnimation { duration: 400 }
@@ -1614,8 +1479,6 @@ Item {
             tests.check(tests.shownPlain(title, "Fix the <div> overflow"), "a session title keeps its <div> (" + (title ? title.text + ", " + title.contentWidth.toFixed(0) + " vs " + plainProbe.advanceWidth.toFixed(0) : "not found") + ")")
             const todo = tests.findContaining("<div> handling", chat)
             tests.check(tests.shownPlain(todo, "Patch the parser's <div> handling"), "a to-do keeps its <div> (" + (todo ? todo.text : "not found") + ")")
-            const step = tests.findContaining("<b>bold</b>", chat)
-            tests.check(tests.shownPlain(step, "Render <b>bold</b> titles"), "a plan step keeps its <b> (" + (step ? step.text : "not found") + ")")
             tests.shotWindow("clicks-plain-text")
             chat.submit("please ask me something", "") } }
         ScriptAction { script: tests.waitUntil(plainSteps, () => chat.askPanel.visible, 10000) }
@@ -1661,12 +1524,12 @@ Item {
             tests.shotWindow("clicks-narrow-file")
             win.openDraft(1) } }
         PauseAnimation { duration: 800 }
-        ScriptAction { script: chat.draftView.parallel = true }
-        PauseAnimation { duration: 500 }
+        ScriptAction { script: win.openWorkflow(1) }
+        PauseAnimation { duration: 800 }
         ScriptAction { script: {
-            const lanes = tests.findName("parallelLanes"), over = lanes ? tests.spills(lanes.parent) : ["no lanes"]
-            tests.check(over.length === 0, "the parallel lanes fit their card (" + over.join(", ") + ")")
-            tests.shotWindow("clicks-narrow-parallel")
+            const page = tests.findName("workflowPage"), over = page ? tests.spills(page) : ["no page"]
+            tests.check(over.length === 0, "the New workflow page fits the window (" + over.join(", ") + ")")
+            tests.shotWindow("clicks-narrow-workflow")
             Workspace.newSession(1, "demo") } }
         // A code block of 200 lines comes in two pieces, joined with no seam.
         PauseAnimation { duration: 1000 }
@@ -1714,7 +1577,7 @@ Item {
         PauseAnimation { duration: 3000 }
         ScriptAction { script: {
             tests.log("measure: A open", tests.rssMb(), "MiB RSS,", tests.anonMb(), "MiB anon")
-            tests.check(tests.itemWith("namesFrom", chat.subagentDialog.contentItem) === null && tests.itemWith("namesFrom", chat.branchDialog.contentItem) === null,
+            tests.check(tests.itemWith("namesFrom", chat.branchDialog.contentItem) === null,
                         "the subagent and branch dialogs have no transcript until opened")
             tests.check(files.rooted === "", "the Files panel, never shown, hasn't listed a folder")
             win.toggleMiniChat() } }
@@ -1977,7 +1840,7 @@ Item {
     // The composer's bottom bar: every control shown at a usable size and
     // inside the window, the provider's logo by the model, and Send by
     // clicks.
-    readonly property var barButtons: ["attachButton", "permissionsButton", "modeButton", "modelButton", "micButton", "sendButton", "expandButton"]
+    readonly property var barButtons: ["attachButton", "permissionsButton", "modelButton", "micButton", "sendButton", "expandButton"]
     property string approvalBefore: ""
     property string approvalNext: ""
     SequentialAnimation {
@@ -2041,18 +1904,12 @@ Item {
             const modes = ["always-ask", "write", "yolo"]
             const next = modes[(modes.indexOf(tests.approvalBefore) + 1) % 3]
             tests.check(chat.composerItem.approvalMode === next && Workspace.approvalMode(chat.session.key) === next, "clicking the shield switches to " + next)
-            tests.check(!chat.session.planMode && !chat.composerItem.planOn && (chat.composerItem.compactBar || tests.findText("Build", chat.composerItem) !== null), "sessions start in Build")
-            tests.clickItem(tests.findName("modeButton", chat.composerItem), "Build") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(chat.session.planMode && (chat.composerItem.compactBar || tests.findText("Plan", chat.composerItem) !== null) && Workspace.planMode(chat.session.key), "clicking Build switches to Plan")
-            tests.check(chat.composerItem.inputFocused, "the composer keeps the cursor")
-            tests.shot("clicks-composer-plan") } }
-        // (A shot is taken at the next frame: nothing changes before it.)
-        PauseAnimation { duration: 300 }
+            tests.check(tests.findName("modeButton", chat.composerItem) === null && tests.findText("Build", chat.composerItem) === null, "no Build/Plan switch (pi has no plan mode)")
+            tests.clickItem(tests.findName("composerInput"), "composer") } }
+        PauseAnimation { duration: 200 }
         ScriptAction { script: {
             tests.rowsBefore = chat.transcript.count
-            TestInput.typeText("fast: plan the cache")
+            TestInput.typeText("fast: add the cache")
             TestInput.key(Qt.Key_Return, 0) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -2061,12 +1918,7 @@ Item {
             tests.shot("clicks-composer-busy") } }
         PauseAnimation { duration: 2200 }
         ScriptAction { script: {
-            tests.check(tests.findText("fast: plan the cache", chat.transcript) !== null, "a plan message shows without the plan note")
-            tests.clickItem(tests.findName("composerInput"), "composer")
-            TestInput.key(Qt.Key_Tab, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(!chat.session.planMode && (chat.composerItem.compactBar || tests.findText("Build", chat.composerItem) !== null) && chat.composerItem.text === "", "Tab switches back to Build (no tab typed)")
+            tests.check(tests.findText("fast: add the cache", chat.transcript) !== null, "the message shows as typed")
             tests.summary(); Qt.quit() } }
     }
     // Dictation, with what the microphone "hears" faked (no recording,
@@ -2163,7 +2015,7 @@ Item {
         ScriptAction { script: {
             const h = JSON.parse(Remotes.hostsJson())
             tests.check(h.length === 1 && h[0].name === "box", "the host is saved")
-            tests.check(h.length === 1 && h[0].state === "connected" && h[0].harlo !== "", "it connects and can run Harlo (" + (h.length ? h[0].state + " " + h[0].message : "") + ")")
+            tests.check(h.length === 1 && h[0].state === "connected" && h[0].pi !== "", "it connects and finds pi there (" + (h.length ? h[0].state + " " + h[0].message : "") + ")")
             tests.check(tests.findName("remoteHost-box", settingsDialog.contentItem) !== null, "and is listed")
             tests.shotPopup(settingsDialog, "clicks-remote-settings")
             tests.clickItem(tests.findName("remoteConnect-box", settingsDialog.contentItem), "Disconnect") } }
@@ -2214,7 +2066,7 @@ Item {
         ScriptAction { script: {
             const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo")
             tests.remoteProject = p ? Number(p[0]) : -1
-            tests.check(p !== undefined && p[2] === "harlo", "the remote folder is a project (Harlo, harlo's own there)")
+            tests.check(p !== undefined && p[2] === "pi", "the remote folder is a project (pi there)")
             const texts = []
             const walk = it => { for (const c of it.children) { if (c.visible && typeof c.text === "string" && c.text.indexOf("box") >= 0) texts.push(c.text); walk(c) } }
             walk(sidebar)
@@ -2223,8 +2075,8 @@ Item {
         PauseAnimation { duration: 600 }
         // (click-tests.sh: the host's check says it has no bubblewrap.)
         ScriptAction { script: {
-            const row = tests.findName("hostProvider-harlo", settingsDialog.contentItem)
-            tests.check(row !== null && row.detail.indexOf("Sandbox: needs bubblewrap") >= 0, "a host without bubblewrap: Harlo's row says the sandbox needs it (" + (row ? row.detail : "none") + ")")
+            const row = tests.findName("hostProvider-pi", settingsDialog.contentItem)
+            tests.check(row !== null && row.detail.indexOf("Sandbox: needs bubblewrap") >= 0, "a host without bubblewrap: pi's row says the sandbox needs it (" + (row ? row.detail : "none") + ")")
             tests.shotPopup(settingsDialog, "clicks-remote-providers")
             settingsDialog.close()
             Workspace.newSession(tests.remoteProject, "") } }
@@ -2233,7 +2085,7 @@ Item {
         PauseAnimation { duration: 50 }
         ScriptAction { script: {
             tests.log("remote session:", chat.session.harness, chat.session.status, chat.session.cwd, chat.session.modelName, Workspace.approvalMode(chat.session.key))
-            tests.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a new session there runs Harlo in the remote folder")
+            tests.check(chat.session.harness === "pi" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a new session there runs pi in the remote folder")
             tests.check(chat.session.modelName !== "", "Harlo answers over SSH (model " + chat.session.modelName + ")")
             tests.check(Workspace.approvalMode(chat.session.key) === "always-ask", "it starts asking first")
             tests.shot("clicks-remote-session") } }
@@ -2252,7 +2104,7 @@ Item {
             // The phone's New Session: every machine's projects, whichever the window shows.
             const ph = JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "projects" })))
             const onBox = (ph.projects || []).find(p => p.host === "box")
-            tests.check(onBox && onBox.where.startsWith("box:") && onBox.agents.indexOf("harlo") >= 0, "the phone still gets box's project, with its machine and agents (" + JSON.stringify(onBox) + ")")
+            tests.check(onBox && onBox.where.startsWith("box:") && onBox.agents.indexOf("pi") >= 0, "the phone still gets box's project, with its machine and agents (" + JSON.stringify(onBox) + ")")
             tests.check(tabs.indexOf(tests.instanceKey) < 0 && tests.findText("box", sidebar) === null, "box's tab and sessions are out of sight (" + tabs + ")")
             // Opening box's session (a notification, say) goes back to box.
             Workspace.open(tests.instanceKey) } }
@@ -2271,7 +2123,7 @@ Item {
         ScriptAction { script: {
             const find = it => { for (const c of it.children) { if (c.visible && c.html !== undefined && c.html.indexOf("Hi from the remote host") >= 0) return c; const f = find(c); if (f) return f } return null }
             tests.check(tests.findText("Remote hello", chat.transcript) !== null && find(chat.transcript) !== null, "opening it reads its transcript over SSH")
-            tests.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "as a Harlo session in the remote folder")
+            tests.check(chat.session.harness === "pi" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "as a pi session in the remote folder")
             tests.shot("clicks-remote-saved") } }
         // (A shot is taken at the next frame: nothing changes before it.)
         PauseAnimation { duration: 300 }
@@ -2394,7 +2246,7 @@ Item {
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
-            tests.check(tests.findName("notifyEnabled", d).checked && tests.findName("notifyWhileFocused", d).checked && tests.findName("notifyEvent-subagent", d).checked, "notifications are on by default (while focused too, like before)")
+            tests.check(tests.findName("notifyEnabled", d).checked && tests.findName("notifyWhileFocused", d).checked && tests.findName("notifyEvent-completion", d).checked, "notifications are on by default (while focused too, like before)")
             tests.check(tests.findName("notifyTitle-completion", d).placeholderText === "{agent_name} is ready", "templates show their defaults")
             tests.clickItem(tests.findName("notifyTitle-completion", d), "completion title")
             TestInput.typeText("{session_name} is done")
@@ -2485,8 +2337,7 @@ Item {
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            // Only Harlo here (clicksmcpagents covers Claude).
-            Workspace.setProviderEnabled("claude", false)
+            // Only pi here (clicksmcpagents covers the others).
             Workspace.addProject(win.argValue("--cwd="))
             tests.mcpProject = Workspace.projectRoots(1)[0]
             settingsDialog.openPage("mcp") } }
@@ -2507,7 +2358,7 @@ Item {
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
             const l = tests.mcpList("global")
-            tests.check(l.length === 1 && l[0].name === "fake" && l[0].harnesses.join() === "harlo", "Create saves it for Harlo (" + JSON.stringify(l.map(s => s.name + ":" + s.harnesses)) + ")")
+            tests.check(l.length === 1 && l[0].name === "fake", "Create saves it (" + JSON.stringify(l.map(s => s.name)) + ")")
             const st = JSON.parse(Mcp.statusJson("global")).fake
             tests.check(st && st.state === "connected" && st.tools.length === 2, "and tests it: connected, 2 tools (" + JSON.stringify(st) + ")")
             const pill = tests.findName("mcpStatus-fake", settingsDialog.contentItem)
@@ -2535,14 +2386,13 @@ Item {
             tests.check(bar !== null && bar.parent.objectName === "settingsFooter" && bar.mapToItem(null, 0, bar.height).y <= d.mapToItem(null, 0, d.height).y + 1
                       && flick.contentHeight > flick.height, "Save / Cancel / Delete float at the bottom while the page scrolls")
             tests.shotPopup(settingsDialog, "clicks-mcp-server")
-            tests.check(tests.findName("mcpForHarlo", d) !== null && tests.findName("mcpForHarlo", d).checked, "it's ticked for Harlo")
             tests.clickItem(tests.findName("mcpTimeout", d), "timeout")
             TestInput.typeText("45")
             tests.clickItem(tests.findName("mcpSave", d), "Save") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             const l = tests.mcpList("global")
-            tests.check(l.length === 1 && l[0].harnesses.join() === "harlo" && l[0].form.timeoutSecs === 45, "the timeout is saved (" + JSON.stringify(l[0]) + ")")
+            tests.check(l.length === 1 && l[0].form.timeoutSecs === 45, "the timeout is saved (" + JSON.stringify(l[0]) + ")")
             settingsDialog.contentItem && tests.clickItem(tests.findName("mcpScope", settingsDialog.contentItem), "scope") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: tests.clickText("repo") }
@@ -2561,7 +2411,7 @@ Item {
         PauseAnimation { duration: 3500 }
         ScriptAction { script: {
             const l = tests.mcpList(tests.mcpProject)
-            tests.check(l.length === 2 && l.every(s => s.harnesses.join() === "harlo"), "importing two servers adds both to the project (" + JSON.stringify(l.map(s => s.name)) + ")")
+            tests.check(l.length === 2, "importing two servers adds both to the project (" + JSON.stringify(l.map(s => s.name)) + ")")
             const st = JSON.parse(Mcp.statusJson(tests.mcpProject))
             tests.check(st.one && st.one.state === "connected" && st.web && st.web.state === "failed", "and tests them (" + (st.web ? st.web.error : "") + ")")
             tests.clickItem(tests.findName("mcpServer-web", settingsDialog.contentItem), "web") } }
@@ -2573,13 +2423,14 @@ Item {
         ScriptAction { script: {
             const l = tests.mcpList(tests.mcpProject)
             tests.check(l.length === 1 && l[0].name === "one", "Delete removes it")
-            tests.check(Workspace.fileStamp(tests.mcpProject + "/.harlo/mcp.json") !== "", "project servers are in .harlo/mcp.json")
+            tests.check(Workspace.fileStamp(tests.mcpProject + "/.pi/mcp.json") !== "", "project servers are in .pi/mcp.json")
             tests.summary(); Qt.quit() } }
     }
     // Phone access from the desktop: the sidebar's button, the consent
     // screen, the QR code and link, Settings → Phone. (scripts/
     // phone-e2e.sh tests a phone pairing for real.)
     SequentialAnimation {
+        id: phoneSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksphone"
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
@@ -2632,7 +2483,9 @@ Item {
             tests.check(tests.findText("Use Harlo's relay?") !== null && tests.findName("pairQr") === null, "harlo's relay asks first")
             tests.shotPopup(pairDeviceDialog, "clicks-phone-relay-consent")
             tests.clickItem(tests.findName("pairRelayOn"), "Use relay") } }
-        PauseAnimation { duration: 3000 }
+        // (Connecting takes longer under load: waited for, up to 20 s.)
+        ScriptAction { script: tests.waitUntil(phoneSteps, () => Phone.relayState === "online", 20000) }
+        PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const link = tests.findName("pairLink")
             tests.check(Phone.relayOn && link !== null && link.text.startsWith(tests.relayUnderTest + "/#p="), "the QR code points at the relay (" + (link ? link.text.substring(0, 40) : "") + ")")
@@ -2674,10 +2527,6 @@ Item {
             tests.summary(); Qt.quit() } }
     }
     readonly property string relayUnderTest: win.argValue("--relay=") || "https://relay.harlo.run"
-    // Claude sessions, against a stand-in claude (scripts/fake-claude.py,
-    // --fake-claude=): a reply, an approval, a question, model / Plan /
-    // permission switches (the stand-in's replies report them), stopping,
-    // and the session in the sidebar, reopened with its history and resumed.
     property string claudeKey: ""
     // A test's message search (off the UI thread, as the dialog's): its hits
     // land here.
@@ -2689,187 +2538,9 @@ Item {
         function onMessagesFound(gen, json) { if (gen === 900001) tests.foundHits = JSON.parse(json) }
     }
     function chatText() { return chat.session.transcriptText() }
-    SequentialAnimation {
-        id: claudeSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksclaude"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: { tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("hello there") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(chat.session.harness === "claude", "a Claude session (" + chat.session.harness + ")")
-            tests.check(tests.chatText().indexOf("Hello from fake claude (model claude-sonnet-5, mode default)") >= 0, "it streams the reply (" + tests.chatText().slice(-160) + ")")
-            Workspace.renameSession(tests.claudeKey, "My Claude chat") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.check(chat.session.title === "My Claude chat", "renamed (" + chat.session.title + ")")
-            tests.sendByKeys("please approve writing a file") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            // (On its tool row when that's in view; the bar otherwise.)
-            tests.check(chat.session.requestIsApproval && (tests.findText("Allow Write to run?", chat.transcript) !== null || tests.findText("Approval needed: Write", chat.requestDock) !== null), "a Write asks for approval")
-            tests.shotWindow("clicks-claude-approval")
-            tests.clickText("Approve", chat.transcript) } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(!chat.session.hasRequest && tests.chatText().indexOf("Wrote hi.txt.") >= 0, "Approve lets it write")
-            tests.sendByKeys("approve it again") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const always = tests.findName("alwaysAllowInline", chat.transcript)
-            tests.check(always !== null && always.ToolTip.text === "Remember: acceptEdits mode (for this session)", "it offers Always allow with Claude's suggestion (" + (always ? always.ToolTip.text : "none") + ")")
-            if (always) tests.clickItem(always, "Always allow") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(!chat.session.hasRequest && tests.chatText().indexOf("remembering acceptEdits") >= 0, "Always allow hands Claude its suggestion back (" + tests.chatText().slice(-60) + ")")
-            tests.sendByKeys("plan it please") } }
-        // A long plan to approve: drawn as Markdown, scrolling in its card,
-        // its answers in view.
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const scroll = tests.findName("requestScroll")
-            const start = tests.findText("Start with this plan")
-            const prose = tests.findAllNames("requestProse", scroll || win.contentItem).map(t => t.getText(0, t.length))
-            tests.check(chat.session.hasRequest && scroll !== null && scroll.scrolls && scroll.height <= Math.max(140, chat.height * 0.45) + 1, "a long plan scrolls in its card (" + (scroll ? Math.round(scroll.height) + " of " + Math.round(scroll.contentHeight) : "none") + ")")
-            tests.check(start !== null && start.mapToItem(null, 0, start.height).y <= win.height && tests.findText("Keep planning") !== null, "its answers stay in view")
-            tests.check(prose.some(t => t === "Context") && !prose.some(t => t.indexOf("## ") >= 0) && prose.some(t => t.indexOf("Step 1.") >= 0 && t.indexOf("**") < 0), "it reads as Markdown: headings and a list, not ## or ** (" + prose.slice(0, 3).join(" | ") + ")")
-            tests.shotWindow("clicks-claude-plan")
-            if (scroll) scroll.contentY = scroll.contentHeight - scroll.height } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const last = tests.findAllNames("requestProse", tests.findName("requestScroll")).find(t => t.getText(0, t.length) === "The last line of the plan.")
-            tests.check(last !== null && last !== undefined, "scrolled down, its end shows")
-            tests.clickText("Start with this plan") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(!chat.session.hasRequest && tests.chatText().indexOf("Plan approved.") >= 0, "Start with this plan approves it (" + tests.chatText().slice(-60) + ")")
-            tests.sendByKeys("ask me which database") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(chat.session.hasRequest && chat.session.requestMethod === "ask" && tests.findText("Which database?", chat.askPanel) !== null, "its question shows in the ask panel")
-            tests.clickText("Postgres", chat.askPanel) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.clickText("Send answers", chat.askPanel) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("You picked Postgres.") >= 0, "the answer goes back (" + tests.chatText().slice(-80) + ")")
-            chat.session.setModel("anthropic", "claude-haiku-4-5")
-            tests.clickItem(tests.findName("modeButton", chat.composerItem), "Plan") } }
-        PauseAnimation { duration: 700 }
-        ScriptAction { script: tests.sendByKeys("what now") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("(model claude-haiku-4-5, mode plan)") >= 0, "the model and Plan reach Claude (" + tests.chatText().slice(-110) + ")")
-            tests.clickItem(tests.findName("modeButton", chat.composerItem), "Build")
-            tests.clickItem(tests.findName("permissionsButton", chat.composerItem), "the shield") } }
-        PauseAnimation { duration: 700 }
-        ScriptAction { script: tests.sendByKeys("and now") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("mode acceptEdits)") >= 0, "the shield's edits mode reaches Claude (" + tests.chatText().slice(-80) + ")")
-            tests.sendByKeys("run a build in the background") } }
-        // A background command's end: a notice as it comes (and the same
-        // one read back from the file, below).
-        PauseAnimation { duration: 1800 }
-        ScriptAction { script: {
-            const said = 'Background command "sleep 1; echo built" completed (exit code 0)'
-            tests.check(tests.chatText().split(said).length === 2 && tests.chatText().indexOf("It finished: built.") >= 0, "a background command's end is a notice as it comes (" + tests.chatText().slice(-160) + ")")
-            tests.check(tests.findContaining("<task-notification>", chat.transcript) === null, "not a message of yours")
-            const bg = tests.findAllNames("backgroundNotice", chat.transcript).filter(n => n.visible)
-            const head = bg.length ? tests.findName("backgroundHeadline", bg[0]) : null
-            const cmd = bg.length ? tests.findName("backgroundCommand", bg[0]) : null
-            tests.check(bg.length === 1 && head && head.text === "Background command finished" && cmd && cmd.text === "$ sleep 1; echo built", "drawn as how it went over its command (" + (head ? head.text : "none") + " | " + (cmd ? cmd.text : "none") + ")")
-            tests.shotWindow("clicks-claude-background")
-            tests.sendByKeys("run a script in the background") } }
-        // A long one that fails: its first line, a click away from all of it.
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const bg = tests.findAllNames("backgroundNotice", chat.transcript).filter(n => n.visible)
-            const last = bg[bg.length - 1]
-            const head = last ? tests.findName("backgroundHeadline", last) : null
-            const cmd = last ? tests.findName("backgroundCommand", last) : null
-            tests.check(bg.length === 2 && head && head.text === "Background command failed" && head.color === Theme.error, "a failed one says so, in red (" + (head ? head.text : "none") + ")")
-            tests.check(cmd && cmd.text === "$ cd /tmp; python3 - <<'EOF' …" && cmd.lineCount === 1, "its command on one line (" + (cmd ? cmd.text : "none") + ")")
-            tests.check(last && tests.findContaining("exit code 1", last) !== null, "with its exit code")
-            tests.bgNotice = last
-            if (head) tests.clickItem(head, "the failed command's line") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const open = tests.bgNotice ? tests.findName("backgroundOpen", tests.bgNotice) : null
-            tests.check(open && open.visible && tests.findContaining('print("checking")', open) !== null, "a click shows all of it")
-            tests.shotWindow("clicks-claude-background-open")
-            // /marketplace: harlo runs claude plugin marketplace add, and
-            // Claude never gets the words.
-            tests.pluginAsked = tests.chatText().split("Hello from fake claude").length
-            tests.sendByKeys("/marketplace add obra/superpowers-marketplace") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(claudeSteps, () => tests.findAllNames("backgroundHeadline", chat.transcript).some(h => h.text === "Marketplace added"), 10000) }
-        // (It starts again, idle, to load what was added.)
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const cmd = tests.findAllNames("backgroundCommand", chat.transcript).find(c => c.visible && c.text.indexOf("claude plugin") >= 0)
-            tests.check(cmd && cmd.text === "$ claude plugin marketplace add obra/superpowers-marketplace", "/marketplace add runs claude plugin marketplace add (" + (cmd ? cmd.text : "none") + ")")
-            tests.check(tests.chatText().split("Hello from fake claude").length === tests.pluginAsked && chat.session.status === "idle", "not sent to Claude (" + chat.session.status + ")")
-            tests.sendByKeys("go slow please") } }
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            tests.check(chat.session.status === "busy", "a slow reply runs")
-            tests.clickItem(tests.findName("stopButton", chat.composerItem), "Stop") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: {
-            tests.check(chat.session.status === "idle", "Stop interrupts it (" + chat.session.status + ")")
-            // Stop the process (the sidebar's Stop process): the session is
-            // then its file.
-            Workspace.closeSession(tests.claudeKey) } }
-        // The scanner lists it from its file; open it again.
-        PauseAnimation { duration: 3500 }
-        ScriptAction { script: {
-            let saved = ""
-            // Its own transcript (under the test's Claude config folder) only.
-            for (let i = 0; Workspace.keyAt(i) !== ""; i++) if (Workspace.keyAt(i).indexOf("/claude-config/projects/") >= 0) saved = Workspace.keyAt(i)
-            tests.check(saved !== "", "the session is in the sidebar (" + saved + ")")
-            if (saved === "") { tests.summary(); Qt.quit() }
-            else Workspace.open(saved) } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("hello there") >= 0 && tests.chatText().indexOf("You picked Postgres.") >= 0, "reopened, it shows its history")
-            tests.check(chat.session.title === "My Claude chat", "and its name (" + chat.session.title + ")")
-            // Not started yet (nothing sent): its / list is the one Claude
-            // gave last time in this folder, with harlo's /plugin.
-            tests.check(chat.session.status !== "idle" && chat.session.commands.some(c => c.indexOf("review\t") === 0) && chat.session.commands.some(c => c.indexOf("plugin\t") === 0),
-                      "before it starts, its / list is Claude's from last time (" + chat.session.status + ": " + chat.session.commands.map(c => c.split("\t")[0]).join(", ") + ")")
-            tests.check(tests.chatText().split('Background command "sleep 1; echo built" completed (exit code 0)').length === 2 && tests.findContaining("<task-notification>", chat.transcript) === null, "the background command's notice, once, read back")
-            if (chat.session.harness !== "claude") { tests.check(false, "the reopened session is the Claude one"); tests.summary(); Qt.quit() }
-            else tests.sendByKeys("one more") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Hello from fake claude") >= 0 && chat.session.status === "idle" && tests.chatText().split("Hello from fake claude").length > 1, "and it carries on (resumed)")
-            tests.findForTest("picked Postgres") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const hits = tests.foundHits || []
-            tests.check(hits.some(h => String(h.path).indexOf("/claude-config/projects/") >= 0), "message search finds Claude's sessions (" + hits.length + " hits)")
-            tests.shot("clicks-claude")
-            // Archived from the phone while open (and done): it leaves the lists.
-            tests.claudeKey = chat.session.key
-            const r = JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "archive", key: tests.claudeKey, archived: true })))
-            tests.check(r.ok === true, "the phone archives it (" + JSON.stringify(r) + ")") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const keys = []
-            for (let i = 0; Workspace.keyAt(i) !== ""; i++) keys.push(Workspace.keyAt(i))
-            tests.check(keys.indexOf(tests.claudeKey) < 0 && !keys.some(k => k.indexOf("/claude-config/projects/") >= 0), "archived, the open session leaves the sidebar (" + keys + ")")
-            tests.summary(); Qt.quit() } }
-    }
 
 
-    // Provider marks: a Claude project's sessions of each provider show
+    // Provider marks: a pi project's sessions of each provider show
     // their provider's mark (the status on its corner) in the sidebar and
     // the tabs, the project shows what its new sessions run, and the header
     // names the provider.
@@ -2891,13 +2562,12 @@ Item {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const id = JSON.parse(Workspace.projectsJson())[0].id
-            Workspace.setProjectHarness(id, "claude")
-            Workspace.newSession(id, "claude") } }
+            Workspace.setProjectHarness(id, "pi")
+            Workspace.newSession(id, "pi") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: tests.sendByKeys("hello there") }
         PauseAnimation { duration: 1200 }
@@ -2906,24 +2576,24 @@ Item {
         ScriptAction { script: tests.sendByKeys("hello there") }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            // Claude Code on Claude: Claude's mark; Demo on its Claude
-            // model: the model's maker, Demo as a tag.
+            // Each session shows its model's maker, and no agent badge.
             const marks = tests.findAllNamed("sessionProvider", sidebar, []).map(m => m.provider).sort()
-            const makers = tests.findAllNamed("sessionMaker", sidebar, []).map(m => m.provider)
-            tests.check(marks.join(",") === "claude" && makers.join(",") === "anthropic" && tests.findAllNamed("sessionAgentTag", sidebar, []).length === 1,
-                        "each session shows its model's maker, its agent as a tag, Claude Code on Claude just Claude's mark (" + marks + " | " + makers + ")")
+            const makers = tests.findAllNamed("sessionMaker", sidebar, []).map(m => m.provider).filter(m => m !== "").sort()
+            const want = [Workspace.modelMaker("fake/fake-coder"), "anthropic"].filter(m => m !== "").sort()
+            tests.check(makers.join(",") === want.join(",") && tests.findAllNamed("sessionAgentTag", sidebar, []).length === 0,
+                        "each session shows its model's maker, with no agent badge (" + marks + " | " + makers + ")")
             const p = tests.findName("projectProvider-repo", sidebar)
             // (A narrow sidebar leaves the mark out: the name keeps its room.)
-            tests.check(p !== null ? p.provider === "claude" : sidebar.width < Theme.px(240), "the project shows what its new sessions run (" + (p ? p.provider : "narrow: left out") + ")")
+            tests.check(p !== null ? p.provider === "pi" : sidebar.width < Theme.px(240), "the project shows what its new sessions run (" + (p ? p.provider : "narrow: left out") + ")")
             tests.check(tests.findText("Demo", tests.findName("sessionProviderChip")) !== null, "the header names the provider")
             const tabMarks = tests.findAllNamed("tabProvider", win.contentItem, []).map(m => m.provider).sort()
-            tests.check(tabMarks.join(",") === "claude,demo", "and so do the tabs (" + tabMarks + ")")
-            const cl = tests.findAllNamed("sessionProvider", sidebar, []).find(m => m.provider === "claude")
+            tests.check(tabMarks.join(",") === "demo,pi", "and so do the tabs (" + tabMarks + ")")
+            const cl = tests.findAllNamed("sessionMaker", sidebar, []).find(m => m.visible)
             const at = cl.mapToItem(null, cl.width / 2, cl.height / 2)
             TestInput.moveTo(at.x, at.y) } }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            // The rows are one line (the avatar says the model and agent),
+            // The rows are one line (the avatar says the model),
             // and no hover tip covers them.
             const titles = tests.findAllNamed("sessionTitle", sidebar, [])
             const rows = titles.map(t => { let r = t; while (r && r.rowKey === undefined) r = r.parent; return r })
@@ -2937,25 +2607,20 @@ Item {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const marks = tests.findAllNamed("menuProvider", null, []).map(m => m.provider)
-            tests.check(marks.filter(m => m === "claude").length === 2 && marks.indexOf("harlo") >= 0, "the project menu shows the providers' marks (" + marks + ")")
+            tests.check(marks.indexOf("pi") >= 0 && marks.indexOf("harlo") < 0 && marks.indexOf("claude") < 0, "the project menu shows the providers' marks (" + marks + ")")
             tests.shotWindow("clicks-marks-menu")
             sidebar.projectMenu.close(); win.openDraft(-1) } }
         PauseAnimation { duration: 700 }
-        ScriptAction { script: tests.clickItem(tests.findName("draftHarness", chat.draftView), "the provider chip") }
-        PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            const marks = tests.findAllNamed("menuProvider", null, []).map(m => m.provider)
-            tests.check(marks.indexOf("claude") >= 0 && marks.indexOf("harlo") >= 0, "so does New session's (" + marks + ")")
-            tests.shotWindow("clicks-marks-draft")
-            TestInput.key(Qt.Key_Escape, 0)
+            tests.check(tests.findName("draftHarness", chat.draftView) === null, "New session has no agent to pick: pi is the only one")
             // Each agent × maker: the model's maker's logo with the agent as
-            // a tag, except Claude Code on Claude, and no maker known.
+            // and no maker known.
             const makers = ["", "anthropic", "openai", "google", "zai-coding-plan", "kimi-for-coding", "deepseek", "xai", "minimax-coding-plan", "mistral", "opencode"]
             // (Laid out on a sheet for the shot: a row per agent, the first
             // with a status on each.)
             tests.marksSheet = matrixSheet.createObject(win.contentItem, { width: 24 + makers.length * 38, height: 92 })
             tests.marksMatrix = []
-            for (const [row, agent] of ["harlo", "claude"].entries())
+            for (const [row, agent] of ["pi", "demo"].entries())
                 for (const [col, m] of makers.entries())
                     tests.marksMatrix.push(avatarProbe.createObject(win.contentItem, { provider: agent, maker: m, x: 20 + col * 38, y: 20 + row * 42, ring: Theme.background, badge: row === 0 ? "unread" : "" })) } }
         PauseAnimation { duration: 700 }
@@ -2964,22 +2629,21 @@ Item {
             tests.marksSheet.destroy()
             const wrong = [], offCentre = []
             for (const a of tests.marksMatrix) {
-                const first = a.maker !== "" && !(a.provider === "claude" && a.maker === "anthropic")
+                const first = a.maker !== ""
                 // (Its own parts, shown or not.)
                 const part = n => a.children.find(c => c.objectName === n)
-                const logo = part("sessionMaker"), mark = part("sessionProvider"), tag = part("sessionAgentTag")
-                const ok = first ? logo.visible && tag.visible && !mark.visible && logo.url !== "" && logo.children[0].status === Image.Ready
-                                 : mark.visible && !logo.visible && !tag.visible
+                const logo = part("sessionMaker"), mark = part("sessionProvider")
+                const ok = part("sessionAgentTag") === undefined && (first ? logo.visible && !mark.visible && logo.url !== "" && logo.children[0].status === Image.Ready
+                                                                         : mark.visible && !logo.visible)
                 if (!ok) wrong.push(a.provider + "×" + (a.maker || "none"))
                 // Each mark centred on whole pixels: the same gap each side.
-                const inner = tag.children[0], small = inner.children[0]
-                for (const [m, box] of [[logo, a], [mark, a], [small, inner]])
+                for (const [m, box] of [[logo, a], [mark, a]])
                     if (m.x * 2 + m.width !== box.width || m.y * 2 + m.height !== box.height || m.x !== Math.round(m.x) || m.y !== Math.round(m.y))
                         offCentre.push(a.provider + "×" + (a.maker || "none") + " " + m.width + " in " + box.width + " at " + m.x + "," + m.y)
                 a.destroy()
             }
-            tests.check(offCentre.length === 0, "every mark sits centred on whole pixels, the agent's in its badge too (" + offCentre.slice(0, 3) + ")")
-            tests.check(tests.marksMatrix.length === 22 && wrong.length === 0, "every agent × maker: the maker's logo loaded, the agent as a tag; Claude on Claude or no model: the agent's mark (wrong: " + wrong + ")")
+            tests.check(offCentre.length === 0, "every mark sits centred on whole pixels (" + offCentre.slice(0, 3) + ")")
+            tests.check(tests.marksMatrix.length === 22 && wrong.length === 0, "every agent × maker: the maker's logo loaded, no agent badge; no model yet: the agent's mark (wrong: " + wrong + ")")
             tests.marksMatrix = []
             // A session's model → its maker: by the model's name, else its
             // provider's logo, else none.
@@ -3001,8 +2665,8 @@ Item {
         Rectangle { color: Theme.background }
     }
 
-    // Claude's plan limits (Stage 4), as Claude Code reports them (its
-    // /usage; the stand-in claude here): the sidebar meter and Settings →
+    // Claude's plan limits (pi's Claude subscription's), as Claude Code
+    // reports them (its /usage; the stand-in claude here): the sidebar meter and Settings →
     // Usage show them; when Claude Code can't say, the last numbers stay.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksclaudeusage"
@@ -3033,108 +2697,9 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // Subagents of Claude sessions (Stage 4), against the stand-in:
-    // "delegate" starts one; the dock lists it by its description, its
-    // transcript opens, a reopened session lists it from disk.
-    function subagentsOf() { try { return JSON.parse(chat.session.subagentsJson || "[]") } catch (e) { return [] } }
-    property string delegateKey: ""
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksdelegate"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: { tests.delegateKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: { chat.subagentDock.expanded = true; tests.sendByKeys("please delegate this") } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const a = tests.subagentsOf()
-            tests.check(a.length === 1 && a[0].name === "Look around" && a[0].agent === "Explore" && a[0].status === "completed", "Claude: the subagent is listed, done (" + JSON.stringify(a) + ")")
-            tests.check(a.length === 1 && String(a[0].sessionFile).indexOf("/subagents/agent-") > 0 && tests.chatText().indexOf("The subagent found notes.md.") >= 0, "with its transcript, and the reply")
-            tests.check(Workspace.meterLast === "Claude", "the meter follows Claude's limits now (" + Workspace.meterLast + ")")
-            tests.check(tests.findText("Look around", chat.subagentDock) !== null, "the dock names it by its description")
-            if (a.length) chat.subagentDialog.show(a[0], false) } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: {
-            const t = chat.subagentDialog.transcriptSession.transcriptText()
-            tests.check(t.indexOf("List the files") >= 0 && t.indexOf("Found notes.md.") >= 0, "View: its own conversation (" + t.slice(0, 120).replace(/\n/g, " | ") + ")")
-            tests.check(tests.findName("steerField") === null && tests.findText("Stop helper") === null, "no Steer or Cancel for Claude's")
-            tests.shotWindow("clicks-delegate-claude")
-            chat.subagentDialog.close()
-            Workspace.closeSession(tests.delegateKey) } }
-        PauseAnimation { duration: 3500 }
-        ScriptAction { script: {
-            let saved = ""
-            for (let i = 0; Workspace.keyAt(i) !== ""; i++) if (Workspace.keyAt(i).indexOf("/claude-config/projects/") >= 0) saved = Workspace.keyAt(i)
-            if (saved !== "") Workspace.open(saved) } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const a = tests.subagentsOf()
-            tests.check(chat.session.harness === "claude" && a.length === 1 && a[0].name === "Look around" && a[0].status === "completed" && !!a[0].sessionFile, "reopened: listed from disk (" + JSON.stringify(a) + ")")
-            tests.summary(); Qt.quit() } }
-    }
 
-    // MCP servers for Claude and Harlo (Stage 4): a new server is for the
-    // installed agents; it lands in each one's own dialect (Claude's global
-    // ones through `claude mcp`, the stand-in here); Harlo's switch works,
-    // Claude has none; removing reaches both; a project gets .mcp.json and
-    // .harlo/mcp.json.
     function readJson(path) { try { return JSON.parse(TestInput.readFile(path) || "{}") } catch (e) { return {} } }
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksmcpagents"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            settingsDialog.openPage("mcp") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: tests.clickItem(tests.findName("mcpAdd", settingsDialog.contentItem), "Add MCP server") }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, c = tests.findName("mcpForClaude", d), h = tests.findName("mcpForHarlo", d)
-            tests.check(c !== null && c.checked && h !== null && h.checked, "a new server is for Claude and Harlo (the installed agents that are on)")
-            tests.shotWindow("clicks-mcp-agents")
-            tests.clickItem(tests.findName("mcpBack", d), "back")
-            const err = Mcp.save("global", "", JSON.stringify({ name: "files", enabled: true, transport: "stdio", command: ["npx", "-y", "files-mcp"], env: [["TOKEN", "t"]], url: "", headers: [], cwd: "", timeoutSecs: 20 }), JSON.stringify(["claude", "harlo"]))
-            tests.check(err === "", "saved (" + err + ")") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const claude = tests.readJson(win.selftestDir + "/claude-config/.claude.json").mcpServers || {}
-            const hs = tests.readJson(win.selftestDir + "/config/harlo-agent/mcp.json").mcpServers || {}
-            tests.check(JSON.stringify(claude.files) === JSON.stringify({ type: "stdio", command: "npx", args: ["-y", "files-mcp"], env: { TOKEN: "t" } }), "Claude's dialect, through claude mcp (" + JSON.stringify(claude.files) + ")")
-            tests.check(JSON.stringify(hs.files) === JSON.stringify({ command: "npx", args: ["-y", "files-mcp"], env: { TOKEN: "t" }, timeout: 20, enabled: true }), "Harlo's dialect (" + JSON.stringify(hs.files) + ")")
-            const l = tests.mcpList("global")
-            tests.check(l.length === 1 && l[0].harnesses.join(",") === "claude,harlo" && !l[0].differs, "listed once, for both")
-            tests.check(Mcp.setEnabled("global", "files", false) === "", "switched off") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const hs = tests.readJson(win.selftestDir + "/config/harlo-agent/mcp.json").mcpServers || {}
-            const claude = tests.readJson(win.selftestDir + "/claude-config/.claude.json").mcpServers || {}
-            tests.check(hs.files.enabled === false && !!claude.files && tests.mcpList("global")[0].differs, "Harlo's is off; Claude's stays (no switch)")
-            tests.check(Mcp.remove("global", "files") === "", "removed") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const hs = tests.readJson(win.selftestDir + "/config/harlo-agent/mcp.json").mcpServers || {}
-            const claude = tests.readJson(win.selftestDir + "/claude-config/.claude.json").mcpServers || {}
-            tests.check(!hs.files && !claude.files && tests.mcpList("global").length === 0, "gone from both")
-            const project = win.argValue("--cwd=")
-            tests.check(Mcp.save(project, "", JSON.stringify({ name: "web", enabled: true, transport: "http", command: [], env: [], url: "https://example.com/mcp", headers: [["Authorization", "Bearer x"]], cwd: "" }), JSON.stringify(["claude", "harlo"])) === "", "a project server") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const project = win.argValue("--cwd=")
-            const claude = tests.readJson(project + "/.mcp.json").mcpServers || {}, hs = tests.readJson(project + "/.harlo/mcp.json").mcpServers || {}
-            tests.check(claude.web && claude.web.type === "http" && claude.web.headers.Authorization === "Bearer x" && hs.web && hs.web.url === "https://example.com/mcp", "in the project's .mcp.json and .harlo/mcp.json")
-            settingsDialog.close()
-            tests.summary(); Qt.quit() } }
-    }
 
-    // Edit & resend for Claude (Stage 4): hovering a prompt
-    // offers it; it forks the session before that prompt (the original
-    // stays as it was) and puts the prompt back in the composer; the next
-    // message goes on in the fork.
     property string forkFile: ""
     function hoverEdit(text) {
         const bubble = tests.findText(text, chat.transcript)
@@ -3143,337 +2708,12 @@ Item {
         TestInput.moveTo(at.x, at.y)
         return true
     }
-    SequentialAnimation {
-        id: effortCheck
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("after the effort change") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(t.indexOf("effort low") >= 0 && t.indexOf("second, edited") >= 0 && t.indexOf("second message") < 0, "a restart (effort) resumes the fork (" + t.slice(-90) + ")")
-            tests.summary(); Qt.quit() } }
-    }
-    SequentialAnimation {
-        id: forkSteps
-        property string harness: "claude"
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksfork"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, forkSteps.harness) }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: tests.sendByKeys("first message") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("second message") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.forkFile = Workspace.sessionFile(Workspace.activeKey)
-            tests.check(tests.hoverEdit("second message"), forkSteps.harness + ": the prompt is there") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.clickText("Edit & resend", chat.transcript) }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            const now = Workspace.sessionFile(Workspace.activeKey)
-            tests.check(chat.composerItem.text === "second message", "the prompt is back in the composer (" + chat.composerItem.text + ")")
-            tests.check(tests.chatText().indexOf("first message") >= 0 && tests.chatText().indexOf("second message") < 0, "the transcript ends before it")
-            tests.check(now !== "" && now !== tests.forkFile, "in a new session (" + now.split("/").pop() + ")")
-            chat.composerItem.text = ""
-            tests.sendByKeys("second, edited") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(t.indexOf("first message") >= 0 && t.indexOf("second, edited") >= 0 && t.indexOf("second message") < 0 && chat.session.status === "idle", "and goes on there")
-            tests.shot("clicks-fork-" + forkSteps.harness)
-            if (forkSteps.harness === "claude") {
-                tests.check(TestInput.readFile(tests.forkFile).indexOf("second message") >= 0, "the original is as it was")
-                // Effort restarts Claude (resuming the fork).
-                chat.session.setThinkingLevel("low")
-                forkSteps.harness = "claude-effort"
-                forkSteps.stop(); effortCheck.start()
-            } else {
-                tests.summary(); Qt.quit()
-            } } }
-    }
 
-    // Claude on a remote host (Stage 4), over the test's SSH server with the
-    // stand-in claude: a session in a remote project runs there, its
-    // transcript is the host's (ssh://…), a name is kept there, and the host's
-    // Claude sessions are listed, reopened with their history and resumed.
-    property string remoteClaudeKey: ""
     property string instanceKey: ""
     property string remoteWorktree: ""
-    SequentialAnimation {
-        id: remoteClaudeSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksremoteclaude"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            tests.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
-            Remotes.connectHost("box") } }
-        // (The first connection is slow when the machine is busy.)
-        PauseAnimation { duration: 6000 }
-        ScriptAction { script: {
-            tests.check(JSON.parse(Remotes.hostsJson())[0].state === "connected", "connected")
-            settingsDialog.openPage("remote") } }
-        PauseAnimation { duration: 600 }
-        // Settings → Other machines: the host's agents.
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, h = JSON.parse(Remotes.hostsJson())[0]
-            tests.check(tests.findName("hostAgent-box-claude", d) !== null && tests.findText("Claude 2.1.296", d) !== null, "the host's agents are listed, with versions")
-            tests.check(tests.findName("hostSignIn-box-claude", d) !== null && h.claudeAuth === "no", "Claude not signed in there: Sign in")
-            tests.check(tests.findName("hostInstall-box-claude", d) === null && tests.findName("hostRecheck-box", d) !== null, "and Check again")
-            tests.shotWindow("clicks-remote-agents")
-            settingsDialog.close()
-            Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const p = JSON.parse(Workspace.projectsJson()).find(p => p.remote)
-            sidebar.projectMenu.projectId = p.id; sidebar.projectMenu.path = "ssh://box" + win.argValue("--cwd="); sidebar.projectMenu.name = p.name; sidebar.projectMenu.harness = p.harness
-            sidebar.projectMenu.popup(sidebar, 120, 160) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.check(tests.findText("New Claude session") !== null && tests.findText("New Harlo session") !== null, "a remote project offers Claude (found there) and Harlo (harlo's own)")
-            sidebar.projectMenu.close()
-            const p = JSON.parse(Workspace.projectsJson()).find(p => p.remote)
-            tests.remoteClaudeKey = Workspace.newSession(p.id, "claude") } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: tests.sendByKeys("hello there") }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const file = Workspace.sessionFile(Workspace.activeKey)
-            tests.shotWindow("clicks-remote-claude-chat")
-            tests.check(chat.session.harness === "claude" && tests.chatText().indexOf("Hello from fake claude") >= 0, "Claude answers over SSH (" + tests.chatText().slice(-80) + ")")
-            tests.check(file.indexOf("ssh://box" + win.selftestDir + "/claude-config/projects/") === 0, "its transcript is the host's (" + file + ")")
-            // Orchestration there: the bridge on the host, harlo's socket
-            // forwarded to it; the helper starts on the host too.
-            tests.sendByKeys("please orchestrate a helper") } }
-        PauseAnimation { duration: 6000 }
-        ScriptAction { script: {
-            const t = tests.chatText(), kids = JSON.parse(Workspace.orchestratedJson(tests.remoteClaudeKey))
-            tests.check(/Started a helper with harlo \([1-9][0-9]* tools\): live:/.test(t), "on the host, the agent finds harlo's tools (" + t.slice(-110) + ")")
-            tests.check(kids.length === 1 && Workspace.instanceOf(kids[0].id) === "box", "and its helper runs on box (" + JSON.stringify(kids) + ")")
-            tests.check(t.indexOf("The Claude session") >= 0 && t.indexOf("harlo · ") >= 0, "whose reply comes back to it")
-            tests.check(Workspace.sessionFile(tests.remoteClaudeKey) !== "", "(still the host's session)")
-            // Code lookup on: harlo's tools offer it, answered from box's code.
-            Workspace.setSetting("lookup_" + JSON.parse(Workspace.projectsJson()).find(p => p.remote).id, "1")
-            tests.sendByKeys("lookup note") } }
-        ScriptAction { script: tests.waitUntil(remoteClaudeSteps, () => tests.chatText().indexOf("Lookup tools:") >= 0, 60000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(/Lookup tools: \S*lookup; retry: fn retry  src\/jobs\.rs:1-3/.test(t), "Code lookup on: Claude on box gets lookup, its card from box's code (" + t.slice(t.indexOf("Lookup tools:"), t.indexOf("Lookup tools:") + 120) + ")")
-            Workspace.renameSession(tests.remoteClaudeKey, "Remote chat") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const file = Workspace.sessionFile(Workspace.activeKey).replace("ssh://box", "")
-            tests.check(TestInput.readFile(file).indexOf('"customTitle":"Remote chat"') >= 0, "the name is written there")
-            tests.sendByKeys("please delegate this") } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: {
-            const a = tests.subagentsOf()
-            tests.check(a.length === 1 && a[0].status === "completed" && String(a[0].sessionFile).indexOf("ssh://box") === 0, "a subagent there, its transcript the host's (" + (a[0] ? a[0].sessionFile : "none") + ")")
-            Workspace.closeSession(tests.remoteClaudeKey) } }
-        PauseAnimation { duration: 6000 }
-        ScriptAction { script: {
-            let saved = ""
-            for (let i = 0; Workspace.keyAt(i) !== ""; i++) if (Workspace.keyAt(i).indexOf("ssh://box" + win.selftestDir + "/claude-config/projects/") === 0) saved = Workspace.keyAt(i)
-            tests.check(saved !== "", "the host's Claude session is in the sidebar (" + saved + ")")
-            if (saved === "") { tests.summary(); Qt.quit() }
-            else Workspace.open(saved) } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            tests.check(chat.session.harness === "claude" && tests.chatText().indexOf("hello there") >= 0 && chat.session.title === "Remote chat", "reopened: its history and name (" + chat.session.title + ")")
-            const a = tests.subagentsOf()
-            tests.check(a.length === 1 && a[0].name === "Look around" && a[0].status === "completed" && String(a[0].sessionFile).indexOf("ssh://box") === 0, "and its subagent, from the host (" + JSON.stringify(a.map(x => [x.name, x.status])) + ")")
-            if (a.length) chat.subagentDialog.show(a[0], false) } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const t = chat.subagentDialog.transcriptSession.transcriptText()
-            tests.check(t.indexOf("List the files") >= 0 && t.indexOf("Found notes.md.") >= 0, "whose own conversation opens from there")
-            chat.subagentDialog.close()
-            if (chat.session.harness !== "claude") { tests.summary(); Qt.quit() }
-            else tests.sendByKeys("one more") } }
-        PauseAnimation { duration: 4000 }
-        // An edit there: numbered from the host's file (read over SSH).
-        ScriptAction { script: tests.sendByKeys("show the tools please") }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: {
-            const edit = tests.findAllNames("previewCode", chat.transcript).find(v => v.signs)
-            const en = edit ? edit.lines.map(l => l.n) : []
-            tests.check(edit && JSON.stringify(en) === JSON.stringify(["3", "", "", "4", "5", "6"]) && edit.lines[0].p.indexOf("ssh://box") === 0,
-                      "an edit on the host, numbered from its file there (" + JSON.stringify(en) + ")") } }
-        ScriptAction { script: {
-            tests.check(tests.chatText().split("Hello from fake claude").length > 2 && chat.session.status === "idle", "and it carries on there (resumed)")
-            tests.shotWindow("clicks-remote-claude")
-            // A worktree on the host: the dialog lists its branches (read in
-            // the background), the project's setup runs there.
-            const p = JSON.parse(Workspace.projectsJson()).find(p => p.remote)
-            Workspace.setProjectSetup(p.id, "echo ok > setup-ran")
-            sidebar.worktreeDialogs.openNew(p.id, p.name, "claude") } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const box = sidebar.worktreeDialogs.baseBox
-            tests.check(box.count >= 2 && box.currentText === "main", "New worktree lists the host's branches, current first (" + box.count + " " + box.currentText + ")")
-            sidebar.worktreeDialogs.newDialog.close()
-            Workspace.newWorktreeSession(JSON.parse(Workspace.projectsJson()).find(p => p.remote).id, "feature-x", "main", "claude") } }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: {
-            const dir = win.selftestDir + "/remote-data/harlo/worktrees/"
-            tests.remoteClaudeKey = Workspace.activeKey
-            tests.check(String(chat.session.cwd).indexOf("ssh://box" + dir) === 0 && String(chat.session.cwd).endsWith("/feature-x"), "a worktree session runs in the host's worktree (" + chat.session.cwd + ")")
-            const wt = String(chat.session.cwd).replace("ssh://box", "")
-            tests.check(TestInput.readFile(wt + "/README.md") === "hello\n", "the worktree is checked out there")
-            tests.check(TestInput.readFile(wt + "/setup-ran") === "ok\n", "and the project's setup ran in it")
-            tests.sendByKeys("hello from the worktree") } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Hello from fake claude") >= 0, "Claude answers in it")
-            tests.remoteWorktree = String(chat.session.cwd).replace("ssh://box", "")
-            Workspace.removeWorktree(tests.remoteClaudeKey, true, true) } }
-        PauseAnimation { duration: 4000 }
-        ScriptAction { script: {
-            tests.check(TestInput.readFile(tests.remoteWorktree + "/README.md") === "", "removing it removes it there")
-            // Settings on box: its agents, and its own MCP files.
-            settingsDialog.openPage("providers") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, row = tests.findName("hostProvider-claude", d)
-            tests.check(Workspace.instance === "box" && row !== null && row.detail.indexOf("Version 2.1.296") === 0 && row.detail.indexOf("not signed in") > 0, "Providers shows box's agents (" + (row ? row.detail : "none") + ")")
-            tests.check(tests.findName("provider-claude", d) === null, "not this computer's list")
-            tests.shotWindow("clicks-remote-providers")
-            settingsDialog.openPage("mcp") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const err = Mcp.save("host:box", "", JSON.stringify({ name: "boxtools", enabled: true, transport: "stdio", command: ["box-mcp"], url: "", headers: [], env: [], cwd: "", timeoutSecs: null, exposure: "", description: "" }), JSON.stringify(["harlo", "claude"]))
-            const home = win.selftestDir + "/claude-config"
-            const hs = JSON.parse(TestInput.readFile(home + "/.config/harlo-agent/mcp.json") || "{}").mcpServers || {}
-            const claude = JSON.parse(TestInput.readFile(home + "/.claude.json") || "{}").mcpServers || {}
-            tests.check(err === "" && hs.boxtools && hs.boxtools.command === "box-mcp", "MCP on box writes box's own Harlo config (" + err + ")")
-            tests.check(claude.boxtools !== undefined, "and box's Claude (claude mcp there)")
-            const l = JSON.parse(Mcp.listJson("host:box"))
-            tests.check(l.servers.some(x => x.name === "boxtools" && x.harnesses.indexOf("claude") >= 0 && x.harnesses.indexOf("harlo") >= 0), "which the page lists for box")
-            tests.shotWindow("clicks-remote-mcp")
-            settingsDialog.close() } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            // The host's Claude is older than the newest: offered, and
-            // updated there.
-            const m = tests.findName("updateMessage-box/claude")
-            tests.check(m !== null && m.text === "Version 2.1.300 is available on box (you have 2.1.296).", "the host's agents are checked for updates (" + (m ? m.text : Updates.entriesJson) + ")")
-            tests.clickItem(tests.findName("updateGo-box/claude"), "Update on box") } }
-        PauseAnimation { duration: 4000 }
-        ScriptAction { script: {
-            const m = tests.findName("updateMessage-box/claude")
-            tests.check(m !== null && m.text === "Claude on box is now 2.1.300. New sessions use it.", "and updated there (" + (m ? m.text : "none") + ")")
-            tests.summary(); Qt.quit() } }
-    }
 
 
-    // Orchestration: an agent drives harlo through its MCP bridge (the
-    // stand-in Claude as the client): it starts a helper session, which
-    // shows in its dock; the helper's reply comes back to it; View opens the
-    // helper as a tab.
-    property string orchestrator: ""
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksorchestrate"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.orchestrator = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: { chat.subagentDock.expanded = true; tests.sendByKeys("please orchestrate a helper") } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(/Started a helper with harlo \([1-9][0-9]* tools\): live:/.test(t), "the agent finds harlo's tools and starts a session (" + t.slice(-90) + ")")
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.orchestrator))
-            tests.check(kids.length === 1 && kids[0].name === "Helper" && kids[0].agent === "claude", "it's the agent's subagent (" + JSON.stringify(kids) + ")")
-            tests.check(tests.findText("Helper", chat.subagentDock) !== null, "and shows in its dock") } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: {
-            const t = tests.chatText(), kids = JSON.parse(Workspace.orchestratedJson(tests.orchestrator))
-            tests.check(kids.length === 1 && kids[0].status === "completed", "the helper finishes (" + (kids[0] ? kids[0].status : "") + ")")
-            tests.check(t.indexOf("The Claude session") >= 0 && t.indexOf("harlo · ") >= 0 && t.indexOf("Thanks; harlo says") >= 0 && t.indexOf("Hello from fake claude") >= 0, "and its reply comes back to the agent (" + t.slice(-120) + ")")
-            const who = tests.findName("subagentWho", chat)
-            tests.check(who !== null && who.text.indexOf("Claude Code") === 0 && who.text.indexOf("claude-") < 0, "the helper is named as elsewhere, not by its ids (" + (who ? who.text : "none") + ")")
-            const st = tests.findName("subagentStatus", chat)
-            tests.check(st === null || !st.visible, "finished needs no word: its faint dot says it")
-            tests.shotWindow("clicks-orchestrate")
-            // A finished helper's View shows on its row's hover.
-            const row = tests.findName("subagentWho", chat.subagentDock)
-            tests.check(row !== null && tests.findName("subagentView", chat.subagentDock) === null, "a finished helper's View waits for a hover")
-            if (row) { const p = row.mapToItem(null, row.width / 2, row.height / 2); TestInput.moveTo(p.x, p.y) } } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.clickItem(tests.findName("subagentView", chat.subagentDock), "View") }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: {
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.orchestrator))
-            tests.check(Workspace.activeKey === kids[0].id && tests.chatText().indexOf("Say hello as the helper") >= 0, "View opens the helper's session (" + Workspace.activeKey + ")")
-            // Turned off: a running agent's bridge offers nothing and harlo
-            // refuses; new sessions get no bridge, and there's no Delegate.
-            Workspace.setOrchestrationEnabled(false)
-            Workspace.open(tests.orchestrator) } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            tests.check(tests.findName("delegateButton") === null, "off: no Delegate button")
-            tests.sendByKeys("please orchestrate again") } }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(t.indexOf("(0 tools): Teamwork is turned off in harlo") >= 0, "off: a running agent gets no tools, and calls are refused (" + t.slice(-110) + ")")
-            Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("please orchestrate") }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("No harlo tools here.") >= 0, "off: a new session has no harlo tools (" + tests.chatText().slice(-60) + ")")
-            tests.summary(); Qt.quit() } }
-    }
 
-    // The real Claude Code (not in the click suite; spends a little):
-    // one tiny turn on Haiku in --cwd.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "claudereal"
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 4000 }
-        ScriptAction { script: { chat.session.setModel("anthropic", "claude-haiku-4-5"); tests.sendByKeys("Reply with exactly: OK") } }
-        PauseAnimation { duration: 20000 }
-        ScriptAction { script: {
-            tests.log("status:", chat.session.status, "model:", chat.session.modelId, "context:", chat.session.contextText)
-            tests.log("transcript:", tests.chatText())
-            Qt.quit() } }
-    }
-
-
-    // A real subagent (not in the click suite): --harness= claude|harlo,
-    // --model=provider/id; one tiny delegated task.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "delegatereal"
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.delegateKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, win.argValue("--harness=")) } }
-        PauseAnimation { duration: 6000 }
-        ScriptAction { script: {
-            const m = win.argValue("--model=").split("/")
-            chat.session.setModel(m[0], m.slice(1).join("/"))
-            tests.sendByKeys("Start one subagent (your subagent/Agent tool, the general agent) with the description 'Say banana' and the task 'Reply with the single word banana.' Then tell me what it said, in one word.") } }
-        PauseAnimation { duration: 75000 }
-        ScriptAction { script: {
-            tests.log("status:", chat.session.status, "model:", chat.session.modelId)
-            tests.log("subagents:", chat.session.subagentsJson)
-            tests.log("transcript:", tests.chatText().replace(/\n/g, " | ").slice(-700))
-            Qt.quit() } }
-    }
 
     // Edit & resend against a real agent (not in the click suite):
     // --harness=, --model=provider/id; three one-word turns.
@@ -3534,19 +2774,19 @@ Item {
         ScriptAction { script: { if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth=")); Workspace.newSession(-1, "demo") } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
-            const b = tests.findName("modeButton", chat.composerItem), p = b.mapToItem(null, b.width / 2, b.height / 2)
+            const b = tests.findName("attachButton", chat.composerItem), p = b.mapToItem(null, b.width / 2, b.height / 2)
             // (Offscreen, controls don't follow the mouse unless told to.)
             b.hoverEnabled = true
             TestInput.moveTo(p.x, p.y) } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             const t = tipStyle.tip
-            tests.check(t.visible && t.text.indexOf("Build: the agent makes changes") === 0, "hovering shows the tip (" + t.text + ")")
+            tests.check(t.visible && t.text.indexOf("Attach files") === 0, "hovering shows the tip (" + t.text + ")")
             tests.check(t.leftPadding === 10 && t.contentItem && t.contentItem.font.pixelSize === Theme.px(12) && t.background && t.background.variant === "outline", "dressed like the pills")
             tests.check(t.contentItem.parent !== tipStyle && t.contentItem.text === t.text, "its text is in it")
             tests.shotWindow("clicks-tooltip")
             // A long one wraps instead of running across the window.
-            tests.findName("modeButton", chat.composerItem).ToolTip.text = "Use the task tool to run two subagents in parallel: one lists every file in this repo with its size, the other counts the lines of Rust in each crate and reports the totals." } }
+            tests.findName("attachButton", chat.composerItem).ToolTip.text = "Use the task tool to run two subagents in parallel: one lists every file in this repo with its size, the other counts the lines of Rust in each crate and reports the totals." } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const t = tipStyle.tip
@@ -3558,7 +2798,7 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // Agent updates: a newer Claude (as the registry says) is offered in
+    // Agent updates: a newer pi (as the registry says) is offered in
     // the corner; Dismiss holds for that version; Update runs it in the
     // background and says what it is now; View output shows the log.
     SequentialAnimation {
@@ -3566,44 +2806,44 @@ Item {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
+            Workspace.setSetting("pi_path", win.argValue("--fake-pi="))
             updateToasts.doneTimeout = 1500
             Updates.checkLocal() } }
         PauseAnimation { duration: 2000 }
         ScriptAction { script: {
-            const m = tests.findName("updateMessage-local/claude")
-            tests.check(m !== null && m.text === "Version 2.1.300 is available (you have 2.1.296).", "a newer Claude is offered (" + (m ? m.text : Updates.entriesJson) + ")")
-            const toast = tests.findName("update-local/claude"), at = toast ? toast.mapToItem(null, 0, 0).x : -1
+            const m = tests.findName("updateMessage-local/pi")
+            tests.check(m !== null && m.text === "Version 0.80.0 is available (you have 0.79.0).", "a newer pi is offered (" + (m ? m.text : Updates.entriesJson) + ")")
+            const toast = tests.findName("update-local/pi"), at = toast ? toast.mapToItem(null, 0, 0).x : -1
             tests.check(toast && at >= 0 && at + toast.width <= win.width, "the notice is inside the window (" + Math.round(at) + "+" + (toast ? Math.round(toast.width) : 0) + " of " + win.width + ")")
             tests.shotWindow("clicks-update-offer")
-            tests.clickItem(tests.findName("updateDismiss-local/claude"), "Dismiss") } }
+            tests.clickItem(tests.findName("updateDismiss-local/pi"), "Dismiss") } }
         PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.check(tests.findName("update-local/claude") === null, "Dismiss puts it away"); Updates.checkLocal() } }
+        ScriptAction { script: { tests.check(tests.findName("update-local/pi") === null, "Dismiss puts it away"); Updates.checkLocal() } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            tests.check(tests.findName("update-local/claude") === null, "and that version isn't offered again")
+            tests.check(tests.findName("update-local/pi") === null, "and that version isn't offered again")
             Workspace.setSetting("update_dismissed", "{}")
             Updates.checkLocal() } }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: { tests.clickItem(tests.findName("updateGo-local/claude"), "Update") } }
+        ScriptAction { script: { tests.clickItem(tests.findName("updateGo-local/pi"), "Update") } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
-            const m = tests.findName("updateMessage-local/claude")
-            tests.check(m !== null && m.text === "Claude is now 2.1.300. New sessions use it.", "Update runs, then says what it is now (" + (m ? m.text : "none") + ")")
+            const m = tests.findName("updateMessage-local/pi")
+            tests.check(m !== null && m.text === "pi is now 0.80.0. New sessions use it.", "Update runs, then says what it is now (" + (m ? m.text : "none") + ")")
             tests.shotWindow("clicks-update-done")
-            tests.clickItem(tests.findName("updateOutput-local/claude"), "View output") } }
+            tests.clickItem(tests.findName("updateOutput-local/pi"), "View output") } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: {
             tests.check(windowSettings.terminalOpen, "View output opens the terminal")
-            tests.check(tests.findName("update-local/claude") !== null, "done: it stays while the pointer is on it")
+            tests.check(tests.findName("update-local/pi") !== null, "done: it stays while the pointer is on it")
             TestInput.moveTo(20, 20) } }
         PauseAnimation { duration: 2200 }
         ScriptAction { script: {
-            tests.check(tests.findName("update-local/claude") === null, "then goes by itself")
+            tests.check(tests.findName("update-local/pi") === null, "then goes by itself")
             Updates.checkLocal() } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            tests.check(tests.findName("update-local/claude") === null, "up to date now: nothing offered")
+            tests.check(tests.findName("update-local/pi") === null, "up to date now: nothing offered")
             tests.summary(); Qt.quit() } }
     }
 
@@ -3639,7 +2879,7 @@ Item {
             Workspace.addProject(base + "/api")
             Workspace.addProject(base + "/shipyard")
             Workspace.saveTemplate(JSON.stringify({ name: "Review a pull request", harness: "claude", approval: "always-ask", text: "Review the open pull request: correctness first, then tests." }))
-            Workspace.saveTemplate(JSON.stringify({ name: "Fix the failing tests", harness: "harlo", approval: "write", text: "Run the tests and fix what fails." })) } }
+            Workspace.saveTemplate(JSON.stringify({ name: "Fix the failing tests", harness: "pi", approval: "write", text: "Run the tests and fix what fails." })) } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: tests.clickItem(tests.findText("Fix the login redirect loop", sidebar), "the session") }
         PauseAnimation { duration: 2000 }
@@ -3708,20 +2948,14 @@ Item {
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             windowSettings.rightMode = ""
-            tests.clickItem(tests.findText("Carriers want manifests as CSV", sidebar), "the plan") } }
+            tests.clickItem(tests.findText("Carriers want manifests as CSV", sidebar), "the options") } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: { chat.transcript.scrollToEnd(); tests.shotWindow("site-plan"); Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: { chat.transcript.scrollToEnd(); tests.shotWindow("site-plan-light"); Workspace.chooseThemeMode("dark") } }
         PauseAnimation { duration: 800 }
-        // (Narrow, the option cards stand one above another: the plan folded
-        // to its header so both show whole, scrolled to the first, the
-        // recommended one, for the plan's phone picture.)
-        ScriptAction { script: {
-            if (win.width >= 1000) return
-            const fold = tests.findName("planToggle", chat)
-            if (fold) tests.clickItem(fold, "fold the plan") } }
-        PauseAnimation { duration: 700 }
+        // (Narrow, the option cards stand one above another: scrolled to
+        // the first, the recommended one, for the phone picture.)
         ScriptAction { script: {
             if (win.width >= 1000) return
             const v = chat.transcript.listView
@@ -3751,7 +2985,7 @@ Item {
         ScriptAction { script: {
             windowSettings.rightMode = ""
             const api = JSON.parse(Workspace.projectsJson()).find(p => p.path.endsWith("/api"))
-            tests.siteKey = Workspace.newSession(api.id, "harlo") } }
+            tests.siteKey = Workspace.newSession(api.id, "pi") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(siteSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
@@ -3853,12 +3087,11 @@ Item {
                 if (!settingsDialog.compact) return
                 tests.check(!settingsDialog.navOpen && settingsDialog.page === "git", "picking a page closes it")
             })
-            // States that say why: Harlo isn't signed in here.
+            // States that say why.
             q.push(() => settingsDialog.openPage("providers"))
             q.push(() => {
-                const st = tests.findName("providerStatus-harlo", settingsDialog.contentItem)
-                tests.check(st && st.text !== "Error" && st.text !== "", "Providers says why Harlo isn't ready (" + (st ? st.text : "") + ")")
-                tests.check(tests.findName("rowSignIn-harlo", settingsDialog.contentItem) !== null, "and offers Sign in on its row")
+                const st = tests.findName("providerStatus-pi", settingsDialog.contentItem)
+                tests.check(st && st.text !== "Error" && st.text !== "", "Providers says how pi is (" + (st ? st.text : "") + ")")
                 // More shows the rest of a row's words, Less hides it again.
                 const m = tests.findMoreText(settingsDialog.contentItem)
                 tests.check(m !== null, "a row has More")
@@ -3871,7 +3104,7 @@ Item {
                 }
                 settingsDialog.openPage("general")
             })
-            q.push(() => tests.check(tests.findName("defaultModelSignIn", settingsDialog.contentItem) !== null, "General's Model row says where to sign in"))
+            q.push(() => tests.check(tests.findName("defaultModelSignIn", settingsDialog.contentItem) !== null || tests.findName("defaultModel", settingsDialog.contentItem) !== null, "General's Model row: pi's models, or where to sign in"))
             // Devices with phone access off: said once per section, not per row.
             q.push(() => settingsDialog.openPage("devices"))
             q.push(() => {
@@ -4218,82 +3451,6 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // The composer's Delegate menu: Second opinion and Committee send the
-    // agent harlo's written instruction (agents and models picked, the
-    // composer's text as the question).
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksdelegatemenu"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            chat.composerItem.text = "is the cache right?"
-            tests.clickItem(tests.findName("delegateButton"), "the Delegate button") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.clickItem(tests.findName("delegateAdvisor"), "Second opinion…") } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: {
-            const agent = tests.findName("delegateAgentAsk"), note = tests.findName("delegateNote")
-            tests.check(agent && agent.currentText === "Harlo", "Second opinion: another agent by default (" + (agent ? agent.currentText : "") + ")")
-            tests.check(note && note.text === "is the cache right?", "the composer's text is the question")
-            tests.shotWindow("clicks-delegate-advisor")
-            tests.clickItem(tests.findName("delegateStart"), "Ask") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(t.indexOf("Get a second opinion from Harlo (agent \"harlo\", its default model)") >= 0 && t.indexOf("The question: is the cache right?") >= 0, "the agent gets harlo's instruction (" + t.slice(0, 120) + ")")
-            tests.check(chat.composerItem.text === "", "and the composer is empty")
-            tests.clickItem(tests.findName("delegateButton"), "the Delegate button") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.clickItem(tests.findName("delegateCommittee"), "Committee…") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const a = tests.findName("delegateAgentMember1"), b = tests.findName("delegateAgentMember2"), m = tests.findName("delegateModelMember1")
-            tests.check(a && b && a.currentText === "Claude" && b.currentText === "Harlo", "Committee: this agent and another (" + (a ? a.currentText : "") + ", " + (b ? b.currentText : "") + ")")
-            tests.check(m && m.count > 2, "with Claude's models to pick from (" + (m ? m.count : 0) + ")")
-            m.currentIndex = 1
-            m.activated(1)
-            tests.findName("delegateNote").text = "flaky tests"
-            tests.clickItem(tests.findName("delegateStart"), "Start committee") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(/- Claude \(agent "claude", model "[^"]+"\)/.test(t) && t.indexOf("- Harlo (agent \"harlo\"") >= 0 && t.indexOf("The problem: flaky tests") >= 0, "both members, with the chosen model, go to the agent (" + t.slice(-300) + ")")
-            tests.summary(); Qt.quit() } }
-    }
-
-    // The Delegate menu with real agents (not in the click suite): Claude
-    // (Haiku) asks Harlo (its default model) for a second opinion.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "delegatemenureal"
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.orchestrator = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: {
-            chat.session.setModel("anthropic", "claude-haiku-4-5")
-            chat.composerItem.text = "In Python, is `x += 1` the same as `x = x + 1` for ints? One short sentence."
-            chat.composerItem.delegatePopover.show("advisor") } }
-        PauseAnimation { duration: 1000 }
-        ScriptAction { script: {
-            const p = chat.composerItem.delegatePopover
-            const row = tests.findName("delegateAgentAsk").parent
-            row.pick("harlo")
-            tests.log("sending:", JSON.stringify(row.chosen()))
-            p.start() } }
-        PauseAnimation { duration: 100000 }
-        ScriptAction { script: {
-            tests.log("children:", Workspace.orchestratedJson(tests.orchestrator))
-            tests.log("asked:", chat.session.hasRequest, "| status:", chat.session.status, "| transcript:", tests.chatText().replace(/\n/g, " | ").slice(-1500))
-            Qt.quit() } }
-    }
-
     // Graphics (not in the click suite; started several times by hand):
     // what draws the window, the saved choice, the notice; --choose= saves
     // a choice for the next start.
@@ -4341,7 +3498,7 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // Tool calls (the stand-in Claude): a finished run open in a box of its
+    // Tool calls (pi on the scripted model): a finished run open in a box of its
     // own height that scrolls (the wheel moves the box, then the session);
     // a write's lines numbered and coloured, more on a click; an edit's
     // lines out and in; a command under what it's for, its last lines; a
@@ -4352,10 +3509,11 @@ Item {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
-        ScriptAction { script: { tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
+        ScriptAction { script: {
+            tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi")
+            Workspace.setApprovalMode(tests.claudeKey, "yolo") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: tests.sendByKeys("show the tools please") }
         ScriptAction { script: tests.waitUntil(toolCardSteps, () => tests.chatText().indexOf("Limits now come from") >= 0 && chat.session.status === "idle", 20000) }
@@ -4369,7 +3527,7 @@ Item {
             tests.check(boxes.length >= 1, "a finished run shows open, in its box (" + boxes.length + ")")
             const box = boxes[boxes.length - 1]
             const what = tests.findAllNames("toolWhat", box).map(l => l.plain)
-            tests.check(what.indexOf("Running the full test suite") >= 0, "a command shows what it's for (" + what.join(" | ") + ")")
+            tests.check(what.indexOf("cargo test") >= 0, "a command shows itself (pi says nothing more of what it's for) (" + what.join(" | ") + ")")
             tests.check(what.indexOf("src/config.rs") >= 0 && what.indexOf("README.md") >= 0, "paths from the session's folder")
             const previews = tests.findAllNames("toolPreview", box)
             tests.check(previews.length === 2, "the write and the edit show their lines (" + previews.length + ")")
@@ -4386,20 +3544,13 @@ Item {
             tests.check(tails.some(x => x.indexOf("7 passed") >= 0), "a command's last lines (" + tails.join(" | ") + ")")
             const code = tests.findAllNames("codeView", box).sort((a, b) => a.mapToItem(box, 0, 0).y - b.mapToItem(box, 0, 0).y).reduce((all, v) => all.concat(v.lines), [])
             tests.check(code.length === 7 && code[0].n === "1" && code[0].h === "hello", "a read's line, numbered (" + JSON.stringify(code[0]) + ")")
-            tests.check(code[1].n === "3" && code[1].mark === "match" && code[3].mark === "context" && code[3].h.indexOf("}") >= 0,
+            tests.check(code[1].n === "4" && code[1].mark === "match" && code[3].mark === "context" && code[3].h.indexOf("}") >= 0,
                       "grep's line numbers as a gutter, its matches tinted among their context (" + JSON.stringify(code.slice(1, 4)) + ")")
-            tests.check(code[4].n === "2" && code[6].n === "4" && code[4].h.indexOf("<span") >= 0 && /^    let/.test(code[4].h.replace(/<[^>]+>/g, "")),
+            tests.check(code[4].n === "4" && code[6].n === "6" && code[4].h.indexOf("<span") >= 0 && /^    let/.test(code[4].h.replace(/<[^>]+>/g, "")),
                       "a printed file's lines numbered from where it starts, highlighted, indented (" + JSON.stringify(code.slice(4)) + ")")
             const sel = tests.findAllNames("codeText", box)
             tests.check(sel.length >= 2 && sel.every(e => e.selectByMouse && e.readOnly), "a listing's text can be selected")
             tests.check(tests.findAllNames("toolTail", box).every(l => !/^\d+[:-]|^    let/.test(l.text)), "a listing isn't shown again as plain lines")
-            tests.check(tests.findAllNames("toolCommandRule", box).length >= 1, "a rule between a command and its listing")
-            const cmds = tests.findAllNames("toolCommand", box)
-            const sedIn = cmds.some(c => c.text.indexOf("sed -n") >= 0)
-            tests.check(win.width < 700 ? cmds.length >= 3 && sedIn : cmds.length === 2 && !sedIn,
-                      "the commands under what they're for; a short one on its line, in the well too when its line cuts it short (" + cmds.length + ")")
-            const grepCmd = cmds.find(c => c.text.indexOf("grep -n") >= 0)
-            tests.check(grepCmd && grepCmd.wrapMode === Text.WrapAtWordBoundaryOrAnywhere, "a command in the well breaks at a space")
             const sedHead = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("sed -n") >= 0)
             const sedWrap = sedHead ? tests.findName("codeWrap", sedHead.parent) : null
             const sedCard = sedHead ? sedHead.parent.parent.parent : null
@@ -4479,23 +3630,36 @@ Item {
             tests.bigMade = made().length
             const calls = box.rows.filter(r => r.kind !== "thinking").length
             tests.check(f && calls === 200 && tests.bigMade > 0 && tests.bigMade < 80, "a run of 200 calls makes only the cards near its box's view (" + tests.bigMade + " of " + calls + " calls, " + box.rows.map(r => r.kind).filter(k => k !== "tool").join(",") + ")")
-            tests.check(made().some(h => /\bStep 199\b/.test(what(h))) && !made().some(h => /\bStep 0\b/.test(what(h))), "it opens at its end, its first steps not made yet (" + made().map(what).join(" | ").slice(0, 300) + ")")
+            tests.check(made().some(h => /\bstep 199\b/.test(what(h))) && !made().some(h => /\bstep 0\b/.test(what(h))), "it opens at its end, its first steps not made yet (" + made().map(what).join(" | ").slice(0, 300) + ")")
             tests.clickItem(tests.findName("composerInput"), "composer")
             TestInput.key(Qt.Key_Up, Qt.ControlModifier | Qt.ShiftModifier)
             const head = win.activeFocusItem
             tests.check(head && head.objectName === "runHeader" && head.group === box.group, "Ctrl+Shift+Up: the long run's line")
             TestInput.key(Qt.Key_Down, 0)
             const first = win.activeFocusItem
-            tests.check(first && first.objectName === "toolHead" && /\bStep 0\b/.test(what(first)), "Down: its first step, made when it's wanted (" + (first ? what(first) : "") + ")")
+            tests.check(first && first.objectName === "toolHead" && /\bstep 0\b/.test(what(first)), "Down: its first step, made when it's wanted (" + (first ? what(first) : "") + ")")
             for (let k = 0; k < 120; k++) TestInput.key(Qt.Key_Down, 0)
             const far = win.activeFocusItem
-            tests.check(far && far.objectName === "toolHead" && /\bStep 120\b/.test(what(far)), "Down ×120: the 121st, the box following (" + (far ? what(far) : "") + ")")
+            tests.check(far && far.objectName === "toolHead" && /\bstep 120\b/.test(what(far)), "Down ×120: the 121st, the box following (" + (far ? what(far) : "") + ")") } }
+        // (The box follows by the next frame; later on a busy machine.)
+        ScriptAction { script: tests.waitUntil(toolCardSteps, () => {
+            const boxes = tests.findAllNames("runBox", chat.transcript), f = tests.findName("runBoxScroll", boxes[boxes.length - 1]), far = win.activeFocusItem
+            if (!f || !far) return false
             const p = far.mapToItem(f, 0, 0)
-            tests.check(p.y >= -1 && p.y + far.height <= f.height + 1, "the step in the box's view")
+            return p.y >= -1 && p.y + far.height <= f.height + 1
+        }, 3000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const t = chat.transcript, boxes = tests.findAllNames("runBox", t), box = boxes[boxes.length - 1], f = tests.findName("runBoxScroll", box)
+            const made = () => { const out = []; const walk = it => { for (const c of it.children) { if (c.objectName === "toolHead") out.push(c); walk(c) } }; walk(box); return out }
+            const what = h => tests.findAllNames("toolWhat", h).map(l => l.plain).join(" ")
+            const far = win.activeFocusItem
+            const p = far.mapToItem(f, 0, 0)
+            tests.check(p.y >= -1 && p.y + far.height <= f.height + 1, "the step in the box's view (" + [Math.round(p.y), Math.round(far.height), Math.round(f.height)] + ")")
             tests.check(made().length < 80, "still only those near the view (" + made().length + ")")
             for (let k = 0; k < 20; k++) TestInput.key(Qt.Key_Up, 0)
             const back = win.activeFocusItem
-            tests.check(back && /\bStep 100\b/.test(what(back)), "Up ×20: back to the 101st (" + (back ? what(back) : "") + ")")
+            tests.check(back && /\bstep 100\b/.test(what(back)), "Up ×20: back to the 101st (" + (back ? what(back) : "") + ")")
             TestInput.key(Qt.Key_Escape, 0)
             tests.summary(); Qt.quit() } }
     }
@@ -4508,10 +3672,11 @@ Item {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
-        ScriptAction { script: { tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
+        ScriptAction { script: {
+            tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi")
+            Workspace.setApprovalMode(tests.claudeKey, "yolo") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: tests.sendByKeys("show the listings please") }
         ScriptAction { script: tests.waitUntil(listingSteps, () => tests.chatText().indexOf("Here are the listings") >= 0 && chat.session.status === "idle", 20000) }
@@ -4534,7 +3699,7 @@ Item {
             tests.listingAt("cat -n")
             tests.shotWindow("listings-catn-read") } }
         PauseAnimation { duration: 200 }
-        ScriptAction { script: { tests.listingAt("Find every use"); tests.shotWindow("listings-grep-sed") } }
+        ScriptAction { script: { tests.listingAt("grep -n 'limits"); tests.shotWindow("listings-grep-sed") } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: { tests.listingAt("head -16"); tests.shotWindow("listings-head-cat") } }
         PauseAnimation { duration: 200 }
@@ -4591,14 +3756,14 @@ Item {
             tests.check(x2 > 0 && Math.abs(x2 - want) < 2, "…its next row under its indentation and 2 (" + [x2, want] + ")")
             const blocks = tests.findAllNames("replyCodeView", chat.transcript)
             tests.check(blocks.length === 3 && blocks[0].count === 4 && blocks[2].count === 2, "a reply's code blocks, wrapped: still numbered (" + blocks.map(b => b.count) + ")")
-            tests.listingAt("Look at how")
+            tests.listingAt("sed -n '38")
             tests.shotWindow("listings-wrap")
             Workspace.chooseLook("wrap", "null")
             Workspace.chooseThemeMode("light") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { tests.listingAt("cat -n"); tests.shotWindow("listings-catn-read-light") } }
         PauseAnimation { duration: 200 }
-        ScriptAction { script: { tests.listingAt("Find every use"); tests.shotWindow("listings-grep-sed-light") } }
+        ScriptAction { script: { tests.listingAt("grep -n 'limits"); tests.shotWindow("listings-grep-sed-light") } }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             const a = tests.findContaining("Run it with", chat.transcript)
@@ -4618,8 +3783,8 @@ Item {
             TestInput.moveTo(4, 4)
             tests.check(tests.findAllNames("copyCode", tests.listingBox()).every(c => !c.visible), "a tool's Copy: hidden until hovered ("
                       + tests.findAllNames("copyCode", tests.listingBox()).map(c => [c.copied, c.activeFocus, win.activeFocusItem ? win.activeFocusItem.objectName + ":" + win.activeFocusItem.focusReason : "-"]) + ")")
-            tests.listingAt("Look at how")
-            const sedCard = tests.findAllNames("toolWhat", tests.listingBox()).find(l => l.plain.indexOf("Look at how") >= 0)
+            tests.listingAt("sed -n '38")
+            const sedCard = tests.findAllNames("toolWhat", tests.listingBox()).find(l => l.plain.indexOf("sed -n '38") >= 0)
             const at = sedCard.mapToItem(null, sedCard.width / 2, sedCard.height / 2)
             tests.hoverLineWidth = sedCard.width
             TestInput.moveTo(at.x, at.y + 30) } }
@@ -4629,7 +3794,7 @@ Item {
             const copy = tests.findAllNames("copyCode", box).find(c => c.visible)
             const head = copy ? (function up(i) { return !i || i.objectName === "toolHead" ? i : up(i.parent) })(copy.parent) : null
             tests.check(copy && head, "hovered: its Copy, in the call's line (" + (copy ? copy.parent : "none") + ")")
-            const sedWhat = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Look at how") >= 0)
+            const sedWhat = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("sed -n '38") >= 0)
             tests.check(sedWhat && sedWhat.width === tests.hoverLineWidth, "its Copy keeps its place: nothing in the line moves on hover (" + (sedWhat ? sedWhat.width : -1) + " vs " + tests.hoverLineWidth + ")")
             const sed = tests.findAllNames("codeView", box).find(v => v.lines.length && v.lines[0].n === "38")
             tests.check(copy && sed && copy.mapToItem(null, 0, copy.height).y <= sed.mapToItem(null, 0, 0).y, "the Copy sits above the code")
@@ -4728,7 +3893,8 @@ Item {
             const v = tests.findAllNames("codeView", chat.transcript).find(c => c.lines.length === 400)
             tests.check(v !== undefined, "opened: 400 lines (" + tests.findAllNames("codeView", chat.transcript).map(c => c.lines.length) + ")")
             const lf = tests.findName("runBoxScroll", tests.listingBox())
-            tests.check(lf && lf.contentY === 0, "a run of one call, opened: its top in view (" + (lf ? lf.contentY : "none") + ")")
+            // (Its top is originY: a list laid out from its end can start above 0.)
+            tests.check(lf && lf.atYBeginning, "a run of one call, opened: its top in view (" + (lf ? lf.contentY + " of origin " + lf.originY : "none") + ")")
             if (v) {
                 tests.check(v.lines[0].n === "1" && v.lines[399].n === "400", "…from its first line")
                 // The numbers and tints placed again (as on a resize): ten times.
@@ -4753,7 +3919,7 @@ Item {
             chat.transcript.follow = false
             const box = tests.listingBox()
             const card = what => { const w = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf(what) >= 0); return w ? w.parent.parent.parent : null }
-            const grep = card("Search the whole tree"), nl = card("Number the log")
+            const grep = card("grep -rn limits_"), nl = card("nl app.log")
             tests.check(grep && grep.code && grep.code.lines[0].n === "3" && !grep.code.earlier, "400 matches: kept from the first (" + (grep && grep.code ? grep.code.lines[0].n : "none") + ")")
             const all = grep ? chat.session.codeText("Bash", grep.command, "", chat.session.callOutput(grep.rowKey)).split("\n").length : 0
             tests.check(all === 400, "Copy: all 400 matches, not just what's kept (" + all + ")")
@@ -4761,8 +3927,8 @@ Item {
             const up = tests.findAllNames("toolEarlierLines", box)
             tests.check(nl && nl.code && nl.code.earlier && nlLast === "1200" && up.length === 1 && /^↑ \d+ of 1194 earlier lines$/.test(up[0].text) && tests.findAllNames("toolEarlier", box).length === 0,
                       "a long log, kept to its end: its last lines, the earlier ones above them (" + nlLast + " · " + (up[0] ? up[0].text : "none") + ")")
-            tests.listingAt("Search the whole tree")
-            const w = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Search the whole tree") >= 0)
+            tests.listingAt("grep -rn limits_")
+            const w = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("grep -rn limits_") >= 0)
             if (w) tests.clickItem(w, "the search's line") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
@@ -4772,21 +3938,21 @@ Item {
             } }
         // (The log's card, past the opened listing, is made as the box comes
         // to it, and placed again once what's above it has its height.)
-        ScriptAction { script: tests.waitUntil(listingSteps, () => tests.listingAt("Number the log"), 5000) }
+        ScriptAction { script: tests.waitUntil(listingSteps, () => tests.listingAt("nl app.log"), 5000) }
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
             const box = tests.listingBox()
-            tests.listingAt("Number the log")
+            tests.listingAt("nl app.log")
             tests.shotWindow("listings-search-log")
             const up = tests.findAllNames("toolEarlierLines", box)[0]
-            const nlw = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Number the log") >= 0)
+            const nlw = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("nl app.log") >= 0)
             const lv = nlw ? tests.findAllNames("codeView", nlw.parent.parent.parent)[0] : null
             tests.holdY = lv ? lv.mapToItem(null, 0, lv.height).y : -1
             if (up) tests.clickItem(up, "the log's earlier lines") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const box = tests.listingBox()
-            const w = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("Number the log") >= 0)
+            const w = tests.findAllNames("toolWhat", box).find(l => l.plain.indexOf("nl app.log") >= 0)
             const nl = w ? w.parent.parent.parent : null
             const lines = nl && nl.code ? nl.code.lines : []
             tests.check(lines.length > 6 && lines[lines.length - 1].n === "1200" && Number(lines[0].n) > 1 && tests.findAllNames("toolEarlier", box).length === 1
@@ -4795,7 +3961,7 @@ Item {
             const lv = nl ? tests.findAllNames("codeView", nl)[0] : null
             const y = lv ? lv.mapToItem(null, 0, lv.height).y : -2
             tests.check(tests.holdY > 0 && Math.abs(y - tests.holdY) < 2, "opening the earlier lines keeps the last line where it was (" + Math.round(tests.holdY) + " → " + Math.round(y) + ")")
-            tests.listingAt("Number the log")
+            tests.listingAt("nl app.log")
             tests.shotWindow("listings-search-log-open")
             tests.summary(); Qt.quit() } }
     }
@@ -4811,7 +3977,7 @@ Item {
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const cwd = win.argValue("--cwd=")
-            const path = win.selftestDir + "/data/harlo-agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/paged000-0000-0000-0000-000000000000.jsonl"
+            const path = win.selftestDir + "/home/.pi/agent/sessions/--" + cwd.replace(/^\//, "").replace(/\//g, "-") + "--/paged000-0000-0000-0000-000000000000.jsonl"
             Qt.callLater(() => Workspace.open(path)) } }
         PauseAnimation { duration: 1500 }
         // (5 rows a turn; then paged once they're sent.)
@@ -4934,24 +4100,17 @@ Item {
             const h = win.selftestDir + "/home"
             tests.check(TestInput.readFile(h + "/.claude/skills/harlo-advisor/SKILL.md") === "" && TestInput.readFile(h + "/.agents/skills/harlo/SKILL.md") === "", "the skills harlo installed are removed at start")
             tests.check(TestInput.readFile(h + "/.agents/skills/harlo-handoff/SKILL.md") === "mine\n", "the user's own skill of the same name kept")
-            settingsDialog.openPage("orchestration") } }
+            settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
-            tests.check(tests.findName("orchSelfStart", d) !== null && tests.findName("orchReviewSteps", d) !== null && tests.findText("Skills", d) === null, "the page: the switch and how helpers start, no skills")
+            tests.check(tests.findName("orchEnabled", d) !== null && tests.findText("Teamwork", d) === null, "Tools for agents has Harlo's tools switch, and nothing says Teamwork")
             tests.shotWindow("clicks-orchestration")
-            tests.findName("orchSelfStart", d).activated(0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            tests.check(Workspace.setting("orchestration_on_their_own") === "asked" && tests.findName("orchSelfStart", d).currentIndex === 0, "Only when I ask is saved and shown")
-            tests.clickItem(tests.findName("orchEnabled", d), "Orchestration's switch, off") } }
+            tests.clickItem(tests.findName("orchEnabled", d), "Harlo's tools, off") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            tests.check(!Workspace.orchestrationOn && Workspace.setting("orchestration") === "0" && !(tests.findName("orchSelfStart", d) || {}).visible, "off: saved, and the page shows only the switch")
-            tests.shotWindow("clicks-orchestration-off")
-            tests.clickItem(tests.findName("orchEnabled", d), "Orchestration's switch, on") } }
+            tests.check(!Workspace.orchestrationOn && Workspace.setting("orchestration") === "0", "off: saved")
+            tests.clickItem(tests.findName("orchEnabled", settingsDialog.contentItem), "Harlo's tools, on") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             tests.check(Workspace.orchestrationOn && Workspace.setting("orchestration") === "1", "on again")
@@ -4959,127 +4118,811 @@ Item {
             Qt.quit() } }
     }
 
-    // Orchestration on a host with the real Claude (not in the click
-    // suite; --ssh= a test sshd): the Python bridge there, harlo's socket
-    // forwarded; one tiny Haiku turn calls list_agents.
+    // Settings → Agents: pi's state (the scripted model's two models), its
+    // details, and its switch, which decides what New session offers.
     SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "orchestrateremotereal"
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")); Remotes.connectHost("box") } }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: { tests.log("host:", JSON.parse(Remotes.hostsJson())[0].state); Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: { tests.orchestrator = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 6000 }
-        ScriptAction { script: { chat.session.setModel("anthropic", "claude-haiku-4-5"); tests.sendByKeys("Call the list_agents tool of the harlo MCP server, then reply with just the agent ids it returned, comma-separated.") } }
-        PauseAnimation { duration: 45000 }
-        ScriptAction { script: {
-            tests.log("asked:", chat.session.hasRequest, "| status:", chat.session.status, "| transcript:", tests.chatText().replace(/\n/g, " | ").slice(-600))
-            Qt.quit() } }
-    }
-
-    // Orchestration with a real agent (not in the click suite): one tiny
-    // turn (--harness=, --model= provider/model) that calls harlo's
-    // list_agents (approved when asked).
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "orchestratereal"
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: { Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.orchestrator = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, win.argValue("--harness=")) } }
-        PauseAnimation { duration: 5000 }
-        ScriptAction { script: {
-            const m = win.argValue("--model=").split("/")
-            chat.session.setModel(m[0], m.slice(1).join("/"))
-            tests.sendByKeys("Call the list_agents tool of the harlo MCP server, then reply with just the agent ids it returned, comma-separated.") } }
-        PauseAnimation { duration: 20000 }
-        ScriptAction { script: { tests.log("asked:", chat.session.hasRequest, chat.session.requestTitle); if (chat.session.hasRequest) chat.session.answerValue("Approve") } }
-        PauseAnimation { duration: 25000 }
-        ScriptAction { script: {
-            tests.log("status:", chat.session.status, "| transcript:", tests.chatText().replace(/\n/g, " | ").slice(-500))
-            Qt.quit() } }
-    }
-
-    // Settings → Agents: each provider's state, its
-    // details, and its switch, which decides what New session offers: a
-    // stand-in claude (--fake-claude=) and Harlo, turned off.
-    SequentialAnimation {
+        id: providersSteps
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksproviders"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             settingsDialog.openPage("providers") } }
-        PauseAnimation { duration: 2000 }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(providersSteps, () => { const l = tests.findName("providerStatus-pi", settingsDialog.contentItem); return l && l.text.indexOf("Available") === 0 }, 20000) }
+        PauseAnimation { duration: 50 }
         ScriptAction { script: {
-            const d = settingsDialog.contentItem, st = id => { const l = tests.findName("providerStatus-" + id, d); return l ? l.text : "(none)" }
-            tests.check(st("claude") === "Available · 17 models", "Claude: available, 17 models (" + st("claude") + ")")
-            tests.check(st("harlo") !== "(none)" && st("harlo") !== "Not installed", "Harlo: harlo's own (" + st("harlo") + ")")
-            tests.clickItem(tests.findName("provider-claude", d), "the Claude row") } }
+            const d = settingsDialog.contentItem, st = tests.findName("providerStatus-pi", d).text
+            tests.check(st === "Available · 2 models", "pi: available, its 2 models (" + st + ")")
+            tests.clickItem(tests.findName("provider-pi", d), "pi's row") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const d = settingsDialog.contentItem
-            const opus = tests.findText("Opus 4.8", d)
-            tests.check(tests.findText("Version 2.1.296", d) !== null && (opus === null || !opus.visible), "its details: version, and its models folded")
-            tests.clickItem(tests.findName("providerModels-claude", d), "Show its 17 models") } }
+            const helper = tests.findText("Fake Helper", d)
+            tests.check(tests.findContaining("Version ", d) !== null && (helper === null || !helper.visible), "its details: version, and its models folded")
+            tests.clickItem(tests.findName("providerModels-pi", d), "Show its 2 models") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const d = settingsDialog.contentItem, opus = tests.findText("Opus 4.8", d)
-            tests.check(opus !== null && opus.visible, "its models on demand")
+            const d = settingsDialog.contentItem, helper = tests.findText("Fake Helper", d)
+            tests.check(helper !== null && helper.visible, "its models on demand")
             tests.shotWindow("clicks-providers")
-            tests.clickItem(tests.findName("providerSwitch-harlo", d), "Harlo's switch") } }
+            tests.clickItem(tests.findName("providerSwitch-pi", d), "pi's switch") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const ids = JSON.parse(Workspace.chatProvidersJson()).map(p => p.id)
-            const st = tests.findName("providerStatus-harlo", settingsDialog.contentItem)
-            tests.check(st && st.text === "Disabled" && ids.indexOf("harlo") < 0, "turned off: Disabled, and not offered (" + ids + ")")
-            tests.check(ids.indexOf("claude") >= 0, "Claude is offered (" + ids + ")")
-            settingsDialog.close(); win.openDraft(-1) } }
+            const st = tests.findName("providerStatus-pi", settingsDialog.contentItem)
+            tests.check(st && st.text === "Disabled" && ids.indexOf("pi") < 0, "turned off: Disabled, and not offered (" + ids + ")")
+            tests.clickItem(tests.findName("providerSwitch-pi", settingsDialog.contentItem), "pi's switch") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(providersSteps, () => JSON.parse(Workspace.chatProvidersJson()).some(p => p.id === "pi"), 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: { settingsDialog.close(); win.openDraft(-1) } }
         PauseAnimation { duration: 700 }
         ScriptAction { script: {
-            // No default set: it shows (and starts) the first one on and
-            // installed, Claude here, as harlo does.
-            tests.check(chat.draftView.effectiveHarness === "claude" && Workspace.defaultAgent() === "claude", "with no default it shows the agent harlo starts (" + chat.draftView.effectiveHarness + ")")
-            tests.clickItem(tests.findName("draftHarness", chat.draftView), "the provider chip") } }
+            // No default set: it shows (and starts) pi, as harlo does.
+            tests.check(chat.draftView.effectiveHarness === "pi" && Workspace.defaultAgent() === "pi", "turned on again, a new session is pi's (" + chat.draftView.effectiveHarness + ")")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // pi, on from the start in Settings → Agents, then a session on the
+    // real pi (in this scratch HOME, on the scripted model) with harlo's
+    // extension: a reply, an approval for
+    // a write, harlo's tools and instructions, its own command kept out of "/", Harlo's
+    // sandbox for its commands and file tools, a command that can't be
+    // undone asking in yolo, and edit & resend.
+    property string piKey: ""
+    SequentialAnimation {
+        id: piSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspi"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(Workspace.sessionCount === 0, "a scratch HOME: no sessions (" + Workspace.sessionCount + ")")
+            tests.shotWindow("clicks-pi-empty")
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 1500 }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => { const st = tests.findName("providerStatus-pi", settingsDialog.contentItem); return st && st.text.indexOf("Available") === 0 }, 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const st = tests.findName("providerStatus-pi", settingsDialog.contentItem)
+            tests.check(st && st.text.indexOf("Available") === 0 && JSON.parse(Workspace.chatProvidersJson()).some(p => p.id === "pi"), "pi is on from the start: available, and offered (" + (st ? st.text : "no row") + ")")
+            tests.shotWindow("clicks-pi-providers")
+            settingsDialog.close()
+            tests.piKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => chat.session.modelName !== "", 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            tests.check(chat.session.harness === "pi" && chat.session.modelName === "Fake Coder", "a pi session on the scripted model (" + chat.session.modelName + ")")
+            tests.check(Workspace.approvalMode(tests.piKey) === "always-ask", "with harlo's approval modes (" + Workspace.approvalMode(tests.piKey) + ")")
+            tests.sendByKeys("say hi") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => tests.chatText().indexOf("ok: say hi") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const cmds = chat.session.commands
+            tests.check(tests.chatText().indexOf("ok: say hi") >= 0 && tests.chatText().indexOf("harlo-modes") < 0, "pi answers, and harlo's modes command doesn't show (" + tests.chatText().slice(-120) + ")")
+            tests.check(!cmds.some(c => c.replace(/^\//, "").indexOf("harlo-modes\t") === 0), "nor is it in the \"/\" list (" + cmds.length + " commands)")
+            tests.sendByKeys("write helper.txt") } }
+        PauseAnimation { duration: 300 }
+        // always-ask: the write asks first.
+        ScriptAction { script: tests.waitUntil(piSteps, () => chat.session.hasRequest, 20000) }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            tests.check(tests.findText("Claude") !== null && tests.findText("Harlo") === null, "New session offers what's on")
-            TestInput.key(Qt.Key_Escape, 0)
-            Workspace.setProviderEnabled("harlo", true)
+            tests.check(chat.session.requestIsApproval && tests.findContaining("helper.txt", chat.transcript) !== null, "the write asks, naming its file")
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") === "", "and nothing is written yet")
+            tests.shotWindow("clicks-pi-approval")
+            tests.clickText("Approve", chat.transcript) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => !chat.session.hasRequest && chat.session.status === "idle" && tests.chatText().indexOf("Done:") >= 0, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") === "from the helper\n", "Approve: the file is written")
+            // harlo's tools, through its bridge.
+            const reqs = tests.modelRequests()
+            tests.check(reqs.some(b => (b.tools || []).some(t => t.function.name === "mcp__harlo__list_sessions")), "pi offers harlo's tools to the model")
+            tests.check(reqs.some(b => (b.messages || []).some(m => m.role === "system" && JSON.stringify(m.content).indexOf("harlo's sessions: read past sessions") >= 0)), "and harlo's instructions are in its system prompt")
+            // Harlo's sandbox, through the extension (yolo: nothing asks).
+            Workspace.setApprovalMode(tests.piKey, "yolo")
+            tests.sendByKeys("peek at the key") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/made-here.txt") !== "" && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(tests.modelRequests().some(b => (b.messages || []).some(m => m.role === "system" && JSON.stringify(m.content).indexOf("Commands run in a sandbox") >= 0 && JSON.stringify(m.content).indexOf("outside_sandbox") < 0)), "pi is told about the sandbox (with no way around it)")
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/made-here.txt") === "made\n" && !chat.session.hasRequest, "its commands run in the sandbox: the project is writable, yolo doesn't ask")
+            tests.check(tests.chatText().indexOf("hidden-from-me") >= 0 && tests.chatText().indexOf("secret-key-text") < 0, "and the key is hidden from them (" + tests.chatText().slice(-160) + ")")
+            tests.check(tests.findContaining("sandbox run", chat.transcript) === null, "the card shows the command as the model wrote it")
+            tests.shotWindow("clicks-pi-sandbox")
+            tests.sendByKeys("read the key") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => tests.chatText().indexOf("hidden by Harlo's sandbox") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.chatText().indexOf("hidden by Harlo's sandbox") >= 0 && tests.chatText().indexOf("secret-key-text") < 0, "pi's read tool is kept out of it too")
+            tests.sendByKeys("search home") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => tests.chatText().indexOf("would look into") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.chatText().indexOf("would look into") >= 0 && tests.chatText().indexOf("secret-key-text") < 0, "and its grep (turned on in pi's settings) from home, above the key (" + tests.chatText().slice(-160) + ")")
+            tests.sendByKeys("reset hard") } }
+        PauseAnimation { duration: 300 }
+        // A command that can't be undone asks, even in yolo.
+        ScriptAction { script: tests.waitUntil(piSteps, () => chat.session.hasRequest, 20000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(Workspace.approvalMode(tests.piKey) === "yolo" && chat.session.requestIsApproval, "git reset --hard asks in yolo")
+            tests.check(tests.findContaining("can't be undone", chat.transcript) !== null && tests.findAllNames("approveInline", chat.transcript).some(b => b.text === "Run anyway"), "says why, its confirm naming what it does")
+            tests.check(tests.findName("alwaysAllowInline", chat.transcript) === null, "with no Always allow")
+            const q = tests.findAllNames("approvalQuestion", chat.transcript)[0]
+            const grid = q ? q.parent : null
+            tests.check(q && !q.truncated && (win.width < 700 ? grid.columns === 1 && q.lineCount === 1 : grid.columns === 2), "the question beside its answers, or over them when narrow (" + (grid ? grid.columns : "none") + ")")
+            tests.shotWindow("clicks-pi-destructive")
+            tests.clickText("Deny", chat.transcript) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => !chat.session.hasRequest && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const told = tests.modelRequests().some(b => (b.messages || []).some(m => m.role === "tool" && JSON.stringify(m.content).indexOf("The user said no") >= 0))
+            tests.check(told, "Deny: not run, and pi is told not to work around it")
+            tests.sendByKeys("quote 2>&1; and <b>bold</b> here") } }
+        PauseAnimation { duration: 300 }
+        // A reply quoting a shell redirect: its Context row shows it as
+        // text (unescaped, "&1;" read as markup and Qt warned).
+        ScriptAction { script: tests.waitUntil(piSteps, () => tests.chatText().indexOf("ok: quote") >= 0 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: { tests.harloRightWas = windowSettings.rightMode; windowSettings.rightMode = "context" } }
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: {
+            const rows = tests.findAllNames("contextRowLabel", win.contentItem).map(l => l.text)
+            tests.check(rows.some(t => t.indexOf("ok: quote 2>&amp;1; and &lt;b>bold&lt;/b> here") >= 0), "a reply's Context row shows its 2>&1; and <b> as text (" + rows.slice(-2).join(" | ").slice(0, 200) + ")")
+            windowSettings.rightMode = tests.harloRightWas
+            chat.session.editAndResend(0) } }
+        PauseAnimation { duration: 300 }
+        // Edit & resend: pi forks at the message and hands it back.
+        ScriptAction { script: tests.waitUntil(piSteps, () => chat.composerItem.text === "say hi", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(chat.composerItem.text === "say hi", "edit & resend puts the message back (" + chat.composerItem.text + ")")
+            tests.check(tests.chatText().indexOf("helper.txt") < 0, "on a fork from before it (" + tests.chatText().slice(-120) + ")")
+            tests.shotWindow("clicks-pi-resend")
+            // A change to commit, and the message pi writes for it (`pi -p`),
+            // on the model picked in Settings → Git.
+            chat.composerItem.text = ""
+            settingsDialog.openPage("git") } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            const box = tests.findName("commitModel", settingsDialog.contentItem)
+            const i = box ? box.model.indexOf("Fake Helper") : -1
+            tests.check(box && box.model[box.currentIndex] === "pi's default" && i > 0, "Git: the commit messages' model is picked from pi's (" + (box ? box.model.join(", ") : "none") + ")")
+            if (i > 0) { box.currentIndex = i; box.activated(i) }
+            tests.check(Workspace.setting("commit_model") === "fake/fake-helper", "and saved as its id (" + Workspace.setting("commit_model") + ")")
+            settingsDialog.close()
+            TestInput.writeFile(win.argValue("--cwd=") + "/README.md", "hello\nmore\n")
+            windowSettings.rightMode = "changes" } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.clickItem(tests.findName("commitWrite"), "Write the message") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piSteps, () => !git.generating, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(changes.commitText.indexOf("[fake-helper]") >= 0 && !git.error, "pi writes the commit message, with the model picked (" + JSON.stringify(changes.commitText).slice(0, 120) + " " + git.message + ")")
+            tests.shotWindow("clicks-pi-commit")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // pi's extensions drawn by harlo (the real pi, a scratch HOME, the
+    // scripted model, scripts/pi-test-extension.ts in pi's extensions):
+    // widgets above and below the message box, a footer with the branch, a
+    // screen of its own that takes keys and clicks and closes on Esc, an
+    // overlay, a tool drawn by its renderers, a custom message drawn by its
+    // renderer, a shortcut that fills the message box.
+    property string piExtKey: ""
+    function extLines(item) { return item ? (item.lines || []).map(l => String(l).replace(/\x1b\[[0-9;:]*m/g, "").replace(/\s+$/, "")) : [] }
+    // A "/" command: the menu takes the first Enter (picking it), the
+    // second sends it.
+    function sendCommandByKeys(text) {
+        tests.sendByKeys(text)
+        if (chat.composerItem.text.trim() !== "") TestInput.key(Qt.Key_Return, 0)
+    }
+    // Settings → Local models for pi (the scratch HOME's): the scripted
+    // model's server marked free, an online one priced (pi's file gets all
+    // four of pi's prices), and a server added again under another name,
+    // which pi then lists.
+    function piModelsFile() { return JSON.parse(TestInput.readFile(win.selftestDir + "/home/.pi/agent/models.json") || "{}") }
+    function piServer(name) { return JSON.parse(Accounts.servers("pi")).find(s => s.name === name) || null }
+    SequentialAnimation {
+        id: piServersSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspiservers"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(Workspace.sessionCount === 0, "a scratch HOME: no sessions (" + Workspace.sessionCount + ")")
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => { const st = tests.findName("providerStatus-pi", settingsDialog.contentItem); return st && st.text.indexOf("Available") === 0 }, 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: settingsDialog.openPage("servers") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => tests.piServer("fake") !== null && tests.findName("serverFree-fake") !== null, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            // (pi's file said nothing of free: harlo said it when it started.)
+            const fakeFree = tests.findName("serverFree-fake")
+            tests.check(fakeFree !== null && fakeFree.visible && fakeFree.checked, "pi's server on this computer that takes no key is marked free")
+            tests.check(tests.piModelsFile().providers.fake.free === true, "in pi's models.json")
+            tests.check(tests.findName("serverFree-gw") === null || !tests.findName("serverFree-gw").visible, "an online one isn't offered as free")
+            const row = tests.findName("serverPrice-gw")
+            tests.check(row !== null && row.visible, "an online server has a price row")
+            tests.shotPopup(settingsDialog, "clicks-pi-servers")
+            tests.clickItem(tests.findName("serverPriceIn-gw"), "price in")
+            TestInput.typeText("3")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.clickItem(tests.findName("serverPriceOut-gw"), "price out")
+            TestInput.typeText("15")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => { const gw = tests.piServer("gw"); return gw && JSON.stringify(gw.prices) === "[[3,15]]" }, 5000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const cost = tests.piModelsFile().providers.gw.models[0].cost || {}
+            tests.check(cost.input === 3 && cost.output === 15 && cost.cacheRead === 3 && cost.cacheWrite === 3, "pi's file has all four prices (" + JSON.stringify(cost) + ")")
+            tests.clickItem(tests.findName("serverFree-fake"), "free") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const fake = tests.piServer("fake")
+            tests.check(fake && fake.free === false, "unticked, it isn't free any more (" + (fake ? fake.free : "no fake") + ")")
+            tests.clickItem(tests.findName("addModelServer"), "Connect…") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.findName("modelServerAddress").text = tests.piServer("fake").baseUrl
+            tests.clickItem(tests.findName("modelServerFind"), "Find models") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => Accounts.serverSearch.indexOf("\"ready\"") >= 0, 8000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const box = tests.findName("modelServerFree")
+            tests.check(box !== null && box.checked, "adding one here with no key: Free is ticked (" + (box ? box.checked : "no box") + ")")
+            tests.findName("modelServerName").text = "again"
+            tests.clickItem(tests.findName("modelServerAdd"), "add") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const again = tests.piServer("again")
+            tests.check(again && again.free === true, "it's saved as free (" + (again ? again.free : "not added") + ")")
+            const entry = tests.piModelsFile().providers.again || {}
+            tests.check(entry.api === "openai-completions" && (entry.models || []).length > 0, "in pi's models.json")
+            tests.shotPopup(settingsDialog, "clicks-pi-servers-added")
+            Workspace.refreshProviders() } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => ((JSON.parse(Workspace.providersJson()).find(x => x.id === "pi") || {}).modelIds || []).some(m => m.indexOf("again/") === 0), 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const ids = (JSON.parse(Workspace.providersJson()).find(x => x.id === "pi") || {}).modelIds || []
+            tests.check(ids.some(m => m.indexOf("again/") === 0), "pi lists the new server's model (" + ids.join(", ") + ")")
+            settingsDialog.openPage("models") } }
+        // Settings → Models: pi's cloud providers. A key is typed into pi
+        // in harlo's terminal, then shows as saved; Remove forgets it.
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => JSON.parse(Accounts.cloud("pi")).state === "ready", 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const list = JSON.parse(Accounts.cloud("pi")).list
+            tests.check(list.length > 10 && list.every(p => p.key === "none") && !list.some(p => p.id === "fake" || p.id === "gw"), "pi's providers, none with a key; local servers aren't among them (" + list.length + ")")
+            tests.check(tests.findText("No provider has a key yet. Pick the one you pay for and set its key.") !== null, "it says none has one")
+            tests.clickItem(tests.findName("cloudProvider-openrouter").children[1], "OpenRouter") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.shown(tests.findName("cloudSetKey-openrouter")) && !tests.shown(tests.findName("cloudKey-openrouter")), "opened: Set key…, and no key field (harlo never sees the key)")
+            tests.shotPopup(settingsDialog, "clicks-pi-models")
+            tests.clickItem(tests.findName("cloudSetKey-openrouter"), "Set key…") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => terminal.visible && terminal.current !== null && terminal.current.running, 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const cmd = terminal.current.initialCommand
+            tests.check(!settingsDialog.visible && /auth login openrouter --api-key$/.test(cmd), "it opens harlo's terminal with pi's key prompt (" + cmd + ")") } }
+        // (pi asks for the key without echoing it.)
+        PauseAnimation { duration: 4000 }
+        ScriptAction { script: {
+            tests.shotWindow("clicks-pi-models-terminal")
+            tests.clickItem(terminal.current, "terminal")
+            TestInput.typeText("sk-or-test-key")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 3000 }
+        ScriptAction { script: {
+            settingsDialog.openPage("models")
+            Accounts.loadCloud("pi") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => { const c = JSON.parse(Accounts.cloud("pi")); return c.state === "ready" && c.list.some(p => p.id === "openrouter" && p.key === "saved") }, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const or = JSON.parse(Accounts.cloud("pi")).list.find(p => p.id === "openrouter")
+            tests.check(or && or.key === "saved" && or.models.length > 0, "pi has the key: OpenRouter shows as saved, with its models (" + (or ? or.models.length : 0) + ")")
+            const st = tests.findName("cloudStatus-openrouter")
+            tests.check(st !== null && st.text === "Key saved", "and the row says so (" + (st ? st.text : "no row") + ")")
+            tests.clickItem(tests.findName("cloudProvider-openrouter").children[1], "OpenRouter") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.shotPopup(settingsDialog, "clicks-pi-models-saved")
+            tests.clickItem(tests.findName("cloudRemove-openrouter"), "Remove") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => { const c = JSON.parse(Accounts.cloud("pi")); return c.state === "ready" && c.list.some(p => p.id === "openrouter" && p.key === "none") }, 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            tests.check(JSON.parse(Accounts.cloud("pi")).list.find(p => p.id === "openrouter").key === "none", "Remove: pi has no key for it any more")
+            settingsDialog.openPage("mcp") } }
+        // Settings → Tools for agents: a server for pi, in pi's mcp.json.
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            tests.check(tests.findText("No MCP servers here yet.", d) !== null, "no MCP servers yet")
+            tests.clickItem(tests.findName("mcpAdd", d), "Add MCP server") } }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            tests.clickItem(tests.findName("mcpName", d), "name")
+            TestInput.key(Qt.Key_A, Qt.ControlModifier)
+            TestInput.typeText("fake")
+            tests.clickItem(tests.findName("mcpCommand", d), "command")
+            TestInput.typeText(win.argValue("--mcp-server="))
+            tests.clickItem(tests.findName("mcpSave", d), "Create") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piServersSteps, () => { const st = JSON.parse(Mcp.statusJson("global")).fake; return st && st.state !== "testing" }, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const l = tests.mcpList("global")
+            tests.check(l.length === 1 && l[0].name === "fake", "Create saves it (" + JSON.stringify(l.map(s => s.name)) + ")")
+            const file = JSON.parse(TestInput.readFile(win.selftestDir + "/home/.pi/agent/mcp.json") || "{}")
+            const e = (file.mcpServers || {}).fake || {}
+            tests.check(e.command === win.argValue("--mcp-server=") && e.type === undefined && e.enabled === true, "in pi's mcp.json, in pi's format (" + JSON.stringify(e) + ")")
+            const st = JSON.parse(Mcp.statusJson("global")).fake
+            tests.check(st && st.state === "connected" && st.tools.length === 2, "and tested: connected, 2 tools (" + JSON.stringify(st) + ")")
+            tests.shotPopup(settingsDialog, "clicks-pi-mcp")
+            tests.summary(); Qt.quit() } }
+    }
+
+    // pi's extensions in Settings → Agents (the scratch HOME's pi): the
+    // installed package listed with harlo's suggestions, switched off (pi
+    // lists it filtered) and on again, a folder installed from the box,
+    // and the first one removed.
+    function piPkg(name) { return JSON.parse(PiExtensions.status("")).packages.find(p => p.name === name) || null }
+    SequentialAnimation {
+        id: piPackagesSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspipackages"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(Workspace.sessionCount === 0, "a scratch HOME: no sessions (" + Workspace.sessionCount + ")")
+            settingsDialog.openPage("providers") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => { const st = tests.findName("providerStatus-pi", settingsDialog.contentItem); return st && st.text.indexOf("Available") === 0 }, 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.clickItem(tests.findName("provider-pi", settingsDialog.contentItem).children[1], "pi's row") }
+        PauseAnimation { duration: 300 }
+        // (pi turned on: harlo's built-in Claude subscription gets ready by itself.)
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => tests.piPkg("harlo-test-pkg1") !== null && JSON.parse(PiExtensions.bridgeStatus()).state === "ready", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem, row = tests.findName("piExt-harlo-test-pkg1", d)
+            const p = tests.piPkg("harlo-test-pkg1")
+            tests.check(tests.shown(row) && p.enabled && p.version === "1.0.1" && p.description === "Test package 1", "the installed package is listed, on (" + JSON.stringify(p) + ")")
+            const b = JSON.parse(PiExtensions.bridgeStatus())
+            tests.check(b.on && !b.inPi && tests.shown(tests.findName("piBridge", d)) && tests.findName("piBridgeSwitch", d).checked, "the Claude subscription is built in and on, nothing installed in pi (" + JSON.stringify(b) + ")")
+            tests.check(!JSON.stringify(tests.readJson(win.selftestDir + "/home/.pi/agent/settings.json").packages).includes("claude"), "pi's own settings don't list it")
+            const suggested = ["npm:pi-claude-bridge", "npm:pi-web-access", "npm:pi-lens"].filter(s => tests.shown(tests.findName("piExtSuggested-" + s, d)))
+            tests.check(JSON.stringify(suggested) === JSON.stringify(["npm:pi-web-access", "npm:pi-lens"]), "the suggestions, the built-in one not among them (" + suggested + ")")
+            tests.scrollIntoView(row)
+            tests.shotWindow("clicks-pi-packages") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.clickItem(tests.findName("piExtSwitch-harlo-test-pkg1", settingsDialog.contentItem), "its switch") }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => { const p = tests.piPkg("harlo-test-pkg1"); return JSON.parse(PiExtensions.status("")).state === "ready" && p && !p.enabled && TestInput.readFile(win.selftestDir + "/home/.pi/agent/settings.json").indexOf('"extensions": []') >= 0 }, 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const s = tests.readJson(win.selftestDir + "/home/.pi/agent/settings.json")
+            tests.check(s.packages.some(e => JSON.stringify(e) === JSON.stringify({ source: win.selftestDir + "/pkg1", extensions: [] })) && s.defaultModel === "fake-coder", "off: pi's filter that loads none of its extensions, the rest of pi's settings kept (" + JSON.stringify(s) + ")")
+            tests.check(!tests.findName("piExtSwitch-harlo-test-pkg1", settingsDialog.contentItem).checked, "its switch shows off")
+            tests.clickItem(tests.findName("piExtSwitch-harlo-test-pkg1", settingsDialog.contentItem), "its switch again") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => { const p = tests.piPkg("harlo-test-pkg1"); return JSON.parse(PiExtensions.status("")).state === "ready" && p && p.enabled }, 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const s = tests.readJson(win.selftestDir + "/home/.pi/agent/settings.json")
+            tests.check(s.packages.indexOf(win.selftestDir + "/pkg1") >= 0, "on again: its plain entry (" + JSON.stringify(s.packages) + ")")
+            const field = tests.findName("piExtSource", settingsDialog.contentItem)
+            field.forceActiveFocus()
+            field.text = win.selftestDir + "/pkg2"
+            tests.clickItem(tests.findName("piExtInstallSource", settingsDialog.contentItem), "Install") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => tests.piPkg("harlo-test-pkg2") !== null && tests.shown(tests.findName("piExt-harlo-test-pkg2", settingsDialog.contentItem)), 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.shown(tests.findName("piExt-harlo-test-pkg2", settingsDialog.contentItem)), "the folder typed in is installed and listed")
+            tests.check(tests.findName("piExtSource", settingsDialog.contentItem).text === "", "the box is emptied")
+            tests.clickItem(tests.findName("piExtRemove-harlo-test-pkg1", settingsDialog.contentItem), "Remove") } }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => tests.piPkg("harlo-test-pkg1") === null && JSON.parse(PiExtensions.status("")).state === "ready", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const s = tests.readJson(win.selftestDir + "/home/.pi/agent/settings.json")
+            tests.check(!JSON.stringify(s.packages || []).includes("/pkg1\"") && tests.findName("piExt-harlo-test-pkg1", settingsDialog.contentItem) === null, "removed: gone from the list and pi's settings (" + JSON.stringify(s.packages) + ")")
+            tests.shotWindow("clicks-pi-packages-after")
+            // The Claude subscription's models: their own group, and
+            // Claude's plan limits.
+            settingsDialog.close()
+            Workspace.quotaJson = JSON.stringify({ updatedAt: Date.now(), error: "", accounts: [{ provider: "Claude", plan: "max", account: "", limitReached: false,
+                windows: [{ label: "Session (5 h)", usedFraction: 0.95, resetsAt: Date.now() + 2 * 3600000, status: "ok" }] }] })
+            tests.piKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => chat.session.modelName !== "", 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            tests.check(!tests.shown(tests.findName("limitLine")), "on another model: no Claude limit (" + chat.session.modelId + ")")
+            tests.clickItem(tests.findName("modelButton"), "the model button") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => tests.findText("CLAUDE SUBSCRIPTION") !== null, 15000) }
+        PauseAnimation { duration: 200 }
+        ScriptAction { script: {
+            // (The scripted model is on this computer: "Local".)
+            tests.check(tests.findText("CLAUDE SUBSCRIPTION") !== null && tests.findText("LOCAL") !== null, "the picker heads its models Claude subscription, apart from the others")
+            const listed = tests.findName("modelList").model.map(m => m.group + ": " + m.name)
+            tests.check(JSON.stringify(listed) === JSON.stringify(["Local: Fake Coder", "Local: Fake Helper", "Claude subscription: Claude Opus 5.5"]), "each model once, in its group (" + listed + ")")
+            tests.shotWindow("clicks-pi-claude-models")
+            tests.clickText("Claude Opus 5.5") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => chat.session.modelId.indexOf("claude-bridge/") === 0, 15000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const line = tests.findName("limitLine")
+            tests.check(chat.session.modelId === "claude-bridge/claude-opus-5-5" && tests.shown(line) && tests.textHas("95%", line), "on it, Claude's plan limit shows (" + chat.session.modelId + ")")
+            tests.shotWindow("clicks-pi-claude-limit")
+            settingsDialog.openPage("providers") } }
+        // pi's Sign in…: its providers, each signed in in harlo's terminal.
+        PauseAnimation { duration: 800 }
+        ScriptAction { script: tests.clickItem(tests.findName("provider-pi", settingsDialog.contentItem).children[1], "pi's row") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.clickItem(tests.findName("piBridgeSwitch", settingsDialog.contentItem), "the Claude subscription's switch") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(!JSON.parse(PiExtensions.bridgeStatus()).on && Workspace.setting("pi_claude_bridge") === "0", "switched off: pi sessions from now on start without it")
+            tests.clickItem(tests.findName("signIn-pi", settingsDialog.contentItem), "Sign in…") } }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => tests.findName("signInMethod-anthropic-terminal", signInDialog.contentItem) !== null, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const listed = ["anthropic", "openai-codex", "github-copilot"].filter(id => tests.shown(tests.findName("signInMethod-" + id + "-terminal", signInDialog.contentItem)))
+            tests.check(signInDialog.visible && listed.length === 3 && tests.findText("Nothing matches.") === null, "pi's Sign in… lists its providers (" + listed + ")")
+            tests.shotWindow("clicks-pi-sign-in")
+            tests.clickItem(tests.findName("signInMethod-anthropic-terminal", signInDialog.contentItem), "Anthropic's Sign in") } }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.waitUntil(piPackagesSteps, () => terminal.visible && terminal.tabs.length > 0, 10000) }
+        PauseAnimation { duration: 50 }
+        // (Before it's typed in, half a second after the shell starts.)
+        ScriptAction { script: {
+            const cmd = terminal.current ? terminal.current.initialCommand : ""
+            tests.check(!signInDialog.visible && !settingsDialog.visible && /auth login anthropic$/.test(cmd), "it opens harlo's terminal with pi's sign-in (" + cmd + ")") } }
+        PauseAnimation { duration: 1500 }
+        ScriptAction { script: {
+            const opened = TestInput.readFile(win.selftestDir + "/opened.txt")
+            tests.check(opened.indexOf("https://") >= 0, "pi's sign-in page went to the stand-in browser (" + opened.slice(0, 60) + ")")
+            tests.shotWindow("clicks-pi-sign-in-terminal")
+            tests.summary(); Qt.quit() } }
+    }
+    function extPanel(kind) { return tests.findAllNames("extPanel-" + kind, chat).filter(v => tests.shown(v)) }
+    // A colour as the lines set it (24-bit SGR), from "#rrggbb".
+    function sgr(hex) { return "38;2;" + [1, 3, 5].map(i => parseInt(String(hex).substr(i, 2), 16)).join(";") + "m" }
+    function blockKinds(v) { return (v ? v.blocks : []).map(b => b.kind).join(",") }
+    property string piExtMode: ""
+    property string piExtAccent: ""
+    SequentialAnimation {
+        id: piExtSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspiext"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            Workspace.addProject(win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 500 }
+        ScriptAction { script: {
+            tests.check(Workspace.sessionCount === 0, "a scratch HOME: no sessions (" + Workspace.sessionCount + ")")
+            Workspace.setProviderEnabled("pi", true) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => JSON.parse(Workspace.chatProvidersJson()).some(p => p.id === "pi"), 20000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: tests.piExtKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => chat.session.modelName !== "" && tests.extPanel("footer").length > 0 && tests.extPanel("widget").length === 3, 20000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const widgets = tests.extPanel("widget"), footer = tests.extPanel("footer")[0], box = tests.findName("composerInput")
+            const above = widgets.find(w => tests.extLines(w)[0] === "widget above: hello"), below = widgets.find(w => tests.extLines(w)[0] === "widget below: a component")
+            const y = it => it.mapToItem(null, 0, 0).y
+            tests.check(!!above && !!below, "both widgets drawn (" + widgets.map(w => tests.extLines(w).join("/")).join(" | ") + ")")
+            tests.check(!!above && !!below && y(above) < y(box) && y(below) > y(box), "one above the message box, one below it")
+            const row = widgets.find(w => /row: left/.test(tests.extLines(w).join(" ")))
+            tests.check(!!row && !row.inBlocks && tests.findName("extensionLines", row).visible, "a component harlo can't take apart (an HStack) is drawn as its lines (" + (row ? tests.extLines(row).join("/") : "none") + ")")
+            tests.check(/^footer on \S+/.test(tests.extLines(footer)[0] || "") && tests.extLines(footer)[0] !== "footer on no branch", "the footer, with the branch (" + tests.extLines(footer)[0] + ")")
+            tests.check(chat.session.extShortcuts.indexOf("ctrl+shift+y") >= 0, "the extension's shortcut is known (" + chat.session.extShortcuts + ")")
+            tests.shotWindow("clicks-piext-panels")
+            tests.sendCommandByKeys("/counter") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extPanel("screen").length === 1, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const sc = tests.extPanel("screen")[0]
+            tests.check(sc.activeFocus, "the screen takes the keys")
+            tests.check(tests.extLines(sc)[0] === "counter: 0", "and shows (" + tests.extLines(sc).join(" / ") + ")")
+            const w = Number((tests.extLines(sc)[2] || "").replace("width: ", ""))
+            tests.check(Math.abs(w - sc.cols) <= 0 && w >= 20, "drawn for its own width in cells (" + w + " for " + sc.cols + ")")
+            TestInput.typeText("++") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extLines(tests.extPanel("screen")[0])[0] === "counter: 2", 5000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const sc = tests.extPanel("screen")[0]
+            tests.check(tests.extLines(sc)[0] === "counter: 2", "keys reach it (" + tests.extLines(sc)[0] + ")")
+            const p = sc.mapToItem(null, sc.pad + 3.5 * sc.cellW, sc.pad + 1.5 * sc.cellH)
+            TestInput.click(p.x, p.y) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extLines(tests.extPanel("screen")[0])[1] === "clicked: 3,1", 5000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const sc = tests.extPanel("screen")[0]
+            tests.check(tests.extLines(sc)[1] === "clicked: 3,1", "a click reaches it, at its cell (" + tests.extLines(sc)[1] + ")")
+            tests.shotWindow("clicks-piext-screen")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extPanel("screen").length === 0 && tests.chatText().indexOf("closed at 2") >= 0, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.extPanel("screen").length === 0, "Esc closes it")
+            tests.check(tests.chatText().indexOf("counter: closed at 2") >= 0, "and the extension carries on with what it gave back (" + tests.chatText().slice(-80) + ")")
+            // (pi asks before an extension's tool by default: not here.)
+            Workspace.setApprovalMode(tests.piExtKey, "yolo")
+            tests.sendByKeys("roll the dice") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.findName("toolExtResult", chat.transcript) !== null && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const call = tests.findName("toolExtCall", chat.transcript), result = tests.findName("toolExtResult", chat.transcript)
+            tests.check(tests.extLines(call)[0] === "dice call: d6", "the tool's call drawn by the extension (" + tests.extLines(call).join("/") + ")")
+            tests.check(tests.extLines(result)[0] === "dice result: 4", "and its result (" + tests.extLines(result).join("/") + ")")
+            tests.check(String(call.lines[0]).indexOf(tests.sgr(Theme.piColors.fg.accent)) >= 0, "in harlo's colours: the accent is harlo's (" + JSON.stringify(String(call.lines[0])).slice(0, 60) + " vs " + Theme.piColors.fg.accent + ")")
+            tests.shotWindow("clicks-piext-tool")
+            tests.sendByKeys("show the report") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.findAllNames("toolExtResult", chat.transcript).length === 2 && chat.session.status === "idle", 20000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const result = tests.findAllNames("toolExtResult", chat.transcript)[1]
+            const kinds = (result.view.resultBlocks || []).map(b => b.kind).join(",")
+            tests.check(kinds === "markdown,lines", "a result of Markdown and a line comes in blocks (" + kinds + ")")
+            const md = tests.findAllNames("extMarkdown", result).filter(m => tests.shown(m))
+            const said = md.map(m => m.getText(0, m.length)).join(" | ")
+            tests.check(md.length > 0 && /first point/.test(said) && md[0].textFormat === TextEdit.RichText, "its Markdown drawn as a reply's (" + said.slice(0, 60) + ")")
+            tests.check(/more lines,\s+click\s+to\s+expand\)/.test(tests.extLines(result).join(" ")), "folded, it says a click opens it (" + tests.extLines(result).slice(-2).join(" ") + ")")
+            tests.check(tests.findName("extMarkdownCode", result) === null || !tests.shown(tests.findName("extMarkdownCode", result)), "no code block yet")
+            tests.shotWindow("clicks-piext-report")
+            tests.clickItem(result, "the folded report") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extLines(tests.findAllNames("toolExtResult", chat.transcript)[1]).some(l => /The end of the report/.test(l)), 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const result = tests.findAllNames("toolExtResult", chat.transcript)[1]
+            tests.check(tests.extLines(result).some(l => /The end of the report/.test(l)), "a click opens it: all of it (" + tests.extLines(result).length + " lines)")
+            const code = tests.findAllNames("extMarkdownCode", result).filter(c => tests.shown(c))
+            tests.check(code.length === 1, "its code block in a well (" + code.length + ")")
+            const first = tests.findAllNames("toolExtResult", chat.transcript)[0]
+            tests.check(tests.extLines(first)[0] === "dice result: 4", "the other tool's result as it was")
+            tests.shotWindow("clicks-piext-report-open")
+            tests.sendCommandByKeys("/note hi there") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.findName("messageExtView", chat.transcript) !== null, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const note = tests.findName("messageExtView", chat.transcript)
+            tests.check(tests.extLines(note)[0] === "note drawn: hi there", "a custom message drawn by its renderer (" + tests.extLines(note).join("/") + ")")
+            tests.check(!note.inBlocks, "a Text alone: its lines, on the grid")
+            tests.clickItem(tests.findName("composerInput"), "composer")
+            TestInput.key(Qt.Key_Y, Qt.ControlModifier | Qt.ShiftModifier) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => chat.composerItem.text === "from the shortcut", 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            tests.check(chat.composerItem.text === "from the shortcut", "its shortcut runs, and fills the message box (" + chat.composerItem.text + ")")
+            chat.composerItem.text = ""
+            tests.sendCommandByKeys("/popup") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extPanel("overlay").length === 1, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const ov = tests.extPanel("overlay")[0]
+            tests.check(tests.extLines(ov)[0] === "an overlay" && tests.shown(tests.findName("extOverlay", chat)), "an overlay, over the conversation (" + tests.extLines(ov).join("/") + ")")
+            tests.check(ov.activeFocus, "with the keys")
+            tests.shotWindow("clicks-piext-overlay")
+            TestInput.key(Qt.Key_Escape, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extPanel("overlay").length === 0 && tests.chatText().indexOf("overlay closed") >= 0, 10000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.extPanel("overlay").length === 0 && !tests.shown(tests.findName("extOverlay", chat)), "Esc closes it")
+            tests.check(tests.chatText().indexOf("overlay closed") >= 0, "and the extension goes on")
+            tests.sendCommandByKeys("/card A card") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.findAllNames("messageExtView", chat.transcript).length === 2 && tests.findName("extPicture", chat.transcript) !== null && tests.findName("extPicture", chat.transcript).status === Image.Ready, 20000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            const card = tests.findAllNames("messageExtView", chat.transcript)[1]
+            tests.check(tests.blockKinds(card) === "lines,markdown,image,lines", "a Box of Markdown, a picture and a Text comes in blocks (" + tests.blockKinds(card) + ")")
+            const pic = tests.findName("extPicture", card)
+            const most = Math.min(160, 30 * card.cellW)
+            tests.check(pic && pic.status === Image.Ready && Math.abs(pic.width - most) < 1 && Math.abs(pic.width / pic.height - 1.6) < 0.05, "the picture drawn, no wider than itself or the extension allows (" + (pic ? pic.width + "×" + pic.height : "none") + ", at most " + most + ")")
+            const said = tests.findAllNames("extMarkdown", card).filter(m => tests.shown(m)).map(m => m.getText(0, m.length)).join(" | ")
+            tests.check(/A card with bold words/.test(said), "its Markdown drawn (" + said.slice(0, 60) + ")")
+            const bg = card.blocks.find(b => b.kind === "markdown").bg
+            tests.check(bg === Theme.piColors.bg.customMessageBg, "on its Box's background (" + bg + ")")
+            chat.transcript.listView.positionViewAtIndex(chat.transcript.listView.count - 1, ListView.Contain)
+            tests.shotWindow("clicks-piext-card")
+            tests.sendCommandByKeys("/pick") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extPanel("screen").length === 1, 20000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            const sc = tests.extPanel("screen")[0]
+            tests.check(!sc.inBlocks && tests.extLines(sc)[0] === "pick one" && tests.extLines(sc).some(l => /→ apple/.test(l)), "a list on a screen: lines, first one chosen (" + tests.extLines(sc).join(" / ") + ")")
+            TestInput.key(Qt.Key_Down, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extLines(tests.extPanel("screen")[0]).some(l => /→ brick/.test(l)), 5000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            tests.check(tests.extLines(tests.extPanel("screen")[0]).some(l => /→ brick/.test(l)), "the arrow keys move in it")
+            tests.shotWindow("clicks-piext-pick")
+            TestInput.key(Qt.Key_Return, 0) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => tests.extPanel("screen").length === 0 && tests.chatText().indexOf("picked: brick") >= 0, 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            tests.check(tests.chatText().indexOf("picked: brick") >= 0, "Enter picks it")
+            // (The other colour mode: drawn again in its colours.)
+            tests.piExtMode = Workspace.themeMode
+            tests.piExtAccent = Theme.piColors.fg.accent
+            Workspace.chooseThemeMode(Theme.isLight ? "dark" : "light") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piExtSteps, () => String(tests.findName("toolExtCall", chat.transcript).lines[0]).indexOf(tests.sgr(Theme.piColors.fg.accent)) >= 0, 10000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const line = String(tests.findName("toolExtCall", chat.transcript).lines[0])
+            tests.check(Theme.piColors.fg.accent !== tests.piExtAccent && line.indexOf(tests.sgr(Theme.piColors.fg.accent)) >= 0, "another colour mode: drawn again in its colours (" + tests.piExtAccent + " → " + Theme.piColors.fg.accent + ")")
+            Workspace.chooseThemeMode(tests.piExtMode)
+            tests.summary(); Qt.quit() } }
+    }
+
+    // pi on a host (the test's SSH server, with the installed pi first on its
+    // PATH and the scripted model): the host check finds it, a session in a
+    // project there runs pi there with harlo's extension put there (an
+    // approval before a write, harlo's tools through the host's bridge,
+    // Harlo's sandbox and destructive-command check from the harlo-agent put
+    // there), and its transcript is the host's.
+    property string piRemoteKey: ""
+    SequentialAnimation {
+        id: piRemoteSteps
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickspiremote"
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: {
+            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
+            tests.check(Workspace.sessionCount === 0, "a scratch HOME: no sessions (" + Workspace.sessionCount + ")")
+            tests.shotWindow("clicks-pi-remote-empty")
+            Workspace.setProviderEnabled("pi", true)
+            tests.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
+            Remotes.connectHost("box") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => { const h = JSON.parse(Remotes.hostsJson())[0]; return h && h.state === "connected" && (h.pi || "") !== "" }, 60000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const h = JSON.parse(Remotes.hostsJson())[0]
+            tests.check(h.state === "connected" && (h.pi || "").endsWith("/remote-bin/pi") && ((h.versions || {}).pi || "") !== "", "the host check finds pi there, with its version (" + h.pi + " " + JSON.stringify(h.versions) + ")")
+            settingsDialog.openPage("remote") } }
+        PauseAnimation { duration: 600 }
+        ScriptAction { script: {
+            const chip = tests.findName("hostAgent-box-pi", settingsDialog.contentItem)
+            tests.check(chip !== null && tests.findName("hostInstall-box-pi", settingsDialog.contentItem) === null, "Other machines: pi listed for box, installed")
+            tests.shotWindow("clicks-pi-remote-agents")
+            settingsDialog.close()
+            Workspace.addProject("ssh://box" + win.argValue("--cwd=")) } }
+        PauseAnimation { duration: 2500 }
+        ScriptAction { script: {
+            const p = JSON.parse(Workspace.projectsJson()).find(p => p.remote)
+            tests.piRemoteKey = Workspace.newSession(p.id, "pi") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => chat.session.modelName !== "" || chat.session.status === "error", 60000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            tests.check(chat.session.harness === "pi" && chat.session.modelName === "Fake Coder", "a pi session on box, on the scripted model (" + chat.session.modelName + " " + chat.session.status + ")")
+            tests.sendByKeys("write helper.txt") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => chat.session.hasRequest, 30000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(chat.session.requestIsApproval && tests.findContaining("helper.txt", chat.transcript) !== null, "harlo's extension there asks before the write")
+            tests.shotWindow("clicks-pi-remote-approval")
+            tests.clickText("Approve", chat.transcript) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => !chat.session.hasRequest && chat.session.status === "idle" && tests.chatText().indexOf("Done:") >= 0, 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") === "from the helper\n", "Approve: written on box")
+            const reqs = tests.modelRequests()
+            tests.check(reqs.some(b => (b.tools || []).some(t => t.function.name === "mcp__harlo__list_sessions")), "harlo's tools reach pi on box (its bridge there)")
+            tests.check(reqs.some(b => (b.messages || []).some(m => m.role === "system" && JSON.stringify(m.content).indexOf("harlo's sessions: read past sessions") >= 0)), "and harlo's instructions, over the forwarded socket")
+            const file = Workspace.sessionFile(tests.piRemoteKey)
+            tests.check(file.indexOf("ssh://box" + win.selftestDir + "/sshd/home/.pi/agent/sessions/") === 0, "its transcript is box's (" + file + ")")
+            tests.shotWindow("clicks-pi-remote-written")
+            // Harlo's agent put on box: its sandbox and its check for
+            // commands that can't be undone.
+            Workspace.setApprovalMode(tests.piRemoteKey, "yolo")
+            tests.sendByKeys("peek at the key") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/made-here.txt") !== "" && chat.session.status === "idle", 60000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/made-here.txt") === "made\n" && tests.chatText().indexOf("hidden-from-me") >= 0 && tests.chatText().indexOf("secret-key-text") < 0, "commands on box run in the sandbox there, the key hidden (" + tests.chatText().slice(-160) + ")")
+            tests.sendByKeys("reset hard") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => chat.session.hasRequest, 30000) }
+        PauseAnimation { duration: 400 }
+        ScriptAction { script: {
+            tests.check(chat.session.requestIsApproval && tests.findContaining("can't be undone", chat.transcript) !== null, "git reset --hard on box asks in yolo")
+            tests.shotWindow("clicks-pi-remote-destructive")
+            tests.clickText("Deny", chat.transcript) } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(piRemoteSteps, () => !chat.session.hasRequest && chat.session.status === "idle", 30000) }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: {
+            tests.check(tests.modelRequests().some(b => (b.messages || []).some(m => m.role === "tool" && JSON.stringify(m.content).indexOf("The user said no") >= 0)), "Deny: not run there")
             tests.summary(); Qt.quit() } }
     }
 
     // The new-session page's model: the agent's models (as Settings →
     // Providers reads them), picked from a filtered list; the session
-    // starts with it (the stand-in claude says its model).
+    // starts with it (the scripted model says which it is).
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksdraftmodel"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             Workspace.refreshProviders()
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             win.openDraft(JSON.parse(Workspace.projectsJson())[0].id)
-            chat.draftView.harness = "claude" } }
+            chat.draftView.harness = "pi" } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const chip = tests.findName("draftModel")
             tests.check(chip !== null && chip.text === "Default model", "a model chip: the agent's default")
             tests.clickItem(chip, "the model chip") } }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.check(chat.draftView.modelChoices.length === 17, "its 17 models to pick (" + chat.draftView.modelChoices.length + ")") }
+        ScriptAction { script: tests.check(chat.draftView.modelChoices.length === 2, "its 2 models to pick (" + chat.draftView.modelChoices.length + ")") }
         ScriptAction { script: {
             tests.clickItem(tests.findName("draftModelFilter"), "the filter")
-            TestInput.typeText("haiku") } }
+            TestInput.typeText("helper") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const haiku = chat.draftView.modelChoices.find(m => m.name.toLowerCase().indexOf("haiku") >= 0)
-            tests.check(haiku !== undefined, "a Haiku to pick")
+            const helper = chat.draftView.modelChoices.find(m => m.name.toLowerCase().indexOf("helper") >= 0)
+            tests.check(helper !== undefined, "Fake Helper to pick")
             tests.shotWindow("clicks-draft-model")
-            tests.clickItem(haiku ? tests.findName("draftModel-" + haiku.id) : null, "Haiku") } }
+            tests.clickItem(helper ? tests.findName("draftModel-" + helper.id) : null, "Fake Helper") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             const m = chat.draftView.model
@@ -5089,8 +4932,7 @@ Item {
             TestInput.key(Qt.Key_Return, 0) } }
         PauseAnimation { duration: 2500 }
         ScriptAction { script: {
-            const haiku = chat.draftView.modelChoices.find(m => m.name.toLowerCase().indexOf("haiku") >= 0)
-            tests.check(chat.session.harness === "claude" && haiku && tests.chatText().indexOf("(model " + haiku.id + ",") >= 0, "the session starts with it (" + tests.chatText().slice(-120) + ")")
+            tests.check(chat.session.harness === "pi" && tests.chatText().indexOf("[fake-helper]") >= 0, "the session starts with it (" + tests.chatText().slice(-120) + ")")
             tests.summary(); Qt.quit() } }
     }
 
@@ -5098,8 +4940,7 @@ Item {
     // contrast, diff colours, chat width, animations, the fonts' sizes and
     // word wrap; each takes effect at once.
     // The setup guide: shown on a first start, not to a harlo set up before;
-    // the agents (a fake Claude and Harlo, both there: no Install
-    // buttons), the default agent and its model (then the new-session
+    // pi (there: no Install button) and its model (then the new-session
     // page starts with it), git (the services' cards, the default, a
     // server; no sign-in), the theme; Finish marks it done; Settings opens
     // it again.
@@ -5109,7 +4950,6 @@ Item {
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             Workspace.refreshProviders() } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
@@ -5118,20 +4958,17 @@ Item {
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
             tests.check(setupGuide.visible && setupGuide.step === 0, "a first start shows the guide")
-            tests.check(["claude", "harlo"].every(id => tests.findName("setupAgent-" + id) !== null), "a card for each agent")
-            tests.check(["claude", "harlo"].every(id => tests.findName("setupInstall-" + id) === null), "no Install for an installed one")
-            tests.clickItem(tests.findName("setupDefault-claude"), "Claude by default") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            tests.check(Workspace.setting("default_harness") === "claude", "the default agent is saved")
-            const combo = tests.findName("setupModel"), p = JSON.parse(Workspace.providersJson()).find(x => x.id === "claude")
-            const i = p.models.findIndex(n => n.toLowerCase().indexOf("haiku") >= 0)
+            tests.check(tests.findName("setupAgent-pi") !== null && tests.findName("setupAgent-harlo") === null && tests.findName("setupAgent-claude") === null, "one card: pi's")
+            tests.check(tests.findName("setupInstall-pi") === null, "no Install for an installed one")
+            tests.check(tests.findAllNamed("setupDefault-pi", setupGuide.contentItem, []).length === 0, "no agent to choose between")
+            const combo = tests.findName("setupModel"), p = JSON.parse(Workspace.providersJson()).find(x => x.id === "pi")
+            const i = p.models.findIndex(n => n.toLowerCase().indexOf("helper") >= 0)
             tests.check(combo !== null && combo.visible && combo.count === p.modelIds.length + 1 && i >= 0, "its models to pick (" + (combo ? combo.count : 0) + ")")
             tests.setupModel = p.modelIds[i]
             combo.activated(i + 1) } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            tests.check(Workspace.setting("default_model_claude") === tests.setupModel, "the model is saved (" + Workspace.setting("default_model_claude") + ")")
+            tests.check(Workspace.setting("default_model_pi") === tests.setupModel, "the model is saved (" + Workspace.setting("default_model_pi") + ")")
             tests.shotPopup(setupGuide, "clicks-setup-agents") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: tests.clickItem(tests.findName("setupNext"), "Next") }
@@ -5177,7 +5014,7 @@ Item {
         ScriptAction { script: {
             tests.check(!setupGuide.visible, "not again on the next start")
             win.openDraft(-1)
-            chat.draftView.harness = "claude" } }
+            chat.draftView.harness = "pi" } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             tests.check(chat.draftView.model === tests.setupModel, "a new session starts with that model (" + chat.draftView.model + ")")
@@ -5579,9 +5416,9 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // Accounts (Settings → Agents): signing Claude in from harlo, against
-    // a stand-in (scripts/fake-signin.py: its link and prompt, the test's
-    // code only), and out again.
+    // Accounts (Settings → Agents → pi): signing Claude in for pi's Claude
+    // subscription, against a stand-in (scripts/fake-signin.py: its link
+    // and prompt, the test's code only), and out again.
     SequentialAnimation {
         id: accountsTest
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksaccounts"
@@ -5591,14 +5428,19 @@ Item {
             Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             settingsDialog.openPage("providers") } }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.clickItem(tests.findName("provider-claude"), "the Claude row") }
-        PauseAnimation { duration: 1500 }
+        ScriptAction { script: tests.waitUntil(accountsTest, () => { const st = tests.findName("providerStatus-pi", settingsDialog.contentItem); return st && st.text.indexOf("Available") === 0 }, 20000) }
+        PauseAnimation { duration: 50 }
         ScriptAction { script: {
-            const none = tests.findName("accountsNone-claude")
-            const claude = JSON.parse(Workspace.providersJson()).find(p => p.id === "claude")
-            tests.check(none !== null, "Claude: not signed in (" + Accounts.status("claude") + ")")
-            tests.check(claude.modelCount === 0 && claude.error.indexOf("Not signed in") === 0, "so no Claude models are offered (" + claude.modelCount + ", " + claude.error + ")")
-            tests.clickItem(tests.findName("signIn-claude"), "Sign in…") } }
+            tests.check(tests.findName("provider-claude", settingsDialog.contentItem) === null, "no Claude Code row: pi is the agent")
+            tests.clickItem(tests.findName("provider-pi", settingsDialog.contentItem).children[1], "pi's row") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.waitUntil(accountsTest, () => JSON.parse(PiExtensions.bridgeStatus()).state === "ready" && tests.shown(tests.findName("piBridgeSignIn", settingsDialog.contentItem)), 30000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const d = settingsDialog.contentItem
+            const detail = tests.findName("piBridgeDetail", d)
+            tests.check(detail && detail.text.indexOf("isn't signed in yet") >= 0, "Claude: not signed in (" + (detail ? detail.text : "no row") + ")")
+            tests.clickItem(tests.findName("piBridgeSignIn", d), "Sign in to Claude…") } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
             tests.check(signInDialog.visible && tests.findText("Claude account") !== null && tests.findText("Anthropic Console") !== null, "the dialog offers a Claude account or the Console")
@@ -5621,12 +5463,14 @@ Item {
             tests.clickItem(tests.findName("signInClose"), "Done") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            const claude = JSON.parse(Workspace.providersJson()).find(p => p.id === "claude")
-            tests.check(claude.modelCount === 17 && claude.error === "", "signed in: its 17 models are offered (" + claude.modelCount + ")")
-            tests.clickItem(tests.findName("signOut-claude-claude"), "Sign out") } }
+            const d = settingsDialog.contentItem
+            const detail = tests.findName("piBridgeDetail", d)
+            tests.check(detail && detail.text.indexOf("Signed in as me@example.com") >= 0 && tests.shown(tests.findName("piBridgeSignOut", d)), "the subscription's row says who, with Sign out (" + (detail ? detail.text : "no row") + ")")
+            tests.shotWindow("clicks-accounts-claude-in")
+            tests.clickItem(tests.findName("piBridgeSignOut", d), "Sign out of Claude") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            tests.check(JSON.parse(Accounts.status("claude")).accounts.length === 0 && tests.findName("accountsNone-claude") !== null, "signed out")
+            tests.check(JSON.parse(Accounts.status("claude")).accounts.length === 0 && tests.shown(tests.findName("piBridgeSignIn", settingsDialog.contentItem)), "signed out")
             settingsDialog.close()
             tests.summary(); Qt.quit() } }
     }
@@ -5890,54 +5734,7 @@ Item {
     }
     // Runs of tool calls sit under a summary line that folds them (a saved session that
     // scripts/click-tests.sh writes); session rows are one line.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksruns"
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            const row = tests.findText("Fix the login redirect loop", sidebar)
-            let d = row
-            while (d && d.rowKey === undefined) d = d.parent
-            tests.check(d && d.height <= 46 && d.ToolTip.text === "", "the session row is one line, with no hover tip (" + (d ? d.height : "none") + ")")
-            // Never opened in harlo: its icon is still its model's, from its file.
-            const logo = d ? tests.findAllNamed("sessionMaker", d, [])[0] : null
-            const tag = d ? tests.findAllNamed("sessionAgentTag", d, [])[0] : null
-            tests.check(logo && logo.visible && logo.provider === "openai" && tag && tag.visible, "a session not opened yet shows its model's logo, Harlo as its badge (" + (logo ? logo.provider : "none") + ")")
-            tests.clickItem(row, "the session") } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: {
-            const t = chat.transcript
-            const run = tests.findText("Thought, edited 1 file, wrote 1 file, ran 1 command", t)
-            tests.check(run !== null, "the second run's summary")
-            tests.check(tests.findContaining("npm test -- auth", t) !== null && tests.findAllNames("runBox", t).length > 0, "a finished run starts open, in its box")
-            const whats = tests.findAllNames("toolWhat", t)
-            const npm = whats.find(l => l.plain === "npm test -- auth")
-            let card = npm
-            while (card && card.echoed === undefined) card = card.parent
-            tests.check(card && card.echoed && !card.outInWell, "one line of output that the line already says ('48 passed') isn't shown again")
-            const guard = whats.find(l => l.plain === "src/auth/guard.ts")
-            tests.check(guard && guard.font.family === Theme.mono && npm.font.family === Theme.mono, "paths and commands in code type")
-            tests.shotWindow("clicks-runs-open")
-            tests.clickItem(run, "the summary") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            const t = chat.transcript
-            tests.check(tests.findContaining("npm test -- auth", t) === null, "clicking it folds the run")
-            tests.check(t.debugFoldedRuns() === 1, "only that run")
-            tests.shotWindow("clicks-runs-folded")
-            tests.clickItem(tests.findText("Thought, edited 1 file, wrote 1 file, ran 1 command", t), "the summary again") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.check(tests.findContaining("npm test -- auth", chat.transcript) !== null, "and again opens it")
-            chat.transcript.positionAt(0) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            const t = chat.transcript
-            const read = tests.findAllNames("codeView", t).find(v => v.lines.some(l => l.h.indexOf("guard") >= 0))
-            tests.check(read && read.lines[0].n === "1" && read.lines[0].p.endsWith("/src/auth/guard.ts") && tests.findAllNames("codeNumber", read).length === 1,
-                      "Harlo's plain read numbered from its first line, a link to the file (" + (read ? JSON.stringify(read.lines[0].n) : "none") + ")")
-            tests.summary(); Qt.quit() } }
-    }
+
     // Glass menus and dialogs over a busy chat, for looking at (not in the
     // click suite): a context menu, a dialog, Settings with a font list
     // open, and the menu again with glass off.
@@ -5988,7 +5785,6 @@ Item {
             Phone.setAccessPort(Number(win.argValue("--phone-port=") || 7676)); Phone.setAccess(true)
             // (Without one: --nodemo=1, as the iOS app's recording starts.)
             if (win.argValue("--nodemo=") !== "1") Workspace.newSession(-1, "demo")
-            if (win.argValue("--fake-claude=")) Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             if (win.argValue("--relay=")) Phone.useRelay(true) } }
         PauseAnimation { duration: 1500 }
         // A long session (--history=N exchanges before it), as a phone may open.
@@ -6430,13 +6226,13 @@ Item {
     property real liveWritten: 0
     SequentialAnimation {
         id: changesLiveSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlochanges"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickschangeslive"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
-        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
+        ScriptAction { script: Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(changesLiveSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 100 }
@@ -6545,17 +6341,6 @@ Item {
         PauseAnimation { duration: 3000 }
         ScriptAction { script: { tests.memMark("end"); tests.log("turns:", tests.memTurn, "rows:", chat.transcript.listView.count) } }
         PauseAnimation { duration: 500 }
-        ScriptAction { script: Qt.quit() }
-    }
-
-    // A subagent transcript file (`--open=`) in the subagent dialog.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "subagentfile"
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: chat.subagentDialog.show({ id: "ListRepoFiles", agent: "scout", status: "completed", description: "List every repository file with its byte size", task: "Complete assignment thoroughly:\n\n# Target", sessionFile: win.argValue("--open=") }, false) }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: chat.subagentDialog.background.parent.grabToImage(r => r.saveToFile(win.selftestDir + "/subagent-file.png")) }
-        PauseAnimation { duration: 800 }
         ScriptAction { script: Qt.quit() }
     }
 
@@ -7763,39 +7548,6 @@ Item {
         }
     }
 
-    // Multirun (demo harness): two lanes in worktrees, overview, keep one.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "multirun"
-        PauseAnimation { duration: 1500 }
-        ScriptAction {
-            script: {
-                Workspace.addProject(win.argValue("--cwd="))
-                const id = Workspace.startRun(JSON.stringify({ projectId: 1, prompt: "Add a cache to the parser", starter: "", attachments: [],
-                    worktrees: true, base: "main", lanes: [{ harness: "demo", model: "fast/small" }, { harness: "demo", model: "slow/large" }] }))
-                tests.log("run:", id, "active:", Workspace.activeKey)
-            }
-        }
-        PauseAnimation { duration: 3500 }
-        ScriptAction {
-            script: {
-                const r = JSON.parse(Workspace.runJson(Workspace.activeKey.substring(9)))
-                tests.log("lanes:", r.lanes.map(l => l.letter + " " + l.model + " " + l.status + " " + l.branch + " changes=" + l.changes).join(" | "))
-                tests.shot("multirun")
-            }
-        }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: Workspace.keepRunLane(Workspace.activeKey.substring(9), 0) }
-        PauseAnimation { duration: 3000 }
-        ScriptAction {
-            script: {
-                const r = JSON.parse(Workspace.runJson(Workspace.activeKey.substring(9)))
-                tests.log("after keep:", "kept", r.kept, r.lanes.map(l => l.letter + " gone=" + l.worktreeGone).join(" | "), "notice:", Workspace.notice)
-                tests.shot("multirun-kept")
-            }
-        }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: Qt.quit() }
-    }
 
     // Drop-down window and commands from later launches (--ipc-test).
     SequentialAnimation {
@@ -7825,7 +7577,7 @@ Item {
         PauseAnimation { duration: 3000 }
         ScriptAction { script: Workspace.open(win.argValue("--open=")) }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: { tests.log("branches:", chat.branchCount, "rows:", chat.transcript.count); tests.shot("branches-header"); chat.branchDialog.show(win.argValue("--open="), "harlo", "/tmp") } }
+        ScriptAction { script: { tests.log("branches:", chat.branchCount, "rows:", chat.transcript.count); tests.shot("branches-header"); chat.branchDialog.show(win.argValue("--open="), "pi", "/tmp") } }
         PauseAnimation { duration: 1200 }
         ScriptAction { script: { tests.log("dialog:", chat.branchDialog.branches.map(b => (b.current ? "*" : "") + b.lastUser + "@" + b.divergesAt).join(" | "), "selected", chat.branchDialog.selected); tests.shotPopup(chat.branchDialog, "branches-dialog") } }
         PauseAnimation { duration: 500 }
@@ -8166,29 +7918,6 @@ Item {
         ScriptAction { script: Qt.quit() }
     }
 
-    // Subagents (demo harness): dock, transcript dialog, steer, cancel.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "subagents"
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: Workspace.newSession(-1, "demo") }
-        PauseAnimation { duration: 1000 }
-        ScriptAction { script: chat.submit("start some subagents", "") }
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: { tests.log("dock:", chat.subagentDock.agents.map(a => a.id + "=" + a.status).join(" "), "running", chat.subagentDock.running); tests.shot("subagents-running") } }
-        PauseAnimation { duration: 1800 }
-        ScriptAction { script: { tests.log("later:", chat.subagentDock.agents.map(a => a.id + "=" + a.status).join(" ")); chat.subagentDialog.show(chat.subagentDock.agents[1], true) } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { tests.log("dialog rows:", chat.subagentDialog.contentItem ? "open" : "-", "running", chat.subagentDialog.running); chat.subagentDialog.background.parent.grabToImage(r => r.saveToFile(win.selftestDir + "/subagent-dialog.png")) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { chat.session.steerSubagent("BuildOtter", "Only run the unit tests"); chat.session.cancelSubagent("BuildOtter") } }
-        PauseAnimation { duration: 1200 }
-        ScriptAction { script: { tests.log("after cancel:", chat.subagentDock.agents.map(a => a.id + "=" + a.status).join(" "), "msg", chat.session.subagentMessage); chat.subagentDialog.close() } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: tests.shot("subagents-done") }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: Qt.quit() }
-    }
-
     // An open image reloads when the file changes, and notes a deletion.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "imagereload"
@@ -8248,28 +7977,7 @@ Item {
         ScriptAction { script: Qt.quit() }
     }
 
-    // Commit message written by a (stand-in) Harlo: --fake-harlo=<script>.
-    SequentialAnimation {
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "commitmsg"
-        PauseAnimation { duration: 1500 }
-        ScriptAction {
-            script: {
-                Workspace.addProject(win.argValue("--cwd="))
-                Workspace.newSession(1, "demo")
-                windowSettings.rightMode = "changes"
-            }
-        }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: { tests.log("changes:", git.unstagedCount, "harness:", changes.harness); git.generateMessage(win.argValue("--fake-harlo="), "", false); tests.log("generating:", git.generating) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.shot("commitmsg-writing") }
-        PauseAnimation { duration: 2500 }
-        ScriptAction { script: { tests.log("message:", JSON.stringify(changes.commitText), "generating:", git.generating, "error:", git.error, git.message); tests.shot("commitmsg-done") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: Qt.quit() }
-    }
-
-    // New-session page: empty state, project/branch, starter, send, worktree.
+    // New-session page: empty state, project/branch, send, worktree.
     SequentialAnimation {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "draft"
         PauseAnimation { duration: 1500 }
@@ -8279,9 +7987,9 @@ Item {
         PauseAnimation { duration: 800 }
         ScriptAction { script: { const d = chat.draftView; tests.log("project:", d.project ? d.project.name : "-", "branch:", d.currentBranch, "default:", d.atDefaultBranch, "tab:", Workspace.activeKey); tests.shot("draft-project") } }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: { const d = chat.draftView; d.starter = "explore"; d.text = "Focus on the build setup"; d.harness = "demo" } }
+        ScriptAction { script: { const d = chat.draftView; d.text = "Focus on the build setup"; d.harness = "demo" } }
         PauseAnimation { duration: 400 }
-        ScriptAction { script: tests.shot("draft-starter") }
+        ScriptAction { script: tests.shot("draft-typed") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: chat.draftView.send() }
         PauseAnimation { duration: 2500 }
@@ -8489,7 +8197,7 @@ Item {
         PauseAnimation { duration: 400 }
         ScriptAction { script: tests.shotPopup(sidebar.sessionMenu, "menu-session") }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: { sidebar.sessionMenu.close(); sidebar.projectMenu.harness = "harlo"; sidebar.projectMenu.popup(sidebar, 120, 110) } }
+        ScriptAction { script: { sidebar.sessionMenu.close(); sidebar.projectMenu.harness = "pi"; sidebar.projectMenu.popup(sidebar, 120, 110) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: tests.shotPopup(sidebar.projectMenu, "menu-project") }
         PauseAnimation { duration: 300 }
@@ -8501,7 +8209,7 @@ Item {
         PauseAnimation { duration: 400 }
         ScriptAction { script: tests.shotPopup(sidebar.trashDialog, "dialog-trash") }
         PauseAnimation { duration: 300 }
-        ScriptAction { script: { sidebar.trashDialog.close(); sidebar.openNewWorktree(-1, "houdini-mcp", "harlo") } }
+        ScriptAction { script: { sidebar.trashDialog.close(); sidebar.openNewWorktree(-1, "houdini-mcp", "pi") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: tests.shotPopup(sidebar.worktreeDialogs.newDialog, "dialog-worktree") }
         PauseAnimation { duration: 300 }
@@ -8616,137 +8324,6 @@ Item {
     property string harloKey: ""
     property string approvedHelper: ""
 
-    // Harlo's question card, a side question (/btw), a background job whose
-    // end starts a run by itself, and a destructive command asking in yolo.
-    SequentialAnimation {
-        id: harloSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlo"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
-            // (Background commands run without asking in yolo.)
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            tests.check(chat.session.harness === "harlo" && chat.session.modelName === "Fake Coder", "a Harlo session on the scripted model (" + chat.session.modelName + ")")
-            tests.sendByKeys("please ask me something") } }
-        PauseAnimation { duration: 300 }
-        // The ask card.
-        ScriptAction { script: tests.waitUntil(harloSteps, () => chat.session.hasRequest, 10000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(chat.session.requestMethod === "ask" && tests.findText("Which colour should the button be?", chat.askPanel) !== null, "Harlo's question shows in the question card")
-            tests.shotWindow("clicks-harlo-ask")
-            tests.clickText("Blue", chat.askPanel) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.clickText("Send answers", chat.askPanel) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSteps, () => tests.chatText().indexOf("Done:") >= 0, 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            const asked = tests.modelRequests().filter(b => (b.messages || []).some(m => m.role === "tool" && JSON.stringify(m.content).indexOf("Blue") >= 0))
-            tests.check(!chat.session.hasRequest && asked.length > 0, "the answer goes back to the model (" + tests.chatText().slice(-120) + ")")
-            const askRes = tests.findAllNames("toolResult", chat.transcript).map(l => l.text)
-            tests.check(askRes.indexOf("Blue") >= 0, "the question's line shows what was answered (" + askRes.join(" | ") + ")")
-            tests.sendByKeys("/btw which colour did I pick?") } }
-        PauseAnimation { duration: 300 }
-        // The side question: a card above the composer, not in the conversation.
-        ScriptAction { script: tests.waitUntil(harloSteps, () => chat.session.asideJson !== "" && JSON.parse(chat.session.asideJson).done, 10000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const card = tests.findName("asideCard")
-            const a = chat.session.asideJson !== "" ? JSON.parse(chat.session.asideJson) : {}
-            tests.check(card !== null && (a.text || "").indexOf("Aside: which colour did I pick?") === 0, "/btw answers in the card above the composer (" + JSON.stringify(a).slice(0, 160) + ")")
-            tests.check(tests.chatText().indexOf("Aside:") < 0, "and not in the conversation")
-            const foot = tests.findText("A side question: not part of the conversation, and not kept.")
-            tests.check(foot && !foot.truncated && foot.mapToItem(null, foot.contentWidth, 0).x <= tests.findName("asideCard").mapToItem(null, tests.findName("asideCard").width, 0).x + 1, "the aside's footnote stays inside its card")
-            tests.shotWindow("clicks-harlo-btw")
-            tests.clickItem(tests.findName("asideDismiss"), "dismiss the aside") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.check(tests.findName("asideCard") === null, "dismissing it hides the card")
-            tests.sendByKeys("quote 2>&1; and <b>bold</b> here") } }
-        PauseAnimation { duration: 300 }
-        // A reply quoting a shell redirect: its Context row shows it as
-        // text (unescaped, "&1;" read as markup and Qt warned).
-        ScriptAction { script: tests.waitUntil(harloSteps, () => tests.chatText().indexOf("ok: quote") >= 0, 10000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { tests.harloRightWas = windowSettings.rightMode; windowSettings.rightMode = "context" } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const rows = tests.findAllNames("contextRowLabel", win.contentItem).map(l => l.text)
-            tests.check(rows.some(t => t.indexOf("ok: quote 2>&amp;1; and &lt;b>bold&lt;/b> here") >= 0), "a reply's Context row shows its 2>&1; and <b> as text (" + rows.slice(-2).join(" | ").slice(0, 200) + ")")
-            windowSettings.rightMode = tests.harloRightWas
-            tests.sendByKeys("run the build in the background") } }
-        PauseAnimation { duration: 300 }
-        // A background job: the turn ends at once; its end starts a run.
-        ScriptAction { script: tests.waitUntil(harloSteps, () => tests.chatText().indexOf("The background job ended") >= 0, 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(t.indexOf("Started in the background as j1") >= 0, "the command starts as a job (" + t.slice(-300) + ")")
-            tests.check(t.indexOf("The background job ended: built-ok") >= 0, "its end comes as a notice, with its output, and starts a run by itself")
-            const bg = tests.findAllNames("backgroundNotice", chat.transcript).filter(n => n.visible)
-            const head = bg.length ? tests.findName("backgroundHeadline", bg[0]) : null
-            const cmd = bg.length ? tests.findName("backgroundCommand", bg[0]) : null
-            tests.check(bg.length === 1 && head && head.text === "Background command finished" && cmd && cmd.text === "$ sleep 1; echo built-ok" && tests.findContaining("read or grep it", chat.transcript) === null, "the notice shows how it went and its command, apart (" + (head ? head.text : "none") + " | " + (cmd ? cmd.text : "none") + ")")
-            tests.shotWindow("clicks-harlo-job")
-            // Its one line, cut short to the well: a click shows all of it.
-            const w = tests.findAllNames("toolWhat", chat.transcript).find(l => l.plain.indexOf("echo built-ok") >= 0)
-            let card = w
-            while (card && card.cutLines === undefined) card = card.parent
-            tests.harloJobCard = card
-            tests.check(card && card.cutLines > 0 && card.canOpen, "a line cut short to its well opens the call (" + (card ? card.cutLines : "none") + ")")
-            if (w) tests.clickItem(w, "the job's line") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const card = tests.harloJobCard
-            tests.check(card && card.open && tests.findAllNames("toolTail", card).length === 0 && tests.findContaining("j1.log", card) !== null, "opened: all of it, the log's path too")
-            tests.shotWindow("clicks-harlo-job-open")
-            tests.sendByKeys("now reset hard") } }
-        PauseAnimation { duration: 300 }
-        // A destructive command asks, even in yolo, without Always allow.
-        ScriptAction { script: tests.waitUntil(harloSteps, () => chat.session.hasRequest, 10000) }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.check(Workspace.approvalMode(tests.harloKey) === "yolo" && chat.session.requestIsApproval, "git reset --hard asks in yolo")
-            tests.check(tests.findContaining("can't be undone", chat.transcript) !== null, "and says why")
-            tests.check(tests.findAllNames("approveInline", chat.transcript).some(b => b.text === "Run anyway"), "its confirm names what it does, not Approve")
-            tests.check(tests.findName("alwaysAllowInline", chat.transcript) === null && tests.findText("Always allow") === null, "with no Always allow")
-            const q = tests.findAllNames("approvalQuestion", chat.transcript)[0]
-            const grid = q ? q.parent : null
-            tests.check(q && !q.truncated && (win.width < 700 ? grid.columns === 1 && q.lineCount === 1 : grid.columns === 2), "the question beside its answers, or over them when narrow (" + (grid ? grid.columns : "none") + ")")
-            tests.shotWindow("clicks-harlo-destructive")
-            tests.clickText("Deny", chat.transcript) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSteps, () => !chat.session.hasRequest && chat.session.status === "idle", 10000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(tests.findAllNames("toolMark", chat.transcript).some(m => m.name === "close"), "Deny: it isn't run (" + tests.chatText().slice(-160) + ")")
-            // A file too big to read whole: its outline, each row its line.
-            const big = ["// The ledger.", "", "pub struct Ledger {", "    id: u32,", "}", "", "impl Ledger {", "    pub fn post(&self) {}", "}"]
-            for (let i = big.length; i < 2099; i++) big.push("// filler " + i)
-            big.push("fn last() {}")
-            TestInput.writeFile(win.argValue("--cwd=") + "/big.rs", big.join("\n") + "\n")
-            tests.sendByKeys("read the big file") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSteps, () => tests.chatText().indexOf("Its outline follows") >= 0 && chat.session.status === "idle", 10000) }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.shotWindow("clicks-harlo-outline")
-            const views = tests.findAllNames("codeView", chat.transcript)
-            const code = views.length ? views[views.length - 1].lines : []
-            tests.check(JSON.stringify(code.map(l => l.n)) === JSON.stringify(["3", "7", "8", "2100"]) && code[1].h.indexOf("Ledger") >= 0, "a big file's read: its outline, each definition at its own line (" + JSON.stringify(code.map(l => l.n)) + ")")
-            tests.check(tests.findAllNames("toolResult", chat.transcript).some(l => l.text === "2100 lines, outline"), "its card says it's the outline of 2100 lines")
-            tests.summary(); Qt.quit() } }
-    }
-
     // The wiki with Harlo and Claude Code: with Wiki on for a project that
     // has one (.okf/), both are told of it through harlo's tools, with the
     // pages whose code changed since; neither gets a wiki tool. With Wiki
@@ -8773,95 +8350,19 @@ Item {
     function wikiSettled() { const st = JSON.parse(Workspace.wikiJson("project:" + tests.wikiProject)); return !st.running && !!st.work && st.work.current }
     function wikiSaid(i) { return JSON.stringify(((tests.modelRequests()[i] || {}).messages || []).filter(m => m.role === "system")) }
     function wikiTools(i) { return ((tests.modelRequests()[i] || {}).tools || []).map(t => t.function.name).filter(n => n.indexOf("wiki") >= 0) }
-    /// Opens a new Harlo session in the wiki's project, its requests counted from here.
+    /// Opens a new pi session in the wiki's project, its requests counted from here.
     function wikiHello() {
         tests.wikiRequests = tests.modelRequests().length
-        tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
+        tests.harloKey = Workspace.newSession(tests.wikiProject, "pi")
         Workspace.setApprovalMode(tests.harloKey, "yolo")
-    }
-    // Code lookup: off as it comes, neither Harlo nor Claude Code gets the
-    // lookup tool; switched on for the project (Settings → Projects), both
-    // do, and it answers from harlo's code index.
-    property int lookupProject: -1
-    function lookupHello() {
-        tests.wikiRequests = tests.modelRequests().length
-        tests.harloKey = Workspace.newSession(tests.lookupProject, "harlo")
-        Workspace.setApprovalMode(tests.harloKey, "yolo")
-    }
-    function lookupTools(i) { return ((tests.modelRequests()[i] || {}).tools || []).map(t => t.function.name).filter(n => n.indexOf("lookup") >= 0) }
-    SequentialAnimation {
-        id: harloLookupSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlolookup"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.lookupProject = JSON.parse(Workspace.projectsJson())[0].id
-            tests.check(Workspace.setting("lookup_" + tests.lookupProject) === "", "Code lookup not set (off as it comes)")
-            tests.lookupHello() } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendByKeys("hello") }
-        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 20000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            tests.check(tests.lookupTools(tests.wikiRequests).length === 0, "off: no lookup tool reaches Harlo (" + tests.lookupTools(tests.wikiRequests).join(", ") + ")")
-            tests.claudeKey = Workspace.newSession(tests.lookupProject, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("lookup note") }
-        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.chatText().indexOf("Lookup tools:") >= 0, 20000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Lookup tools: none") >= 0, "nor Claude Code (" + tests.chatText().slice(-120) + ")")
-            // On, from Settings → Projects.
-            settingsDialog.projectId = tests.lookupProject
-            settingsDialog.openPage("projects") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const sw = tests.findName("projectLookup", settingsDialog.contentItem)
-            const f = tests.findName("settingsPage", settingsDialog.contentItem)
-            if (sw && f) f.contentY = Math.max(0, Math.min(sw.mapToItem(f.contentItem, 0, 0).y - 160, f.contentHeight - f.height))
-            tests.check(sw !== null && tests.shown(sw) && !sw.checked, "Settings → Projects has Code lookup, off (" + (sw ? sw.checked : "no switch") + ")")
-            if (sw) tests.clickItem(sw, "Code lookup") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.check(Workspace.setting("lookup_" + tests.lookupProject) === "1", "clicked, it's on for the project (" + Workspace.setting("lookup_" + tests.lookupProject) + ")")
-            tests.shotWindow("clicks-harlo-lookup-setting")
-            settingsDialog.close()
-            tests.lookupHello() } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: { tests.wikiDone = tests.doneCount(); tests.sendByKeys("look up retry") } }
-        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.wikiAnswered(), 30000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            tests.check(tests.lookupTools(tests.wikiRequests).length === 1 && tests.lookupTools(tests.wikiRequests)[0] === "lookup", "on: Harlo gets the lookup tool (" + tests.lookupTools(tests.wikiRequests).join(", ") + ")")
-            const said = tests.lastToolResult()
-            tests.check(said.indexOf("fn retry  src/jobs.rs:1-3") >= 0 && said.indexOf("pub fn retry()") >= 0, "and its card comes from the code index (" + said.slice(0, 160) + ")")
-            tests.shotWindow("clicks-harlo-lookup")
-            tests.claudeKey = Workspace.newSession(tests.lookupProject, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("lookup note") }
-        ScriptAction { script: tests.waitUntil(harloLookupSteps, () => tests.chatText().indexOf("Lookup tools:") >= 0, 30000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(/Lookup tools: \S*lookup; retry: fn retry  src\/jobs\.rs:1-3/.test(t), "Claude Code gets it through harlo's tools, the same card (" + t.slice(t.indexOf("Lookup tools:"), t.indexOf("Lookup tools:") + 160) + ")")
-            tests.summary(); Qt.quit() } }
     }
     SequentialAnimation {
         id: harloWikiSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowiki"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickswiki"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
@@ -8877,7 +8378,7 @@ Item {
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
             const said = tests.wikiSaid(tests.wikiRequests)
-            tests.check(tests.wikiTools(tests.wikiRequests).length === 0, "Wiki on (as it comes): no wiki tool reaches Harlo (" + tests.wikiTools(tests.wikiRequests).join(", ") + ")")
+            tests.check(tests.wikiTools(tests.wikiRequests).length === 0, "Wiki on (as it comes): no wiki tool reaches pi (" + tests.wikiTools(tests.wikiRequests).join(", ") + ")")
             tests.check(said.indexOf("This project has a wiki in .okf/") >= 0 && said.indexOf("check that code before relying on it") >= 0, "but a few lines on the wiki and when to read it")
             tests.check(said.indexOf("Out of date") < 0, "with no page out of date yet")
             const mapAt = said.indexOf("Wiki map (.okf/)")
@@ -8902,7 +8403,7 @@ Item {
         ScriptAction { script: {
             const said = tests.wikiSaid(tests.wikiRequests)
             tests.check(said.indexOf("so the code wins): .okf/architecture/jobs.md.") >= 0, "a page whose code changed is named out of date (" + said.slice(said.indexOf("Out of date"), said.indexOf("Out of date") + 120) + ")")
-            // Reading that page, Harlo is told which of its footnotes to check.
+            // Reading that page, pi is told which of its footnotes to check.
             tests.wikiDone = tests.doneCount()
             tests.sendByKeys("read the wiki at architecture/jobs.md") } }
         ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.wikiAnswered(), 30000) }
@@ -8911,19 +8412,10 @@ Item {
             const read = tests.lastToolResult()
             const note = read.indexOf("[Wiki: this page is out of date.")
             tests.check(read.indexOf("retried three times") >= 0 && note >= 0 && read.indexOf("[^retry] src/jobs.rs, fn retry (lines 1–3) changed since the page was written", note) >= 0,
-                        "reading it, Harlo is told which footnotes' code changed (" + read.slice(Math.max(note, 0), Math.max(note, 0) + 200) + ")")
+                        "reading it, pi is told which footnotes' code changed (" + read.slice(Math.max(note, 0), Math.max(note, 0) + 200) + ")")
             const counts = tests.findAllNames("toolResult", chat.transcript).map(l => l.text)
             tests.check(counts.indexOf("15 lines") >= 0, "its card counts the page's 15 lines, not the note's (" + counts.join(" | ") + ")")
-            tests.shotWindow("clicks-harlo-wiki")
-            // Claude Code, through the same tools.
-            tests.claudeKey = Workspace.newSession(tests.wikiProject, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("wiki note") }
-        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.chatText().indexOf("Wiki tools:") >= 0, 20000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(t.indexOf("Wiki tools: none; wiki told; out of date: .okf/architecture/jobs.md") >= 0, "Claude Code is told the same, with no wiki tool (" + t.slice(t.indexOf("Wiki tools:"), t.indexOf("Wiki tools:") + 200) + ")")
+            tests.shotWindow("clicks-wiki")
             // The map off in Settings → Wiki: the note alone.
             settingsDialog.openPage("wiki") } }
         PauseAnimation { duration: 800 }
@@ -8936,7 +8428,7 @@ Item {
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             tests.check(Workspace.setting("wiki_map") === "0", "clicked, it's off (" + Workspace.setting("wiki_map") + ")")
-            tests.shotWindow("clicks-harlo-wiki-map-setting")
+            tests.shotWindow("clicks-wiki-map-setting")
             settingsDialog.close()
             tests.wikiHello() } }
         PauseAnimation { duration: 300 }
@@ -8962,7 +8454,7 @@ Item {
         ScriptAction { script: {
             const c = tests.findName("projectWikiMap", settingsDialog.contentItem)
             tests.check(Workspace.setting("wiki_map_" + tests.wikiProject) === "1" && c && c.currentIndex === 1, "picked On, the project has it on (" + Workspace.setting("wiki_map_" + tests.wikiProject) + ")")
-            tests.shotWindow("clicks-harlo-wiki-map-project")
+            tests.shotWindow("clicks-wiki-map-project")
             settingsDialog.close()
             tests.wikiHello() } }
         PauseAnimation { duration: 300 }
@@ -8984,18 +8476,11 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             tests.check(tests.wikiSaid(tests.wikiRequests).indexOf("This project has a wiki") < 0, "Wiki off: a new session isn't told of it")
-            tests.claudeKey = Workspace.newSession(tests.wikiProject, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("wiki note") }
-        ScriptAction { script: tests.waitUntil(harloWikiSteps, () => tests.chatText().indexOf("Wiki tools:") >= 0, 20000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Wiki tools: none; wiki not told") >= 0, "nor is Claude Code (" + tests.chatText().slice(-120) + ")")
             // Updating it: a session of its own with harlo's check, which
             // only it gets.
-            Workspace.setSetting("default_harness", "harlo")
-            // (Written with the project's model for Harlo.)
-            Workspace.setSetting("project_model_" + tests.wikiProject + "_harlo", "fake/fake-helper")
+            Workspace.setSetting("default_harness", "pi")
+            // (Written with the project's model for pi.)
+            Workspace.setSetting("project_model_" + tests.wikiProject + "_pi", "fake/fake-helper")
             tests.wikiRequests = tests.modelRequests().length
             tests.wikiKeyBefore = Workspace.activeKey
             tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "update") === "", "Update starts") } }
@@ -9021,7 +8506,7 @@ Item {
             const cwd = win.argValue("--cwd=")
             tests.check((TestInput.readFile(cwd + "/.okf/log.md") || "").indexOf("(/architecture/jobs.md)") >= 0, "the log records the stamped pages (" + (TestInput.readFile(cwd + "/.okf/log.md") || "").slice(0, 200) + ")")
             tests.check(TestInput.readFile(cwd + "/AGENTS.md") === "" && TestInput.listDir(cwd + "/.github") === "", "and nothing outside .okf/ is written")
-            tests.shotWindow("clicks-harlo-wiki-update")
+            tests.shotWindow("clicks-wiki-update")
             // Done, and left: on the project's Wiki shelf, folded.
             Workspace.open(tests.wikiKeyBefore) } }
         PauseAnimation { duration: 1500 }
@@ -9087,12 +8572,12 @@ Item {
     function wikiOwes() { return (wikiPanel.pageView && wikiPanel.pageView.items) || [] }
     SequentialAnimation {
         id: wikiPanelSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikipanel"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickswikipanel"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
-            Workspace.setSetting("default_harness", "harlo")
+            Workspace.setSetting("default_harness", "pi")
             Workspace.addProject(win.argValue("--cwd="))
             Workspace.addProject(win.argValue("--cwd=").replace(/\/repo$/, "/repo2")) } }
         PauseAnimation { duration: 500 }
@@ -9100,7 +8585,7 @@ Item {
             const ps = JSON.parse(Workspace.projectsJson())
             tests.wikiProject = ps.find(p => p.folder === "repo").id
             tests.wikiProject2 = ps.find(p => p.folder === "repo2").id
-            tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo") } }
+            tests.harloKey = Workspace.newSession(tests.wikiProject, "pi") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.clickItem(tests.findName("rail-wiki"), "the rail's Wiki") }
         PauseAnimation { duration: 300 }
@@ -9336,7 +8821,7 @@ Item {
         ScriptAction { script: {
             tests.check(true, "back in the panel: up to date, and when it was written (" + tests.wikiFresh() + ")")
             // A project without a wiki: what it is, and Create.
-            tests.harloKey = Workspace.newSession(tests.wikiProject2, "harlo") } }
+            tests.harloKey = Workspace.newSession(tests.wikiProject2, "pi") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.waitUntil(wikiPanelSteps, () => tests.findName("wikiCreate", wikiPanel) !== null && tests.findName("wikiCreate", wikiPanel).visible, 10000) }
         PauseAnimation { duration: 300 }
@@ -9451,7 +8936,7 @@ Item {
     function demoFile(path) { return TestInput.readFile(win.argValue("--cwd=") + "/" + path) }
     SequentialAnimation {
         id: wikiDemoSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikidemo"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickswikidemo"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
@@ -9461,7 +8946,7 @@ Item {
         ScriptAction { script: {
             tests.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
             Workspace.setSetting("wiki_" + tests.wikiProject, "1")
-            tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
+            tests.harloKey = Workspace.newSession(tests.wikiProject, "pi")
             Workspace.setApprovalMode(tests.harloKey, "yolo")
             windowSettings.rightMode = "wiki" } }
         PauseAnimation { duration: 600 }
@@ -9608,7 +9093,7 @@ Item {
             const stale = win.argValue("--wiki-stale=") !== "", broken = win.argValue("--wiki-break=") !== ""
             const note = (/This project has a wiki in \.okf\/[^"]{0,200}/.exec(said) || [""])[0]
             tests.check(note !== "" && (stale ? said.indexOf(".okf/architecture/orders.md") >= 0 : broken ? said.indexOf(".okf/overview.md") >= 0 : said.indexOf("Out of date") < 0),
-                      "a Harlo session is told of the wiki" + (stale ? ", and that orders.md is out of date" : broken ? ", and that overview.md is out of date" : "") + " (" + note + ")")
+                      "a pi session is told of the wiki" + (stale ? ", and that orders.md is out of date" : broken ? ", and that overview.md is out of date" : "") + " (" + note + ")")
             tests.check(!(req.tools || []).some(t => /wiki/.test((t.function || t).name || "")), "with no wiki tools (" + (req.tools || []).map(t => (t.function || t).name).filter(n => /wiki/.test(n)).join(", ") + ")")
             const t = tests.lastToolResult()
             tests.check(t.length > 80 && /^---|type:|# /.test(t.trim().slice(0, 200)) && !/error|not found/i.test(t.slice(0, 120)), "and reads a page as a file (" + tests.demoBest + ": " + t.slice(0, 120) + ")")
@@ -9631,17 +9116,17 @@ Item {
     }
     SequentialAnimation {
         id: wikiOfferSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikioffer"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickswikioffer"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
-            Workspace.setSetting("default_harness", "harlo")
+            Workspace.setSetting("default_harness", "pi")
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             tests.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
-            Workspace.setSetting("project_model_" + tests.wikiProject + "_harlo", "fake/fake-helper")
+            Workspace.setSetting("project_model_" + tests.wikiProject + "_pi", "fake/fake-helper")
             // (Its footnote recorded: an update with nothing owed, no session.)
             tests.wikiSessionsBefore = Workspace.sessionCount
             Workspace.startWikiRun("project:" + tests.wikiProject, "update") } }
@@ -9664,7 +9149,7 @@ Item {
             tests.check(/^3 commits on main added b, which no page mentions\. An update deals with the 2 things it owes in a session you can watch\.$/.test(text),
                       "an offer: main's commits, the declaration they add and what the wiki owes (" + text + ")")
             tests.check(tests.findText("Merged work isn't in repo's wiki yet", toast) !== null, "naming the project")
-            tests.shotWindow("clicks-harlo-wiki-offer")
+            tests.shotWindow("clicks-wiki-offer")
             tests.clickItem(tests.findName("wikiOfferLater", toast), "Not now") } }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => tests.findName("wikiOffer-" + tests.wikiProject) === null, 5000) }
         ScriptAction { script: {
@@ -9689,15 +9174,15 @@ Item {
             Workspace.checkWikiOffers() } }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => tests.findName("wikiOffer-" + tests.wikiProject) !== null, 10000) }
         PauseAnimation { duration: 400 }
-        // Settings → Wiki: Harlo with Fake Coder, thinking low, writes
+        // Settings → Wiki: pi with Fake Coder, thinking low, writes
         // every wiki (the project's own model is Fake Helper).
         ScriptAction { script: settingsDialog.openPage("wiki") }
-        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => { const c = tests.findName("wikiWriterAgent", settingsDialog.contentItem); return c && c.model.indexOf("Harlo") > 0 }, 10000) }
+        ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => { const c = tests.findName("wikiWriterAgent", settingsDialog.contentItem); return c && c.model.indexOf("pi") > 0 }, 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const agent = tests.findName("wikiWriterAgent", settingsDialog.contentItem)
             tests.check(agent.currentText === "Same as the project", "unset, each project's own agent writes its wiki (" + agent.currentText + ")")
-            agent.activated(agent.model.indexOf("Harlo")) } }
+            agent.activated(agent.model.indexOf("pi")) } }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => { const c = tests.findName("wikiWriterModel", settingsDialog.contentItem); return c && c.visible && c.model.length > 1 }, 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -9706,11 +9191,11 @@ Item {
             const thinking = tests.findName("wikiWriterThinking", settingsDialog.contentItem)
             thinking.activated(1)
             const v = JSON.parse(Workspace.setting("wiki_writer") || "{}")
-            tests.check(JSON.stringify(v) === JSON.stringify({ update: { agent: "harlo", model: "fake/fake-coder", thinking: "low" } }), "Settings → Wiki keeps Update's agent, model and thinking, Create's unset (" + JSON.stringify(v) + ")")
+            tests.check(JSON.stringify(v) === JSON.stringify({ update: { agent: "pi", model: "fake/fake-coder", thinking: "low" } }), "Settings → Wiki keeps Update's agent, model and thinking, Create's unset (" + JSON.stringify(v) + ")")
             const create = tests.findName("wikiCreateAgent", settingsDialog.contentItem)
             tests.check(create && create.currentText === "Same as the project", "Create has its own (" + (create ? create.currentText : "") + ")")
             // Create's set after Update's, on the same page: both kept.
-            create.activated(create.model.indexOf("Harlo")) } }
+            create.activated(create.model.indexOf("pi")) } }
         ScriptAction { script: tests.waitUntil(wikiOfferSteps, () => { const c = tests.findName("wikiCreateModel", settingsDialog.contentItem); return c && c.visible && c.model.length > 1 }, 10000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -9728,7 +9213,7 @@ Item {
             tests.check(!left.create && left.update && left.update.model === "fake/fake-coder", "unsetting Create leaves Update's (" + JSON.stringify(left) + ")")
             // (The stand-in models are served on this computer: local.)
             tests.check(um.model.slice(1).every(m => / · local$/.test(m)), "models from a server here say local (" + JSON.stringify(um.model) + ")")
-            tests.shotWindow("clicks-harlo-wiki-writer")
+            tests.shotWindow("clicks-wiki-writer")
             settingsDialog.close()
             // (As it reads when shown.)
             wikiPanel.load()
@@ -9751,7 +9236,7 @@ Item {
             const asked = JSON.stringify(tests.modelRequests().map(r => r.messages || []))
             const at = asked.indexOf("harlo's check found")
             tests.check(at >= 0 && asked.indexOf("new fn c in src/c.rs:1", at) >= 0 && asked.indexOf("[^a] src/a.rs, fn a", at) >= 0, "the update starts with what the check found owed (" + (at >= 0 ? asked.slice(at, at + 300) : "not said") + ")")
-            tests.check(tests.wikiPanelWriter === "Written by Harlo with " + Theme.modelLabel("fake/fake-coder") + " (Settings → Wiki)", "and the panel says who updates it (" + tests.wikiPanelWriter + ")")
+            tests.check(tests.wikiPanelWriter === "Written by pi with " + Theme.modelLabel("fake/fake-coder") + " (Settings → Wiki)", "and the panel says who updates it (" + tests.wikiPanelWriter + ")")
             tests.summary(); Qt.quit() } }
     }
 
@@ -9770,18 +9255,17 @@ Item {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "wikireal"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            if (win.argValue("--agent=") !== "claude") Workspace.setProviderEnabled("claude", false)
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             tests.wikiProject = JSON.parse(Workspace.projectsJson())[0].id
             Workspace.setSetting("wiki_" + tests.wikiProject, "1")
-            Workspace.setSetting("default_harness", win.argValue("--agent=") || "harlo")
+            Workspace.setSetting("default_harness", win.argValue("--agent=") || "pi")
             if (win.argValue("--model="))
-                Workspace.setSetting("project_model_" + tests.wikiProject + "_" + (win.argValue("--agent=") || "harlo"), win.argValue("--model="))
+                Workspace.setSetting("project_model_" + tests.wikiProject + "_" + (win.argValue("--agent=") || "pi"), win.argValue("--model="))
             const mode = win.argValue("--wiki-mode=")
             if (mode === "lookup") {
-                tests.harloKey = Workspace.newSession(tests.wikiProject, win.argValue("--agent=") || "harlo")
+                tests.harloKey = Workspace.newSession(tests.wikiProject, win.argValue("--agent=") || "pi")
                 Workspace.setApprovalMode(tests.harloKey, "yolo")
             } else {
                 tests.wikiKeyBefore = Workspace.activeKey
@@ -9853,12 +9337,11 @@ Item {
     function remoteWikiFile(rel) { return TestInput.readFile(win.argValue("--cwd=") + rel) || "" }
     SequentialAnimation {
         id: wikiRemoteSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlowikiremote"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickswikiremote"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
-            Workspace.setProviderEnabled("claude", false)
             tests.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
             Remotes.connectHost("box") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => JSON.parse(Remotes.hostsJson())[0].state === "connected", 30000) }
@@ -9868,8 +9351,8 @@ Item {
         ScriptAction { script: {
             const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo")
             tests.wikiProject = p ? Number(p[0]) : -1
-            tests.check(Workspace.instance === "box" && tests.wikiProject >= 0 && p[2] === "harlo", "the project on box, with Harlo there")
-            tests.harloKey = Workspace.newSession(tests.wikiProject, "harlo")
+            tests.check(Workspace.instance === "box" && tests.wikiProject >= 0 && p[2] === "pi", "the project on box, with pi there")
+            tests.harloKey = Workspace.newSession(tests.wikiProject, "pi")
             Workspace.setApprovalMode(tests.harloKey, "yolo")
             windowSettings.rightMode = "wiki" } }
         PauseAnimation { duration: 600 }
@@ -9936,7 +9419,7 @@ Item {
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => chat.session.modelName !== "", 30000) }
         PauseAnimation { duration: 50 }
         ScriptAction { script: {
-            tests.check(chat.session.harness === "harlo" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a Harlo session on box (" + chat.session.cwd + ")")
+            tests.check(chat.session.harness === "pi" && chat.session.cwd === "ssh://box" + win.argValue("--cwd="), "a pi session on box (" + chat.session.cwd + ")")
             tests.sendByKeys("hello") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.modelRequests().length > tests.wikiRequests && chat.session.status === "idle", 30000) }
         PauseAnimation { duration: 100 }
@@ -9944,21 +9427,7 @@ Item {
             const said = tests.wikiSaid(tests.wikiRequests)
             tests.check(tests.wikiTools(tests.wikiRequests).length === 0, "no wiki tool reaches it (" + tests.wikiTools(tests.wikiRequests).join(", ") + ")")
             tests.check(said.indexOf("so the code wins): .okf/architecture/jobs.md.") >= 0, "and it's told the page is out of date, as box's code says (" + said.slice(said.indexOf("This project has a wiki"), said.indexOf("This project has a wiki") + 60) + ")")
-            tests.check(tests.lookupTools(tests.wikiRequests).length === 0, "Code lookup off: no lookup tool (" + tests.lookupTools(tests.wikiRequests).join(", ") + ")")
             tests.shotWindow("wiki-remote-session")
-            // Code lookup on: a new session on box gets it, answered there.
-            Workspace.setSetting("lookup_" + tests.wikiProject, "1")
-            tests.wikiHello() } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => chat.session.modelName !== "", 30000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: { tests.wikiDone = tests.doneCount(); tests.sendByKeys("look up retry") } }
-        ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiAnswered(), 60000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const said = tests.lastToolResult()
-            tests.check(tests.lookupTools(tests.wikiRequests).join() === "lookup" && said.indexOf("fn retry  src/jobs.rs:1-3") >= 0,
-                      "on: the session on box gets lookup, its card from box's code (" + tests.lookupTools(tests.wikiRequests).join() + ": " + said.slice(0, 120) + ")")
             Workspace.markWikiReviewed("project:" + tests.wikiProject, "architecture/jobs.md") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.remoteWikiFile("/.okf/architecture/jobs.md").indexOf("verified:") >= 0, 30000) }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => tests.wikiFresh() === "Up to date", 40000) }
@@ -9975,8 +9444,8 @@ Item {
             const p = Workspace.projectList().map(l => l.split("\t")).find(p => p[1] === "repo2")
             tests.wikiProject = p ? Number(p[0]) : -1
             tests.check(tests.wikiProject >= 0, "a second project on box")
-            Workspace.setSetting("default_harness", "harlo")
-            Workspace.setSetting("project_model_" + tests.wikiProject + "_harlo", "fake/fake-helper")
+            Workspace.setSetting("default_harness", "pi")
+            Workspace.setSetting("project_model_" + tests.wikiProject + "_pi", "fake/fake-helper")
             tests.wikiKeyBefore = Workspace.activeKey
             tests.check(Workspace.startWikiRun("project:" + tests.wikiProject, "create") === "", "Create starts on box") } }
         ScriptAction { script: tests.waitUntil(wikiRemoteSteps, () => Workspace.activeKey !== tests.wikiKeyBefore && chat.session.key === Workspace.activeKey, 60000) }
@@ -9987,7 +9456,7 @@ Item {
             tests.check(chat.session.title === "Wiki: create" && chat.session.cwd === "ssh://box" + cwd, "a wiki session on box (" + chat.session.title + ", " + chat.session.cwd + ")")
             tests.check(said.indexOf("Wiki: complete") >= 0, "the run finishes there (" + said.slice(said.lastIndexOf("Wiki:"), said.lastIndexOf("Wiki:") + 300) + ")")
             const page = TestInput.readFile(cwd + "/.okf/overview.md") || ""
-            tests.check(page.indexOf("generated:") >= 0 && page.indexOf("harlo/fake-helper") >= 0, "the page is written and stamped on box (" + page.slice(0, 160).replace(/\n/g, " | ") + ")")
+            tests.check(page.indexOf("generated:") >= 0 && page.indexOf("pi/fake-helper") >= 0, "the page is written and stamped on box (" + page.slice(0, 160).replace(/\n/g, " | ") + ")")
             tests.check((TestInput.readFile(cwd + "/.okf/log.md") || "").indexOf("(/overview.md)") >= 0 && (TestInput.readFile(cwd + "/.okf/index.md") || "").indexOf("okf_version") >= 0, "with its index and log there")
             tests.check(TestInput.readFile(cwd + "/AGENTS.md") === "", "and nothing outside .okf/ written")
             tests.shotWindow("wiki-remote-create")
@@ -10019,14 +9488,14 @@ Item {
     property string diagramKey2: ""
     SequentialAnimation {
         id: diagramSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlodiagram"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksdiagram"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
             if (win.argValue("--theme-mode=")) Workspace.chooseThemeMode(win.argValue("--theme-mode="))
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
-        ScriptAction { script: tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") }
+        ScriptAction { script: tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(diagramSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
@@ -10041,16 +9510,16 @@ Item {
             const pics = tests.findAllNames("diagram", chat.transcript)
             tests.check(pics.length >= 1, "the diagram sent again is drawn (" + pics.length + " pictures)")
             tests.check(tests.modelRequests().length === 2, "and harlo asks no more (" + tests.modelRequests().length + " requests)")
-            tests.shotWindow("clicks-harlo-diagram")
+            tests.shotWindow("clicks-diagram")
             tests.clickItem(pics[pics.length - 1], "the diagram") } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const v = chat.transcript.pictureViewer
             tests.check(v && v.opened && v.pictures.length === 1 && v.title === "Diagram" && v.fit > 1 && tests.findName("viewerZoom") !== null,
                       "clicking the diagram opens it full size in harlo, a small one enlarged (" + (v ? v.fit.toFixed(2) : "") + ")")
-            tests.shotWindow("clicks-harlo-diagram-viewer")
+            tests.shotWindow("clicks-diagram-viewer")
             v.close()
-            tests.diagramKey2 = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
+            tests.diagramKey2 = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(diagramSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
@@ -10086,7 +9555,7 @@ Item {
     property string mockUrl: ""
     SequentialAnimation {
         id: visualSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlovisuals"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksvisuals"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
@@ -10094,7 +9563,7 @@ Item {
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
+            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi")
             Workspace.setApprovalMode(tests.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(visualSteps, () => chat.session.modelName !== "", 10000) }
@@ -10117,7 +9586,7 @@ Item {
                       "a card's Markdown is drawn: `key` as code, no backticks (" + (about ? about.text.replace(/^<style>.*<\/style>/, "") : "none") + ")")
             const plainOne = tests.findAllNames("optionAbout", chat.transcript).find(l => l.text === "Smaller change.")
             tests.check(plainOne && plainOne.textFormat === Text.PlainText, "a line with no marks stays plain text")
-            tests.shotWindow("clicks-harlo-options")
+            tests.shotWindow("clicks-options")
             tests.clickText("Code", chat.transcript) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
@@ -10156,7 +9625,7 @@ Item {
             const ba = tests.findName("mockupBeforeAfter")
             tests.check(cap && cap.text === "Settings with Sync now" && ba && ba.visible && ba.current === 1, "with its title, After chosen of Before | After (" + (cap ? cap.text : "") + ")")
             tests.mockUrl = pic.children[0].source.toString()
-            tests.shotWindow("clicks-harlo-mockup") } }
+            tests.shotWindow("clicks-mockup") } }
         // (Both pictures taken: a real browser takes a moment.)
         ScriptAction { script: tests.waitUntil(visualSteps, () => { const m = tests.findName("mockupView"); return m && m.mock && m.mock.before && m.mock.before.state === "ready" && m.mock.after.state === "ready" }, 20000) }
         PauseAnimation { duration: 50 }
@@ -10167,7 +9636,7 @@ Item {
             const frame = tests.findName("viewerPictureFrame")
             tests.check(v && v.opened && v.pictures.length === 2 && v.pic.label === "After" && frame && frame.width > 0,
                       "clicking it opens it full size in harlo, After shown, Before beside it (" + (v ? v.pictures.length : "none") + "; " + (() => { const m = tests.findName("mockupView"); return m && m.mock ? (m.mock.before ? m.mock.before.state : "-") + "/" + m.mock.after.state : "" })() + ")")
-            tests.shotWindow("clicks-harlo-mockup-viewer")
+            tests.shotWindow("clicks-mockup-viewer")
             // (Shown whole at its own size, there's nothing to switch.)
             if (v.fit < 1) tests.clickItem(tests.findName("viewerZoom"), "100%")
             else tests.check(tests.findName("viewerZoom") === null, "no 100% when it's shown at its own size") } }
@@ -10206,147 +9675,6 @@ Item {
             tests.summary(); Qt.quit() } }
     }
 
-    // A split: Harlo offers a helper in a worktree, Start helpers starts it,
-    // it writes a file and reports, and Harlo brings its work over
-    // (bring_over) to the project as an uncommitted change.
-    SequentialAnimation {
-        id: splitSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlosplit"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
-            // (The helper works in its parent's mode: writes without asking.)
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(splitSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendByKeys("split it please") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(splitSteps, () => chat.session.hasRequest, 10000) }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.check(tests.findText("Split into helpers?") !== null || tests.findContaining("Split into helpers", chat.requestDock) !== null, "Harlo offers the split")
-            tests.shotWindow("clicks-split-offer")
-            tests.clickText("Start helpers", chat.requestDock) } }
-        PauseAnimation { duration: 300 }
-        // The helper starts in its worktree, writes, reports; the parent
-        // gets its report and brings the work over.
-        ScriptAction { script: tests.waitUntil(splitSteps, () => TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") !== "", 40000) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            tests.check(kids.length === 1, "one helper started (" + JSON.stringify(kids) + ")")
-            const t = tests.chatText()
-            tests.check(t.indexOf("finished and reported: succeeded") >= 0, "its report comes back to Harlo")
-            tests.check(TestInput.readFile(win.argValue("--cwd=") + "/helper.txt") === "from the helper\n", "bring_over brings helper.txt to the project")
-            tests.check(git.unstagedCount + git.stagedCount > 0 || t.indexOf("helper.txt") >= 0, "as a change, nothing committed (" + t.slice(-200) + ")")
-            // The helper isn't offered splits of its own part; its parent is.
-            const reqs = tests.modelRequests()
-            const firstUser = r => { const m = (r.messages || []).find(m => m.role === "user"); return m ? JSON.stringify(m.content) : "" }
-            const offers = r => (r.tools || []).some(x => x["function"].name.endsWith("propose_helpers"))
-            const said = r => JSON.stringify((r.messages || []).filter(m => m.role === "system"))
-            const helperReqs = reqs.filter(r => firstUser(r).indexOf("You're a helper") >= 0)
-            const parentReqs = reqs.filter(r => firstUser(r) === JSON.stringify("split it please"))
-            tests.check(helperReqs.length > 0 && !helperReqs.some(offers) && !helperReqs.some(r => said(r).indexOf("propose_helpers") >= 0),
-                      "the helper isn't offered propose_helpers, nor told of it (" + helperReqs.length + " requests)")
-            tests.check(parentReqs.length > 0 && parentReqs.every(offers), "its parent is")
-            tests.shotWindow("clicks-split-brought") } }
-        PauseAnimation { duration: 200 }
-        // The report shows as harlo's, not yours: not on the prompt rail, no
-        // Edit & resend; Open helper shows the helper.
-        ScriptAction { script: {
-            // (Among harlo's rows: the report.)
-            const rows = []
-            const walk = it => { if (!it) return; if (it.objectName === "harloMessage" && it.visible) rows.push(it); for (const c of it.children || []) walk(c); if (it.contentItem && it.contentItem !== it) walk(it.contentItem) }
-            walk(chat)
-            const msg = rows.find(r => / finished/.test(tests.findName("harloMessageText", r).text)) || null
-            const text = msg ? tests.findName("harloMessageText", msg) : null
-            tests.check(msg !== null && msg.objectName === "harloMessage" && msg.visible && text.text.indexOf("[harlo]") < 0,
-                      "the helper's report shows as harlo's (" + (text ? text.text.slice(0, 120) : "none") + ")")
-            tests.check(text !== null && !/live:|report_done|\(local:|session "/.test(text.text), "it says what happened plainly, no session keys or tool names (" + (text ? text.text : "") + ")")
-            const toggle = msg ? tests.findName("harloSentToggle", msg) : null
-            tests.check(toggle !== null && toggle.visible, "what harlo sent is a click away")
-            if (toggle) toggle.clicked()
-            const sent = msg ? tests.findName("harloSent", msg) : null
-            tests.check(sent !== null && sent.visible && sent.text.indexOf("finished and reported") >= 0, "a click shows it")
-            if (toggle) toggle.clicked()
-            const prompts = JSON.parse(chat.session.userPrompts())
-            tests.check(prompts.length === 1 && prompts[0].text === "split it please", "the prompt rail has only yours (" + JSON.stringify(prompts) + ")")
-            tests.check(msg !== null && tests.findText("Edit & resend", msg.parent) === null, "no Edit & resend on it")
-            const open = msg ? tests.findName("openHelper", msg) : null
-            tests.check(open !== null && open.visible, "it offers Open helper")
-            tests.clickItem(open, "Open helper") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            const helper = kids.length ? kids[0].openKey : ""
-            tests.check(helper !== "" && Workspace.activeKey === helper, "Open helper shows the helper (" + Workspace.activeKey + ", " + JSON.stringify(kids) + ")")
-            tests.shotWindow("clicks-split-helper") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { tests.summary(); Qt.quit() } }
-    }
-
-    // A split on a real model (run by hand, not in the click tests: it
-    // needs a sign-in): Harlo main offers helpers for two independent
-    // modules, they're started, report back, and the work comes over.
-    // --model=provider/model picks the model.
-    SequentialAnimation {
-        id: liveSplitSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "liveharlosplit"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            Workspace.setProviderEnabled("claude", false)
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(liveSplitSteps, () => chat.session.modelName !== "", 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const m = (win.argValue("--model=") || "codex/gpt-6.1-sol").split("/")
-            chat.session.setModel(m[0], m.slice(1).join("/")) } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            tests.log("model", chat.session.modelName)
-            tests.sendByKeys("Create two independent Python modules with tests: bmi.py (bmi(weight_kg, height_m) rounded to one decimal, and category(value) giving underweight, normal, overweight or obese by the WHO cut-offs) and roman.py (to_roman(n) and from_roman(text) for 1 to 3999, ValueError on anything else). Each gets its own pytest file." + (win.argValue("--split=") ? " Split it into two helpers, one per module." : "")) } }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: tests.waitUntil(liveSplitSteps, () => chat.session.hasRequest || chat.session.status === "idle", 600000) }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            // (Asked for helpers, it starts them itself; otherwise it offers.)
-            const offered = chat.session.hasRequest && tests.findContaining("Split into helpers", chat.requestDock) !== null
-            const started = JSON.parse(Workspace.orchestratedJson(tests.harloKey)).length > 0
-            tests.check(offered || started, "Harlo offers the split, or starts the helpers asked for")
-            tests.shotWindow("live-split-offer")
-            if (offered) tests.clickText("Start helpers", chat.requestDock)
-            if (offered || started) return
-            tests.log("chat", tests.chatText().slice(-3000))
-            tests.summary(); Qt.quit() } }
-        PauseAnimation { duration: 5000 }
-        // Both helpers report, and the main session is done with them.
-        ScriptAction { script: tests.waitUntil(liveSplitSteps, () => {
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            const reports = tests.chatText().split("finished and reported").length - 1
-            return kids.length > 0 && reports >= kids.length && chat.session.status === "idle" && !chat.session.hasRequest
-        }, 1500000) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const cwd = win.argValue("--cwd=")
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            tests.log("helpers", JSON.stringify(kids))
-            tests.check(kids.length >= 2, "two helpers (" + kids.length + ")")
-            tests.check(TestInput.readFile(cwd + "/bmi.py") !== "" && TestInput.readFile(cwd + "/roman.py") !== "", "both modules are in the project")
-            tests.log("chat", tests.chatText().slice(-3000))
-            tests.shotWindow("live-split-done")
-            tests.summary(); Qt.quit() } }
-    }
-
     // A benchmark task in harlo (scripts/bench's `app` agent, on a real
     // model): a Harlo session in the task's repository is given the task
     // (--prompt-file), a split it offers is accepted, and once it and its
@@ -10358,17 +9686,14 @@ Item {
         running: win.selftestDir !== "" && win.argValue("--scenario=") === "benchtask"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
-            // (--harness=claude: a Claude Code session, with harlo's tools.)
-            Workspace.setProviderEnabled("claude", win.argValue("--harness=") === "claude")
+            // (--harness=pi: a pi session, with harlo's tools.)
             Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             const project = JSON.parse(Workspace.projectsJson())[0].id
-            // (--wiki=on|off: the project's wiki, its agents told of it or not;
-            // --lookup=on|off: the lookup tool.)
+            // (--wiki=on|off: the project's wiki, its agents told of it or not.)
             if (win.argValue("--wiki=") !== "") Workspace.setSetting("wiki_" + project, win.argValue("--wiki=") === "on" ? "1" : "0")
-            if (win.argValue("--lookup=") !== "") Workspace.setSetting("lookup_" + project, win.argValue("--lookup=") === "on" ? "1" : "0")
-            tests.harloKey = Workspace.newSession(project, win.argValue("--harness=") || "harlo")
+            tests.harloKey = Workspace.newSession(project, win.argValue("--harness=") || "pi")
             Workspace.setApprovalMode(tests.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(benchSteps, () => chat.session.modelName !== "", 20000) }
@@ -10384,14 +9709,7 @@ Item {
             chat.session.send(task, "normal") } }
         PauseAnimation { duration: 3000 }
         ScriptAction { script: tests.waitUntil(benchSteps, () => {
-            // (A split it offers: accepted, as the task asks for one.)
-            if (chat.session.hasRequest && tests.findContaining("Split into helpers", chat.requestDock) !== null) {
-                tests.clickText("Start helpers", chat.requestDock)
-                tests.benchQuiet = 0
-                return false
-            }
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            const done = chat.session.status === "idle" && !chat.session.hasRequest && kids.every(k => ["completed", "failed", "ended"].includes(k.status))
+            const done = chat.session.status === "idle" && !chat.session.hasRequest
             if (!done) { tests.benchQuiet = 0; return false }
             if (!tests.benchQuiet) tests.benchQuiet = Date.now()
             return Date.now() - tests.benchQuiet > 15000
@@ -10400,82 +9718,34 @@ Item {
         // doesn't hold the animation.)
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            TestInput.writeFile(win.selftestDir + "/bench.json", JSON.stringify({ helpers: kids, status: chat.session.status, chat: tests.chatText().slice(-4000) }, null, 1))
-            tests.log("helpers", kids.length)
+            TestInput.writeFile(win.selftestDir + "/bench.json", JSON.stringify({ status: chat.session.status, chat: tests.chatText().slice(-4000) }, null, 1))
             Qt.quit() } }
     }
 
-    // A plan run with helpers on a real model (run by hand: it needs a
-    // sign-in): the session makes a two-step plan, the run hands each step
-    // to a helper and has each reviewed before the next.
-    SequentialAnimation {
-        id: livePlanSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "liveharloplan"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            Workspace.setProviderEnabled("claude", false)
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(livePlanSteps, () => chat.session.modelName !== "", 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const m = (win.argValue("--model=") || "codex/gpt-6.1-sol").split("/")
-            chat.session.setModel(m[0], m.slice(1).join("/")) } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("Make the shared plan (plan_set) for this, with exactly two steps, and stop there: don't do the steps yourself. Step 1: bmi.py (bmi(weight_kg, height_m) rounded to one decimal, and category(value) giving underweight, normal, overweight or obese by the WHO cut-offs) with test_bmi.py. Step 2: roman.py (to_roman(n) and from_roman(text) for 1 to 3999, ValueError on anything else) with test_roman.py. Both use pytest.") }
-        PauseAnimation { duration: 2000 }
-        ScriptAction { script: tests.waitUntil(livePlanSteps, () => (JSON.parse(Workspace.planJson(tests.harloKey)).steps || []).length >= 2 && chat.session.status === "idle", 300000) }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            tests.log("plan", Workspace.planJson(tests.harloKey))
-            tests.clickItem(tests.findName("planRun"), "Run with helpers") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: tests.clickItem(tests.findName("planRunTeam"), "Helpers: as this session") }
-        PauseAnimation { duration: 3000 }
-        ScriptAction { script: tests.waitUntil(livePlanSteps, () => { const p = JSON.parse(Workspace.planJson(tests.harloKey)); return !p.run || (p.run.paused || "") !== "" }, 1800000) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const p = JSON.parse(Workspace.planJson(tests.harloKey))
-            tests.log("plan", JSON.stringify(p))
-            tests.log("helpers", Workspace.orchestratedJson(tests.harloKey))
-            tests.check(!p.run && (p.steps || []).every(s => s.status === "done"), "the plan ran to the end (" + (p.run ? p.run.paused : "") + ")")
-            tests.check((p.steps || []).every(s => (s.summary || "").indexOf("Reviewed:") >= 0), "each step was reviewed")
-            tests.shotWindow("live-plan-done")
-            tests.summary(); Qt.quit() } }
-    }
-
-    // Implement and verify (a workflow): Harlo implements in a worktree,
-    // harlo runs the tests, the stand-in Claude reviews. greet.txt says
-    // "hi" (the tests fail: back to the same session), then "hello" (the
-    // review asks for "hello!": back again, tested again), then "hello!"
-    // (approved). scripts/fake-harlo-model.py and fake-claude.py play them.
+    // Implement and verify (a workflow): an agent implements in a worktree,
+    // harlo runs the tests, a reviewer reviews. greet.txt says "hi" (the
+    // tests fail: back to the same session), then "hello" (the review asks
+    // for "hello!": back again, tested again), then "hello!" (approved).
+    // scripts/fake-harlo-model.py plays them.
     readonly property string workflowTests: "grep -Ex 'hello!?' greet.txt || { echo \"expected hello, got: $(cat greet.txt)\"; exit 1; }"
     function workflowRun() { const runs = JSON.parse(Workspace.workflowsJson()); return runs.length ? runs[0] : null }
     function workflowLogHas(text) { const r = workflowRun(); return !!r && r.log.some(e => e.text.indexOf(text) >= 0) }
-    /// The stand-in claude reviews (never the installed one): false, and
-    /// the scenario ends, when it isn't given.
-    function useFakeClaude() {
-        const fake = win.argValue("--fake-claude=")
-        if (fake === "") { tests.check(false, "the stand-in claude is given (--fake-claude)"); tests.summary(); Qt.quit(); return false }
-        Workspace.setSetting("claude_path", fake)
+    // Workflows on pi alone: it implements and reviews, on the scripted
+    // model (which plays both).
+    function piOnly() {
         return true
     }
     function startWorkflowDirect() {
         const p = JSON.parse(Workspace.projectsJson())[0]
-        return Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: workflowTests, implementer: "harlo", reviewer: "claude", approval: "write" }))
+        return Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: workflowTests, implementer: "pi", reviewer: "pi", approval: "write" }))
     }
     SequentialAnimation {
         id: workflowSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflow"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflow"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) } }
+            if (tests.piOnly()) Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             const p = JSON.parse(Workspace.projectsJson())[0]
@@ -10485,10 +9755,10 @@ Item {
         ScriptAction { script: tests.clickItem(tests.findText("Run a workflow…"), "the project menu's Run a workflow…") }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
-            tests.check(d.visible && d.title.indexOf("Run a workflow in") === 0, "the project menu opens Run a workflow (" + d.title + ")")
+            const d = sidebar.workflowDialog.form
+            tests.check(sidebar.workflowDialog.visible && d.title.indexOf("Run a workflow in") === 0, "the project menu opens Run a workflow (" + d.title + ")")
             tests.check(d.flowBox.currentText === "Implement and verify" && tests.findName("workflowPickStages").text.indexOf("Implement  →  ") === 0, "it offers Implement and verify first, its stages under it (" + d.flowBox.currentText + ", " + tests.findName("workflowPickStages").text + ")")
-            tests.check(d.implementerBox.currentText === "Harlo" && d.reviewerBox.currentText === "Claude", "Harlo implements and Claude reviews by default (" + d.implementerBox.currentText + ", " + d.reviewerBox.currentText + ")")
+            tests.check(d.implementerBox.currentText === "pi" && d.reviewerBox.currentText === "pi", "pi implements and reviews by default (" + d.implementerBox.currentText + ", " + d.reviewerBox.currentText + ")")
             tests.check(!tests.findName("workflowStart").enabled, "Start waits for a task")
             tests.check(d.repoState === "ready" && !tests.shown(tests.findName("workflowNoGit")) && !tests.shown(tests.findName("workflowNoCommits")), "a repository with commits needs nothing more (" + d.repoState + ")")
             d.taskArea.text = "Write greet.txt greeting the user"
@@ -10498,18 +9768,18 @@ Item {
         ScriptAction { script: {
             tests.check(tests.findName("workflowStart").enabled, "with no test command it can still start")
             tests.check(tests.findName("workflowPickStages").text === "Implement  →  Review    (Tests left out: no test command)", "and the stages say its tests are left out (" + tests.findName("workflowPickStages").text + ")")
-            sidebar.workflowDialog.testField.text = tests.workflowTests
+            sidebar.workflowDialog.form.testField.text = tests.workflowTests
             tests.check(tests.findName("workflowPickStages").text === "Implement  →  Tests  →  Review", "given one, they're back (" + tests.findName("workflowPickStages").text + ")")
-            tests.check(sidebar.workflowDialog.testField.cursorPosition === 0, "a long test command shows where it starts")
+            tests.check(sidebar.workflowDialog.form.testField.cursorPosition === 0, "a long test command shows where it starts")
             tests.check(tests.findName("workflowStart").accent, "Start is the dialog's main button")
-            const d = sidebar.workflowDialog
+            const d = sidebar.workflowDialog.form
             tests.check(d.implementerModelBox.currentIndex === 0 && d.implementerModelBox.currentText.startsWith("Default") && d.reviewerModelBox.currentIndex === 0 && d.reviewerModelBox.currentText.startsWith("Default"), "each agent starts on its default model (" + d.implementerModelBox.currentText + ", " + d.reviewerModelBox.currentText + ")") } }
         // Each role's model: its agent's default, or one of its models
         // (read when the dialog opens).
-        ScriptAction { script: tests.waitUntil(workflowSteps, () => sidebar.workflowDialog.implementerModels.length > 0 && sidebar.workflowDialog.reviewerModels.length > 0, 30000) }
+        ScriptAction { script: tests.waitUntil(workflowSteps, () => sidebar.workflowDialog.form.implementerModels.length > 0 && sidebar.workflowDialog.form.reviewerModels.length > 0, 30000) }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
+            const d = sidebar.workflowDialog.form
             const helper = d.implementerModels.findIndex(m => m.name === "Fake Helper")
             tests.check(helper >= 0 && d.reviewerModels.length > 0, "the model menus list the agents' models (" + d.implementerModels.map(m => m.name) + " | " + d.reviewerModels.map(m => m.name) + ")")
             d.implementerModelBox.currentIndex = helper + 1
@@ -10533,7 +9803,7 @@ Item {
             tests.check(r && r.implementerModel === tests.workflowModels.implementer && r.reviewerModel === tests.workflowModels.reviewer && r.implementerModel.indexOf("fake-helper") >= 0,
                         "the run keeps the models picked (" + (r ? r.implementerModel + ", " + r.reviewerModel : "") + ")")
             tests.check(chat.session.modelId.indexOf("fake-helper") >= 0, "and the implementation session runs on the implementer's (" + chat.session.modelId + ")")
-            tests.check(Workspace.setting("workflow_implementer_" + JSON.parse(Workspace.projectsJson())[0].id) === "harlo\t" + tests.workflowModels.implementer, "remembered for the project's next run") } }
+            tests.check(Workspace.setting("workflow_implementer_" + JSON.parse(Workspace.projectsJson())[0].id) === "pi\t" + tests.workflowModels.implementer, "remembered for the project's next run") } }
         // The tests fail: back to the same session, as attempt 2.
         ScriptAction { script: tests.waitUntil(workflowSteps, () => tests.workflowLogHas("Tests failed") && tests.workflowRun().attempt === 2, 30000) }
         PauseAnimation { duration: 600 }
@@ -10553,7 +9823,7 @@ Item {
             tests.check(details && lastDot && details.mapToItem(card, 0, 0).y > lastDot.mapToItem(card, 0, 0).y, "the run's details come after its log")
             tests.check(details && !/-[0-9a-f]{6,}( |$)/.test(details.text) && details.text.indexOf("…") > 0 && details.text.indexOf("`") < 0 && details.text.indexOf("cat greet.txt") < 0 && details.ToolTip.text.indexOf("cat greet.txt") > 0,
                         "the details name the branch without its id and cut the long command, whole on hover (" + (details ? details.text : "none") + ")")
-            tests.check(details && details.text.indexOf("Implement: Harlo · Fake Helper") >= 0 && details.text.indexOf("Review: Claude · " + Theme.helperModel("claude", tests.workflowModels.reviewer)) >= 0,
+            tests.check(details && details.text.indexOf("Implement: pi · " + Theme.helperModel("pi", tests.workflowModels.implementer)) >= 0 && details.text.indexOf("Review: pi · " + Theme.helperModel("pi", tests.workflowModels.reviewer)) >= 0,
                         "and each agent's model (" + (details ? details.text : "none") + ")")
             tests.shotWindow("clicks-workflow-test-failed") } }
         // The review asks for changes: back to the same session again.
@@ -10599,14 +9869,6 @@ Item {
             const reports = tests.findAllNames("toolName", chat).filter(n => n.visible).map(n => n.text).filter(t => /^(Reported )?[Aa]ttempt/.test(t))
             tests.check(reports.indexOf("Reported attempt 3") >= 0 || reports.indexOf("Attempt 3") >= 0, "a report reads as one (" + reports.join(", ") + ")")
             {
-                const unused = tests.findContaining("not used", chat)
-                tests.check(unused !== null && unused.objectName === "toolResult", "and a report for an attempt that's over says it wasn't used, not that it failed")
-                // (Narrow too: its summary keeps room beside it.)
-                const what = unused ? Array.from(unused.parent.children).find(c => c.objectName === "toolWhat") : null
-                tests.check(what && what.width >= Math.min(60, what.implicitWidth) && unused.mapToItem(null, unused.width, 0).x <= chat.mapToItem(null, chat.width, 0).x,
-                            "its summary still shows beside it (" + (what ? Math.round(what.width) + " px of " + Math.round(what.implicitWidth) : "none") + ", " + (unused ? unused.text.replace(/<[^>]*>/g, "") : "") + ")")
-            }
-            {
                 const right = card.mapToItem(null, card.width, 0).x
                 const inside = it => it.mapToItem(null, it.width, 0).x <= right + 1
                 const parts = ["workflowStages", "workflowState", "workflowToggle"].map(n => tests.findName(n, card))
@@ -10620,6 +9882,25 @@ Item {
             tests.findName("workflowCard", chat).expanded = false } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: { chat.transcript.listView.positionViewAtEnd(); tests.shotWindow("clicks-workflow-reports") } }
+        // The report for an attempt that's over (in a narrow window further
+        // up: scrolled to, a screen at a time).
+        ScriptAction { script: tests.waitUntil(workflowSteps, () => {
+            if (tests.findContaining("not used", chat)) return true
+            // (A run box shows its last steps, the earlier ones above.)
+            const boxes = tests.findAllNames("runBoxScroll", chat.transcript).filter(f => f.contentY > f.originY)
+            if (boxes.length) { for (const f of boxes) f.contentY = Math.max(f.originY, f.contentY - f.height / 2); return false }
+            const lv = chat.transcript.listView
+            lv.contentY = Math.max(lv.originY, lv.contentY - lv.height / 2)
+            return false
+        }, 5000) }
+        PauseAnimation { duration: 50 }
+        ScriptAction { script: {
+            const unused = tests.findContaining("not used", chat)
+            tests.check(unused !== null && unused.objectName === "toolResult", "and a report for an attempt that's over says it wasn't used, not that it failed")
+            // (Narrow too: its summary keeps room beside it.)
+            const what = unused ? Array.from(unused.parent.children).find(c => c.objectName === "toolWhat") : null
+            tests.check(what && what.width >= Math.min(60, what.implicitWidth) && unused.mapToItem(null, unused.width, 0).x <= chat.mapToItem(null, chat.width, 0).x,
+                        "its summary still shows beside it (" + (what ? Math.round(what.width) + " px of " + Math.round(what.implicitWidth) : "none") + ", " + (unused ? unused.text.replace(/<[^>]*>/g, "") : "") + ")") } }
         // A reviewer's session shows the run's card too.
         ScriptAction { script: {
             const rows = tests.findAllNames("sessionTitle", sidebar).filter(t => t.visible && (t.text || "").indexOf("Review: ") === 0)
@@ -10636,9 +9917,9 @@ Item {
     // opened again: the run reconnects to the same reviewer session.
     SequentialAnimation {
         id: workflowRestart
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowrestart"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowrestart"
         PauseAnimation { duration: 900 }
-        ScriptAction { script: if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) }
+        ScriptAction { script: if (tests.piOnly()) Workspace.addProject(win.argValue("--cwd=")) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.check(tests.startWorkflowDirect() === "", "the run starts") }
         PauseAnimation { duration: 300 }
@@ -10652,7 +9933,7 @@ Item {
     }
     SequentialAnimation {
         id: workflowRestartAgain
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowrestart-reopened"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowrestart-reopened"
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.waitUntil(workflowRestartAgain, () => tests.workflowLogHas("reconnected to its session"), 30000) }
         PauseAnimation { duration: 100 }
@@ -10677,8 +9958,8 @@ Item {
     }
 
     // On a project on a host (the throwaway SSH server, as "box"): the
-    // worktree made there, Harlo implementing there, the checks run over
-    // SSH with their output coming in, the stand-in claude reviewing there.
+    // worktree made there, an agent implementing there, the checks run over
+    // SSH with their output coming in, a reviewer reviewing there.
     // harlo is closed while the review of attempt 2 is pending; opened
     // again, it reconnects to that session on box and the run finishes.
     readonly property string workflowRemoteTests: "echo checking on the host; sleep 2; " + workflowTests
@@ -10687,11 +9968,11 @@ Item {
     function workflowRemoteHost() { return JSON.parse(Remotes.hostsJson()).find(h => h.name === "box") }
     SequentialAnimation {
         id: workflowRemote
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowremote"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowremote"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            if (!tests.useFakeClaude()) return
+            if (!tests.piOnly()) return
             tests.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
             Remotes.connectHost("box") } }
         ScriptAction { script: tests.waitUntil(workflowRemote, () => (tests.workflowRemoteHost() || {}).state === "connected", 30000) }
@@ -10702,18 +9983,18 @@ Item {
         ScriptAction { script: {
             const p = JSON.parse(Workspace.projectsJson())[0]
             sidebar.workflowDialog.show(p.id, p.name, p.harness)
-            tests.check(sidebar.workflowDialog.host === "box", "the dialog knows the project is on box (" + sidebar.workflowDialog.host + ")") } }
-        ScriptAction { script: tests.waitUntil(workflowRemote, () => sidebar.workflowDialog.implementerModels.length > 0, 60000) }
+            tests.check(sidebar.workflowDialog.form.host === "box", "the dialog knows the project is on box (" + sidebar.workflowDialog.form.host + ")") } }
+        ScriptAction { script: tests.waitUntil(workflowRemote, () => sidebar.workflowDialog.form.implementerModels.length > 0, 60000) }
         PauseAnimation { duration: 100 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
+            const d = sidebar.workflowDialog.form
             tests.check(d.implementerModels.some(m => m.name === "Fake Coder") && d.implementerModelBox.currentIndex === 0 && d.implementerModelBox.currentText.startsWith("Default"), "on box, the implementer's models are Harlo's there (" + d.implementerModels.map(m => m.name) + ")")
-            d.close() } }
+            sidebar.workflowDialog.close() } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const p = JSON.parse(Workspace.projectsJson())[0]
             tests.check(p && p.path === "box:" + win.argValue("--cwd="), "the project is on box (" + (p ? p.path : "none") + ")")
-            const why = Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: tests.workflowRemoteTests, implementer: "harlo", reviewer: "claude", approval: "write" }))
+            const why = Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: tests.workflowRemoteTests, implementer: "pi", reviewer: "pi", approval: "write" }))
             tests.check(why === "", "the run starts (" + why + ")") } }
         // A check's output, coming in over SSH as it runs.
         ScriptAction { script: tests.waitUntil(workflowRemote, () => { const r = tests.workflowRun(); if (r && r.liveCheck && r.liveCheck.output.indexOf("checking on the host") >= 0) tests.workflowLiveSeen = true; return tests.workflowLiveSeen }, 90000) }
@@ -10739,7 +10020,7 @@ Item {
     }
     SequentialAnimation {
         id: workflowRemoteAgain
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowremote-reopened"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowremote-reopened"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             const r = tests.workflowRun()
@@ -10792,7 +10073,7 @@ Item {
     // watched to its end.
     property var labState: ({})
     Timer {
-        running: win.selftestDir !== "" && win.argValue("--scenario=").indexOf("clicksharloworkflowlab") === 0
+        running: win.selftestDir !== "" && win.argValue("--scenario=").indexOf("clicksworkflowlab") === 0
         interval: 250
         repeat: true
         onTriggered: tests.labTick()
@@ -10832,7 +10113,7 @@ Item {
         const c = s.case, at = () => ((Date.now() - s.t0) / 1000).toFixed(1) + " s"
         if (Date.now() - s.t0 > (c.timeout || 150) * 1000) return tests.labEnd("timed out at " + s.step)
         if (s.step === "setup") {
-            if (!reopened && !tests.useFakeClaude()) return
+            if (!reopened && !tests.piOnly()) return
             if (c.host) {
                 if (!reopened) Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh="))
                 Remotes.connectHost("box"); s.lastConnect = Date.now(); s.step = "connecting"
@@ -10856,7 +10137,7 @@ Item {
         if (s.step === "start") {
             if (Date.now() < s.startAt) return
             const p = JSON.parse(Workspace.projectsJson())[0]
-            const why = p ? Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: c.tests || tests.workflowTests, implementer: "harlo", reviewer: "claude", approval: "write" })) : "no project"
+            const why = p ? Workspace.startWorkflow(p.id, JSON.stringify({ task: "Write greet.txt greeting the user", criteria: "- greet.txt says hello!", testCommand: c.tests || tests.workflowTests, implementer: "pi", reviewer: "pi", approval: "write" })) : "no project"
             if (why !== "") return tests.labEnd("not started: " + why)
             s.events.push(at() + " started"); s.step = "watching"
             return
@@ -10899,9 +10180,9 @@ Item {
     // pauses and says why; Resume starts the review.
     SequentialAnimation {
         id: workflowCrash
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowcrash"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowcrash"
         PauseAnimation { duration: 900 }
-        ScriptAction { script: if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) }
+        ScriptAction { script: if (tests.piOnly()) Workspace.addProject(win.argValue("--cwd=")) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.startWorkflowDirect() }
         PauseAnimation { duration: 300 }
@@ -10911,7 +10192,7 @@ Item {
     }
     SequentialAnimation {
         id: workflowCrashAgain
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowcrash-reopened"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowcrash-reopened"
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.waitUntil(workflowCrashAgain, () => !!tests.workflowRun() && tests.workflowRun().state === "paused", 30000) }
         PauseAnimation { duration: 100 }
@@ -10941,9 +10222,9 @@ Item {
     // run reconnects to it.
     SequentialAnimation {
         id: workflowFound
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowfound"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowfound"
         PauseAnimation { duration: 900 }
-        ScriptAction { script: if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) }
+        ScriptAction { script: if (tests.piOnly()) Workspace.addProject(win.argValue("--cwd=")) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.startWorkflowDirect() }
         PauseAnimation { duration: 300 }
@@ -10953,7 +10234,7 @@ Item {
     }
     SequentialAnimation {
         id: workflowFoundAgain
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowfound-reopened"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowfound-reopened"
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.waitUntil(workflowFoundAgain, () => tests.workflowLogHas("reconnected to its session"), 30000) }
         PauseAnimation { duration: 100 }
@@ -10973,11 +10254,11 @@ Item {
     // and a start at login (--background) picks the run up, windowless.
     SequentialAnimation {
         id: workflowBackgroundSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowbackground"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowbackground"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd=")) } }
+            if (tests.piOnly()) Workspace.addProject(win.argValue("--cwd=")) } }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
             tests.check(Workspace.workflowsUnderWay() === 0, "nothing under way yet")
@@ -11023,7 +10304,7 @@ Item {
     }
     SequentialAnimation {
         id: workflowBackgroundAgain
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowbackground-reopened"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowbackground-reopened"
         PauseAnimation { duration: 600 }
         ScriptAction { script: tests.check(!win.visible, "started at login with a run under way: no window") }
         PauseAnimation { duration: 3400 }
@@ -11044,11 +10325,11 @@ Item {
     // stand-ins: each fix goes through both checks before the review.
     SequentialAnimation {
         id: workflowCustomSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflowcustom"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflowcustom"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            if (tests.useFakeClaude()) Workspace.addProject(win.argValue("--cwd="))
+            if (tests.piOnly()) Workspace.addProject(win.argValue("--cwd="))
             settingsDialog.openPage("workflows") } }
         PauseAnimation { duration: 700 }
         ScriptAction { script: {
@@ -11085,10 +10366,10 @@ Item {
             // The implementation gets its own agent and model.
             const page = tests.findName("workflowsPage", settingsDialog.contentItem)
             const agentBox = tests.findName("stageAgent", tests.findName("workflowStage0"))
-            const i = page.providers.findIndex(p => p.id === "harlo") + 1
+            const i = page.providers.findIndex(p => p.id === "pi") + 1
             agentBox.currentIndex = i
             agentBox.activated(i) } }
-        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => tests.findName("workflowsPage", settingsDialog.contentItem).modelsOf("harlo").length > 0, 30000) }
+        ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => tests.findName("workflowsPage", settingsDialog.contentItem).modelsOf("pi").length > 0, 30000) }
         PauseAnimation { duration: 200 }
         ScriptAction { script: {
             const ed = tests.findName("workflowsPage", settingsDialog.contentItem).editor
@@ -11097,7 +10378,7 @@ Item {
             tests.check(i > 0, "the implementation's model menu lists its agent's models")
             modelBox.currentIndex = i
             modelBox.activated(i)
-            tests.check(ed.stageModel.get(0).harness === "harlo" && ed.stageModel.get(0).agentModel.indexOf("fake-helper") >= 0, "the implementation names its agent and model (" + ed.stageModel.get(0).harness + ", " + ed.stageModel.get(0).agentModel + ")")
+            tests.check(ed.stageModel.get(0).harness === "pi" && ed.stageModel.get(0).agentModel.indexOf("fake-helper") >= 0, "the implementation names its agent and model (" + ed.stageModel.get(0).harness + ", " + ed.stageModel.get(0).agentModel + ")")
             {
                 const l0 = tests.findName("stageAgentLabel", tests.findName("workflowStage0")), m0 = tests.findName("stageAgent", tests.findName("workflowStage0"))
                 tests.check(tests.shown(l0) && l0.text === "Agent" && m0.mapToItem(null, 0, 0).x > l0.mapToItem(null, l0.width, 0).x, "the implementation's agent menu has a label (" + (l0 ? l0.text : "none") + ")")
@@ -11110,40 +10391,35 @@ Item {
             const mine = flows.find(f => f.name === "Careful")
             tests.check(!tests.findName("workflowsPage", settingsDialog.contentItem).editor.visible && !!mine && mine.stages.map(s => s.name).join(",") === "Implement,Tests,Short,Review", "saved, in order (" + (mine ? mine.stages.map(s => s.name) : "none") + ")")
             tests.check(mine && mine.needsTestCommand && mine.needsReviewer && mine.stages[2].command === "echo counting words; sleep 2; test $(wc -c < greet.txt) -lt 100", "its tests and review are the ones picked at the start; its own check keeps its command")
-            tests.check(mine && mine.stages[0].agent.harness === "harlo" && mine.stages[0].agent.model.indexOf("fake-helper") >= 0, "and its implementation keeps its agent and model")
+            tests.check(mine && mine.stages[0].agent.harness === "pi" && mine.stages[0].agent.model.indexOf("fake-helper") >= 0, "and its implementation keeps its agent and model")
             tests.check(tests.findText("Careful", settingsDialog.contentItem) !== null, "and listed")
             settingsDialog.close()
-            // Started from a new session's message: Run as workflow.
-            win.openDraft(JSON.parse(Workspace.projectsJson())[0].id)
-            chat.draftView.harness = "harlo"
-            chat.draftView.input.text = "Write greet.txt greeting the user" } }
-        PauseAnimation { duration: 400 }
+            // Started from the sidebar's New workflow: its page.
+            tests.clickItem(tests.findName("newWorkflowButton"), "New workflow") } }
+        PauseAnimation { duration: 600 }
         ScriptAction { script: {
-            const b = tests.draftWorkflow()
-            tests.check(tests.shown(b) && b.enabled, "a new session with a task and a project offers Run as workflow")
-            tests.check(win.width >= 900 ? b.objectName === "draftWorkflowButton" && b.text === "Workflow" : true, "labelled \"Workflow\" when there's room (" + b.objectName + ")")
-            const hint = tests.findName("draftStartHint")
-            tests.check(!hint || hint.text === "" || hint.contentWidth <= hint.width + 1, "the start hint fits beside the buttons, or isn't there (" + (hint ? hint.text + " " + hint.contentWidth + "/" + hint.width : "") + ")")
-            tests.shotWindow("clicks-workflow-draft") } }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: tests.clickItem(tests.draftWorkflow(), "Run as workflow") }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            const d = sidebar.workflowDialog
-            tests.check(d.visible && d.fromDraft && d.taskArea.text === "Write greet.txt greeting the user" && d.title === "Run a workflow in " + JSON.parse(Workspace.projectsJson())[0].name,
-                        "it opens the start dialog with the message as the task, in the session's project (" + d.title + ", " + d.taskArea.text + ")")
+            const v = chat.workflowView, d = v.form, name = JSON.parse(Workspace.projectsJson())[0].name
+            tests.check(v.visible && Workspace.activeKey === "view:workflow" && Workspace.activeTitle === "New workflow", "New workflow opens its page, in a tab of its own (" + Workspace.activeTitle + ")")
+            tests.check(tests.findName("workflowProject", v).text === name && d.title === "Run a workflow in " + name, "for the project last worked in (" + d.title + ")")
+            tests.check(d.taskArea.activeFocus, "the cursor is in the task")
+            tests.check(tests.findName("draftWorkflowButton") === null && tests.findName("draftParallelButton") === null, "the new-session page has no Workflow or Run in parallel buttons")
+            d.taskArea.text = "Write greet.txt greeting the user"
             d.flowBox.currentIndex = d.flows.findIndex(f => f.name === "Careful")
             d.flowBox.activated(d.flowBox.currentIndex)
             d.criteriaArea.text = "- greet.txt says hello!"
             d.testField.text = tests.workflowTests } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
-            tests.check(tests.findText("Implement  →  Tests  →  Short  →  Review", d.contentItem) !== null, "picked, the dialog shows its stages")
+            const v = chat.workflowView, d = v.form
+            tests.check(tests.findText("Implement  →  Tests  →  Short  →  Review", v) !== null, "picked, the page shows its stages")
             tests.check(tests.shown(d.testField) && tests.shown(d.reviewerBox), "and asks for the tests and the reviewer it needs")
-            tests.check(d.implementerAgent === "harlo" && d.implementerModel.indexOf("fake-helper") >= 0, "and starts with the workflow's own implementer and model (" + d.implementerAgent + ", " + d.implementerModel + ")")
-            tests.shotWindow("clicks-workflow-dialog-custom")
-            tests.clickItem(tests.findName("workflowStart"), "Start") } }
+            tests.check(d.implementerAgent === "pi" && d.implementerModel.indexOf("fake-helper") >= 0, "and starts with the workflow's own implementer and model (" + d.implementerAgent + ", " + d.implementerModel + ")")
+            const over = tests.spills(tests.findName("workflowPage", v))
+            tests.check(over.length === 0, "everything fits the page (" + over.join(", ") + ")")
+            tests.shotWindow("clicks-workflow-page")
+            tests.clickItem(tests.findName("workflowPageStart", v), "Start") } }
+        PauseAnimation { duration: 300 }
+        ScriptAction { script: tests.check(!Workspace.tabs.some(t => t.startsWith("view:workflow\t")), "started, the page's tab closes") }
         PauseAnimation { duration: 300 }
         // The Short check takes a moment: its output shows while it runs.
         ScriptAction { script: tests.waitUntil(workflowCustomSteps, () => { const r = tests.workflowRun(); return !!r && !!r.liveCheck && r.liveCheck.output.indexOf("counting words") >= 0 && r.liveCheck.seconds >= 1 }, 60000) }
@@ -11217,17 +10493,17 @@ Item {
     // A new project from a workflow: Add a project → a new folder (a git
     // repository with nothing in it) → its new session's message run as a
     // workflow with no tests yet: an empty first commit is made for the
-    // run's branch, Harlo writes greet.txt, the stand-in claude reviews.
+    // run's branch, an agent writes greet.txt, a reviewer reviews.
     // Then a folder with files and no git: the dialog offers git init and
     // says the run would start without its files.
     property string workflowNewFolder: ""
     SequentialAnimation {
         id: workflowNewSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloworkflownew"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksworkflownew"
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            if (tests.useFakeClaude()) sidebar.openAddProject() } }
+            if (tests.piOnly()) sidebar.openAddProject() } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
             tests.check(sidebar.addProjectDialog.visible, "Add a project opens")
@@ -11238,8 +10514,8 @@ Item {
             tests.check(d.creating && d.newParent !== "" && tests.shown(tests.findName("addProjectNewName")), "it asks for the new folder's name, and where (" + d.newParent + ")")
             tests.check(!tests.findName("addProjectAdd").enabled, "Add waits for a name")
             d.newFolderName.text = "greeter"
-            const agent = tests.findName("addProjectAgent-harlo")
-            if (agent) tests.clickItem(agent, "Harlo")
+            const agent = tests.findName("addProjectAgent-pi")
+            if (agent) tests.clickItem(agent, "pi")
             tests.workflowNewFolder = d.newParent + "/greeter" } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -11255,31 +10531,28 @@ Item {
             const repo = p ? JSON.parse(Workspace.projectRepoState(p.id)) : {}
             tests.check(repo.state === "no-commits" && !repo.files, "nothing committed yet, and no files (" + JSON.stringify(repo) + ")")
             tests.check(chat.draftView.visible && chat.draftView.project && chat.draftView.project.id === p.id, "its new session opens")
-            chat.draftView.harness = "harlo"
-            chat.draftView.input.text = "Write greet.txt greeting the user" } }
-        PauseAnimation { duration: 400 }
-        // (Ctrl+Shift+Enter in the message box: Run as workflow.)
-        ScriptAction { script: { chat.draftView.input.forceActiveFocus(); TestInput.key(Qt.Key_Return, Qt.ControlModifier | Qt.ShiftModifier) } }
+            win.openWorkflow(p.id) } }
         PauseAnimation { duration: 500 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
-            tests.check(d.visible && d.fromDraft && d.taskArea.text === "Write greet.txt greeting the user", "the message opens the start dialog as its task")
-            tests.check(d.repoState === "no-commits" && tests.shown(tests.findName("workflowNoCommits")) && !tests.shown(tests.findName("workflowNoGit")), "it says an empty first commit will be made")
+            const v = chat.workflowView, d = v.form
+            d.taskArea.text = "Write greet.txt greeting the user"
+            tests.check(v.visible && d.projectId === v.projectId && d.title === "Run a workflow in " + v.project.name, "New workflow, for the new project (" + d.title + ")")
+            tests.check(d.repoState === "no-commits" && tests.shown(tests.findName("workflowNoCommits", v)) && !tests.shown(tests.findName("workflowNoGit", v)), "it says an empty first commit will be made")
             tests.check(d.testField.text === "", "an empty folder has no test command to guess (" + d.testField.text + ")")
-            tests.check(tests.findName("workflowPickStages").text.indexOf("Implement  →  Review") === 0, "so its stages leave the tests out (" + tests.findName("workflowPickStages").text + ")")
-            tests.check(tests.findName("workflowStart").enabled, "and it can start without one")
+            tests.check(tests.findName("workflowPickStages", v).text.indexOf("Implement  →  Review") === 0, "so its stages leave the tests out (" + tests.findName("workflowPickStages", v).text + ")")
+            tests.check(tests.findName("workflowPageStart", v).enabled, "and it can start without one")
             d.criteriaArea.text = "- greet.txt says hello!"
             tests.shotWindow("clicks-workflow-new-project") } }
         PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.clickItem(tests.findName("workflowStart"), "Start") }
+        ScriptAction { script: tests.clickItem(tests.findName("workflowPageStart", chat.workflowView), "Start") }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const r = tests.workflowRun()
-            tests.check(!!r && !sidebar.workflowDialog.visible, "the run starts (" + (r ? r.branch : "none") + ")")
+            tests.check(!!r && !chat.workflowView.visible, "the run starts (" + (r ? r.branch : "none") + ")")
             tests.check(r && JSON.stringify(r.stages.map(s => s.label)) === JSON.stringify(["Implement", "Review"]), "with no tests, it goes straight from the implementation to the review (" + (r ? r.stages.map(s => s.label) : "") + ")")
             const p = JSON.parse(Workspace.projectsJson()).find(x => x.path === tests.workflowNewFolder)
             tests.check(JSON.parse(Workspace.projectRepoState(p.id)).state === "ready", "the folder has its first commit now")
-            tests.check(chat.draftView.input.text === "", "the draft's message went into the run") } }
+            tests.check(chat.workflowView.form.taskArea.text === "", "the task went into the run") } }
         ScriptAction { script: tests.waitUntil(workflowNewSteps, () => !!tests.workflowRun() && tests.workflowRun().state === "done", 60000) }
         PauseAnimation { duration: 600 }
         ScriptAction { script: {
@@ -11299,13 +10572,13 @@ Item {
             const p = JSON.parse(Workspace.projectsJson()).find(x => x.name === "plain")
             tests.check(!!p, "a folder without git is added")
             if (p) sidebar.workflowDialog.show(p.id, p.name, p.harness)
-            sidebar.workflowDialog.taskArea.text = "Tidy the notes" } }
+            sidebar.workflowDialog.form.taskArea.text = "Tidy the notes" } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
+            const d = sidebar.workflowDialog.form
             const note = tests.findName("workflowNoGit")
             tests.check(d.repoState === "no-git" && d.folderFiles && tests.shown(note), "the dialog says it isn't a git repository")
-            tests.check(tests.findContaining("won't be in the run unless you commit", d.contentItem) !== null, "and that the run would start without its files")
+            tests.check(tests.findContaining("won't be in the run unless you commit", sidebar.workflowDialog.contentItem) !== null, "and that the run would start without its files")
             tests.check(d.criteriaArea.text === "", "the last project's criteria don't carry over")
             tests.check(!tests.findName("workflowStart").enabled, "Start waits until you say to make it one")
             tests.clickItem(tests.findName("workflowMakeRepo"), "Make it a git repository") } }
@@ -11409,8 +10682,8 @@ Item {
             const d = sidebar.addProjectDialog
             d.newParent = win.argValue("--parent=")
             d.newFolderName.text = tests.realCase.folder
-            const agent = tests.findName("addProjectAgent-harlo")
-            if (agent) tests.clickItem(agent, "Harlo") } }
+            const agent = tests.findName("addProjectAgent-pi")
+            if (agent) tests.clickItem(agent, "pi") } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
             if (tests.realCase.kind !== "new") return
@@ -11420,37 +10693,33 @@ Item {
         ScriptAction { script: {
             const p = tests.realProject()
             if (!p) { tests.realFinish("FAIL no project at " + win.argValue("--cwd=") + (sidebar.addProjectDialog.problem ? ": " + sidebar.addProjectDialog.problem : "")); return }
-            if (!chat.draftView.visible || !chat.draftView.project || chat.draftView.project.id !== p.id) win.openDraft(p.id)
-            chat.draftView.harness = "harlo"
-            chat.draftView.input.text = tests.realCase.task } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
             tests.shotWindow("2-new-session")
-            tests.clickItem(tests.draftWorkflow(), "Run as workflow") } }
+            win.openWorkflow(p.id) } }
         PauseAnimation { duration: 800 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
-            if (!d.visible) { tests.realFinish("FAIL Run as workflow didn't open the start dialog"); return }
+            const d = chat.workflowView.form
+            if (!chat.workflowView.visible || d.projectId !== tests.realProject().id) { tests.realFinish("FAIL New workflow didn't open its page for the project"); return }
+            d.taskArea.text = tests.realCase.task
             d.criteriaArea.text = tests.realCase.criteria || ""
             d.testField.text = tests.realCase.tests || ""
             d.approvalBox.currentIndex = tests.realCase.approval === undefined ? 2 : tests.realCase.approval
             tests.realUntil = Date.now() + 60000 } }
-        ScriptAction { script: tests.waitUntil(workflowRealSteps, () => sidebar.workflowDialog.implementerModels.some(m => m.id === win.argValue("--model=")) || Date.now() > tests.realUntil, 70000) }
+        ScriptAction { script: tests.waitUntil(workflowRealSteps, () => chat.workflowView.form.implementerModels.some(m => m.id === win.argValue("--model=")) || Date.now() > tests.realUntil, 70000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
+            const d = chat.workflowView.form
             const i = d.implementerModels.findIndex(m => m.id === win.argValue("--model="))
-            if (i < 0) { tests.realFinish("FAIL the dialog doesn't offer " + win.argValue("--model=") + " (" + d.implementerModels.map(m => m.id).join(", ") + ")"); return }
+            if (i < 0) { tests.realFinish("FAIL the page doesn't offer " + win.argValue("--model=") + " (" + d.implementerModels.map(m => m.id).join(", ") + ")"); return }
             d.implementerModelBox.currentIndex = i + 1
             d.implementerModelBox.activated(i + 1) } }
         PauseAnimation { duration: 400 }
         ScriptAction { script: {
-            tests.shotWindow("3-start-dialog")
-            tests.clickItem(tests.findName("workflowStart"), "Start") } }
+            tests.shotWindow("3-start-page")
+            tests.clickItem(tests.findName("workflowPageStart", chat.workflowView), "Start") } }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: {
-            const d = sidebar.workflowDialog
-            if (d.visible) { tests.shotWindow("x-not-started"); tests.realFinish("FAIL it didn't start: " + d.problem.text); return }
+            const d = chat.workflowView.form
+            if (Workspace.activeKey === "view:workflow") { tests.shotWindow("x-not-started"); tests.realFinish("FAIL it didn't start: " + d.problem.text); return }
             tests.realLogAt = Date.now()
             tests.realUntil = Date.now() + Number(win.argValue("--limit=") || 90) * 60000 } }
         ScriptAction { script: tests.waitUntil(workflowRealSteps, () => tests.realWatch(), 24 * 3600 * 1000) }
@@ -11479,688 +10748,22 @@ Item {
             tests.realFinish(r.merged ? "pass: done on attempt " + r.attempt + ", merged into " + r.base : "FAIL done on attempt " + r.attempt + ", but not merged: " + r.log[r.log.length - 1].text) } }
     }
 
-    // A plan run reviews each step: Settings → Teamwork has it on; a
-    // step whose review finds problems goes back to its helper, which fixes
-    // it, and a second review lets the run go on; problems that stay pause
-    // the run (scripts/fake-harlo-model.py plays helper and reviewer).
-    SequentialAnimation {
-        id: planReviewSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloreview"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd="))
-            settingsDialog.openPage("orchestration") } }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const sw = tests.findName("orchReviewSteps", settingsDialog.contentItem)
-            tests.check(sw !== null && sw.checked && tests.findText("Review each step", settingsDialog.contentItem) !== null, "Settings → Teamwork: Review each step, on by default")
-            tests.shotWindow("clicks-review-setting")
-            settingsDialog.close() } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendByKeys("make a plan please") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => (JSON.parse(Workspace.planJson(tests.harloKey)).steps || []).length === 1 && chat.session.status === "idle", 15000) }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: tests.check(chat.planDock.expanded, "a plan made while you watch opens") }
-        // The step to another model: chosen on the plan card.
-        // (Its buttons show on hover.)
-        ScriptAction { script: { const t = tests.findText("Write helper.txt", chat.planDock), p = t.mapToItem(null, t.width / 2, t.height / 2); TestInput.moveTo(p.x, p.y) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.clickItem(tests.findName("planStepHelper-1"), "Who does it") }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            tests.check(tests.findText("Who does this step") !== null, "the step's helper is chosen in a popover")
-            const box = tests.findName("delegateModelHelper")
-            const i = box ? box.model.indexOf("Fake Helper") : -1
-            tests.check(i > 0, "its models are offered (" + (box ? box.model : "none") + ")")
-            if (i > 0) { box.currentIndex = i; box.activated(i) } } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.clickItem(tests.findName("delegateStart"), "Choose") }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            const step = JSON.parse(Workspace.planJson(tests.harloKey)).steps[0]
-            tests.check(step.agent === "harlo" && step.model === "fake/fake-helper", "the step keeps who does it (" + step.agent + ", " + step.model + ")")
-            const who = tests.findName("planStepWho-1")
-            tests.check(who !== null && who.visible && who.text === "Done by Harlo · Fake Helper", "the card says so (" + (who ? who.text : "none") + ")")
-            tests.shotWindow("clicks-review-step-helper") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.clickItem(tests.findName("planRun"), "Run with helpers") }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: tests.clickItem(tests.findName("planRunTeam"), "Helpers: as this session") }
-        // Its helper writes helper.txt and reports; a review starts.
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => { const r = JSON.parse(Workspace.planJson(tests.harloKey)).run; return !!r && Object.keys(r.reviewing || {}).length > 0 }, 30000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            tests.check(tests.findContaining("being reviewed") !== null && tests.findName("planOpenReview-1") !== null, "the step shows it's being reviewed, with Open review")
-            // The sidebar's rows fit (a helper's too), at any width.
-            const titles = tests.findAllNames("sessionTitle", sidebar).filter(t => t.visible)
-            const fits = t => Array.from(t.parent.children).filter(c => c.visible).every(c => c.x + c.width <= t.parent.width + 1)
-            tests.check(titles.length >= 3 && titles.every(t => t.width >= 24 && fits(t)), "the sidebar's rows fit, each title with room (" + titles.map(t => Math.round(t.width)).join(", ") + ")")
-            const planWhat = tests.findAllNames("toolWhat", chat.transcript).find(l => l.plain === "Write helper.txt")
-            tests.check(planWhat && planWhat.font.family !== Theme.mono, "a plan's step reads as prose, not code")
-            tests.check(tests.findText("Plan", chat.transcript) !== null && tests.findText("Plan set", chat.transcript) === null, "the plan tool is named 'Plan'")
-            tests.shotWindow("clicks-review-running") } }
-        // The review finds a problem; the helper fixes it; a second review
-        // passes and the plan finishes.
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => { const p = JSON.parse(Workspace.planJson(tests.harloKey)); return !p.run && (p.steps || []).every(s => s.status === "done") }, 60000) }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const cwd = win.argValue("--cwd=")
-            const p = JSON.parse(Workspace.planJson(tests.harloKey))
-            const step = (p.steps || [])[0] || {}
-            tests.check(step.status === "done" && step.summary.indexOf("Fixed") >= 0 && step.summary.indexOf("Reviewed: Looks right") >= 0, "the step is done, with its review (" + step.summary + ")")
-            tests.check(TestInput.readFile(cwd + "/helper.txt") === "from the helper\nsecond line\n", "the helper fixed what the review found")
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            const reviews = kids.filter(k => k.name.indexOf("Review: Step 1") === 0)
-            tests.check(reviews.length === 2 && reviews.every(k => k.status === "completed"), "two reviews, both completed (" + JSON.stringify(kids.map(k => [k.name, k.status])) + ")")
-            const reqs = tests.modelRequests()
-            const first = r => { const m = (r.messages || []).find(m => m.role === "user"); return m ? JSON.stringify(m.content) : "" }
-            const reviewReqs = reqs.filter(r => first(r).indexOf("You review one step") >= 0)
-            tests.check(reviewReqs.length > 0 && reviewReqs.every(r => first(r).indexOf("git diff ") >= 0), "the reviewer is told where the step's changes are")
-            const fixes = reqs.filter(r => (r.messages || []).some(m => m.role === "user" && JSON.stringify(m.content).indexOf("A review of your step found problems") >= 0))
-            tests.check(fixes.length > 0 && fixes.some(r => JSON.stringify(r.messages).indexOf("helper.txt:1 needs a second line") >= 0), "the problems went back to the step's helper")
-            // Each helper's model and what it used; the run's total.
-            // (The step's helper on the model chosen for it; its reviews on the run's.)
-            const stepKid = kids.find(k => k.step === 1)
-            tests.check(stepKid && stepKid.model === "fake/fake-helper" && reviews.every(k => k.model === "fake/fake-coder"), "the step's helper ran on the model chosen for it, its reviews on the run's (" + JSON.stringify(kids.map(k => [k.name, k.model])) + ")")
-            tests.check(kids.length === 3 && kids.every(k => k.used && k.used.tokens > 0), "each helper shows what it used (" + JSON.stringify(kids.map(k => k.used)) + ")")
-            const total = kids.reduce((t, k) => t + k.used.tokens, 0)
-            tests.check(tests.findContaining("Helpers · all done · " + (total / 1000).toFixed(1) + "k tokens") !== null, "and the Subagents box")
-            tests.shotWindow("clicks-review-done")
-            // A finished plan folds to "All done" (a reopened session too).
-            const done = tests.findText("All done", chat.planDock)
-            tests.check(!chat.planDock.expanded && done !== null && !done.truncated, "the finished plan folds to All done, whole (" + (done ? done.width + " of " + done.implicitWidth + " px" : "none") + ")")
-            tests.clickItem(tests.findName("planToggle", chat.planDock), "the plan's fold") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(chat.planDock.expanded && tests.findText("Write helper.txt", chat.planDock) !== null, "opened by hand, it shows its steps")
-            chat.planDock.settleFold()
-            tests.check(chat.planDock.expanded, "and stays open for that session")
-            tests.clickItem(tests.findName("planToggle", chat.planDock), "fold it again") } }
-        // Opening a session with a plan to do: folded, the next step in its
-        // header; opened, its finished steps fold to a line.
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            chat.planDock.edit({ op: "add", title: "Write notes.txt" })
-            chat.planDock.foldedByHand = ({})
-            chat.planDock.sessionOpened() } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const folded = tests.findName("planFoldedStep", chat.planDock)
-            tests.check(!chat.planDock.expanded && tests.shown(folded) && tests.findText("Write notes.txt", folded) !== null && tests.findText("Next", folded) !== null, "a session opens with its plan folded, the next step in the header")
-            tests.check(chat.planDock.height < 60, "folded, the card is one line (" + Math.round(chat.planDock.height) + " px)")
-            {
-                const t = tests.findText("Write notes.txt", folded), toggle = tests.findName("planToggle", chat.planDock)
-                const gap = toggle.mapToItem(null, 0, 0).x - t.mapToItem(null, t.width, 0).x
-                tests.check(gap >= 0 && gap <= 16, "folded, the next step sits at the right, by the toggle (" + gap.toFixed(1) + " px from it)")
-                // (With room for it: a narrow window elides it.)
-                tests.check(win.width < 900 || !t.truncated, "a short step's title shows whole (" + t.width + " of " + t.implicitWidth + " px)")
-            }
-            tests.clickItem(tests.findName("planToggle", chat.planDock), "open the plan") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const fin = tests.findName("planFinishedToggle", chat.planDock)
-            tests.check(tests.shown(fin) && tests.findText("1 finished step", fin) !== null && tests.findText("Write helper.txt", chat.planDock) === null && tests.findContaining("Write notes.txt", chat.planDock) !== null,
-                "opened, the finished step folds to a line and the step to do shows")
-            tests.check(chat.planDock.maxStepsHeight <= Math.max(120, chat.height * 0.2) + 1, "the steps scroll past a fifth of the chat's height (" + Math.round(chat.planDock.maxStepsHeight) + " px)")
-            tests.clickItem(fin, "show the finished steps") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(tests.findText("Write helper.txt", chat.planDock) !== null, "a click shows the finished steps")
-            tests.shotWindow("clicks-review-plan-open")
-            const p = JSON.parse(Workspace.planJson(tests.harloKey))
-            chat.planDock.edit({ op: "remove", id: p.steps[p.steps.length - 1].id })
-            tests.clickItem(tests.findName("planToggle", chat.planDock), "fold it again") } }
-        // A long plan opens at once (like a project's: 60 finished steps
-        // with long reports, then 30 to do): the folded finished steps aren't
-        // made, a step's buttons are made when it's hovered, and its helper,
-        // commit and review rows only when it has them.
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const report = "What was done and how it was checked. ".repeat(16)
-            for (let i = 1; i <= 60; i++) chat.planDock.edit({ op: "add", title: "Finished step " + i, detail: report })
-            for (const st of JSON.parse(Workspace.planJson(tests.harloKey)).steps.filter(x => x.title.startsWith("Finished step")))
-                chat.planDock.edit({ op: "skip", id: st.id, skipped: true })
-            for (let i = 1; i <= 30; i++) chat.planDock.edit({ op: "add", title: "Long plan step " + i, detail: report })
-            TestInput.moveTo(2, 2) } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const t0 = Date.now()
-            tests.clickItem(tests.findName("planToggle", chat.planDock), "open a long plan")
-            const ms = Date.now() - t0
-            tests.log("plan of", chat.planDock.steps.length, "steps opened in", ms, "ms")
-            tests.check(chat.planDock.steps.length === 91 && ms < 120, "a 91-step plan opens at once (" + ms + " ms)")
-            tests.check(tests.findAllNames("planStepRow", chat.planDock).length === 30, "only the steps to do are made, not the 61 folded finished ones (" + tests.findAllNames("planStepRow", chat.planDock).length + ")")
-            tests.check(tests.findAllNames("planStepEdits", chat.planDock).length === 0, "no step's buttons are made before it's hovered") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: { const t = tests.findContaining("Long plan step 1", chat.planDock), p = t.mapToItem(null, t.width / 2, t.height / 2); TestInput.moveTo(p.x, p.y) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(tests.findAllNames("planStepEdits", chat.planDock).length === 1, "hovering a step shows its buttons")
-            for (const st of JSON.parse(Workspace.planJson(tests.harloKey)).steps.filter(x => x.title.startsWith("Long plan step") || x.title.startsWith("Finished step")))
-                chat.planDock.edit({ op: "remove", id: st.id })
-            tests.clickItem(tests.findName("planToggle", chat.planDock), "fold the plan") } }
-        // The project's Team: its helpers' agent, and its reviewer on
-        // another model (the next run's reviews use it).
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: settingsDialog.openProject(JSON.parse(Workspace.projectsJson())[0].id) }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const box = tests.findName("teamAgent", settingsDialog.contentItem)
-            tests.check(box !== null && box.model[box.currentIndex] === "Same as the session", "Team: the helpers are like the session at first (" + (box ? box.model : "none") + ")")
-            tests.check(tests.findName("teamPreset", settingsDialog.contentItem) === null, "no ready-made teams (they repeated the rows below)")
-            const i = box ? box.model.indexOf("Harlo") : -1
-            tests.check(i > 0, "Harlo is one of them")
-            if (i > 0) { box.currentIndex = i; box.activated(i) } } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const pid = JSON.parse(Workspace.projectsJson())[0].id
-            tests.check(JSON.parse(Workspace.setting("team_helpers_" + pid)).agent === "harlo", "choosing it sets the team (" + Workspace.setting("team_helpers_" + pid) + ")")
-            const rev = tests.findName("teamReviewer", settingsDialog.contentItem)
-            const i = rev ? rev.model.indexOf("Harlo") : -1
-            tests.check(rev !== null && rev.model[rev.currentIndex] === "The helpers' agent" && i > 0, "Reviews by: the helpers' agent, or another (" + (rev ? rev.model : "none") + ")")
-            if (i > 0) { rev.currentIndex = i; rev.activated(i) } } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const m = tests.findName("teamReviewerModel", settingsDialog.contentItem)
-            const i = m ? m.model.indexOf("Fake Helper") : -1
-            tests.check(i > 0, "the reviewer's model is offered (" + (m ? m.model : "none") + ")")
-            if (i > 0) { m.currentIndex = i; m.activated(i) } } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const pid = JSON.parse(Workspace.projectsJson())[0].id
-            const v = JSON.parse(Workspace.setting("team_helpers_" + pid))
-            tests.check(v.reviewer && v.reviewer.agent === "harlo" && v.reviewer.model === "fake/fake-helper", "the team's reviewer is saved (" + JSON.stringify(v) + ")")
-            tests.scrollIntoView(tests.findName("teamReviewerModel", settingsDialog.contentItem))
-            tests.shotWindow("clicks-review-team")
-            settingsDialog.close() } }
-        // Problems that stay: the run pauses for you.
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo")
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendByKeys("make a bad plan please") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => (JSON.parse(Workspace.planJson(tests.harloKey)).steps || []).length === 1 && chat.session.status === "idle", 15000) }
-        PauseAnimation { duration: 600 }
-        // This run from the phone, with the team's helpers; its helper asks
-        // before writing (the session asks first: its helpers start so),
-        // and the phone approves.
-        ScriptAction { script: {
-            const call = m => JSON.parse(Workspace.phoneTestCall(JSON.stringify(m)))
-            const plan = call({ op: "plan", key: tests.harloKey })
-            tests.check(plan.team && plan.team.agent === "harlo" && plan.team.team === true && plan.team.reviewer && plan.team.reviewer.model === "fake/fake-helper",
-                      "the phone's plan says who the team's helpers are (" + JSON.stringify(plan.team) + ")")
-            Workspace.setApprovalMode(tests.harloKey, "always-ask")
-            const run = call({ op: "planRun", key: tests.harloKey, agent: "" })
-            tests.check(run.run && run.run.agent === "harlo" && !run.error, "the phone runs it with the team's helpers (" + JSON.stringify(run.run || run) + ")") } }
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "helpers", key: tests.harloKey }))).helpers.some(h => h.asks && h.asks.approval), 30000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const call = m => JSON.parse(Workspace.phoneTestCall(JSON.stringify(m)))
-            const h = call({ op: "helpers", key: tests.harloKey }).helpers.find(h => h.asks && h.asks.approval)
-            tests.check(h.step === 1 && h.model === "fake/fake-coder" && h.asks.options.indexOf("Approve") >= 0, "the phone sees the helper's model and its request (" + JSON.stringify([h.model, h.asks]) + ")")
-            tests.check(!!call({ op: "answerHelper", key: tests.harloKey, helper: "live:none", id: h.asks.id, value: "Approve" }).error, "a session that isn't its helper can't be answered")
-            const after = call({ op: "answerHelper", key: tests.harloKey, helper: h.id, id: h.asks.id, value: "Approve" })
-            tests.check(Array.isArray(after.helpers) && !after.helpers.some(x => x.id === h.id && x.asks && x.asks.id === h.asks.id), "the phone approves it (" + JSON.stringify((after.helpers || []).map(x => x.asks)) + ")")
-            tests.approvedHelper = h.id
-            Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const h = JSON.parse(Workspace.phoneTestCall(JSON.stringify({ op: "helpers", key: tests.harloKey }))).helpers.find(x => x.id === tests.approvedHelper)
-            tests.check(h && !h.asks && h.status !== "waiting", "the helper went on (" + (h ? h.status : "gone") + ")") } }
-        ScriptAction { script: tests.waitUntil(planReviewSteps, () => { const r = JSON.parse(Workspace.planJson(tests.harloKey)).run; return !!r && (r.paused || "") !== "" }, 60000) }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const p = JSON.parse(Workspace.planJson(tests.harloKey))
-            const step = (p.steps || [])[0] || {}
-            tests.check(p.run && p.run.paused.indexOf("its review still found problems after a round of fixes") >= 0 && p.run.paused.indexOf("helper.txt:1") >= 0, "problems after a round of fixes pause the run (" + (p.run ? p.run.paused : "no run") + ")")
-            tests.check(step.status === "pending" && step.summary.indexOf("Not done: its review found problems") === 0, "and the step waits again (" + step.status + ": " + step.summary + ")")
-            tests.check(tests.findText("· paused") !== null && tests.findText("Run again") !== null, "the plan card says paused, with Run again")
-            tests.check(tests.findName("planPaused").text.indexOf("Paused at step 1.") === 0 && tests.findName("planPaused").text.indexOf("helper.txt:1") < 0, "the pause names the step and what to do; the problem is said once, at the step (" + tests.findName("planPaused").text + ")")
-            const kids = JSON.parse(Workspace.orchestratedJson(tests.harloKey))
-            const reviews = kids.filter(k => k.review !== null && k.review !== undefined)
-            tests.check(reviews.length === 2 && reviews.every(k => k.model === "fake/fake-helper") && kids.filter(k => k.step === 1).every(k => k.model === "fake/fake-coder"),
-                      "the team's reviewer reviews, on its model; the helper is the team's (" + JSON.stringify(kids.map(k => [k.name, k.model])) + ")")
-            tests.shotWindow("clicks-review-paused")
-            tests.summary(); Qt.quit() } }
-    }
-
-    // Settings → Agents → Harlo: the subagents' model and the model to go
-    // on with, typed in; a new session's subagent runs on the first, and a
-    // server that stays busy hands the turn to the second.
-    // Settings → Models: Harlo's built-in providers, a
-    // key refused then taken (saved for harlo-agent, checked against a
-    // stand-in provider), its models in the picker, then removed; the
-    // switch that gives SSH machines the keys; and a coding plan's key, and
-    // a Claude session on the plan.
-    SequentialAnimation {
-        id: harloCloudSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlocloud"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd="))
-            settingsDialog.openPage("models") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => (JSON.parse(Accounts.cloud("harlo")).list || []).length > 0, 20000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, st = id => { const l = tests.findName("cloudStatus-" + id, d); return l ? l.text : "(none)" }
-            const ids = JSON.parse(Accounts.cloud("harlo")).list.map(p => p.id)
-            tests.check(ids.length === 16 && ["anthropic", "gemini", "openrouter", "xai", "opencode-go"].every(i => ids.indexOf(i) >= 0), "Cloud models lists Harlo's providers (" + ids.join(", ") + ")")
-            tests.check(st("anthropic") === "No key", "Anthropic has no key yet (" + st("anthropic") + ")")
-            tests.check(tests.findName("cloudProvider-deepseek-anthropic", d) === null, "an API variant sharing another's key has no row of its own")
-            tests.clickItem(tests.findName("cloudProvider-deepseek", d), "DeepSeek's row") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, v = tests.findName("cloudVariants-deepseek", d)
-            tests.check(v !== null && v.text.indexOf("DeepSeek (Anthropic API)") > 0, "it's inside that one's row (" + (v ? v.text : "none") + ")")
-            tests.clickItem(tests.findName("cloudProvider-deepseek", d), "DeepSeek's row")
-            tests.check(tests.findName("cloudAdd", d) === null && tests.findName("cloudSearch", d) !== null, "with no key yet, the providers are listed straight away, with a search")
-            tests.check(tests.findName("cloudProvider-gemini", d) !== null && tests.findName("cloudProvider-mistral", d) === null && tests.findName("cloudMore", d) !== null,
-                        "the common ones first, the rest under More providers")
-            tests.clickItem(tests.findName("cloudSearch", d), "the providers' search")
-            TestInput.typeText("anthro") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, shown = id => { const r = tests.findName("cloudProvider-" + id, d); return r !== null && r.visible }
-            tests.check(shown("anthropic") && !shown("gemini") && !shown("deepseek"), "searching narrows the list to Anthropic")
-            tests.scrollIntoView(tests.findName("cloudProvider-anthropic", d))
-            tests.clickItem(tests.findName("cloudProvider-anthropic", d), "Anthropic's row") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            tests.check(tests.findText("Claude Opus 5.5", d) !== null && tests.findText("$4 / $20", d) === null && tests.findText("Prices ↗", d) !== null, "opened: its models, no prices, a link to its prices")
-            tests.clickItem(tests.findName("cloudKey-anthropic", d), "the key field")
-            TestInput.typeText("sk-ant-wrong")
-            tests.clickItem(tests.findName("cloudSave-anthropic", d), "Save") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const r = (JSON.parse(Accounts.cloud("harlo")).results || {}).anthropic; return r && r.state !== "busy" }, 30000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: {
-            const r = JSON.parse(Accounts.cloud("harlo")).results.anthropic
-            tests.check(r.state === "error" && r.message.indexOf("refused the key") >= 0 && r.message.indexOf("invalid x-api-key") >= 0, "a wrong key: saved, and the provider's refusal said (" + r.message + ")")
-            const d = settingsDialog.contentItem
-            tests.check(tests.findName("cloudKey-anthropic", d).text === "", "the field empties once it's sent")
-            tests.clickItem(tests.findName("cloudKey-anthropic", d), "the key field")
-            TestInput.typeText("sk-ant-good")
-            TestInput.key(Qt.Key_Return, 0) } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const v = JSON.parse(Accounts.cloud("harlo")); const r = (v.results || {}).anthropic; return r && r.state === "ok" && v.state === "ready" }, 30000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const r = JSON.parse(Accounts.cloud("harlo")).results.anthropic
-            tests.check(r.message === "Saved; it works: Anthropic took the key", "the right key works (" + r.message + ")")
-            const st = tests.findName("cloudStatus-anthropic", settingsDialog.contentItem)
-            tests.check(st && st.text === "Key saved", "and it says so (" + (st ? st.text : "none") + ")")
-            const add = tests.findName("cloudAdd", settingsDialog.contentItem), gemini = tests.findName("cloudProvider-gemini", settingsDialog.contentItem)
-            tests.check(add !== null && gemini === null, "with a key, it's listed first and the rest wait behind Add a provider")
-            const saved = TestInput.readFile(win.selftestDir + "/config/harlo-agent/keys.json")
-            tests.check(saved.indexOf("sk-ant-good") >= 0 && saved.indexOf("sk-ant-wrong") < 0, "kept in harlo-agent's keys file, the last one only")
-            const log = TestInput.readFile(win.selftestDir + "/cloud-log.jsonl")
-            tests.check(log.indexOf("/anthropic/models") >= 0, "checked with the provider (the stand-in)")
-            tests.scrollIntoView(tests.findName("cloudProvider-anthropic", settingsDialog.contentItem))
-            tests.shotWindow("clicks-harlo-cloud")
-            settingsDialog.close()
-            tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.modelName !== "", 15000) }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.clickItem(tests.findName("modelButton"), "the model button") }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.models.some(m => m.split("\t")[1] === "claude-opus-5-5"), 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const opus = chat.session.models.find(m => m.split("\t")[1] === "claude-opus-5-5") || ""
-            tests.check(opus.split("\t")[0] === "anthropic", "the picker gets Anthropic's model once its key is saved (" + opus.replace(/\t/g, " | ") + ")")
-            tests.check(tests.findText("$4 / $20") === null, "with no price beside it")
-            TestInput.key(Qt.Key_Escape, 0)
-            settingsDialog.openPage("models") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            tests.scrollIntoView(tests.findName("cloudProvider-anthropic", d))
-            const remove = tests.findName("cloudRemove-anthropic", d)
-            if (!remove || !remove.visible) tests.clickItem(tests.findName("cloudProvider-anthropic", d), "Anthropic's row") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const share = tests.findName("harloShareKeys", settingsDialog.contentItem)
-            tests.check(share && share.checked, "with a key saved, SSH machines get the keys by default")
-            tests.scrollIntoView(share)
-            tests.clickItem(share, "the SSH keys switch") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(Workspace.setting("harlo_share_keys") === "0", "turned off")
-            const remove = tests.findName("cloudRemove-anthropic", settingsDialog.contentItem)
-            tests.scrollIntoView(remove)
-            tests.clickItem(remove, "Remove") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const v = JSON.parse(Accounts.cloud("harlo")); const p = (v.list || []).find(p => p.id === "anthropic"); return v.state === "ready" && p && p.key === "none" }, 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const st = tests.findName("cloudStatus-anthropic", settingsDialog.contentItem)
-            tests.check(st && st.text === "No key", "removed (" + (st ? st.text : "none") + ")")
-            tests.check(TestInput.readFile(win.selftestDir + "/config/harlo-agent/keys.json").indexOf("sk-ant-good") < 0, "and gone from the file")
-            tests.check(tests.findName("harloShareKeys", settingsDialog.contentItem) === null, "with no key left, the SSH keys switch goes")
-            // Coding plans for Claude Code: harlo's own list and keys,
-            // checked by one short request of the stand-in claude.
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            const plans = JSON.parse(Accounts.cloud("claude")).list || []
-            tests.check(plans.map(p => p.id).join(",") === "glm-coding,kimi-code,minimax-plan", "the coding plans are listed (" + plans.map(p => p.id) + ")")
-            const glm = tests.findName("cloudProvider-glm-coding", settingsDialog.contentItem)
-            tests.scrollIntoView(glm)
-            tests.clickItem(tests.findName("cloudProvider-glm-coding", settingsDialog.contentItem), "the GLM Coding Plan's row") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            tests.check(tests.findText("GLM 5.3 Flash", d) !== null && tests.findText("Plan ↗", d) !== null, "opened: its models and a link to its plans")
-            const key = tests.findName("cloudKey-glm-coding", d)
-            tests.clickItem(key, "its key field")
-            TestInput.typeText("plan-bad")
-            tests.clickItem(tests.findName("cloudSave-glm-coding", d), "Save") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const r = (JSON.parse(Accounts.cloud("claude")).results || {})["glm-coding"]; return r && r.state !== "busy" }, 30000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const res = tests.findName("cloudResult-glm-coding", settingsDialog.contentItem)
-            tests.check(res && res.text.indexOf("Saved, but the check failed") === 0 && res.text.indexOf("invalid api key") > 0, "a wrong key: saved, and the plan's refusal said (" + (res ? res.text : "none") + ")")
-            tests.clickItem(tests.findName("cloudKey-glm-coding", settingsDialog.contentItem), "its key field")
-            TestInput.typeText("plan-good")
-            tests.clickItem(tests.findName("cloudSave-glm-coding", settingsDialog.contentItem), "Save") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => { const v = JSON.parse(Accounts.cloud("claude")); const r = (v.results || {})["glm-coding"]; return r && r.state === "ok" && v.state === "ready" }, 30000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            const res = tests.findName("cloudResult-glm-coding", d)
-            tests.check(res && res.text === "Saved; it works: GLM Coding Plan answered through Claude Code.", "the right key works (" + (res ? res.text : "none") + ")")
-            const st = tests.findName("cloudStatus-glm-coding", d)
-            tests.check(st && st.text === "Key saved", "and it says so (" + (st ? st.text : "none") + ")")
-            const file = win.selftestDir + "/config/harlo/coding-plans.json"
-            tests.check(JSON.parse(TestInput.readFile(file))["glm-coding"] === "plan-good", "kept in harlo's coding-plans.json")
-            const log = TestInput.readFile(win.argValue("--cwd=") + "/../home/plan-log.jsonl").trim().split("\n").map(l => JSON.parse(l))
-            const last = log[log.length - 1] || {}
-            tests.check(log.length === 2 && last.baseUrl === "https://api.z.ai/api/anthropic" && last.model === "glm-5.3-flash[1m]" && !last.persist,
-                        "checked through Claude Code on the plan's endpoint, its small model, nothing kept (" + JSON.stringify(last) + ")")
-            const notes = tests.findText("A MiniMax M Plan key (sk-cp-…, from your plan's page) works here too.")
-            tests.check(notes === null || !notes.visible, "MiniMax's note shows only when its row is open")
-            // A Claude session on the plan: picked in the composer, under
-            // the plan's name; claude restarted with the plan's settings
-            // file (the key in it, never on the command line); and back.
-            settingsDialog.close()
-            tests.claudeKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "claude") } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.clickItem(tests.findName("modelButton"), "the model button") }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.models.some(m => m.split("\t")[0] === "glm-coding"), 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(tests.findText("GLM CODING PLAN") !== null, "the plan's models are under its name in the picker")
-            tests.clickItem(tests.findText("GLM 5.3"), "GLM 5.3") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.modelName === "GLM 5.3", 15000) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("hello plan") }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => tests.chatText().indexOf("Hello from fake claude") >= 0, 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const text = tests.chatText()
-            tests.check(text.indexOf("model glm-5.3[1m]") >= 0 && text.indexOf("via https://api.z.ai/api/anthropic") >= 0, "claude runs on the plan's endpoint with its model (" + text.slice(-160) + ")")
-            const starts = TestInput.readFile(win.argValue("--cwd=") + "/../home/claude-starts.jsonl").trim().split("\n").map(l => JSON.parse(l))
-            const last = starts[starts.length - 1] || { args: [] }
-            tests.check(last.args.indexOf("--settings") >= 0 && last.key === "plan-good" && !last.args.some(a => a.indexOf("plan-good") >= 0), "with the key in its settings file, not on the command line")
-            // Its icon: the model's maker (Z.ai), Claude Code as a tag.
-            const makers = tests.findAllNamed("sessionMaker", sidebar, []).map(m => m.provider)
-            tests.check(makers.indexOf("zai-coding-plan") >= 0 && tests.findAllNamed("sessionProvider", sidebar, []).every(m => m.provider !== "claude"),
-                        "the session's icon shows its model's maker, Claude Code as a tag (" + makers + ")")
-            tests.shotWindow("clicks-harlo-plan")
-            chat.session.setModel("anthropic", "claude-sonnet-5") } }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => chat.session.modelName !== "GLM 5.3", 15000) }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.sendByKeys("hello again") }
-        PauseAnimation { duration: 200 }
-        ScriptAction { script: tests.waitUntil(harloCloudSteps, () => tests.chatText().split("Hello from fake claude").length === 3, 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const text = tests.chatText(), reply = text.slice(text.lastIndexOf("Hello from fake claude"))
-            tests.check(reply.indexOf("model claude-sonnet-5,") >= 0 && reply.indexOf("via ") < 0, "back on Anthropic's model, without the plan (" + reply.slice(0, 120) + ")")
-            const starts = TestInput.readFile(win.argValue("--cwd=") + "/../home/claude-starts.jsonl").trim().split("\n").map(l => JSON.parse(l))
-            const last = starts[starts.length - 1] || { args: [] }
-            tests.check(last.args.indexOf("--settings") < 0 && last.args.some(a => a.startsWith("--resume")), "restarted without the plan, the same conversation (" + starts.length + " starts)")
-            const marks = tests.findAllNamed("sessionProvider", sidebar, []).map(m => m.provider)
-            tests.check(tests.findAllNamed("sessionMaker", sidebar, []).every(m => m.provider !== "zai-coding-plan") && marks.indexOf("claude") >= 0, "on Claude again: Claude's own mark (" + marks + ")")
-            tests.summary(); Qt.quit() } }
-    }
-
-    SequentialAnimation {
-        id: harloSettingsSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlosettings"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd="))
-            settingsDialog.openPage("lsp") } }
-        PauseAnimation { duration: 600 }
-        // Settings → Code intelligence: each language's server, found where it's
-        // usually installed too (a stand-in gopls in the home's go/bin).
-        ScriptAction { script: tests.waitUntil(harloSettingsSteps, () => Accounts.languageServers !== "" && JSON.parse(Accounts.languageServers).state === "ready", 20000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const list = JSON.parse(Accounts.languageServers).list || []
-            const go = list.find(l => l.language === "Go") || {}
-            tests.check(list.length === 5 && list.every(l => l.state === "ready" || l.install !== ""), "Code intelligence lists five languages, with how to install the missing (" + list.map(l => l.language + ":" + l.state).join(", ") + ")")
-            tests.check(go.state === "ready" && go.path.endsWith("/home/go/bin/gopls"), "a server outside the PATH is found where it's usually installed (" + go.state + " " + go.path + ")")
-            const rows = tests.findName("harloLanguageServers", settingsDialog.contentItem)
-            tests.check(rows && rows.visible && rows.children.length >= 6, "and shown under it (" + (rows ? rows.children.length : "none") + ")")
-            tests.clickItem(tests.findName("harloLanguageServersCheck", settingsDialog.contentItem), "Check again") } }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: tests.waitUntil(harloSettingsSteps, () => JSON.parse(Accounts.languageServers).state === "ready", 20000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            tests.check((JSON.parse(Accounts.languageServers).list || []).length === 5, "Check again asks again")
-            tests.scrollIntoView(tests.findName("harloLanguageServers", settingsDialog.contentItem))
-            tests.shotWindow("clicks-harlo-language-servers")
-            tests.check(settingsDialog.current.title === "Code intelligence", "on a page of its own, Code intelligence")
-            settingsDialog.openPage("providers") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            tests.check(tests.findName("harloLanguageServers", settingsDialog.contentItem) === null, "and no longer under Providers")
-            // Picked from Harlo's models and the budget's choices.
-            const pick = (name, text) => {
-                const box = tests.findName(name, settingsDialog.contentItem)
-                const i = box ? box.model.findIndex(t => t.indexOf(text) >= 0) : -1
-                tests.check(i > 0, name + " offers " + text + " (" + (box ? box.model.join(", ") : "none") + ")")
-                if (i > 0) { box.currentIndex = i; box.activated(i) }
-            }
-            pick("harloTaskModel", "Fake Helper")
-            pick("harloFallback", "Go on with Fake Helper")
-            pick("harloHelperBudget", "500k tokens")
-            pick("harloAdvisor", "Fake Helper")
-            pick("harloSteering", "When it finishes")
-            const memory = tests.findName("harlo_memory", settingsDialog.contentItem)
-            tests.check(memory !== null && !memory.checked, "Notes between sessions is there, off")
-            if (memory) { tests.scrollIntoView(memory); memory.toggle(); memory.toggled() } } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(Workspace.setting("harlo_task_model") === "fake/fake-helper" && Workspace.setting("harlo_fallback") === "fake/fake-helper" && Workspace.setting("harlo_helper_budget") === "500k",
-                      "the three are saved as picked (" + [Workspace.setting("harlo_task_model"), Workspace.setting("harlo_fallback"), Workspace.setting("harlo_helper_budget")].join(", ") + ")")
-            tests.check(Workspace.setting("harlo_advisor") === "fake/fake-helper" && Workspace.setting("harlo_memory") === "1", "the reviewer and the notes too (" + Workspace.setting("harlo_advisor") + ", " + Workspace.setting("harlo_memory") + ")")
-            tests.check(Workspace.setting("harlo_steering") === "wait", "messages sent while it works wait for the turn's end (" + Workspace.setting("harlo_steering") + ")")
-            tests.shotWindow("clicks-harlo-extras")
-            tests.shotWindow("clicks-harlo-settings")
-            settingsDialog.openPage("git") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            const box = tests.findName("commitModel", settingsDialog.contentItem)
-            const i = box ? box.model.indexOf("Fake Helper") : -1
-            tests.check(box && box.model[box.currentIndex] === "Harlo's default" && i > 0, "Git: the commit messages' model is picked from Harlo's (" + (box ? box.model.join(", ") : "none") + ")")
-            if (i > 0) { box.currentIndex = i; box.activated(i) }
-            tests.check(Workspace.setting("commit_model") === "fake/fake-helper", "and saved as its id (" + Workspace.setting("commit_model") + ")")
-            settingsDialog.close() } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSettingsSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendByKeys("use a subagent please") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSettingsSteps, () => tests.chatText().indexOf("Done:") >= 0, 15000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            // (A subagent's: its first message is the task.)
-            const first = b => JSON.stringify(((b.messages || []).find(m => m.role === "user") || {}).content || "")
-            const sub = tests.modelRequests().filter(b => first(b).indexOf("SUBTASK") >= 0)
-            tests.check(sub.length > 0 && sub.every(b => b.model === "fake-helper"), "the subagent runs on the subagents' model (" + sub.map(b => b.model).join() + ")")
-            // (The reviewer's requests: its own instructions, on the model picked.)
-            const reviewing = b => JSON.stringify(((b.messages || [])[0] || {}).content || "").indexOf("You review a coding agent's work") >= 0
-            const own = tests.modelRequests().filter(b => first(b).indexOf("use a subagent") >= 0 && !reviewing(b))
-            tests.check(own.length > 0 && own.every(b => b.model === "fake-coder"), "the session stays on its own")
-            const reviews = tests.modelRequests().filter(reviewing)
-            tests.check(reviews.length === 1 && reviews[0].model === "fake-helper", "the reviewer reads the turn once, on the model picked (" + reviews.map(b => b.model).join() + ")")
-            tests.check(own.every(b => (b.tools || []).some(t => (t.function || t).name === "memory")), "and the session has its notes tool")
-            tests.sendByKeys("be busy now") } }
-        PauseAnimation { duration: 300 }
-        // (Retries take 1 + 2 + 4 s.)
-        ScriptAction { script: tests.waitUntil(harloSettingsSteps, () => tests.chatText().indexOf("[fake-helper]") >= 0 && chat.session.status === "idle", 30000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const t = tests.chatText()
-            tests.check(t.indexOf("ok: be busy now [fake-helper]") >= 0, "a server that stays busy: it goes on with the model set (" + t.slice(-200) + ")")
-            tests.check(chat.session.modelName === "Fake Helper", "and says so: the session's model is now that one (" + chat.session.modelName + ")")
-            tests.shotWindow("clicks-harlo-fallback")
-            tests.summary(); Qt.quit() } }
-    }
-
-    // MCP for Harlo: a server that wants a sign-in (click-tests.sh: the
-    // stand-in server in Harlo's mcp.json, and a stand-in browser that
-    // follows the link) signs in from its page; a project's own server is
-    // not allowed for Harlo until it's saved here; a session uses both.
-    SequentialAnimation {
-        id: harloMcpSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlomcp"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setProviderEnabled("claude", false)
-            Workspace.addProject(win.argValue("--cwd="))
-            settingsDialog.openPage("mcp") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloMcpSteps, () => (JSON.parse(Mcp.statusJson("global")).locked || {}).state === "needs_auth", 15000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const pill = tests.findName("mcpStatus-locked", settingsDialog.contentItem)
-            tests.check(pill !== null && pill.text === "Needs sign-in", "a server that wants a sign-in says so (" + (pill ? pill.text : "none") + ")")
-            tests.clickItem(tests.findName("mcpServer-locked", settingsDialog.contentItem), "locked") } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: {
-            const b = tests.findName("mcpSignIn", settingsDialog.contentItem)
-            tests.check(b !== null, "its page has Sign in (for Harlo)")
-            tests.shotPopup(settingsDialog, "clicks-mcp-signin")
-            tests.clickItem(b, "Sign in") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloMcpSteps, () => signInDialog.flow !== null && signInDialog.flow.state !== "running", 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(signInDialog.flow !== null && signInDialog.flow.state === "done", "the sign-in finishes in the browser (" + (signInDialog.flow ? signInDialog.flow.state + " " + signInDialog.flow.message : "none") + ")")
-            tests.shotWindow("clicks-mcp-signed-in")
-            signInDialog.close() } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloMcpSteps, () => (JSON.parse(Mcp.statusJson("global")).locked || {}).state === "connected", 15000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const st = JSON.parse(Mcp.statusJson("global")).locked || {}
-            tests.check(st.state === "connected" && (st.tools || []).length === 1, "then it's tested again: connected, its tool listed (" + JSON.stringify(st) + ")")
-            tests.check(TestInput.readFile(win.selftestDir + "/config/harlo-agent/mcp-auth.json").indexOf("/mcp") >= 0, "the sign-in is kept in Harlo's mcp-auth.json")
-            tests.clickItem(tests.findName("mcpBack", settingsDialog.contentItem), "All servers") } }
-        PauseAnimation { duration: 400 }
-        // The project's own server (the repo's .harlo/mcp.json).
-        ScriptAction { script: tests.clickItem(tests.findName("mcpScope", settingsDialog.contentItem), "scope") }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: tests.clickText("repo") }
-        PauseAnimation { duration: 800 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem
-            tests.check(tests.findName("mcpServer-dice", d) !== null && tests.findText("not allowed for Harlo", d) !== null, "a project's own server: not allowed for Harlo")
-            tests.shotPopup(settingsDialog, "clicks-mcp-project")
-            tests.clickItem(tests.findName("mcpServer-dice", d), "dice") } }
-        PauseAnimation { duration: 500 }
-        // Its tool marked as only looking (the server doesn't say).
-        // (Pressed, not clicked: scrolled into view, it's under the floating
-        // Save bar.)
-        ScriptAction { script: tests.findName("mcpTest", settingsDialog.contentItem).clicked() }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloMcpSteps, () => { const c = tests.findName("mcpLooks-roll", settingsDialog.contentItem); return c !== null && c.visible }, 15000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const d = settingsDialog.contentItem, c = tests.findName("mcpLooks-roll", d)
-            tests.check(c !== null && c.visible && c.enabled && !c.checked, "a tested tool can be marked as only looking, for Harlo (unmarked: the server doesn't say)")
-            tests.check(tests.findName("mcpLooksHint", d) !== null && tests.findName("mcpLooksHint", d).visible, "the page says what marking does")
-            c.click()
-            const f = tests.ancestorWith(c, "contentHeight")
-            if (f) f.contentY = Math.max(0, f.contentHeight - f.height) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const c = tests.findName("mcpLooks-roll", settingsDialog.contentItem)
-            tests.check(c.checked, "ticked")
-            tests.shotPopup(settingsDialog, "clicks-mcp-looks") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.clickItem(tests.findName("mcpSave", settingsDialog.contentItem), "Save") }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: {
-            const file = TestInput.readFile(win.argValue("--cwd=") + "/.harlo/mcp.json")
-            tests.check(JSON.stringify((JSON.parse(file).mcpServers.dice || {}).readOnly) === JSON.stringify(["roll"]), "saved in Harlo's entry as readOnly (" + file.replace(/\s+/g, " ") + ")")
-            tests.check(tests.findText("not allowed for Harlo", settingsDialog.contentItem) === null, "saved here, it's allowed")
-            settingsDialog.close() } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: { tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloMcpSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: tests.sendByKeys("what time is it? mcp clock") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloMcpSteps, () => tests.chatText().indexOf("Done:") >= 0, 30000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Done: It's 3 pm in Tokyo") >= 0, "Harlo calls the signed-in server's tool (" + tests.chatText().slice(-160) + ")")
-            tests.sendByKeys("roll one: mcp roll") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloMcpSteps, () => tests.chatText().indexOf("You rolled") >= 0 || chat.session.status === "idle" && tests.chatText().split("Done:").length > 2, 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Done: You rolled 4") >= 0, "and the project's server, now allowed (" + tests.chatText().slice(-160) + ")")
-            tests.shotWindow("clicks-mcp-harlo")
-            tests.summary(); Qt.quit() } }
-    }
 
     // An MCP server harlo installs with a click (click-tests.sh: a stand-in
     // GitHub whose release is the real context-mode, then a newer one):
-    // turned on for Harlo (downloaded), tested, updated, used by a session,
+    // turned on for pi (downloaded), tested, updated, used by a session,
     // turned off.
     SequentialAnimation {
         id: catalogSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlocatalog"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickscatalog"
         function offered() { return JSON.parse(Mcp.catalogJson("global"))[0] || {} }
         function entry() {
-            const text = TestInput.readFile(win.selftestDir + "/config/harlo-agent/mcp.json") || "{}"
+            const text = TestInput.readFile(win.selftestDir + "/home/.pi/agent/mcp.json") || "{}"
             return (JSON.parse(text).mcpServers || {})["context-mode"] || null
         }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setProviderEnabled("claude", false)
             Workspace.addProject(win.argValue("--cwd="))
             settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 300 }
@@ -12177,7 +10780,7 @@ Item {
             tests.check(repo !== null && repo.visible && repo.text === "mksglu/context-mode" && repo.url === "https://github.com/mksglu/context-mode", "its repository, a link to it (" + (repo ? repo.text + " " + repo.url : "none") + ")")
             tests.check(stars !== null && stars.visible && stars.text === "12k" && stars.ToolTip.text === "12,345 stars on GitHub", "its stars (" + (stars ? stars.text + ", " + stars.ToolTip.text : "none") + ")")
             tests.check(b.version === "" && b.node !== "" && b.nodeError === "", "nothing downloaded yet; a Node found (" + JSON.stringify(b) + ")")
-            tests.check(TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/current/package.json") === "" && catalogSteps.entry() === null, "nothing in harlo's folder or Harlo's servers yet")
+            tests.check(TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/current/package.json") === "" && catalogSteps.entry() === null, "nothing in harlo's folder or pi's servers yet")
             tests.shotPopup(settingsDialog, "clicks-catalog-off")
             tests.clickItem(sw, "turn on") } }
         PauseAnimation { duration: 300 }
@@ -12185,12 +10788,12 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const b = catalogSteps.offered(), e = catalogSteps.entry() || {}
-            tests.check(JSON.stringify(b.agents) === JSON.stringify(["harlo"]) && b.error === "" && b.version === "2.1.7", "downloaded and on for Harlo (" + JSON.stringify(b) + ")")
+            tests.check(b.on === true && b.error === "" && b.version === "2.1.7", "downloaded and on for pi (" + JSON.stringify(b) + ")")
             const data = win.selftestDir + "/data/harlo/mcp/context-mode"
             tests.check(JSON.parse(TestInput.readFile(data + "/2.1.7/package.json") || "{}").version === "2.1.7", "in Harlo's folder")
             tests.check(e.command && e.command.startsWith("/") && e.command.endsWith("/node"), "the entry runs Node by its path (" + e.command + ")")
             tests.check(JSON.stringify(e.args) === JSON.stringify([data + "/current/server.mjs", "--agent", "claude-code"]), "harlo's copy, through current (" + JSON.stringify(e.args) + ")")
-            tests.check(JSON.stringify(e.hiddenTools) === JSON.stringify(["ctx_upgrade", "ctx_doctor"]) && e.enabled === true, "its own updating hidden from Harlo (" + JSON.stringify(e) + ")") } }
+            tests.check(JSON.stringify(e.toolExposure) === JSON.stringify({ ctx_upgrade: "hidden", ctx_doctor: "hidden" }) && e.enabled === true, "its own updating hidden from pi (" + JSON.stringify(e) + ")") } }
         ScriptAction { script: tests.waitUntil(catalogSteps, () => (JSON.parse(Mcp.statusJson("global"))["context-mode"] || {}).state === "connected", 30000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -12223,8 +10826,8 @@ Item {
             tests.shotPopup(settingsDialog, "clicks-catalog-updated")
             settingsDialog.close() } }
         PauseAnimation { duration: 400 }
-        // A Harlo session uses it.
-        ScriptAction { script: { tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(tests.harloKey, "yolo") } }
+        // A pi session uses it.
+        ScriptAction { script: { tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "pi"); Workspace.setApprovalMode(tests.harloKey, "yolo") } }
         PauseAnimation { duration: 300 }
         ScriptAction { script: tests.waitUntil(catalogSteps, () => chat.session.modelName !== "", 10000) }
         PauseAnimation { duration: 50 }
@@ -12233,12 +10836,12 @@ Item {
         ScriptAction { script: tests.waitUntil(catalogSteps, () => tests.chatText().indexOf("Done:") >= 0, 40000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
-            tests.check(tests.chatText().indexOf("Done: ctx_stats:") >= 0, "Harlo calls context-mode's tool (" + tests.chatText().slice(-200) + ")")
+            tests.check(tests.chatText().indexOf("Done: ctx_stats:") >= 0, "pi calls context-mode's tool (" + tests.chatText().slice(-200) + ")")
+            // (Its tools, as pi's codemode finds them: the script lists them.)
             const req = tests.modelRequests().slice(-1)[0] || {}
-            const names = (req.tools || []).map(t => t.function.name)
-            tests.check(names.includes("mcp__context-mode__ctx_execute") && !names.includes("mcp__context-mode__ctx_upgrade") && !names.includes("mcp__context-mode__ctx_doctor"), "offered its tools but the two hidden (" + names.filter(n => n.indexOf("context") >= 0).join() + ")")
-            const system = ((req.messages || [])[0] || {}).content || ""
-            tests.check(system.indexOf('<mcp_server name="context-mode">') >= 0 && system.indexOf("ctx_execute") >= 0, "and its instructions")
+            const out = String(((req.messages || []).filter(m => m.role === "tool").slice(-1)[0] || {}).content || "")
+            const found = (/\(found: ([^)]*)\)/.exec(out) || ["", ""])[1]
+            tests.check(found.indexOf("ctx_execute") >= 0 && found.indexOf("ctx_upgrade") < 0 && found.indexOf("ctx_doctor") < 0, "offered its tools but the two hidden (" + found + ")")
             tests.shotWindow("clicks-catalog-session")
             settingsDialog.openPage("mcp") } }
         PauseAnimation { duration: 800 }
@@ -12249,7 +10852,7 @@ Item {
         ScriptAction { script: {
             const d = settingsDialog.contentItem
             tests.check(catalogSteps.entry() === null, "off: its entry is gone")
-            tests.check(tests.findName("mcpCatalogStatus-context-mode", d).text === "Off" && tests.findName("mcpCatalogFor-context-mode-harlo", d).checked, "Off, and Harlo stays ticked for next time")
+            tests.check(tests.findName("mcpCatalogStatus-context-mode", d).text === "Off", "it says Off")
             tests.summary(); Qt.quit() } }
     }
 
@@ -12259,18 +10862,17 @@ Item {
     // there; Update and off likewise; this computer's card is its own.
     SequentialAnimation {
         id: catalogHostSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlocataloghost"
+        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickscataloghost"
         readonly property string hostHome: win.selftestDir + "/host-home"
         readonly property string copies: hostHome + "/.local/share/harlo/mcp/context-mode"
         function offered(scope) { return JSON.parse(Mcp.catalogJson(scope || "host:box"))[0] || {} }
         function entry() {
-            const text = TestInput.readFile(catalogHostSteps.hostHome + "/.config/harlo-agent/mcp.json") || "{}"
+            const text = TestInput.readFile(catalogHostSteps.hostHome + "/.pi/agent/mcp.json") || "{}"
             return (JSON.parse(text).mcpServers || {})["context-mode"] || null
         }
         PauseAnimation { duration: 900 }
         ScriptAction { script: {
             if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.setProviderEnabled("claude", false)
             tests.check(Remotes.saveHost("", "box", "ssh " + win.argValue("--ssh=")) === "", "the host is saved")
             Remotes.connectHost("box") } }
         ScriptAction { script: tests.waitUntil(catalogHostSteps, () => JSON.parse(Remotes.hostsJson())[0].state === "connected", 30000) }
@@ -12283,7 +10885,7 @@ Item {
             const d = settingsDialog.contentItem, b = catalogHostSteps.offered()
             const card = tests.findName("mcpCatalog-context-mode", d), sw = tests.findName("mcpCatalogToggle-context-mode", d)
             tests.check(card !== null && card.visible && sw !== null && !sw.checked && sw.enabled, "box's global servers offer it too, off")
-            tests.check(tests.findName("mcpCatalogLede", d).text.indexOf("sets it up on box for the agents you tick") > 0, "it says it's set up on box (" + tests.findName("mcpCatalogLede", d).text + ")")
+            tests.check(tests.findName("mcpCatalogLede", d).text.indexOf("sets it up on box for pi") > 0, "it says it's set up on box (" + tests.findName("mcpCatalogLede", d).text + ")")
             tests.check(tests.findName("mcpCatalogVersion-context-mode", d).text === "Not installed · version 2.1.7 is the newest", "not installed there (" + tests.findName("mcpCatalogVersion-context-mode", d).text + ")")
             tests.check(b.node !== "" && b.nodeError === "" && (b.error || "") === "", "box's Node found (" + JSON.stringify(b) + ")")
             tests.check(TestInput.readFile(catalogHostSteps.copies + "/current/package.json") === "" && catalogHostSteps.entry() === null, "nothing on box yet")
@@ -12294,12 +10896,12 @@ Item {
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
             const b = catalogHostSteps.offered(), e = catalogHostSteps.entry() || {}, c = catalogHostSteps.copies
-            tests.check(JSON.stringify(b.agents) === JSON.stringify(["harlo"]) && b.error === "" && b.version === "2.1.7", "downloaded and on for Harlo on box (" + JSON.stringify(b) + ")")
+            tests.check(b.on === true && b.error === "" && b.version === "2.1.7", "downloaded and on for pi on box (" + JSON.stringify(b) + ")")
             tests.check(JSON.parse(TestInput.readFile(c + "/current/package.json") || "{}").version === "2.1.7" && TestInput.readFile(c + "/current/server.mjs") !== "", "copied to box, its current link there")
             tests.check(TestInput.readFile(win.selftestDir + "/data/harlo/mcp/context-mode/current/package.json") === "", "not installed on this computer")
             tests.check(e.command && e.command.startsWith("/") && e.command.endsWith("/node"), "box's entry runs box's Node by its path (" + e.command + ")")
             tests.check(JSON.stringify(e.args) === JSON.stringify([c + "/current/server.mjs", "--agent", "claude-code"]), "box's copy, through current (" + JSON.stringify(e.args) + ")")
-            tests.check(JSON.stringify(e.hiddenTools) === JSON.stringify(["ctx_upgrade", "ctx_doctor"]) && e.enabled === true, "its own updating hidden from Harlo there") } }
+            tests.check(JSON.stringify(e.toolExposure) === JSON.stringify({ ctx_upgrade: "hidden", ctx_doctor: "hidden" }) && e.enabled === true, "its own updating hidden from pi there") } }
         ScriptAction { script: tests.waitUntil(catalogHostSteps, () => (JSON.parse(Mcp.statusJson("host:box"))["context-mode"] || {}).state === "connected", 40000) }
         PauseAnimation { duration: 300 }
         ScriptAction { script: {
@@ -12340,223 +10942,8 @@ Item {
         PauseAnimation { duration: 50 }
         ScriptAction { script: {
             const b = catalogHostSteps.offered("global"), d = settingsDialog.contentItem
-            tests.check(b.version === "" && (b.agents || []).length === 0, "this computer's own: not installed here (" + JSON.stringify(b) + ")")
+            tests.check(b.version === "" && b.on !== true, "this computer's own: not installed here (" + JSON.stringify(b) + ")")
             tests.check(tests.findName("mcpCatalogVersion-context-mode", d).text === "Not installed · version 2.1.8 is the newest", "and its card says so (" + tests.findName("mcpCatalogVersion-context-mode", d).text + ")")
-            tests.summary(); Qt.quit() } }
-    }
-
-    // Claude Code's skills and agent profiles in a Harlo session (the test's
-    // ~/.claude/skills/greet and the repo's .claude/agents/reviewer, from
-    // click-tests.sh), and the commit message Harlo writes.
-    SequentialAnimation {
-        id: harloSkillSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharloskills"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: { tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSkillSteps, () => chat.session.modelName !== "" && chat.session.commands.length > 0, 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            tests.check(chat.session.commands.some(c => c.indexOf("skill:greet") >= 0), "the command list offers skill:greet (" + chat.session.commands.filter(c => c.indexOf("skill") >= 0).join() + ")")
-            tests.clickItem(tests.findName("composerInput"), "composer")
-            TestInput.typeText("/skill:gr") } }
-        PauseAnimation { duration: 600 }
-        ScriptAction { script: {
-            tests.check(chat.composerItem.completionVisible && chat.composerItem.completionItems.some(c => JSON.stringify(c).indexOf("skill:greet") >= 0), "typing / suggests it")
-            tests.shotWindow("clicks-harlo-skill-completion")
-            // Each command a row of its own: its description on one line,
-            // nothing reaching into the next row.
-            const listView = chat.composerItem.completionList
-            const names = tests.findAllNames("commandName", listView).filter(n => n.visible)
-            const notes = tests.findAllNames("commandDescription", listView).filter(n => n.visible)
-            const inside = n => { let row = n; while (row && row.parent && row.parent !== listView.contentItem) row = row.parent
-                                  const p = n.mapToItem(row, 0, 0); return p.y >= 0 && p.y + n.height <= row.height + 0.5 }
-            const grammar = notes.find(n => n.text.indexOf("Checks the grammar") === 0)
-            tests.check(names.length >= 2 && notes.length >= 2 && notes.every(n => n.lineCount === 1) && names.concat(notes).every(inside),
-                      "every suggestion fits its row, its description on one line (" + names.length + " rows, " + notes.map(n => n.lineCount).join(",") + " lines)")
-            tests.check(grammar && grammar.text.indexOf("\n") < 0 && grammar.text.indexOf("SKIP") < 0 && grammar.truncated,
-                      "a long description runs together and is cut at the row's end (" + (grammar ? grammar.text.slice(0, 60) : "none") + ")")
-            const hint = tests.findAllNames("commandHint", listView).find(n => n.visible && n.text.indexOf("file") >= 0)
-            tests.check(hint && hint.text === "<file> [--strict]" && hint.contentWidth > 40, "an argument hint with <…> shows as written (" + (hint ? hint.text + ", " + Math.round(hint.contentWidth) + " px" : "none") + ")")
-            const footer = tests.findName("completionFooter", listView.parent)
-            tests.check(footer && footer.visible && footer.text.indexOf("Tab or Enter") >= 0, "its footer says how to choose")
-            // (The rest typed out: the suggestion isn't picked.)
-            TestInput.key(Qt.Key_A, Qt.ControlModifier)
-            TestInput.typeText("/skill:greet the team")
-            TestInput.key(Qt.Key_Escape, 0)
-            TestInput.key(Qt.Key_Return, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSkillSteps, () => tests.modelRequests().length > 0 && chat.session.status === "idle", 10000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const b = tests.modelRequests()[0] || {}
-            const sys = JSON.stringify((b.messages || []).filter(m => m.role === "system")), user = JSON.stringify((b.messages || []).filter(m => m.role === "user").slice(-1))
-            tests.check(sys.indexOf("greet") >= 0 && sys.indexOf("Greets the user warmly.") >= 0, "Harlo's instructions list the skill with its description")
-            tests.check(user.indexOf("<skill name=\\\"greet\\\"") >= 0 && user.indexOf("Say hello in three languages.") >= 0 && user.indexOf("the team") >= 0, "/skill:greet sends the skill with the prompt (" + user.slice(0, 200) + ")")
-            tests.sendByKeys("use the reviewer please") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSkillSteps, () => tests.chatText().split("Done:").length > 1 && chat.session.status === "idle", 15000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const first = b => JSON.stringify(((b.messages || []).find(m => m.role === "user") || {}).content || "")
-            const sub = tests.modelRequests().find(b => first(b).indexOf("SUBTASK review it") >= 0)
-            const tools = sub ? (sub.tools || []).map(t => t.function.name) : []
-            tests.check(sub !== undefined && JSON.stringify(sub.messages).indexOf("REVIEWER-PROFILE") >= 0, "a task names Claude's agent profile: its instructions are the subagent's")
-            tests.check(tools.includes("read") && tools.includes("grep") && !tools.includes("write") && !tools.includes("bash"), "with its tools only (" + tools.join() + ")")
-            // /plugin: Claude Code's plugin command (the stand-in's), run
-            // by harlo in the project, never sent to the model.
-            Workspace.setSetting("claude_path", win.argValue("--fake-claude="))
-            tests.pluginAsked = tests.modelRequests().length
-            tests.check(chat.session.commands.some(c => c.indexOf("plugin") === 0), "the / list offers plugin")
-            tests.sendByKeys("/plugin install hello@demo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSkillSteps, () => tests.findAllNames("backgroundHeadline", chat.transcript).some(h => h.text === "Plugin installed"), 10000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const log = TestInput.readFile(win.argValue("--cwd=") + "/../home/plugin-log.txt").trim().split("\n").map(l => JSON.parse(l))
-            tests.check(log.length === 1 && JSON.stringify(log[0].args) === '["install","hello@demo"]' && log[0].cwd.endsWith("/repo"), "harlo runs claude plugin install in the project (" + JSON.stringify(log) + ")")
-            tests.check(tests.modelRequests().length === tests.pluginAsked, "and the model isn't asked")
-            const cmd = tests.findAllNames("backgroundCommand", chat.transcript).find(c => c.visible && c.text.indexOf("claude plugin") >= 0)
-            tests.check(cmd && cmd.text === "$ claude plugin install hello@demo", "its notice shows the command (" + (cmd ? cmd.text : "none") + ")")
-            tests.shotWindow("clicks-harlo-plugin-installed") } }
-        // Harlo starts again (idle): the plugin's skill is in its / list.
-        ScriptAction { script: tests.waitUntil(harloSkillSteps, () => chat.session.commands.some(c => c.indexOf("skill:hello:wave") >= 0), 15000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            tests.check(chat.session.commands.some(c => c.indexOf("skill:hello:wave") >= 0), "Harlo loads the plugin's skill (" + chat.session.commands.filter(c => c.indexOf("skill") >= 0).join() + ")")
-            tests.sendByKeys("/plugin install missing@demo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSkillSteps, () => tests.findAllNames("backgroundHeadline", chat.transcript).some(h => h.text === "Plugin not installed"), 10000) }
-        PauseAnimation { duration: 100 }
-        ScriptAction { script: {
-            const head = tests.findAllNames("backgroundHeadline", chat.transcript).find(h => h.text === "Plugin not installed")
-            const note = head ? head.parent.parent : null
-            tests.check(head && head.color === Theme.error && note && tests.findContaining("exit code 1", note) !== null, "one that fails says so, in red, with its exit code")
-            tests.clickItem(head, "the failed install")
-            tests.pluginNote = note } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const open = tests.pluginNote ? tests.findName("backgroundOpen", tests.pluginNote) : null
-            tests.check(open && open.visible && tests.findContaining("not found in any marketplace", open) !== null, "and why, a click away")
-            tests.check(tests.modelRequests().length === tests.pluginAsked, "still nothing sent to the model")
-            tests.shotWindow("clicks-harlo-plugin-failed")
-            // A change to commit, and the message Harlo writes for it.
-            TestInput.writeFile(win.argValue("--cwd=") + "/README.md", "hello\nmore\n")
-            windowSettings.rightMode = "changes" } }
-        PauseAnimation { duration: 1500 }
-        ScriptAction { script: tests.clickItem(tests.findName("commitWrite"), "Write the message") }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSkillSteps, () => !git.generating, 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(changes.commitText.indexOf("[fake-coder]") >= 0 && !git.error, "Harlo writes the commit message (" + JSON.stringify(changes.commitText).slice(0, 120) + " " + git.message + ")")
-            tests.shotWindow("clicks-harlo-commit")
-            tests.summary(); Qt.quit() } }
-    }
-
-    // Another session, mentioned and searched: the project's past Harlo
-    // session (click-tests.sh writes it) picked from the composer's `@`
-    // list goes with the message as an excerpt; the model finds it with
-    // list_sessions' query and reads it with read_session.
-    SequentialAnimation {
-        id: harloSessionSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clicksharlosessions"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: { tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo"); Workspace.setApprovalMode(tests.harloKey, "yolo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSessionSteps, () => chat.session.modelName !== "" && JSON.parse(Workspace.sessionMentions(chat.session.cwd, chat.session.key, "")).length > 0, 15000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            const all = JSON.parse(Workspace.sessionMentions(chat.session.cwd, chat.session.key, ""))
-            tests.check(all.length === 1 && all[0].mention === "@session:a1b2c3d4", "the project's past session is offered, not this one (" + JSON.stringify(all).slice(0, 200) + ")")
-            tests.clickItem(tests.findName("composerInput"), "composer")
-            TestInput.typeText("@sandbox") } }
-        PauseAnimation { duration: 700 }
-        ScriptAction { script: {
-            const items = chat.composerItem.completionItems
-            tests.check(chat.composerItem.completionVisible && items.length > 0 && items[0].kind === "session" && items[0].name.indexOf("sandbox commands") >= 0,
-                      "typing @ and its words lists the session first (" + JSON.stringify(items.slice(0, 2)) + ")")
-            tests.shotWindow("clicks-harlo-session-mention")
-            TestInput.key(Qt.Key_Return, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            tests.check(tests.findName("composerInput").text.indexOf("@session:a1b2c3d4 ") === 0, "picking it writes its mention (" + JSON.stringify(tests.findName("composerInput").text) + ")")
-            TestInput.typeText("what did we pick?")
-            TestInput.key(Qt.Key_Return, 0) } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSessionSteps, () => tests.modelRequests().length > 0 && chat.session.status === "idle", 15000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const user = JSON.stringify((tests.modelRequests()[0].messages || []).filter(m => m.role === "user").slice(-1))
-            tests.check(user.indexOf("PICKED-BWRAP") >= 0 && user.indexOf("Session \\\"How should we sandbox commands?\\\"") >= 0 && user.indexOf("what did we pick?") >= 0,
-                      "its messages go with the message (" + user.slice(0, 300) + ")")
-            tests.check(tests.chatText().indexOf("what did we pick?") >= 0 && tests.chatText().indexOf("PICKED-BWRAP") < 0, "the transcript shows the message, not the excerpt")
-            tests.check(chat.session.title.indexOf("@session:") < 0 && chat.session.title.indexOf("what did we pick?") >= 0, "the title leaves the mention out (" + chat.session.title + ")")
-            tests.shotWindow("clicks-harlo-session-sent")
-            // (The search is slowed to 1.5 s: the window keeps drawing.)
-            longTick.reset(); longTick.start()
-            tests.sendByKeys("search past sessions for bubblewrap") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSessionSteps, () => tests.chatText().split("Done:").length > 1 && chat.session.status === "idle", 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const reqs = tests.modelRequests(), last = reqs[reqs.length - 1]
-            const result = JSON.stringify((last.messages || []).filter(m => m.role === "tool").slice(-1))
-            tests.check(result.indexOf("@session:a1b2c3d4") >= 0 && result.indexOf("**bubblewrap**") >= 0, "list_sessions with a query finds it, with the passage (" + result.slice(0, 300) + ")")
-            longTick.stop()
-            tests.check(longTick.worst < 400, "the window kept drawing while it searched (longest gap " + longTick.worst + " ms)")
-            tests.sendByKeys("read past session @session:a1b2c3d4") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(harloSessionSteps, () => tests.chatText().split("Done:").length > 2 && chat.session.status === "idle", 20000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const reqs = tests.modelRequests(), last = reqs[reqs.length - 1]
-            const result = JSON.stringify((last.messages || []).filter(m => m.role === "tool").slice(-1))
-            tests.check(result.indexOf("closed") >= 0 && result.indexOf("Assistant: PICKED-BWRAP") >= 0, "read_session reads the past one (" + result.slice(0, 300) + ")")
-            tests.shotWindow("clicks-harlo-session-read")
-            tests.summary(); Qt.quit() } }
-    }
-
-    // Plan limits from a Harlo session on the Codex sign-in (click-tests.sh:
-    // a stand-in ChatGPT backend whose replies carry the plan's usage): the
-    // meter shows them, under ChatGPT's logo.
-    SequentialAnimation {
-        id: codexLimitSteps
-        running: win.selftestDir !== "" && win.argValue("--scenario=") === "clickscodexlimits"
-        PauseAnimation { duration: 900 }
-        ScriptAction { script: {
-            if (win.argValue("--winwidth=")) win.width = Number(win.argValue("--winwidth="))
-            Workspace.addProject(win.argValue("--cwd=")) } }
-        PauseAnimation { duration: 500 }
-        ScriptAction { script: { tests.harloKey = Workspace.newSession(JSON.parse(Workspace.projectsJson())[0].id, "harlo") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(codexLimitSteps, () => chat.session.modelName !== "", 10000) }
-        PauseAnimation { duration: 50 }
-        ScriptAction { script: {
-            tests.check(chat.session.modelName === "Fake Codex" && tests.findName("planMeter") === null, "a Harlo session on the Codex sign-in; no meter yet (" + chat.session.modelName + ")")
-            tests.sendByKeys("hello") } }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: tests.waitUntil(codexLimitSteps, () => tests.chatText().indexOf("hi from codex") >= 0 && tests.findName("planMeter") !== null, 15000) }
-        PauseAnimation { duration: 300 }
-        ScriptAction { script: {
-            const m = tests.findName("planMeter"), q = Workspace.quotaJson
-            tests.check(tests.chatText().indexOf("hi from codex") >= 0, "it answers")
-            tests.check(m !== null && tests.findText("41%", m) !== null && tests.findName("planMeterLogo", m).provider === "openai-codex", "the meter shows the plan's fullest window from the reply (41%) under ChatGPT's logo")
-            tests.check(q.indexOf("tester@example.com") >= 0 && q.indexOf("13") >= 0, "both windows, for the signed-in account")
-            tests.shotWindow("clicks-codex-meter")
-            tests.clickItem(m, "plan meter") } }
-        PauseAnimation { duration: 400 }
-        ScriptAction { script: {
-            const o = tests.findName("meterPick-openai-codex")
-            tests.check(o !== null && o.hint === "41%", "its menu lists ChatGPT (41%)")
             tests.summary(); Qt.quit() } }
     }
 }

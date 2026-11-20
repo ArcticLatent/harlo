@@ -88,10 +88,6 @@ pub struct SidebarRow {
     pub color: String,
     /// Session on a Settled shelf: why ("merged", "closed", "quiet").
     pub settled: String,
-    /// Session another one started (orchestration), shown under it: that
-    /// session's title, and how deep ([`nest_helpers`]).
-    pub helper_of: String,
-    pub nest: u32,
     /// A session's model (`provider/model`) and its name: as it runs, else
     /// as it last ran in harlo ("" not known).
     pub model: String,
@@ -471,85 +467,11 @@ pub fn tilde(p: &Path) -> String {
     p.display().to_string()
 }
 
-/// Puts each session another one started right under its parent.
-///
-/// `parent_of` maps a key to its parent's key. Only when they're in the same
-/// part of the list (one project's sessions, or its Settled shelf), marked with
-/// the parent's title and indented a step deeper. The rest keep their order.
-pub fn nest_helpers(rows: &mut Vec<SidebarRow>, parent_of: &HashMap<String, String>) {
-    // Each row's part of the list: what non-session rows came before it.
-    let mut part = 0usize;
-    let parts: Vec<usize> = rows
-        .iter()
-        .map(|r| {
-            if r.kind != SidebarKind::Session {
-                part += 1;
-            }
-            part
-        })
-        .collect();
-    let at: HashMap<&str, usize> = rows.iter().enumerate().filter(|(_, r)| r.kind == SidebarKind::Session).map(|(i, r)| (r.key.as_str(), i)).collect();
-    // Who is shown under whom (in their order in the list).
-    let mut under: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut nested = vec![false; rows.len()];
-    for (i, r) in rows.iter().enumerate().filter(|(_, r)| r.kind == SidebarKind::Session) {
-        if let Some(&p) = parent_of.get(&r.key).and_then(|p| at.get(p.as_str()))
-            && p != i
-            && parts[p] == parts[i]
-        {
-            under.entry(p).or_default().push(i);
-            nested[i] = true;
-        }
-    }
-    // Whose helper each is (named even when it isn't under it: on the
-    // Settled shelf while its parent isn't, say).
-    let title_at: HashMap<&str, &str> = rows.iter().filter(|r| r.kind == SidebarKind::Session).map(|r| (r.key.as_str(), r.title.as_str())).collect();
-    let named: Vec<String> = rows
-        .iter()
-        .map(|r| parent_of.get(&r.key).filter(|p| **p != r.key).and_then(|p| title_at.get(p.as_str())).map(|t| (*t).to_owned()).unwrap_or_default())
-        .collect();
-    if under.is_empty() {
-        for (row, name) in rows.iter_mut().zip(named) {
-            row.helper_of = name;
-        }
-        return;
-    }
-    fn place(i: usize, depth: u32, under: &HashMap<usize, Vec<usize>>, done: &mut [bool], order: &mut Vec<(usize, u32)>) {
-        if std::mem::replace(&mut done[i], true) {
-            return;
-        }
-        order.push((i, depth));
-        for &c in under.get(&i).into_iter().flatten() {
-            place(c, depth + 1, under, done, order);
-        }
-    }
-    let mut done = vec![false; rows.len()];
-    let mut order = Vec::with_capacity(rows.len());
-    for (i, _) in nested.iter().enumerate().filter(|(_, n)| !**n) {
-        place(i, 0, &under, &mut done, &mut order);
-    }
-    // (A loop of parents: left where they were.)
-    for i in 0..rows.len() {
-        if !done[i] {
-            place(i, 0, &under, &mut done, &mut order);
-        }
-    }
-    let mut old: Vec<Option<SidebarRow>> = std::mem::take(rows).into_iter().map(Some).collect();
-    for (i, depth) in order {
-        // (Each row is placed once.)
-        let Some(mut row) = old[i].take() else { continue };
-        row.nest = depth;
-        row.helper_of.clone_from(&named[i]);
-        rows.push(row);
-    }
-}
-
 /// The sidebar's sessions as a phone lists them, each with its project's name.
 ///
-/// `parents` names the session each nested helper is under, and `requests`
-/// gives what a session (by key) waits on you for: a phone answers from its
-/// list.
-pub fn phone_list(rows: Vec<SidebarRow>, parents: &HashMap<String, String>, requests: impl Fn(&str) -> Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+/// `requests` gives what a session (by key) waits on you for: a phone
+/// answers from its list.
+pub fn phone_list(rows: Vec<SidebarRow>, requests: impl Fn(&str) -> Vec<serde_json::Value>) -> Vec<serde_json::Value> {
     let mut group = String::new();
     let mut list = Vec::new();
     for r in rows {
@@ -563,8 +485,6 @@ pub fn phone_list(rows: Vec<SidebarRow>, parents: &HashMap<String, String>, requ
                 // Its machine ("" this one), and why it's settled ("" not).
                 "host": crate::remote::host_of(&r.cwd).unwrap_or_default(), "settled": match crate::shelf::why_text(&r.settled) { "" => r.settled.as_str(), t => t },
                 "requests": requests(&r.key),
-                // A helper: the session that started it (shown under it).
-                "parent": if r.nest > 0 { parents.get(&r.key).cloned() } else { None }, "helperOf": r.helper_of, "nest": r.nest,
                 // Its model (as it runs, else as it last ran): its icon's maker.
                 "model": r.model, "modelName": r.model_name,
             })),
@@ -584,23 +504,9 @@ mod tests {
         SidebarRow { kind, key: key.into(), project_id: 1, title: format!("T {key}"), ..SidebarRow::default() }
     }
 
-    #[test]
-    fn helpers_show_under_their_parent() {
-        use SidebarKind::*;
-        let mut rows = vec![row(Project, "p"), row(Session, "child"), row(Session, "other"), row(Session, "lead"), row(Session, "grandchild"), row(Shelf, "s"), row(Session, "settled-child")];
-        let parents: HashMap<String, String> = [("child", "lead"), ("grandchild", "child"), ("settled-child", "lead"), ("orphan", "gone")].map(|(a, b)| (a.to_owned(), b.to_owned())).into();
-        nest_helpers(&mut rows, &parents);
-        let shown: Vec<(&str, u32, &str)> = rows.iter().map(|r| (r.key.as_str(), r.nest, r.helper_of.as_str())).collect();
-        assert_eq!(shown, [
-            ("p", 0, ""), ("other", 0, ""), ("lead", 0, ""), ("child", 1, "T lead"), ("grandchild", 2, "T child"),
-            // On the shelf, its parent isn't: it stays, and says whose it is.
-            ("s", 0, ""), ("settled-child", 0, "T lead"),
-        ]);
-    }
-
     fn session(path: &str, cwd: &str, title: &str, age_secs: u64) -> SessionInfo {
         SessionInfo {
-            harness: HarnessKind::Harlo,
+            harness: HarnessKind::Pi,
             path: PathBuf::from(path),
             id: path.into(),
             cwd: PathBuf::from(cwd),
@@ -864,13 +770,12 @@ mod tests {
         use SidebarKind::*;
         let mut lead = row(Session, "lead");
         lead.settled = "merged".into();
-        let mut helper = row(Session, "helper");
-        (helper.nest, helper.helper_of, helper.cwd) = (1, "T lead".into(), PathBuf::from("ssh://nas/src"));
-        let rows = vec![row(Project, "p"), lead, helper, row(Shelf, "s"), row(OtherGroup, "o"), row(Session, "loose")];
-        let parents: HashMap<String, String> = [("helper".to_owned(), "lead".to_owned())].into();
-        let list = phone_list(rows, &parents, |key| if key == "lead" { vec![serde_json::json!({ "id": "q" })] } else { Vec::new() });
-        let shown: Vec<_> = list.iter().map(|s| (s["key"].as_str(), s["project"].as_str(), s["parent"].as_str(), s["host"].as_str(), s["requests"].as_array().map(Vec::len))).collect();
-        assert_eq!(shown, [(Some("lead"), Some("T p"), None, Some(""), Some(1)), (Some("helper"), Some("T p"), Some("lead"), Some("nas"), Some(0)), (Some("loose"), Some(""), None, Some(""), Some(0))]);
+        let mut there = row(Session, "there");
+        there.cwd = PathBuf::from("ssh://nas/src");
+        let rows = vec![row(Project, "p"), lead, there, row(Shelf, "s"), row(OtherGroup, "o"), row(Session, "loose")];
+        let list = phone_list(rows, |key| if key == "lead" { vec![serde_json::json!({ "id": "q" })] } else { Vec::new() });
+        let shown: Vec<_> = list.iter().map(|s| (s["key"].as_str(), s["project"].as_str(), s["host"].as_str(), s["requests"].as_array().map(Vec::len))).collect();
+        assert_eq!(shown, [(Some("lead"), Some("T p"), Some(""), Some(1)), (Some("there"), Some("T p"), Some("nas"), Some(0)), (Some("loose"), Some(""), Some(""), Some(0))]);
         assert_ne!(list[0]["settled"], "", "a settled session says why");
     }
 }

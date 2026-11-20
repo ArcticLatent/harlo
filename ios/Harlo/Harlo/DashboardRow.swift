@@ -2,13 +2,11 @@ import HarloKit
 import SwiftUI
 
 /// A session's card on the dashboard, with its swipe and long-press
-/// actions; a helper's (`depth` > 0) under the session that started it,
-/// set in.
+/// actions.
 struct DashboardRow: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let session: SessionSummary
-    var depth = 0
     /// Its project shows (the recent ones, or grouped by day).
     var showProject: Bool
     var rename: (SessionSummary) -> Void
@@ -19,10 +17,9 @@ struct DashboardRow: View {
         Button {
             model.open(s)
         } label: {
-            SessionCard(session: s, unread: unread, showProject: showProject, nested: depth > 0)
+            SessionCard(session: s, unread: unread, showProject: showProject)
         }
         .buttonStyle(.plain)
-        .padding(.leading, CGFloat(min(depth, 3)) * 20)
         .plainRow(top: 5, bottom: 5)
         .swipeActions(edge: .trailing) {
             Button {

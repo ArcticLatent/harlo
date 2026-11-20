@@ -44,8 +44,8 @@ Rectangle {
         spacing: 6
 
         // Plan use at a glance: the provider you used last (or the one
-        // pinned from its menu), its fullest limit window, as a ring. Of the
-        // machine shown: another's are what its Claude sessions said.
+        // pinned from its menu), its fullest limit window, as a ring. This
+        // computer's: another machine's sessions sign in there, out of sight.
         Item {
             id: planMeter
             objectName: "planMeter"
@@ -53,7 +53,7 @@ Rectangle {
             readonly property var accounts: {
                 try {
                     if (host === "") return JSON.parse(Workspace.quotaJson || "{}").accounts || []
-                    return (JSON.parse(Workspace.hostLimitsJson || "{}")[host] || {}).accounts || []
+                    return []
                 } catch (e) { return [] }
             }
             // Each provider with limits, at its fullest window (of any of
@@ -74,7 +74,7 @@ Rectangle {
             readonly property string lastOther: Workspace.meterPin === "" && Workspace.meterLast !== "" && !providers.some(p => p.provider === Workspace.meterLast) ? Workspace.meterLast : ""
             // (This computer's servers: another machine's aren't known here.)
             readonly property bool lastLocal: lastOther !== "" && host === "" && Accounts.revision >= 0
-                && ["harlo", ""].some(a => JSON.parse(Accounts.servers(a)).some(s => s.name === lastOther && s.place !== "online"))
+                && ["pi", ""].some(a => JSON.parse(Accounts.servers(a)).some(s => s.name === lastOther && s.place !== "online"))
                 || ["ollama", "llama.cpp", "lm-studio"].includes(lastOther)
             // Pinned, else the last used, else the fullest.
             readonly property var shown: {
@@ -91,7 +91,7 @@ Rectangle {
             visible: (shown !== null && shown !== undefined) || lastOther !== "" || none
             width: 38
             height: meterCol.implicitHeight + 10
-            Rectangle { anchors.fill: parent; radius: 10; color: meterHover.hovered || meterMenu.visible ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+            Rectangle { anchors.fill: parent; radius: 4; color: meterHover.hovered || meterMenu.visible ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
             Column {
                 id: meterCol
                 anchors.centerIn: parent
@@ -159,7 +159,7 @@ Rectangle {
             TapHandler { onTapped: meterMenu.popup(planMeter, planMeter.width + 8, 0) }
             ToolTip.visible: meterHover.hovered && !meterMenu.visible
             readonly property string where: host !== "" ? " on " + host : ""
-            ToolTip.text: planMeter.none ? "Nothing used on " + planMeter.host + " yet: its limits show once a session there works (Claude's say how much is used)"
+            ToolTip.text: planMeter.none ? "No plan limits on " + planMeter.host + ": harlo reads only this computer's"
                 : planMeter.lastOther !== "" ? planMeter.lastOther + " (used last" + planMeter.where + "): " + (planMeter.lastLocal ? "runs on your own server, no usage limits" : "no usage limits Harlo can read") + "\nClick to switch"
                 : planMeter.shown ? planMeter.shown.provider + planMeter.where + ": " + planMeter.percent(planMeter.shown) + " of the " + planMeter.shown.label + " limit" + (planMeter.shown.reached ? " (limit reached)" : "")
                 + (Workspace.meterPin === planMeter.shown.provider ? " (pinned)" : Workspace.meterLast === planMeter.shown.provider ? " (used last)" : "") + "\nClick to switch" : ""
@@ -201,7 +201,7 @@ Rectangle {
             readonly property var list: {
                 const rows = []
                 if (Accounts.revision < 0) return rows
-                for (const a of ["harlo", ""])
+                for (const a of ["pi", ""])
                     for (const sv of JSON.parse(Accounts.servers(a)))
                         if (sv.managed && !rows.some(r => r.baseUrl === sv.baseUrl)) rows.push(sv)
                 return rows
@@ -237,7 +237,7 @@ Rectangle {
                 y: serversButton.height - height
                 width: 300
                 padding: 6
-                background: GlassSurface { radius: 10 }
+                background: GlassSurface { radius: 4 }
                 contentItem: Column {
                     spacing: 2
                     Label {
@@ -259,7 +259,7 @@ Rectangle {
                             objectName: "railServer-" + modelData.name
                             width: serversPanel.availableWidth
                             height: 44
-                            Rectangle { anchors.fill: parent; radius: 6; color: rowHover.hovered ? Theme.rowHover : "transparent" }
+                            Rectangle { anchors.fill: parent; radius: 2; color: rowHover.hovered ? Theme.rowHover : "transparent" }
                             HoverHandler { id: rowHover }
                             Rectangle {
                                 id: dot
@@ -404,7 +404,7 @@ Rectangle {
                 color: rb.active ? Theme.accent : rb.hovered ? Theme.text : Theme.textMuted
             }
         }
-        background: Rectangle { radius: 10; color: rb.active || rb.down ? Theme.rowSelected : rb.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+        background: Rectangle { radius: 4; color: rb.active || rb.down ? Theme.rowSelected : rb.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
         ToolTip.visible: hovered
         ToolTip.text: tip
         ToolTip.delay: 400

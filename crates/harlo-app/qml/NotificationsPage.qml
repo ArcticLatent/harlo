@@ -23,10 +23,9 @@ ColumnLayout {
     }
     readonly property var eventRows: [
         { name: "completion", title: "Agent completion", detail: "A run finishes.", icon: "checkbox-circle" },
-        { name: "subagent", title: "Helper finished", detail: "A helper finishes.", icon: "node-tree" },
-        { name: "error", title: "Agent errors", detail: "A reply fails, the agent stops unexpectedly, or a helper fails.", icon: "alert" },
+        { name: "error", title: "Agent errors", detail: "A reply fails, or the agent stops unexpectedly.", icon: "alert" },
         { name: "question", title: "Agent questions", detail: "The agent asks you something or wants a tool approved.", icon: "question" },
-        { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's, ChatGPT's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", icon: "speed", fixed: true },
+        { name: "limits", title: "Plan limits", detail: "A plan limit (Claude's) is used up, and when one you'd nearly or fully used resets, with a sound of its own.", icon: "speed", fixed: true },
     ]
     property string testNote: ""
 
@@ -214,7 +213,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
                 implicitHeight: cardCol.implicitHeight + 24
-                radius: 10
+                radius: 4
                 color: Theme.elevated
                 border.color: Theme.border
                 ColumnLayout {

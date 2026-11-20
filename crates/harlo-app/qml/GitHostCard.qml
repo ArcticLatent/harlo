@@ -29,7 +29,7 @@ Rectangle {
         : "https://" + (st.host || "codeberg.org") + "/user/settings/applications"
 
     implicitHeight: col.implicitHeight + 28
-    radius: 12
+    radius: 4
     color: Theme.raised
     // (The default says so in words; an accent border read as focus.)
     border.color: Theme.hairline
@@ -54,7 +54,7 @@ Rectangle {
             Rectangle {
                 implicitWidth: 34
                 implicitHeight: 34
-                radius: 9
+                radius: 3
                 color: Theme.controlFill
                 Icon { anchors.centerIn: parent; name: "git-repository"; color: card.chosen ? Theme.accent : Theme.textMuted; implicitWidth: 17; implicitHeight: 17 }
             }

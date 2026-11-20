@@ -273,7 +273,7 @@ pub fn forget(host: &str, remote: &str) {
     if let Some(dir) = dir() {
         let slot = slot(&dir, host, remote);
         if let Some(copy) = Path::new(remote).file_name().map(|n| slot.join(n)) {
-            crate::claude::forget_cached(&copy);
+            crate::cache::forget(&copy);
         }
         let _ = std::fs::remove_dir_all(slot);
     }
@@ -290,7 +290,7 @@ fn prune_once(dir: &Path) {
         let used = std::fs::read_to_string(slot.join("source.json")).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|v| v["used"].as_u64());
         if used.is_none_or(|u| now.saturating_sub(u) > KEPT.as_secs()) {
             if let Some(copy) = std::fs::read_dir(&slot).into_iter().flatten().flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n != "source.json")) {
-                crate::claude::forget_cached(&copy);
+                crate::cache::forget(&copy);
             }
             let _ = std::fs::remove_dir_all(&slot);
         }

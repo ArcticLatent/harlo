@@ -47,7 +47,7 @@ Button {
             width: Math.max(0, Math.min(implicitWidth, lb.maxLabel, lb.availableWidth - leadHolder.width - 6))
         }
     }
-    background: ControlSurface { control: lb; radius: 9 }
+    background: ControlSurface { control: lb; radius: 3 }
     ToolTip.visible: hovered && tip !== ""
     ToolTip.delay: 400
     ToolTip.text: tip

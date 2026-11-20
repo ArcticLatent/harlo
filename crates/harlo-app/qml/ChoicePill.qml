@@ -18,5 +18,5 @@ Button {
         ProviderMark { anchors.verticalCenter: parent.verticalCenter; visible: pill.provider !== ""; provider: pill.provider; tip: ""; implicitWidth: 12; implicitHeight: 12; color: pill.selected ? Theme.foreground : Theme.muted }
         Label { anchors.verticalCenter: parent.verticalCenter; text: pill.text; color: pill.selected ? Theme.foreground : Theme.muted; font: pill.font }
     }
-    background: ControlSurface { control: pill; variant: pill.selected ? "selected" : "outline"; radius: 7 }
+    background: ControlSurface { control: pill; variant: pill.selected ? "selected" : "outline"; radius: 3 }
 }

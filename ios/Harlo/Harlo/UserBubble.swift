@@ -15,8 +15,7 @@ struct UserBubble: View {
             Spacer(minLength: 36)
             VStack(alignment: .trailing, spacing: 5) {
                 // What came with it: photos (as pictures, from a harlo that
-                // sends them; else by name) and files, and tags ("1 image",
-                // "Plan").
+                // sends them; else by name) and files, and tags ("1 image").
                 let pictures = model.showsPictures ? row.images : []
                 if !pictures.isEmpty {
                     PictureStrip(paths: pictures)

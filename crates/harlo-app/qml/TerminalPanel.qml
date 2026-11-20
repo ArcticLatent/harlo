@@ -147,7 +147,7 @@ Rectangle {
                             anchors.fill: parent
                             anchors.topMargin: 6
                             anchors.bottomMargin: 6
-                            radius: 8
+                            radius: 3
                             color: tab.active ? Theme.rowSelected : tabHover.hovered ? Theme.rowHover : "transparent"
                             Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                         }

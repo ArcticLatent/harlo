@@ -6,9 +6,9 @@
 #![expect(clippy::unnecessary_box_returns, reason = "cxx-qt's generated constructors return a Box")]
 
 mod accounts;
+mod pi_extensions;
 mod audio;
 mod chat_session;
-mod cloud_keys;
 mod code_view;
 mod image_view;
 mod ci;
@@ -17,6 +17,7 @@ mod diagrams;
 mod visuals;
 mod dictation;
 mod terminal_session;
+mod extension_lines;
 mod test_input;
 mod text_file;
 mod themes;
@@ -45,7 +46,6 @@ mod setup;
 mod keep_above;
 mod workspace;
 mod orchestration;
-mod plans;
 mod graphics;
 mod jobs;
 mod log_format;
@@ -222,8 +222,7 @@ fn connect_agents() {
         }
     });
     harlo_harness::set_remote_start(harlo_core::model_servers::forward_to);
-    // (Harlo's agent on other machines: the copy harlo puts there.)
-    harlo_harness::set_remote_program(harlo_core::agent_host::remote_program);
+    harlo_harness::set_remote_helper(harlo_core::agent_host::remote_helper);
 }
 
 /// Starts the work done once in the background: forwards, MCP servers, and old files swept.
@@ -236,7 +235,7 @@ fn start_background_work() {
     std::thread::spawn(workspace::sweep_branch_previews);
     // (Long sessions' page files and live tails earlier harlos left.)
     std::thread::spawn(|| {
-        if let Some(dir) = harlo_harness::claude::cache_dir() {
+        if let Some(dir) = harlo_harness::cache::dir() {
             harlo_harness::store::sweep_own_files(&dir.join("pages"));
             harlo_harness::store::sweep_own_files(&dir.join("live"));
         }

@@ -1,0 +1,8 @@
+{
+  "name": "harlo-pi-claude-bridge",
+  "private": true,
+  "description": "harlo's built-in Claude subscription extension for pi: pi-claude-bridge, pinned.",
+  "dependencies": {
+    "pi-claude-bridge": "0.13.0"
+  }
+}

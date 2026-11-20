@@ -11,7 +11,7 @@ ColumnLayout {
     spacing: 0
     property int revision: 0
     readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-        .filter(p => p.id === "harlo" && p.state !== "missing")
+        .filter(p => p.id === "pi" && p.state !== "missing")
     // Other machines that are connected, and the servers their agents have.
     readonly property var hostNames: (Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []).filter(h => h.state === "connected").map(h => h.name)
     readonly property var onHosts: Accounts.hostServers !== "" ? JSON.parse(Accounts.hostServers) : ({})
@@ -207,8 +207,8 @@ ColumnLayout {
     Timer { interval: 3000; repeat: true; running: srv.visible; onTriggered: srv.check() }
     SectionHeader {
         title: "Your servers"
-        subtitle: "Models you run yourself or your company serves, for Harlo."
-        more: "They show in the model lists (under Local when they run on this computer or your network). Claude Code only uses Anthropic's models. Harlo starts and stops the servers it set up; they stop when Harlo quits. Tick an agent to add a server to its config, untick it to take it out."
+        subtitle: "Models you run yourself or your company serves, for pi."
+        more: "They show in the model lists (under Local when they run on this computer or your network). Harlo starts and stops the servers it set up; they stop when Harlo quits. Tick an agent to add a server to its config, untick it to take it out."
         AddButton {
             objectName: "setupModelServer"
             visible: srv.agents.length > 0
@@ -238,7 +238,7 @@ ColumnLayout {
         Label { Layout.fillWidth: true; text: parent.job ? (ServerSetup.host !== "" ? ServerSetup.host + ": " : "") + parent.job.step : ""; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
         FlatButton { text: "Show"; font.pixelSize: Theme.px(12); onClicked: setupServer.open() }
     }
-    Group { visible: srv.agents.length === 0; EmptyNote { text: "Local models are for Harlo, which isn't installed." } }
+    Group { visible: srv.agents.length === 0; EmptyNote { text: "Local models are for pi, which isn't installed." } }
     Group {
         visible: srv.list.length > 0
         Repeater {
@@ -310,36 +310,36 @@ ColumnLayout {
                         font.pixelSize: Theme.px(12)
                         wrapMode: Text.Wrap
                     }
-                    // One on this computer or its network (Harlo's):
+                    // One on this computer or its network (pi's):
                     // free when it runs on your own hardware (a
                     // proxy here may pass requests on to a paid
                     // service).
                     AppCheckBox {
                         objectName: "serverFree-" + serverItem.modelData.name
-                        visible: serverItem.local && serverItem.modelData.agentIds.includes("harlo")
+                        visible: serverItem.local && serverItem.modelData.agentIds.includes("pi")
                         Layout.topMargin: 4
                         text: "Free: it runs on hardware you own"
                         checked: !!serverItem.modelData.free
                         onToggled: {
-                            const err = Accounts.setServerFree("harlo", serverItem.modelData.name, checked)
+                            const err = Accounts.setServerFree("pi", serverItem.modelData.name, checked)
                             if (err !== "") Workspace.showNotice(err, true)
                             Accounts.loadServers()
                         }
                     }
-                    // A server's price (Harlo's), when it isn't
+                    // A server's price (pi's), when it isn't
                     // free: what its list says, or one you give;
                     // without one, what its sessions cost isn't known.
                     RowLayout {
                         id: priceRow
                         objectName: "serverPrice-" + serverItem.modelData.name
-                        visible: (!serverItem.modelData.free || (serverItem.modelData.prices || []).some(p => p)) && serverItem.modelData.agentIds.includes("harlo")
+                        visible: (!serverItem.modelData.free || (serverItem.modelData.prices || []).some(p => p)) && serverItem.modelData.agentIds.includes("pi")
                         Layout.topMargin: 6
                         spacing: 6
                         readonly property var prices: serverItem.modelData.prices || []
                         // (The same for every model: shown to change.)
                         readonly property var shared: prices.length > 0 && prices.every(p => JSON.stringify(p) === JSON.stringify(prices[0])) ? prices[0] : null
                         function save() {
-                            const err = Accounts.setServerPrice("harlo", serverItem.modelData.name, srv.amount(priceIn.text), srv.amount(priceOut.text))
+                            const err = Accounts.setServerPrice("pi", serverItem.modelData.name, srv.amount(priceIn.text), srv.amount(priceOut.text))
                             if (err !== "") Workspace.showNotice(err, true)
                             Accounts.loadServers()
                         }
@@ -467,7 +467,7 @@ ColumnLayout {
                                 }
                                 Label {
                                     visible: hostRow.there.state === "ready" && hostRow.agentIds.length === 0
-                                    text: "no Harlo there"
+                                    text: "no pi there"
                                     color: Theme.textFaint
                                     font.pixelSize: Theme.px(12)
                                     height: implicitHeight + 6
@@ -650,12 +650,12 @@ ColumnLayout {
             readonly property string host: modelData
             readonly property var e: srv.hostEngines[host] || ({ state: "loading", list: [], busy: {} })
             readonly property var there: srv.onHosts[host] || ({ state: "loading", agents: {} })
-            readonly property var agentIds: ["harlo"].filter(id => (there.agents || {})[id] !== undefined)
+            readonly property var agentIds: ["pi"].filter(id => (there.agents || {})[id] !== undefined)
             // Rows as this computer's: models by id, their contexts.
             readonly property var rows: (e.list || []).map(r => ({
                 name: r.name, baseUrl: r.baseUrl, engine: r.engine, running: r.running, log: r.log, managed: true, here: r.here || "",
                 models: (r.models || []).map(m => m.id), contexts: (r.models || []).map(m => m.context || 0), rawModels: r.models || [],
-                agentIds: ["harlo"].filter(id => ((there.agents || {})[id] || []).some(sv => sv.baseUrl === r.baseUrl)),
+                agentIds: ["pi"].filter(id => ((there.agents || {})[id] || []).some(sv => sv.baseUrl === r.baseUrl)),
             }))
             Layout.fillWidth: true
             spacing: 0
@@ -764,7 +764,7 @@ ColumnLayout {
                                 spacing: 16
                                 Label {
                                     visible: hostBlock.there.state === "ready" && hostBlock.agentIds.length === 0
-                                    text: "No Harlo on " + hostBlock.host
+                                    text: "No pi on " + hostBlock.host
                                     color: Theme.textFaint
                                     font.pixelSize: Theme.px(12)
                                     height: implicitHeight + 6

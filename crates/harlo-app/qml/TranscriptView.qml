@@ -66,9 +66,17 @@ Item {
         return ""
     }
     /// A subagent under a task tool row: view (or steer) it.
-    signal subagentRequested(var agent, bool steer)
-    /// The subagents of the session, shown under the tool call that started them.
-    readonly property var subagents: session.subagentsJson !== "" ? JSON.parse(session.subagentsJson) : []
+    // A pi extension's drawing of a tool call (`t:` + its id) or of a
+    // custom message (`m:` + its time), by its view's last frame.
+    readonly property var extDrawn: {
+        const m = {}
+        const all = session.extViewsJson !== "" ? JSON.parse(session.extViewsJson) : []
+        for (const v of all) {
+            if (v.kind === "tool") m["t:" + v.toolCallId] = v
+            else if (v.kind === "message") m["m:" + v.timestamp] = v
+        }
+        return m
+    }
 
     function scrollToEnd() { view.follow = true; view.scrollToEnd() }
     // (Tests: the list itself.)
@@ -467,16 +475,15 @@ Item {
     }
     // A tool's name, the same for every agent: "bash" and "Bash" both
     // "Bash", "web_search" "Web search" (an MCP tool's as Theme says).
-    // The shared plan's tools and the wiki's, by what they do.
-    readonly property var planTools: ({ plan_set: "Plan", plan_read: "Read the plan", plan_start: "Start a step", plan_done: "Finish a step",
-                                        wiki_check: "Check the wiki" })
+    // The wiki's tool, by what it does.
+    readonly property var harloTools: ({ wiki_check: "Check the wiki" })
     // Harlo's own tools whose names don't say it in words.
     readonly property var agentTools: ({ ast_grep: qsTr("Structural search"), ast_edit: qsTr("Structural edit"), debug: qsTr("Debugger"),
                                          wait: qsTr("Wait for subagents"), run_code: qsTr("Run code") })
     function toolName(t) {
         if (agentTools[t]) return agentTools[t]
-        const p = /^(?:mcp__harlo__|harlo_)?((?:plan|wiki)_[a-z_]+)$/.exec(t || "")
-        if (p && planTools[p[1]]) return planTools[p[1]]
+        const p = /^(?:mcp__harlo__|harlo_)?(wiki_[a-z_]+)$/.exec(t || "")
+        if (p && harloTools[p[1]]) return harloTools[p[1]]
         const l = Theme.toolLabel(t)
         return /^[a-z][a-z_]*$/.test(l) ? (l.charAt(0).toUpperCase() + l.slice(1)).replace(/_/g, " ") : l
     }
@@ -544,7 +551,7 @@ Item {
             else e.accepted = root.typedOn(e)
         }
         Rectangle {
-            x: -6; width: parent.width + 12; height: parent.height; radius: 6
+            x: -6; width: parent.width + 12; height: parent.height; radius: 2
             color: runHover.hovered ? Theme.hover : "transparent"
             border.width: root.keyFocus(runHead) ? 1 : 0
             border.color: Theme.accent
@@ -589,11 +596,11 @@ Item {
                 if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) { view.toggle(thought.rowKey); e.accepted = true }
                 else e.accepted = root.stepKey(thoughtBox, e.key) || root.typedOn(e)
             }
-            Rectangle { x: thoughtWord.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6; color: thoughtHover.hovered ? Theme.hover : "transparent" }
+            Rectangle { x: thoughtWord.x - 6; width: parent.width - x + 6; height: parent.height; radius: 2; color: thoughtHover.hovered ? Theme.hover : "transparent" }
             // (Focused: ringed from its word, the run's line left clear.)
             Rectangle {
                 visible: root.keyFocus(thoughtBox)
-                x: thoughtWord.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
+                x: thoughtWord.x - 6; width: parent.width - x + 6; height: parent.height; radius: 2
                 color: "transparent"; border.width: 1; border.color: Theme.accent
             }
             RowLayout {
@@ -852,7 +859,7 @@ Item {
                 y: modelData.y
                 width: modelData.w + 2
                 height: modelData.h
-                radius: 3
+                radius: 2
                 color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, Theme.isLight ? 0.35 : 0.3)
             }
         }
@@ -1100,7 +1107,7 @@ Item {
                 visible: root.session.status === "busy" && !shownElsewhere
                 x: view.columnX
                 anchors.verticalCenter: parent.verticalCenter
-                text: !waiting ? "Working…" : root.session.requestIsApproval ? "Waiting for your approval" : "Waiting for your answer"
+                text: !waiting ? (root.session.extWorking !== "" ? root.session.extWorking : "Working…") : root.session.requestIsApproval ? "Waiting for your approval" : "Waiting for your answer"
                 color: waiting ? Theme.warning : Theme.primary
                 // (Pulsing only while it shows, in a window that's shown;
                 // stopped, it's back at full opacity.)
@@ -1142,7 +1149,7 @@ Item {
                     // Edit & resend, on hover.
                     Row {
                         z: 2
-                        visible: userHover.hovered && userRow.note === "" && ["claude", "harlo"].includes(root.session.harness)
+                        visible: userHover.hovered && userRow.note === "" && root.session.harness === "pi"
                         anchors.right: bubble.right
                         anchors.rightMargin: 6
                         anchors.top: bubble.top
@@ -1183,7 +1190,7 @@ Item {
                         padding: 2
                         accent: Theme.textFaint
                         font.pixelSize: Theme.px(11.5)
-                        background: Rectangle { color: Theme.background; radius: 6 }
+                        background: Rectangle { color: Theme.background; radius: 2 }
                         ToolTip.visible: hovered
                         ToolTip.delay: 400
                         ToolTip.text: "Put the folder's files back as they were before this turn (this turn and the ones after it)"
@@ -1537,7 +1544,7 @@ Item {
                                         color: "transparent"
                                         border.width: 2
                                         border.color: Theme.primary
-                                        radius: 4
+                                        radius: 2
                                     }
                                     ToolTip.visible: diagramHover.hovered
                                     ToolTip.text: "Open full size"
@@ -1757,7 +1764,7 @@ Item {
                         y: toolRow.gap + toolRow.head
                         width: view.columnWidth + 8
                         height: (toolCard.item ? toolCard.item.implicitHeight : 0) + (toolRow.asking ? 20 : 10)
-                        radius: 8
+                        radius: 3
                         // (Solid when it asks: a row under it doesn't show through.)
                         color: toolRow.asking ? Qt.tint(Theme.raised, Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.06)) : "transparent"
                         border.color: toolRow.asking ? Theme.warning : "transparent"
@@ -1806,13 +1813,10 @@ Item {
                     required property string title
                     required property string subtitle
                     required property string label
-                    required property string command
-                    required property string result
-                    required property string rowState
-                    // A background command that ended: how it went (label,
-                    // subtitle), the command, its last lines (result).
-                    readonly property bool background: title === "command"
-                    // harlo's message to the agent (a helper's report, …): it
+                    required property real rowTime
+                    // Drawn by a pi extension (a custom message's renderer).
+                    readonly property var ext: rowTime > 0 ? (root.extDrawn["m:" + rowTime] || null) : null
+                    // harlo's message to the agent (a workflow's note, …): it
                     // opens a turn, as harlo's; `subtitle` is the session
                     // it's about.
                     readonly property bool harlo: title === "harlo"
@@ -1823,136 +1827,24 @@ Item {
                     readonly property real gap: root.gapAbove(harlo ? "harlo" : "notice", ListView.previousSection)
                     HeadSlot { replyModel: noticeRow.rowModel; active: !noticeRow.harlo && root.opensTurn(noticeRow.ListView.previousSection); y: noticeRow.gap - height - 10 }
                     width: view.width
-                    implicitHeight: (harlo ? harloSlot.height + 6 : background ? bgSlot.height + 4 : noticeText.implicitHeight + 4) + gap
+                    implicitHeight: (harlo ? harloSlot.height + 6 : ext ? extSlot.height + 4 : noticeText.implicitHeight + 4) + gap
                     // (Each kind made only for its own notices.)
                     Loader {
-                        id: bgSlot
-                        active: noticeRow.background
+                        id: extSlot
+                        active: !!noticeRow.ext
                         x: view.columnX
                         y: noticeRow.gap
                         width: view.columnWidth
-                        sourceComponent: Column {
-                            id: bgCol
-                            objectName: "backgroundNotice"
-                            spacing: 4
-                            readonly property bool failed: noticeRow.rowState === "error"
-                            readonly property bool open: view.expanded[noticeRow.rowKey] === true
-                            // (The command's first line: the rest, and its last
-                            // lines, a click away.)
-                            readonly property string firstLine: noticeRow.command.split("\n")[0].trim()
-                            readonly property bool more: noticeRow.command.indexOf("\n") >= 0 || noticeRow.result !== ""
-                            Row {
-                                id: bgHead
-                                spacing: 7
-                                width: parent.width
-                                Icon {
-                                    name: "terminal-box"
-                                    width: Theme.px(14)
-                                    height: width
-                                    color: bgCol.failed ? Theme.error : Theme.textMuted
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                PlainLabel {
-                                    objectName: "backgroundHeadline"
-                                    text: noticeRow.label
-                                    color: bgCol.failed ? Theme.error : Theme.textMuted
-                                    font.pixelSize: Theme.px(12.5)
-                                    font.weight: Font.Medium
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                PlainLabel {
-                                    visible: noticeRow.subtitle !== ""
-                                    // (Cut short when the column is narrow.)
-                                    width: Math.max(0, Math.min(implicitWidth, bgHead.width - x - (bgMore.visible ? bgMore.width + bgHead.spacing : 0)))
-                                    text: noticeRow.subtitle
-                                    elide: Text.ElideRight
-                                    color: Theme.textFaint
-                                    font.pixelSize: Theme.px(12)
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                Icon {
-                                    id: bgMore
-                                    visible: bgCol.more || bgLine.truncated
-                                    name: bgCol.open ? "arrow-down-s" : "arrow-right-s"
-                                    color: Theme.textFaint
-                                    width: Theme.px(14)
-                                    height: width
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
-                                HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
-                            }
-                            // The command: one line, cut at the end; opened, all of it.
-                            Item {
-                                width: parent.width
-                                height: bgLine.implicitHeight
-                                visible: !bgCol.open
-                                Label {
-                                    id: bgLine
-                                    objectName: "backgroundCommand"
-                                    x: Theme.px(14) + 7
-                                    width: parent.width - x
-                                    text: "$ " + bgCol.firstLine + (noticeRow.command.indexOf("\n") >= 0 ? " …" : "")
-                                    textFormat: Text.PlainText
-                                    color: Theme.textFaint
-                                    font.family: Theme.mono
-                                    font.pixelSize: Theme.px(12)
-                                    elide: Text.ElideRight
-                                    maximumLineCount: 1
-                                    wrapMode: Text.NoWrap
-                                }
-                                TapHandler { enabled: bgCol.more || bgLine.truncated; onTapped: view.toggle(noticeRow.rowKey) }
-                                HoverHandler { enabled: bgCol.more || bgLine.truncated; cursorShape: Qt.PointingHandCursor }
-                                ToolTip.visible: bgHover.hovered && (bgCol.more || bgLine.truncated)
-                                ToolTip.delay: 600
-                                ToolTip.text: "Show the whole command" + (noticeRow.result !== "" ? " and its last lines" : "")
-                                HoverHandler { id: bgHover }
-                            }
-                            Rectangle {
-                                objectName: "backgroundOpen"
-                                visible: bgCol.open
-                                width: parent.width
-                                height: bgOpen.implicitHeight + 16
-                                radius: 6
-                                color: Theme.codeBg
-                                Column {
-                                    id: bgOpen
-                                    x: 10
-                                    y: 8
-                                    width: parent.width - 20
-                                    spacing: 8
-                                    TextEdit {
-                                        width: parent.width
-                                        readOnly: true
-                                        selectByMouse: true
-                                        text: "$ " + noticeRow.command
-                                        textFormat: TextEdit.PlainText
-                                        wrapMode: TextEdit.Wrap
-                                        color: Theme.textMuted
-                                        selectionColor: Theme.selection
-                                        font.family: Theme.mono
-                                        font.pixelSize: Theme.px(12)
-                                    }
-                                    TextEdit {
-                                        visible: noticeRow.result !== ""
-                                        width: parent.width
-                                        readOnly: true
-                                        selectByMouse: true
-                                        text: noticeRow.result
-                                        textFormat: TextEdit.PlainText
-                                        wrapMode: TextEdit.Wrap
-                                        color: Theme.text
-                                        selectionColor: Theme.selection
-                                        font.family: Theme.mono
-                                        font.pixelSize: Theme.px(12)
-                                    }
-                                }
-                            }
+                        sourceComponent: ExtensionView {
+                            objectName: "messageExtView"
+                            session: root.session
+                            view: noticeRow.ext
+                            background: Theme.canvas
                         }
                     }
                     PlainLabel {
                         id: noticeText
-                        visible: !noticeRow.harlo && !noticeRow.background
+                        visible: !noticeRow.harlo && !noticeRow.ext
                         x: view.columnX
                         y: noticeRow.gap
                         width: view.columnWidth
@@ -1989,7 +1881,7 @@ Item {
                         padding: 2
                         accent: Theme.textFaint
                         font.pixelSize: Theme.px(11.5)
-                        background: Rectangle { color: Theme.background; radius: 6 }
+                        background: Rectangle { color: Theme.background; radius: 2 }
                         ToolTip.visible: hovered
                         ToolTip.delay: 400
                         ToolTip.text: "Put the folder's files back as they were before this turn (this turn and the ones after it)"
@@ -2093,7 +1985,7 @@ Item {
     Rectangle {
         id: flash
         opacity: 0
-        radius: 8
+        radius: 3
         color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.18)
         border.color: Theme.primary
         SequentialAnimation {

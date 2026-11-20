@@ -25,8 +25,6 @@ struct DashboardView: View {
 
     /// The projects whose Settled shelf is open.
     @State private var openShelves: Set<String> = []
-    /// The sessions whose helpers show (folded under them otherwise).
-    @State private var openHelpers: Set<String> = []
     /// The workflow run shown in full.
     @State private var openRun: WorkflowRun?
     @State private var showRuns = false
@@ -36,11 +34,6 @@ struct DashboardView: View {
     var currentRuns: [WorkflowRun] {
         Array(model.workflowRuns.filter { $0.running || $0.paused || ($0.finishable && !$0.merged) }.prefix(3))
     }
-
-    /// Helpers fold under the sessions that started them (not while
-    /// searching: then every match lists).
-    var folding: Bool { search.trimmingCharacters(in: .whitespaces).isEmpty }
-    var helpers: SessionSummary.Helpers { SessionSummary.helpers(model.sessions) }
 
     struct SessionGroup: Identifiable {
         let id: String
@@ -52,20 +45,17 @@ struct DashboardView: View {
 
     var groups: [SessionGroup] {
         let working = ["busy", "starting", "input"]
-        let h = helpers
-        // (A session works while one of its helpers does.)
-        let works = { (s: SessionSummary) in working.contains(h.status(s)) }
+        let works = { (s: SessionSummary) in working.contains(s.status) }
         if !all {
-            // (Settled ones are done with, unless they work again; helpers
-            // show under their sessions.)
-            let shown = model.sessions.filter { ($0.settled.isEmpty || works($0)) && !h.folded($0) }
+            // (Settled ones are done with, unless they work again.)
+            let shown = model.sessions.filter { $0.settled.isEmpty || works($0) }
             let busy = shown.filter(works)
             let rest = shown.filter { !works($0) }.sorted { $0.modified > $1.modified }
             return [SessionGroup(id: "", name: "", sessions: Array((busy + rest).prefix(max(Self.recentCount, busy.count))))]
         }
         let q = search.trimmingCharacters(in: .whitespaces)
         let found = model.sessions.filter { s in
-            q.isEmpty ? !h.folded(s) : "\(s.title) \(s.project) \(s.branch) \(s.location) \(s.host)".localizedStandardContains(q)
+            q.isEmpty || "\(s.title) \(s.project) \(s.branch) \(s.location) \(s.host)".localizedStandardContains(q)
         }
         if groupBy == "day" {
             return SessionSummary.byDay(found).map { SessionGroup(id: $0.name, name: $0.name, sessions: $0.sessions) }
@@ -98,30 +88,12 @@ struct DashboardView: View {
             if openShelves.contains(g.id) { openShelves.remove(g.id) } else { openShelves.insert(g.id) }
         }
         if open {
-            ForEach(g.settled) { s in entry(s) }
+            ForEach(g.settled) { s in card(s) }
         }
     }
 
-    /// A session's card, then its helpers (folded, behind a line to open).
-    @ViewBuilder
-    func entry(_ s: SessionSummary) -> some View {
-        card(s)
-        if folding, let kids = helpers.helpers[s.key] {
-            let open = openHelpers.contains(s.key)
-            FoldLine(icon: "arrow.triangle.branch", title: "Helpers · \(kids.count)", open: open, nested: true,
-                     waiting: kids.contains { $0.session.status == "input" },
-                     working: kids.contains { ["busy", "starting"].contains($0.session.status) },
-                     accessibilityTitle: "Helpers of \(s.title), \(kids.count)") {
-                if open { openHelpers.remove(s.key) } else { openHelpers.insert(s.key) }
-            }
-            if open {
-                ForEach(kids) { k in card(k.session, depth: k.depth) }
-            }
-        }
-    }
-
-    func card(_ s: SessionSummary, depth: Int = 0) -> DashboardRow {
-        DashboardRow(session: s, depth: depth, showProject: !all || groupBy == "day") { s in
+    func card(_ s: SessionSummary) -> DashboardRow {
+        DashboardRow(session: s, showProject: !all || groupBy == "day") { s in
             newName = s.title
             renaming = s
         }
@@ -239,7 +211,7 @@ struct DashboardView: View {
                         .plainRow(top: 12, bottom: 2)
                 }
                 ForEach(g.sessions) { s in
-                    entry(s)
+                    card(s)
                 }
                 if !g.settled.isEmpty { shelf(g) }
             }

@@ -121,6 +121,11 @@ fn dismissed() -> serde_json::Map<String, Value> {
     db().and_then(|d| d.get(DISMISSED).ok().flatten()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
+/// Whether updates of an agent are offered: pi's only while it's on.
+fn offered(agent: &str) -> bool {
+    agent != "pi" || harlo_core::scanner::listed_kinds().contains(&harlo_harness::HarnessKind::Pi)
+}
+
 /// How long a looked-up version is trusted before asking again.
 const REMEMBER: Duration = Duration::from_secs(3600);
 
@@ -323,6 +328,7 @@ impl Updates {
         crate::runtime().spawn_blocking(move || {
             let mut found: Vec<(String, String, String)> = remote::AGENTS
                 .iter()
+                .filter(|a| offered(a))
                 .filter_map(|a| {
                     let program = local_program(a)?;
                     let current = local_version(&program);
@@ -393,6 +399,7 @@ impl Updates {
                     .as_object()
                     .into_iter()
                     .flatten()
+                    .filter(|(agent, _)| offered(agent))
                     .filter_map(|(agent, v)| {
                         let current = v.as_str()?.to_owned();
                         let newest = latest(agent, false)?;

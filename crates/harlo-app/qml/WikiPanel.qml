@@ -579,7 +579,7 @@ Rectangle {
                 topPadding: 7
                 bottomPadding: 7
                 hoverEnabled: true
-                background: Rectangle { radius: 8; color: hit.hovered || hit.activeFocus ? Theme.rowHover : "transparent" }
+                background: Rectangle { radius: 3; color: hit.hovered || hit.activeFocus ? Theme.rowHover : "transparent" }
                 contentItem: ColumnLayout {
                     spacing: 2
                     PlainLabel {
@@ -834,7 +834,7 @@ Rectangle {
                                 visible: block.kind === "code"
                                 width: parent.width
                                 height: visible ? code.implicitHeight + 16 : 0
-                                radius: 6
+                                radius: 2
                                 color: Theme.codeBg
                                 TextEdit {
                                     id: code
@@ -1116,7 +1116,7 @@ Rectangle {
                             Rectangle {
                                 anchors.fill: parent
                                 anchors.margins: -2
-                                radius: 3
+                                radius: 2
                                 color: "transparent"
                                 border.width: 2
                                 border.color: Theme.primary
@@ -1291,7 +1291,7 @@ Rectangle {
                 topPadding: 7
                 bottomPadding: 7
                 hoverEnabled: true
-                background: Rectangle { radius: 8; color: row.hovered || row.activeFocus ? Theme.rowHover : "transparent" }
+                background: Rectangle { radius: 3; color: row.hovered || row.activeFocus ? Theme.rowHover : "transparent" }
                 contentItem: ColumnLayout {
                     spacing: 2
                     PlainLabel {

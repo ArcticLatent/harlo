@@ -11,41 +11,20 @@ ColumnLayout {
     signal trayToggled(bool on)
     signal pageRequested(string id)
     spacing: 0
-    property string harness: Workspace.setting("default_harness")
     property bool restoreTabs: Workspace.setting("restore_tabs") !== "0"
-    SectionHeader { title: "New sessions"; subtitle: "For sessions outside a project and for newly added projects. Each project keeps its own default (right-click it in the sidebar)." }
+    SectionHeader { title: "New sessions"; subtitle: "For sessions outside a project and for newly added projects. Each project can keep its own model (right-click it in the sidebar)." }
     Group {
-        SettingRow {
-            title: "Provider"
-            detail: "Automatic picks the first one on in Settings → Agents that's installed."
-            icon: "robot-2"
-            Flow {
-                spacing: 6
-                Repeater {
-                    model: [{ id: "", label: "Automatic" }].concat(Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : [])
-                    ChoicePill {
-                        required property var modelData
-                        text: modelData.label
-                        provider: modelData.id
-                        selected: general.harness === modelData.id
-                        onClicked: { Workspace.setSetting("default_harness", modelData.id); general.harness = modelData.id }
-                    }
-                }
-            }
-        }
-        // The model the provider's new sessions start with.
+        // The model new sessions start with (pi's).
         SettingRow {
             id: modelRow
-            divider: true
-            readonly property string agent: general.harness !== "" ? general.harness : (Workspace.providersRevision >= 0 ? Workspace.defaultAgent() : "")
+            readonly property string agent: "pi"
             readonly property var prov: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(p => p.id === agent) || null : null
             readonly property var ids: prov ? prov.modelIds || [] : []
             property string current: Workspace.setting("default_model_" + agent)
             onAgentChanged: current = Workspace.setting("default_model_" + agent)
             title: "Model"
-            detail: !prov ? "Pick a provider first."
-                  : ids.length === 0 ? prov.label + " lists its models once it's signed in."
-                  : "New " + prov.label + " sessions start with this one; the new-session page can still pick another."
+            detail: !prov || ids.length === 0 ? "pi lists its models once a provider is signed in."
+                  : "New sessions start with this one; the new-session page can still pick another."
             icon: "sparkling"
             // (No models before sign-in: where to sign in.)
             FlatButton {
@@ -59,7 +38,7 @@ ColumnLayout {
                 objectName: "defaultModel"
                 visible: modelRow.ids.length > 0
                 width: 260
-                model: [modelRow.prov ? modelRow.prov.label + "'s own default" : ""].concat(modelRow.ids.map((id, i) => Theme.modelLabel((modelRow.prov.models || [])[i] || id)))
+                model: ["pi's own default"].concat(modelRow.ids.map((id, i) => Theme.modelLabel((modelRow.prov.models || [])[i] || id)))
                 currentIndex: Math.max(0, modelRow.ids.indexOf(modelRow.current) + 1)
                 onActivated: i => {
                     const id = i === 0 ? "" : modelRow.ids[i - 1]
@@ -104,7 +83,7 @@ ColumnLayout {
                 Rectangle {
                     implicitWidth: cmdLabel.implicitWidth + 16
                     implicitHeight: 28
-                    radius: 6
+                    radius: 2
                     color: Theme.background
                     border.color: Theme.border
                     Label { id: cmdLabel; anchors.centerIn: parent; text: "harlo --toggle-dropdown"; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
@@ -114,11 +93,11 @@ ColumnLayout {
         }
     }
     Rule { }
-    SectionHeader { title: "Setup guide"; subtitle: "The guide Harlo shows on its first start: the agents, git and the theme. From a terminal: harlo --setup" }
+    SectionHeader { title: "Setup guide"; subtitle: "The guide Harlo shows on its first start: pi, git and the theme. From a terminal: harlo --setup" }
     Group {
         SettingRow {
             title: "Open the setup guide"
-            detail: "Install and sign in agents, pick the default agent and model, sign git in, choose a theme."
+            detail: "Install and sign in pi, pick the model new sessions start with, sign git in, choose a theme."
             icon: "compass-3"
             FlatButton { objectName: "openSetupGuide"; text: "Open"; font.pixelSize: Theme.px(12); onClicked: general.setupRequested() }
         }

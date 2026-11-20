@@ -18,10 +18,10 @@ vendor: harlo
 homepage: https://harlo.run
 license: MIT
 description: |-
-  Desktop app for coding agents.
-  harlo runs its own agent, Harlo, and Claude Code on your computer (and on
-  your other machines over SSH), with a native chat, changes and diffs,
-  worktrees, a terminal, and an iPhone app to follow and answer them.
+  Desktop app for the pi coding agent.
+  harlo runs pi on your computer (and on your other machines over SSH),
+  with a native chat, changes and diffs, worktrees, a terminal, and an
+  iPhone app to follow and answer it.
 
 contents:
   - src: dist/opt/harlo
@@ -112,7 +112,7 @@ overrides:
       - git
 
 rpm:
-  summary: Desktop app for coding agents (Harlo, Claude Code)
+  summary: Desktop app for the pi coding agent
   group: Development/Tools
 deb:
   fields:

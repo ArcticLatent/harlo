@@ -12,7 +12,7 @@ Rectangle {
     readonly property color card: colors[3] || bg
     readonly property color mut: colors[4] || fg
     readonly property color side: colors[5] || card
-    radius: 7
+    radius: 3
     color: bg
     border.color: Qt.rgba(fg.r, fg.g, fg.b, 0.12)
     clip: true
@@ -20,7 +20,7 @@ Rectangle {
         width: parent.width * 0.3
         height: parent.height
         color: parent.side
-        radius: 7
+        radius: 4
         Rectangle { x: parent.width - 7; width: 7; height: parent.height; color: parent.color }
         Column {
             x: 8
@@ -59,7 +59,7 @@ Rectangle {
         y: parent.height - height - 9
         width: parent.width * 0.6
         height: 16
-        radius: 6
+        radius: 2
         color: parent.card
         border.color: Qt.rgba(parent.fg.r, parent.fg.g, parent.fg.b, 0.15)
         Rectangle { x: parent.width - 13; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: parent.parent.acc }

@@ -72,7 +72,7 @@ Rectangle {
                 anchors.fill: parent
                 anchors.topMargin: 7
                 anchors.bottomMargin: 7
-                radius: 9
+                radius: 3
                 color: tab.active ? Theme.rowSelected : hover.hovered ? Theme.rowHover : "transparent"
                 Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                 RowLayout {
@@ -92,7 +92,7 @@ Rectangle {
                         ring: tab.active ? Theme.rowSelected : hover.hovered ? Theme.rowHover : Theme.chrome
                     }
                     FileIcon { visible: tab.isFile || tab.isDiff; path: tab.isFile ? tab.key.substring(5) : tab.diffPath; Layout.preferredWidth: 14; Layout.preferredHeight: 14 }
-                    Icon { visible: tab.key.startsWith("view:"); name: tab.key === "view:new" ? "chat-new" : tab.key.startsWith("view:run:") ? "node-tree" : tab.key.substring(5); color: Theme.primary; implicitWidth: 12; implicitHeight: 12 }
+                    Icon { visible: tab.key.startsWith("view:"); name: tab.key === "view:new" ? "chat-new" : tab.key === "view:workflow" ? "list-check-2" : tab.key.substring(5); color: Theme.primary; implicitWidth: 12; implicitHeight: 12 }
                     // (On a branch of its own: a worktree session.)
                     Icon { objectName: "tabBranch"; visible: tab.branch !== ""; name: "git-branch"; color: Theme.textMuted; implicitWidth: 12; implicitHeight: 12 }
                     PlainLabel {

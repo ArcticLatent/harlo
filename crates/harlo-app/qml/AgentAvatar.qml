@@ -2,20 +2,19 @@ import QtQuick
 import harlo
 
 // A session as an avatar: its model's maker's logo on a rounded square tinted
-// for the maker, with the agent that runs it as a small tag on the lower
-// left; the agent's own mark when the model isn't known yet, or when it's
-// the agent's own maker's (Claude Code on Claude). A session's status sits
-// on the upper right (working, waiting for you, unread).
+// for the maker; the agent's own mark while the model isn't known yet. A
+// session's status sits on the upper right (working, waiting for you,
+// unread).
 Item {
     id: avatar
-    /// The agent ("harlo", "claude", …).
+    /// The agent ("pi", "demo").
     property string provider
     /// The model's maker, a logo id (Workspace.modelMaker); "" not known.
     property string maker: ""
     property string badge: ""
     /// What's behind it (the corners' rings cut into it).
     property color ring: Theme.chrome
-    readonly property bool modelFirst: maker !== "" && !(provider === "claude" && maker === "anthropic")
+    readonly property bool modelFirst: maker !== ""
     readonly property var tint: modelFirst ? Theme.makerColor(maker) : Theme.agentColor(provider)
     implicitWidth: 26
     implicitHeight: 26
@@ -24,7 +23,7 @@ Item {
     function fit(box, share) { return box - 2 * Math.round(box * (1 - share) / 2) }
     Rectangle {
         anchors.fill: parent
-        radius: Math.round(width * 0.27)
+        radius: Math.round(width * 0.12)
         color: avatar.tint.fill
     }
     ProviderMark {
@@ -45,33 +44,6 @@ Item {
         implicitHeight: implicitWidth
         provider: avatar.modelFirst ? avatar.maker : ""
         color: avatar.tint.ink
-    }
-    // The agent, as a small badge on the corner: solid in its own colour, its
-    // mark in near-black (both themes), so it reads against any logo's tile;
-    // ringed in what's behind so it cuts into the corner.
-    Rectangle {
-        objectName: "sessionAgentTag"
-        visible: avatar.modelFirst
-        width: Math.round(avatar.width * 0.58)
-        height: width
-        radius: width / 2
-        x: -Math.round(avatar.width * 0.115)
-        y: avatar.height - height + Math.round(avatar.width * 0.115)
-        color: avatar.ring
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: Math.max(1, Math.round(avatar.width * 0.05))
-            radius: width / 2
-            color: Theme.agentBase(avatar.provider)
-            ProviderMark {
-                anchors.centerIn: parent
-                implicitWidth: avatar.fit(parent.width, 0.66)
-                implicitHeight: implicitWidth
-                provider: avatar.provider
-                tip: ""
-                color: "#16171b"
-            }
-        }
     }
     Rectangle {
         visible: avatar.badge !== "" && avatar.badge !== "idle" && avatar.badge !== "live"

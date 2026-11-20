@@ -7,9 +7,9 @@
   </a>
 </p>
 
-<p align="center"><b>Your coding agents, in a truly native app.</b><br>
-Harlo, harlo's own agent, and Claude Code on your Linux computer and your other machines,<br>
-with your own local models, a wiki of your code, and an iPhone app to follow and answer them.<br>
+<p align="center"><b>Your coding agent, in a truly native app.</b><br>
+The pi coding agent on your Linux computer and your other machines,<br>
+with your own local models, a wiki of your code, and an iPhone app to follow and answer it.<br>
 Written in Rust and Qt, not Electron.</p>
 
 <p align="center">
@@ -38,25 +38,24 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
 - **A Rust core.** Agent streams, transcripts, diffs, git and search run in compiled Rust on threads of their own, so a session of 50,000 rows still scrolls smoothly.
 - **Drawn by your GPU.** The interface is Qt Quick on Qt 6, and the editor, the diffs and the terminal are drawn by Rust. There's no HTML, no JavaScript framework and no bundled Chromium.
 - **At home on Linux:** Wayland and X11, your system's notifications and input methods, a tray icon, a drop-down window, and packages for your distribution.
-- **An agent that's careful with tokens.** Harlo, harlo's own agent, does the same work with fewer tokens. See [how it compares](#how-harlo-compares).
 
 ## What it does
 
 | | |
 |---|---|
-| **Two agents, one chat** | **Harlo**, harlo's own agent, works with your ChatGPT plan, an OpenAI key or any OpenAI-compatible server, your own models included. It sees images, searches and reads the web, uses MCP servers and skills, splits work between subagents (each writer in a worktree of its own), and runs its commands in a sandbox. Extras you can turn on in Settings: a second model that reviews each turn's work before it finishes, notes it keeps between sessions, a debugger, and search and edits by the code's structure. It counts every request's tokens and says what they cost, or that the cost is unknown, never a made-up $0. **Claude Code** uses your own login and settings, and your existing Claude Code sessions show up in the sidebar: click one to carry on. |
-| **A wiki of your code** | **Create wiki** has your agent write a wiki of the repository in `.okf/` (Open Knowledge Format): how its parts fit, its workflows and the decisions behind them, each claim footnoted with the file and declaration it comes from. harlo checks every footnote against the code without a model, so it knows which pages the code has moved past and what new code no page mentions yet. Your agents are pointed to the wiki and told which pages are out of date, and **Update** has a session deal with only what changed. The Wiki panel lists the pages, reads them with their diagrams and footnotes (each opens its code), searches them and draws them as a graph; **Mark reviewed** records that you've read a page against its code. |
-| **Plans and helpers** | For a bigger task the agent writes a plan you can edit, and works through it step by step. **Run with helpers** gives each step a session of its own, steps that don't depend on each other at the same time in worktrees, and each finished step is reviewed by another agent. An agent can also offer to split work between helpers; you decide. |
+| **pi, in a native chat** | harlo runs the [pi](https://github.com/earendil-works/pi) coding agent with your own installation, settings and sign-ins, and your existing pi sessions show up in the sidebar: click one to carry on. pi works with your Claude plan (harlo's built-in Claude subscription), API keys for the providers pi knows, and any OpenAI-compatible server, your own models included. Its MCP servers, extensions and packages are managed in Settings; what an extension draws, harlo draws in the chat. pi's commands run in harlo's sandbox, and a command that can't be undone asks first, whatever the approval mode. |
+| **A wiki of your code** | **Create wiki** has pi write a wiki of the repository in `.okf/` (Open Knowledge Format): how its parts fit, its workflows and the decisions behind them, each claim footnoted with the file and declaration it comes from. harlo checks every footnote against the code without a model, so it knows which pages the code has moved past and what new code no page mentions yet. pi is pointed to the wiki and told which pages are out of date, and **Update** has a session deal with only what changed. The Wiki panel lists the pages, reads them with their diagrams and footnotes (each opens its code), searches them and draws them as a graph; **Mark reviewed** records that you've read a page against its code. |
+| **Workflows** | A task run through stages you set up: pi implements it in a worktree of its own, your checks run, a second session reviews the work, and you merge what passed. |
 | **Diagrams, choices and mockups** | Agents draw Mermaid diagrams, which harlo shows as pictures. A choice between approaches comes as cards with their pros and cons and a Choose button. A UI change comes as a mockup harlo renders, before and after. |
 | **Changes and diffs** | Every file an agent touched, side-by-side diffs, review comments sent back to the agent, and undo for any turn. A folder of repositories shows each one's changes. |
 | **Pull requests and CI** | Commit, push, open a pull request and follow its checks on GitHub, GitLab or Forgejo (your own server too). Failed checks go back to the agent in one click. |
 | **Your other machines** | Add a machine over SSH and run sessions there as you would here: its files, terminal, changes, worktrees, sign-ins, models, wikis and plans. |
-| **Your own models** | Settings → Model servers sets up llama.cpp, Ollama, vLLM, Strata, Basalt or NInfer for your graphics card, downloads a model that fits and adds it to your agents. On this computer or on another machine (a GPU box, a NAS; x86-64 or ARM), each machine's agents can use the other's servers through SSH, and a stopped server starts before your message. |
-| **Plan limits and spending** | Your Claude and ChatGPT plan's limits as they change, on each machine, a notification when one is used up and when it resets, and Stop and continue at the reset. Spending limits per session and per day. The context bar marks where each agent compacts. |
-| **Worktrees** | Sessions in worktrees of their own, side by side, or one task run by several agents in parallel; merge the one you keep. |
+| **Your own models** | Settings → Local models sets up llama.cpp, Ollama, vLLM, Strata, Basalt or NInfer for your graphics card, downloads a model that fits and adds it to pi. On this computer or on another machine (a GPU box, a NAS; x86-64 or ARM), each machine's pi can use the other's servers through SSH, and a stopped server starts before your message. |
+| **Plan limits and spending** | Your Claude plan's limits as they change, a notification when one is used up and when it resets, and Stop and continue at the reset. Spending limits per session and per day. The context bar marks where pi compacts. |
+| **Worktrees** | Sessions in worktrees of their own, side by side; merge the one you keep. |
 | **Dictation** | Speak your prompt. Recognised on your computer (whisper.cpp); nothing leaves it. |
-| **Guard rails** | Approvals, plan mode, an action log of every command and edit, quiet hours. Harlo's commands run in a sandbox (bubblewrap) that can change only the project, /tmp and tool caches and can't see your keys and sign-ins. |
-| **And** | A terminal, a file browser and editor with find and replace, an image viewer, pictures in the chat, search across every conversation, templates, scheduled prompts, MCP servers, hand-offs and second opinions between agents, export as Markdown, and 31 themes. |
+| **Guard rails** | Approvals, an action log of every command and edit, quiet hours. pi's commands run in a sandbox (bubblewrap) that can change only the project, /tmp and tool caches and can't see your keys and sign-ins. |
+| **And** | A terminal, a file browser and editor with find and replace, an image viewer, pictures in the chat, search across every conversation, templates, scheduled prompts, export as Markdown, and 31 themes. |
 
 <p align="center">
   <img src="site/assets/desktop-wiki.webp" alt="The Wiki panel reading a page, beside a Claude Code session that looked something up in it" width="49%">
@@ -67,25 +66,11 @@ Many agent apps are a web page in an Electron window. harlo is a desktop app:
   <img src="site/assets/desktop-midnight.webp" alt="harlo in the Midnight theme with the Activity panel" width="49%">
 </p>
 
-## How Harlo compares
-
-Harlo, pi and opencode on the same 26 coding tasks (fixing bugs across files, refactoring, reading long logs, splitting work between subagents), with the same model and reasoning (gpt-6.1-sol, medium). Totals over the 25 tasks all three can run:
-
-| | Harlo | pi | opencode |
-|---|---|---|---|
-| Tasks passed | 25 of 25 | 24 of 25 | 25 of 25 |
-| Input tokens | 824k | 907k | 3,130k |
-| Not from cache | 284k | 263k | 644k |
-| Output tokens | 23.0k | 23.2k | 32.2k |
-| Time | 13 min | 19 min | 16 min |
-
-On these tasks Harlo sent the least input (9% less than pi, about a quarter of opencode's), finished soonest, and passed every one (it passed the 26th too, which pi can't run). pi had the least input not served from cache: 263k against Harlo's 284k. Measured on 19 November 2026 with harlo-agent from this repository on that date, pi 1.5.2 and opencode 2.2.5; your numbers will vary with the model and the task.
-
 ### On your iPhone
 
 *Coming soon to the App Store.*
 
-Follow your sessions live, answer questions and approvals from a notification (even with the app closed), and watch a run on the Lock Screen and in the Dynamic Island. Read and search a project's wiki, follow a plan and its helpers, look through changes, files and pictures, and start new sessions on any of your machines. Widgets show your sessions and your plan's limits. Between the phone and your computer everything is end-to-end encrypted: on your Wi-Fi, over Tailscale, or through harlo's relay, which can't read what it passes on.
+Follow your sessions live, answer questions and approvals from a notification (even with the app closed), and watch a run on the Lock Screen and in the Dynamic Island. Read and search a project's wiki, follow a workflow run, look through changes, files and pictures, and start new sessions on any of your machines. Widgets show your sessions and your plan's limits. Between the phone and your computer everything is end-to-end encrypted: on your Wi-Fi, over Tailscale, or through harlo's relay, which can't read what it passes on.
 
 <p align="center">
   <img src="site/assets/iphone-dashboard.webp" alt="The iPhone app's sessions" width="24%">
@@ -107,19 +92,19 @@ Download the file for your system from [harlo.run/download](https://harlo.run/do
 
 The packages bring their own Qt and need glibc 2.35 or newer, an x86-64 CPU with AVX2, and git. harlo updates itself (Settings → General → Check for updates). Each release lists its files' SHA-256 sums in `SHA256SUMS`.
 
-**Checking a wiki in CI.** Each release also has Harlo's agent and the code index on their own (`harlo-agent-linux-x86_64`, `harlo-index-linux-x86_64`, and `aarch64` builds), static, for a CI job. `wiki --validate` checks a repository's `.okf/` wiki without changing anything: it fails on pages that break the format, and with `--strict` also when the code has moved past the wiki (a page whose cited code changed, a footnote naming nothing, new code no page covers). `--json` gives the report as JSON.
+**Checking a wiki in CI.** Each release also has harlo's helper and the code index on their own (`harlo-helper-linux-x86_64`, `harlo-index-linux-x86_64`, and `aarch64` builds), static, for a CI job. `wiki --validate` checks a repository's `.okf/` wiki without changing anything: it fails on pages that break the format, and with `--strict` also when the code has moved past the wiki (a page whose cited code changed, a footnote naming nothing, new code no page covers). `--json` gives the report as JSON.
 
 ```yaml
 - name: Check the wiki
   run: |
     cd "$RUNNER_TEMP"
     base=https://github.com/ArcticLatent/harlo/releases/latest/download
-    curl -fsSL -O "$base/harlo-agent-linux-x86_64" -O "$base/harlo-index-linux-x86_64"
+    curl -fsSL -O "$base/harlo-helper-linux-x86_64" -O "$base/harlo-index-linux-x86_64"
     chmod +x harlo-*-linux-x86_64
-    ./harlo-agent-linux-x86_64 wiki --validate "$GITHUB_WORKSPACE" --strict
+    ./harlo-helper-linux-x86_64 wiki --validate "$GITHUB_WORKSPACE" --strict
 ```
 
-On first start, harlo's setup guide helps you install and sign in the agents you want (`harlo --setup` opens it again). Once the iPhone app is in the App Store, get it, then Settings → Devices → Pair a device on your computer, and scan the code.
+On first start, harlo's setup guide helps you install pi and sign it in (`harlo --setup` opens it again). Once the iPhone app is in the App Store, get it, then Settings → Devices → Pair a device on your computer, and scan the code.
 
 ## Build from source
 
@@ -127,6 +112,7 @@ Needs Rust 1.85 or newer, Qt 6.9 or newer (`qt6-base`, `qt6-declarative`, `qt6-m
 
 ```sh
 cargo run -p harlo-app --release
+cargo build -p harlo-helper --release                                          # pi's sandbox and the wiki's commands
 cargo build -p harlo-core --release --bin harlo-engines --no-default-features   # model servers on other machines
 cargo test --workspace
 ```
@@ -136,15 +122,15 @@ On Arch, `cd packaging/aur/harlo-git && makepkg -si` builds the latest commit ag
 <details>
 <summary><b>Using harlo: a quick tour</b></summary>
 
-- **Sessions.** The sidebar lists your sessions by project; drag a project to move it. **+ Project** adds a folder; **+** on a project starts a session with its default agent (right-click for another). Settings → Providers shows each agent's version and models, turns it on or off, and signs it in to its providers in your browser; the agent keeps the credential, harlo never reads it.
-- **The composer.** Enter sends, Shift+Enter adds a line, `/` completes the agent's commands, `@` completes files and past sessions, Up/Down recalls earlier prompts. While the agent works, Enter queues a follow-up, Ctrl+Enter steers, Esc stops. Drop files or pictures on the chat to attach them. Below it: Build / Plan (Tab), the permissions shield, the model, the microphone and expand (Ctrl+Shift+X).
+- **Sessions.** The sidebar lists your sessions by project; drag a project to move it. **+ Project** adds a folder; **+** on a project starts a pi session (right-click for a worktree session or a workflow). Settings → Agents shows pi's version, its extensions and packages, and its Claude subscription; Settings → Models signs pi in to its providers. pi keeps the credentials; harlo never reads them.
+- **The composer.** Enter sends, Shift+Enter adds a line, `/` completes the agent's commands, `@` completes files and past sessions, Up/Down recalls earlier prompts. While the agent works, Enter queues a follow-up, Ctrl+Enter steers, Esc stops. Drop files or pictures on the chat to attach them. Below it: the permissions shield, the model, the microphone and expand (Ctrl+Shift+X).
 - **Panels.** Changes (Ctrl+Shift+G), Files (Ctrl+Shift+E), Activity (Ctrl+Shift+A), Context (Ctrl+Shift+I), Notes (Ctrl+Shift+N), Wiki (Ctrl+Shift+K) and the terminal (Ctrl+`). Ctrl+K opens the command palette, Ctrl+P finds a session, Ctrl+Shift+F searches every conversation, Ctrl+F finds in the one shown, Ctrl+/ lists the shortcuts.
-- **Projects.** Settings → Projects gives a project a name, a colour, an icon, its default agent, its wiki setting and the commands to run in each new worktree.
-- **The wiki.** In the Wiki panel, **Create wiki** starts a session that writes it; its changes land in Changes for you to review and commit, like any other. Once a project has a wiki, its sessions are pointed to it and told which pages are out of date, unless you switch Wiki off for the project; Harlo's agent also says so when it reads a page whose code has changed, naming the footnotes to check. After merged work changes what the wiki describes, harlo offers to update it.
-- **Remote machines.** Settings → Remote Instances adds SSH connections (`user@host` or a `~/.ssh/config` name). The instance menu at the top of the sidebar switches between this computer and each machine, and connects or disconnects one. **+ Project** then offers each machine's folders (with New folder), and its sessions run there, with its terminal, files and changes. An agent there signs in from the model menu (**Sign in on <machine>**).
-- **Model servers.** Settings → Model servers: **Set up a local model…** for this computer, **Set up a model on <machine>…** for each connected machine. harlo shows what fits the machine's card and memory, installs the engine, downloads the model, starts it and tests it. Tick the agents that should use it, on that machine or (through SSH) here. On another machine, harlo runs a small helper of its own (`harlo-engines`, in `~/.cache/harlo` there) for the setup.
+- **Projects.** Settings → Projects gives a project a name, a colour, an icon, its model, its wiki setting and the commands to run in each new worktree.
+- **The wiki.** In the Wiki panel, **Create wiki** starts a session that writes it; its changes land in Changes for you to review and commit, like any other. Once a project has a wiki, its sessions are pointed to it and told which pages are out of date, unless you switch Wiki off for the project; pi is also told when it reads a page whose code has changed, naming the footnotes to check. After merged work changes what the wiki describes, harlo offers to update it.
+- **Remote machines.** Settings → Remote Instances adds SSH connections (`user@host` or a `~/.ssh/config` name). The instance menu at the top of the sidebar switches between this computer and each machine, and connects or disconnects one. **+ Project** then offers each machine's folders (with New folder), and its sessions run there, with its terminal, files and changes. pi there signs in from the model menu (**Sign in on <machine>**).
+- **Local models.** Settings → Local models: **Set up a local model…** for this computer, **Set up a model on <machine>…** for each connected machine. harlo shows what fits the machine's card and memory, installs the engine, downloads the model, starts it and tests it. Choose where pi should use it: on that machine or (through SSH) here. On another machine, harlo runs a small helper of its own (`harlo-engines`, in `~/.cache/harlo` there) for the setup.
 - **Your phone.** Settings → Devices → Pair a device shows a QR code. On the same network the phone connects directly (port 7676; if a firewall blocks it, harlo offers to open it for that network only). Away from home it goes through a harlo relay or Tailscale Funnel.
-- **Your data.** harlo keeps its own state in `~/.local/share/harlo/` and `~/.config/harlo/`. Conversations stay where each agent keeps them.
+- **Your data.** harlo keeps its own state in `~/.local/share/harlo/` and `~/.config/harlo/`. Conversations stay where pi keeps them.
 
 </details>
 
@@ -164,8 +150,8 @@ It speaks plain HTTP: put it behind something that adds HTTPS (Caddy, a Cloudfla
 
 | Crate | Role |
 |---|---|
-| `crates/harlo-harness` | Runs the agents (Harlo over its RPC, Claude Code's stream-json) and turns what they say into one stream of events |
-| `crates/harlo-agent` | Harlo, harlo's own agent (`harlo-agent`): the model loop, its tools, the sandbox, MCP and subagents |
+| `crates/harlo-harness` | Runs pi over its RPC, with harlo's extension for it (`pi/harlo.ts`), and turns what it says into one stream of events |
+| `crates/harlo-helper` | harlo's helper for pi (`harlo-helper`), here and on other machines: the sandbox, the check for commands that can't be undone, and the wiki's commands |
 | `crates/harlo-core` | Sessions, transcripts, markdown, git, worktrees, search, plans, the wiki's state, remote machines, model servers, phone protocol, state. No Qt. Its `harlo-engines` program sets up and runs model servers on other machines |
 | `crates/harlo-okf` | The wiki engine: finds the declarations in the code, checks a `.okf/` wiki's footnotes against them, and keeps its ledger, indexes and log. No model |
 | `crates/harlo-code` | The text and terminal views drawn by Rust: the editor, both sides of a diff, the terminal |

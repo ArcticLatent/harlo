@@ -58,7 +58,7 @@ AppDialog {
                 placeholderText: "What it changes and why (optional)"
                 placeholderTextColor: Theme.textFaint
                 font.pixelSize: Theme.px(13)
-                background: Rectangle { radius: 8; color: Theme.background; border.color: bodyField.activeFocus ? Theme.accent : Theme.border }
+                background: Rectangle { radius: 3; color: Theme.background; border.color: bodyField.activeFocus ? Theme.accent : Theme.border }
             }
         }
         RowLayout {

@@ -29,7 +29,7 @@ Flow {
             readonly property alias thumb: thumb
             width: strip.side
             height: strip.side
-            radius: 8
+            radius: 3
             color: Theme.codeBg
             border.width: activeFocus ? 2 : 1
             border.color: activeFocus ? Theme.accent : tileHover.hovered ? Theme.controlBorderHover : Theme.border

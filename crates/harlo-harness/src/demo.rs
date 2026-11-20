@@ -11,9 +11,6 @@
 //! - A prompt containing `ask` sends an `ask` request (two
 //!   questions); one containing `choose` sends a `select` with option
 //!   descriptions. Answers come back as an info notice.
-//! - A prompt containing `subagents` starts two pretend subagents
-//!   (`get_subagents`, `cancel_subagent`, `steer_subagent` answer for them;
-//!   each has a transcript file).
 //! - A prompt containing `long tool` runs one call of an MCP tool with a
 //!   long plugin-style name (for narrow layouts).
 //! - A prompt containing `long code` answers with a 200-line code block.
@@ -22,7 +19,6 @@
 //! - A prompt containing `todos` runs a pretend `todo` tool call (the phases
 //!   come back from `get_state`); `queue demo` fills the message queue
 //!   (`remove_queued_message` / `promote_queued_message` work on it).
-//! - `/btw <question>` answers on the side (`Aside` events), as Harlo does.
 //! - A prompt containing `approve` asks for approval before its tool call,
 //!   as in `always-ask` mode (`Allow tool: bash` with Approve/Deny).
 //! - `get_available_models` / `set_model`, `get_available_thinking_levels` /
@@ -72,7 +68,6 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
         let _ = events.send(HarnessEvent::Ready);
         let seq = Arc::new(AtomicU64::new(0));
         let abort = Arc::new(AtomicBool::new(false));
-        let subagents: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
         let todos: Arc<std::sync::Mutex<Value>> = Arc::new(std::sync::Mutex::new(json!([])));
         let queue: Arc<std::sync::Mutex<(Vec<String>, Vec<String>)>> = Arc::default();
         let approval: Approval = Arc::default();
@@ -96,18 +91,6 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
             let respond = |data: Value| reply(json!({"type":"response","id":id,"command":ty,"success":true,"data":data}));
             let fail = |error: &str| reply(json!({"type":"response","id":id,"command":ty,"success":false,"error":error}));
             match ty.as_str() {
-                // A side question: answered beside the conversation (as
-                // Harlo's), not added to it.
-                "prompt" if cmd["message"].as_str().is_some_and(|m| m.starts_with("/btw ")) => {
-                    respond(json!({}));
-                    let question = cmd["message"].as_str().unwrap_or_default()[5..].trim().to_owned();
-                    let events = events.clone();
-                    tokio::spawn(async move {
-                        let _ = events.send(HarnessEvent::Aside(json!({ "question": question, "text": "Because the demo", "done": false, "error": null })));
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                        let _ = events.send(HarnessEvent::Aside(json!({ "question": question, "text": "Because the demo says so.", "done": true, "error": null })));
-                    });
-                }
                 "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("ask") || m.contains("choose")) => {
                     respond(json!({"disposition":"started"}));
                     let text = cmd["message"].as_str().unwrap_or_default();
@@ -136,12 +119,6 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                         })
                     };
                     let _ = events.send(HarnessEvent::UiRequest(request));
-                }
-                "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("subagents")) => {
-                    respond(json!({"disposition":"started"}));
-                    let n = seq.fetch_add(1, Ordering::Relaxed);
-                    let _ = events.send(HarnessEvent::MessageEnd { id: format!("u{n}"), message: user_message(cmd["message"].as_str().unwrap_or_default()) });
-                    tokio::spawn(run_subagents(events.clone(), Arc::clone(&subagents)));
                 }
                 "prompt" if cmd["message"].as_str().is_some_and(|m| m.contains("todos")) => {
                     respond(json!({"disposition":"started"}));
@@ -247,28 +224,6 @@ pub(crate) fn spawn() -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>) {
                 "set_session_name" => {
                     cmd["name"].as_str().unwrap_or_default().clone_into(&mut name);
                     respond(Value::Null);
-                }
-                // The list leaves out detached (background) subagents;
-                // only their events tell about them.
-                "get_subagents" => respond(json!({ "subagents": subagents.lock().unwrap().iter().filter(|a| a["detached"] != true).cloned().collect::<Vec<_>>() })),
-                "cancel_subagent" => {
-                    let target = cmd["subagentId"].as_str().unwrap_or_default().to_owned();
-                    let mut cancelled = false;
-                    for a in subagents.lock().unwrap().iter_mut() {
-                        if a["id"] == target.as_str() && a["status"] == "running" {
-                            a["status"] = json!("aborted");
-                            cancelled = true;
-                        }
-                    }
-                    respond(json!({ "cancelled": cancelled }));
-                    if cancelled {
-                        let _ = events.send(HarnessEvent::SubagentActivity(json!({ "type": "subagent_lifecycle", "payload": { "id": target, "status": "aborted" } })));
-                    }
-                }
-                "steer_subagent" => {
-                    respond(Value::Null);
-                    let text = format!("Demo steered {}: {}", cmd["subagentId"].as_str().unwrap_or_default(), cmd["message"].as_str().unwrap_or_default());
-                    let _ = events.send(HarnessEvent::Notice { level: crate::event::NoticeLevel::Info, text, system: false });
                 }
                 "extension_ui_response" if approval.lock().unwrap().as_ref().is_some_and(|(id, _)| cmd["id"].as_str() == Some(id)) => {
                     let (_, reply) = approval.lock().unwrap().take().unwrap();
@@ -546,51 +501,6 @@ pub fn translate(&mut self, frame: Value) -> Vec<HarnessEvent> {{
 That's all for item {n}. Let me know if you want the [plan](https://example.com) expanded.
 "#
     )
-}
-
-/// Two pretend subagents: a scout that finishes and a worker that keeps
-/// running until cancelled.
-async fn run_subagents(events: mpsc::UnboundedSender<HarnessEvent>, list: Arc<std::sync::Mutex<Vec<Value>>>) {
-    let dir = std::env::temp_dir().join(format!("harlo-demo-subagents-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
-    let transcript = |name: &str, task: &str, answer: &str| {
-        let path = dir.join(format!("{name}.jsonl"));
-        let lines = [
-            json!({"type":"session","version":3,"id":name,"timestamp":"2026-10-11T12:00:00.000Z","cwd":"/tmp"}),
-            json!({"type":"message","id":"m1","parentId":null,"timestamp":"2026-10-11T12:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":task}]}}),
-            json!({"type":"message","id":"m2","parentId":"m1","timestamp":"2026-10-11T12:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":answer}]}}),
-        ];
-        let _ = std::fs::write(&path, lines.iter().map(|l| l.to_string() + "\n").collect::<String>());
-        path.to_string_lossy().into_owned()
-    };
-    let scout = transcript("ScoutLark", "Find where the build flags are set.", "They are set in `build.rs` and `Cargo.toml` (`[profile.release]`).");
-    let worker = transcript("BuildOtter", "Run the test suite and report failures.", "Running `cargo test`…");
-    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-    *list.lock().unwrap() = vec![
-        json!({"id":"ScoutLark","index":0,"agent":"scout","agentSource":"bundled","detached":true,"description":"Locate the build flags","status":"running","task":"Find where the build flags are set.","sessionFile":scout,"lastUpdate":now(),"parentToolCallId":"demo-task","progress":{"currentTool":"grep","currentToolArgs":{"pattern":"opt-level"},"resolvedModel":"demo-small","toolCount":3}}),
-        json!({"id":"BuildOtter","index":1,"agent":"task","agentSource":"bundled","description":"Run the tests","status":"running","task":"Run the test suite and report failures.","sessionFile":worker,"lastUpdate":now(),"parentToolCallId":"demo-task","progress":{"currentTool":"bash","currentToolArgs":{"command":"cargo test"},"resolvedModel":"demo-large","toolCount":1}}),
-    ];
-    // The `task` tool call the two run under.
-    let args = json!({ "tasks": [{ "agent": "scout", "description": "Locate the build flags" }, { "agent": "task", "description": "Run the tests" }] });
-    let call = json!({ "type": "toolCall", "id": "demo-task", "name": "task", "arguments": args });
-    let _ = events.send(HarnessEvent::MessageEnd { id: "demo-task-msg".into(), message: json!({ "role": "assistant", "content": [call], "stopReason": "toolUse" }) });
-    let _ = events.send(HarnessEvent::ToolStart { call_id: "demo-task".into(), name: "task".into(), args });
-    // The frames: the subagent's record as the payload.
-    let ping = |events: &mpsc::UnboundedSender<HarnessEvent>, list: &[Value]| {
-        for a in list {
-            let _ = events.send(HarnessEvent::SubagentActivity(json!({ "type": "subagent_progress", "payload": a })));
-        }
-    };
-    ping(&events, &list.lock().unwrap());
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    for a in list.lock().unwrap().iter_mut() {
-        if a["id"] == "ScoutLark" && a["status"] == "running" {
-            a["status"] = json!("completed");
-            a["progress"]["currentTool"] = Value::Null;
-            a["progress"]["toolCount"] = json!(5);
-        }
-    }
-    ping(&events, &list.lock().unwrap());
 }
 
 fn now_ms() -> i64 {

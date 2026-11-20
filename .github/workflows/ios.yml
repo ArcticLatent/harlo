@@ -77,9 +77,10 @@ jobs:
       - name: HarloKit tests
         run: |
           set -o pipefail
-          swift test --package-path ios/HarloKit 2>&1 | tee "$RUNNER_TEMP/kit.log" | grep -E "error:|Executed|passed|failed" || true
-          # Errors as annotations (readable without the logs).
-          if grep -q "error:" "$RUNNER_TEMP/kit.log"; then grep "error:" "$RUNNER_TEMP/kit.log" | head -30 | sed 's/^/::error::/'; exit 1; fi
+          if ! swift test --package-path ios/HarloKit 2>&1 | tee "$RUNNER_TEMP/kit.log"; then
+            awk '/error:/ && count++ < 30 {print "::error::" $0}' "$RUNNER_TEMP/kit.log"
+            exit 1
+          fi
 
       - name: Xcode project
         run: |

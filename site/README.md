@@ -17,15 +17,14 @@ as it is (`wrangler.jsonc` at the repository's root: Workers static assets;
     size for the first screen.
   - `assets/crop-*.webp`: the part of a window a section is about, cut at full
     size so its text stays readable: the wiki (`site-wiki`, the chat and the
-    Wiki panel), the plan (`site-plan`, the chat column) and the diff
+    Wiki panel), the options (`site-plan`, the chat column) and the diff
     (`site-diff`, the diff without the sidebar); `crop-*-narrow` is a smaller
     cut for phones, all from the narrow window (text at 125%) and at about the
     same scale and below the tabs: the chat and Changes panel of `site-hero`
     once the review is done (`crop-hero-narrow`), the chat from the question
     with the Wiki panel (`crop-wiki-narrow`, from `site-wiki-top`), the inline
     diff with the sidebar hidden, without the hunk buttons (`crop-diff-narrow`) and the chat column from
-    the two option cards (`crop-plan-narrow`, from `site-plan-cards`, with the plan folded so
-    both show whole).
+    the two option cards (`crop-plan-narrow`, from `site-plan-cards`).
 - iPhone screenshots: the UI tests' (the iOS workflow's pro-dark and pro-light runs), 660 px wide, as
   `assets/iphone-*.webp` and `assets/iphone-*-light.webp`.
 - Fonts: Geist and JetBrains Mono from `crates/harlo-app/fonts`, subset to woff2

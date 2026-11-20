@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls.Basic
 import harlo
 
-// A provider's mark (Harlo, Claude, Demo), so a session or
-// project shows what runs it; its name on hover. `badge`: a status dot on
+// A provider's mark (pi, Demo; Claude for its plan's limits), so a
+// session shows what runs it; its name on hover. `badge`: a status dot on
 // its corner (a session's: busy, waiting for you, unread).
 Item {
     id: mark
@@ -12,7 +12,7 @@ Item {
     property string badge: ""
     property color ring: Theme.background
     property string tip: provider !== "" ? Theme.harnessLabel(provider) : ""
-    readonly property bool known: ["harlo", "claude", "demo"].indexOf(provider) >= 0
+    readonly property bool known: ["claude", "pi", "demo"].indexOf(provider) >= 0
     implicitWidth: 14
     implicitHeight: 14
     Icon {

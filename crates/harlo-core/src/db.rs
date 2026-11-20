@@ -190,24 +190,6 @@ CREATE TABLE IF NOT EXISTS worktrees (
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     base_commit TEXT NOT NULL DEFAULT ''
 );
-CREATE TABLE IF NOT EXISTS runs (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    project_id INTEGER NOT NULL,
-    kept INTEGER,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-CREATE TABLE IF NOT EXISTS run_lanes (
-    run_id TEXT NOT NULL,
-    idx INTEGER NOT NULL,
-    harness TEXT NOT NULL,
-    model TEXT NOT NULL DEFAULT '',
-    cwd TEXT NOT NULL DEFAULT '',
-    branch TEXT NOT NULL DEFAULT '',
-    session_file TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (run_id, idx)
-);
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -226,33 +208,6 @@ CREATE TABLE IF NOT EXISTS workflows (
     data TEXT NOT NULL
 );
 ";
-
-/// A multirun: one prompt sent to several lanes (sessions, usually in their
-/// own worktrees).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct RunRecord {
-    pub id: String,
-    pub title: String,
-    pub prompt: String,
-    pub project_id: i64,
-    /// The lane chosen with "Keep this", once it is.
-    pub kept: Option<i64>,
-    pub created_at: i64,
-    pub lanes: Vec<RunLane>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct RunLane {
-    pub idx: i64,
-    pub harness: String,
-    /// `provider/model`, or empty for the harness's default.
-    pub model: String,
-    pub cwd: PathBuf,
-    /// Worktree branch, or empty when the lane runs in the project folder.
-    pub branch: String,
-    /// Known once the harness has written it.
-    pub session_file: PathBuf,
-}
 
 impl Db {
     /// Opens the database at `path`, creating it and bringing its tables up to
@@ -633,98 +588,6 @@ impl Db {
         Ok(())
     }
 
-    /// Records a run of several agents, with its lanes.
-    ///
-    /// # Errors
-    ///
-    /// A SQLite error when the database can't be written.
-    pub fn add_run(&self, run: &RunRecord) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO runs (id, title, prompt, project_id) VALUES (?1, ?2, ?3, ?4)",
-            params![run.id, run.title, run.prompt, run.project_id],
-        )?;
-        for l in &run.lanes {
-            self.upsert_lane(&run.id, l)?;
-        }
-        Ok(())
-    }
-
-    /// Adds or updates one lane of a run.
-    ///
-    /// # Errors
-    ///
-    /// A SQLite error when the database can't be written.
-    pub fn upsert_lane(&self, run_id: &str, l: &RunLane) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO run_lanes (run_id, idx, harness, model, cwd, branch, session_file) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(run_id, idx) DO UPDATE SET harness = ?3, model = ?4, cwd = ?5, branch = ?6,
-                 session_file = CASE WHEN ?7 = '' THEN session_file ELSE ?7 END",
-            params![run_id, l.idx, l.harness, l.model, l.cwd.to_string_lossy(), l.branch, l.session_file.to_string_lossy()],
-        )?;
-        Ok(())
-    }
-
-    /// Records the session file of a run's lane.
-    ///
-    /// # Errors
-    ///
-    /// A SQLite error when the database can't be written.
-    pub fn set_lane_file(&self, run_id: &str, idx: i64, file: &Path) -> Result<()> {
-        self.conn.execute("UPDATE run_lanes SET session_file = ?3 WHERE run_id = ?1 AND idx = ?2", params![run_id, idx, file.to_string_lossy()])?;
-        Ok(())
-    }
-
-    /// Marks the lane whose work was kept.
-    ///
-    /// # Errors
-    ///
-    /// A SQLite error when the database can't be written.
-    pub fn set_run_kept(&self, run_id: &str, idx: i64) -> Result<()> {
-        self.conn.execute("UPDATE runs SET kept = ?2 WHERE id = ?1", params![run_id, idx])?;
-        Ok(())
-    }
-
-    /// Forgets a run and its lanes.
-    ///
-    /// # Errors
-    ///
-    /// A SQLite error when the database can't be written.
-    pub fn delete_run(&self, run_id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM run_lanes WHERE run_id = ?1", [run_id])?;
-        self.conn.execute("DELETE FROM runs WHERE id = ?1", [run_id])?;
-        Ok(())
-    }
-
-    /// Every run, newest first, with its lanes.
-    ///
-    /// # Errors
-    ///
-    /// A SQLite error when the database can't be read.
-    pub fn runs(&self) -> Result<Vec<RunRecord>> {
-        let mut stmt = self.conn.prepare("SELECT id, title, prompt, project_id, kept, created_at FROM runs ORDER BY created_at DESC, rowid DESC")?;
-        let mut runs: Vec<RunRecord> = stmt
-            .query_map([], |r| {
-                Ok(RunRecord { id: r.get(0)?, title: r.get(1)?, prompt: r.get(2)?, project_id: r.get(3)?, kept: r.get(4)?, created_at: r.get(5)?, lanes: Vec::new() })
-            })?
-            .collect::<Result<_, _>>()?;
-        let mut lanes = self.conn.prepare("SELECT idx, harness, model, cwd, branch, session_file FROM run_lanes WHERE run_id = ?1 ORDER BY idx")?;
-        for run in &mut runs {
-            run.lanes = lanes
-                .query_map([&run.id], |r| {
-                    Ok(RunLane {
-                        idx: r.get(0)?,
-                        harness: r.get(1)?,
-                        model: r.get(2)?,
-                        cwd: PathBuf::from(r.get::<_, String>(3)?),
-                        branch: r.get(4)?,
-                        session_file: PathBuf::from(r.get::<_, String>(5)?),
-                    })
-                })?
-                .collect::<Result<_, _>>()?;
-        }
-        Ok(runs)
-    }
-
     /// Scheduled prompts, in the order they were made.
     ///
     /// # Errors
@@ -988,24 +851,6 @@ mod tests {
         db.mark_worktree_removed(Path::new("/t/x")).unwrap();
         let all = db.worktrees().unwrap();
         assert_eq!((all.len(), all[0].base.as_str(), all[0].base_commit.as_str(), all[0].removed), (1, "main", "abc123", true));
-    }
-
-    #[test]
-    fn stores_runs() {
-        let db = Db::open_in_memory().unwrap();
-        let lane = |idx: i64, model: &str| RunLane { idx, harness: "omp".into(), model: model.into(), cwd: format!("/w/{idx}").into(), branch: format!("harlo/run-{idx}"), session_file: PathBuf::new() };
-        db.add_run(&RunRecord { id: "r1".into(), title: "Cache".into(), prompt: "Add a cache".into(), project_id: 1, lanes: vec![lane(0, "a/x"), lane(1, "b/y")], ..Default::default() }).unwrap();
-        let mut l = lane(1, "b/y");
-        l.session_file = "/s/1.jsonl".into();
-        db.upsert_lane("r1", &l).unwrap();
-        db.upsert_lane("r1", &lane(1, "b/y")).unwrap();
-        db.set_run_kept("r1", 1).unwrap();
-        let runs = db.runs().unwrap();
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].kept, Some(1));
-        assert_eq!(runs[0].lanes[1].session_file, PathBuf::from("/s/1.jsonl"), "a known file is not cleared");
-        db.delete_run("r1").unwrap();
-        assert!(db.runs().unwrap().is_empty());
     }
 
     #[test]

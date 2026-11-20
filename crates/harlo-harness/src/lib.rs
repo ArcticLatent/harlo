@@ -1,13 +1,11 @@
-//! Harnesses (Harlo and Claude Code) and the translation of their
-//! protocols into one normalized event vocabulary.
+//! Harnesses (pi and the demo) and the translation of their protocols into
+//! one normalized event vocabulary.
 
 // Rust guideline compliant 2026-10-09
 
 mod demo;
 pub mod branches;
-pub mod claude;
-pub mod coding_plans;
-mod claude_run;
+pub mod cache;
 mod error;
 pub mod event;
 pub mod file_blocks;
@@ -19,7 +17,7 @@ pub mod store;
 
 pub use error::Error;
 pub use event::{BlockKind, HarnessEvent, HarnessKind, NoticeLevel, Translator};
-pub use process::{Answer, Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program};
+pub use process::{Answer, Harness, HarnessConfig, RemoteLaunch, SendMode, SessionTarget, image_from_file, on_host, resolve_program, set_pi_extensions};
 pub use store::SessionInfo;
 
 /// The thinking level of `available` nearest `want`.
@@ -101,23 +99,22 @@ pub fn set_remote_start(f: RemoteStart) {
     let _ = REMOTE_START.set(f);
 }
 
-/// The program a session of a kind runs on a remote host when harlo puts
-/// it there itself (Harlo's agent): its path there, or None (that machine's
-/// PATH finds it). Its error says why it can't be put there.
-pub type RemoteProgram = fn(&str, HarnessKind) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>>;
-static REMOTE_PROGRAM: std::sync::OnceLock<RemoteProgram> = std::sync::OnceLock::new();
+/// harlo's helper on a remote host (its sandbox, for pi): put there first
+/// if needed; its path there. Its error says why it can't be put there.
+pub type RemoteHelper = fn(&str) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+static REMOTE_HELPER: std::sync::OnceLock<RemoteHelper> = std::sync::OnceLock::new();
 
-pub fn set_remote_program(f: RemoteProgram) {
-    let _ = REMOTE_PROGRAM.set(f);
+pub fn set_remote_helper(f: RemoteHelper) {
+    let _ = REMOTE_HELPER.set(f);
 }
 
-/// The program to run on `host` for `kind` (see [`set_remote_program`]).
-pub(crate) fn remote_program(host: &str, kind: HarnessKind) -> Result<std::path::PathBuf, Error> {
-    let there = match REMOTE_PROGRAM.get() {
-        Some(f) => f(host, kind).map_err(|e| Error::new(error::ErrorKind::Start, error::chain(&*e)))?,
-        None => None,
-    };
-    Ok(there.map_or_else(|| std::path::PathBuf::from(kind.program_name()), std::path::PathBuf::from))
+/// harlo's helper on `host` (see [`set_remote_helper`]); None when nothing
+/// puts it there.
+pub(crate) fn remote_helper(host: &str) -> Result<Option<std::path::PathBuf>, Error> {
+    match REMOTE_HELPER.get() {
+        Some(f) => f(host).map(|p| Some(std::path::PathBuf::from(p))).map_err(|e| Error::new(error::ErrorKind::Start, error::chain(&*e))),
+        None => Ok(None),
+    }
 }
 
 /// The bridge an agent runs for harlo's tools, here or on its host, while

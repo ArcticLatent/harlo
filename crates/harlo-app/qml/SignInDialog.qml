@@ -16,7 +16,8 @@ AppDialog {
     standardButtons: Dialog.NoButton
 
     signal signedInOnHost()
-    signal mcpSignedIn(string scope, string server)
+    /// A sign-in that needs a terminal (pi's): harlo's terminal runs it.
+    signal runInTerminalRequested(string command)
     property string agent: ""
     property string agentLabel: ""
     /// "pick" or "flow".
@@ -42,31 +43,12 @@ AppDialog {
         Accounts.loadProviders(id)
         open()
     }
-    /// Harlo signing in to an MCP server of `scope` (straight to the flow).
-    function openForMcp(scope, server) {
-        agent = "harlo"
-        agentLabel = "Harlo"
-        chosen = { id: "mcp:" + server, name: "Sign in to " + server, scope: scope, server: server }
-        method = { id: scope }
-        search = ""
-        openedUrls = ({})
-        page = "flow"
-        Accounts.start(agent, chosen.id, scope)
-        open()
-    }
-    /// `agent` signing in to `provider` (OpenRouter), straight to the flow.
-    function openForProvider(id, provider, name) {
-        agent = id
-        agentLabel = Theme.harnessLabel(id.split("@")[0]) + (id.indexOf("@") >= 0 ? " on " + id.split("@")[1] : "")
-        chosen = { id: provider, name: name }
-        method = { id: provider }
-        search = ""
-        openedUrls = ({})
-        page = "flow"
-        Accounts.start(agent, provider, provider)
-        open()
-    }
     function begin(provider, m) {
+        if (m.type === "terminal") {
+            close()
+            runInTerminalRequested(m.command)
+            return
+        }
         chosen = provider
         method = m
         openedUrls = ({})
@@ -76,14 +58,8 @@ AppDialog {
     onClosed: {
         if (running) Accounts.cancel()
         const onHost = agent.indexOf("@") >= 0
-        if (flow && flow.state === "done" && chosen && chosen.server !== undefined) {
-            mcpSignedIn(chosen.scope, chosen.server)
-            return
-        }
         if (flow && flow.state === "done") {
             Workspace.refreshProviders()
-            // (A sign-in that saves a key: OpenRouter's.)
-            if (agent.split("@")[0] === "harlo") Accounts.loadCloud(agent)
             if (onHost) signedInOnHost()
         }
     }
@@ -112,6 +88,14 @@ AppDialog {
             visible: dlg.page === "pick"
             Layout.fillWidth: true
             spacing: 8
+            Label {
+                visible: (dlg.providers.list || []).some(p => p.methods.some(m => m.type === "terminal"))
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "pi signs in from a terminal: Sign in opens one in harlo with pi's sign-in. Providers not listed take an API key (Settings → Models)."
+                color: Theme.muted
+                font.pixelSize: Theme.px(12)
+            }
             AppTextField {
                 objectName: "signInSearch"
                 visible: (dlg.providers.list || []).length > 6
