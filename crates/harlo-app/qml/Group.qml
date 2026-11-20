@@ -8,7 +8,7 @@ Rectangle {
     Layout.fillWidth: true
     Layout.topMargin: 12
     implicitHeight: groupCol.implicitHeight
-    radius: 12
+    radius: 4
     color: Theme.raised
     border.color: Theme.hairline
     ColumnLayout { id: groupCol; width: parent.width; spacing: 0 }

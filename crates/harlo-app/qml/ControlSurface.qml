@@ -14,7 +14,7 @@ Item {
     /// The Button this is the background of (for hovered / down / enabled).
     property Item control: parent
     property string variant: "outline"
-    property real radius: 8
+    property real radius: 3
 
     readonly property bool hovered: control && control.hovered === true
     readonly property bool down: control && (control.down === true || control.pressed === true)

@@ -13,7 +13,7 @@ import XCTest
 @MainActor
 final class HarloUITests: XCTestCase {
     var app = XCUIApplication()
-    /// The main session: a fix, with its tool calls, questions and helpers.
+    /// The main session: a fix, with its tool calls and approvals.
     let main = "jumps to the top"
 
     override func setUp() async throws {
@@ -52,7 +52,7 @@ final class HarloUITests: XCTestCase {
     }
 
     /// Taps `text` in the conversation once it's above everything under it
-    /// (the message box, the plan, a side question): at the largest text
+    /// (the message box): at the largest text
     /// sizes it can sit under them, and the tap would land there (on the
     /// model's button, say).
     func tapInConversation(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -136,11 +136,10 @@ final class HarloUITests: XCTestCase {
         add(a)
     }
 
-    /// Opens the main session from the dashboard (not its helper's row,
-    /// which names it too).
+    /// Opens the main session from the dashboard.
     func openMain(file: StaticString = #filePath, line: UInt = #line) {
         let row = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@ AND NOT (label CONTAINS 'Helper of')", main)).firstMatch
+            .matching(NSPredicate(format: "label CONTAINS %@", main)).firstMatch
         guard row.waitForExistence(timeout: 8) else {
             XCTFail("the main session isn't listed", file: file, line: line)
             return
@@ -172,7 +171,7 @@ final class HarloUITests: XCTestCase {
     func test01Dashboard() {
         launch("end")
         see(main)
-        see("Have a subagent look over the README")
+        see("What does the README say about the app?")
         shot("01-dashboard")
         audit("dashboard")
         // (At the largest text sizes the third is below the fold: the list
@@ -200,26 +199,14 @@ final class HarloUITests: XCTestCase {
         showUnderHeader("Read 1 file")
         tap("Read 1 file")
         see("Ran command")
-        see("Run the tests")
+        see("./run-tests.sh")
         showUnderHeader("Read 1 file")
         shot("03-session-run")
-        // The command's card opened: the command and the end of its output.
-        tapInConversation("Run the tests")
-        see("./run-tests.sh")
+        // The command's card opened: the end of its output.
+        tapInConversation("./run-tests.sh")
         see("112 passed; 0 failed")
-        showUnderHeader("Run the tests")
+        showUnderHeader("./run-tests.sh")
         shot("04-command-output")
-    }
-
-    func test03Question() {
-        launch("ask")
-        openMain()
-        see("Should the list keep its place")
-        see("Match rows by key")
-        shot("05-question")
-        audit("question")
-        tap("Match rows by key")
-        shot("06-question-answered")
     }
 
     func test04Approval() {
@@ -246,58 +233,17 @@ final class HarloUITests: XCTestCase {
     func test06Working() {
         launch("working")
         openMain()
-        see("Look for other full rebuilds")
+        see("./build.sh")
         shot("10-working")
     }
 
-    func test07SideQuestionAndBackgroundJob() {
-        launch("aside")
+    func test08MCP() {
+        launch("mcp")
         openMain()
-        see("Because it only touches the rows")
-        // (The background command that ended, as its own row.)
-        see("Background command finished")
-        see("$ ./build.sh")
-        // The conversation's end in sight above the side question (it
-        // stopped short while the answer came in).
-        let last = element("The release build finished")
-        let bottom = app.otherElements["sessionBottom"]
-        XCTAssertTrue(see("The release build finished") && last.frame.maxY <= bottom.frame.minY + 2,
-                      "the end is above the side question (\(last.frame), \(bottom.frame))")
-        shot("11-side-question")
-    }
-
-    func test08HelperAndMCP() {
-        launch("helpers")
-        openMain()
-        // (30 s: on a slow simulator the session's first look takes long.)
-        see("bring over a helper's changes", timeout: 30)
-        see("Update the changelog finished")
-        shot("12-helper-report")
-        tapInConversation("Update the changelog finished")
-        // Opened: its plain line, then what the agent got, under its name.
-        see("As the agent got it")
-        shot("13-harlo-message-open")
         // An MCP server's tool, named in words.
         see("dice roll")
         tapInConversation("dice roll")
         shot("14-mcp-tool")
-    }
-
-    func test09Plan() {
-        launch("plan")
-        openMain()
-        // The plan's line above the composer, opened (once more if the
-        // first tap came while the transcript was still settling).
-        let line = element("of 3 done")
-        XCTAssertTrue(line.waitForExistence(timeout: 8), "the plan's line")
-        for _ in 0..<2 {
-            line.tap()
-            if app.navigationBars["Plan"].waitForExistence(timeout: 4) { break }
-        }
-        XCTAssertTrue(app.navigationBars["Plan"].exists, "the plan opens")
-        see("Test with 200 sessions")
-        shot("15-plan")
-        audit("plan")
     }
 
     /// The project's wiki from the session menu: what it owes the code, its
@@ -305,7 +251,7 @@ final class HarloUITests: XCTestCase {
     /// well, its footnotes), the pages' graph, and a search that opens its
     /// section.
     func test09bWiki() {
-        launch("plan")
+        launch("wiki")
         openMain()
         app.buttons["Session menu"].tap()
         tap("Wiki")
@@ -423,9 +369,9 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5), "the composer")
         field.tap()
         field.typeText("@")
-        see("Have a subagent look over")
+        see("What does the README say")
         shot("17-mention-list")
-        tap("Have a subagent look over")
+        tap("What does the README say")
         XCTAssertTrue(((field.value as? String) ?? "").contains("@session:"), "the session goes in as @session: (\(String(describing: field.value)))")
         shot("18-mention-picked")
     }
@@ -511,15 +457,6 @@ final class HarloUITests: XCTestCase {
         shot("22-action-log")
     }
 
-    func test14ClaudeSession() {
-        launch("end")
-        tap("Have a subagent look over")
-        // Its run folded; opened, the subagent's call.
-        tapInConversation("started 1 subagent")
-        see("Subagent")
-        shot("23-claude-session")
-    }
-
     func test14bBackAtTheEnd() {
         launch("end")
         // Opened, left for another session and opened again: at its end
@@ -547,8 +484,8 @@ final class HarloUITests: XCTestCase {
         openMain()
         atEnd("opened")
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        tap("Have a subagent look over")
-        see("started 1 subagent")
+        tap("What does the README say")
+        see("Sure: What does the README say")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         openMain()
         atEnd("opened again")

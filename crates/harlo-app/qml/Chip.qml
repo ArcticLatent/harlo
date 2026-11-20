@@ -7,7 +7,7 @@ import harlo
 Rectangle {
     property alias text: label.text
     property color fg: Theme.muted
-    radius: 4
+    radius: 2
     color: Theme.elevated
     border.color: Theme.border
     implicitWidth: label.implicitWidth + 14

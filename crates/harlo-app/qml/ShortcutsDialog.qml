@@ -20,7 +20,7 @@ Popup {
     padding: 0
     modal: true
     focus: true
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
 
 
@@ -33,7 +33,7 @@ Popup {
             id: card
             anchors.fill: parent
             implicitHeight: cardBody.implicitHeight
-            radius: 14
+            radius: 5
             // The glass behind it (the background) shows through.
             color: "transparent"
             ColumnLayout {
@@ -50,7 +50,7 @@ Popup {
                     Rectangle {
                         implicitWidth: 36
                         implicitHeight: 36
-                        radius: 9
+                        radius: 3
                         color: Theme.selected
                         Icon { anchors.centerIn: parent; name: "keyboard"; color: Theme.primary; implicitWidth: 20; implicitHeight: 20 }
                     }
@@ -67,7 +67,7 @@ Popup {
                         implicitHeight: 30
                         onClicked: root.close()
                         contentItem: Icon { name: "close"; color: closeButton.hovered ? Theme.foreground : Theme.muted }
-                        background: Rectangle { radius: 6; color: closeButton.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 2; color: closeButton.hovered ? Theme.hover : "transparent" }
                         ToolTip.visible: hovered
                         ToolTip.text: "Close (Esc)"
                     }
@@ -125,7 +125,7 @@ Popup {
                     Layout.bottomMargin: 1
                     implicitHeight: tips.implicitHeight + 28
                     color: Theme.subtle
-                    radius: 12
+                    radius: 6
                     // Square off the top corners.
                     Rectangle { width: parent.width; height: 12; color: parent.color }
                     // The palette's two prefixes (the rest is in the list).

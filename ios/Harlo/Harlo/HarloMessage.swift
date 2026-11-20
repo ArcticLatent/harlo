@@ -2,11 +2,9 @@ import HarloKit
 import SwiftUI
 import UIKit
 
-/// harlo's message to the agent (a helper's report, the answer to a
-/// split): harlo's mark, folded to its first lines (tap for the rest), and
-/// the session it's about to open. Not yours: no bubble.
+/// harlo's message to the agent (a workflow's note): harlo's mark, folded
+/// to its first lines (tap for the rest). Not yours: no bubble.
 struct HarloMessage: View {
-    @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let row: Row
     @State private var open = false
@@ -51,14 +49,6 @@ struct HarloMessage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
-            if !row.subtitle.isEmpty, let helper = model.sessions.first(where: { $0.key == row.subtitle }) {
-                Button("Open helper") {
-                    model.open(helper)
-                }
-                .scaledFont(14, .medium)
-                .foregroundStyle(Color(p.primary))
-                .buttonStyle(.plain)
-            }
         }
         .padding(.top, 4)
     }

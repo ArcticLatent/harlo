@@ -61,7 +61,7 @@ Popup {
         chosen(it.name, it.remote === true, it.kind === "create")
     }
 
-    background: GlassSurface { radius: 10 }
+    background: GlassSurface { radius: 4 }
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Math.round(Theme.motion * 0.55) }
         NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: Math.round(Theme.motion * 0.55); easing.type: Easing.OutCubic }
@@ -131,7 +131,7 @@ Popup {
                 Rectangle {
                     visible: !entry.header
                     anchors.fill: parent
-                    radius: 6
+                    radius: 2
                     color: (list.currentIndex === entry.index || hover.hovered) && !entry.modelData.current ? Theme.hover : "transparent"
                     RowLayout {
                         anchors.fill: parent

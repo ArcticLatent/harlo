@@ -107,7 +107,7 @@ struct WorkflowSheet: View {
             if canOpen(run.askingKey) {
                 Button("Open it") {
                     dismiss()
-                    model.openHelper(run.askingKey)
+                    model.openSession(run.askingKey)
                 }
                 .accessibilityHint("Opens the session that asks, to answer it")
                 .accessibilityIdentifier("workflowOpenAsking")

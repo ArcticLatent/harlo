@@ -22,6 +22,7 @@ harlo-apns = { path = "crates/harlo-apns" }
 harlo-okf = { path = "crates/harlo-okf" }
 harlo-index = { path = "crates/harlo-index", default-features = false }
 harlo-update-signing = { path = "crates/harlo-update-signing" }
+harlo-worktree = { path = "crates/harlo-worktree" }
 
 # Every other dependency, its version only: each crate names the features it uses.
 anyhow = "1"
@@ -125,7 +126,7 @@ opt-level = 3
 [profile.dev.package.vte]
 opt-level = 3
 
-# harlo-agent as shipped: one optimized unit (smaller, less memory per session).
+# harlo-helper as shipped to other machines: one optimized unit (smaller).
 [profile.agent]
 inherits = "release"
 lto = "fat"

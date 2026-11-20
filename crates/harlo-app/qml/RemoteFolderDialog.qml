@@ -100,7 +100,7 @@ AppDialog {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 300
-            radius: 8
+            radius: 3
             color: Theme.background
             border.color: Theme.border
             Label {
@@ -133,7 +133,7 @@ AppDialog {
                         Icon { name: "folder"; color: Theme.muted; implicitWidth: 15; implicitHeight: 15 }
                         Label { Layout.fillWidth: true; text: folderRow.modelData; color: Theme.foreground; font.pixelSize: Theme.px(13); elide: Text.ElideRight }
                     }
-                    background: Rectangle { radius: 6; color: folderRow.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: folderRow.hovered ? Theme.hover : "transparent" }
                     onClicked: dlg.openFolder(modelData)
                 }
             }

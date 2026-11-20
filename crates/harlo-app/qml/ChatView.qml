@@ -14,7 +14,7 @@ Rectangle {
     property alias fileEditor: fileEditor
     property alias askPanel: askPanel
     property alias draftView: draftView
-    property alias subagentDock: subagentDock
+    property alias workflowView: workflowView
     property alias todoDock: todoDock
     property alias requestDock: requestDock
     // A card above the composer, in the transcript's gutter; hidden while
@@ -30,9 +30,7 @@ Rectangle {
         color: Theme.elevated
         border.color: Theme.border
     }
-    property alias planDock: planDock
     property alias branchDialog: branchDialog
-    property alias subagentDialog: subagentDialog
     readonly property var statsView: statsLoader.item
     property alias diffView: diffView
     property alias unsavedDialog: unsavedDialog
@@ -93,10 +91,11 @@ Rectangle {
     signal openDiff(string path)
     signal fileSaved(string path)
     signal addProjectRequested()
-    signal workflowRequested(int projectId, string task, string agent, string model)
     signal signInOnHost(string agent, string host)
     /// A turn was undone: the folder's files changed.
     signal filesUndone()
+    /// Settings → Workflows (the New workflow page's Edit workflows…).
+    signal workflowSettingsRequested()
 
     // File tabs (`file:<path>`) show the editor; the chat session stays
     // bound underneath so the side panels keep following it.
@@ -224,10 +223,10 @@ Rectangle {
     // Branches of the active session's file (header button when > 1).
     property int branchCount: 0
     // (Read off the UI thread: a remote session's file over SSH. Sessions in
-    // the tree format, Harlo's, can branch.)
+    // the tree format, Harlo's and pi's, can branch.)
     function refreshBranches() {
         const file = Workspace.sessionFile(Workspace.activeKey)
-        if (file === "" || !["harlo", "demo"].includes(session.harness)) branchCount = 0
+        if (file === "" || !["pi", "demo"].includes(session.harness)) branchCount = 0
         else Workspace.requestSessionBranches(file)
     }
     Connections {
@@ -361,13 +360,18 @@ Rectangle {
                     Workspace.closeTab("view:new")
             }
             onAddProjectRequested: root.addProjectRequested()
-            onWorkflowRequested: (projectId, task, agent, model) => root.workflowRequested(projectId, task, agent, model)
         }
-        RunView {
+        WorkflowView {
+            id: workflowView
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: Workspace.activeKey.startsWith("view:run:")
-            runId: visible ? Workspace.activeKey.substring(9) : ""
+            visible: Workspace.activeKey === "view:workflow"
+            onStartedWorkflow: {
+                if (Workspace.tabs.some(t => t.startsWith("view:workflow\t")))
+                    Workspace.closeTab("view:workflow")
+            }
+            onEditWorkflowsRequested: root.workflowSettingsRequested()
+            onAddProjectRequested: root.addProjectRequested()
         }
         // (Built the first time it's shown, then kept: its period and
         // project stay picked.)
@@ -496,6 +500,17 @@ Rectangle {
             padding: 10
         }
 
+        // A pi extension's header (setHeader), over the conversation.
+        ExtensionPanels {
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.topMargin: visible ? 6 : 0
+            session: root.session
+            views: root.extViews
+            kinds: ["header"]
+        }
+
         Item {
             id: transcriptBox
             Layout.fillWidth: true
@@ -515,7 +530,6 @@ Rectangle {
                 onLeaveRuns: text => { if (text !== "") composer.insertText(text); else composer.focusInput() }
                 onEditRequested: row => root.session.editAndResend(row)
                 onUndoRequested: key => undoDialog.show(key)
-                onSubagentRequested: (agent, steer) => subagentDialog.show(agent, steer)
                 promptRail: Workspace.setting("prompt_rail") !== "0"
                 onPromptRailFinished: composer.focusInput()
                 visible: root.hasSession
@@ -538,7 +552,7 @@ Rectangle {
                 anchors.rightMargin: 16
                 width: Math.min(400, parent.width - 32)
                 height: 40
-                radius: 10
+                radius: 4
                 color: Theme.raised
                 border.color: Theme.border
                 z: 20
@@ -599,6 +613,29 @@ Rectangle {
                     ComposerIconButton { objectName: "findClose"; iconName: "close"; tip: "Close (Esc)"; onClicked: findBar.hide() }
                 }
             }
+            // A pi extension's overlays (custom() with overlay: true): over
+            // the conversation, the latest on top.
+            Rectangle {
+                objectName: "extOverlay"
+                visible: overlayPanels.count > 0 && root.hasSession
+                z: 30
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 24
+                width: Math.min(parent.width - 32, Math.max(360, parent.width * 0.7))
+                height: Math.min(parent.height - 48, overlayPanels.implicitHeight + 16)
+                radius: 4
+                color: Theme.raised
+                border.color: Theme.border
+                ExtensionPanels {
+                    id: overlayPanels
+                    x: 8
+                    y: 8
+                    width: parent.width - 16
+                    session: root.session
+                    views: root.extViews
+                    kinds: ["overlay"]
+                }
+            }
             // Scrolled back: the text fades out under the Latest button
             // rather than running into it.
             Rectangle {
@@ -636,76 +673,6 @@ Rectangle {
 
         }
 
-        // A side question (/btw) and its answer: apart from the
-        // conversation, until put away.
-        ChatCard {
-            id: asideCard
-            objectName: "asideCard"
-            readonly property var aside: session.asideJson !== "" ? JSON.parse(session.asideJson) : null
-            shown: aside !== null
-            implicitHeight: asideCol.implicitHeight + 20
-            ColumnLayout {
-                id: asideCol
-                x: 12
-                y: 10
-                width: parent.width - 24
-                spacing: 6
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-                    Icon { name: "chat-thread"; implicitWidth: 14; implicitHeight: 14; color: Theme.muted }
-                    PlainLabel {
-                        Layout.fillWidth: true
-                        text: asideCard.aside ? asideCard.aside.question : ""
-                        color: Theme.foreground
-                        font.bold: true
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 3
-                        elide: Text.ElideRight
-                    }
-                    Label {
-                        visible: asideCard.aside !== null && !asideCard.aside.done
-                        text: "answering…"
-                        color: Theme.muted
-                        font.pixelSize: Theme.px(11)
-                    }
-                    FlatButton {
-                        objectName: "asideDismiss"
-                        text: "Dismiss"
-                        font.pixelSize: Theme.px(12)
-                        onClicked: session.dismissAside()
-                    }
-                }
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(asideText.implicitHeight, Math.max(120, root.height * 0.35))
-                    visible: asideText.text !== ""
-                    clip: true
-                    contentWidth: availableWidth
-                    TextEdit {
-                        id: asideText
-                        width: parent.width
-                        readOnly: true
-                        selectByMouse: true
-                        text: !asideCard.aside ? "" : asideCard.aside.error ? asideCard.aside.error : asideCard.aside.text
-                        color: asideCard.aside && asideCard.aside.error ? Theme.error : Theme.foreground
-                        selectionColor: Theme.primary
-                        textFormat: asideCard.aside && asideCard.aside.error ? TextEdit.PlainText : TextEdit.MarkdownText
-                        wrapMode: TextEdit.Wrap
-                        font.pixelSize: Theme.px(13)
-                    }
-                }
-                Label {
-                    Layout.fillWidth: true
-                    visible: asideCard.aside !== null && asideCard.aside.done && !asideCard.aside.error
-                    text: "A side question: not part of the conversation, and not kept."
-                    color: Theme.muted
-                    font.pixelSize: Theme.px(11)
-                    wrapMode: Text.Wrap
-                }
-            }
-        }
-
         // The agent's `ask`: all of one call's questions together.
         AskPanel {
             id: askPanel
@@ -735,20 +702,6 @@ Rectangle {
             maxBodyHeight: Math.max(140, root.height * 0.45)
         }
 
-        // The shared plan (a project with the plan on).
-        PlanDock {
-            id: planDock
-            Layout.fillWidth: true
-            Layout.leftMargin: transcript.gutter
-            Layout.rightMargin: transcript.gutter
-            Layout.topMargin: 8
-            session: root.session
-            maxStepsHeight: Math.max(120, root.height * 0.2)
-            onChooseHelpers: composer.delegatePopover.show("run")
-            onChooseStepHelper: (id, agent, model) => composer.delegatePopover.showStep(id, agent, model)
-            visible: plan.enabled && steps.length > 0 && !root.covered
-        }
-
         // The workflow run the session is part of.
         WorkflowCard {
             id: workflowCard
@@ -773,23 +726,6 @@ Rectangle {
             visible: tasks.length > 0 && !root.covered
         }
 
-        // The agent's subagents (its task tool).
-        SubagentDock {
-            id: subagentDock
-            Layout.fillWidth: true
-            Layout.leftMargin: transcript.gutter
-            Layout.rightMargin: transcript.gutter
-            Layout.topMargin: 8
-            session: root.session
-            subagents: transcript.subagents
-            visible: agents.length > 0 && !root.covered
-            onViewRequested: (agent, steer) => subagentDialog.show(agent, steer)
-        }
-        SubagentDialog {
-            id: subagentDialog
-            parentSession: root.session
-        }
-
         // Messages waiting for the current run.
         Column {
             Layout.fillWidth: true
@@ -805,7 +741,7 @@ Rectangle {
                     required property string modelData
                     required property int index
                     // Every agent's can be dropped, and a follow-up sent now.
-                    readonly property bool editable: ["claude", "harlo", "demo"].includes(session.harness)
+                    readonly property bool editable: ["pi", "demo"].includes(session.harness)
                     width: parent.width
                     implicitHeight: 22
                     HoverHandler { id: queuedHover }
@@ -933,19 +869,19 @@ Rectangle {
         RowLayout {
             id: limitLine
             objectName: "limitLine"
-            // Whose limits: Claude's sign-in, or Harlo's Codex sign-in.
+            // Whose limits: Claude's sign-in (pi through its Claude
+            // subscription extension).
             readonly property string provider: {
                 const p = (session.modelId || "").split("/")[0]
-                if (session.harness === "claude") return "Claude"
-                if (session.harness === "harlo") return p === "codex" ? "openai-codex" : ""
+                if (session.harness === "pi") return p === "claude-bridge" ? "Claude" : ""
                 return ""
             }
-            // Its machine's limits (another's: what its Claude sessions said).
+            // This computer's limits (another machine's sessions: none).
             readonly property string host: (/^ssh:\/\/([^\/]+)/.exec(session.cwd) || [])[1] || ""
             function accountsHere() {
                 try {
                     if (host === "") return JSON.parse(Workspace.quotaJson || "{}").accounts || []
-                    return (JSON.parse(Workspace.hostLimitsJson || "{}")[host] || {}).accounts || []
+                    return []
                 } catch (e) { return [] }
             }
             // Its fullest window of 90% or more.
@@ -1095,18 +1031,81 @@ Rectangle {
             font.pixelSize: Theme.px(12)
         }
 
+        // A pi extension's screen (custom()) and widgets above the message box.
+        ExtensionPanels {
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.topMargin: visible ? 8 : 0
+            visible: count > 0 && !root.covered
+            session: root.session
+            views: root.extViews
+            kinds: ["screen", "widget"]
+            placement: "aboveEditor"
+        }
+
         Composer {
             id: composer
             Layout.fillWidth: true
             Layout.fillHeight: expanded
             Layout.leftMargin: transcript.gutter
             Layout.rightMargin: transcript.gutter
-            Layout.bottomMargin: 16
+            Layout.bottomMargin: belowPanels.visible ? 6 : 16
             Layout.topMargin: 8
             visible: root.hasSession && !root.covered
             session: root.session
             onSubmitted: (text, mode) => root.submit(text, mode)
             onSignInOnHost: (agent, host) => root.signInOnHost(agent, host)
+        }
+
+        // A pi extension's widgets below the message box, and its footer.
+        ExtensionPanels {
+            id: belowPanels
+            Layout.fillWidth: true
+            Layout.leftMargin: transcript.gutter
+            Layout.rightMargin: transcript.gutter
+            Layout.bottomMargin: visible ? 12 : 0
+            session: root.session
+            views: root.extViews
+            kinds: ["widget", "footer"]
+            placement: "belowEditor"
+        }
+    }
+
+    // pi extensions' views (screens, widgets, overlays…; tool calls and
+    // messages are drawn in the conversation).
+    readonly property var extViews: root.session.extViewsJson !== "" ? JSON.parse(root.session.extViewsJson) : []
+    // The size an extension draws a new view for, until the view says its
+    // own: the conversation's column, in the code font's cells.
+    ExtensionLines { id: extCell; visible: false; fontFamily: Theme.mono; fontPixelSize: Theme.mpx(13) }
+    readonly property int extCols: Math.max(20, Math.floor((transcript.columnWidth - 16) / Math.max(1, extCell.cellWidth)))
+    readonly property int extRows: Math.max(8, Math.floor(transcriptBox.height / Math.max(1, extCell.cellHeight)))
+    function sendExtSize() {
+        if (root.session.harness !== "pi") return
+        root.session.extInput("", JSON.stringify({ op: "size", width: root.extCols, rows: root.extRows }))
+        root.sendExtLook()
+    }
+    // harlo's colours, which the extensions draw with (pi's theme tokens).
+    function sendExtLook() { if (root.session.harness === "pi") root.session.extInput("", JSON.stringify(Object.assign({ op: "theme" }, Theme.piColors))) }
+    readonly property var extLook: Theme.piColors
+    onExtLookChanged: root.sendExtLook()
+    onExtColsChanged: extSizeLater.restart()
+    onExtRowsChanged: extSizeLater.restart()
+    Timer { id: extSizeLater; interval: 200; onTriggered: root.sendExtSize() }
+    Connections {
+        target: root.session
+        // (Bound again: a new pi, or the same one with new extensions.)
+        function onExtShortcutsChanged() { root.sendExtSize() }
+        function onExtOpenUrl(url) { Qt.openUrlExternally(url) }
+    }
+    // The extensions' own keys ("ctrl+shift+x"): passed on to them.
+    Instantiator {
+        model: root.session.extShortcuts
+        delegate: Shortcut {
+            required property string modelData
+            sequence: Keymap.fromPiKey(modelData)
+            enabled: sequence !== "" && root.hasSession && !root.covered
+            onActivated: root.session.extInput("", JSON.stringify({ op: "shortcut", key: modelData }))
         }
     }
 
@@ -1155,7 +1154,7 @@ Rectangle {
         ToolTip.text: "Latest"
         ToolTip.delay: 400
         accent: Theme.primary
-        radius: 14
+        radius: 5
         onClicked: transcript.scrollToEnd()
     }
 }

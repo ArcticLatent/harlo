@@ -26,6 +26,11 @@ struct ToolCard: View {
     }
 
     var running: Bool { row.state == "running" }
+    /// A pi extension's drawing of the call and its result.
+    var ext: ExtView? {
+        guard !row.callId.isEmpty else { return nil }
+        return model.session?.extViews.first { $0.kind == "tool" && $0.toolCallId == row.callId }
+    }
     /// A workflow's report, said in words.
     var report: WorkflowReport? { row.workflowReport }
     var symbol: String { Style.toolSymbol(row.title) }
@@ -61,7 +66,7 @@ struct ToolCard: View {
                                 .foregroundStyle(Color(p.muted))
                                 .lineLimit(2)
                         } else if !row.subtitle.isEmpty && line.words {
-                            // (A question, a task, a helper's title: words,
+                            // (A question, a task: words,
                             // cut at the end.)
                             Text(line.text)
                                 .scaledFont(14)
@@ -87,6 +92,18 @@ struct ToolCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if let ext, !(ext.lines + ext.result).isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !ext.lines.isEmpty {
+                        ExtBlocks(lines: ext.lines, blocks: ext.blocks)
+                    }
+                    if !ext.result.isEmpty {
+                        ExtBlocks(lines: ext.result, blocks: ext.resultBlocks)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+            }
             if !row.images.isEmpty && model.showsPictures {
                 PictureStrip(paths: row.images, side: 72)
                     .padding(.horizontal, 12)

@@ -21,7 +21,7 @@ Menu {
 
     background: GlassSurface {
         implicitWidth: 210
-        radius: 10
+        radius: 4
     }
 
     enter: Transition {

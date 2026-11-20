@@ -133,7 +133,7 @@ Rectangle {
                         color: root.filter === filterChip.modelData.id ? Theme.text : Theme.textMuted
                         font.pixelSize: Theme.px(12)
                     }
-                    background: ControlSurface { control: filterChip; variant: root.filter === filterChip.modelData.id ? "selected" : "outline"; radius: 14 }
+                    background: ControlSurface { control: filterChip; variant: root.filter === filterChip.modelData.id ? "selected" : "outline"; radius: 5 }
                 }
             }
         }

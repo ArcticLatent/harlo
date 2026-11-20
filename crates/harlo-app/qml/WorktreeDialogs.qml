@@ -19,8 +19,7 @@ Item {
         // (Read off the UI thread: a remote project's over SSH.)
         baseBox.model = []
         Workspace.requestBranches(projectId)
-        harnessBox.providers = JSON.parse(Workspace.chatProvidersJson())
-        harnessBox.currentIndex = Math.max(0, harnessBox.providers.findIndex(p => p.id === harness))
+        newDialog.harness = harness
         newDialog.open()
         branchField.selectAll()
         branchField.forceActiveFocus()
@@ -62,6 +61,7 @@ Item {
     AppDialog {
         id: newDialog
         property int projectId: -1
+        property string harness: ""
         modal: true
         anchors.centerIn: Overlay.overlay
         width: 440
@@ -69,7 +69,7 @@ Item {
             DialogButton { text: "Create"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; enabled: branchField.text.trim() !== "" && baseBox.count > 0 }
             DialogButton { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
         }
-        onAccepted: Workspace.newWorktreeSession(projectId, branchField.text.trim(), baseBox.currentText, harnessBox.providers[harnessBox.currentIndex] ? harnessBox.providers[harnessBox.currentIndex].id : "")
+        onAccepted: Workspace.newWorktreeSession(projectId, branchField.text.trim(), baseBox.currentText, harness)
         GridLayout {
             width: parent.width
             columns: 2
@@ -79,8 +79,6 @@ Item {
             AppTextField { id: branchField; Layout.fillWidth: true; onAccepted: if (text.trim() !== "") newDialog.accept() }
             Label { text: "From" }
             ComboField { id: baseBox; Layout.fillWidth: true }
-            Label { text: "Provider" }
-            ComboField { id: harnessBox; property var providers: []; Layout.fillWidth: true; model: providers.map(p => p.label); marks: providers.map(p => p.id) }
             Label {
                 Layout.columnSpan: 2
                 Layout.fillWidth: true
@@ -119,7 +117,7 @@ Item {
                 wrapMode: TextEdit.NoWrap
                 color: Theme.foreground
                 selectionColor: Theme.selection
-                background: Rectangle { radius: 6; color: Theme.background; border.color: setupArea.activeFocus ? Theme.primary : Theme.border }
+                background: Rectangle { radius: 2; color: Theme.background; border.color: setupArea.activeFocus ? Theme.primary : Theme.border }
             }
         }
     }

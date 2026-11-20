@@ -18,10 +18,6 @@ Popup {
     signal setupRequested()
     /// Signing an agent in to a model provider.
     signal signInRequested(string agent, string label)
-    /// Straight to signing `agent` in to `provider` (OpenRouter).
-    signal providerSignInRequested(string agent, string provider, string name)
-    /// Harlo signing in to an MCP server of `scope`.
-    signal mcpSignInRequested(string scope, string server)
     /// MCP sign-in: run this in a terminal.
     signal runInTerminalRequested(string command)
     /// A file to open in harlo's editor (an agent's config, a log).
@@ -41,20 +37,18 @@ Popup {
         { id: "notifications", title: "Notifications", icon: "notification-3", group: "basics", keywords: "notify desktop alert finished input" },
         { id: "shortcuts", title: "Shortcuts", icon: "command", group: "basics", keywords: "keyboard keys hotkeys" },
         { id: "voice", title: "Voice", icon: "mic", group: "basics", keywords: "voice speech dictation microphone mic whisper transcribe speak" },
-        { id: "providers", title: "Agents", icon: "robot-2", group: "agents", keywords: "agents providers harnesses harlo claude code binary path program version install update enable disable sign in login log in account accounts oauth credentials sandbox bubblewrap network helpers subagents fallback limit token budget" },
+        { id: "providers", title: "Agents", icon: "robot-2", group: "agents", keywords: "agents providers harnesses harlo claude code binary path program version install update enable disable sign in login log in account accounts oauth credentials sandbox bubblewrap network" },
         { id: "models", title: "Models", icon: "brain-ai-3", group: "agents", keywords: "models cloud providers api key keys anthropic openai gemini openrouter xai deepseek mistral groq cerebras together opencode coding plans glm kimi minimax prices ssh machines share keys" },
         { id: "servers", title: "Local models", icon: "server", group: "agents", keywords: "model servers local models ollama lm studio llama.cpp vllm sglang gateway openai compatible custom provider providers.json harlo basalt" },
-        { id: "projects", title: "Projects", icon: "folder-3", group: "projects", keywords: "project icon colour color name harness setup remove wiki okf docs plan steps commit review" },
+        { id: "projects", title: "Projects", icon: "folder-3", group: "projects", keywords: "project icon colour color name harness setup remove wiki okf docs" },
         { id: "git", title: "Git", icon: "git-repository", group: "projects", keywords: "undo snapshot turn revert rollback github gitlab forgejo codeberg gitea hosting sign in login token credentials changes count repository hidden sidebar uncommitted commit message model ai" },
         { id: "worktrees", title: "Worktrees", icon: "git-branch", group: "projects", keywords: "worktree folder location branch settled shelf finished merged closed pull request quiet archive" },
         { id: "wiki", title: "Wiki", icon: "book-open", group: "projects", keywords: "wiki okf writer model agent thinking create update continue cheaper cheap cost tokens spend" },
         { id: "workflows", title: "Workflows", icon: "list-check-2", group: "automation", keywords: "workflow workflows implement verify check checks tests review reviewer stages run runs pipeline lint clippy security retry tries fixes" },
         { id: "schedules", title: "Schedules", icon: "history", group: "automation", keywords: "schedule scheduled prompt cron timer daily weekday every hour morning automatic run" },
-        { id: "orchestration", title: "Teamwork", icon: "ai-agent", group: "automation", keywords: "orchestration handoff advisor committee second opinion delegate subagent agents start sessions mcp tools teamwork" },
         { id: "devices", title: "Phone", icon: "smartphone", group: "connections", keywords: "phone pair device mobile qr tailscale remote access devices" },
         { id: "remote", title: "Other machines", icon: "terminal-box", group: "connections", keywords: "remote ssh server host machine nas instance connect remote instances other machines" },
-        { id: "mcp", title: "Tools for agents", icon: "node-tree", group: "connections", keywords: "mcp tool servers model context protocol tools stdio http oauth tools for agents" },
-        { id: "lsp", title: "Code intelligence", icon: "code-box", group: "connections", keywords: "lsp code intelligence language server servers definition references calls rust-analyzer pyright gopls clangd typescript" },
+        { id: "mcp", title: "Tools for agents", icon: "node-tree", group: "connections", keywords: "mcp tool servers model context protocol tools stdio http oauth tools for agents harlo sessions approval" },
         { id: "usage", title: "Usage", icon: "bar-chart-2", group: "end", keywords: "stats statistics tokens cost models tools" },
         { id: "about", title: "About Harlo", icon: "information", group: "end", keywords: "about version release licence license mit website source code github changelog what's new report problem issue bug logs diagnostics debug protocol traffic crash" },
     ]
@@ -100,7 +94,7 @@ Popup {
     padding: 0
     modal: true
     focus: true
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
     onOpened: searchField.forceActiveFocus()
     enter: Transition {
@@ -121,7 +115,7 @@ Popup {
         Rectangle {
             id: card
             anchors.fill: parent
-            radius: 14
+            radius: 5
             color: "transparent"
             clip: true
 
@@ -154,7 +148,7 @@ Popup {
                     // A shade over the glass.
                     // (Opened over the page, it's solid.)
                     color: Theme.glass && !root.navOpen ? Qt.rgba(Theme.chrome.r, Theme.chrome.g, Theme.chrome.b, 0.6) : Theme.chrome
-                    radius: 13
+                    radius: 4
                     topRightRadius: 0
                     bottomRightRadius: 0
                     Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.hairline }
@@ -175,7 +169,7 @@ Popup {
                             leftPadding: 12
                             onClicked: { root.navOpen = true; searchField.forceActiveFocus() }
                             contentItem: Icon { name: "search"; color: navSearch.hovered ? Theme.foreground : Theme.textMuted; implicitWidth: 16; implicitHeight: 16 }
-                            background: Rectangle { radius: 9; color: navSearch.hovered ? Theme.rowHover : "transparent" }
+                            background: Rectangle { radius: 3; color: navSearch.hovered ? Theme.rowHover : "transparent" }
                             ToolTip.visible: hovered
                             ToolTip.text: "Search settings"
                         }
@@ -295,7 +289,7 @@ Popup {
                                                         elide: Text.ElideRight
                                                     }
                                                 }
-                                                background: Rectangle { radius: 9; color: navItem.current ? Theme.rowSelected : navItem.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+                                                background: Rectangle { radius: 3; color: navItem.current ? Theme.rowSelected : navItem.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
                                                 // (From a search: to the row it matched.)
                                                 onClicked: { if (root.query.trim() !== "") root.seekTo(modelData.id, root.query.trim()); else root.page = modelData.id; root.navOpen = false }
                                             }
@@ -352,7 +346,7 @@ Popup {
                         implicitHeight: 30
                         onClicked: root.close()
                         contentItem: Icon { name: "close"; color: closeButton.hovered ? Theme.foreground : Theme.muted }
-                        background: Rectangle { radius: 6; color: closeButton.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 2; color: closeButton.hovered ? Theme.hover : "transparent" }
                         ToolTip.visible: hovered
                         ToolTip.text: "Close (Esc)"
                     }
@@ -385,26 +379,9 @@ Popup {
                 id: usageColumn
                 spacing: 0
                 PageTitle { }
-                // Other machines: those connected, or whose limits were seen.
-                readonly property var limitHosts: {
-                    const seen = (() => { try { return JSON.parse(Workspace.hostLimitsJson || "{}") } catch (e) { return {} } })()
-                    const hosts = Remotes.revision >= 0 ? JSON.parse(Remotes.hostsJson()) : []
-                    return hosts.filter(h => h.state === "connected" || seen[h.name] !== undefined).map(h => h.name)
-                }
                 PlanLimits {
                     Layout.fillWidth: true
                     Layout.bottomMargin: 8
-                    title: usageColumn.limitHosts.length > 0 ? "Plan limits on this PC" : "Plan limits"
-                }
-                Repeater {
-                    model: usageColumn.limitHosts
-                    PlanLimits {
-                        required property string modelData
-                        host: modelData
-                        Layout.fillWidth: true
-                        Layout.topMargin: 8
-                        Layout.bottomMargin: 8
-                    }
                 }
                 // Spending limits: per session and per day, in dollars.
                 ColumnLayout {
@@ -420,7 +397,7 @@ Popup {
                     SectionHeader {
                         title: "Spending limits"
                         subtitle: "Today so far, since midnight: $" + (spendLimits.spend.today || 0).toFixed(2) + " in Harlo's sessions. Past a limit, Harlo stops the run until you allow more."
-                        more: "Costs are what the agents report: Claude Code at the end of each turn, Harlo after each request. Harlo on a ChatGPT plan or on a model server marked free (it runs on your own hardware) costs nothing extra. On a model with no price its cost isn't known, so the limits can't count it: give the server a price in Model servers. Empty: no limit."
+                        more: "Costs are what the agents report after each request. A model server marked free (it runs on your own hardware) costs nothing extra. On a model with no price its cost isn't known, so the limits can't count it: give the server a price in Model servers. Empty: no limit."
                     }
                     // (Sessions open now whose costs the limits can't count.)
                     FormNote {
@@ -532,7 +509,7 @@ Popup {
                     Layout.fillWidth: true
                     sourceComponent: ({
                         general: generalPage, appearance: appearancePage, notifications: notificationsPage, voice: voicePage, devices: devicesPage,
-                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, workflows: workflowsPage, providers: providersPage, models: modelsPage, lsp: lspPage, servers: serversPage, remote: remotePage, mcp: mcpPage, orchestration: orchestrationPage,
+                        shortcuts: shortcutsPage, projects: projectsPage, wiki: wikiPage, worktrees: worktreesPage, git: gitPage, schedules: schedulesPage, workflows: workflowsPage, providers: providersPage, models: modelsPage, servers: serversPage, remote: remotePage, mcp: mcpPage,
                         about: aboutPage
                     })[root.page] || null
                 }
@@ -542,7 +519,7 @@ Popup {
                 id: flash
                 objectName: "settingsSeekFlash"
                 opacity: 0
-                radius: 12
+                radius: 4
                 color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12)
                 border.color: Theme.accent
                 border.width: 1
@@ -917,23 +894,23 @@ Popup {
                 }
             }
             Rule { }
-            SectionHeader { title: "Commit messages"; subtitle: "The ✦ button in the Changes panel has a model write the message for the staged changes (or all changes): Harlo's, or Claude Code's when Harlo can't, with no tools and nothing saved." }
+            SectionHeader { title: "Commit messages"; subtitle: "The ✦ button in the Changes panel has pi write the message for the staged changes (or all changes), with no tools and nothing saved." }
             Group {
                 SettingRow {
                     id: commitModelRow
                     property string saved: Workspace.setting("commit_model")
-                    readonly property var prov: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(p => p.id === "harlo") || null : null
+                    readonly property var prov: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).find(p => p.id === "pi") || null : null
                     readonly property var ids: prov ? prov.modelIds || [] : []
                     // (One it no longer lists stays a choice.)
                     readonly property var choices: saved === "" || ids.indexOf(saved) >= 0 ? ids : ids.concat([saved])
                     Component.onCompleted: Workspace.ensureProviders()
                     title: "Model"
-                    detail: "One of Harlo's: a small, fast one is plenty. Claude Code writes it when Harlo can't, with Haiku." + (ids.length === 0 ? " Harlo lists its models once it's signed in." : "")
+                    detail: "One of pi's: a small, fast one is plenty." + (ids.length === 0 ? " pi lists its models once a provider is signed in." : "")
                     icon: "sparkling"
                     ComboField {
                         objectName: "commitModel"
                         width: 240
-                        model: ["Harlo's default"].concat(commitModelRow.choices.map(id => { const i = commitModelRow.ids.indexOf(id); return i >= 0 ? Theme.modelLabel((commitModelRow.prov.models || [])[i] || id) : id }))
+                        model: ["pi's default"].concat(commitModelRow.choices.map(id => { const i = commitModelRow.ids.indexOf(id); return i >= 0 ? Theme.modelLabel((commitModelRow.prov.models || [])[i] || id) : id }))
                         currentIndex: commitModelRow.choices.indexOf(commitModelRow.saved) + 1
                         onActivated: i => {
                             commitModelRow.saved = i === 0 ? "" : commitModelRow.choices[i - 1]
@@ -1124,73 +1101,7 @@ Popup {
         McpPage {
             compact: root.compact
             footerHost: root.pageFooter
-            onSignInRequested: (scope, server) => root.mcpSignInRequested(scope, server)
-        }
-    }
-
-    Component {
-        id: orchestrationPage
-        ColumnLayout {
-            spacing: 0
-
-            SectionHeader {
-                title: "Agents drive Harlo"
-                subtitle: "Agents in Harlo can start sessions with other agents, send them messages, read their replies and stop them. The sessions an agent starts show under its own as its helpers: each one reports back to it when it finishes, can ask it questions, and it's told when one waits for you. Any agent can also ask you to approve a step; only you can answer. Harlo hands these tools to each session it starts (Claude Code's on a host need python3 there); outside Harlo, agents don't have them."
-            }
-            Group {
-                SettingRow {
-                    title: "Teamwork"
-                    detail: Workspace.orchestrationOn ? "On: agents get Harlo's tools, and the composer has the Delegate button (hand off, second opinion, committee, split)."
-                                                      : "Off: agents get no Harlo tools, and there's no Delegate button."
-                    icon: "ai-agent"
-                    AppSwitch {
-                        objectName: "orchEnabled"
-                        checked: Workspace.orchestrationOn
-                        onToggled: { Workspace.setOrchestrationEnabled(checked); checked = Qt.binding(() => Workspace.orchestrationOn) }
-                    }
-                }
-                SettingRow {
-                    id: selfStart
-                    visible: Workspace.orchestrationOn
-                    divider: true
-                    // "1" on their own, "asked" only when asked, else they offer.
-                    property string mode: Workspace.setting("orchestration_on_their_own")
-                    readonly property int choice: mode === "asked" ? 0 : mode === "1" ? 2 : 1
-                    title: "Agents start helpers"
-                    detail: ["Only when you ask: for another agent or session, or with the Delegate button. Otherwise they do the work themselves.",
-                             "When you ask, and they offer a split when a task has parts that could be done at the same time: you decide, and Harlo starts the helpers if you agree.",
-                             "On their own: when another agent's work would help (a second opinion, parallel work, another model)."][choice]
-                        + " For sessions started from now on."
-                    icon: "node-tree"
-                    ComboField {
-                        objectName: "orchSelfStart"
-                        width: 190
-                        model: ["Only when I ask", "Ask me first", "On their own"]
-                        currentIndex: selfStart.choice
-                        onActivated: i => {
-                            selfStart.mode = ["asked", "", "1"][i]
-                            Workspace.setSetting("orchestration_on_their_own", selfStart.mode)
-                        }
-                    }
-                }
-                SettingRow {
-                    id: reviewSteps
-                    visible: Workspace.orchestrationOn
-                    divider: true
-                    // ("" on, the default; "0" off.)
-                    property bool reviews: Workspace.setting("plan_review") !== "0"
-                    title: "Review each step"
-                    detail: reviews ? "When a plan runs with helpers, another session of the same agent reviews each finished step before the next one starts. Problems go back to the step's helper once; if the review still finds some, the run pauses for you."
-                               : "Off: a plan's steps follow each other as soon as their helpers report."
-                    icon: "eye"
-                    AppSwitch {
-                        objectName: "orchReviewSteps"
-                        checked: reviewSteps.reviews
-                        onToggled: { Workspace.setSetting("plan_review", checked ? "" : "0"); reviewSteps.reviews = checked }
-                    }
-                }
-            }
-
+            onRunInTerminalRequested: command => root.runInTerminalRequested(command)
         }
     }
 
@@ -1199,7 +1110,6 @@ Popup {
         RemotePage {
             compact: root.compact
             onRunInTerminalRequested: command => root.runInTerminalRequested(command)
-            onSignInRequested: (agent, label) => root.signInRequested(agent, label)
         }
     }
 
@@ -1212,124 +1122,9 @@ Popup {
     }
 
     Component {
-        id: lspPage
-        ColumnLayout {
-            spacing: 0
-            SectionHeader {
-                title: "Language servers"
-                subtitle: "The ones installed on this computer; Harlo finds them, it doesn't install them."
-            }
-            Group {
-                // The language servers found here (it doesn't install them).
-                SettingRow {
-                    id: codeIntel
-                    readonly property var info: Accounts.languageServers === "" ? ({}) : JSON.parse(Accounts.languageServers)
-                    title: "Code intelligence"
-                    detail: "Harlo asks a language server where code is defined, used and called from."
-                    more: "For when a text search can't tell same-named things apart, for far fewer tokens on those questions. It uses the servers installed on this computer: install one for a language you work in, then start a new session."
-                        + (codeIntel.info.state === "failed" ? "\n" + codeIntel.info.error : "")
-                    icon: "code-box"
-                    Component.onCompleted: Accounts.loadLanguageServers()
-                    FlatButton {
-                        objectName: "harloLanguageServersCheck"
-                        text: codeIntel.info.state === "loading" ? "Checking…" : "Check again"
-                        enabled: codeIntel.info.state !== "loading"
-                        font.pixelSize: Theme.px(12)
-                        onClicked: Accounts.loadLanguageServers()
-                    }
-                }
-                ColumnLayout {
-                    objectName: "harloLanguageServers"
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 60
-                    Layout.rightMargin: 16
-                    Layout.bottomMargin: 14
-                    spacing: 10
-                    // Copies through a hidden TextEdit (QML has no clipboard API).
-                    TextEdit {
-                        id: lspCopier
-                        visible: false
-                        function copyText(t) { text = t; selectAll(); copy(); deselect(); text = "" }
-                    }
-                    Repeater {
-                        model: codeIntel.info.list || []
-                        // Each language: its name, then where its server is or how to install it.
-                        ColumnLayout {
-                            id: lsRow
-                            required property var modelData
-                            readonly property bool ready: modelData.state === "ready"
-                            readonly property bool broken: modelData.state === "broken"
-                            readonly property bool command: !ready && modelData.install.indexOf("Install ") !== 0
-                            Layout.fillWidth: true
-                            spacing: 2
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-                                Icon {
-                                    name: lsRow.ready ? "checkbox-circle" : "close-circle"
-                                    color: lsRow.ready ? Theme.success : lsRow.broken ? Theme.warning : Theme.textMuted
-                                    implicitWidth: 14
-                                    implicitHeight: 14
-                                }
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: lsRow.modelData.language + (lsRow.ready ? "" : lsRow.broken ? " · doesn't start" : " · not installed")
-                                    color: Theme.text
-                                    font.pixelSize: Theme.px(12.5)
-                                    elide: Text.ElideRight
-                                }
-                                // (Hidden, not removed, so every row is as tall.)
-                                FlatButton {
-                                    opacity: lsRow.command ? 1 : 0
-                                    enabled: lsRow.command
-                                    text: "Copy"
-                                    font.pixelSize: Theme.px(11.5)
-                                    onClicked: lspCopier.copyText(lsRow.modelData.install)
-                                }
-                            }
-                            // Why, in its first clause; all of it (and the
-                            // program's path) on hover.
-                            Label {
-                                id: lsWhy
-                                objectName: "lspWhy"
-                                visible: lsRow.broken
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                readonly property string full: lsRow.modelData.path + ": " + lsRow.modelData.why.replace(/\.+$/, "") + "."
-                                text: lsRow.modelData.why.split(/[,;:] | because /)[0].replace(/\.+$/, "") + "."
-                                color: Theme.warning
-                                font.pixelSize: Theme.px(12)
-                                elide: Text.ElideRight
-                                HoverHandler { id: lsWhyHover }
-                                ToolTip.visible: lsWhyHover.hovered
-                                ToolTip.text: lsWhy.full
-                                ToolTip.delay: 300
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 22
-                                text: lsRow.ready ? lsRow.modelData.path : lsRow.modelData.install
-                                color: Theme.textMuted
-                                font.family: lsRow.ready || lsRow.command ? Theme.mono : Theme.uiFont
-                                font.pixelSize: Theme.px(12)
-                                // (A path shortened in the middle; a command in full.)
-                                elide: lsRow.ready ? Text.ElideMiddle : Text.ElideNone
-                                wrapMode: lsRow.ready ? Text.NoWrap : Text.Wrap
-                                ToolTip.visible: lsHover.hovered && truncated
-                                ToolTip.text: text
-                                HoverHandler { id: lsHover }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Component {
         id: modelsPage
         ModelsPage {
-            onProviderSignInRequested: (agent, provider, name) => root.providerSignInRequested(agent, provider, name)
+            onRunInTerminalRequested: command => root.runInTerminalRequested(command)
         }
     }
 
@@ -1337,7 +1132,6 @@ Popup {
         id: providersPage
         ProvidersPage {
             onSignInRequested: (agent, label) => root.signInRequested(agent, label)
-            onProviderSignInRequested: (agent, provider, name) => root.providerSignInRequested(agent, provider, name)
         }
     }
 }

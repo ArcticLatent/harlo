@@ -64,7 +64,7 @@ Popup {
     padding: 0
     modal: true
     focus: true
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
 
     contentItem: Item {

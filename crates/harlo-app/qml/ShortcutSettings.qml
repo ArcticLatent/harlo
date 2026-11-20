@@ -98,7 +98,7 @@ ColumnLayout {
         objectName: "keyChip-" + key.id
         implicitWidth: Math.max(56, chipLabel.implicitWidth + 20)
         implicitHeight: 26
-        radius: 6
+        radius: 2
         color: recording ? Theme.accentSoft
              : chipHover.hovered ? Theme.controlFillHover
              : unset ? "transparent" : Theme.controlFill
@@ -184,7 +184,7 @@ ColumnLayout {
                                 padding: 0
                                 onClicked: { Keymap.reset(keySlot.modelData.id); root.note = null }
                                 contentItem: Item { Icon { anchors.centerIn: parent; name: "arrow-go-back"; color: resetKey.hovered ? Theme.text : Theme.textMuted; implicitWidth: 13; implicitHeight: 13 } }
-                                background: Rectangle { radius: 5; color: resetKey.hovered ? Theme.hover : "transparent" }
+                                background: Rectangle { radius: 2; color: resetKey.hovered ? Theme.hover : "transparent" }
                                 Accessible.name: "Reset to " + (Keymap.defaults[keySlot.modelData.id] || "none")
                                 ToolTip.visible: hovered
                                 ToolTip.text: Accessible.name

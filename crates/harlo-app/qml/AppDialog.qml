@@ -12,7 +12,7 @@ Dialog {
     topPadding: title !== "" ? 6 : 20
     bottomPadding: 12
 
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
 
     // Long titles (file paths) elide instead of widening the dialog; the

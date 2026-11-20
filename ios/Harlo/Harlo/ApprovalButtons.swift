@@ -17,6 +17,13 @@ struct ApprovalButtons: View {
     }
 
     var body: some View {
+        buttons
+            // (While its answer is on its way: one answer per request.)
+            .disabled(model.answering.contains(request.id))
+            .opacity(model.answering.contains(request.id) ? 0.55 : 1)
+    }
+
+    @ViewBuilder var buttons: some View {
         if request.approval && !request.options.isEmpty {
             if options.count <= 2 {
                 HStack(spacing: 10) {
@@ -64,9 +71,11 @@ struct ApprovalButtons: View {
     }
 
     func answer(_ value: JSON) {
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
         Task {
-            if let key { await model.answer(request, value, in: key) } else { await model.answer(request, value) }
+            let taken = if let key { await model.answer(request, value, in: key) } else { await model.answer(request, value) }
+            // (Felt once harlo has it, not on the tap: an answer that didn't
+            // get there stays to be sent again.)
+            if taken { UINotificationFeedbackGenerator().notificationOccurred(.success) }
         }
     }
 }

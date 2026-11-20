@@ -1,4 +1,4 @@
-//! The read-only check of a wiki, for CI: `harlo-agent wiki --validate`.
+//! The read-only check of a wiki, for CI: `harlo-helper wiki --validate`.
 //!
 //! Two things, with no model and nothing written: whether the bundle's
 //! files conform (OKF v0.2 §11 and harlo's footnotes, as [`check`] finds
@@ -65,7 +65,7 @@ impl Report {
         let mut out = format!("harlo wiki check: {} pages in {}/\n", self.pages, bundle::DIR);
         if !self.index {
             out.push_str(
-                "(harlo-index isn't beside harlo-agent, so changed files are read with the plain scanner: a footnote may show as changed when only the code around it did.)\n",
+                "(harlo-index isn't beside harlo-helper, so changed files are read with the plain scanner: a footnote may show as changed when only the code around it did.)\n",
             );
         }
         for level in [Level::Error, Level::Warning, Level::Note] {

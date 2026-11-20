@@ -1,7 +1,6 @@
-//! The running harlo's side of orchestration (see `harlo_core::orchestration`):
-//! a local socket where `harlo --mcp-bridge` hands over agents' tool calls,
-//! and harlo-agent's calls on its own pipe ([`answer_pipe`]). Each call is
-//! carried out on the UI thread, where the sessions are.
+//! The running harlo's side of its tools (see `harlo_core::orchestration`):
+//! a local socket where `harlo --mcp-bridge` hands over agents' tool calls.
+//! Each call is carried out on the UI thread, where the sessions are.
 
 // Rust guideline compliant 2026-10-09
 
@@ -84,34 +83,11 @@ fn on_ui<T: Send + 'static>(thread: &CxxQtThread<Workspace>, f: impl FnOnce(std:
     rx.recv_timeout(Duration::from_secs(60)).ok().ok_or_else(|| anyhow::Error::msg("harlo didn't answer in time"))
 }
 
-/// A harlo-agent session's call on its pipe, done on the UI thread
-/// (`result`): finished here in the background, then the answer to the
-/// session.
-pub fn answer_pipe(thread: CxxQtThread<Workspace>, key: String, call: String, tool: String, args: Value, result: anyhow::Result<Value>) {
-    std::thread::spawn(move || {
-        let answer = match result.and_then(|r| finish(&thread, &tool, &args, r)) {
-            Ok(result) => json!({ "type": "harlo_result", "call": call, "ok": true, "result": result }),
-            Err(error) => json!({ "type": "harlo_result", "call": call, "ok": false, "error": format!("{error:#}") }),
-        };
-        if let Some(live) = crate::registry::get(&key) {
-            live.handle.send_raw(answer);
-        }
-    });
-}
-
-/// What's left of a call after the UI thread's part: the wiki and the plan
-/// worked on, a session's messages read.
+/// What's left of a call after the UI thread's part: the wiki worked on, a
+/// session's messages read.
 fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Value) -> anyhow::Result<Value> {
-    // The wiki and the plan: their work here, with what the UI thread gave.
+    // The wiki and the rest: their work here, with what the UI thread gave.
     if result["_defer"] == true {
-        if tool == "bring_over" {
-            let path = |k: &str| std::path::PathBuf::from(result[k].as_str().unwrap_or_default());
-            let text = |k: &str| result[k].as_str().unwrap_or_default().to_owned();
-            let helper = path("helper");
-            let brought = harlo_core::git::bring_over(&helper, &path("here"), &text("start"), &text("base")).map_err(|e| anyhow::anyhow!("Not brought over: {e:#}."))?;
-            let shown = harlo_core::remote::display(&helper);
-            return Ok(json!({ "applied": brought.applied, "clashed": brought.clashed, "text": harlo_core::orchestration::brought_text(&brought.applied, &brought.clashed, &shown) }));
-        }
         // Past sessions' messages: searched here, then shown with what the
         // UI thread knows of them.
         if tool == "list_sessions" {
@@ -131,14 +107,6 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
                 None => json!(text),
             });
         }
-        if tool == harlo_core::tool_calls::LOOKUP {
-            let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
-            let query = harlo_core::tool_calls::lookup_query(args);
-            if query.name.is_empty() {
-                anyhow::bail!("Give the name to look up.");
-            }
-            return Ok(json!(harlo_core::agent_host::lookup(&cwd, &query)?));
-        }
         if tool == harlo_core::wiki::CHECK {
             let cwd = std::path::PathBuf::from(result["cwd"].as_str().unwrap_or_default());
             let writer = result["writer"].as_str().unwrap_or_default().to_owned();
@@ -147,9 +115,7 @@ fn finish(thread: &CxxQtThread<Workspace>, tool: &str, args: &Value, result: Val
             let _ = thread.queue(|mut this| this.as_mut().wiki_ready());
             return Ok(answer);
         }
-        let outcome = crate::plans::tool(tool, args, &result);
-        let _ = thread.queue(super::workspace::qobject::Workspace::plans_changed);
-        return outcome;
+        anyhow::bail!("harlo has no tool {tool}.");
     }
     if tool != "read_session" {
         return Ok(result);

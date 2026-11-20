@@ -608,27 +608,23 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(ToolName.words("ast_grep", running: false), "Searched the code's structure")
         XCTAssertEqual(ToolName.words("debug", running: true), "Debugging")
         XCTAssertEqual(ToolName.symbol("memory"), "note.text")
-        // Words under a question or a plan, a path or a command under the rest.
+        // Words under a question or a task, a path or a command under the rest.
         XCTAssertTrue(ToolName.saysWords("ask"))
         XCTAssertTrue(ToolName.saysWords("AskUserQuestion"))
         XCTAssertTrue(ToolName.saysWords("task"))
-        XCTAssertTrue(ToolName.saysWords("plan_set"))
-        XCTAssertEqual(ToolName.line("mcp__harlo__start_session", "agent=harlo  title=Update the changelog  worktree=changelog  prompt=Add it.").text, "Update the changelog")
-        XCTAssertTrue(ToolName.line("start_session", "agent=harlo  title=Update the changelog").words)
-        XCTAssertFalse(ToolName.line("bring_over", "live:4").words)
+        XCTAssertEqual(ToolName.line("mcp__harlo__request_approval", "title=Merge the branch  message=Ready to merge.").text, "Merge the branch")
+        XCTAssertTrue(ToolName.line("harlo_request_approval", "title=Merge the branch").words)
+        XCTAssertFalse(ToolName.line("list_sessions", "limit=5").words)
         XCTAssertEqual(ToolName.line("bash", "ls -la").text, "ls -la")
         XCTAssertFalse(ToolName.saysWords("bash"))
         XCTAssertFalse(ToolName.saysWords("read"))
         XCTAssertEqual(ToolName.words("hashline_edit", running: false), "Edited file")
         XCTAssertEqual(ToolName.words("AskUserQuestion", running: false), "Asked you")
         XCTAssertEqual(ToolName.words("web_search", running: false), "Searched the web")
-        // harlo's, under either agent's name for them, and the plan's.
-        XCTAssertEqual(ToolName.words("mcp__harlo__start_session", running: false), "harlo: start a session")
-        XCTAssertEqual(ToolName.words("harlo_bring_over", running: false), "harlo: bring over a helper's changes")
-        XCTAssertEqual(ToolName.words("start_session", running: false), "harlo: start a session", "as Harlo calls it")
-        XCTAssertEqual(ToolName.symbol("bring_over"), "person.2")
-        XCTAssertEqual(ToolName.words("mcp__harlo__plan_done", running: false), "Finish a step")
-        XCTAssertEqual(ToolName.words("plan_set", running: false), "Plan")
+        // harlo's, under either agent's name for them.
+        XCTAssertEqual(ToolName.words("mcp__harlo__read_session", running: false), "harlo: read a session")
+        XCTAssertEqual(ToolName.words("harlo_list_sessions", running: false), "harlo: list sessions")
+        XCTAssertEqual(ToolName.symbol("harlo_read_session"), "person.2")
         // The wiki session's tool, by Harlo's name and Claude's.
         XCTAssertEqual(ToolName.words("wiki_check", running: false), "Check the wiki")
         XCTAssertEqual(ToolName.words("mcp__harlo__wiki_check", running: true), "Check the wiki")
@@ -863,7 +859,7 @@ final class LimitsWidgetTests: XCTestCase {
         m.host = PairedHarlo(key: "k", name: "box", endpoints: [])
         let now = Date()
         m.limits = HarloModel.sampleLimits(now: now)
-        XCTAssertEqual(LimitsSnapshot.load(store)?.accounts.count, 2)
+        XCTAssertEqual(LimitsSnapshot.load(store)?.accounts.count, 1)
         XCTAssertEqual(reloads, 1)
         m.limits = HarloModel.sampleLimits(now: now)
         XCTAssertEqual(reloads, 1, "the same: not written again")
@@ -1013,10 +1009,8 @@ final class MachinesTests: XCTestCase {
         XCTAssertEqual(SessionInfo(["modelId": "opencode-go/claude-haiku-5-5", "maker": "anthropic"]).maker, "anthropic")
         // Claude Code on Claude: Claude's own mark; any other maker, or
         // another agent: the maker, with the agent as a tag.
-        XCTAssertFalse(Palette.modelFirst(harness: "claude", maker: "anthropic"))
-        XCTAssertTrue(Palette.modelFirst(harness: "claude", maker: "zai-coding-plan"))
-        XCTAssertTrue(Palette.modelFirst(harness: "harlo", maker: "anthropic"))
-        XCTAssertFalse(Palette.modelFirst(harness: "harlo", maker: ""))
+        XCTAssertTrue(Palette.modelFirst(harness: "pi", maker: "anthropic"))
+        XCTAssertFalse(Palette.modelFirst(harness: "pi", maker: ""))
     }
 
     func testModelsOnAStoppedServer() {
@@ -1064,152 +1058,7 @@ final class MachinesTests: XCTestCase {
     }
 }
 
-final class PlanTests: XCTestCase {
-    func testPlanFromHarlo() {
-        let v = try! JSON.parse(#"""
-        { "enabled": true, "commits": true, "reviewers": [{ "id": "claude", "label": "Claude" }, { "id": "other", "label": "Other" }],
-          "steps": [{ "id": 1, "title": "One", "status": "done", "commit": "abc123", "summary": "did it" },
-                    { "id": 2, "title": "Two", "status": "active", "detail": "how" },
-                    { "id": 3, "title": "Three", "status": "skipped", "editedByUser": true },
-                    { "id": 4, "title": "Four" }] }
-        """#)
-        let plan = Plan(v)
-        XCTAssertTrue(plan.shows)
-        XCTAssertEqual(plan.finished, 2, "done and skipped")
-        XCTAssertEqual(plan.current?.title, "Two")
-        XCTAssertEqual(plan.steps[3].status, "pending")
-        XCTAssertTrue(plan.steps[3].open)
-        XCTAssertFalse(plan.steps[0].open)
-        XCTAssertEqual(plan.reviewers(for: "claude").map(\.id), ["other", "claude"], "another agent first")
-        XCTAssertFalse(Plan(["enabled": false, "steps": []]).shows)
-    }
-
-    func testPlanEditsAsHarloTakesThem() {
-        XCTAssertEqual(PlanEdit.add(title: "T", detail: "", after: 3).json, ["op": "add", "title": "T", "detail": "", "after": 3])
-        XCTAssertEqual(PlanEdit.add(title: "T", detail: "d", after: nil).json, ["op": "add", "title": "T", "detail": "d"])
-        XCTAssertEqual(PlanEdit.skip(id: 2, skipped: true).json, ["op": "skip", "id": 2, "skipped": true])
-        XCTAssertEqual(PlanEdit.shift(id: 2, by: -1).json, ["op": "shift", "id": 2, "by": -1])
-        XCTAssertEqual(PlanEdit.alongside(id: 3, alongside: true).json, ["op": "alongside", "id": 3, "alongside": true])
-    }
-
-    func testPlanRunWithHelpers() {
-        let v = try! JSON.parse(#"""
-        { "enabled": true, "reviewers": [{ "id": "other", "label": "Other" }, { "id": "claude", "label": "Claude" }],
-          "run": { "agent": "claude", "agentName": "Claude", "model": "", "paused": "" },
-          "steps": [{ "id": 1, "title": "One", "status": "active", "helper": "live:4" },
-                    { "id": 2, "title": "Two", "status": "active", "alongside": true, "helper": "live:5", "branch": "plan/two-2" },
-                    { "id": 3, "title": "Three" }] }
-        """#)
-        var plan = Plan(v)
-        XCTAssertEqual(plan.run?.agentName, "Claude")
-        XCTAssertFalse(plan.canRun, "it's running")
-        XCTAssertEqual(plan.steps[0].helper, "live:4")
-        XCTAssertTrue(plan.steps[1].alongside)
-        XCTAssertEqual(plan.steps[1].branch, "plan/two-2")
-        XCTAssertFalse(plan.steps[2].alongside)
-        XCTAssertEqual(plan.helperAgents(for: "claude").map(\.id), ["claude", "other"], "the session's own first")
-        plan.run?.paused = "Step 2 (Two) failed: tests"
-        XCTAssertTrue(plan.canRun, "a paused run goes on")
-        plan.run = nil
-        XCTAssertTrue(plan.canRun)
-        XCTAssertNil(Plan(["enabled": true, "steps": []]).run)
-    }
-
-    func testHelpers() {
-        let h = Helper(["id": "live:4", "name": "Step 1: One", "agent": "claude", "status": "waiting", "openKey": "live:4", "description": "Did it", "step": 1])
-        XCTAssertEqual(h.id, "live:4")
-        XCTAssertEqual(h.summary, "Did it")
-        XCTAssertEqual(h.step, 1)
-        XCTAssertTrue(h.needsSomeone)
-        XCTAssertNil(Helper(["id": "live:6", "status": "running"]).step)
-        let row = SessionSummary(["key": "live:4", "title": "Step 1: One", "parent": "live:1", "helperOf": "Fix it", "nest": 1])
-        XCTAssertEqual(row.parent, "live:1")
-        XCTAssertEqual(row.helperOf, "Fix it")
-        XCTAssertEqual(row.nest, 1)
-        XCTAssertEqual(SessionSummary(["key": "live:1"]).nest, 0)
-    }
-
-    func testHelperModelUseAndRequest() {
-        let v = try! JSON.parse(#"""
-        { "id": "live:7", "openKey": "live:7", "name": "Step 2: Two", "agent": "harlo", "status": "waiting", "step": 2, "review": null,
-          "model": "codex/gpt-6.1-sol", "used": { "tokens": 12400, "cost": 0.031, "requests": 3 },
-          "asks": { "id": "r1", "approval": true, "options": ["Approve", "Deny"], "text": "Run cargo test?" } }
-        """#)
-        let h = Helper(v)
-        XCTAssertEqual(h.modelLabel, "gpt-6.1-sol")
-        XCTAssertEqual(h.used?.label, "12.4k tokens · $0.03")
-        XCTAssertEqual(h.asks?.id, "r1")
-        XCTAssertEqual(h.asks?.options, ["Approve", "Deny"])
-        XCTAssertTrue(h.asks?.approval == true)
-        XCTAssertNil(h.reviews)
-        let reviewer = Helper(["id": "live:8", "status": "running", "review": 2, "asks": nil])
-        XCTAssertEqual(reviewer.reviews, 2)
-        XCTAssertNil(reviewer.asks)
-        XCTAssertNil(reviewer.used)
-        XCTAssertEqual(reviewer.modelLabel, "")
-        let total = Helper.Used.total([h.used, nil, Helper.Used(tokens: 600, cost: 0.005, requests: 1)])
-        XCTAssertEqual(total.label, "13.0k tokens · $0.04")
-        XCTAssertEqual(Helper.Used(cost: 0.004).label, "<$0.01")
-        XCTAssertEqual(Helper.Used().label, "")
-    }
-
-    func testPlanTeamAndReviews() {
-        let v = try! JSON.parse(#"""
-        { "enabled": true, "reviewers": [{ "id": "harlo", "label": "Harlo" }],
-          "team": { "agent": "harlo", "agentName": "Harlo", "model": "codex/gpt-6.1-sol", "team": true,
-                    "reviewer": { "agent": "claude", "agentName": "Claude Code", "model": "claude-opus-5-5" } },
-          "run": { "agent": "harlo", "agentName": "Harlo", "paused": "", "review": true, "reviewing": { "2": "live:9" } },
-          "steps": [{ "id": 1, "title": "One", "status": "done" },
-                    { "id": 2, "title": "Two", "status": "active", "helper": "live:5" },
-                    { "id": 3, "title": "Three", "agent": "claude", "model": "claude-sonnet-5-5" }] }
-        """#)
-        let plan = Plan(v)
-        XCTAssertEqual(plan.team?.label, "Harlo · gpt-6.1-sol, reviewed by Claude Code · claude-opus-5-5")
-        XCTAssertTrue(plan.team?.custom == true)
-        XCTAssertEqual(plan.run?.reviewing[2], "live:9")
-        XCTAssertEqual(plan.steps[2].agent, "claude")
-        XCTAssertEqual(plan.steps[2].model, "claude-sonnet-5-5")
-        // The session's own agent, without a Team.
-        let own = Plan(try! JSON.parse(#"{ "team": { "agent": "claude", "agentName": "Claude Code", "model": "", "team": false } }"#))
-        XCTAssertEqual(own.team?.label, "Claude Code")
-        XCTAssertFalse(own.team?.custom == true)
-        XCTAssertNil(Plan(try! JSON.parse(#"{ "team": {} }"#)).team)
-    }
-
-    func testHelpersFoldUnderTheirSession() {
-        let list = SessionSummary.list([
-            ["key": "a", "status": "idle"],
-            ["key": "a1", "parent": "a", "nest": 1, "status": "idle"],
-            ["key": "a1x", "parent": "a1", "nest": 2, "status": "input"],
-            ["key": "a2", "parent": "a", "nest": 1, "status": "idle"],
-            ["key": "b", "status": "idle"],
-            // (Its parent isn't listed: it lists on its own.)
-            ["key": "c1", "parent": "gone", "nest": 1, "status": "busy"],
-        ])
-        let h = SessionSummary.helpers(list)
-        XCTAssertEqual(list.filter { !h.folded($0) }.map(\.key), ["a", "b", "c1"])
-        XCTAssertEqual(h.helpers["a"]?.map(\.session.key), ["a1", "a1x", "a2"])
-        XCTAssertEqual(h.helpers["a"]?.map(\.depth), [1, 2, 1])
-        XCTAssertNil(h.helpers["b"])
-        XCTAssertEqual(h.status(list[0]), "input", "a helper waiting for you shows on its session")
-        XCTAssertEqual(h.status(list[4]), "idle")
-    }
-
-    func testDemoEdits() {
-        var plan = HarloModel.samplePlan()
-        plan = HarloModel.demoEdit(plan, .add(title: "New", detail: "", after: 1))
-        XCTAssertEqual(plan.steps.map(\.title)[1], "New")
-        XCTAssertTrue(plan.steps[1].editedByUser)
-        plan = HarloModel.demoEdit(plan, .skip(id: 3, skipped: true))
-        XCTAssertEqual(plan.steps.first { $0.id == 3 }?.status, "skipped")
-        plan = HarloModel.demoEdit(plan, .alongside(id: 3, alongside: false))
-        XCTAssertEqual(plan.steps.first { $0.id == 3 }?.alongside, false)
-        plan = HarloModel.demoEdit(plan, .alongside(id: 1, alongside: true))
-        XCTAssertEqual(plan.steps.first?.alongside, false, "the first step has none before it")
-        plan = HarloModel.demoEdit(plan, .remove(id: 3))
-        XCTAssertNil(plan.steps.first { $0.id == 3 })
-    }
-
+final class HelperTests: XCTestCase {
     func testARunWhoseSessionAsksNeedsYou() {
         let run = WorkflowRun(["id": "wf-4", "workflow": "W", "state": "running", "attempt": 1, "asking": true, "askingKey": "s-review",
                                "waiting": "The review needs you: it asks to run a command",
@@ -1370,7 +1219,7 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(code.map(\.id), ["src/jobs.rs#Queue::retry"])
         XCTAssertEqual(code.first?.place, "src/jobs.rs:12")
         XCTAssertEqual(code.first?.doc, "Runs it again.")
-        if case .plan(let key)? = Event(["ev": "plan", "key": "live:1"]) { XCTAssertEqual(key, "live:1") } else { XCTFail("a plan event") }
+        XCTAssertNil(Event(["ev": "plan", "key": "live:1"]), "harlo has no shared plan to tell of")
     }
 
     func testHarlosMessagesAreHarlos() throws {
@@ -1400,32 +1249,40 @@ final class PlanTests: XCTestCase {
         XCTAssertEqual(UIRequest(["id": "4", "method": "select", "title": "Split into helpers?"]).tool, "")
     }
 
-    @MainActor func testSideQuestionsCome() {
-        let ev = Event(["ev": "aside", "key": "live:1", "aside": ["question": "why?", "text": "Because **so**.", "done": true]])
-        guard case .aside(let k, let a)? = ev else { return XCTFail("\(String(describing: ev))") }
-        XCTAssertEqual(k, "live:1")
-        XCTAssertEqual(a, Aside(["question": "why?", "text": "Because **so**.", "done": true]))
-        XCTAssertEqual(a.error, "")
+    @MainActor func testExtensionViewsCome() {
         let s = OpenSession(key: "live:1")
-        s.opened(liveKey: "live:1", harness: "harlo")
-        s.take(ev!)
-        XCTAssertEqual(s.aside?.text, "Because **so**.")
+        s.opened(liveKey: "live:1", harness: "pi")
+        let widget: JSON = ["ev": "ext", "key": "live:1", "op": "view",
+                            "view": ["id": "widget:w", "kind": "widget", "lines": ["one"], "placement": "belowEditor"]]
+        s.take(Event(widget)!)
+        s.take(Event(["ev": "ext", "key": "live:1", "op": "view", "view": ["id": "screen:1", "kind": "screen", "lines": []]])!)
+        s.take(Event(["ev": "ext", "key": "live:1", "op": "view",
+                      "view": ["id": "tool:c1", "kind": "tool", "lines": ["call"], "result": ["4"], "toolCallId": "c1"]])!)
+        XCTAssertEqual(s.extViews.map(\.id), ["widget:w", "screen:1", "tool:c1"])
+        XCTAssertEqual(s.extViews[0].placement, "belowEditor")
+        XCTAssertTrue(s.extViews[1].interactive)
+        XCTAssertEqual(s.extViews[2].result, ["4"])
+        // A change keeps its place; a close takes it away; a new binding, all.
+        s.take(Event(["ev": "ext", "key": "live:1", "op": "view", "view": ["id": "widget:w", "kind": "widget", "lines": ["two"]]])!)
+        XCTAssertEqual(s.extViews.first?.lines, ["two"])
+        s.take(Event(["ev": "ext", "key": "live:1", "op": "close", "id": "screen:1"])!)
+        XCTAssertEqual(s.extViews.map(\.id), ["widget:w", "tool:c1"])
+        s.take(Event(["ev": "ext", "key": "live:1", "op": "clear"])!)
+        XCTAssertTrue(s.extViews.isEmpty)
+        XCTAssertNil(Event(["ev": "ext", "key": "live:1", "op": "spin"]), "an op it doesn't know")
+        XCTAssertEqual(Row(["key": "r", "kind": "tool", "callId": "c1"]).callId, "c1")
     }
 
     @MainActor func testOpeningAgainShowsOnlyWhatsCurrent() {
         let s = OpenSession(key: "live:1")
-        s.opened(liveKey: "live:1", harness: "claude")
-        s.take(Event(["ev": "subagents", "key": "live:1", "subagents": [["id": "t1", "agent": "web-fetch", "status": "running"]]])!)
-        XCTAssertEqual(s.subagents.map(\.status), ["running"])
-        // Away while it ended; opened again, harlo sends the list as it is.
+        s.opened(liveKey: "live:1", harness: "pi")
+        let todo: JSON = ["ev": "todos", "key": "live:1", "phases": [["name": "Fix", "tasks": [["content": "Run the tests", "status": "in_progress"]]]]]
+        s.take(Event(todo)!)
+        XCTAssertEqual(s.todos.count, 1)
+        // Opened again, harlo sends what's current: none left, none show.
         s.liveKey = ""
-        s.take(Event(["ev": "subagents", "key": "live:2", "subagents": [["id": "t1", "agent": "web-fetch", "status": "completed"]]])!)
-        s.opened(liveKey: "live:2", harness: "claude")
-        XCTAssertEqual(s.subagents.map(\.status), ["completed"])
-        // With none left, none show.
-        s.liveKey = ""
-        s.opened(liveKey: "live:3", harness: "claude")
-        XCTAssertTrue(s.subagents.isEmpty)
+        s.opened(liveKey: "live:2", harness: "pi")
+        XCTAssertTrue(s.todos.isEmpty)
     }
 
     @MainActor func testStoppedMessagesComeBack() {
@@ -1553,6 +1410,35 @@ final class ReplayTests: XCTestCase {
         XCTAssertFalse(DiagramPicture.showsDown(across: wide, down: nil, width: 360))
     }
 
+    func testFailedAnswerRemainsAvailableForRetry() async throws {
+        let recording = Self.recording.replacingOccurrences(of: #""reply":{"ok":true}"#, with: #""reply":{"error":"Not delivered"}"#)
+        let m = HarloModel.replaying(try Replay(recording: recording, scene: "approval"))
+        for _ in 0..<250 where m.sessions.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        m.open(try XCTUnwrap(m.sessions.first))
+        let s = try XCTUnwrap(m.session)
+        for _ in 0..<250 where s.requests.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        let request = try XCTUnwrap(s.requests.first)
+        let delivered = await m.answer(request, request.approval(false), in: s.key)
+        XCTAssertFalse(delivered)
+        XCTAssertEqual(s.requests.first?.id, request.id)
+        XCTAssertFalse(m.answered.contains(request.id))
+    }
+
+    func testASecondTapWhileAnAnswerIsOnItsWaySendsNothing() async throws {
+        let m = HarloModel.replaying(try Replay(recording: Self.recording, scene: "approval"))
+        for _ in 0..<250 where m.sessions.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        m.open(try XCTUnwrap(m.sessions.first))
+        let s = try XCTUnwrap(m.session)
+        for _ in 0..<250 where s.requests.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        let request = try XCTUnwrap(s.requests.first)
+        async let first = m.answer(request, request.approval(true), in: s.key)
+        async let second = m.answer(request, request.approval(false), in: s.key)
+        let taken = await [first, second]
+        XCTAssertEqual(taken.filter { $0 }.count, 1, "one answer goes, the other tap waits")
+        XCTAssertTrue(m.answering.isEmpty)
+        XCTAssertTrue(m.answered.contains(request.id))
+    }
+
     func testTheAppShowsTheRecordingAtAScene() async throws {
         let m = HarloModel.replaying(try Replay(recording: Self.recording, scene: "approval"))
         XCTAssertTrue(m.replaying)
@@ -1599,15 +1485,14 @@ final class RecordingTests: XCTestCase {
 
     func testEveryScene() async throws {
         let text = try XCTUnwrap(Self.text)
-        XCTAssertEqual(Replay.scenes(in: text), ["session", "ask", "approval", "working", "aside", "plan", "helpers", "end", "pictures", "workflow-asks", "workflow-check", "workflow"])
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "approval", "working", "mcp", "wiki", "end", "pictures", "workflow-asks", "workflow-check", "workflow"])
         let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
 
         var (m, s) = try await open("session")
         XCTAssertTrue(m.features.contains("sessionMentions"))
         XCTAssertEqual(m.sessions.count, 3, "\(m.sessions.map(\.title))")
-        let tests = try XCTUnwrap(tools(s).first { $0.label == "Run the tests" })
-        XCTAssertEqual(tests.command, "./run-tests.sh")
-        XCTAssertTrue(tests.shownOutput().hasSuffix("112 passed; 0 failed; 0 ignored; finished in 1.84s"))
+        let tests = try XCTUnwrap(tools(s).first { $0.command == "./run-tests.sh" })
+        XCTAssertTrue(tests.shownOutput().trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("112 passed; 0 failed; 0 ignored; finished in 1.84s"))
         XCTAssertEqual(s.rows.first { $0.kind == "markdown" }?.model, "tour-coder")
         // No workflow runs yet: none listed, and the session isn't in one.
         await m.loadWorkflows()
@@ -1615,23 +1500,17 @@ final class RecordingTests: XCTestCase {
         XCTAssertTrue(m.workflowRuns.isEmpty)
         XCTAssertNil(s.workflow)
 
-        (m, s) = try await open("ask")
-        XCTAssertEqual(s.requests.first?.questions.first?.options.count, 2)
         (m, s) = try await open("approval")
         let approval = try XCTUnwrap(s.requests.first)
         XCTAssertTrue(approval.approval && approval.message.contains("git clean"), approval.message)
         XCTAssertEqual(m.waiting.count, 1)
+        // A command still running.
         (m, s) = try await open("working")
-        XCTAssertFalse(s.subagents.isEmpty)
-        (m, s) = try await open("aside")
-        // (Its answer comes a moment after the scene opens.)
-        for _ in 0..<250 where s.aside?.done != true { try await Task.sleep(nanoseconds: 20_000_000) }
-        XCTAssertEqual(s.aside?.done, true)
-        XCTAssertTrue(s.rows.contains { $0.kind == "notice" && $0.text.contains("The background command finished") })
-        (m, s) = try await open("plan")
-        for _ in 0..<250 where (s.plan?.steps.count ?? 0) < 3 { try await Task.sleep(nanoseconds: 20_000_000) }
-        XCTAssertEqual(s.plan?.steps.count, 3)
-        // The plan's sheet reads the project's wiki as it opens: its
+        XCTAssertTrue(tools(s).contains { $0.command == "./build.sh" && $0.state != "done" }, "\(tools(s).map { "\($0.command) \($0.state)" })")
+        (m, s) = try await open("mcp")
+        XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
+        (m, s) = try await open("wiki")
+        // The wiki's sheet reads the project's wiki as it opens: its
         // pages, two footnotes' code changed; a page in blocks; a search.
         for _ in 0..<50 where s.wiki?.loading != false {
             await m.loadWiki()
@@ -1655,20 +1534,10 @@ final class RecordingTests: XCTestCase {
                 XCTAssertGreaterThan(d.picture?.width ?? 0, 100, "\(source.prefix(30)) \(light): \(d.why)")
             }
         }
-        XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
-        (m, s) = try await open("helpers")
-        XCTAssertTrue(s.rows.contains { $0.fromHarlo && !$0.label.isEmpty })
-        XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "harlo: bring over a helper's changes" })
         (m, s) = try await open("end")
         XCTAssertTrue(s.info.modelId.hasSuffix("tour-helper"), s.info.modelId)
         let mentions = await m.sessionMentions(matching: "")
-        XCTAssertTrue(mentions.contains { $0.harness == "claude" }, "\(mentions.map(\.title))")
-        // The Claude Code session: its subagent's call.
-        let claude = try XCTUnwrap(m.sessions.first { $0.harness == "claude" })
-        m.open(claude)
-        let c = try XCTUnwrap(m.session)
-        for _ in 0..<100 where c.rows.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
-        XCTAssertTrue(c.rows.contains { $0.kind == "tool" && $0.title == "Agent" }, "\(c.rows.map(\.title))")
+        XCTAssertTrue(mentions.contains { $0.title.hasPrefix("What does the README say") }, "\(mentions.map(\.title))")
 
         // The phone's photo and the reply's picture, each as a thumbnail
         // and fitted to the screen.
@@ -1793,5 +1662,29 @@ final class QueuedMessageTests: XCTestCase {
         XCTAssertEqual(HarloModel.mode(busy: true, steer: false, stopping: false), .followUp)
         XCTAssertEqual(HarloModel.mode(busy: false, steer: true, stopping: true), .normal)
         XCTAssertEqual(SendMode.stopAndSend.rawValue, "stopAndSend", "the name harlo's phone server reads")
+    }
+
+    /// An extension's view: its Markdown and pictures in blocks among its
+    /// lines, each block of lines its own rows.
+    func testExtensionBlocks() throws {
+        let v = ExtView(try JSON.parse(#"""
+        {"id": "tool:1", "kind": "tool", "lines": ["call"], "result": ["# Hi", "", "pic", "more", "end"],
+         "resultBlocks": [
+           {"kind": "markdown", "text": "# Hi", "rows": 2, "parts": [{"kind": "prose", "html": "<h1>Hi</h1>"}, {"kind": "code", "html": "<pre>x</pre>", "code": "x", "lang": "rust"}]},
+           {"kind": "image", "data": "aGk=", "mime": "image/png", "rows": 1},
+           {"kind": "image", "tooBig": true, "rows": 0},
+           {"kind": "lines", "row": 3, "rows": 2},
+           {"kind": "lines", "row": 4, "rows": 9}
+         ]}
+        """#))
+        XCTAssertEqual(v.blocks, [], "the call's lines: none")
+        XCTAssertEqual(v.resultBlocks.count, 5)
+        guard case .markdown(let parts) = v.resultBlocks[0] else { return XCTFail("markdown first") }
+        XCTAssertEqual(parts.map(\.isCode), [false, true])
+        XCTAssertEqual([parts[1].code, parts[1].lang], ["x", "rust"])
+        XCTAssertEqual(v.resultBlocks[1], .picture(data: Data("hi".utf8), mime: "image/png"))
+        XCTAssertEqual(v.resultBlocks[2], .pictureTooBig)
+        XCTAssertEqual(v.resultBlocks[3], .lines(["more", "end"]))
+        XCTAssertEqual(v.resultBlocks[4], .lines(["end"]), "rows past the end: the lines there are")
     }
 }

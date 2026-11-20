@@ -346,23 +346,20 @@ public struct ModelChoice: Equatable, Sendable, Identifiable {
     }
 }
 
-/// A session's approval mode and Plan.
+/// A session's approval mode.
 public struct Modes: Equatable, Sendable {
     /// `always-ask`, `write`, `yolo`; "" when the agent has none.
     public var approval: String
     public var approvals: [String]
-    public var plan: Bool
 
     public init(_ v: JSON) {
         approval = v["approval"].text
         approvals = (v["approvals"].array ?? []).compactMap(\.string)
-        plan = v["plan"].bool ?? false
     }
 
-    public init(approval: String = "", approvals: [String] = [], plan: Bool = false) {
+    public init(approval: String = "", approvals: [String] = []) {
         self.approval = approval
         self.approvals = approvals
-        self.plan = plan
     }
 
     /// An approval mode for people.
@@ -461,134 +458,6 @@ public struct TodoPhase: Equatable, Sendable, Identifiable {
     }
 
     public var done: Int { tasks.count(where: { $0.status == "completed" }) }
-}
-
-/// A subagent the session started.
-public struct Subagent: Equatable, Sendable, Identifiable {
-    public var id: String
-    public var agent: String
-    public var description: String
-    /// running | completed | failed | aborted
-    public var status: String
-
-    public init(_ v: JSON) {
-        id = v["id"].text
-        agent = v["agent"].text
-        description = v["description"].text
-        status = v["status"].text
-    }
-}
-
-/// A helper: a session the session's agent, or its plan's run, started in
-/// harlo.
-public struct Helper: Equatable, Sendable, Identifiable {
-    /// Its session's key (to open it).
-    public var id: String
-    public var name: String
-    /// Its agent ("claude", …).
-    public var agent: String
-    /// running | asking (its parent) | waiting (for you) | completed |
-    /// failed | ended
-    public var status: String
-    /// What it reported, "" nothing yet.
-    public var summary: String
-    /// The plan step it does (a run with helpers), nil none.
-    public var step: Int64?
-    /// The plan step it reviews (a run's review of a step), nil none.
-    public var reviews: Int64?
-    /// Its model's id ("" not known).
-    public var model: String
-    /// What it used so far (nil: not known).
-    public var used: Used?
-    /// What it waits for you to answer (the oldest), nil nothing.
-    public var asks: Ask?
-
-    /// Tokens and cost a helper used.
-    public struct Used: Equatable, Sendable {
-        public var tokens: Int64
-        public var cost: Double
-        public var requests: Int64
-
-        public init(tokens: Int64 = 0, cost: Double = 0, requests: Int64 = 0) {
-            self.tokens = tokens
-            self.cost = cost
-            self.requests = requests
-        }
-
-        /// "12.4k tokens · $0.03", "$0.12", "" nothing.
-        public var label: String {
-            var parts: [String] = []
-            if tokens > 0 { parts.append("\(Used.tokens(tokens)) tokens") }
-            if cost > 0 { parts.append(Used.cost(cost)) }
-            return parts.joined(separator: " · ")
-        }
-
-        static func tokens(_ n: Int64) -> String {
-            if n >= 1_000_000 { return "\((Double(n) / 1_000_000).formatted(.number.precision(.fractionLength(1))))M" }
-            if n >= 1000 { return "\((Double(n) / 1000).formatted(.number.precision(.fractionLength(1))))k" }
-            return "\(n)"
-        }
-
-        static func cost(_ c: Double) -> String {
-            c < 0.01 ? "<$0.01" : "$\(c.formatted(.number.precision(.fractionLength(2))))"
-        }
-
-        /// Several helpers' together.
-        public static func total(_ list: [Used?]) -> Used {
-            list.compactMap { $0 }.reduce(Used()) { Used(tokens: $0.tokens + $1.tokens, cost: $0.cost + $1.cost, requests: $0.requests + $1.requests) }
-        }
-    }
-
-    /// A helper's request for you: a tool's approval is answered right
-    /// here (Approve, Deny, …); anything else in its session.
-    public struct Ask: Equatable, Sendable {
-        public var id: String
-        public var text: String
-        public var approval: Bool
-        public var options: [String]
-
-        public init(id: String, text: String, approval: Bool, options: [String]) {
-            self.id = id
-            self.text = text
-            self.approval = approval
-            self.options = options
-        }
-    }
-
-    public init(_ v: JSON) {
-        id = v["openKey"].string ?? v["id"].text
-        name = v["name"].text
-        agent = v["agent"].text
-        status = v["status"].text
-        summary = v["description"].text
-        step = v["step"].int
-        reviews = v["review"].int
-        model = v["model"].text
-        let u = v["used"]
-        used = u.object == nil ? nil : Used(tokens: u["tokens"].int ?? 0, cost: u["cost"].double ?? 0, requests: u["requests"].int ?? 0)
-        let a = v["asks"]
-        asks = a.object == nil ? nil : Ask(id: a["id"].text, text: a["text"].text, approval: a["approval"].bool ?? false,
-                                         options: (a["options"].array ?? []).map(\.text))
-    }
-
-    public init(id: String, name: String, agent: String, status: String, summary: String = "", step: Int64? = nil,
-                model: String = "", used: Used? = nil, asks: Ask? = nil) {
-        self.id = id
-        self.name = name
-        self.agent = agent
-        self.status = status
-        self.summary = summary
-        self.step = step
-        self.model = model
-        self.used = used
-        self.asks = asks
-    }
-
-    /// Its model, short ("gpt-6.1-sol" of "codex/gpt-6.1-sol"); "" none.
-    public var modelLabel: String { model.split(separator: "/").last.map(String.init) ?? "" }
-
-    /// It waits on its parent or on you.
-    public var needsSomeone: Bool { status == "asking" || status == "waiting" }
 }
 
 /// The session's repository: its branch and changed files.
@@ -867,11 +736,7 @@ public struct Palette: Codable, Equatable, Sendable {
     /// An agent's tile (the dashboard, a reply's head): its colour, solid,
     /// and a dark mark on it.
     public func agentTile(_ id: String) -> (fill: RGBA, ink: RGBA) {
-        let base: RGBA
-        switch id {
-        case "claude": base = RGBA(0.969, 0.639, 0.471)
-        default: base = RGBA(0.733, 0.745, 0.776)
-        }
+        let base = RGBA(0.733, 0.745, 0.776)
         return (isLight ? base.mix(RGBA(1, 1, 1), 0.2) : base, RGBA(0.09, 0.075, 0.11))
     }
 
@@ -892,10 +757,9 @@ public struct Palette: Codable, Equatable, Sendable {
     }
 
     /// Whether a session's icon shows its model's maker (with the agent as a
-    /// tag): a maker is known, and it isn't the agent's own (Claude Code on
-    /// Claude shows Claude's mark).
+    /// tag): a maker is known.
     public static func modelFirst(harness: String, maker: String) -> Bool {
-        !maker.isEmpty && !(harness == "claude" && maker == "anthropic")
+        !maker.isEmpty
     }
 
     /// Text on a primary-coloured fill.

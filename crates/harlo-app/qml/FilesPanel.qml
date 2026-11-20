@@ -107,7 +107,7 @@ Rectangle {
                 leftPadding: 18 + depth * 16
                 rightPadding: 16
                 // A soft pill, as the sidebar's rows.
-                background: Rectangle { radius: 8; color: node.open ? Theme.rowSelected : node.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+                background: Rectangle { radius: 3; color: node.open ? Theme.rowSelected : node.hovered ? Theme.rowHover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
                 contentItem: RowLayout {
                     spacing: 9
                     Icon {

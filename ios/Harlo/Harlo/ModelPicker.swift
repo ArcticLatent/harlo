@@ -29,10 +29,8 @@ struct ModelPicker: View {
     /// Where more models come from: keys added on the computer.
     var keysNote: LocalizedStringKey? {
         switch session.harness {
-        case "harlo":
+        case "pi":
             return "Other providers' models show here once their key is added in harlo on your computer: Settings → Models."
-        case "claude":
-            return "A coding plan's models (GLM, Kimi, MiniMax) show here once its key is added in harlo on your computer: Settings → Models → Coding plans for Claude Code."
         default:
             return nil
         }

@@ -7,7 +7,7 @@ Rectangle {
     property alias text: chipLabel.text
     implicitWidth: Math.max(52, chipLabel.implicitWidth + 16)
     implicitHeight: 26
-    radius: 7
+    radius: 3
     color: Theme.controlFill
     Label { id: chipLabel; anchors.centerIn: parent; color: Theme.text; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
 }

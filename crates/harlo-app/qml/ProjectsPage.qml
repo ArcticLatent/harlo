@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Settings → Projects: each project's name, icon, colour and harness, its wiki, code lookup and plan.
+// Settings → Projects: each project's name, icon, colour and harness, and its wiki.
 ColumnLayout {
     id: proj
     property int projectId: -1
@@ -40,7 +40,7 @@ ColumnLayout {
                     ProjectIcon { anchors.verticalCenter: parent.verticalCenter; icon: pick.modelData.icon; color: pick.modelData.color; implicitWidth: 15; implicitHeight: 15 }
                     Label { anchors.verticalCenter: parent.verticalCenter; text: pick.modelData.name; color: Theme.foreground; font.pixelSize: Theme.px(12.5) }
                 }
-                background: ControlSurface { control: pick; variant: pick.on ? "selected" : "outline"; radius: 8 }
+                background: ControlSurface { control: pick; variant: pick.on ? "selected" : "outline"; radius: 3 }
             }
         }
     }
@@ -56,7 +56,7 @@ ColumnLayout {
             Rectangle {
                 implicitWidth: 44
                 implicitHeight: 44
-                radius: 10
+                radius: 4
                 color: Theme.controlFill
                 border.color: Theme.controlBorder
                 ProjectIcon { anchors.centerIn: parent; icon: proj.p ? proj.p.icon : ""; color: proj.p ? proj.p.color : ""; fallback: Theme.foreground; implicitWidth: 24; implicitHeight: 24 }
@@ -103,14 +103,14 @@ ColumnLayout {
                             anchors.centerIn: parent
                             width: 22
                             height: 22
-                            radius: 6
+                            radius: 2
                             color: swatch.modelData.key ? swatch.modelData.color : "transparent"
                             border.color: swatch.modelData.key ? Qt.darker(swatch.modelData.color, 1.15) : Theme.controlBorder
                             Icon { anchors.centerIn: parent; visible: !swatch.modelData.key; name: "close"; color: Theme.muted; implicitWidth: 14; implicitHeight: 14 }
                         }
                     }
                     background: Rectangle {
-                        radius: 8
+                        radius: 3
                         color: "transparent"
                         border.width: 2
                         border.color: swatch.on ? Theme.primary : swatch.hovered ? Theme.controlBorderHover : "transparent"
@@ -151,7 +151,7 @@ ColumnLayout {
                             implicitHeight: 17
                         }
                     }
-                    background: ControlSurface { control: iconPick; variant: iconPick.on ? "selected" : "outline"; radius: 8 }
+                    background: ControlSurface { control: iconPick; variant: iconPick.on ? "selected" : "outline"; radius: 3 }
                     ToolTip.visible: hovered
                     ToolTip.delay: 400
                     ToolTip.text: modelData === "" ? "A folder (the default)" : modelData.replace(/-\d$/, "").replace("-", " ")
@@ -162,30 +162,11 @@ ColumnLayout {
 
         SectionHeader { title: "New sessions" }
         Group {
-            SettingRow {
-                title: "Provider"
-                detail: "What + on the project starts (right-click it for the others)."
-                icon: "robot-2"
-                Row {
-                    spacing: 6
-                    Repeater {
-                        model: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []
-                        ChoicePill {
-                            required property var modelData
-                            text: modelData.label
-                            provider: modelData.id
-                            selected: proj.p !== null && proj.p.harness === modelData.id
-                            onClicked: Workspace.setProjectHarness(proj.p.id, modelData.id)
-                        }
-                    }
-                }
-            }
-            // Its agent's model here (each agent remembers its own).
+            // Its agent's model here.
             SettingRow {
                 id: projModel
                 objectName: "projectModel"
                 visible: proj.p !== null
-                divider: true
                 title: "Model"
                 detail: "What " + (proj.p ? Theme.harnessLabel(proj.p.harness) : "the agent") + " starts with here."
                     + (proj.p && proj.p.remote ? (projModel.hostModels && projModel.hostModels.error ? " Couldn't read its models: " + projModel.hostModels.error : "") : "")
@@ -262,7 +243,7 @@ ColumnLayout {
             wrapMode: TextEdit.Wrap
             placeholderText: "npm install"
             placeholderTextColor: Theme.muted
-            background: Rectangle { radius: 6; color: Theme.background; border.color: setupArea.activeFocus ? Theme.primary : Theme.border }
+            background: Rectangle { radius: 2; color: Theme.background; border.color: setupArea.activeFocus ? Theme.primary : Theme.border }
         }
         RowLayout {
             Layout.topMargin: 6
@@ -271,12 +252,12 @@ ColumnLayout {
             FlatButton { text: "Cancel"; outlined: false; font.pixelSize: Theme.px(12); onClicked: setupArea.text = proj.p.setup }
         }
         Rule { visible: proj.p !== null }
-        // The wiki and the shared plan.
+        // The wiki.
         SectionHeader {
             visible: proj.p !== null
-            title: "Wiki, lookup and plans"
-            subtitle: "Tools that help this project's agents find their way, plan and keep track."
-            more: "Every agent gets them, through Harlo's tools (Settings → Teamwork). Sessions started afterwards get them."
+            title: "Wiki"
+            subtitle: "Helps this project's agents find their way."
+            more: "Sessions started afterwards get it."
         }
         Group {
             id: featureGroup
@@ -332,169 +313,6 @@ ColumnLayout {
                     onActivated: i => {
                         Workspace.setSetting("wiki_map_" + featureGroup.pid, values[i])
                         featureGroup.rev++
-                        currentIndex = Qt.binding(() => at())
-                    }
-                }
-            }
-            SettingRow {
-                divider: true
-                title: "Code lookup"
-                detail: "Agents can look up a function or type by name: where it's declared, its signature, what it calls and what calls it, without reading files."
-                more: "From harlo's code index of this project (its own cache; nothing is written in the project). Harlo has it as a tool of its own, other agents through Harlo's tools. Off unless you switch it on: it's one more tool in every request."
-                icon: "node-tree"
-                AppSwitch {
-                    objectName: "projectLookup"
-                    checked: featureGroup.on("lookup", false)
-                    onToggled: featureGroup.set("lookup", checked)
-                }
-            }
-            SettingRow {
-                id: planRow
-                divider: true
-                title: "Shared plan"
-                detail: "For a bigger task the agent writes a plan of steps and works through it."
-                more: "You add, change, reorder or skip steps at any time (above the message box), and it reads them before each step. On by default in a git repository."
-                icon: "list-check-2"
-                // (Unset: on in a git repository.)
-                readonly property bool on: featureGroup.rev >= 0 && featureGroup.pid >= 0 && Workspace.planOn(featureGroup.pid)
-                AppSwitch {
-                    objectName: "projectPlan"
-                    checked: planRow.on
-                    onToggled: featureGroup.set("plan", checked)
-                }
-            }
-            SettingRow {
-                divider: true
-                visible: planRow.on
-                title: "Commit each finished step"
-                detail: "When a step is done, Harlo commits its changes with the step as the message."
-                more: "Only if they're provably the step's: not when a file it touched already had changes, the branch moved, or another session worked there meanwhile (then it says why and leaves them to you). A finished step can be reviewed by another agent. Off unless you turn it on (or the shared plan) here."
-                icon: "git-commit"
-                AppSwitch {
-                    objectName: "projectPlanCommits"
-                    checked: featureGroup.rev >= 0 && featureGroup.pid >= 0 && Workspace.planCommitsOn(featureGroup.pid)
-                    onToggled: featureGroup.set("plan_commits", checked)
-                }
-            }
-        }
-        // Who the agents' helpers are (a plan's run, a split).
-        SectionHeader {
-            visible: proj.p !== null && Workspace.orchestrationOn
-            Layout.topMargin: 22
-            title: "Team"
-            subtitle: "Who does the steps and who reviews them when a plan runs with helpers."
-            more: "Also who works when an agent splits a task. You can plan with one model, have another do the steps and a third check them, and still choose others for one run, or one step."
-        }
-        Group {
-            id: team
-            visible: proj.p !== null && Workspace.orchestrationOn
-            readonly property int pid: proj.p ? proj.p.id : -1
-            property int rev: 0
-            // { agent, model, thinking } ({}: the same as the session).
-            readonly property var value: {
-                if (rev < 0 || pid < 0) return ({})
-                try { return JSON.parse(Workspace.setting("team_helpers_" + pid) || "{}") } catch (e) { return ({}) }
-            }
-            readonly property var providers: Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()).filter(p => p.canChat && p.enabled && p.state !== "missing") : []
-            readonly property var provider: providers.find(p => p.id === value.agent) || null
-            readonly property var levels: ["", "low", "medium", "high"]
-            function save(v) { Workspace.setSetting("team_helpers_" + pid, v.agent ? JSON.stringify(v) : ""); rev++ }
-            function change(k, x) { const v = Object.assign({}, value); v[k] = x; save(v) }
-            // Ready-made teams: one agent for the steps, or one doing
-            // them and another reviewing them.
-            readonly property var reviewerProvider: value.reviewer ? providers.find(p => p.id === value.reviewer.agent) || null : null
-            onVisibleChanged: if (visible) Workspace.ensureProviders()
-            SettingRow {
-                title: "Helpers"
-                detail: team.provider ? "Helpers are " + team.provider.label + " sessions, with the model and thinking below."
-                                      : "The same as the session that starts them: its agent, model and thinking."
-                icon: "node-tree"
-                ComboField {
-                    objectName: "teamAgent"
-                    width: 190
-                    model: ["Same as the session"].concat(team.providers.map(p => p.label))
-                    function at() { return team.provider ? team.providers.indexOf(team.provider) + 1 : 0 }
-                    currentIndex: at()
-                    onModelChanged: currentIndex = Qt.binding(() => at())
-                    onActivated: i => {
-                        team.save(i === 0 ? {} : { agent: team.providers[i - 1].id, model: "", thinking: "" })
-                        currentIndex = Qt.binding(() => at())
-                    }
-                }
-            }
-            SettingRow {
-                visible: team.provider !== null
-                divider: true
-                title: "Their model"
-                detail: team.provider && team.provider.state === "checking" ? "Finding " + team.provider.label + "'s models…" : ""
-                icon: "sparkling"
-                ComboField {
-                    objectName: "teamModel"
-                    width: 190
-                    readonly property var ids: team.provider ? team.provider.modelIds || [] : []
-                    model: ["Default model"].concat(team.provider ? (team.provider.models || []).map(m => Theme.modelLabel(m)) : [])
-                    function at() { return !team.value.model ? 0 : ids.indexOf(team.value.model) + 1 }
-                    currentIndex: at()
-                    onModelChanged: currentIndex = Qt.binding(() => at())
-                    onActivated: i => {
-                        team.change("model", i > 0 ? ids[i - 1] || "" : "")
-                        currentIndex = Qt.binding(() => at())
-                    }
-                }
-            }
-            SettingRow {
-                visible: team.provider !== null
-                divider: true
-                title: "Their thinking"
-                detail: "How hard they think: more is slower and costs more."
-                icon: "speed"
-                ComboField {
-                    objectName: "teamThinking"
-                    width: 190
-                    model: ["Default", "Low", "Medium", "High"]
-                    function at() { return Math.max(0, team.levels.indexOf(team.value.thinking || "")) }
-                    currentIndex: at()
-                    onActivated: i => {
-                        team.change("thinking", team.levels[i])
-                        currentIndex = Qt.binding(() => at())
-                    }
-                }
-            }
-            SettingRow {
-                visible: team.provider !== null
-                divider: true
-                title: "Reviews by"
-                detail: team.reviewerProvider ? "Each finished step is reviewed by a " + team.reviewerProvider.label + " session."
-                                              : "Each finished step is reviewed by a session like its helper."
-                icon: "eye"
-                ComboField {
-                    objectName: "teamReviewer"
-                    width: 190
-                    model: ["The helpers' agent"].concat(team.providers.map(p => p.label))
-                    function at() { return team.reviewerProvider ? team.providers.indexOf(team.reviewerProvider) + 1 : 0 }
-                    currentIndex: at()
-                    onModelChanged: currentIndex = Qt.binding(() => at())
-                    onActivated: i => {
-                        team.change("reviewer", i === 0 ? undefined : { agent: team.providers[i - 1].id, model: "" })
-                        currentIndex = Qt.binding(() => at())
-                    }
-                }
-            }
-            SettingRow {
-                visible: team.provider !== null && team.reviewerProvider !== null
-                divider: true
-                title: "The reviewer's model"
-                icon: "sparkling"
-                ComboField {
-                    objectName: "teamReviewerModel"
-                    width: 190
-                    readonly property var ids: team.reviewerProvider ? team.reviewerProvider.modelIds || [] : []
-                    model: ["Default model"].concat(team.reviewerProvider ? (team.reviewerProvider.models || []).map(m => Theme.modelLabel(m)) : [])
-                    function at() { return !team.value.reviewer || !team.value.reviewer.model ? 0 : ids.indexOf(team.value.reviewer.model) + 1 }
-                    currentIndex: at()
-                    onModelChanged: currentIndex = Qt.binding(() => at())
-                    onActivated: i => {
-                        team.change("reviewer", { agent: team.value.reviewer.agent, model: i > 0 ? ids[i - 1] || "" : "" })
                         currentIndex = Qt.binding(() => at())
                     }
                 }

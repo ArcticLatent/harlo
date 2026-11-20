@@ -27,7 +27,7 @@ Popup {
     padding: 8
     modal: true
     focus: true
-    background: GlassSurface { radius: 14; kind: "dialog" }
+    background: GlassSurface { radius: 5; kind: "dialog" }
     Overlay.modal: GlassScrim { }
 
     property var items: []
@@ -246,7 +246,7 @@ Popup {
                         leftPadding: 10
                         rightPadding: 10
                         highlighted: rowLoader.index === list.currentIndex
-                        background: Rectangle { radius: 6; color: row.highlighted ? Theme.selected : row.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 2; color: row.highlighted ? Theme.selected : row.hovered ? Theme.hover : "transparent" }
                         onClicked: { list.currentIndex = rowLoader.index; root.runCurrent() }
                         contentItem: RowLayout {
                             spacing: 10

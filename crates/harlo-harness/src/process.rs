@@ -193,23 +193,14 @@ impl Harness {
         if !cfg.kind.can_chat() {
             return Err(Error::new(ErrorKind::Start, format!("harlo can't run {} sessions yet", cfg.kind.label())));
         }
-        if cfg.kind == HarnessKind::Claude {
-            let program = match (&cfg.program, &cfg.remote) {
-                (Some(p), _) => p.clone(),
-                // There: its PATH finds it. (It needn't be on this PC too.)
-                (None, Some(_)) => PathBuf::from(cfg.kind.program_name()),
-                (None, None) => resolve_program(cfg.kind).or_error(ErrorKind::Start, || "could not find the `claude` binary".to_owned())?,
-            };
-            return crate::claude_run::spawn(cfg, program);
-        }
-        let args = launch_args(&cfg);
+        let mut args = launch_args(&cfg);
+        let mut env = cfg.env.clone();
+        let there = if cfg.kind == HarnessKind::Pi { pi_extension(&cfg, &mut args, &mut env)? } else { None };
+        let cfg = HarnessConfig { env, ..cfg };
         let (program, mut cmd) = match &cfg.remote {
             // On the remote machine: its PATH finds the program.
             Some(remote) => {
-                let program = match cfg.program.clone() {
-                    Some(p) => p,
-                    None => crate::remote_program(&remote.host, cfg.kind)?,
-                };
+                let program = cfg.program.clone().or(there).unwrap_or_else(|| PathBuf::from(cfg.kind.program_name()));
                 let mut cmd = Command::new("ssh");
                 cmd.args(&remote.ssh_args)
                     .arg(remote_script(remote, &program.to_string_lossy(), &args, &cfg.cwd, &cfg.env))
@@ -281,9 +272,28 @@ impl Harness {
 
     /// Sends a command without waiting. Its response arrives as
     /// [`HarnessEvent::Response`]. Returns the assigned id.
-    pub fn send(&self, mut cmd: Value) -> String {
+    pub fn send(&self, cmd: Value) -> String {
+        let mut cmd = self.in_pis_terms(cmd);
         let id = self.next_id();
         cmd["id"] = Value::String(id.clone());
+        if self.answered_for_pi(&cmd).is_some() {
+            return id;
+        }
+        // pi: stop, and once pi says the run has stopped, the prompt (pi
+        // doesn't go on with one queued behind a stopped run). Queued
+        // all the same, should it still be ending.
+        if self.kind == HarnessKind::Pi && cmd["type"] == "abort_and_prompt" {
+            cmd["type"] = json!("prompt");
+            cmd["streamingBehavior"] = json!("followUp");
+            if let (Ok(stopped), Ok(rt)) = (self.ask(json!({ "type": "abort" })), tokio::runtime::Handle::try_current()) {
+                let tx = self.tx.clone();
+                rt.spawn(async move {
+                    let _ = stopped.get().await;
+                    let _ = tx.send(Outgoing::Frame(cmd));
+                });
+                return id;
+            }
+        }
         let _ = self.tx.send(Outgoing::Frame(cmd));
         id
     }
@@ -296,6 +306,17 @@ impl Harness {
     /// ([`is_gone`](Error::is_gone)), or answers with an error
     /// ([`is_refused`](Error::is_refused)), its own text the message.
     pub async fn request(&self, cmd: Value) -> Result<Value, Error> {
+        if self.kind == HarnessKind::Pi && self.in_steps(&cmd) {
+            return self.requeue(&cmd).await;
+        }
+        // (harlo's own command for pi isn't the user's to pick.)
+        if self.kind == HarnessKind::Pi && cmd["type"] == "get_commands" {
+            let mut data = self.rpc(cmd).await?;
+            if let Some(list) = data["commands"].as_array_mut() {
+                list.retain(|c| c["name"].as_str().map(|n| n.trim_start_matches('/')) != Some("harlo-modes"));
+            }
+            return Ok(data);
+        }
         // (A queued message that went out meanwhile can't be changed.)
         if self.in_steps(&cmd) {
             let data = self.rpc(cmd).await?;
@@ -306,6 +327,58 @@ impl Harness {
             };
         }
         self.rpc(cmd).await
+    }
+
+    /// pi: removes or promotes a queued message. pi can only clear its
+    /// whole queue, so what's kept goes back in, in order (as text: a
+    /// queued message's images don't come back).
+    async fn requeue(&self, cmd: &Value) -> Result<Value, Error> {
+        let promote = cmd["type"] == "promote_queued_message";
+        let text = cmd["message"].as_str().unwrap_or_default();
+        let queue = if promote { "followUp" } else { cmd["queue"].as_str().unwrap_or("followUp") };
+        let had = self.rpc(json!({ "type": "clear_queue" })).await?;
+        let list = |key: &str| had[key].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect::<Vec<_>>();
+        let (mut steering, mut follow_up) = (list("steering"), list("followUp"));
+        let from = if queue == "steering" { &mut steering } else { &mut follow_up };
+        let taken = from.iter().position(|t| t == text).map(|at| from.remove(at));
+        if promote && let Some(t) = &taken {
+            steering.push(t.clone());
+        }
+        for t in &steering {
+            self.rpc(json!({ "type": "steer", "message": t })).await?;
+        }
+        for t in &follow_up {
+            self.rpc(json!({ "type": "follow_up", "message": t })).await?;
+        }
+        match taken {
+            Some(_) => Ok(json!({ "removed": !promote, "promoted": promote })),
+            None => Err(Error::new(ErrorKind::AlreadySent, "That message has been sent already.")),
+        }
+    }
+
+    /// pi: a command of harlo's own as pi takes it. Modes go to harlo's
+    /// extension as its command (run at once, even mid-run, and not a
+    /// message).
+    fn in_pis_terms(&self, cmd: Value) -> Value {
+        if self.kind != HarnessKind::Pi || cmd["type"] != "harlo_set_modes" {
+            return cmd;
+        }
+        let modes = json!({ "approval": cmd["approval"] });
+        json!({ "type": "prompt", "message": format!("/harlo-modes {modes}") })
+    }
+
+    /// pi: the answer to a command of harlo's own that pi doesn't have
+    /// (None: pi takes it).
+    fn answered_for_pi(&self, cmd: &Value) -> Option<Value> {
+        if self.kind != HarnessKind::Pi {
+            return None;
+        }
+        let refused = |why: &str| json!({ "type": "response", "command": cmd["type"], "success": false, "error": why });
+        Some(match cmd["type"].as_str()? {
+            "set_interrupt_mode" => json!({ "type": "response", "command": cmd["type"], "success": true }),
+            "login" => refused("pi signs in itself: run `pi auth login <provider>` in a terminal."),
+            _ => return None,
+        })
     }
 
     /// Whether [`request`](Self::request) checks this command's answer:
@@ -327,10 +400,15 @@ impl Harness {
     ///
     /// An [`Error`] that [`is_gone`](Error::is_gone) when the agent isn't
     /// running.
-    pub fn ask(&self, mut cmd: Value) -> Result<Answer, Error> {
+    pub fn ask(&self, cmd: Value) -> Result<Answer, Error> {
+        let mut cmd = self.in_pis_terms(cmd);
         let id = self.next_id();
         cmd["id"] = Value::String(id.clone());
         let (tx, rx) = oneshot::channel();
+        if let Some(answer) = self.answered_for_pi(&cmd) {
+            let _ = tx.send(answer);
+            return Ok(Answer(rx));
+        }
         self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.clone(), tx);
         if self.tx.send(Outgoing::Frame(cmd)).is_err() {
             self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);
@@ -432,10 +510,140 @@ pub fn image_from_file(path: &Path) -> Result<Value, Error> {
     }))
 }
 
+/// harlo's extension for pi (`pi/harlo.ts`): its tools, instructions,
+/// approval modes and harlo's sandbox.
+const PI_EXTENSION: &str = include_str!("../pi/harlo.ts");
+
+/// More extensions harlo loads into every pi it starts on this computer
+/// (its built-in Claude subscription extension), with what they need in
+/// their environment: set by the app ([`set_pi_extensions`]).
+static PI_EXTRA: std::sync::RwLock<PiExtra> = std::sync::RwLock::new((Vec::new(), Vec::new()));
+
+/// Extension paths, and environment.
+type PiExtra = (Vec<String>, Vec<(String, String)>);
+
+/// Sets the extensions (paths, `-e`) and environment every pi started on
+/// this computer from now on gets, besides harlo's own.
+pub fn set_pi_extensions(paths: Vec<String>, env: Vec<(String, String)>) {
+    if let Ok(mut extra) = PI_EXTRA.write() {
+        *extra = (paths, env);
+    }
+}
+
+/// pi: loads harlo's extension, and gives it harlo's tool bridge (while
+/// harlo's tools are on), that bridge's socket and harlo's helper (for its
+/// sandbox; on a host, put there too). The extension is written
+/// once per version, under harlo's cache folder here or on the host. On a
+/// host, the pi found there is returned.
+fn pi_extension(cfg: &HarnessConfig, args: &mut Vec<String>, env: &mut Vec<(String, String)>) -> Result<Option<PathBuf>, Error> {
+    let (file, there) = match &cfg.remote {
+        Some(remote) => {
+            let (file, program) = pi_on_host(remote)?;
+            (file, Some(program))
+        }
+        None => (pi_extension_here()?, None),
+    };
+    args.extend(["-e".to_owned(), file]);
+    if cfg.remote.is_none()
+        && let Ok(extra) = PI_EXTRA.read()
+    {
+        for path in &extra.0 {
+            args.extend(["-e".to_owned(), path.clone()]);
+        }
+        env.extend(extra.1.iter().cloned());
+    }
+    // (harlo's helper, for its sandbox and its check for commands that
+    // can't be undone: the one shipped with harlo, or put on the host.)
+    let helper = match &cfg.remote {
+        Some(remote) => crate::remote_helper(&remote.host)?,
+        None => helper_here(),
+    };
+    if let Some(helper) = helper {
+        env.push(("HARLO_HELPER_BIN".to_owned(), helper.to_string_lossy().into_owned()));
+    }
+    if let Some(bridge) = crate::mcp_bridge_for(cfg.remote.as_ref()) {
+        env.push(("HARLO_MCP_BRIDGE".to_owned(), json!(bridge).to_string()));
+        // (Its socket, last on either bridge's command line.)
+        if let Some(socket) = bridge.last() {
+            env.push(("HARLO_MCP_SOCKET".to_owned(), socket.clone()));
+        }
+    }
+    Ok(there)
+}
+
+/// The extension's file here, written if it isn't yet.
+fn pi_extension_here() -> Result<String, Error> {
+    let file = pi_extension_file().or_error(ErrorKind::Start, || "no cache folder for harlo's pi extension".to_owned())?;
+    if !file.exists() {
+        let dir = file.parent().unwrap_or(Path::new("/"));
+        std::fs::create_dir_all(dir).or_error(ErrorKind::Start, || format!("making {}", dir.display()))?;
+        let part = file.with_extension(format!("ts.{}", std::process::id()));
+        std::fs::write(&part, PI_EXTENSION).and_then(|()| std::fs::rename(&part, &file)).or_error(ErrorKind::Start, || format!("writing {}", file.display()))?;
+    }
+    Ok(file.to_string_lossy().into_owned())
+}
+
+/// On a host, in one SSH command: the extension's file there (written if
+/// it isn't yet), and its pi.
+fn pi_on_host(remote: &RemoteLaunch) -> Result<(String, PathBuf), Error> {
+    use std::io::Write as _;
+    let host = &remote.host;
+    let mut child = std::process::Command::new("ssh")
+        .args(&remote.ssh_args)
+        .arg(pi_host_script(&remote.prelude))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .or_error(ErrorKind::Start, || format!("reaching {host}"))?;
+    // (Read whole even when it's there already, so the write never breaks.)
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(PI_EXTENSION.as_bytes());
+    }
+    let out = child.wait_with_output().or_error(ErrorKind::Start, || format!("reaching {host}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let file = lines.next().filter(|_| out.status.success()).map(str::to_owned);
+    let Some(file) = file else {
+        return Err(Error::new(ErrorKind::Start, format!("couldn't put harlo's pi extension on {host}: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    };
+    let program = lines.next().map(PathBuf::from).or_error(ErrorKind::Start, || format!("pi isn't installed on {host}: install it there to start pi sessions on it."))?;
+    Ok((file, program))
+}
+
+/// The host's side of [`pi_on_host`]: prints the extension's path, then
+/// pi's (none when it isn't there).
+fn pi_host_script(prelude: &str) -> String {
+    let name = pi_extension_name();
+    format!(
+        r#"{prelude} d="${{XDG_CACHE_HOME:-$HOME/.cache}}/harlo/pi"; f="$d/{name}"; mkdir -p "$d" && {{ if [ -s "$f" ]; then cat >/dev/null; else cat > "$f.$$" && mv -f "$f.$$" "$f"; fi; }} && printf '%s\n' "$f" && {{ command -v pi || for p in "$HOME/.pi/agent/bin/pi" "$HOME/.local/bin/pi"; do if [ -x "$p" ]; then printf '%s\n' "$p"; break; fi; done; }}"#
+    )
+}
+
+/// The extension's file name: `harlo-<its hash>.ts`, new when it changes.
+fn pi_extension_name() -> String {
+    // (FNV-1a.)
+    let hash = PI_EXTENSION.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    format!("harlo-{hash:016x}.ts")
+}
+
+/// Where the extension goes: `$XDG_CACHE_HOME/harlo/pi/harlo-<its hash>.ts`.
+fn pi_extension_file() -> Option<PathBuf> {
+    // (Tests write it in one folder of their own, never the user's cache.)
+    if cfg!(test) {
+        return Some(std::env::temp_dir().join("harlo-test-pi-extension").join(pi_extension_name()));
+    }
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+    Some(cache.join("harlo/pi").join(pi_extension_name()))
+}
+
 fn launch_args(cfg: &HarnessConfig) -> Vec<String> {
     let mut args: Vec<String> = match cfg.kind {
-        HarnessKind::Harlo => vec!["--mode".into(), "rpc".into()],
-        HarnessKind::Claude | HarnessKind::Demo => vec![],
+        HarnessKind::Pi => vec!["--mode".into(), "rpc".into()],
+        HarnessKind::Demo => vec![],
     };
     match &cfg.session {
         SessionTarget::New => {}
@@ -453,12 +661,6 @@ fn launch_args(cfg: &HarnessConfig) -> Vec<String> {
 /// (a desktop launch often has a minimal PATH).
 pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
     let name = kind.program_name();
-    // harlo's own agent: the one built and shipped with this harlo first.
-    if kind == HarnessKind::Harlo
-        && let Some(shipped) = std::env::current_exe().ok().and_then(|exe| shipped_with(&exe, name))
-    {
-        return Some(shipped);
-    }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
             let candidate = dir.join(name);
@@ -469,11 +671,15 @@ pub fn resolve_program(kind: HarnessKind) -> Option<PathBuf> {
     }
     let home = PathBuf::from(std::env::var_os("HOME")?);
     let known = match kind {
-        HarnessKind::Claude => vec![home.join(".local/bin/claude"), home.join(".claude/local/claude"), PathBuf::from("/usr/local/bin/claude"), PathBuf::from("/usr/bin/claude")],
-        HarnessKind::Harlo => vec![home.join(".local/bin/harlo-agent")],
+        HarnessKind::Pi => vec![home.join(".pi/agent/bin/pi"), home.join(".local/bin/pi")],
         HarnessKind::Demo => vec![],
     };
     known.into_iter().find(|p| is_executable(p))
+}
+
+/// harlo's helper on this computer: the one shipped beside harlo's program.
+fn helper_here() -> Option<PathBuf> {
+    std::env::current_exe().ok().and_then(|exe| shipped_with(&exe, "harlo-helper"))
 }
 
 /// A program shipped with harlo (`exe`): beside it (a build), else in
@@ -701,33 +907,114 @@ mod tests {
         assert_eq!(sent(json!("Approve")), json!({ "type": "extension_ui_response", "id": "ui_1", "value": "Approve" }));
     }
 
+    /// pi lacks some of harlo's commands: they're answered here, put in
+    /// pi's terms, or refused, and nothing pi wouldn't know goes out.
+    #[tokio::test]
+    async fn harlo_commands_in_pis_terms() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let pending = Pending::default();
+        let h = Harness::from_parts(HarnessKind::Pi, tx, Arc::clone(&pending));
+        // Signing in: pi does it itself.
+        assert!(h.request(json!({ "type": "login", "provider": "x" })).await.unwrap_err().is_refused());
+        assert!(rx.try_recv().is_err(), "nothing went to pi");
+        let frame = |rx: &mut mpsc::UnboundedReceiver<Outgoing>| match rx.try_recv() {
+            Ok(Outgoing::Frame(v)) => v,
+            _ => panic!("no frame"),
+        };
+        // Modes: harlo's extension's command.
+        drop(h.ask(json!({ "type": "harlo_set_modes", "approval": "write" })).unwrap());
+        let modes = frame(&mut rx);
+        assert_eq!((modes["type"].as_str(), modes["message"].as_str()), (Some("prompt"), Some(r#"/harlo-modes {"approval":"write"}"#)));
+        // Stop and send: a stop, and once pi has stopped, the prompt.
+        h.prompt("instead", Vec::new(), SendMode::StopAndSend);
+        let abort = frame(&mut rx);
+        assert_eq!(abort["type"], "abort");
+        tokio::task::yield_now().await;
+        assert!(rx.try_recv().is_err(), "the prompt waits for the stop");
+        let waiting = pending.lock().unwrap().remove(abort["id"].as_str().unwrap()).unwrap();
+        waiting.send(json!({ "success": true })).unwrap();
+        let prompt = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.ok().flatten();
+        let Some(Outgoing::Frame(prompt)) = prompt else { panic!("no prompt after the stop") };
+        assert_eq!((prompt["type"].as_str(), prompt["message"].as_str(), prompt["streamingBehavior"].as_str()), (Some("prompt"), Some("instead"), Some("followUp")));
+        // Promoting a queued message: the queue cleared, then put back with
+        // it moved to steering.
+        let pi = tokio::spawn(async move {
+            let mut sent = Vec::new();
+            while let Some(Outgoing::Frame(cmd)) = rx.recv().await {
+                let data = match cmd["type"].as_str() {
+                    Some("clear_queue") => json!({ "steering": [], "followUp": ["a", "b"] }),
+                    Some("get_commands") => json!({ "commands": [{ "name": "harlo-modes" }, { "name": "review" }] }),
+                    _ => Value::Null,
+                };
+                if let Some(waiter) = pending.lock().unwrap().remove(cmd["id"].as_str().unwrap_or_default()) {
+                    let _ = waiter.send(json!({ "type": "response", "success": true, "data": data }));
+                }
+                sent.push((cmd["type"].as_str().unwrap_or_default().to_owned(), cmd["message"].as_str().unwrap_or_default().to_owned()));
+            }
+            sent
+        });
+        assert_eq!(h.request(json!({ "type": "promote_queued_message", "message": "b" })).await.unwrap()["promoted"], true);
+        assert!(h.request(json!({ "type": "remove_queued_message", "message": "gone", "queue": "followUp" })).await.unwrap_err().to_string().contains("sent already"));
+        // The extension's own command is left out of pi's list.
+        assert_eq!(h.request(json!({ "type": "get_commands" })).await.unwrap()["commands"], json!([{ "name": "review" }]));
+        drop(h);
+        let sent = pi.await.unwrap();
+        let s = |t: &str, m: &str| (t.to_owned(), m.to_owned());
+        assert_eq!(sent[..3], [s("clear_queue", ""), s("steer", "b"), s("follow_up", "a")]);
+    }
+
+    /// The host's side of a pi launch, run here in a scratch home: the
+    /// extension written there once, then pi's path, or nothing for it.
+    #[test]
+    fn pi_on_a_host_gets_the_extension_and_is_found() {
+        use std::io::Write as _;
+        let home = std::env::temp_dir().join(format!("harlo-pi-host-{}", std::process::id()));
+        let bin = home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let run = |path: &str| {
+            let mut child = std::process::Command::new("sh")
+                .args(["-c", &pi_host_script("PATH=\"$TEST_BIN:/usr/bin:/bin\";")])
+                .env_clear()
+                .env("HOME", &home)
+                .env("TEST_BIN", path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child.stdin.take().unwrap().write_all(PI_EXTENSION.as_bytes()).unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success());
+            String::from_utf8(out.stdout).unwrap().lines().map(str::to_owned).collect::<Vec<_>>()
+        };
+        let file = home.join(".cache/harlo/pi").join(pi_extension_name());
+        // No pi there: only the extension's path.
+        assert_eq!(run(&bin.to_string_lossy()), [file.to_string_lossy()]);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), PI_EXTENSION);
+        // pi in ~/.pi/agent/bin (not on PATH): found there.
+        let pi = home.join(".pi/agent/bin/pi");
+        std::fs::create_dir_all(pi.parent().unwrap()).unwrap();
+        std::fs::write(&pi, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&pi, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        assert_eq!(run(&bin.to_string_lossy()), [file.to_string_lossy().into_owned(), pi.to_string_lossy().into_owned()]);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
     #[test]
     fn launch_args_per_harness() {
         let cfg = |kind, session| HarnessConfig { kind, program: None, cwd: PathBuf::from("/"), session, extra_args: vec![], env: vec![], remote: None };
-        assert_eq!(launch_args(&cfg(HarnessKind::Harlo, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc", "--session", "/s.jsonl"]);
-        assert_eq!(launch_args(&cfg(HarnessKind::Harlo, SessionTarget::Ephemeral)), ["--mode", "rpc", "--no-session"]);
-        assert_eq!(launch_args(&cfg(HarnessKind::Claude, SessionTarget::New)), Vec::<String>::new());
+        assert_eq!(launch_args(&cfg(HarnessKind::Pi, SessionTarget::Resume("/s.jsonl".into()))), ["--mode", "rpc", "--session", "/s.jsonl"]);
+        assert_eq!(launch_args(&cfg(HarnessKind::Pi, SessionTarget::Ephemeral)), ["--mode", "rpc", "--no-session"]);
+        assert_eq!(launch_args(&cfg(HarnessKind::Demo, SessionTarget::New)), Vec::<String>::new());
+        assert_eq!(launch_args(&cfg(HarnessKind::Pi, SessionTarget::New)), ["--mode", "rpc"]);
     }
 
     #[test]
     fn remote_command_line() {
         let mut remote = RemoteLaunch { host: "nas".into(), ssh_args: vec!["me@nas".into()], prelude: "PATH=\"$HOME/.local/bin:$PATH\";".into(), cleanup: String::new() };
-        let script = remote_script(&remote, "harlo-agent", &["--mode".into(), "rpc".into(), "--session".into(), "/s/it's.jsonl".into()], Path::new("ssh://nas/home/me/my proj"), &[("A".into(), "1 2".into())]);
-        assert_eq!(script, r#"PATH="$HOME/.local/bin:$PATH"; cd '/home/me/my proj' && exec env 'A=1 2' harlo-agent --mode rpc --session '/s/it'\''s.jsonl'"#);
+        let script = remote_script(&remote, "pi", &["--mode".into(), "rpc".into(), "--session".into(), "/s/it's.jsonl".into()], Path::new("ssh://nas/home/me/my proj"), &[("A".into(), "1 2".into())]);
+        assert_eq!(script, r#"PATH="$HOME/.local/bin:$PATH"; cd '/home/me/my proj' && exec env 'A=1 2' pi --mode rpc --session '/s/it'\''s.jsonl'"#);
         remote.cleanup = "rm -f /tmp/x".into();
-        assert_eq!(remote_script(&remote, "harlo-agent", &[], Path::new("/w"), &[]), r#"PATH="$HOME/.local/bin:$PATH"; cd /w && harlo-agent; status=$?; rm -f /tmp/x; exit $status"#);
-    }
-
-    #[test]
-    fn a_program_harlo_puts_there() {
-        #[expect(clippy::unnecessary_wraps, reason = "the signature set_remote_program takes")]
-        fn put(_: &str, kind: HarnessKind) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
-            Ok((kind == HarnessKind::Harlo).then(|| "/home/me/.cache/harlo/harlo-agent-00ff".to_owned()))
-        }
-        crate::set_remote_program(put);
-        assert_eq!(crate::remote_program("nas", HarnessKind::Harlo).unwrap(), Path::new("/home/me/.cache/harlo/harlo-agent-00ff"));
-        // Others: that machine's PATH finds them.
-        assert_eq!(crate::remote_program("nas", HarnessKind::Claude).unwrap(), Path::new("claude"));
+        assert_eq!(remote_script(&remote, "pi", &[], Path::new("/w"), &[]), r#"PATH="$HOME/.local/bin:$PATH"; cd /w && pi; status=$?; rm -f /tmp/x; exit $status"#);
     }
 
     /// An agent that reads and never answers: what's left unanswered ends
@@ -739,10 +1026,10 @@ mod tests {
     async fn stand_in(name: &str, script: &str) -> (Harness, mpsc::UnboundedReceiver<HarnessEvent>, PathBuf) {
         let dir = std::env::temp_dir().join(format!("harlo-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let program = dir.join("harlo-agent");
+        let program = dir.join("pi");
         std::fs::write(&program, format!("#!/bin/sh\n{script}\n")).unwrap();
         std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let cfg = HarnessConfig { kind: HarnessKind::Harlo, program: Some(program), cwd: dir.clone(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
+        let cfg = HarnessConfig { kind: HarnessKind::Pi, program: Some(program), cwd: dir.clone(), session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None };
         // Another test thread forking while the script was still open for
         // writing keeps it busy for a moment ("Text file busy"): try again.
         let mut tries = 0;
@@ -771,7 +1058,7 @@ mod tests {
     async fn asked_commands_go_out_in_the_order_sent() {
         let (harness, _events, dir) = stand_in("ordered-agent", "while read -r line; do printf '%s\\n' \"$line\" >> sent; done").await;
         let harness = std::sync::Arc::new(harness);
-        let answer = harness.ask(json!({ "type": "harlo_set_modes", "approval": "write", "plan": false })).unwrap();
+        let answer = harness.ask(json!({ "type": "harlo_set_modes", "approval": "write" })).unwrap();
         let waiting = tokio::spawn(answer.get());
         harness.prompt("and now", Vec::new(), SendMode::Normal);
         let sent = dir.join("sent");
@@ -783,8 +1070,9 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         };
-        let types: Vec<&str> = lines.iter().map(|l| l["type"].as_str().unwrap_or_default()).collect();
-        assert_eq!(types, ["harlo_set_modes", "prompt"]);
+        // (The modes go to pi as harlo's extension's command.)
+        let messages: Vec<&str> = lines.iter().map(|l| l["message"].as_str().unwrap_or_default()).collect();
+        assert!(matches!(&*messages, [modes, "and now"] if modes.starts_with("/harlo-modes ")), "{messages:?}");
         harness.kill();
         assert!(waiting.await.unwrap().unwrap_err().is_gone(), "unanswered: ended by the stop");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -821,15 +1109,15 @@ mod tests {
             std::fs::write(p, "#!/bin/sh\n").unwrap();
             std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
         };
-        assert_eq!(shipped_with(&exe, "harlo-agent"), None);
+        assert_eq!(shipped_with(&exe, "harlo-helper"), None);
         // The packages': in lib/harlo.
-        let lib = root.join("opt/harlo/lib/harlo/harlo-agent");
+        let lib = root.join("opt/harlo/lib/harlo/harlo-helper");
         make(&lib);
-        assert_eq!(shipped_with(&exe, "harlo-agent").map(|p| p.canonicalize().unwrap()), Some(lib.canonicalize().unwrap()));
+        assert_eq!(shipped_with(&exe, "harlo-helper").map(|p| p.canonicalize().unwrap()), Some(lib.canonicalize().unwrap()));
         // A build's, beside it, comes first.
-        let beside = root.join("opt/harlo/bin/harlo-agent");
+        let beside = root.join("opt/harlo/bin/harlo-helper");
         make(&beside);
-        assert_eq!(shipped_with(&exe, "harlo-agent"), Some(beside));
+        assert_eq!(shipped_with(&exe, "harlo-helper"), Some(beside));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

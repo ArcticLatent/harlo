@@ -90,7 +90,7 @@ Rectangle {
                 placeholderTextColor: Theme.textFaint
                 selectionColor: Theme.selection
                 font.pixelSize: Theme.px(13.5)
-                background: Rectangle { radius: 12; color: Theme.raised; border.color: editor.activeFocus ? Theme.accent : Theme.hairline }
+                background: Rectangle { radius: 4; color: Theme.raised; border.color: editor.activeFocus ? Theme.accent : Theme.hairline }
                 onTextChanged: if (!root.loading) saveTimer.restart()
             }
         }

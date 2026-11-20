@@ -2,7 +2,7 @@
 //!
 //! All of it is read from the files, with no model and nothing written,
 //! by [`harlo_okf::view`], on the repository's machine: here, or through
-//! harlo's agent on another (`harlo-agent wiki --okf`). What's left here
+//! harlo's helper on another (`harlo-helper wiki --okf`). What's left here
 //! is a page laid out for reading (its Markdown in blocks), and the offer
 //! to update the wiki as the default branch moves. The work list reads
 //! every file in scope, so these run off the UI thread.
@@ -41,18 +41,18 @@ pub fn ask(folder: &Path, mut request: Value) -> Value {
     }
 }
 
-/// A request answered by harlo's agent on `host_name`.
+/// A request answered by harlo's helper on `host_name`.
 fn on_host(host_name: &str, request: &Value) -> anyhow::Result<Value> {
     let host = remote::host(host_name).ok_or_else(|| anyhow::anyhow!("No remote instance named {host_name}"))?;
-    let agent = crate::agent_host::program_on(host_name)?;
-    // The code index beside it, for the declarations (without it, harlo's
-    // agent reads them with its own scanner: a failure here isn't one).
+    let helper = crate::agent_host::helper_on(host_name)?;
+    // The code index beside it, for the declarations (without it, the
+    // helper reads them with its own scanner: a failure here isn't one).
     let _ = crate::agent_host::index_on(host_name);
-    let out = remote::run_with_input(&host, &format!("exec {} wiki --okf", remote::quote_path(&agent)), Some(request.to_string().as_bytes()), HOST_TIMEOUT)?;
+    let out = remote::run_with_input(&host, &format!("exec {} wiki --okf", remote::quote_path(&helper)), Some(request.to_string().as_bytes()), HOST_TIMEOUT)?;
     if !out.status.success() {
         anyhow::bail!("{}", remote::ssh_error(host_name, &out));
     }
-    serde_json::from_slice(&out.stdout).map_err(|e| anyhow::anyhow!("{host_name}'s harlo-agent didn't answer about the wiki ({e})"))
+    serde_json::from_slice(&out.stdout).map_err(|e| anyhow::anyhow!("{host_name}'s harlo-helper didn't answer about the wiki ({e})"))
 }
 
 /// The wiki of the repository `folder` is in.

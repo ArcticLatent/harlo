@@ -1,32 +1,29 @@
 //! Harness-agnostic event vocabulary and the per-harness wire translators.
 //!
 //! This module is the only place that knows the pi-protocol event shapes
-//! harlo-agent speaks. Everything downstream (reducer, UI) consumes
+//! pi speaks. Everything downstream (reducer, UI) consumes
 //! [`HarnessEvent`].
 
 // Rust guideline compliant 2026-10-09
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HarnessKind {
-    /// Claude Code (`claude`, stream-json; see `claude.rs`).
-    Claude,
-    /// harlo's own agent (`harlo-agent --mode rpc`: pi's protocol, with
-    /// harlo's approvals and modes built in).
-    Harlo,
+    /// pi (`pi --mode rpc`), with harlo's extension for its tools,
+    /// approvals and modes.
+    Pi,
     /// Synthetic event source for UI development and benchmarks.
     Demo,
 }
 
 impl HarnessKind {
     /// The providers, in Settings → Agents' order.
-    pub const PROVIDERS: [HarnessKind; 2] = [Self::Harlo, Self::Claude];
+    pub const PROVIDERS: [HarnessKind; 1] = [Self::Pi];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "claude" => Some(Self::Claude),
-            "harlo" => Some(Self::Harlo),
+            "pi" => Some(Self::Pi),
             "demo" => Some(Self::Demo),
             _ => None,
         }
@@ -34,8 +31,7 @@ impl HarnessKind {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Claude => "claude",
-            Self::Harlo => "harlo",
+            Self::Pi => "pi",
             Self::Demo => "demo",
         }
     }
@@ -43,8 +39,7 @@ impl HarnessKind {
     /// Its name for people.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Claude => "Claude",
-            Self::Harlo => "Harlo",
+            Self::Pi => "pi",
             Self::Demo => "Demo",
         }
     }
@@ -52,15 +47,17 @@ impl HarnessKind {
     /// harlo can run sessions with it (a provider it only lists is shown in
     /// Settings → Agents but not offered).
     pub fn can_chat(self) -> bool {
-        matches!(self, Self::Claude | Self::Harlo | Self::Demo)
+        matches!(self, Self::Pi | Self::Demo)
+    }
+
+    /// It speaks pi's RPC protocol (`--mode rpc`).
+    pub fn speaks_pi(self) -> bool {
+        self == Self::Pi
     }
 
     /// The program's name (on PATH, on another machine).
     pub fn program_name(self) -> &'static str {
-        match self {
-            Self::Harlo => "harlo-agent",
-            other => other.as_str(),
-        }
+        self.as_str()
     }
 }
 
@@ -96,9 +93,6 @@ pub enum HarnessEvent {
     RunEnded,
     /// No automatic work remains (`agent_settled`).
     Settled,
-    /// How many commands the agent left running in the background (Claude
-    /// Code's): it picks the work up again when one finishes.
-    BackgroundTasks(usize),
 
     /// `message` is the harness `AgentMessage` as sent on the wire.
     MessageStart { id: String, message: Value },
@@ -120,27 +114,12 @@ pub enum HarnessEvent {
     /// Stopped with messages queued: they're given back (each its text and
     /// images, steering first).
     QueueWithdrawn(Vec<(String, Vec<Value>)>),
-    /// A subagent started, progressed or ended (the frame, for its id).
-    SubagentActivity(Value),
-    /// harlo-agent calling one of harlo's tools on its pipe (answered with
-    /// a `harlo_result` command of the same id).
-    HarloCall { id: String, tool: String, args: Value },
     Renamed(Option<String>),
     ThinkingLevel(String),
     ModelChanged(Value),
-    /// The slash-command list changed (Claude Code's).
-    CommandsChanged(Value),
-    /// Plan limits after a request. Claude: `rate_limit_info` (each
-    /// window's `utilization`, `resetsAt` in seconds and `status`). Harlo:
-    /// `{ provider, account, windows: [{ windowMinutes, usedPercent,
-    /// resetsAt (s) }] }` (it has a `provider`).
-    Limits(Value),
     /// The context's size or window became known outside a turn (ask
     /// `get_session_stats`).
     ContextChanged,
-    /// A side question (`/btw`) and its answer as it comes: `{ question,
-    /// text, done, error? }` (Harlo's `harlo_aside`).
-    Aside(Value),
 
     /// `system` is true for the harness's own status notices (`notice`), as
     /// opposed to messages meant for the user.
@@ -149,6 +128,10 @@ pub enum HarnessEvent {
     Status { key: String, text: Option<String> },
     /// Extension widget lines (`setWidget`); `None` clears it.
     Widget { key: String, lines: Option<Vec<String>> },
+    /// harlo's UI for pi's extensions (`harlo_ui`, from harlo's pi
+    /// extension): `{ op: "view", id, kind, lines, … }`, `{ op: "close",
+    /// id }`, `{ op: "hello", shortcuts }` or `{ op: "working", … }`.
+    ExtUi(Value),
     /// A blocking dialog (select/confirm/input/editor/ask) awaiting an
     /// `extension_ui_response`.
     UiRequest(Value),
@@ -191,6 +174,11 @@ impl Translator {
     pub fn translate(&mut self, frame: Value) -> Vec<HarnessEvent> {
         use HarnessEvent as E;
         let ty = frame["type"].as_str().unwrap_or_default().to_owned();
+        // (pi shows its system prompt as a message: not part of the
+        // conversation.)
+        if matches!(ty.as_str(), "message_start" | "message_end") && frame["message"]["role"] == "system" {
+            return Vec::new();
+        }
         let ev = match ty.as_str() {
             "agent_start" => E::RunStarted,
             "agent_end" => E::RunEnded,
@@ -250,10 +238,6 @@ impl Translator {
                 max_attempts: 0,
                 error: opt_str(&frame, "finalError"),
             },
-            "subagent_lifecycle" | "subagent_progress" => E::SubagentActivity(frame),
-            "harlo_limits" => E::Limits(json!({ "provider": frame["provider"], "account": frame["account"], "windows": frame["windows"] })),
-            "harlo_aside" => E::Aside(json!({ "question": frame["question"], "text": frame["text"], "done": frame["done"], "error": frame["error"] })),
-            "harlo_call" => E::HarloCall { id: str_of(&frame, "id"), tool: str_of(&frame, "tool"), args: frame["args"].clone() },
             "queue_update" => E::QueueChanged {
                 steering: string_list(&frame["steering"]),
                 follow_up: string_list(&frame["followUp"]),
@@ -276,6 +260,7 @@ impl Translator {
                 system: true,
             },
             "extension_ui_request" => translate_ui_request(frame),
+            "harlo_ui" => E::ExtUi(frame),
             "response" => E::Response {
                 id: opt_str(&frame, "id"),
                 command: str_of(&frame, "command"),
@@ -337,7 +322,11 @@ fn translate_ui_request(frame: Value) -> HarnessEvent {
             lines: frame["widgetLines"].as_array().map(|a| a.iter().filter_map(|l| l.as_str().map(str::to_owned)).collect()),
         },
         "cancel" => E::UiCancel { target_id: str_of(&frame, "targetId") },
-        "setTitle" | "set_editor_text" | "open_url" => E::Other(frame),
+        // (Through the extension UI's frames: harlo's composer and links.)
+        "set_editor_text" => E::ExtUi(serde_json::json!({ "op": "editor", "text": str_of(&frame, "text") })),
+        "open_url" => E::ExtUi(serde_json::json!({ "op": "url", "url": str_of(&frame, "url") })),
+        // (A terminal's window title: harlo's titles are the sessions'.)
+        "setTitle" => E::Other(frame),
         _ => E::UiRequest(frame),
     }
 }
@@ -370,8 +359,27 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn extension_ui_frames_come_through() {
+        let mut t = Translator::new(HarnessKind::Pi);
+        let view = json!({ "type": "harlo_ui", "op": "view", "id": "screen:1", "kind": "screen", "lines": ["hi"] });
+        assert!(matches!(&*t.translate(view.clone()), [HarnessEvent::ExtUi(f)] if *f == view));
+        let editor = t.translate(json!({ "type": "extension_ui_request", "id": "x", "method": "set_editor_text", "text": "typed" }));
+        assert!(matches!(&*editor, [HarnessEvent::ExtUi(f)] if f["op"] == "editor" && f["text"] == "typed"));
+        let url = t.translate(json!({ "type": "extension_ui_request", "id": "y", "method": "open_url", "url": "https://example.org" }));
+        assert!(matches!(&*url, [HarnessEvent::ExtUi(f)] if f["op"] == "url" && f["url"] == "https://example.org"));
+    }
+
+    #[test]
+    fn pis_system_prompt_is_left_out() {
+        let mut t = Translator::new(HarnessKind::Pi);
+        assert!(t.translate(json!({ "type": "message_start", "message": { "role": "system", "content": "" } })).is_empty());
+        assert!(t.translate(json!({ "type": "message_end", "message": { "role": "system", "content": "" } })).is_empty());
+        assert!(matches!(t.translate(json!({ "type": "message_start", "message": { "role": "user", "content": [] } }))[..], [HarnessEvent::MessageStart { .. }]));
+    }
+
+    #[test]
     fn synthesizes_message_ids() {
-        let mut t = Translator::new(HarnessKind::Harlo);
+        let mut t = Translator::new(HarnessKind::Pi);
         let start = t.translate(json!({"type":"message_start","message":{"role":"assistant","content":[]}}));
         let delta = t.translate(json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hi"}}));
         let HarnessEvent::MessageStart { id: a, .. } = &start[0] else { panic!() };
@@ -381,24 +389,5 @@ mod tests {
         let next = t.translate(json!({"type":"message_start","message":{"role":"user","content":"x"}}));
         let HarnessEvent::MessageStart { id: c, .. } = &next[0] else { panic!() };
         assert_ne!(a, c);
-    }
-
-    #[test]
-    fn harlo_agents_plan_limits() {
-        let mut t = Translator::new(HarnessKind::Harlo);
-        let w = json!([{ "windowMinutes": 300, "usedPercent": 12.5, "resetsAt": 1792300303 }]);
-        let ev = t.translate(json!({ "type": "harlo_limits", "provider": "openai-codex", "account": "a@b", "windows": w }));
-        let HarnessEvent::Limits(l) = &ev[0] else { panic!("{ev:?}") };
-        assert_eq!(l, &json!({ "provider": "openai-codex", "account": "a@b", "windows": w }));
-    }
-
-    #[test]
-    fn harlo_agent_calls_harlos_tools() {
-        let mut t = Translator::new(HarnessKind::Harlo);
-        let ev = t.translate(json!({"type":"harlo_aside","question":"why?","text":"Because.","done":true}));
-        assert!(matches!(&*ev, [HarnessEvent::Aside(a)] if a["question"] == "why?" && a["text"] == "Because." && a["done"] == true && a["error"].is_null()), "{ev:?}");
-        let ev = t.translate(json!({"type":"harlo_call","id":"hc-3","tool":"list_sessions","args":{"all":true}}));
-        let HarnessEvent::HarloCall { id, tool, args } = &ev[0] else { panic!("{ev:?}") };
-        assert_eq!((id.as_str(), tool.as_str(), args), ("hc-3", "list_sessions", &json!({"all":true})));
     }
 }

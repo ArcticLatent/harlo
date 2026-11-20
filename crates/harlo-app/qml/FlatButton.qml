@@ -10,7 +10,7 @@ Button {
     property color accent: Theme.foreground
     property bool outlined: true
     property string variant: "outline"
-    property real radius: 8
+    property real radius: 3
     flat: true
     font.pixelSize: Theme.px(13)
     padding: 5

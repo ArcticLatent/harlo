@@ -28,8 +28,6 @@ pub struct Probe {
     pub server: String,
     /// (name, description).
     pub tools: Vec<(String, String)>,
-    /// The tools the server says only look (`readOnlyHint`).
-    pub looks: Vec<String>,
 }
 
 impl Probe {
@@ -57,12 +55,8 @@ fn tools_of(result: &Value) -> Vec<(String, String)> {
         .collect()
 }
 
-fn looks_of(result: &Value) -> Vec<String> {
-    result["tools"].as_array().into_iter().flatten().filter(|t| t["annotations"]["readOnlyHint"] == true).filter_map(|t| t["name"].as_str().map(str::to_owned)).collect()
-}
-
 /// `${VAR}`, `${VAR:-default}` from the environment; a whole value of
-/// `!command` is that command's output (as Harlo does).
+/// `!command` is that command's output.
 pub fn expand(value: &str) -> String {
     expand_with(value, &|name| std::env::var(name).ok())
 }
@@ -88,54 +82,6 @@ fn expand_with(value: &str, var: &dyn Fn(&str) -> Option<String>) -> String {
     }
     out.push_str(rest);
     out
-}
-
-/// Harlo's sign-in to the server at `url` (`harlo-agent mcp login`, kept in
-/// its `mcp-auth.json`) as a bearer token, refreshed (and kept) when it's
-/// about to expire, as Harlo would. None without one.
-pub fn harlo_token(url: &str) -> Option<String> {
-    let dir = crate::mcp::harlo_dir();
-    let file = dir.join("mcp-auth.json");
-    let read = || -> Option<Value> { serde_json::from_str::<Value>(&std::fs::read_to_string(&file).ok()?).ok() };
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let fresh = |t: &Value| t["expires_at"].as_u64().is_none_or(|e| e == 0 || e > now + 60);
-    let t = read()?.get(url)?.clone();
-    if fresh(&t) || t["refresh_token"].as_str().is_none_or(str::is_empty) {
-        return t["access_token"].as_str().map(str::to_owned);
-    }
-    // (Under Harlo's lock: a refresh token can be used once.)
-    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("mcp-auth.lock")).ok()?;
-    lock.lock().ok()?;
-    let mut all = read()?;
-    let t = all.get(url)?.clone();
-    if fresh(&t) {
-        return t["access_token"].as_str().map(str::to_owned);
-    }
-    let s = |k: &str| t[k].as_str().unwrap_or_default().to_owned();
-    let mut form = vec![("grant_type", "refresh_token".to_owned()), ("refresh_token", s("refresh_token")), ("client_id", s("client_id"))];
-    for k in ["resource", "client_secret"] {
-        if !s(k).is_empty() {
-            form.push((k, s(k)));
-        }
-    }
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(15))).build().into();
-    let mut resp = agent.post(&s("token_endpoint")).header("Accept", "application/json").send_form(form).ok()?;
-    let got: Value = serde_json::from_str(&resp.body_mut().read_to_string().ok()?).ok()?;
-    let access = got["access_token"].as_str()?.to_owned();
-    let entry = &mut all[url];
-    entry["access_token"] = json!(access);
-    if let Some(r) = got["refresh_token"].as_str() {
-        entry["refresh_token"] = json!(r);
-    }
-    entry["expires_at"] = json!(got["expires_in"].as_u64().map_or(0, |e| now + e));
-    let tmp = file.with_extension("tmp");
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).ok()?;
-        f.write_all(serde_json::to_string_pretty(&all).ok()?.as_bytes()).ok()?;
-    };
-    std::fs::rename(&tmp, &file).ok()?;
-    Some(access)
 }
 
 /// Tests `form`. `project` is the folder relative `cwd`s start from (a
@@ -221,7 +167,6 @@ fn probe_stdio(form: &Form, project: Option<&Path>, timeout: Duration) -> Probe 
             let id = 2 + page;
             let result = conn.request(id, &json!({ "jsonrpc": "2.0", "id": id, "method": "tools/list", "params": params }))?;
             probe.tools.extend(tools_of(&result));
-            probe.looks.extend(looks_of(&result));
             cursor = result["nextCursor"].as_str().map(str::to_owned);
             if cursor.is_none() {
                 break;
@@ -337,7 +282,6 @@ fn probe_http(form: &Form, timeout: Duration) -> Probe {
             }
             let result = post(&json!({ "jsonrpc": "2.0", "id": 2 + page, "method": "tools/list", "params": params }))?.unwrap_or_default();
             probe.tools.extend(tools_of(&result));
-            probe.looks.extend(looks_of(&result));
             cursor = result["nextCursor"].as_str().map(str::to_owned);
             if cursor.is_none() {
                 break;
@@ -459,7 +403,6 @@ fn probe_sse(form: &Form, timeout: Duration) -> Probe {
             }
             let result = request(json!({ "jsonrpc": "2.0", "id": 2 + page, "method": "tools/list", "params": params }))?;
             probe.tools.extend(tools_of(&result));
-            probe.looks.extend(looks_of(&result));
             cursor = result["nextCursor"].as_str().map(str::to_owned);
             if cursor.is_none() {
                 break;
@@ -497,7 +440,6 @@ done"#;
         assert_eq!(p.state, "connected", "{p:?}");
         assert_eq!(p.server, "fake 1.0");
         assert_eq!(p.tools, [("look".into(), "Looks.".into()), ("cook".into(), String::new())]);
-        assert_eq!(p.looks, ["look"], "the tools it says only look");
     }
 
     #[test]
@@ -552,19 +494,6 @@ done"#;
             }
         });
         format!("http://127.0.0.1:{port}/mcp")
-    }
-
-    #[test]
-    fn uses_harlos_sign_in() {
-        let _one = crate::mcp::tests::HARLO_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let dir = crate::mcp::harlo_dir();
-        std::fs::create_dir_all(&dir).unwrap();
-        let later = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3600;
-        std::fs::write(dir.join("mcp-auth.json"), json!({ "https://h/mcp": { "access_token": "t1", "expires_at": later, "client_id": "c", "token_endpoint": "https://h/token" }, "https://o/mcp": { "access_token": "t2" } }).to_string()).unwrap();
-        assert_eq!(harlo_token("https://h/mcp").as_deref(), Some("t1"));
-        assert_eq!(harlo_token("https://o/mcp").as_deref(), Some("t2"));
-        assert_eq!(harlo_token("https://none/mcp"), None);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

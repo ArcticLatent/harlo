@@ -114,7 +114,7 @@ GridLayout {
         readonly property color side: colors[5] || card
         function a(c, alpha) { return Qt.rgba(c.r, c.g, c.b, alpha) }
         readonly property real u: width / 160
-        radius: 8
+        radius: 3
         color: bg
         border.color: a(fg, 0.14)
         // The sidebar (square where it meets the conversation).

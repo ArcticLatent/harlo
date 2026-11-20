@@ -120,7 +120,13 @@ public struct Replay: Sendable {
             guard let op = l["call"].string else { return nil }
             return (op, l["args"], l["reply"], i < end)
         }
-        events = all[..<end].filter { $0["ev"] != .null }.map { $0["ev"] }
+        // (A `sessions` reply is the list at that moment, as an event is:
+        // whichever came last is the list.)
+        events = all[..<end].compactMap { l in
+            if l["ev"] != .null { return l["ev"] }
+            if l["call"].string == "sessions", let list = l["reply"]["sessions"].array { return ["ev": "sessions", "sessions": .array(list)] }
+            return nil
+        }
     }
 
     /// harlo's answer to `op` with `args`: the last one recorded before the

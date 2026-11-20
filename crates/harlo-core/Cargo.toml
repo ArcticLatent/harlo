@@ -15,6 +15,7 @@ default = ["dictation"]
 dictation = ["dep:whisper-rs"]
 
 [dependencies]
+harlo-worktree.workspace = true
 harlo-harness.workspace = true
 anyhow.workspace = true
 serde = { workspace = true, features = ["derive"] }

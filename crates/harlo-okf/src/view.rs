@@ -2,7 +2,7 @@
 //!
 //! [`answer`] takes one request and answers it, so the same code serves a
 //! repository on this machine (called directly) and one on another
-//! (`harlo-agent wiki --okf` there, the request on its standard input).
+//! (`harlo-helper wiki --okf` there, the request on its standard input).
 //! Reading is from the files, with no model: the pages and the links
 //! between them, what the wiki owes the code, a page's data for reading
 //! (its footnotes numbered and marked), and a search of its sections. The
@@ -33,6 +33,8 @@ use crate::work::{self, Item, Work};
 /// - `page` (`path`): [`page`]'s.
 /// - `search` (`query`, `limit`): [`search`]'s.
 /// - `pageReport` (`path`): `{ text }`, what one page owes, a line each.
+/// - `readingNote` (`path`, the page in `.okf/`): `{ text }`, [`reading_note`]'s
+///   ("" for a current page).
 /// - `outOfDate`: `{ exists, pages }`, whether there's a wiki, and the
 ///   pages that owe the code something; `unchecked` (why) instead when
 ///   that couldn't be worked out (an unreadable ledger), not "none".
@@ -49,6 +51,7 @@ pub fn answer(request: &Value) -> Value {
         "page" => page(root, text("path")),
         "search" => search(root, text("query"), request["limit"].as_u64().map_or(12, |n| usize::try_from(n).unwrap_or(12))),
         "pageReport" => json!({ "text": page_report(root, text("path")) }),
+        "readingNote" => json!({ "text": reading_note(root, text("path")).unwrap_or_default() }),
         "outOfDate" => match out_of_date(root) {
             Ok(pages) => json!({ "exists": bundle::exists(root), "pages": pages }),
             Err(why) => json!({ "exists": bundle::exists(root), "pages": [], "unchecked": why }),

@@ -50,8 +50,8 @@ ComboBox {
     // The app's button surface; the accent border while it has the focus.
     background: ControlSurface {
         control: box
-        radius: 7
-        Rectangle { anchors.fill: parent; radius: 7; color: "transparent"; border.color: Theme.primary; visible: box.activeFocus }
+        radius: 3
+        Rectangle { anchors.fill: parent; radius: 3; color: "transparent"; border.color: Theme.primary; visible: box.activeFocus }
     }
     delegate: ItemDelegate {
         id: row
@@ -77,7 +77,7 @@ ComboBox {
             elide: Text.ElideRight
         }
         }
-        background: Rectangle { radius: 4; color: row.highlighted ? Theme.hover : "transparent" }
+        background: Rectangle { radius: 2; color: row.highlighted ? Theme.hover : "transparent" }
     }
     popup: Popup {
         y: box.height + 2
@@ -91,6 +91,6 @@ ComboBox {
             currentIndex: box.highlightedIndex
             ScrollBar.vertical: ScrollBar { }
         }
-        background: GlassSurface { radius: 8 }
+        background: GlassSurface { radius: 3 }
     }
 }

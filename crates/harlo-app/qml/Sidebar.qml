@@ -161,17 +161,15 @@ Rectangle {
     WorkflowDialog {
         id: workflowDialog
         onEditRequested: root.settingsPageRequested("workflows")
-        // (Started from a new session's message: that draft is done with.)
-        onStarted: if (fromDraft) root.draftWorkflowStarted()
     }
     // For the command palette.
     /// Settings → Projects, on this project.
     signal projectSettingsRequested(int projectId)
     signal settingsPageRequested(string page)
-    // A run started from a new session's message.
-    signal draftWorkflowStarted()
     /// Open the new-session page for a project (-1: home folder).
     signal newSessionRequested(int projectId)
+    /// Open the New workflow page for a project (-2: the last one worked in).
+    signal newWorkflowRequested(int projectId)
     /// Export a session as Markdown (the window asks where).
     signal exportRequested(string key, string title)
     // Test hooks.
@@ -210,18 +208,6 @@ Rectangle {
         AppMenuItem { text: "New worktree session…"; onTriggered: worktreeDialogs.openNew(projectMenu.projectId, projectMenu.name, projectMenu.harness) }
         AppMenuItem { objectName: "projectWorkflow"; text: "Run a workflow…"; onTriggered: workflowDialog.show(projectMenu.projectId, projectMenu.name, projectMenu.harness) }
         AppMenuItem { text: "Worktree setup commands…"; onTriggered: worktreeDialogs.openSetup(projectMenu.projectId, projectMenu.name) }
-        AppMenuSeparator { }
-        Repeater {
-            // (A remote project: the agents its host has.)
-            model: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => !projectMenu.path.startsWith("ssh://") || Theme.offeredOnHost(projectMenu.path.substring(6).split("/")[0], p.id))
-            AppMenuItem {
-                required property var modelData
-                text: "Default: " + modelData.label
-                provider: modelData.id
-                marked: projectMenu.harness === modelData.id
-                onTriggered: Workspace.setProjectHarness(projectMenu.projectId, modelData.id)
-            }
-        }
         AppMenuSeparator { }
         // (Or drag the project's header.)
         AppMenuItem { objectName: "projectMoveUp"; text: "Move up"; enabled: projectMenu.place !== "first" && projectMenu.place !== "only"; onTriggered: root.moveProject(projectMenu.projectId, -1, 0, false) }
@@ -316,7 +302,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: 14
             Layout.rightMargin: 14
-            Layout.bottomMargin: 10
+            Layout.bottomMargin: 2
             implicitHeight: 38
             flat: true
             hoverEnabled: true
@@ -332,8 +318,36 @@ Rectangle {
                 Label { visible: root.width >= 220; text: Keymap.seq("newSession"); color: Theme.textFaint; font.pixelSize: Theme.px(12) }
             }
             background: Rectangle {
-                radius: 10
+                radius: 4
                 color: newSessionButton.current ? Theme.rowSelected : newSessionButton.down ? Theme.rowSelected : newSessionButton.hovered ? Theme.rowHover : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
+            }
+        }
+
+        // New workflow: opens the New workflow page (a run that implements,
+        // checks and reviews a task in a worktree).
+        Button {
+            id: newWorkflowButton
+            objectName: "newWorkflowButton"
+            Layout.fillWidth: true
+            Layout.leftMargin: 14
+            Layout.rightMargin: 14
+            Layout.bottomMargin: 10
+            implicitHeight: 38
+            flat: true
+            hoverEnabled: true
+            readonly property bool current: Workspace.activeKey === "view:workflow"
+            onClicked: root.newWorkflowRequested(-2)
+            leftPadding: 12
+            rightPadding: 12
+            contentItem: RowLayout {
+                spacing: 10
+                Icon { name: "list-check-2"; color: Theme.accent; implicitWidth: 17; implicitHeight: 17 }
+                Label { Layout.fillWidth: true; text: "New workflow"; color: Theme.text; font.pixelSize: Theme.px(14); font.weight: Font.Medium }
+            }
+            background: Rectangle {
+                radius: 4
+                color: newWorkflowButton.current ? Theme.rowSelected : newWorkflowButton.down ? Theme.rowSelected : newWorkflowButton.hovered ? Theme.rowHover : "transparent"
                 Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
             }
         }
@@ -353,7 +367,7 @@ Rectangle {
             color: Theme.text
             font.pixelSize: Theme.px(14)
             background: Rectangle {
-                radius: 10
+                radius: 4
                 color: Theme.well
                 border.color: search.activeFocus ? Theme.accent : "transparent"
                 Icon { name: "search"; color: Theme.textFaint; implicitWidth: 16; implicitHeight: 16; x: 12; anchors.verticalCenter: parent.verticalCenter }
@@ -386,7 +400,7 @@ Rectangle {
                 }
                 Label { visible: root.width >= 240; text: Keymap.seq("searchAll"); color: Theme.textFaint; font.pixelSize: Theme.px(11.5) }
             }
-            background: Rectangle { radius: 8; color: searchMessages.hovered ? Theme.rowHover : "transparent" }
+            background: Rectangle { radius: 3; color: searchMessages.hovered ? Theme.rowHover : "transparent" }
             onClicked: root.searchMessagesRequested(search.text.trim())
         }
 
@@ -525,7 +539,7 @@ Rectangle {
                 y: Math.max(0, Math.min(list.height - height, Math.max(list.dragY + list.ghostShift, list.ghostFloor)))
                 width: list.width - 16
                 height: 30
-                radius: 8
+                radius: 3
                 rotation: -1
                 antialiasing: true
                 color: Theme.raised
@@ -586,7 +600,7 @@ Rectangle {
                         opacity: list.dragId < 0 ? 1 : list.dragId === projectId ? 0.35 : 0.55
                         contentItem: Label { text: moreRow.title; color: Theme.muted; font.pixelSize: Theme.px(12); verticalAlignment: Text.AlignVCenter }
                         hoverEnabled: list.dragId < 0
-                        background: Rectangle { radius: 8; color: moreRow.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 3; color: moreRow.hovered ? Theme.hover : "transparent" }
                         onClicked: Workspace.showMore(projectId)
                     }
                 }
@@ -613,7 +627,7 @@ Rectangle {
                         ToolTip.visible: hovered
                         ToolTip.text: shelfRow.wiki
                             ? "Wiki runs that are done. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
-                            : "Finished helpers, and worktree sessions that are merged,\nclosed or quiet for a week. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
+                            : "Worktree sessions that are merged, closed\nor quiet for a week. Working in one brings it back.\nArchived after 30 days here; right-click to archive all now."
                         ToolTip.delay: 700
                         contentItem: RowLayout {
                             spacing: 6
@@ -621,7 +635,7 @@ Rectangle {
                             Icon { name: shelfRow.wiki ? "book-open" : "archive-stack"; color: Theme.textFaint; implicitWidth: 13; implicitHeight: 13 }
                             Label { Layout.fillWidth: true; text: shelfRow.title + " · " + shelfRow.count; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
                         }
-                        background: Rectangle { radius: 8; color: shelfRow.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 3; color: shelfRow.hovered ? Theme.hover : "transparent" }
                         onClicked: Workspace.toggleCollapsed(rowKey)
                         TapHandler {
                             acceptedButtons: Qt.RightButton
@@ -650,8 +664,6 @@ Rectangle {
                         required property int changes
                         required property string settled
                         // Started by another session's agent: shown under it.
-                        required property string helperOf
-                        required property int nest
                         // Its model (as it runs, else as it last ran) and who
                         // made it: the avatar's logo.
                         required property string modelName
@@ -674,27 +686,18 @@ Rectangle {
                         rightInset: 10
                         topInset: 1
                         bottomInset: 1
-                        leftPadding: (tight ? 14 : 18) + Math.min(nest, 3) * (tight ? 10 : 14)
+                        leftPadding: (tight ? 14 : 18)
                         rightPadding: tight ? 14 : 18
                         topPadding: 2
                         bottomPadding: 2
                         readonly property color rowColor: active ? Theme.rowSelected : hovered ? Theme.rowHover : Theme.chrome
                         background: Rectangle {
-                            radius: 9
+                            radius: 3
                             color: sessionRow.active || sessionRow.hovered ? sessionRow.rowColor : "transparent"
                             Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                         }
                         contentItem: RowLayout {
                             spacing: sessionRow.tight ? 7 : 11
-                            // A helper: hooked under its parent.
-                            Label {
-                                objectName: "sessionHelperMark"
-                                visible: sessionRow.nest > 0 && !sessionRow.tight
-                                text: "↳"
-                                color: Theme.textFaint
-                                font.pixelSize: Theme.px(13)
-                                Layout.rightMargin: -5
-                            }
                             // What runs it, with its status on the corner.
                             AgentAvatar {
                                 provider: sessionRow.harness
@@ -766,7 +769,7 @@ Rectangle {
             Layout.bottomMargin: 10
             visible: Workspace.notice !== ""
             implicitHeight: noticeRow.implicitHeight + 20
-            radius: 12
+            radius: 4
             color: failed ? Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.08) : Theme.raised
             border.color: failed ? Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.35) : Theme.hairline
             RowLayout {
@@ -914,7 +917,7 @@ Rectangle {
         leftPadding: 18
         rightPadding: 14
         background: Rectangle {
-            radius: 8
+            radius: 3
             color: groupRow.hovered && !groupRow.lifted ? Theme.rowHover : "transparent"
             // (With the keys, a ring: only the keyboard gives a header
             // them, never a click.)
@@ -932,7 +935,7 @@ Rectangle {
                     strokeStyle: ShapePath.DashLine
                     dashPattern: [4, 3]
                     fillColor: "transparent"
-                    PathRectangle { x: 0.5; y: 0.5; width: hole.width - 1; height: hole.height - 1; radius: 8 }
+                    PathRectangle { x: 0.5; y: 0.5; width: hole.width - 1; height: hole.height - 1; radius: 3 }
                 }
             }
         }
@@ -988,7 +991,7 @@ Rectangle {
                 visible: host !== ""
                 implicitWidth: hostRow.implicitWidth + 10
                 implicitHeight: 18
-                radius: 5
+                radius: 2
                 color: Theme.subtle
                 border.color: Theme.border
                 Row {

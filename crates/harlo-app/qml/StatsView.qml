@@ -225,7 +225,7 @@ Rectangle {
                             [root.compact(content.r.steps), content.r.steps === 1 ? "model step" : "model steps"],
                             [String(content.r.activeDays || 0), content.r.activeDays === 1 ? "day active" : "days active"],
                             (content.r.longestStreak || 0) > 1 ? [String(content.r.longestStreak) + " days", "", "longest run"] : null,
-                            (content.r.subagents || 0) > 0 ? [String(content.r.subagents), content.r.subagents === 1 ? "helper session" : "helper sessions"] : null,
+                            (content.r.subagents || 0) > 0 ? [String(content.r.subagents), content.r.subagents === 1 ? "forked session" : "forked sessions"] : null,
                         ].filter(f => f)
                         // [value, after] or [value, "", before].
                         text: figures.map(f => {
@@ -247,7 +247,7 @@ Rectangle {
                     objectName: "statsChart"
                     Layout.fillWidth: true
                     implicitHeight: 190
-                    radius: 8
+                    radius: 3
                     color: Theme.elevated
                     readonly property var daily: content.r.daily || []
                     readonly property real peak: Math.max(1, ...daily.map(d => d.steps))
@@ -327,7 +327,7 @@ Rectangle {
                     objectName: "statsComposition"
                     Layout.fillWidth: true
                     implicitHeight: compCol.implicitHeight + 28
-                    radius: 8
+                    radius: 3
                     color: Theme.elevated
                     readonly property var t: content.r.tokens
                     ColumnLayout {
@@ -384,7 +384,7 @@ Rectangle {
                     objectName: "statsEfficiency"
                     Layout.fillWidth: true
                     implicitHeight: effGrid.implicitHeight + 24
-                    radius: 8
+                    radius: 3
                     color: Theme.elevated
                     readonly property var e: content.r.efficiency
                     GridLayout {
@@ -541,7 +541,7 @@ Rectangle {
                                 Rectangle {
                                     visible: root.modelMetric !== "tokens"
                                     anchors.fill: parent
-                                    radius: 3
+                                    radius: 2
                                     color: root.cCount
                                 }
                                 Row {
@@ -591,7 +591,7 @@ Rectangle {
                             implicitHeight: 6
                             radius: 3
                             color: Theme.subtle
-                            Rectangle { width: parent.width * modelData.count / toolRows.peak; height: parent.height; radius: 3; color: root.cCount }
+                            Rectangle { width: parent.width * modelData.count / toolRows.peak; height: parent.height; radius: 2; color: root.cCount }
                         }
                         Label { text: root.compact(modelData.count); color: Theme.textMuted; font.pixelSize: Theme.px(12); Layout.preferredWidth: 32; horizontalAlignment: Text.AlignRight }
                     }

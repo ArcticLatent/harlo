@@ -7,8 +7,8 @@ import QtQuick.Effects
 import harlo
 
 // The new-session page: pick a project, where to work (current checkout or
-// a new worktree) and the harness, write the first message or pick a
-// starter. Nothing starts until the first message is sent.
+// a new worktree) and the model, and write the first message. Nothing
+// starts until the first message is sent.
 Rectangle {
     id: root
     color: Theme.background
@@ -17,65 +17,19 @@ Rectangle {
     property string harness: ""          // "" = the project's default
     property bool useWorktree: false
     property string worktreeName: ""
-    property string starter: ""          // starter id
     property var attachments: []
     // The shield: what runs without asking ("" the mode it starts in).
     property string approval: ""
-    readonly property string startApproval: Workspace.modesRevision >= 0 && !parallel ? Workspace.draftApproval(effectiveHarness, projectId) : ""
+    readonly property string startApproval: Workspace.modesRevision >= 0 ? Workspace.draftApproval(effectiveHarness, projectId) : ""
     readonly property string shownApproval: startApproval === "" ? "" : approval !== "" ? approval : startApproval
     function cycleApproval() {
         const modes = ["always-ask", "write", "yolo"]
         approval = modes[(modes.indexOf(shownApproval) + 1) % modes.length]
     }
-    // Build or Plan (Tab): the session starts planning, without changing files.
-    property bool planOn: false
-    // Run in parallel: one prompt to several lanes (harness + model each).
-    property bool parallel: false
-    property var lanes: [{ harness: "harlo", model: "" }, { harness: "harlo", model: "" }]
-    property bool laneWorktrees: true
-    property var knownModels: []
-    onParallelChanged: {
-        if (parallel && knownModels.length === 0) knownModels = JSON.parse(Workspace.knownModels())
-        if (parallel) fitLanes()
-    }
-    // A remote project's lanes: its host's agents, and the models they
-    // offer there (asked when a lane's menu opens; by harness).
-    property var laneModels: ({})
-    readonly property var laneHarnesses: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : [])
-        .map(p => p.id).filter(id => !runsOnHost || Theme.offeredOnHost(host, id))
-    /// Lanes keep to agents the machine has (another machine's may not).
-    function fitLanes() {
-        if (laneHarnesses.length === 0 || lanes.every(l => laneHarnesses.indexOf(l.harness) >= 0)) return
-        const fallback = laneHarnesses.indexOf(effectiveHarness) >= 0 ? effectiveHarness : laneHarnesses[0]
-        lanes = lanes.map(l => laneHarnesses.indexOf(l.harness) >= 0 ? l : { harness: fallback, model: "" })
-    }
-    onLaneHarnessesChanged: if (parallel) fitLanes()
-    onHostChanged: { hostModels = null; laneModels = ({}) }
-    function laneMenuModels(harness) {
-        if (!runsOnHost) return knownModels.filter(m => m.harness === harness).map(m => ({ id: m.model, name: Theme.modelLabel(m.model) }))
-        const got = laneModels[harness]
-        return got && got.models ? got.models.map(m => ({ id: m.id, name: m.name })) : []
-    }
-    function setLane(i, field, value) {
-        const next = lanes.map(l => Object.assign({}, l))
-        next[i][field] = value
-        lanes = next
-    }
+    // (Another machine: its models are asked for again.)
+    onHostChanged: hostModels = null
     signal startedSession(string key)
     signal addProjectRequested()
-    // Run as workflow: the start dialog, with the message as the task and
-    // this draft's agent and model as the implementer.
-    signal workflowRequested(int projectId, string task, string agent, string model)
-    readonly property bool workflowOffered: !parallel && effectiveHarness !== "demo"
-    readonly property bool canRunWorkflow: workflowOffered && project !== null && input.text.trim() !== ""
-    readonly property string workflowTip: project === null ? qsTr("Run as workflow (Ctrl+Shift+Enter): pick a project first; a run works in a worktree of it")
-        : qsTr("Run as workflow (Ctrl+Shift+Enter): the agent implements the task in a worktree, then checks and reviews go over it until they pass (type the task first)")
-    function runWorkflow() { workflowRequested(projectId, input.text, effectiveHarness, activeModel) }
-    /// The workflow started: the draft is done with, as when a session starts.
-    function workflowStarted() {
-        reset()
-        startedSession("")
-    }
     /// Sign this agent in on that host.
     signal signInOnHost(string agent, string host)
 
@@ -111,9 +65,6 @@ Rectangle {
         function onHostModelsReady(id, harness, json) {
             if (id !== root.projectId) return
             if (harness === root.effectiveHarness) root.hostModels = JSON.parse(json)
-            const next = Object.assign({}, root.laneModels)
-            next[harness] = JSON.parse(json)
-            root.laneModels = next
         }
     }
     onVisibleChanged: if (visible) refresh()
@@ -177,13 +128,10 @@ Rectangle {
         return all.filter(m => m.local).concat(all.filter(m => !m.local))
     }
     readonly property string modelName: { const m = modelChoices.find(x => x.id === model); return m ? m.name : model }
-    readonly property var starters: JSON.parse(Workspace.starters())
     // Your templates (a set-up and a first message, saved under a name).
     readonly property var templates: Workspace.templatesJson !== "" ? JSON.parse(Workspace.templatesJson) : []
     /// Fills the draft from a template: nothing starts until it's sent.
     function applyTemplate(t) {
-        parallel = false
-        starter = ""
         harness = t.harness
         setModel(t.model !== "" ? t.model : defaultModel())
         approval = t.approval
@@ -204,8 +152,7 @@ Rectangle {
         return [t.harness ? Theme.harnessLabel(t.harness) : "", (t.model || "").replace(/^.*\//, ""), modes[t.approval] || "",
                 t.worktree ? "new worktree" : ""].filter(x => x !== "").join(" · ")
     }
-    readonly property var starterInfo: starters.find(s => s.id === starter) || null
-    readonly property bool canSend: folder !== "" && (input.text.trim() !== "" || starter !== "" || attachments.length > 0)
+    readonly property bool canSend: folder !== "" && (input.text.trim() !== "" || attachments.length > 0)
 
     // Opens the page for a project (-1: home folder), keeping any draft text.
     function openFor(id) {
@@ -224,34 +171,20 @@ Rectangle {
     }
     function reset() {
         input.text = ""
-        planOn = false
-        starter = ""
         attachments = []
         useWorktree = false
     }
-    // `instead`: the first message to send in place of the typed one (the
-    // Delegate menu's instruction).
-    function send(instead) {
+    function send() {
         if (!canSend)
             return
-        if (parallel) {
-            Workspace.startRun(JSON.stringify({
-                projectId: projectId, prompt: input.text, starter: starter, attachments: attachments,
-                worktrees: laneWorktrees && currentBranch !== "", base: currentBranch, lanes: lanes
-            }))
-            reset()
-            parallel = false
-            startedSession("")
-            return
-        }
         if (useWorktree && currentBranch === "")
             useWorktree = false
         if (useWorktree && worktreeName.trim() === "")
             worktreeName = Workspace.suggestBranch()
         const key = Workspace.startDraft(JSON.stringify({
             projectId: project ? projectId : -1, harness: effectiveHarness, worktreeBranch: useWorktree ? worktreeName.trim() : "",
-            base: currentBranch, starter: starter, text: typeof instead === "string" ? instead : input.text, attachments: attachments,
-            approval: startApproval === "" ? "" : approval, model: activeModel, plan: planOn
+            base: currentBranch, text: input.text, attachments: attachments,
+            approval: startApproval === "" ? "" : approval, model: activeModel
         }))
         reset()
         startedSession(key)
@@ -297,21 +230,6 @@ Rectangle {
             onTriggered: { root.useWorktree = true; if (root.worktreeName === "") root.worktreeName = Workspace.suggestBranch() }
         }
     }
-    AppMenu {
-        id: harnessMenu
-        Repeater {
-            // (A remote project: the agents its host has.)
-            model: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => !root.runsOnHost || Theme.offeredOnHost(root.host, p.id))
-            AppMenuItem {
-                required property var modelData
-                text: modelData.label
-                provider: modelData.id
-                marked: root.effectiveHarness === modelData.id
-                onTriggered: root.harness = modelData.id
-            }
-        }
-    }
-
     AppMenu {
         id: templateMenu
         property var template: null
@@ -395,7 +313,7 @@ Rectangle {
         }
         background: ControlSurface {
             control: chip
-            Rectangle { anchors.fill: parent; radius: 8; color: "transparent"; border.color: Theme.primary; visible: chip.visualFocus }
+            Rectangle { anchors.fill: parent; radius: 3; color: "transparent"; border.color: Theme.primary; visible: chip.visualFocus }
         }
     }
 
@@ -425,8 +343,7 @@ Rectangle {
                 wrapMode: Text.Wrap
             }
 
-            // Project, where, harness: centred line by line, as the title
-            // above and the starters below.
+            // Project, where, model: centred line by line, as the title above.
             Flow {
                 objectName: "draftPickers"
                 Layout.fillWidth: true
@@ -474,15 +391,7 @@ Rectangle {
                     onTextEdited: root.worktreeName = text
                 }
                 Chip {
-                    objectName: "draftHarness"
-                    iconName: "harness-" + root.effectiveHarness
-                    iconColor: Theme.foreground
-                    text: Theme.harnessLabel(root.effectiveHarness)
-                    onClicked: harnessMenu.popup(this, 0, height + 4)
-                }
-                Chip {
                     objectName: "draftModel"
-                    visible: !root.parallel
                     iconName: "sparkling"
                     iconColor: root.activeModel !== "" ? Theme.primary : Theme.muted
                     text: root.activeModel !== "" ? Theme.modelLabel(root.modelName) : "Default model"
@@ -498,10 +407,12 @@ Rectangle {
                     Popup {
                         id: modelPopup
                         y: parent.height + 4
+                        // (Kept inside the window, however far right the chip is.)
+                        margins: 8
                         width: 400
                         height: Math.min(380, 60 + Math.max(1, draftModels.count) * 30 + (root.modelChoices.some(m => m.local) ? 30 : 0) + (root.modelChoices.length === 0 ? 70 : 0))
                         padding: 8
-                        background: GlassSurface { radius: 10 }
+                        background: GlassSurface { radius: 4 }
                         onOpened: { draftModelFilter.text = ""; draftModelFilter.forceActiveFocus() }
                         ColumnLayout {
                             anchors.fill: parent
@@ -564,14 +475,17 @@ Rectangle {
                                     objectName: "draftModel-" + modelData.id
                                     // The first of each group: its name above it (when
                                     // there are local models; "Default model" has none).
+                                    // (The row before it: gone for a moment while the
+                                    // filter changes the list.)
+                                    readonly property var before: index > 0 && ListView.view && ListView.view.model ? ListView.view.model[index - 1] : undefined
                                     readonly property real heading: root.modelChoices.length > 0 && root.modelChoices[0].local && modelData.id !== ""
-                                        && (index === 0 || ListView.view.model[index - 1].id === "" || !!ListView.view.model[index - 1].local !== !!modelData.local) ? 30 : 0
+                                        && (index === 0 || !before || before.id === "" || !!before.local !== !!modelData.local) ? 30 : 0
                                     width: ListView.view.width
                                     height: 30 + heading
                                     topInset: heading
                                     topPadding: heading + bottomPadding
                                     highlighted: ListView.isCurrentItem
-                                    background: Rectangle { radius: 4; color: dmRow.highlighted ? Theme.selected : dmRow.hovered ? Theme.hover : "transparent" }
+                                    background: Rectangle { radius: 2; color: dmRow.highlighted ? Theme.selected : dmRow.hovered ? Theme.hover : "transparent" }
                                     Label {
                                         visible: dmRow.heading > 0
                                         x: 8
@@ -607,161 +521,12 @@ Rectangle {
                 }
             }
 
-            // Lanes of a parallel run
-            Rectangle {
-                visible: root.parallel
-                Layout.fillWidth: true
-                implicitHeight: lanesCol.implicitHeight + 20
-                radius: 12
-                color: Theme.elevated
-                border.color: Theme.border
-                ColumnLayout {
-                    id: lanesCol
-                    objectName: "parallelLanes"
-                    x: 12
-                    y: 10
-                    width: parent.width - 24
-                    spacing: 6
-                    // (Narrow, under 380 px: the harness buttons show only
-                    // their marks, and the rows wrap or cut their words.)
-                    readonly property bool narrow: width < 380
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Icon { name: "node-tree"; color: Theme.primary; implicitWidth: 15; implicitHeight: 15 }
-                        Label { text: "Run in parallel"; color: Theme.foreground; font.pixelSize: Theme.px(13); font.bold: true }
-                        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight; text: "the same prompt, one session per lane"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                    }
-                    Repeater {
-                        model: root.lanes
-                        RowLayout {
-                            id: laneRow
-                            required property var modelData
-                            required property int index
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Rectangle {
-                                implicitWidth: 22
-                                implicitHeight: 22
-                                radius: 6
-                                color: Theme.selected
-                                Label { anchors.centerIn: parent; text: String.fromCharCode(65 + laneRow.index); color: Theme.primary; font.pixelSize: Theme.px(12); font.bold: true }
-                            }
-                            Repeater {
-                                model: root.laneHarnesses
-                                Button {
-                                    id: hb
-                                    required property string modelData
-                                    readonly property bool on: laneRow.modelData.harness === modelData
-                                    flat: true
-                                    implicitHeight: 26
-                                    leftPadding: lanesCol.narrow ? 6 : 9
-                                    rightPadding: lanesCol.narrow ? 6 : 9
-                                    onClicked: root.setLane(laneRow.index, "harness", modelData)
-                                    ToolTip.visible: lanesCol.narrow && hovered
-                                    ToolTip.text: Theme.harnessLabel(modelData)
-                                    Accessible.name: Theme.harnessLabel(modelData)
-                                    contentItem: Row {
-                                        spacing: 5
-                                        ProviderMark { anchors.verticalCenter: parent.verticalCenter; provider: hb.modelData; tip: ""; implicitWidth: 12; implicitHeight: 12; color: hb.on ? Theme.foreground : Theme.muted }
-                                        Label { visible: !lanesCol.narrow; anchors.verticalCenter: parent.verticalCenter; text: Theme.harnessLabel(hb.modelData); color: hb.on ? Theme.foreground : Theme.muted; font.pixelSize: Theme.px(12) }
-                                    }
-                                    background: ControlSurface { control: hb; variant: hb.on ? "selected" : "outline"; radius: 7 }
-                                }
-                            }
-                            AppTextField {
-                                Layout.fillWidth: true
-                                Layout.minimumWidth: 60
-                                implicitHeight: 28
-                                text: laneRow.modelData.model
-                                placeholderText: "model (harness default)"
-                                font.family: Theme.mono
-                                font.pixelSize: Theme.px(12)
-                                onTextEdited: root.setLane(laneRow.index, "model", text)
-                            }
-                            FlatButton {
-                                text: "▾"
-                                padding: 4
-                                font.pixelSize: Theme.px(12)
-                                onClicked: {
-                                    // (Asked again each time: what the host's agent offers changes.)
-                                    if (root.runsOnHost) {
-                                        const next = Object.assign({}, root.laneModels)
-                                        delete next[laneRow.modelData.harness]
-                                        root.laneModels = next
-                                        Workspace.requestHostModels(root.projectId, laneRow.modelData.harness)
-                                    }
-                                    modelMenu.popup(this, 0, height + 2)
-                                }
-                                ToolTip.visible: hovered
-                                ToolTip.text: root.runsOnHost ? "Models on " + root.host : "Models you've used"
-                                AppMenu {
-                                    id: modelMenu
-                                    readonly property var asked: root.laneModels[laneRow.modelData.harness]
-                                    AppMenuItem { text: "Harness default"; onTriggered: root.setLane(laneRow.index, "model", "") }
-                                    AppMenuItem {
-                                        visible: root.runsOnHost && !modelMenu.asked
-                                        height: visible ? implicitHeight : 0
-                                        enabled: false
-                                        text: "Reading " + Theme.harnessLabel(laneRow.modelData.harness) + "'s models on " + root.host + "…"
-                                    }
-                                    AppMenuItem {
-                                        visible: root.runsOnHost && !!modelMenu.asked && (!!modelMenu.asked.error || (modelMenu.asked.models || []).length === 0)
-                                        height: visible ? implicitHeight : 0
-                                        enabled: false
-                                        text: !modelMenu.asked ? ""
-                                            : modelMenu.asked.error ? "Couldn't read them: " + modelMenu.asked.error
-                                            : "No models. " + Theme.harnessLabel(laneRow.modelData.harness) + " needs its own login or API key on " + root.host + "."
-                                    }
-                                    Repeater {
-                                        model: root.laneMenuModels(laneRow.modelData.harness)
-                                        AppMenuItem {
-                                            required property var modelData
-                                            text: modelData.name
-                                            marked: laneRow.modelData.model === modelData.id
-                                            onTriggered: root.setLane(laneRow.index, "model", modelData.id)
-                                        }
-                                    }
-                                }
-                            }
-                            Button {
-                                id: removeLane
-                                visible: root.lanes.length > 2
-                                flat: true
-                                implicitWidth: 24
-                                implicitHeight: 24
-                                padding: 0
-                                onClicked: root.lanes = root.lanes.filter((_, i) => i !== laneRow.index)
-                                contentItem: Item { Icon { anchors.centerIn: parent; name: "close"; color: removeLane.hovered ? Theme.foreground : Theme.muted } }
-                                background: Rectangle { radius: 5; color: removeLane.hovered ? Theme.hover : "transparent" }
-                            }
-                        }
-                    }
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: 10
-                        FlatButton {
-                            visible: root.lanes.length < 4
-                            text: "+ Add lane"
-                            font.pixelSize: Theme.px(12)
-                            onClicked: root.lanes = root.lanes.concat([{ harness: root.lanes[root.lanes.length - 1].harness, model: "" }])
-                        }
-                        AppCheckBox {
-                            visible: root.currentBranch !== ""
-                            text: "Each lane in its own worktree"
-                            checked: root.laneWorktrees
-                            onToggled: root.laneWorktrees = checked
-                        }
-                    }
-                }
-            }
-
             // Composer
             Rectangle {
                 id: draftCard
                 Layout.fillWidth: true
                 implicitHeight: box.implicitHeight + 20
-                radius: 10
+                radius: 4
                 color: Theme.elevated
                 border.color: input.activeFocus ? Theme.primary : Theme.border
                 // The chat composer's shadow.
@@ -780,34 +545,11 @@ Rectangle {
                     y: 10
                     width: parent.width - 24
                     spacing: 8
-                    // Chosen starter and attachments
+                    // Attachments
                     Flow {
                         Layout.fillWidth: true
                         spacing: 6
-                        visible: root.starterInfo !== null || root.attachments.length > 0
-                        Rectangle {
-                            visible: root.starterInfo !== null
-                            implicitHeight: 26
-                            implicitWidth: starterRow.implicitWidth + 14
-                            radius: 13
-                            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.14)
-                            border.color: Theme.primary
-                            Row {
-                                id: starterRow
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Icon { anchors.verticalCenter: parent.verticalCenter; name: root.starterInfo ? root.starterInfo.icon : ""; color: Theme.primary; implicitWidth: 14; implicitHeight: 14 }
-                                Label { anchors.verticalCenter: parent.verticalCenter; text: root.starterInfo ? root.starterInfo.label : ""; color: Theme.foreground; font.pixelSize: Theme.px(12) }
-                                Icon {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    name: "close"
-                                    color: Theme.muted
-                                    implicitWidth: 13
-                                    implicitHeight: 13
-                                    TapHandler { onTapped: root.starter = "" }
-                                }
-                            }
-                        }
+                        visible: root.attachments.length > 0
                         Repeater {
                             model: root.attachments
                             AttachmentChip {
@@ -829,10 +571,7 @@ Rectangle {
                         selectionColor: Theme.selection
                         font.pixelSize: Theme.px(14)
                         placeholderTextColor: Theme.muted
-                        placeholderText: root.starterInfo
-                            ? root.starterInfo.prompt + "  Add details, or just send."
-                            : root.planOn ? "Plan: describe what to plan (no files change)…"
-                            : "Plan, build, or ask."
+                        placeholderText: "Ask, or describe what to build."
                         background: null
                         padding: 4
                         Keys.onPressed: event => {
@@ -844,21 +583,8 @@ Rectangle {
                                 if (files.length > 0) event.accepted = true
                                 return
                             }
-                            // Ctrl+Shift+Enter: Run as workflow.
-                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier) && (event.modifiers & Qt.ShiftModifier)) {
-                                if (root.canRunWorkflow) root.runWorkflow()
-                                event.accepted = true
-                                return
-                            }
                             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
                                 root.send()
-                                event.accepted = true
-                                return
-                            }
-                            // Tab / Shift+Tab: Build ↔ Plan, as in a chat.
-                            if (!root.parallel && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
-                                    && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) === 0) {
-                                root.planOn = !root.planOn
                                 event.accepted = true
                             }
                         }
@@ -886,76 +612,6 @@ Rectangle {
                                  + "\nClick to switch"
                             onClicked: root.cycleApproval()
                         }
-                        // Delegate: the new session's agent splits the task, or asks
-                        // another agent (its first message says how).
-                        ComposerIconButton {
-                            objectName: "draftDelegateButton"
-                            visible: Workspace.orchestrationOn && !root.parallel && root.effectiveHarness !== "demo" && root.effectiveHarness !== ""
-                            enabled: root.canSend && root.input.text.trim() !== ""
-                            iconName: "robot-2"
-                            tip: "Delegate: split the task into helpers, get a second opinion, or form a committee (type the task first)"
-                            onClicked: draftDelegateMenu.popup(this, 0, -draftDelegateMenu.implicitHeight - 6)
-                            AppMenu {
-                                id: draftDelegateMenu
-                                AppMenuItem { objectName: "draftDelegateSplit"; text: "Split into helpers…"; hint: "parts at once"; onTriggered: draftDelegate.show("split") }
-                                AppMenuItem { text: "Second opinion…"; hint: "from another agent"; onTriggered: draftDelegate.show("advisor") }
-                                AppMenuItem { text: "Committee…"; hint: "two agents plan"; onTriggered: draftDelegate.show("committee") }
-                            }
-                            DelegatePopover {
-                                id: draftDelegate
-                                // (Over the whole message box, as in a chat.)
-                                parent: box
-                                draft: root.input.text
-                                draftAgent: root.effectiveHarness
-                                draftModel: root.activeModel
-                                draftFolder: root.folder
-                                draftProject: root.projectId
-                                x: 8
-                                y: -height - 6
-                                // (Its instruction, with the task, is the first message.)
-                                onDelegated: text => root.send(text)
-                            }
-                        }
-                        // Run as workflow: implement, check and review in a
-                        // worktree. Labelled when the bar has room.
-                        ComposerLabelButton {
-                            objectName: "draftWorkflowButton"
-                            visible: root.workflowOffered && box.width >= 440
-                            enabled: root.canRunWorkflow
-                            iconName: "list-check-2"
-                            text: qsTr("Workflow")
-                            tip: root.workflowTip
-                            onClicked: root.runWorkflow()
-                        }
-                        ComposerIconButton {
-                            objectName: "draftWorkflowIcon"
-                            visible: root.workflowOffered && box.width < 440
-                            enabled: root.canRunWorkflow
-                            iconName: "list-check-2"
-                            tip: root.workflowTip
-                            onClicked: root.runWorkflow()
-                        }
-                        ComposerIconButton {
-                            objectName: "draftParallelButton"
-                            iconName: "node-tree"
-                            tint: root.parallel ? Theme.primary : Theme.foreground
-                            on: root.parallel
-                            tip: root.parallel ? "Run in parallel is on: the prompt goes to every lane above"
-                                               : "Run in parallel: send the prompt to several models at once and compare"
-                            onClicked: root.parallel = !root.parallel
-                        }
-                        // Build or Plan (Tab), as the chat's: the session starts in it.
-                        ComposerLabelButton {
-                            objectName: "draftModeButton"
-                            visible: !root.parallel
-                            iconName: "ai-agent"
-                            text: root.planOn ? "Plan" : "Build"
-                            tint: root.planOn ? Theme.warning : Theme.success
-                            tip: (root.planOn ? "Plan: the agent explores and proposes a plan; no files change"
-                                              : "Build: the agent makes changes")
-                                 + "\nClick or Tab to switch"
-                            onClicked: { root.planOn = !root.planOn; root.input.forceActiveFocus() }
-                        }
                         // Fills the gap; shortens (then vanishes) before Send moves.
                         Label {
                             id: startHint
@@ -966,11 +622,11 @@ Rectangle {
                             horizontalAlignment: Text.AlignRight
                             elide: Text.ElideRight
                             // (Narrow: the short form, rather than one cut mid-word.)
-                            readonly property string full: root.parallel ? "Enter starts " + root.lanes.length + " lanes" : "Enter to start · Shift+Enter for a new line"
+                            readonly property string full: "Enter to start · Shift+Enter for a new line"
                             TextMetrics { id: startHintFull; font: startHint.font; text: startHint.full }
                             TextMetrics { id: startHintShort; font: startHint.font; text: "Enter to start" }
                             // (No room even for that: nothing, rather than over the buttons.)
-                            text: root.parallel || width >= startHintFull.advanceWidth ? full : width >= startHintShort.advanceWidth ? "Enter to start" : ""
+                            text: width >= startHintFull.advanceWidth ? full : width >= startHintShort.advanceWidth ? "Enter to start" : ""
                             color: Theme.muted
                             font.pixelSize: Theme.px(11)
                         }
@@ -979,51 +635,9 @@ Rectangle {
                             iconName: "send-plane-2"
                             tint: Theme.primary
                             enabled: root.canSend
-                            tip: root.parallel ? "Start " + root.lanes.length + " lanes (Enter)" : "Start the session (Enter)"
+                            tip: "Start the session (Enter)"
                             onClicked: root.send()
                         }
-                    }
-                }
-            }
-
-            // Starters
-            Flow {
-                Layout.fillWidth: true
-                Layout.topMargin: 4
-                spacing: 8
-                // Centre the chips line by line.
-                leftPadding: Math.max(0, (width - starterRowWidth) / 2)
-                readonly property real starterRowWidth: {
-                    let w = 0
-                    for (let i = 0; i < starterRepeater.count; i++) {
-                        const it = starterRepeater.itemAt(i)
-                        if (!it) continue
-                        if (w + it.width > width) break
-                        w += it.width + spacing
-                    }
-                    return Math.max(0, w - spacing)
-                }
-                Repeater {
-                    id: starterRepeater
-                    model: root.starters
-                    Button {
-                        id: starterChip
-                        required property var modelData
-                        readonly property bool chosen: root.starter === modelData.id
-                        flat: true
-                        implicitHeight: 32
-                        leftPadding: 12
-                        rightPadding: 13
-                        onClicked: { root.starter = chosen ? "" : modelData.id; input.forceActiveFocus() }
-                        contentItem: Row {
-                            spacing: 7
-                            Icon { anchors.verticalCenter: parent.verticalCenter; name: starterChip.modelData.icon; color: starterChip.chosen ? Theme.primary : Theme.muted; implicitWidth: 15; implicitHeight: 15 }
-                            Label { anchors.verticalCenter: parent.verticalCenter; text: starterChip.modelData.label; color: starterChip.chosen || starterChip.hovered ? Theme.foreground : Theme.muted; font.pixelSize: Theme.px(13) }
-                        }
-                        background: ControlSurface { control: starterChip; variant: starterChip.chosen ? "selected" : "outline"; radius: 16 }
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 500
-                        ToolTip.text: "“" + starterChip.modelData.prompt + "”"
                     }
                 }
             }
@@ -1063,7 +677,7 @@ Rectangle {
                             Icon { anchors.verticalCenter: parent.verticalCenter; name: "bookmark"; color: Theme.primary; implicitWidth: 14; implicitHeight: 14 }
                             Label { anchors.verticalCenter: parent.verticalCenter; text: templateChip.modelData.name; color: templateChip.hovered ? Theme.foreground : Theme.muted; font.pixelSize: Theme.px(13) }
                         }
-                        background: ControlSurface { control: templateChip; variant: "outline"; radius: 16 }
+                        background: ControlSurface { control: templateChip; variant: "outline"; radius: 6 }
                         TapHandler {
                             acceptedButtons: Qt.RightButton
                             onTapped: { templateMenu.template = templateChip.modelData; templateMenu.popup() }
@@ -1076,7 +690,7 @@ Rectangle {
                 Button {
                     id: saveTemplateChip
                     objectName: "saveTemplate"
-                    visible: input.text.trim() !== "" && !root.parallel
+                    visible: input.text.trim() !== ""
                     flat: true
                     implicitHeight: 32
                     leftPadding: 11
@@ -1087,7 +701,7 @@ Rectangle {
                         Icon { anchors.verticalCenter: parent.verticalCenter; name: "add"; color: Theme.muted; implicitWidth: 14; implicitHeight: 14 }
                         Label { anchors.verticalCenter: parent.verticalCenter; text: "Save as template"; color: saveTemplateChip.hovered ? Theme.foreground : Theme.muted; font.pixelSize: Theme.px(13) }
                     }
-                    background: ControlSurface { control: saveTemplateChip; radius: 16 }
+                    background: ControlSurface { control: saveTemplateChip; radius: 6 }
                     ToolTip.visible: hovered
                     ToolTip.delay: 500
                     ToolTip.text: "Save this agent, model, permissions and message under a name, to start from again"

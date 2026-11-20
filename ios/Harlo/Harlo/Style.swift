@@ -21,11 +21,11 @@ enum Style {
 
     /// An agent's letters, for its avatar.
     static func initials(_ id: String) -> String {
-        ["harlo": "HA", "claude": "CL", "demo": "DE"][id] ?? String(id.prefix(2)).uppercased()
+        ["pi": "PI", "demo": "DE"][id] ?? String(id.prefix(2)).uppercased()
     }
 
     static func harnessLabel(_ id: String) -> String {
-        ["harlo": "Harlo", "claude": "Claude", "demo": "Demo"][id] ?? id
+        ["pi": "pi", "demo": "Demo"][id] ?? id
     }
 
     /// "now", "3m", "2h", "5d", "4mo" from unix seconds.

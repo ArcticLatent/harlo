@@ -347,7 +347,7 @@ Rectangle {
                         verticalAlignment: Text.AlignVCenter
                     }
                     background: Rectangle {
-                        radius: 8
+                        radius: 3
                         color: moreRow.hovered ? Theme.rowHover : "transparent"
                         Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                         Rectangle { width: parent.width; height: 1; color: Theme.hairline }

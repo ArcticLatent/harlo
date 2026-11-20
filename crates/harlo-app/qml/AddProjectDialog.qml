@@ -103,7 +103,7 @@ AppDialog {
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 32
-                radius: 6
+                radius: 2
                 color: Theme.background
                 border.color: Theme.border
                 Label {
@@ -211,7 +211,7 @@ AppDialog {
                         ProviderMark { anchors.verticalCenter: parent.verticalCenter; provider: ab.modelData.id; tip: ""; implicitWidth: 13; implicitHeight: 13; color: ab.on ? Theme.foreground : Theme.muted }
                         Label { anchors.verticalCenter: parent.verticalCenter; text: ab.modelData.label; color: ab.on ? Theme.foreground : Theme.muted; font.pixelSize: Theme.px(12.5) }
                     }
-                    background: ControlSurface { control: ab; variant: ab.on ? "selected" : "outline"; radius: 7 }
+                    background: ControlSurface { control: ab; variant: ab.on ? "selected" : "outline"; radius: 3 }
                 }
             }
         }
@@ -259,7 +259,7 @@ AppDialog {
                     topInset: heading
                     topPadding: heading + bottomPadding
                     highlighted: dlg.model === modelData.id
-                    background: Rectangle { radius: 6; color: mRow.highlighted ? Theme.rowSelected : mRow.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: mRow.highlighted ? Theme.rowSelected : mRow.hovered ? Theme.hover : "transparent" }
                     Label {
                         visible: mRow.heading > 0
                         x: 8

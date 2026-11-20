@@ -4,7 +4,7 @@ import UIKit
 
 /// The sheets a session opens.
 enum SessionSheet: Identifiable {
-    case changes, activity, models, actions, plan, wiki
+    case changes, activity, models, actions, wiki
     /// The workflow run it's part of (its id).
     case workflow(String)
     /// The session as a Markdown file, to share.
@@ -24,7 +24,6 @@ enum SessionSheet: Identifiable {
         case .file(let path, let line): return "file:\(path):\(line)"
         case .branches: return "branches"
         case .changes: return "changes"
-        case .plan: return "plan"
         case .wiki: return "wiki"
         case .workflow(let id): return "workflow:" + id
         case .activity: return "activity"

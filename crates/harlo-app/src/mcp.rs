@@ -1,6 +1,6 @@
 //! `Mcp` (QML singleton): Settings → Tools for agents. Lists, saves and removes the MCP
-//! servers Harlo and Claude read (globally or in a project, here or on a remote
-//! host), and tests them for a status (the harnesses don't report one).
+//! servers pi reads (globally or in a project, here or on a remote host),
+//! and tests them for a status (pi doesn't report one).
 
 // Rust guideline compliant 2026-10-09
 
@@ -25,15 +25,20 @@ pub mod qobject {
     #[auto_cxx_name]
     extern "RustQt" {
         /// A scope ("global" or a project's path): `{ servers: [{ name,
-        /// harnesses, differs, form }], errors, files: { harlo, claude } }`.
+        /// form }], errors, file }`.
         #[qinvokable]
         fn list_json(self: &Mcp, scope: &QString) -> QString;
-        /// Saves a server (`form` JSON) for `harnesses` (JSON array of
-        /// "harlo" / "claude"); renames from `old_name`. An error, or "".
+        /// Saves a server (`form` JSON); renames from `old_name`. An error,
+        /// or "".
         #[qinvokable]
-        fn save(self: Pin<&mut Mcp>, scope: &QString, old_name: &QString, form: &QString, harnesses: &QString) -> QString;
+        fn save(self: Pin<&mut Mcp>, scope: &QString, old_name: &QString, form: &QString) -> QString;
         #[qinvokable]
         fn remove(self: Pin<&mut Mcp>, scope: &QString, name: &QString) -> QString;
+        /// The terminal command that signs pi in to a server of `scope`
+        /// (`pi mcp login`, in the project's folder for a project's; on
+        /// its machine for a host's).
+        #[qinvokable]
+        fn pi_login_command(self: &Mcp, scope: &QString, name: &QString) -> QString;
         /// Turns a server on or off (tests it when turned on). An error, or "".
         #[qinvokable]
         fn set_enabled(self: Pin<&mut Mcp>, scope: &QString, name: &QString, on: bool) -> QString;
@@ -54,7 +59,7 @@ pub mod qobject {
         #[qinvokable]
         fn split_command(self: &Mcp, line: &QString) -> QString;
         /// The agent is installed (its path in Settings → Agents, else
-        /// found): new servers are for the installed ones.
+        /// found).
         #[qinvokable]
         fn installed(self: &Mcp, harness: &QString) -> bool;
         /// The agent is installed where a scope's servers run (here, or
@@ -63,8 +68,8 @@ pub mod qobject {
         fn installed_on(self: &Mcp, harness: &QString, scope: &QString) -> bool;
         /// The servers harlo installs with a click, in a scope ("global",
         /// or "host:<name>" for a host's): `[{ id, name, about, license,
-        /// repo, version, agents, chosen, taken, needs, node, nodeError,
-        /// latest, stars, busy, progress, message, error }]` (as last looked:
+        /// repo, version, on, taken, needs, node, nodeError, latest, stars,
+        /// busy, progress, message, error }]` (as last looked:
         /// `catalog_refresh` looks again).
         #[qinvokable]
         fn catalog_json(self: &Mcp, scope: &QString) -> QString;
@@ -72,10 +77,9 @@ pub mod qobject {
         /// hourly unless `force`).
         #[qinvokable]
         fn catalog_refresh(self: Pin<&mut Mcp>, scope: &QString, force: bool);
-        /// Turns one on there for `harnesses` (JSON array; downloading it
-        /// first if it isn't yet), or off (`harnesses`: chosen for next time).
+        /// Turns one on there (downloading it first if it isn't yet), or off.
         #[qinvokable]
-        fn catalog_set(self: Pin<&mut Mcp>, scope: &QString, id: &QString, on: bool, harnesses: &QString);
+        fn catalog_set(self: Pin<&mut Mcp>, scope: &QString, id: &QString, on: bool);
         /// Updates one there to its newest release.
         #[qinvokable]
         fn catalog_update(self: Pin<&mut Mcp>, scope: &QString, id: &QString);
@@ -115,7 +119,6 @@ fn form_json(f: &Form) -> Value {
     json!({
         "name": f.name, "enabled": f.enabled, "transport": f.transport, "command": f.command, "url": f.url,
         "headers": f.headers, "env": f.env, "cwd": f.cwd, "timeoutSecs": f.timeout_secs,
-        "readOnlyAll": f.read_only_all, "readOnly": f.read_only,
     })
 }
 
@@ -138,26 +141,13 @@ fn form_from(v: &Value) -> Form {
         env: pairs(&v["env"]),
         cwd: v["cwd"].as_str().unwrap_or_default().to_owned(),
         timeout_secs: v["timeoutSecs"].as_f64().filter(|t| *t > 0.0),
-        read_only_all: v["readOnlyAll"].as_bool().unwrap_or(false),
-        read_only: v["readOnly"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(str::to_owned).collect(),
     }
-}
-
-fn kind_name(k: HarnessKind) -> &'static str {
-    k.as_str()
-}
-
-/// An agent's program: the path set in Settings → Agents (if it's
-/// there), else the installed one.
-fn program(kind: HarnessKind) -> Option<PathBuf> {
-    let set = harlo_core::db::Db::open(&harlo_core::db::default_path()).ok().and_then(|d| d.get(&format!("settings.{}_path", kind.as_str())).ok().flatten()).unwrap_or_default();
-    if set.trim().is_empty() { harlo_harness::resolve_program(kind) } else { Some(PathBuf::from(set.trim())).filter(|p| p.is_file()) }
 }
 
 fn probe_json(p: &Probe) -> Value {
     json!({
         "state": p.state, "error": p.error, "server": p.server,
-        "tools": p.tools.iter().map(|(n, d)| json!({ "name": n, "description": d, "looks": p.looks.contains(n) })).collect::<Vec<_>>(),
+        "tools": p.tools.iter().map(|(n, d)| json!({ "name": n, "description": d })).collect::<Vec<_>>(),
     })
 }
 
@@ -175,28 +165,17 @@ impl Mcp {
             .servers
             .iter()
             // (harlo's own: under Ready to install.)
-            .filter(|s| mcp_catalog::Place::of(&scope).is_none_or(|p| mcp_catalog::which(&s.form, &p).is_none()))
-            .map(|s| {
-                // (A project's server Harlo won't start yet: not saved here.)
-                let unapproved = s.harnesses.contains(&HarnessKind::Harlo) && mcp::harlo_approved(&scope, &s.form.name) == Some(false);
-                json!({ "name": s.form.name, "harnesses": s.harnesses.iter().map(|k| kind_name(*k)).collect::<Vec<_>>(), "differs": s.differs, "harloUnapproved": unapproved, "form": form_json(&s.form) })
-            })
+            .filter(|s| mcp_catalog::Place::of(&scope).is_none_or(|p| mcp_catalog::which(s, &p).is_none()))
+            .map(|s| json!({ "name": s.name, "form": form_json(s) }))
             .collect();
-        let files: serde_json::Map<String, Value> = mcp::HARNESSES.iter().map(|k| (kind_name(*k).to_owned(), json!(harlo_core::sidebar::tilde(&mcp::config_path(*k, &scope))))).collect();
-        QString::from(&json!({ "servers": servers, "errors": listing.errors, "files": files }).to_string())
+        let file = harlo_core::sidebar::tilde(&mcp::config_path(&scope));
+        QString::from(&json!({ "servers": servers, "errors": listing.errors, "file": file }).to_string())
     }
 
-    pub fn save(mut self: Pin<&mut Self>, scope: &QString, old_name: &QString, form: &QString, harnesses: &QString) -> QString {
+    pub fn save(mut self: Pin<&mut Self>, scope: &QString, old_name: &QString, form: &QString) -> QString {
         let scope_s = scope.to_string();
         let form = form_from(&serde_json::from_str(&form.to_string()).unwrap_or_default());
-        let kinds: Vec<HarnessKind> = serde_json::from_str::<Vec<String>>(&harnesses.to_string())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|h| HarnessKind::parse(h))
-            .filter(|k| mcp::HARNESSES.contains(k))
-            .collect();
-        mcp::use_claude(program(HarnessKind::Claude));
-        match mcp::save(&Scope::parse(&scope_s), &old_name.to_string(), &form, &kinds) {
+        match mcp::save(&Scope::parse(&scope_s), &old_name.to_string(), &form) {
             Ok(()) => {
                 // A changed server's old test result no longer applies.
                 let mut this = self.as_mut().rust_mut();
@@ -210,7 +189,6 @@ impl Mcp {
     }
 
     pub fn remove(mut self: Pin<&mut Self>, scope: &QString, name: &QString) -> QString {
-        mcp::use_claude(program(HarnessKind::Claude));
         match mcp::remove(&Scope::parse(&scope.to_string()), &name.to_string()) {
             Ok(()) => {
                 self.as_mut().rust_mut().status.remove(&(scope.to_string(), name.to_string()));
@@ -241,7 +219,7 @@ impl Mcp {
 
     pub fn test_all(self: Pin<&mut Self>, scope: &QString) {
         let s = scope.to_string();
-        let names: Vec<String> = mcp::load(&Scope::parse(&s)).servers.into_iter().filter(|l| l.form.enabled).map(|l| l.form.name).collect();
+        let names: Vec<String> = mcp::load(&Scope::parse(&s)).servers.into_iter().filter(|f| f.enabled).map(|f| f.name).collect();
         self.test_names(&s, &names);
     }
 
@@ -256,31 +234,18 @@ impl Mcp {
             Scope::Global => None,
         };
         for name in names {
-            let Some(server) = listing.servers.iter().find(|s| s.form.name == *name) else { continue };
+            let Some(server) = listing.servers.iter().find(|s| s.name == *name) else { continue };
             let key = (scope_s.to_owned(), name.clone());
             if self.status.get(&key).is_some_and(|p| p.state == "testing") {
                 continue;
             }
             self.as_mut().rust_mut().status.insert(key.clone(), Probe { state: "testing".into(), ..Default::default() });
-            let mut form = server.form.clone();
-            // Harlo's sign-in, when it has one here (a host keeps its own).
-            let here = match &scope {
-                Scope::Global => true,
-                Scope::Project(p) => harlo_core::remote::split(p).is_none(),
-                Scope::Host(_) => false,
-            };
-            let harlo = here && server.harnesses.contains(&HarnessKind::Harlo) && form.transport != "stdio";
+            let form = server.clone();
             let project = project.clone();
             // At most the server's own timeout, else 30 s.
             let timeout = Duration::from_secs_f64(form.timeout_secs.unwrap_or(30.0).clamp(3.0, 30.0));
             let thread = self.qt_thread();
             crate::runtime().spawn_blocking(move || {
-                if harlo
-                    && !form.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("authorization"))
-                    && let Some(t) = mcp_probe::harlo_token(&mcp_probe::expand(form.url.trim()))
-                {
-                    form.headers.push(("Authorization".into(), format!("Bearer {t}")));
-                }
                 let result = mcp_probe::probe(&form, project.as_deref(), timeout);
                 let _ = thread.queue(move |mut this| {
                     this.as_mut().rust_mut().status.insert(key, result);
@@ -289,6 +254,20 @@ impl Mcp {
             });
         }
         self.bump();
+    }
+
+    #[expect(clippy::unused_self, reason = "QML calls it as a method of its object")]
+    pub fn pi_login_command(&self, scope: &QString, name: &QString) -> QString {
+        let args = ["mcp".to_owned(), "login".to_owned(), name.to_string()];
+        let (host, cwd) = match Scope::parse(&scope.to_string()) {
+            Scope::Global => (None, None),
+            Scope::Host(h) => (harlo_core::remote::host(&h), None),
+            Scope::Project(p) => match harlo_core::remote::split(&p) {
+                Some((h, dir)) => (harlo_core::remote::host(&h), Some(dir)),
+                None => (None, Some(p.to_string_lossy().into_owned())),
+            },
+        };
+        QString::from(&crate::accounts::pi_terminal_command_in(&args, host.as_ref(), cwd.as_deref()))
     }
 
     pub fn status_json(&self, scope: &QString) -> QString {
@@ -310,7 +289,7 @@ impl Mcp {
     }
 
     pub fn installed(&self, harness: &QString) -> bool {
-        HarnessKind::parse(&harness.to_string()).and_then(program).is_some()
+        HarnessKind::parse(&harness.to_string()).and_then(crate::accounts::program).is_some()
     }
 
     pub fn catalog_json(&self, scope: &QString) -> QString {
@@ -384,7 +363,6 @@ impl Mcp {
         let Some(b) = mcp_catalog::get(id) else { return };
         let Some(place) = mcp_catalog::Place::of(&Scope::parse(&scope)) else { return };
         self.as_mut().catalog_put(&scope, b.id, &json!({ "busy": busy, "progress": 0.0, "error": "", "message": "" }));
-        mcp::use_claude(program(HarnessKind::Claude));
         let thread = self.qt_thread();
         crate::runtime().spawn_blocking(move || {
             let mut shown = std::time::Instant::now();
@@ -408,7 +386,7 @@ impl Mcp {
             st["message"] = json!(message);
             st["error"] = json!(error);
             let _ = thread.queue(move |mut this| {
-                let test = st["error"] == "" && st["agents"].as_array().is_some_and(|a| !a.is_empty());
+                let test = st["error"] == "" && st["on"] == true;
                 this.as_mut().rust_mut().status.remove(&(scope.clone(), b.id.to_owned()));
                 this.as_mut().catalog_put(&scope, b.id, &st);
                 if test {
@@ -418,10 +396,9 @@ impl Mcp {
         });
     }
 
-    pub fn catalog_set(self: Pin<&mut Self>, scope: &QString, id: &QString, on: bool, harnesses: &QString) {
-        let kinds: Vec<HarnessKind> = serde_json::from_str::<Vec<String>>(&harnesses.to_string()).unwrap_or_default().iter().filter_map(|h| HarnessKind::parse(h)).filter(|k| mcp::HARNESSES.contains(k)).collect();
+    pub fn catalog_set(self: Pin<&mut Self>, scope: &QString, id: &QString, on: bool) {
         self.catalog_work(scope.to_string(), &id.to_string(), if on { "on" } else { "off" }, move |b, place, progress| {
-            if on { mcp_catalog::enable(b, place, &kinds, progress) } else { mcp_catalog::disable(b, place, &kinds) }.map(|()| String::new())
+            if on { mcp_catalog::enable(b, place, progress) } else { mcp_catalog::disable(b, place) }.map(|()| String::new())
         });
     }
 

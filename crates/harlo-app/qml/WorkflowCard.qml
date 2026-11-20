@@ -11,7 +11,7 @@ import harlo
 Rectangle {
     id: root
     property ChatSession session
-    readonly property var run: session && session.key !== "" && Workspace.workflowsRevision >= 0 && Workspace.orchestrationRevision >= 0
+    readonly property var run: session && session.key !== "" && Workspace.workflowsRevision >= 0
         ? (s => s === "" ? null : JSON.parse(s))(Workspace.workflowFor(session.key)) : null
     readonly property bool paused: !!run && run.state === "paused"
     // One of its sessions waits on you (a question or an approval).
@@ -32,7 +32,7 @@ Rectangle {
 
     visible: !!run
     implicitHeight: col.implicitHeight + 16
-    radius: 10
+    radius: 4
     color: Theme.elevated
     border.color: paused || asking ? Theme.warning : Theme.border
 
@@ -110,7 +110,7 @@ Rectangle {
                 padding: 0
                 onClicked: root.expanded = !root.expanded
                 contentItem: Item { Icon { anchors.centerIn: parent; name: "arrow-down-s"; rotation: root.expanded ? 180 : 0; color: toggle.hovered ? Theme.foreground : Theme.muted; implicitWidth: 18; implicitHeight: 18 } }
-                background: Rectangle { radius: 5; color: toggle.hovered ? Theme.hover : "transparent" }
+                background: Rectangle { radius: 2; color: toggle.hovered ? Theme.hover : "transparent" }
                 Accessible.name: root.expanded ? qsTr("Hide the run's log") : qsTr("Show the run's log")
                 ToolTip.visible: hovered
                 ToolTip.text: Accessible.name
@@ -199,7 +199,7 @@ Rectangle {
             Layout.fillWidth: true
             visible: !!live
             implicitHeight: liveCol.implicitHeight + 12
-            radius: 6
+            radius: 2
             color: Theme.background
             border.color: Theme.border
             ColumnLayout {
@@ -297,7 +297,7 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: !!root.run && !!root.run.lastCheck
                 implicitHeight: testCol.implicitHeight + 12
-                radius: 6
+                radius: 2
                 color: Theme.background
                 border.color: Theme.border
                 ColumnLayout {

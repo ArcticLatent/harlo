@@ -358,67 +358,111 @@ impl Terminal {
 
     /// Reads the visible screen into `screen` in `palette`'s colours.
     pub fn render(&self, palette: &Palette, screen: &mut Screen) {
-        let term = self.term.lock();
-        let content = term.renderable_content();
-        let offset = i32::try_from(content.display_offset).unwrap_or(i32::MAX);
-        let (rows, cols) = (term.screen_lines(), term.columns());
-        let colors = content.colors;
-        let selection = content.selection;
-        screen.rows = rows;
-        screen.cols = cols;
-        screen.cells.clear();
-        screen.cells.resize(rows * cols, Cell::blank(palette));
-        for cell in content.display_iter {
-            let row = cell.point.line.0 + offset;
-            let col = cell.point.column.0;
-            if row < 0 || usize::try_from(row).unwrap_or(0) >= rows || col >= cols {
-                continue;
-            }
-            let selected = selection.is_some_and(|s| s.contains(cell.point));
-            let mut fg = resolve(cell.fg, colors, palette, true);
-            let mut bg = resolve(cell.bg, colors, palette, false);
-            if cell.flags.contains(Flags::DIM) {
-                fg = mix(fg, palette.background);
-            }
-            if cell.flags.contains(Flags::INVERSE) {
-                std::mem::swap(&mut fg, &mut bg);
-            }
-            if cell.flags.contains(Flags::HIDDEN) {
-                fg = bg;
-            }
-            if selected {
-                bg = palette.selection_bg;
-            }
-            let mut flags = 0;
-            for (has, bit) in [
-                (Flags::BOLD, Cell::BOLD),
-                (Flags::ITALIC, Cell::ITALIC),
-                (Flags::ALL_UNDERLINES, Cell::UNDERLINE),
-                (Flags::STRIKEOUT, Cell::STRIKE),
-                (Flags::WIDE_CHAR, Cell::WIDE),
-                (Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER, Cell::SPACER),
-            ] {
-                if cell.flags.intersects(has) {
-                    flags |= bit;
-                }
-            }
-            let c = if flags & Cell::SPACER != 0 || cell.c == '\0' || cell.c == '\t' { ' ' } else { cell.c };
-            screen.cells[usize::try_from(row).unwrap_or(0) * cols + col] = Cell { c, fg, bg, flags };
-        }
-        let cursor = content.cursor;
-        let cursor_row = cursor.point.line.0 + offset;
-        use alacritty_terminal::vte::ansi::CursorShape as Shape;
-        let hidden = matches!(cursor.shape, Shape::Hidden) || !content.mode.contains(TermMode::SHOW_CURSOR);
-        screen.cursor_row = cursor_row;
-        screen.cursor_col = i32::try_from(cursor.point.column.0).unwrap_or(i32::MAX);
-        screen.cursor_visible = !hidden && cursor_row >= 0 && usize::try_from(cursor_row).unwrap_or(0) < rows;
-        screen.cursor_shape = match cursor.shape {
-            Shape::Underline => CursorShape::Underline,
-            Shape::Beam => CursorShape::Beam,
-            _ => CursorShape::Block,
-        };
-        screen.scrolled_back = content.display_offset;
+        read_screen(&self.term.lock(), palette, screen);
     }
+}
+
+/// Styled lines (ANSI escapes: colours, bold…), as a pi extension's
+/// component draws them, read into `screen`: `cols` wide, a row per line.
+///
+/// Lines wider than `cols` are cut, not wrapped. The cursor stays hidden.
+pub fn screen_of_lines(lines: &[String], cols: usize, palette: &Palette, screen: &mut Screen) {
+    use alacritty_terminal::vte::ansi::Processor;
+    #[derive(Clone, Copy)]
+    struct Quiet;
+    impl EventListener for Quiet {}
+    let cols = cols.max(1);
+    // (Read wider, then cut: with no room left, a terminal writes the rest
+    // of a line over its last cell.)
+    let size = Size { cols: cols + 256, lines: lines.len().max(1) };
+    let mut term = Term::new(Config { scrolling_history: 0, ..Config::default() }, &size, Quiet);
+    // (No wrapping at the edge: a line that runs over stays on its row.)
+    let mut parser: Processor = Processor::new();
+    parser.advance(&mut term, b"\x1b[?7l");
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            parser.advance(&mut term, b"\x1b[0m\r\n");
+        }
+        parser.advance(&mut term, line.as_bytes());
+    }
+    read_screen(&term, palette, screen);
+    let wide = screen.cols;
+    for r in 0..screen.rows {
+        screen.cells.copy_within(r * wide..r * wide + cols, r * cols);
+    }
+    screen.cells.truncate(screen.rows * cols);
+    screen.cols = cols;
+    // (A wide character cut in half leaves a blank.)
+    for r in 0..screen.rows {
+        let last = &mut screen.cells[r * cols + cols - 1];
+        if last.flags & Cell::WIDE != 0 {
+            *last = Cell { c: ' ', flags: 0, ..*last };
+        }
+    }
+    screen.cursor_visible = false;
+}
+
+/// Reads `term`'s visible screen into `screen` in `palette`'s colours.
+fn read_screen<L: EventListener>(term: &Term<L>, palette: &Palette, screen: &mut Screen) {
+    let content = term.renderable_content();
+    let offset = i32::try_from(content.display_offset).unwrap_or(i32::MAX);
+    let (rows, cols) = (term.screen_lines(), term.columns());
+    let colors = content.colors;
+    let selection = content.selection;
+    screen.rows = rows;
+    screen.cols = cols;
+    screen.cells.clear();
+    screen.cells.resize(rows * cols, Cell::blank(palette));
+    for cell in content.display_iter {
+        let row = cell.point.line.0 + offset;
+        let col = cell.point.column.0;
+        if row < 0 || usize::try_from(row).unwrap_or(0) >= rows || col >= cols {
+            continue;
+        }
+        let selected = selection.is_some_and(|s| s.contains(cell.point));
+        let mut fg = resolve(cell.fg, colors, palette, true);
+        let mut bg = resolve(cell.bg, colors, palette, false);
+        if cell.flags.contains(Flags::DIM) {
+            fg = mix(fg, palette.background);
+        }
+        if cell.flags.contains(Flags::INVERSE) {
+            std::mem::swap(&mut fg, &mut bg);
+        }
+        if cell.flags.contains(Flags::HIDDEN) {
+            fg = bg;
+        }
+        if selected {
+            bg = palette.selection_bg;
+        }
+        let mut flags = 0;
+        for (has, bit) in [
+            (Flags::BOLD, Cell::BOLD),
+            (Flags::ITALIC, Cell::ITALIC),
+            (Flags::ALL_UNDERLINES, Cell::UNDERLINE),
+            (Flags::STRIKEOUT, Cell::STRIKE),
+            (Flags::WIDE_CHAR, Cell::WIDE),
+            (Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER, Cell::SPACER),
+        ] {
+            if cell.flags.intersects(has) {
+                flags |= bit;
+            }
+        }
+        let c = if flags & Cell::SPACER != 0 || cell.c == '\0' || cell.c == '\t' { ' ' } else { cell.c };
+        screen.cells[usize::try_from(row).unwrap_or(0) * cols + col] = Cell { c, fg, bg, flags };
+    }
+    let cursor = content.cursor;
+    let cursor_row = cursor.point.line.0 + offset;
+    use alacritty_terminal::vte::ansi::CursorShape as Shape;
+    let hidden = matches!(cursor.shape, Shape::Hidden) || !content.mode.contains(TermMode::SHOW_CURSOR);
+    screen.cursor_row = cursor_row;
+    screen.cursor_col = i32::try_from(cursor.point.column.0).unwrap_or(i32::MAX);
+    screen.cursor_visible = !hidden && cursor_row >= 0 && usize::try_from(cursor_row).unwrap_or(0) < rows;
+    screen.cursor_shape = match cursor.shape {
+        Shape::Underline => CursorShape::Underline,
+        Shape::Beam => CursorShape::Beam,
+        _ => CursorShape::Block,
+    };
+    screen.scrolled_back = content.display_offset;
 }
 
 impl Drop for Terminal {
@@ -684,5 +728,21 @@ mod tests {
         assert_eq!(term.link_at(row + 1, 2), url, "on the row it wrapped onto");
         assert_eq!(term.link_at(row + 1, 19), "", "past its end");
         term.kill();
+    }
+
+    #[test]
+    fn styled_lines_become_cells() {
+        let palette = Palette::from_hex(&[]);
+        let mut screen = Screen::default();
+        let lines = ["\x1b[31mred\x1b[0m plain".to_owned(), "\x1b[1;38;2;1;2;3mbold".to_owned(), "far too long for it".to_owned()];
+        screen_of_lines(&lines, 8, &palette, &mut screen);
+        assert_eq!((screen.rows, screen.cols), (3, 8));
+        assert_eq!(screen.row_text(0), "red plai", "cut at the width");
+        assert_eq!(screen.row(0)[0].fg, palette.ansi[1]);
+        assert_eq!(screen.row(0)[4].fg, palette.foreground);
+        let b = screen.row(1)[0];
+        assert_eq!((b.fg, b.flags & Cell::BOLD), (Rgb { r: 1, g: 2, b: 3 }, Cell::BOLD));
+        assert_eq!(screen.row_text(2), "far too", "not wrapped onto another row");
+        assert!(!screen.cursor_visible);
     }
 }

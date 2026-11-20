@@ -1,6 +1,6 @@
 //! Saved sessions on remote hosts, for the sidebar.
 //!
-//! The Claude and Harlo session files of a host are listed over SSH and changed
+//! A host's pi session files (while pi is on) are listed over SSH and changed
 //! ones read in a batch, reported like local scan results (paths and folders as
 //! `ssh://host/…`): those outside the host's projects go in its Other sessions,
 //! as here.
@@ -20,18 +20,17 @@ use crate::scanner::ScanDelta;
 
 /// Lists `<kind>\t<mtime>\t<size>\t<path>` for each session file (GNU find,
 /// else BSD stat).
-/// `HARLO_TEST_SESSIONS` (tests) replaces Harlo's folder, and leaves
-/// Claude's out.
 const LIST_SCRIPT: &str = r#"list() { [ -d "$2" ] || return 0
 if find "$2" -maxdepth 0 -printf '' 2>/dev/null; then find "$2" -mindepth 2 -maxdepth 2 -name '*.jsonl' -type f -printf "$1\t%T@\t%s\t%p\n"
-else for f in "$2"/*/*.jsonl; do [ -f "$f" ] && printf '%s\t%s\t%s\t%s\n' "$1" "$(stat -f %m "$f")" "$(stat -f %z "$f")" "$f"; done; fi; }
-[ -n "$HARLO_TEST_SESSIONS" ] || list claude "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"; list harlo "${HARLO_TEST_SESSIONS:-${XDG_DATA_HOME:-$HOME/.local/share}/harlo-agent/sessions}"; true"#;
+else for f in "$2"/*/*.jsonl; do [ -f "$f" ] && printf '%s\t%s\t%s\t%s\n' "$1" "$(stat -f %m "$f")" "$(stat -f %z "$f")" "$f"; done; fi; }"#;
 
-/// The agent a listed file is of.
-fn listed_kind(name: &str) -> HarnessKind {
-    match name {
-        "claude" => HarnessKind::Claude,
-        _ => HarnessKind::Harlo,
+/// The listing of pi's sessions when pi is on (`PI_CODING_AGENT_DIR` or
+/// `~/.pi/agent`, as pi keeps them; `HARLO_TEST_SESSIONS` in tests).
+fn list_script(pi: bool) -> String {
+    if pi {
+        format!(r#"{LIST_SCRIPT}; list pi "${{HARLO_TEST_SESSIONS:-${{PI_CODING_AGENT_SESSION_DIR:-${{PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}/sessions}}}}"; true"#)
+    } else {
+        "true".to_owned()
     }
 }
 
@@ -59,12 +58,12 @@ impl RemoteScanner {
     ///
     /// When `host` can't be reached.
     pub fn poll(&mut self, host: &Host) -> Result<ScanDelta> {
-        let listing = remote::run_ok(host, LIST_SCRIPT, Duration::from_secs(30))?;
+        let listing = remote::run_ok(host, &list_script(crate::scanner::listed_kinds().contains(&HarnessKind::Pi)), Duration::from_secs(30))?;
         let mut seen: HashMap<PathBuf, (HarnessKind, i64, u64)> = HashMap::new();
         for line in listing.lines() {
             let mut parts = line.splitn(4, '\t');
             let (Some(kind), Some(mtime), Some(size), Some(path)) = (parts.next(), parts.next(), parts.next(), parts.next()) else { continue };
-            let kind = listed_kind(kind);
+            let kind = HarnessKind::parse(kind).unwrap_or(HarnessKind::Pi);
             let mtime = mtime.split('.').next().and_then(|m| m.parse().ok()).unwrap_or(0);
             seen.insert(remote::join(&host.name, path), (kind, mtime, size.parse().unwrap_or(0)));
         }
@@ -139,7 +138,7 @@ impl RemoteScanner {
 /// A listed file: its agent, modified time and size.
 type Listed = HashMap<PathBuf, (HarnessKind, i64, u64)>;
 
-/// The Harlo session files last listed on each host, for Stats.
+/// The pi session files last listed on each host, for Stats.
 fn files() -> &'static std::sync::Mutex<Listed> {
     static FILES: std::sync::OnceLock<std::sync::Mutex<Listed>> = std::sync::OnceLock::new();
     FILES.get_or_init(Default::default)
@@ -149,10 +148,10 @@ fn files() -> &'static std::sync::Mutex<Listed> {
 fn note_files(prefix: &str, seen: &HashMap<PathBuf, (HarnessKind, i64, u64)>) {
     let mut files = files().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     files.retain(|p, _| !p.to_string_lossy().starts_with(prefix));
-    files.extend(seen.iter().filter(|(_, (k, ..))| *k == HarnessKind::Harlo).map(|(p, v)| (p.clone(), *v)));
+    files.extend(seen.iter().filter(|(_, (k, ..))| k.speaks_pi()).map(|(p, v)| (p.clone(), *v)));
 }
 
-/// Harlo's session files on other machines, as last listed:
+/// pi's session files on other machines, as last listed:
 /// `(ssh path, agent, modified (seconds), size)`.
 pub fn session_files() -> Vec<(PathBuf, HarnessKind, i64, u64)> {
     files().lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().map(|(p, (k, m, s))| (p.clone(), *k, *m, *s)).collect()
@@ -203,17 +202,19 @@ mod tests {
     /// Against a real SSH server, with fake session files in a scratch home
     /// (not run by default): `HARLO_TEST_SSH=… cargo test -p harlo-core -- --ignored remote_scan`
     #[test]
-    fn lists_harlos_sessions() {
+    fn lists_pis_sessions() {
         let home = crate::scratch::Scratch::new(std::env::temp_dir().join(format!("harlo-remote-list-{}", std::process::id())));
-        let dir = home.join(".local/share/harlo-agent/sessions/--work--");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("s.jsonl"), "{}\n").unwrap();
-        let out = std::process::Command::new("sh").args(["-c", LIST_SCRIPT]).env_clear().env("HOME", &*home).env("PATH", "/usr/bin:/bin").output().unwrap();
-        let text = String::from_utf8_lossy(&out.stdout);
-        let line = text.lines().find(|l| l.starts_with("harlo\t")).unwrap_or_else(|| panic!("{text}"));
-        assert!(line.ends_with("/.local/share/harlo-agent/sessions/--work--/s.jsonl"), "{line}");
-        assert_eq!(listed_kind("harlo"), HarnessKind::Harlo);
-        assert_eq!(listed_kind("claude"), HarnessKind::Claude);
+        let pi = home.join(".pi/agent/sessions/--work--");
+        std::fs::create_dir_all(&pi).unwrap();
+        std::fs::write(pi.join("p.jsonl"), "{}\n").unwrap();
+        let listed = |on: bool| {
+            let out = std::process::Command::new("sh").args(["-c", &list_script(on)]).env_clear().env("HOME", &*home).env("PATH", "/usr/bin:/bin").output().unwrap();
+            String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.starts_with("pi\t")).map(str::to_owned).collect::<Vec<_>>()
+        };
+        // Only while pi is on.
+        assert!(listed(false).is_empty());
+        let on = listed(true);
+        assert!(on.len() == 1 && on[0].ends_with("/.pi/agent/sessions/--work--/p.jsonl"), "{on:?}");
     }
 
     #[test]
@@ -221,6 +222,8 @@ mod tests {
     fn remote_scan() {
         let args = remote::parse_ssh_command(&std::env::var("HARLO_TEST_SSH").expect("HARLO_TEST_SSH")).unwrap();
         let host = Host { name: "t".into(), ssh: args };
+        // (pi's sessions are listed only while pi is on.)
+        crate::scanner::set_pi_listed(true);
         remote::set_hosts(vec![host.clone()]);
         // A sessions folder of our own (set through the SSH environment).
         let dir = std::env::temp_dir().join(format!("harlo-remote-scan-{}", std::process::id()));
@@ -243,7 +246,7 @@ mod tests {
         let mut titles: Vec<String> = delta.upserts.iter().map(|i| i.first_message.clone()).collect();
         titles.sort();
         assert_eq!(titles, ["big one", "inside the project", "outside"], "{:?}", delta.upserts);
-        assert!(delta.upserts.iter().all(|i| i.path.starts_with("ssh://t/") && i.harness == HarnessKind::Harlo && secs(i.modified) > 0));
+        assert!(delta.upserts.iter().all(|i| i.path.starts_with("ssh://t/") && i.harness == HarnessKind::Pi && secs(i.modified) > 0));
         // (Outside the project: in Other sessions, its folder on the host.)
         assert!(delta.upserts.iter().any(|i| i.cwd == remote::join("t", "/elsewhere")));
         // Nothing changed: nothing to report.

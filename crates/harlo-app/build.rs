@@ -35,7 +35,6 @@ const QML_FILES: &[&str] = &[
     "qml/PromptRail.qml",
     "qml/BranchPicker.qml",
     "qml/StashesDialog.qml",
-    "qml/SubagentRow.qml",
     "qml/MiniChat.qml",
     "qml/NotesPanel.qml",
     "qml/PlanLimits.qml",
@@ -54,15 +53,18 @@ const QML_FILES: &[&str] = &[
     "qml/AskPanel.qml",
     "qml/DraftView.qml",
     "qml/TerminalView.qml",
+    "qml/ExtensionView.qml",
+    "qml/ExtensionBlock.qml",
+    "qml/ExtensionMarkdown.qml",
+    "qml/ExtensionPanels.qml",
     "qml/TerminalPanel.qml",
-    "qml/SubagentDock.qml",
-    "qml/SubagentDialog.qml",
     "qml/TodoDock.qml",
     "qml/WorkflowCard.qml",
     "qml/WorkflowDialog.qml",
+    "qml/WorkflowForm.qml",
+    "qml/WorkflowView.qml",
     "qml/WorkflowsPage.qml",
     "qml/QuitRunsDialog.qml",
-    "qml/DelegatePopover.qml",
     "qml/DiffView.qml",
     "qml/ToastStack.qml",
     "qml/FormNote.qml",
@@ -95,6 +97,7 @@ const QML_FILES: &[&str] = &[
     "qml/RemotePage.qml",
     "qml/ServersPage.qml",
     "qml/ProvidersPage.qml",
+    "qml/PiExtensionsSection.qml",
     "qml/CloudProviders.qml",
     "qml/ModelsPage.qml",
     "qml/CloudProviderRow.qml",
@@ -117,7 +120,6 @@ const QML_FILES: &[&str] = &[
     "qml/PlainLabel.qml",
     "qml/SegmentedControl.qml",
     "qml/SelfTests.qml",
-    "qml/PlanDock.qml",
     "qml/InstanceSwitcher.qml",
     "qml/SearchDialog.qml",
     "qml/BranchDialog.qml",
@@ -125,7 +127,6 @@ const QML_FILES: &[&str] = &[
     "qml/DropDownContent.qml",
     "qml/DropDownLayer.qml",
     "qml/DropDownPlain.qml",
-    "qml/RunView.qml",
     "qml/ShortcutsDialog.qml",
     "qml/Icon.qml",
     "qml/ComboField.qml",
@@ -228,6 +229,6 @@ fn main() {
         .qt_module("Widgets")
         .qt_module("Test")
         .qt_module("Multimedia")
-        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/code_view.rs", "src/image_view.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/setup.rs", "src/diagrams.rs", "src/visuals.rs", "src/server_setup.rs"])
+        .files(["src/qt_base.rs", "src/chat_session.rs", "src/workspace.rs", "src/git_panel.rs", "src/file_browser.rs", "src/text_file.rs", "src/code_view.rs", "src/image_view.rs", "src/usage_stats.rs", "src/fonts.rs", "src/terminal_session.rs", "src/extension_lines.rs", "src/platform.rs", "src/test_input.rs", "src/dictation.rs", "src/audio.rs", "src/remotes.rs", "src/updates.rs", "src/mcp.rs", "src/phone.rs", "src/accounts.rs", "src/pi_extensions.rs", "src/setup.rs", "src/diagrams.rs", "src/visuals.rs", "src/server_setup.rs"])
         .build();
 }

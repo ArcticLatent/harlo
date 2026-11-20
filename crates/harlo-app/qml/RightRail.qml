@@ -43,7 +43,7 @@ Rectangle {
                 height: 38
                 Rectangle {
                     anchors.fill: parent
-                    radius: 10
+                    radius: 4
                     color: btn.active ? Theme.rowSelected : hover.hovered ? Theme.rowHover : "transparent"
                     Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
                 }
@@ -78,7 +78,7 @@ Rectangle {
         height: 38
         Rectangle {
             anchors.fill: parent
-            radius: 10
+            radius: 4
             color: root.terminalOpen ? Theme.rowSelected : termHover.hovered ? Theme.rowHover : "transparent"
             Behavior on color { ColorAnimation { duration: Theme.hoverMotion } }
         }

@@ -7,7 +7,7 @@ Rectangle {
     property string text
     implicitWidth: Math.max(22, capLabel.implicitWidth + 12)
     implicitHeight: 22
-    radius: 5
+    radius: 2
     color: Theme.background
     border.color: Theme.border
     // A darker bottom edge, like a physical key.

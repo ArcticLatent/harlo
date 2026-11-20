@@ -37,7 +37,7 @@ struct ApprovalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                AgentTile(harness: session.harness, maker: session.maker, size: 42, ring: p.raised)
+                AgentTile(harness: session.harness, maker: session.maker, size: 42)
                 Text(Style.harnessLabel(session.harness))
                     .scaledFont(18, .semibold)
                 Spacer(minLength: 6)

@@ -55,7 +55,7 @@ ColumnLayout {
             Layout.fillWidth: true
             Layout.topMargin: 10
             implicitHeight: cardCol.implicitHeight + 24
-            radius: 10
+            radius: 4
             color: Theme.elevated
             border.color: Theme.border
             ColumnLayout {
@@ -228,7 +228,7 @@ ColumnLayout {
                             objectName: "workflowStage" + index
                             Layout.fillWidth: true
                             implicitHeight: stageCol.implicitHeight + 16
-                            radius: 8
+                            radius: 3
                             color: Theme.background
                             border.color: Theme.border
                             ColumnLayout {
@@ -268,7 +268,7 @@ ColumnLayout {
                                         implicitWidth: 26
                                         implicitHeight: 26
                                         contentItem: Icon { name: "arrow-up-s"; color: parent.enabled ? Theme.foreground : Theme.border; implicitWidth: 16; implicitHeight: 16 }
-                                        background: Rectangle { radius: 5; color: parent.hovered ? Theme.hover : "transparent" }
+                                        background: Rectangle { radius: 2; color: parent.hovered ? Theme.hover : "transparent" }
                                         onClicked: stageModel.move(stage.index, stage.index - 1, 1)
                                         Accessible.name: qsTr("Move up")
                                     }
@@ -278,7 +278,7 @@ ColumnLayout {
                                         implicitWidth: 26
                                         implicitHeight: 26
                                         contentItem: Icon { name: "arrow-down-s"; color: parent.enabled ? Theme.foreground : Theme.border; implicitWidth: 16; implicitHeight: 16 }
-                                        background: Rectangle { radius: 5; color: parent.hovered ? Theme.hover : "transparent" }
+                                        background: Rectangle { radius: 2; color: parent.hovered ? Theme.hover : "transparent" }
                                         onClicked: stageModel.move(stage.index, stage.index + 1, 1)
                                         Accessible.name: qsTr("Move down")
                                     }
@@ -288,7 +288,7 @@ ColumnLayout {
                                         implicitWidth: 26
                                         implicitHeight: 26
                                         contentItem: Icon { name: "delete-bin"; color: parent.hovered ? Theme.error : Theme.muted; implicitWidth: 15; implicitHeight: 15 }
-                                        background: Rectangle { radius: 5; color: parent.hovered ? Theme.hover : "transparent" }
+                                        background: Rectangle { radius: 2; color: parent.hovered ? Theme.hover : "transparent" }
                                         onClicked: stageModel.remove(stage.index)
                                         Accessible.name: qsTr("Remove this stage")
                                     }

@@ -1,11 +1,10 @@
 //! Session files on disk. The sidebar is built by reading the session JSONL
 //! files directly.
 //!
-//! Harlo's: `$XDG_DATA_HOME/harlo-agent/sessions/--<abs-path>--/<ts>_<uuid>.jsonl`
-//! in pi's session format. The first line is the `session` header; the
+//! pi's, under `~/.pi/agent/sessions/--<abs-path>--/<ts>_<uuid>.jsonl`. The first line is the `session` header; the
 //! display name comes from the latest `session_info` entry. (A file may also
 //! start with a fixed-width `title` slot, rewritten in place on rename, with
-//! the header on line 2.) Claude Code's are read by `claude.rs`.
+//! the header on line 2.)
 //!
 //! Only the head and tail of large files are read.
 
@@ -61,25 +60,22 @@ impl SessionInfo {
 pub fn sessions_root(kind: HarnessKind) -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
     match kind {
-        // harlo-agent's, in pi's file layout.
-        HarnessKind::Harlo => Some(
-            std::env::var_os("XDG_DATA_HOME")
+        // pi's own: its session folder setting, else its config folder's.
+        HarnessKind::Pi => Some(
+            std::env::var_os("PI_CODING_AGENT_SESSION_DIR")
                 .map(PathBuf::from)
                 .filter(|p| p.is_absolute())
-                .unwrap_or_else(|| home.join(".local/share"))
-                .join("harlo-agent/sessions"),
+                .unwrap_or_else(|| {
+                    std::env::var_os("PI_CODING_AGENT_DIR").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".pi/agent")).join("sessions")
+                }),
         ),
-        // Claude Code's are listed their own way.
-        HarnessKind::Claude | HarnessKind::Demo => None,
+        HarnessKind::Demo => None,
     }
 }
 
 /// Every session file of one harness, with its modification time and size.
 /// Cheap (stat only); use it to decide which files need [`read_session`].
 pub fn list_files(kind: HarnessKind) -> Vec<(PathBuf, SystemTime, u64)> {
-    if kind == HarnessKind::Claude {
-        return crate::claude::list_files();
-    }
     let Some(root) = sessions_root(kind) else { return Vec::new() };
     let Ok(dirs) = std::fs::read_dir(&root) else { return Vec::new() };
     let mut out = Vec::new();
@@ -105,9 +101,6 @@ pub fn list_files(kind: HarnessKind) -> Vec<(PathBuf, SystemTime, u64)> {
 /// Reads the summary of one session file. Returns `None` for files without
 /// a session header (not a session, or still being created).
 pub fn read_session(kind: HarnessKind, path: &Path) -> Option<SessionInfo> {
-    if kind == HarnessKind::Claude {
-        return crate::claude::read_session(path);
-    }
     let meta = std::fs::metadata(path).ok()?;
     let size = meta.len();
     let (head, tail) = read_parts(path, size)?;
@@ -131,11 +124,6 @@ fn read_parts(path: &Path, size: u64) -> Option<(String, Option<String>)> {
     Some((lossy_complete_lines(&head, false), Some(lossy_complete_lines(&tail, true))))
 }
 
-/// [`read_parts`] with the tail as "" for a small file.
-pub(crate) fn head_and_tail(path: &Path, size: u64) -> Option<(String, String)> {
-    read_parts(path, size).map(|(h, t)| (h, t.unwrap_or_default()))
-}
-
 /// How much of a session file [`session_from_text`] needs: all of it up to
 /// this size, else its first and last [`PART_BYTES`].
 pub const FULL_READ_LIMIT_BYTES: u64 = FULL_READ_LIMIT;
@@ -144,9 +132,6 @@ pub const PART_BYTES: u64 = HEAD_BYTES;
 /// [`read_session`] from text already read (a remote file): the whole
 /// file, or its head and tail (each cut to complete lines).
 pub fn session_from_text(kind: HarnessKind, path: &Path, size: u64, modified: SystemTime, head: &str, tail: Option<&str>) -> Option<SessionInfo> {
-    if kind == HarnessKind::Claude {
-        return crate::claude::session_from_text(path, size, modified, head, tail.unwrap_or_default());
-    }
     let mut info = SessionInfo {
         harness: kind,
         path: path.to_owned(),
@@ -328,14 +313,13 @@ pub fn read_saved(path: &Path) -> std::io::Result<SavedSession> {
     }))
 }
 
-/// [`read_saved`] for any harness's session file (a long Claude one from
-/// its cache).
+/// [`read_saved`] for any harness's session file.
 ///
 /// # Errors
 ///
 /// An I/O error when the session file can't be read.
-pub fn read_saved_for(kind: HarnessKind, path: &Path) -> std::io::Result<SavedSession> {
-    if kind == HarnessKind::Claude { crate::claude::saved_file_cached(path) } else { read_saved(path) }
+pub fn read_saved_for(path: &Path) -> std::io::Result<SavedSession> {
+    read_saved(path)
 }
 
 /// Passes on the messages [`read_saved_for`] gives, one at a time.
@@ -347,8 +331,8 @@ pub fn read_saved_for(kind: HarnessKind, path: &Path) -> std::io::Result<SavedSe
 ///
 /// An I/O error when the session file can't be read, whatever was passed on
 /// before it.
-pub fn each_saved_message(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
-    each_saved_message_upto(kind, path, u64::MAX, each)
+pub fn each_saved_message(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
+    each_saved_message_upto(path, u64::MAX, each)
 }
 
 /// [`each_saved_message`] as the file was when it was `end` bytes long: a
@@ -359,10 +343,7 @@ pub fn each_saved_message(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(V
 ///
 /// An I/O error when the session file can't be read, whatever was passed on
 /// before it.
-pub fn each_saved_message_upto(kind: HarnessKind, path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
-    if kind == HarnessKind::Claude {
-        return crate::claude::each_saved_message_upto(path, end, each);
-    }
+pub fn each_saved_message_upto(path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<()> {
     drop(std::fs::File::open(path)?);
     let failed = std::cell::RefCell::new(None);
     branch_messages(
@@ -379,14 +360,13 @@ pub fn each_saved_message_upto(kind: HarnessKind, path: &Path, end: u64, each: &
 /// [`read_saved_for`], its messages passed on one at a time.
 ///
 /// In order rather than held (what it gives back has none): a long session
-/// opened without holding all of it. A long Claude transcript's cache is
-/// written as [`read_saved_for`] writes it.
+/// opened without holding all of it.
 ///
 /// # Errors
 ///
 /// An I/O error when the session file can't be read.
-pub fn stream_saved_for(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
-    stream_saved_for_upto(kind, path, u64::MAX, each)
+pub fn stream_saved_for(path: &Path, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
+    stream_saved_for_upto(path, u64::MAX, each)
 }
 
 /// [`stream_saved_for`] as the file was when it was `end` bytes long (what
@@ -395,10 +375,7 @@ pub fn stream_saved_for(kind: HarnessKind, path: &Path, each: &mut dyn FnMut(Val
 /// # Errors
 ///
 /// An I/O error when the session file can't be read.
-pub fn stream_saved_for_upto(kind: HarnessKind, path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
-    if kind == HarnessKind::Claude {
-        return crate::claude::stream_saved_cached_upto(path, end, each);
-    }
+pub fn stream_saved_for_upto(path: &Path, end: u64, each: &mut dyn FnMut(Value)) -> std::io::Result<SavedSession> {
     drop(std::fs::File::open(path)?);
     let failed = std::cell::RefCell::new(None);
     let (saved, _) = branch_with_model(
@@ -413,8 +390,8 @@ pub fn stream_saved_for_upto(kind: HarnessKind, path: &Path, end: u64, each: &mu
 }
 
 /// [`parse_saved`] for any harness's session file.
-pub fn parse_saved_for(kind: HarnessKind, text: &str) -> SavedSession {
-    if kind == HarnessKind::Claude { crate::claude::saved(text) } else { parse_saved(text) }
+pub fn parse_saved_for(text: &str) -> SavedSession {
+    parse_saved(text)
 }
 
 /// [`read_saved`] from the file's text.
@@ -580,17 +557,49 @@ fn complete_end(path: &Path) -> std::io::Result<u64> {
     Ok(0)
 }
 
+/// Where to read a growing session file on from.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Resume {
+    /// The file offset of a user message's line.
+    pub offset: u64,
+    /// The message index that line starts at.
+    pub index: i64,
+    /// The bytes before `offset`: another text there means it was rewritten.
+    pub check: Vec<u8>,
+}
+
+/// Messages of a session file from `first_index` on.
+#[derive(Debug, Default)]
+pub struct Part {
+    pub messages: Vec<Value>,
+    pub first_index: i64,
+    pub resume: Resume,
+}
+
+/// How many bytes before a resume point are kept to recognise it: enough to
+/// tell a rewritten file from one only added to.
+const RESUME_CHECK_BYTES: u64 = 64;
+
+/// The bytes just before `offset`, to recognise that place later.
+fn check_at(path: &Path, offset: u64) -> std::io::Result<Vec<u8>> {
+    let mut file = File::open(path)?;
+    let start = offset.saturating_sub(RESUME_CHECK_BYTES);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = vec![0; usize::try_from(offset - start).unwrap_or(usize::MAX)];
+    file.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// The current branch's messages from where `resume` left off.
 ///
-/// A Harlo session is a tree, but what's added to it usually goes on from its
+/// A pi session is a tree, but what's added to it usually goes on from its
 /// last entry: then only that is read. Anything else (going back to an earlier
 /// point, a file rewritten) and it's read whole.
 ///
 /// # Errors
 ///
 /// An I/O error when the session file can't be read.
-pub fn read_part(path: &Path, resume: Option<&crate::claude::Resume>) -> std::io::Result<crate::claude::Part> {
-    use crate::claude::{Part, Resume};
+pub fn read_part(path: &Path, resume: Option<&Resume>) -> std::io::Result<Part> {
     let end = complete_end(path)?;
     let lines = |from: u64, each: &mut dyn FnMut(u64, &str)| {
         let _ = for_each_line(path, from, &mut |offset, line| {
@@ -602,12 +611,12 @@ pub fn read_part(path: &Path, resume: Option<&crate::claude::Resume>) -> std::io
     let resume_at = |offset: u64, index: i64, leaf: Option<String>| -> std::io::Result<Resume> {
         let mut check = leaf.unwrap_or_default().into_bytes();
         check.push(b'\n');
-        check.extend(crate::claude::check_at(path, offset)?);
+        check.extend(check_at(path, offset)?);
         Ok(Resume { offset, index, check })
     };
     if let Some(r) = resume.filter(|r| r.offset <= end)
         && let Some((leaf, tail)) = r.check.iter().position(|&b| b == b'\n').map(|at| (&r.check[..at], &r.check[at + 1..]))
-            && !leaf.is_empty() && crate::claude::check_at(path, r.offset).is_ok_and(|now| now == tail) {
+            && !leaf.is_empty() && check_at(path, r.offset).is_ok_and(|now| now == tail) {
                 let mut leaf = String::from_utf8_lossy(leaf).into_owned();
                 let (mut messages, mut on) = (Vec::new(), true);
                 lines(r.offset, &mut |_, line| {
@@ -704,7 +713,7 @@ mod tests {
 
     #[test]
     fn a_listed_session_says_its_last_model() {
-        let at = |head: &str, tail: Option<&str>| session_from_text(HarnessKind::Harlo, Path::new("/s.jsonl"), 0, SystemTime::UNIX_EPOCH, head, tail).unwrap().model;
+        let at = |head: &str, tail: Option<&str>| session_from_text(HarnessKind::Pi, Path::new("/s.jsonl"), 0, SystemTime::UNIX_EPOCH, head, tail).unwrap().model;
         let header = r#"{"type":"session","id":"s","cwd":"/w"}"#;
         let change = r#"{"type":"model_change","provider":"opencode-go","modelId":"glm-5.3"}"#;
         let reply = r#"{"type":"message","message":{"role":"assistant","provider":"openai-codex","model":"gpt-6","content":[]}}"#;
@@ -812,7 +821,7 @@ mod tests {
             r#"{"type":"message","id":"2","parentId":"1","message":{"role":"user","content":[{"type":"text","text":"\n  Fix the build\nplease"}]}}"#,
             r#"{"type":"session_info","id":"3","parentId":"2","name":"Build fix"}"#,
         ]);
-        let info = read_session(HarnessKind::Harlo, &path).unwrap();
+        let info = read_session(HarnessKind::Pi, &path).unwrap();
         assert_eq!(info.id, "abc");
         assert_eq!(info.cwd, PathBuf::from("/home/u/proj"));
         assert_eq!(info.first_message, "Fix the build");
@@ -827,7 +836,7 @@ mod tests {
             r#"{"type":"session","version":3,"id":"def","timestamp":"t","cwd":"/tmp"}"#,
             r#"{"type":"message","id":"1","message":{"role":"user","content":"hello"}}"#,
         ]);
-        let info = read_session(HarnessKind::Harlo, &path).unwrap();
+        let info = read_session(HarnessKind::Pi, &path).unwrap();
         assert_eq!((info.name.as_str(), info.first_message.as_str()), ("Houdini setup", "hello"));
     }
 
@@ -847,7 +856,7 @@ mod tests {
         assert_eq!(msgs[1]["content"], "kept");
         let streamed = |path: &Path| {
             let mut all = Vec::new();
-            each_saved_message(HarnessKind::Harlo, path, &mut |m| all.push(m)).unwrap();
+            each_saved_message(path, &mut |m| all.push(m)).unwrap();
             all
         };
         assert_eq!(streamed(&path), msgs, "passed on one at a time, the same");
@@ -862,7 +871,7 @@ mod tests {
         let texts = |m: Vec<Value>| m.iter().map(|m| m["content"].as_str().unwrap_or_default().to_owned()).collect::<Vec<_>>();
         assert_eq!(texts(read_messages(&shuffled).unwrap()), ["first", "second", "third"]);
         assert_eq!(texts(streamed(&shuffled)), ["first", "second", "third"]);
-        assert!(each_saved_message(HarnessKind::Harlo, &dir.join("gone.jsonl"), &mut |_| {}).is_err());
+        assert!(each_saved_message(&dir.join("gone.jsonl"), &mut |_| {}).is_err());
         // Opened one at a time: the same messages, and what else it says.
         let replies = write(&dir, "f.jsonl", &[
             r#"{"type":"session","id":"s","cwd":"/w"}"#,
@@ -873,19 +882,19 @@ mod tests {
         ]);
         for file in [&path, &shuffled, &replies] {
             let mut all = Vec::new();
-            let meta = stream_saved_for(HarnessKind::Harlo, file, &mut |m| all.push(m)).unwrap();
+            let meta = stream_saved_for(file, &mut |m| all.push(m)).unwrap();
             let whole = read_saved(file).unwrap();
             assert!(meta.messages.is_empty());
             assert_eq!((all, meta.model, meta.model_id, meta.thinking, meta.name), (whole.messages, whole.model, whole.model_id, whole.thinking, whole.name), "{}", file.display());
         }
         assert_eq!(read_saved(&replies).unwrap().model_id, "p/m2");
-        stream_saved_for(HarnessKind::Harlo, &dir.join("gone.jsonl"), &mut |_| {}).unwrap_err();
+        stream_saved_for(&dir.join("gone.jsonl"), &mut |_| {}).unwrap_err();
     }
 
     #[test]
     fn rejects_files_without_header() {
         let dir = tmp_dir("bad");
         let path = write(&dir, "c.jsonl", &[r#"{"type":"message"}"#]);
-        assert!(read_session(HarnessKind::Harlo, &path).is_none());
+        assert!(read_session(HarnessKind::Pi, &path).is_none());
     }
 }

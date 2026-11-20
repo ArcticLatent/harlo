@@ -118,7 +118,7 @@ mod tests {
             std::fs::write(dir.join(format!("20000101-0000{i:02}-harlo-1.jsonl")), "").unwrap();
         }
         set_dir(Some(dir.clone()));
-        let log = ProtocolLog::open(HarnessKind::Harlo, Path::new("/usr/bin/harlo-agent"), &["--mode".into(), "rpc".into()], Path::new("/tmp")).unwrap();
+        let log = ProtocolLog::open(HarnessKind::Pi, Path::new("/usr/bin/pi"), &["--mode".into(), "rpc".into()], Path::new("/tmp")).unwrap();
         log.frame("out", br#"{"type":"prompt","message":"hi"}"#);
         log.frame("in", b"not json\n");
         log.stderr("warning: something");

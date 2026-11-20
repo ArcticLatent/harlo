@@ -1,4 +1,4 @@
-//! Usage statistics across every saved session on disk (Harlo's and Claude's): sessions, prompts,
+//! Usage statistics across every saved pi session on disk: sessions, prompts,
 //! tokens, cost, activity by day, models and tool calls.
 //!
 //! Each session file is summarised once and cached by (modified time, size);
@@ -132,7 +132,7 @@ fn cache() -> &'static Mutex<HashMap<PathBuf, CacheEntry>> {
 pub fn all_sessions() -> Vec<Arc<FileStats>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
-    for kind in [HarnessKind::Harlo] {
+    for kind in crate::scanner::listed_kinds().into_iter().filter(|k| k.speaks_pi()) {
         for (path, modified, size) in store::list_files(kind) {
             seen.insert(path.clone());
             let cached = cache().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&path).filter(|(m, s, _)| *m == modified && *s == size).map(|(_, _, f)| Arc::clone(f));
@@ -155,7 +155,7 @@ pub fn all_sessions() -> Vec<Arc<FileStats>> {
     out
 }
 
-/// Summaries of Harlo's sessions on other machines (blocking).
+/// Summaries of the sessions on other machines (blocking).
 ///
 /// Those the sidebar last listed, each read from harlo's copy of it, brought up
 /// to date first when the file there changed. Only those changed in the last
@@ -395,7 +395,7 @@ mod tests {
             old,
         ];
         let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-        let fs = Arc::new(summarize(HarnessKind::Harlo, &file(&refs)).unwrap());
+        let fs = Arc::new(summarize(HarnessKind::Pi, &file(&refs)).unwrap());
         assert_eq!((fs.steps.len(), fs.prompts.len(), fs.tools.len()), (3, 1, 3));
         assert_eq!(fs.steps[0].thinking, "high");
 

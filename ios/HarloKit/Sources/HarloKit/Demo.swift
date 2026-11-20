@@ -49,7 +49,7 @@ extension HarloModel {
             s.model = "Claude Sonnet 4.5"
             s.info.model = s.model
             s.info.thinking = "medium"
-            s.modes = Modes(approval: "always-ask", approvals: ["always-ask", "write", "yolo"], plan: false)
+            s.modes = Modes(approval: "always-ask", approvals: ["always-ask", "write", "yolo"])
             let t = summary.modified * 1000
             s.rows = [
                 Row(key: summary.key + "-u", kind: "user", text: summary.title, time: t - 60_000),
@@ -66,17 +66,6 @@ extension HarloModel {
     /// canned reply says what would happen with harlo.
     func demoSend(_ text: String) -> Bool {
         guard let s = session else { return false }
-        // A side question: answered beside the conversation, not in it.
-        if text.hasPrefix("/btw ") {
-            let question = String(text.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-            s.aside = Aside(["question": .string(question), "text": "", "done": false])
-            Task { @MainActor [weak s] in
-                try? await Task.sleep(for: .milliseconds(900))
-                s?.aside = Aside(["question": .string(question), "done": true,
-                                  "text": "In the demo, no agent answers. Paired with harlo, Harlo answers a side question from the conversation so far, without adding it to the conversation."])
-            }
-            return true
-        }
         demoCount += 1
         let n = demoCount, ms = Int64(Date.now.timeIntervalSince1970 * 1000)
         s.rows.append(Row(key: "demo-u\(n)", kind: "user", text: text, time: ms))
@@ -132,33 +121,6 @@ extension HarloModel {
 }
 
 extension HarloModel {
-    /// A plan edit in the demo (and the screenshots), done here.
-    nonisolated static func demoEdit(_ plan: Plan, _ edit: PlanEdit) -> Plan {
-        var p = plan
-        func at(_ id: Int64) -> Int? { p.steps.firstIndex { $0.id == id } }
-        switch edit {
-        case .add(let t, let d, let after):
-            var step = PlanStep(["id": .int((p.steps.map(\.id).max() ?? 0) + 1), "title": .string(t), "detail": .string(d), "editedByUser": true])
-            step.status = "pending"
-            let i = after.flatMap(at).map { $0 + 1 } ?? p.steps.count
-            p.steps.insert(step, at: i)
-        case .edit(let id, let t, let d):
-            if let i = at(id) { p.steps[i].title = t; p.steps[i].detail = d; p.steps[i].editedByUser = true }
-        case .remove(let id):
-            p.steps.removeAll { $0.id == id }
-        case .shift(let id, let by):
-            if let i = at(id) {
-                let j = max(0, min(p.steps.count - 1, i + by))
-                p.steps.swapAt(i, j)
-            }
-        case .skip(let id, let skipped):
-            if let i = at(id) { p.steps[i].status = skipped ? "skipped" : "pending" }
-        case .alongside(let id, let on):
-            if let i = at(id), i > 0 { p.steps[i].alongside = on }
-        }
-        return p
-    }
-
     nonisolated static let sampleWiki = Wiki(pages: [
         WikiPage(path: "overview.md", title: "Overview", summary: "Where to start: what harlo is and how its parts fit.", kind: "Overview",
                  links: ["architecture/sessions.md"]),
@@ -198,17 +160,5 @@ extension HarloModel {
 
     nonisolated static func sampleCodeCard(_ code: WikiHits.Code) -> String {
         "\(code.signature)\n\(code.doc)\ncalls: Agent::spawn (src/agent.rs:20)\ncalled by:\n  Workspace::open (src/workspace.rs:88)"
-    }
-
-    nonisolated static func samplePlan() -> Plan {
-        var plan = Plan(steps: [
-            PlanStep(["id": 1, "title": "Keep the list's rows on a status change", "status": "done", "summary": "Rows are merged by key instead of rebuilt.", "commit": "3f9a2c41d0"]),
-            PlanStep(["id": 2, "title": "Keep the scroll position", "status": "active", "detail": "Anchor to the first visible row."]),
-            PlanStep(["id": 3, "title": "A test for reordering", "status": "pending", "alongside": true]),
-        ])
-        plan.commits = true
-        plan.reviewers = [Agent(id: "claude", label: "Claude"), Agent(id: "harlo", label: "Harlo")]
-        plan.team = Plan.Team(agent: "harlo", agentName: "Harlo", model: "codex/gpt-6.1-sol", custom: true, reviewerName: "Claude", reviewerModel: "claude-opus-5-5")
-        return plan
     }
 }

@@ -64,7 +64,7 @@ public actor HarloClient {
         switch op {
         case "open":
             for e in r.events(of: reply["key"].text) { if let ev = Event(e) { continuation.yield(ev) } }
-        case "answer":
+        case "answer" where reply["ok"].bool == true:
             continuation.yield(.cleared(key: args["key"].text, id: args["requestId"].text))
         default:
             break
@@ -267,10 +267,9 @@ public actor HarloClient {
         Modes(try check(await call("modes", ["key": .string(key)])))
     }
 
-    public func setModes(_ key: String, approval: String? = nil, plan: Bool? = nil) async throws -> Modes {
+    public func setModes(_ key: String, approval: String? = nil) async throws -> Modes {
         var args: JSON = ["key": .string(key)]
         if let approval { args["approval"] = .string(approval) }
-        if let plan { args["plan"] = .bool(plan) }
         return Modes(try check(await call("setModes", args)))
     }
 
@@ -300,44 +299,6 @@ public actor HarloClient {
 
     public func pin(_ key: String, _ pinned: Bool) async throws {
         try check(await call("pin", ["key": .string(key), "pinned": .bool(pinned)]))
-    }
-
-    /// A session's shared plan.
-    public func plan(_ key: String) async throws -> Plan {
-        Plan(try check(await call("plan", ["key": .string(key)])))
-    }
-
-    /// Changes a session's plan: the plan after it.
-    public func editPlan(_ key: String, _ edit: PlanEdit) async throws -> Plan {
-        Plan(try check(await call("planEdit", ["key": .string(key), "edit": edit.json])))
-    }
-
-    /// Runs a session's plan with helpers of an agent ("" the session's
-    /// own), or goes on with a paused run: the plan after it.
-    public func runPlan(_ key: String, agent: String, model: String = "") async throws -> Plan {
-        Plan(try check(await call("planRun", ["key": .string(key), "agent": .string(agent), "model": .string(model)])))
-    }
-
-    /// Stops a plan's run (helpers at work finish their steps): the plan after.
-    public func stopPlanRun(_ key: String) async throws -> Plan {
-        Plan(try check(await call("planStop", ["key": .string(key)])))
-    }
-
-    /// The helpers a session started (its agent, or its plan's run).
-    public func helpers(_ key: String) async throws -> [Helper] {
-        (try check(await call("helpers", ["key": .string(key)]))["helpers"].array ?? []).map(Helper.init)
-    }
-
-    /// Answers a helper's request (a tool's approval: Approve, Deny, …):
-    /// the session's helpers after it.
-    public func answerHelper(_ key: String, helper: String, request: String, value: String) async throws -> [Helper] {
-        (try check(await call("answerHelper", ["key": .string(key), "helper": .string(helper), "id": .string(request), "value": .string(value)]))["helpers"].array ?? []).map(Helper.init)
-    }
-
-    /// Has another agent review a finished step's commit (its review comes
-    /// back to the session).
-    public func reviewStep(_ key: String, step: Int64, agent: String) async throws {
-        try check(await call("reviewStep", ["key": .string(key), "id": .int(step), "agent": .string(agent)]))
     }
 
     /// The wiki of a session's repository: its pages and how fresh it is.
@@ -548,6 +509,7 @@ public actor HarloClient {
     public func answer(_ key: String, requestId: String, answer: JSON) async throws {
         let r = try await call("answer", ["key": .string(key), "requestId": .string(requestId), "answer": answer])
         if let e = r["error"].string { throw HarloError.closed(e) }
+        guard r["ok"].bool == true else { throw HarloError.badFrame("harlo didn't acknowledge the answer") }
     }
 
     /// Whether harlo still answers within `timeout` seconds (after the
@@ -584,14 +546,33 @@ public actor HarloClient {
         }
     }
 
+    #if os(Linux)
+    /// Linux's URLSession (harlo-probe) hands a message over 16 KB over in
+    /// pieces of 16,380 then 16,384 characters: they're kept until the
+    /// last, shorter one.
+    private var partial = ""
+    #endif
+
     /// One sealed frame from harlo; false: the connection is done.
-    private func handle(_ frame: String) -> Bool {
+    private func handle(_ piece: String) -> Bool {
         guard var ch = channel else { return false }
+        #if os(Linux)
+        let frame = partial + piece
+        partial = ""
+        #else
+        let frame = piece
+        #endif
         let msg: JSON
         do {
             msg = try ch.open(frame)
             channel = ch
         } catch {
+            #if os(Linux)
+            if [16380, 16384].contains(piece.utf8.count), frame.utf8.count < 16 << 20 {
+                partial = frame
+                return true
+            }
+            #endif
             finish((error as? HarloError)?.description ?? "a bad frame")
             task.cancel(with: .protocolError, reason: nil)
             return false

@@ -7,13 +7,13 @@
 pkgname=harlo
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="Desktop app for coding agents: Harlo (its own) and Claude Code"
+pkgdesc="Desktop app for the pi coding agent"
 arch=('x86_64' 'aarch64')
 url="https://harlo.run"
 license=('MIT' 'OFL-1.1')
 depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-svg' 'git' 'gcc-libs' 'glibc')
 # cmake and clang build the bundled whisper.cpp (dictation).
-makedepends=('cargo' 'cmake' 'clang' 'curl')
+makedepends=('cargo' 'cmake' 'clang' 'curl' 'npm')
 optdepends=('layer-shell-qt: drop-down window on Wayland'
             'libnotify: desktop notifications (notify-send)'
             'openssh: projects on remote machines (Settings → Remote Instances)')
@@ -39,12 +39,14 @@ build() {
     export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target QMAKE=qmake6
     cargo build --frozen --release -p harlo-app
     cargo build --frozen --release -p harlo-core --bin harlo-engines --no-default-features
-    cargo build --frozen --profile agent -p harlo-agent
+    # harlo's helper for pi (its sandbox, the check for commands that can't
+    # be undone, the wiki's commands).
+    cargo build --frozen --profile agent -p harlo-helper
     # Its copy for other machines: static (musl), so it runs whatever C
-    # library they have. Without Rust's musl target here, Harlo isn't
-    # offered on other machines.
+    # library they have. Without Rust's musl target here, pi on other
+    # machines runs without harlo's sandbox.
     if [ -d "$(rustc --print target-libdir --target x86_64-unknown-linux-musl 2>/dev/null)" ]; then
-        CC_x86_64_unknown_linux_musl=gcc cargo build --frozen --profile agent -p harlo-agent --target x86_64-unknown-linux-musl
+        CC_x86_64_unknown_linux_musl=gcc cargo build --frozen --profile agent -p harlo-helper --target x86_64-unknown-linux-musl
         # The code index: static too, one copy for here and other machines.
         CC_x86_64_unknown_linux_musl=gcc cargo build --frozen --profile agent -p harlo-index --target x86_64-unknown-linux-musl
     else
@@ -56,7 +58,7 @@ build() {
 check() {
     cd "harlo-$pkgver"
     export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target QMAKE=qmake6
-    cargo test --frozen --release -p harlo-core -p harlo-harness
+    cargo test --frozen --release -p harlo-helper -p harlo-core -p harlo-harness
 }
 
 package() {
@@ -64,10 +66,10 @@ package() {
     install -Dm755 target/release/harlo "$pkgdir/usr/bin/harlo"
     # (What harlo puts on another machine to run model servers there.)
     install -Dm755 target/release/harlo-engines "$pkgdir/usr/lib/harlo/harlo-engines"
-    # (Harlo, harlo's own agent.)
-    install -Dm755 target/agent/harlo-agent "$pkgdir/usr/lib/harlo/harlo-agent"
-    if [ -f target/x86_64-unknown-linux-musl/agent/harlo-agent ]; then
-        install -Dm755 target/x86_64-unknown-linux-musl/agent/harlo-agent "$pkgdir/usr/lib/harlo/harlo-agent-x86_64"
+    # (harlo's helper for pi, and its copy for other machines.)
+    install -Dm755 target/agent/harlo-helper "$pkgdir/usr/lib/harlo/harlo-helper"
+    if [ -f target/x86_64-unknown-linux-musl/agent/harlo-helper ]; then
+        install -Dm755 target/x86_64-unknown-linux-musl/agent/harlo-helper "$pkgdir/usr/lib/harlo/harlo-helper-x86_64"
     fi
     # (The code index, which harlo looks for in lib/harlo.)
     if [ -f target/x86_64-unknown-linux-musl/agent/harlo-index ]; then
@@ -75,6 +77,9 @@ package() {
     else
         install -Dm755 target/agent/harlo-index "$pkgdir/usr/lib/harlo/harlo-index"
     fi
+    # (The built-in Claude subscription extension for pi; harlo fetches
+    # Anthropic's Agent SDK for it on first use.)
+    sh packaging/pi-claude-bridge/build.sh "$pkgdir/usr/lib/harlo/pi-claude-bridge"
     install -Dm644 packaging/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
     install -Dm644 crates/harlo-app/icons/app/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

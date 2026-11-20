@@ -16,7 +16,7 @@ Button {
         Icon { anchors.centerIn: parent; name: "refresh"; color: rb.enabled ? Theme.textMuted : Theme.textFaint; implicitWidth: 15; implicitHeight: 15 }
     }
     background: Rectangle {
-        radius: 6
+        radius: 2
         color: rb.down ? Theme.pressed : rb.hovered ? Theme.hover : "transparent"
         border.color: rb.visualFocus ? Theme.accent : "transparent"
     }

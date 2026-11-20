@@ -6,7 +6,7 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     public var title: String
     /// The project (or "Other sessions") it's grouped under.
     public var project: String
-    /// "harlo", "claude", "demo".
+    /// "harlo", "claude", "pi", "demo".
     public var harness: String
     /// "busy", "input", "live", "idle", "exited", "unread", …
     public var status: String
@@ -23,11 +23,6 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
     /// Why harlo put it on its project's Settled shelf ("Merged", …), "" when
     /// it isn't.
     public var settled: String
-    /// A helper: the session that started it (its key), and that one's
-    /// name; harlo lists it right after it, `nest` deep.
-    public var parent: String
-    public var helperOf: String
-    public var nest: Int
     /// Its model's name (as it runs, else as it last ran; "" not known),
     /// and who made it: a logo's id ("anthropic", "zai-coding-plan", …).
     public var modelName: String
@@ -48,9 +43,6 @@ public struct SessionSummary: Equatable, Sendable, Identifiable {
         requests = (v["requests"].array ?? []).map(UIRequest.init)
         host = v["host"].text
         settled = v["settled"].text
-        parent = v["parent"].text
-        helperOf = v["helperOf"].text
-        nest = Int(v["nest"].int ?? 0)
         modelName = v["modelName"].text
         maker = v["maker"].text
     }
@@ -108,6 +100,9 @@ public struct Row: Equatable, Sendable, Identifiable {
     public var code: ToolCode?
     /// Tool rows: the command highlighted as shell ("" none: it shows plain).
     public var commandSpans: [Span]
+    /// Tool rows: the call's id (a pi extension may draw the call: its
+    /// `ExtView` has this `toolCallId`).
+    public var callId = ""
 
     public var id: String { key }
 
@@ -134,6 +129,7 @@ public struct Row: Equatable, Sendable, Identifiable {
         code = ToolCode(v["code"])
         let commandHtml = v["commandHtml"].text
         commandSpans = commandHtml.isEmpty ? [] : RichText.codeLine(commandHtml)
+        callId = v["callId"].text
     }
 
     public init(key: String, kind: String, html: String = "", text: String = "", title: String = "", subtitle: String = "",
@@ -167,7 +163,7 @@ public struct Row: Equatable, Sendable, Identifiable {
 }
 
 extension Row {
-    /// A message harlo sent the agent (a helper's report, the answer to a
+    /// A message harlo sent the agent (a workflow's note, the answer to a
     /// split, …): a notice titled "harlo", the session it's about in
     /// `subtitle`.
     public var fromHarlo: Bool { kind == "notice" && title == "harlo" }
@@ -212,24 +208,6 @@ extension Array where Element == Row {
 }
 
 /// A question or approval the agent is waiting on.
-/// A side question (`/btw …`) and its answer as it comes: not part of the
-/// conversation, and not kept.
-public struct Aside: Equatable, Sendable {
-    public var question: String
-    /// The answer so far (Markdown).
-    public var text: String
-    public var done: Bool
-    /// Why there's no answer ("" none).
-    public var error: String
-
-    public init(_ v: JSON) {
-        question = v["question"].text
-        text = v["text"].text
-        done = v["done"].bool ?? false
-        error = v["error"].text
-    }
-}
-
 public struct UIRequest: Equatable, Sendable, Identifiable {
     public var id: String
     /// "confirm", "select", "input", "editor", "ask", …
@@ -300,19 +278,16 @@ public enum Event: Equatable, Sendable {
     /// Messages waiting for the agent: steering, then follow-ups.
     case queue(key: String, steering: [String], followUp: [String])
     case todos(key: String, phases: [TodoPhase])
-    case subagents(key: String, subagents: [Subagent])
-    /// A side question (/btw) and its answer so far.
-    case aside(key: String, aside: Aside)
     /// Messages stopped before they were sent: their words and photos, to
     /// put back in the composer.
     case unsent(key: String, text: String, photos: [Photo])
     /// Plan limits changed (this computer's or a machine's).
     case limits(PlanLimits)
-    /// The open session's shared plan changed: ask for it again.
-    case plan(key: String)
     /// A workflow run changed: ask for the open session's (and the list)
     /// again.
     case workflow(key: String)
+    /// A pi extension's view changed, closed, or all of them went.
+    case ext(key: String, change: ExtChange)
     /// This phone was removed in harlo.
     case revoked
 
@@ -332,15 +307,15 @@ public enum Event: Equatable, Sendable {
             })
         case "queue": self = .queue(key: key, steering: (v["steering"].array ?? []).compactMap(\.string), followUp: (v["followUp"].array ?? []).compactMap(\.string))
         case "todos": self = .todos(key: key, phases: TodoPhase.list(v["phases"]))
-        case "subagents": self = .subagents(key: key, subagents: (v["subagents"].array ?? []).map(Subagent.init))
-        case "aside": self = .aside(key: key, aside: Aside(v["aside"]))
         case "unsent":
             self = .unsent(key: key, text: v["text"].text, photos: (v["photos"].array ?? []).compactMap { p in
                 Data(base64Encoded: p["data"].text).map { Photo(data: $0, mimeType: p["mimeType"].text) }
             })
         case "limits": self = .limits(PlanLimits(v))
-        case "plan": self = .plan(key: key)
         case "workflow": self = .workflow(key: key)
+        case "ext":
+            guard let change = ExtChange(v) else { return nil }
+            self = .ext(key: key, change: change)
         case "revoked": self = .revoked
         default: return nil
         }
@@ -382,54 +357,5 @@ extension SessionSummary {
             groups[s.pinned ? "Pinned" : group(s), default: []].append(s)
         }
         return order.compactMap { name in groups[name].map { (name, $0) } }
-    }
-
-    /// Helpers folded under the sessions that started them: each helper of
-    /// one in `list` (and theirs, `depth` deep from 1), by the top session's
-    /// key, in harlo's order. The rest are the ones that list on their own.
-    public struct Nested: Sendable, Identifiable {
-        public var session: SessionSummary
-        /// 1: started by the top session; 2: by one of its helpers; …
-        public var depth: Int
-        public var id: String { session.key }
-    }
-
-    public struct Helpers: Sendable {
-        public var helpers: [String: [Nested]] = [:]
-        /// Whether `s` is folded under another session.
-        public func folded(_ s: SessionSummary) -> Bool { foldedKeys.contains(s.key) }
-        var foldedKeys: Set<String> = []
-
-        /// A session's own state with its helpers': working if one is, else
-        /// waiting for you if one is.
-        public func status(_ s: SessionSummary) -> String {
-            let all = [s.status] + (helpers[s.key] ?? []).map(\.session.status)
-            if all.contains("input") { return "input" }
-            if all.contains(where: { ["busy", "starting"].contains($0) }) { return "busy" }
-            return s.status
-        }
-    }
-
-    public static func helpers(_ list: [SessionSummary]) -> Helpers {
-        let keys = Set(list.map(\.key))
-        var kids: [String: [SessionSummary]] = [:]
-        for s in list where !s.parent.isEmpty && s.parent != s.key && keys.contains(s.parent) {
-            kids[s.parent, default: []].append(s)
-        }
-        var out = Helpers()
-        out.foldedKeys = Set(kids.values.flatMap { $0.map(\.key) })
-        for top in list where !out.foldedKeys.contains(top.key) {
-            var found: [Nested] = []
-            var seen: Set<String> = [top.key]
-            func walk(_ key: String, _ depth: Int) {
-                for k in kids[key] ?? [] where seen.insert(k.key).inserted {
-                    found.append(Nested(session: k, depth: depth))
-                    walk(k.key, depth + 1)
-                }
-            }
-            walk(top.key, 1)
-            if !found.isEmpty { out.helpers[top.key] = found }
-        }
-        return out
     }
 }

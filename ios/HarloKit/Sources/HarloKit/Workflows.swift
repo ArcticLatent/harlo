@@ -22,7 +22,7 @@ public struct WorkflowStage: Equatable, Sendable {
         model = v["model"].text
     }
 
-    /// Who does it, with the model when one was picked: "Claude Code · Opus 5.5".
+    /// Who does it, with the model when one was picked: "pi · Opus 5.5".
     public var doer: String {
         model.isEmpty ? what : "\(what) · \(Self.modelName(model))"
     }

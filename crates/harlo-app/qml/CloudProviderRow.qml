@@ -11,8 +11,8 @@ ColumnLayout {
     id: row
     required property var modelData
     required property int index
-    /// "harlo" or "harlo@<host>".
-    property string agent: "harlo"
+    /// "pi" or "pi@<host>".
+    property string agent: "pi"
     property bool expanded: false
     /// What came of the last change to its key: `{ state: "busy" | "ok" |
     /// "error", message }`, or null.
@@ -20,12 +20,14 @@ ColumnLayout {
     /// The providers that use this one's key over another API.
     property var variants: []
     signal toggled()
-    signal signInRequested()
+    /// pi's key: `command` in harlo's terminal.
+    signal runInTerminalRequested(string command)
 
     readonly property string key: modelData.key || "none"
     readonly property bool replaced: modelData.replaced === true
     readonly property bool busy: result !== null && result.state === "busy"
     readonly property var models: modelData.models || []
+    readonly property int chipLimit: 30
 
     objectName: "cloudProvider-" + modelData.id
     Layout.fillWidth: true
@@ -40,7 +42,7 @@ ColumnLayout {
         rightPadding: 14
         Accessible.name: row.modelData.name + ", " + status.text
         onClicked: row.toggled()
-        background: Rectangle { color: head.hovered ? Theme.hover : "transparent"; radius: 10 }
+        background: Rectangle { color: head.hovered ? Theme.hover : "transparent"; radius: 4 }
         contentItem: RowLayout {
             spacing: 10
             Icon { name: row.expanded ? "arrow-down-s" : "arrow-right-s"; color: Theme.muted; implicitWidth: 14; implicitHeight: 14 }
@@ -87,32 +89,26 @@ ColumnLayout {
             font.pixelSize: Theme.px(12)
             text: qsTr("Your providers.json sets up a provider called %1, so Harlo uses that one instead.").arg(row.modelData.id)
         }
-        // The key: pasted and saved (then checked with the provider).
+        // pi's key: typed into pi in harlo's terminal (harlo never sees it).
         RowLayout {
-            visible: !row.replaced
             Layout.fillWidth: true
             spacing: 8
-            AppTextField {
-                id: keyField
-                objectName: "cloudKey-" + row.modelData.id
+            Label {
                 Layout.fillWidth: true
-                echoMode: TextInput.Password
-                enabled: !row.busy
-                placeholderText: row.key === "saved" ? qsTr("Paste a new key to replace the saved one") : row.agent === "claude" ? qsTr("Paste your plan's key") : qsTr("Paste your API key")
-                Accessible.name: qsTr("%1 API key").arg(row.modelData.name)
+                wrapMode: Text.Wrap
+                text: row.key === "saved" ? qsTr("pi has a key for it. A new one replaces it.") : qsTr("You type the key into pi in Harlo's terminal; pi keeps it in its own private file.")
+                color: Theme.muted
                 font.pixelSize: Theme.px(12)
-                onAccepted: saveButton.clicked()
             }
             FlatButton {
-                id: saveButton
-                objectName: "cloudSave-" + row.modelData.id
-                text: qsTr("Save")
-                accent: Theme.primary
-                enabled: keyField.text.trim() !== "" && !row.busy
+                objectName: "cloudSetKey-" + row.modelData.id
+                text: row.key === "saved" ? qsTr("New key…") : qsTr("Set key…")
+                accent: row.key === "saved" ? Theme.foreground : Theme.primary
+                enabled: !row.busy
                 font.pixelSize: Theme.px(12)
                 onClicked: {
-                    Accounts.saveKey(row.agent, row.modelData.id, keyField.text)
-                    keyField.text = ""
+                    const command = Accounts.piKeyCommand(row.agent, row.modelData.id)
+                    if (command !== "") row.runInTerminalRequested(command)
                 }
             }
         }
@@ -135,14 +131,6 @@ ColumnLayout {
                 text: qsTr("Remove")
                 font.pixelSize: Theme.px(12)
                 onClicked: Accounts.removeKey(row.agent, row.modelData.id)
-            }
-            FlatButton {
-                objectName: "cloudSignIn-" + row.modelData.id
-                visible: row.modelData.id === "openrouter"
-                enabled: !row.busy
-                text: qsTr("Sign in with OpenRouter…")
-                font.pixelSize: Theme.px(12)
-                onClicked: row.signInRequested()
             }
             FlatButton {
                 visible: (row.modelData.keyPage || "") !== ""
@@ -204,13 +192,14 @@ ColumnLayout {
             Layout.topMargin: 2
             spacing: 5
             Repeater {
-                model: row.models
+                // (A few dozen at most: OpenRouter has hundreds.)
+                model: row.models.slice(0, row.chipLimit)
                 Rectangle {
                     id: chip
                     required property var modelData
                     implicitWidth: chipName.implicitWidth + 16
                     implicitHeight: 24
-                    radius: 6
+                    radius: 2
                     color: Theme.controlFill
                     border.color: Theme.controlBorder
                     Label {
@@ -227,6 +216,12 @@ ColumnLayout {
                         + (chip.modelData.contextWindow > 0 ? qsTr(" · %1k context").arg(Math.round(chip.modelData.contextWindow / 1000)) : "")
                 }
             }
+        }
+        Label {
+            visible: row.models.length > row.chipLimit
+            text: qsTr("and %1 more, in the model picker").arg(row.models.length - row.chipLimit)
+            color: Theme.muted
+            font.pixelSize: Theme.px(12)
         }
         Label {
             visible: row.models.length === 0 && !row.replaced

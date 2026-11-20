@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::Result;
-use harlo_harness::HarnessKind;
-use harlo_harness::claude::{Part, Resume};
+use harlo_harness::store::{Part, Resume};
 use harlo_harness::store::{BIG_FILE, after_reading};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -114,7 +113,7 @@ fn message_text(message: &Value) -> Option<(String, String)> {
     };
     if role == "user" {
         let (_, rest) = crate::attach::split_blocks(&text);
-        let (rest, _) = crate::starters::strip(&rest);
+        let rest = crate::starters::strip(&rest);
         let rest = harlo_harness::file_blocks::strip_ask_first(rest).0;
         harlo_harness::file_blocks::strip_plan(rest).0.clone_into(&mut text);
     }
@@ -373,21 +372,16 @@ fn search_in(conn: &Connection, input: &str, limit: usize) -> Result<Vec<Hit>> {
 
 /// What the index needs of a session, or `None` when it can't be read now.
 ///
-/// A local session is read on from `resume`: a Claude transcript only grows,
-/// and a Harlo session is read whole again when what was added doesn't go on
-/// from its last entry. A remote one is copied from its host and read whole.
+/// A local session is read on from `resume`, and read whole again when what
+/// was added doesn't go on from its last entry. A remote one is copied from its host and read whole.
 /// On `None` the index keeps what it had, and tries again.
-pub fn read_session(path: &Path, kind: HarnessKind, resume: Option<&Resume>) -> Option<Part> {
+pub fn read_session(path: &Path, resume: Option<&Resume>) -> Option<Part> {
     if !crate::remote::is_remote(path) {
-        return match kind {
-            HarnessKind::Claude => harlo_harness::claude::read_part(path, resume),
-            _ => harlo_harness::store::read_part(path, resume),
-        }
-        .ok();
+        return harlo_harness::store::read_part(path, resume).ok();
     }
     crate::remote::host_of(path).and_then(|h| crate::remote::host(&h))?;
     let copy = crate::remote::local_copy(path).ok()?;
-    let messages = harlo_harness::store::read_saved_for(kind, &copy).ok()?.messages;
+    let messages = harlo_harness::store::read_saved_for(&copy).ok()?.messages;
     Some(Part { messages, ..Default::default() })
 }
 
@@ -480,20 +474,22 @@ mod tests {
         assert_eq!(best_block(&blocks, ""), 0);
     }
 
-    /// A Claude transcript that grows: what was there isn't read again, and
-    /// hits still name the message's place in the whole conversation.
+    /// A session file that grows: what was there isn't read again, and hits
+    /// still name the message's place in the whole conversation.
     #[test]
     fn indexes_only_what_was_added() {
-        use harlo_harness::claude::read_part;
+        use harlo_harness::store::read_part;
         let dir = std::env::temp_dir().join(format!("harlo-search-parts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let line = |kind: &str, id: &str, text: &str| match kind {
-            "user" => format!(r#"{{"type":"user","message":{{"role":"user","content":"{text}"}}}}"#) + "\n",
-            _ => format!(r#"{{"type":"assistant","message":{{"id":"{id}","model":"m","content":[{{"type":"text","text":"{text}"}}]}}}}"#) + "\n",
+        // pi's entries, each going on from the one before.
+        let line = |role: &str, id: &str, parent: &str, text: &str| {
+            let parent = if parent.is_empty() { "null".to_owned() } else { format!(r#""{parent}""#) };
+            format!(r#"{{"type":"message","id":"{id}","parentId":{parent},"message":{{"role":"{role}","content":"{text}"}}}}"#) + "\n"
         };
+        let head = |id: &str| format!(r#"{{"type":"session","id":"{id}","cwd":"/w"}}"#) + "\n";
         let path = dir.join("s.jsonl");
-        let mut text = line("user", "", "walrus") + &line("assistant", "a", "narwhal") + &line("user", "", "puffin");
+        let mut text = head("s") + &line("user", "a", "", "walrus") + &line("assistant", "b", "a", "narwhal") + &line("user", "c", "b", "puffin");
         std::fs::write(&path, &text).unwrap();
         let stamped = |size: usize, at: i64| vec![(path.clone(), at, i64::try_from(size).unwrap_or(i64::MAX))];
         let mut index = SearchIndex::open(&dir.join("search.db")).unwrap();
@@ -506,11 +502,11 @@ mod tests {
         assert_eq!(read_from.get(), Some(0));
         assert_eq!(index.search("puffin", 10).unwrap()[0].index, 2);
 
-        text += &line("assistant", "b", "ptarmigan");
-        text += &line("user", "", "lemming");
+        text += &line("assistant", "d", "c", "ptarmigan");
+        text += &line("user", "e", "d", "lemming");
         std::fs::write(&path, &text).unwrap();
         index.update_parts(&stamped(text.len(), 2), read).unwrap();
-        assert!(read_from.get().unwrap() > 0, "read on from the last prompt");
+        assert!(read_from.get().unwrap() > 0, "read on from where it was");
         for (word, at) in [("walrus", 0), ("narwhal", 1), ("puffin", 2), ("ptarmigan", 3), ("lemming", 4)] {
             let hits = index.search(word, 10).unwrap();
             assert_eq!(hits.len(), 1, "{word} once");
@@ -518,7 +514,7 @@ mod tests {
         }
 
         // Another conversation in its place: read whole.
-        std::fs::write(&path, line("user", "", "albatross")).unwrap();
+        std::fs::write(&path, head("t") + &line("user", "z", "", "albatross")).unwrap();
         index.update_parts(&stamped(1, 3), read).unwrap();
         assert!(index.search("walrus", 10).unwrap().is_empty());
         assert_eq!(index.search("albatross", 10).unwrap()[0].index, 0);

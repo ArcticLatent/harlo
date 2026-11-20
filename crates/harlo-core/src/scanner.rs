@@ -5,9 +5,23 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use harlo_harness::{HarnessKind, SessionInfo, store};
+
+/// pi's sessions are listed (it's turned on in Settings → Agents).
+static PI_LISTED: AtomicBool = AtomicBool::new(false);
+
+/// Lists pi's sessions with the others, or stops (the next poll drops them).
+pub fn set_pi_listed(on: bool) {
+    PI_LISTED.store(on, Ordering::Relaxed);
+}
+
+/// The agents whose session files on this computer are listed.
+pub fn listed_kinds() -> Vec<HarnessKind> {
+    if PI_LISTED.load(Ordering::Relaxed) { vec![HarnessKind::Pi] } else { Vec::new() }
+}
 
 #[derive(Debug, Default)]
 pub struct ScanDelta {
@@ -31,7 +45,7 @@ impl Scanner {
     pub fn poll(&mut self) -> ScanDelta {
         let mut delta = ScanDelta::default();
         let mut seen = HashMap::with_capacity(self.known.len());
-        for kind in [HarnessKind::Claude, HarnessKind::Harlo] {
+        for kind in listed_kinds() {
             for (path, modified, size) in store::list_files(kind) {
                 let changed = self.known.get(&path) != Some(&(modified, size));
                 if changed {

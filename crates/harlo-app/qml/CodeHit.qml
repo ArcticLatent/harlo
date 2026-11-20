@@ -24,7 +24,7 @@ ItemDelegate {
     bottomPadding: 7
     hoverEnabled: true
     Accessible.name: hit.kind + " " + hit.name
-    background: Rectangle { radius: 8; color: codeHit.hovered || codeHit.activeFocus || codeHit.open ? Theme.rowHover : "transparent" }
+    background: Rectangle { radius: 3; color: codeHit.hovered || codeHit.activeFocus || codeHit.open ? Theme.rowHover : "transparent" }
     contentItem: ColumnLayout {
         spacing: 2
         PlainLabel {

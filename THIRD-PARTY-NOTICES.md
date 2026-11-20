@@ -9,7 +9,7 @@ notices under `/usr/share/licenses/harlo` (the AppImage under
 |---|---|---|---|
 | Colour themes (all but harlo and Midnight) | [OpenChamber](https://github.com/openchamber/openchamber) | MIT | [`crates/harlo-app/themes/LICENSE`](crates/harlo-app/themes/LICENSE) |
 | Provider logos | [OpenChamber](https://github.com/openchamber/openchamber) | MIT | [`crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE`](crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE) |
-| Conversation starters' instructions (`crates/harlo-core/src/starters.rs`) and the streaming-text reveal (`committed_prefix` in `crates/harlo-core/src/markdown.rs`), adapted | [OpenChamber](https://github.com/openchamber/openchamber) | MIT | as above |
+| The streaming-text reveal (`committed_prefix` in `crates/harlo-core/src/markdown.rs`), adapted | [OpenChamber](https://github.com/openchamber/openchamber) | MIT | as above |
 | File-type icons (glyphs from Seti-UI, Devicons, Material Design Icons, Codicons, Octicons, Font Awesome and Font Logos) | [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts) 3.4.0 | SIL OFL 1.1 and MIT; the glyphs MIT, Apache-2.0, CC-BY-4.0 or Unlicense | [`crates/harlo-app/fonts/FileIcons-LICENSE.txt`](crates/harlo-app/fonts/FileIcons-LICENSE.txt) |
 | Outline icons | [Remix Icon](https://github.com/Remix-Design/RemixIcon) | Remix Icon License | [`crates/harlo-app/icons/REMIXICON-LICENSE`](crates/harlo-app/icons/REMIXICON-LICENSE) |
 | Agent mark (Claude Code) | [Paseo](https://github.com/getpaseo/paseo) | Apache-2.0 | [`crates/harlo-app/icons/PASEO-NOTICE`](crates/harlo-app/icons/PASEO-NOTICE) |
@@ -19,6 +19,8 @@ notices under `/usr/share/licenses/harlo` (the AppImage under
 | TweetNaCl-js (the phone page's encryption) | [TweetNaCl-js](https://github.com/dchest/tweetnacl-js) | Public domain (Unlicense) | [`crates/harlo-app/phone/TWEETNACL-LICENSE`](crates/harlo-app/phone/TWEETNACL-LICENSE) |
 | Qt 6 (in the release packages) | [The Qt Company](https://www.qt.io) | LGPL-3.0 | installed with the packages (`qt/`) |
 | tree-sitter and its grammars for 18 languages, and ast-grep-core (the code index and structural search, `harlo-index`) | [tree-sitter](https://github.com/tree-sitter), the grammars' authors and [ast-grep](https://github.com/ast-grep/ast-grep) | MIT | [`crates/harlo-index/GRAMMARS-LICENSE`](crates/harlo-index/GRAMMARS-LICENSE) |
+| pi-claude-bridge (the built-in Claude subscription extension for pi) and the packages it runs with (`packaging/pi-claude-bridge/package-lock.json` lists them) | [Eli Dickinson](https://github.com/elidickinson/pi-claude-bridge) and the packages' authors | MIT (each package's own license file ships in `lib/harlo/pi-claude-bridge`) | in each package |
+| Anthropic's Claude Agent SDK, which that extension needs: not shipped with harlo, downloaded from npm on first use | [Anthropic](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) | Anthropic's terms | not redistributed |
 | whisper.cpp (dictation) | [ggml-org](https://github.com/ggml-org/whisper.cpp) | MIT | built from the `whisper-rs` crate |
 
 The agents' names and marks belong to their projects. The Rust crates harlo

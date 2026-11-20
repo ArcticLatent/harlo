@@ -344,7 +344,7 @@ Rectangle {
                         Icon { anchors.centerIn: parent; name: "search"; implicitWidth: 13; implicitHeight: 13
                                color: root.findOpen || findButton.hovered ? Theme.foreground : Theme.muted }
                     }
-                    background: Rectangle { radius: 5; color: root.findOpen ? Theme.selected : findButton.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: root.findOpen ? Theme.selected : findButton.hovered ? Theme.hover : "transparent" }
                     ToolTip.visible: hovered
                     ToolTip.delay: 400
                     ToolTip.text: "Find" + Keymap.hint("findInSession") + ", replace (Ctrl+H)"
@@ -424,7 +424,7 @@ Rectangle {
                             font.pixelSize: Theme.px(12)
                             font.weight: root.matchCase ? Font.DemiBold : Font.Normal
                         }
-                        background: Rectangle { radius: 6; color: root.matchCase ? Theme.selected : caseButton.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 2; color: root.matchCase ? Theme.selected : caseButton.hovered ? Theme.hover : "transparent" }
                         ToolTip.visible: hovered
                         ToolTip.delay: 400
                         ToolTip.text: root.matchCase ? "Matching case" : "Match case"

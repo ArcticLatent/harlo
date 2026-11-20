@@ -11,8 +11,7 @@
 //! `promote`, `branch`, `files`, `file`, `branches`, `switchBranch`; `push`,
 //! the app's notifications, and `activity`, a Live Activity's); harlo → phone:
 //! `{ id, … }` replies and `{ ev, … }` events (`sessions`, `reset`, `rows`,
-//! `status`, `meta`, `request`, `cleared`, `commands`, `queue`, `todos`,
-//! `subagents`, `aside`).
+//! `status`, `meta`, `request`, `cleared`, `commands`, `queue`, `todos`).
 
 // Rust guideline compliant 2026-10-09
 
@@ -157,6 +156,15 @@ pub async fn start(addr: SocketAddr, shared: Arc<Shared>) -> anyhow::Result<Serv
 /// Forwards a session's updates to a connection.
 struct Forward(mpsc::UnboundedSender<Vec<SessionUpdate>>);
 
+impl Forward {
+    /// Starts a subscription with no queued or in-flight events from the old one.
+    fn replace(receiver: &mut mpsc::UnboundedReceiver<Vec<SessionUpdate>>) -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *receiver = rx;
+        Self(tx)
+    }
+}
+
 impl SessionSink for Forward {
     fn deliver(&self, updates: Vec<SessionUpdate>) {
         let _ = self.0.send(updates);
@@ -237,7 +245,7 @@ fn row_json(r: &harlo_core::Row, folder: &std::path::Path) -> Value {
     json!({ "key": r.key, "kind": if more { "codePart" } else { r.kind.as_str() }, "html": clip(&r.html), "text": text, "title": r.title, "subtitle": r.subtitle, "state": r.state,
         "group": r.group, "summary": r.summary, "groupOpen": r.group_open, "time": r.time, "ended": r.ended, "result": r.result, "diff": clip(&r.diff),
         "runMs": r.run_ms, "label": r.label, "command": clip(&r.command), "model": r.model, "images": harlo_core::pictures::shown(r, folder),
-        "code": tool_code(r), "commandHtml": command_html(&r.command) })
+        "code": tool_code(r), "commandHtml": command_html(&r.command), "callId": r.call_id })
 }
 
 /// A call's output as code on a phone, when it's a file's lines.
@@ -528,8 +536,6 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
         SessionUpdate::Todos(phases) => json!({ "ev": "todos", "key": key, "phases": phases }),
         SessionUpdate::UiRequest(r) => json!({ "ev": "request", "key": key, "request": request_json(r) }),
         SessionUpdate::UiCleared(id) => json!({ "ev": "cleared", "key": key, "id": id }),
-        // A side question (/btw) and its answer so far: shown, not kept.
-        SessionUpdate::Aside(a) => json!({ "ev": "aside", "key": key, "aside": a }),
         // Stopped before they were sent: their words and pictures back in
         // the composer (files the phone can't attach stay on the desktop).
         SessionUpdate::Unsent(held) => {
@@ -541,6 +547,56 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
     })
 }
 
+/// A picture in an extension's view a phone gets (its base64 text, at
+/// most); a bigger one is named, not sent.
+const EXT_PICTURE_MAX: usize = 512 * 1024;
+
+/// A pi extension's view as a phone shows it, when that changed: `{ ev:
+/// "ext", key, op: "view", view: { id, kind, lines, result, blocks,
+/// resultBlocks, toolCallId, timestamp, placement } }` (its lines as plain
+/// text; none for a screen or an overlay, which take the computer's keys;
+/// `blocks` as the desktop gets them, with each Markdown block's `parts`
+/// and a picture over `EXT_PICTURE_MAX` as `{kind: "image", tooBig:
+/// true}`), `op: "close"` with `id`, or `op: "clear"` (the extensions bound
+/// again).
+fn ext_event(key: &str, frame: &Value, sent: &mut std::collections::HashMap<String, String>) -> Option<Value> {
+    let id = frame["id"].as_str().unwrap_or_default();
+    match frame["op"].as_str()? {
+        "hello" => {
+            sent.clear();
+            Some(json!({ "ev": "ext", "key": key, "op": "clear" }))
+        }
+        "close" => sent.remove(id).map(|_| json!({ "ev": "ext", "key": key, "op": "close", "id": id })),
+        "view" => {
+            let kind = frame["kind"].as_str().unwrap_or_default();
+            let plain = |v: &Value| -> Vec<String> {
+                v.as_array().into_iter().flatten().filter_map(Value::as_str).map(|l| harlo_core::session::strip_ansi(l).trim_end().to_owned()).collect()
+            };
+            let interactive = matches!(kind, "screen" | "overlay");
+            let shown = !interactive && frame["hidden"] != true;
+            let blocks = |v: &Value| -> Value {
+                let list = v.as_array().filter(|_| shown).into_iter().flatten().map(|b| match b["kind"].as_str() {
+                    Some("image") if b["data"].as_str().is_some_and(|d| d.len() > EXT_PICTURE_MAX) => json!({ "kind": "image", "tooBig": true, "rows": b["rows"] }),
+                    _ => b.clone(),
+                });
+                Value::Array(list.collect())
+            };
+            let mut view = json!({ "id": id, "kind": kind, "lines": if shown { plain(&frame["lines"]) } else { Vec::new() }, "result": if shown { plain(&frame["result"]) } else { Vec::new() },
+                "blocks": blocks(&frame["blocks"]), "resultBlocks": blocks(&frame["resultBlocks"]),
+                "toolCallId": frame["toolCallId"], "timestamp": frame["timestamp"], "placement": frame["placement"], "hidden": frame["hidden"] == true });
+            let text = view.to_string();
+            if sent.get(id) == Some(&text) {
+                return None;
+            }
+            sent.insert(id.to_owned(), text);
+            // (Rendered only when it changed.)
+            crate::chat_session::markdown_parts(&mut view, None);
+            Some(json!({ "ev": "ext", "key": key, "op": "view", "view": view }))
+        }
+        _ => None,
+    }
+}
+
 /// What harlo can do for a phone, beyond the first app's (in `ready`):
 /// `sessionMentions` (the folder's other sessions for `@`, read in when a
 /// message names them),
@@ -548,7 +604,7 @@ fn event(key: &str, u: &SessionUpdate) -> Option<Value> {
 /// (sessions say their machine), `settled` (settled sessions, for a phone
 /// that says it shows them), `limits` (plan limits: the `limits` call and
 /// event), `compaction` (a session's meta says where it compacts).
-const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "plan", "diagrams", "visuals", "planRun", "helpers", "answerHelper", "team", "pictures", "wiki", "workflows"];
+const FEATURES: &[&str] = &["sessionMentions", "serverStart", "machines", "settled", "limits", "compaction", "connect", "modelServers", "putBack", "stoppedModels", "diagrams", "visuals", "pictures", "wiki", "workflows", "extViews"];
 
 /// The session list for one phone: settled sessions only for one that
 /// shows them.
@@ -761,14 +817,29 @@ async fn start_or_stop_server(msg: &Value, start: bool) -> Value {
 /// A question or approval, as phones show it.
 pub fn request_json(r: &harlo_core::UiRequest) -> Value {
     json!({
-        "id": r.id, "method": r.method, "title": r.title, "message": r.message, "options": r.options,
+        "id": r.id, "method": r.method, "title": r.title, "message": approval_message(r), "options": r.options,
         "placeholder": r.placeholder, "prefill": r.prefill, "approval": r.is_approval, "questions": r.raw["questions"],
     })
 }
 
-/// A subagent as phones show it.
-fn subagent_json(s: &Value) -> Value {
-    json!({ "id": s["id"], "agent": s["agent"], "description": s["description"], "status": s["status"] })
+/// What a request says under its title: its message, or for an approval
+/// without one, the details on its title's later lines ("bash: git clean
+/// -fdx"), which phones show as what it would do. pi's approvals carry
+/// them only in the title.
+fn approval_message(r: &harlo_core::UiRequest) -> String {
+    if !r.is_approval || !r.message.is_empty() {
+        return r.message.clone();
+    }
+    let mut lines = r.title.lines();
+    let tool = lines.next().unwrap_or_default().trim_start_matches("Allow tool:").trim();
+    let details: Vec<&str> = lines
+        .map(|l| l.strip_prefix("Command:").unwrap_or(l).trim())
+        .filter(|l| !l.is_empty() && !l.starts_with("Reason:") && *l != "Outside the sandbox")
+        .collect();
+    if details.is_empty() {
+        return String::new();
+    }
+    format!("{tool}: {}", details.join("\n"))
 }
 
 /// Edit & resend from the user's `ordinal`-th message, as the desktop
@@ -776,11 +847,10 @@ fn subagent_json(s: &Value) -> Value {
 /// (`text`). (`fork`, a fork that keeps the message, no agent does now.)
 async fn branch(live: &crate::registry::LiveRef, file: Option<std::path::PathBuf>, ordinal: Option<usize>, fork: bool) -> Value {
     let Some(ordinal) = ordinal else { return json!({ "error": "That isn't one of your messages." }) };
-    if !matches!(live.harness.as_str(), "claude" | "harlo") || fork {
+    if live.harness != "pi" || fork {
         return json!({ "error": "This agent can't do that." });
     }
-    let harness = live.harness.clone();
-    let entry = tokio::task::spawn_blocking(move || crate::chat_session::user_entry_id(file, &harness, ordinal)).await.ok().flatten();
+    let entry = tokio::task::spawn_blocking(move || crate::chat_session::user_entry_id(file, ordinal)).await.ok().flatten();
     let Some(entry) = entry else { return json!({ "error": "That message can't be branched from yet." }) };
     match live.handle.request(json!({ "type": "fork", "entryId": entry })).await {
         Ok(data) if data["cancelled"].as_bool() == Some(true) => json!({ "cancelled": true }),
@@ -1160,9 +1230,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
     let _online = Online::new(&shared, &device.id);
 
     let mut devices = shared.devices_changed.subscribe();
-    let mut plans = crate::phone_bridge::watch_plans();
     let mut flows = crate::phone_bridge::watch_workflows();
-    let (updates_tx, mut updates) = mpsc::unbounded_channel::<Vec<SessionUpdate>>();
     let (later_tx, mut later) = mpsc::unbounded_channel::<Value>();
     let mut conn = Conn {
         shared: Arc::clone(&shared),
@@ -1172,12 +1240,11 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
         wants_sessions: false,
         limits: crate::phone_bridge::watch_limits(),
         wants_limits: false,
-        wants_plans: false,
         wants_workflows: false,
-        subagents: Vec::new(),
+        ext_sent: std::collections::HashMap::new(),
         window: Window::default(),
         open: None,
-        updates_tx,
+        updates_rx: mpsc::unbounded_channel().1,
         later_tx,
     };
 
@@ -1203,13 +1270,6 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                 }
             }
             Some(reply) = later.recv() => vec![reply],
-            Ok(()) = plans.changed(), if conn.wants_plans => {
-                plans.borrow_and_update();
-                match &conn.open {
-                    Some((key, _)) => vec![json!({ "ev": "plan", "key": key })],
-                    None => Vec::new(),
-                }
-            }
             Ok(()) = flows.changed(), if conn.wants_workflows => {
                 flows.borrow_and_update();
                 vec![json!({ "ev": "workflow", "key": conn.open.as_ref().map(|(k, _)| k.clone()).unwrap_or_default() })]
@@ -1220,7 +1280,7 @@ pub async fn connection(mut link: Link, shared: Arc<Shared>) {
                 vec![ev]
             }
             Ok(()) = conn.sessions.changed(), if conn.wants_sessions => vec![json!({ "ev": "sessions", "sessions": for_phone(conn.sessions.borrow_and_update().clone(), conn.shows_settled) })],
-            Some(batch) = updates.recv() => conn.updates(&batch),
+            Some(batch) = conn.updates_rx.recv() => conn.updates(&batch),
             Ok(()) = devices.changed() => {
                 // Removed while connected: goodbye.
                 if shared.devices.lock().unwrap().find_by_key(hello["key"].as_str().unwrap_or_default()).is_none() {
@@ -1252,17 +1312,17 @@ struct Conn {
     wants_sessions: bool,
     limits: tokio::sync::watch::Receiver<Value>,
     wants_limits: bool,
-    /// A phone that asked for a plan hears when one changes.
-    wants_plans: bool,
     /// It asked about workflow runs: it's told when they change.
     wants_workflows: bool,
-    /// The open session's subagents, from their frames.
-    subagents: Vec<Value>,
+    /// What the phone was last sent of each of a pi extension's views (an
+    /// animation's frames change nothing it shows).
+    ext_sent: std::collections::HashMap<String, String>,
     /// The open session's rows the phone has.
     window: Window,
     /// The session this phone has open: its live key and subscription.
     open: Option<(String, u64)>,
-    updates_tx: mpsc::UnboundedSender<Vec<SessionUpdate>>,
+    /// Each subscription has its own queue; switching drops the old backlog.
+    updates_rx: mpsc::UnboundedReceiver<Vec<SessionUpdate>>,
     /// Replies that come later (a message waiting on its model's server).
     later_tx: mpsc::UnboundedSender<Value>,
 }
@@ -1287,12 +1347,9 @@ impl Conn {
             }
             out.extend(row_frames(key, &mut self.window, u));
             out.extend(event(key, u));
-        }
-        // Subagents: their frames folded into one list.
-        let frames: Vec<&Value> = batch.iter().filter_map(|u| match u { SessionUpdate::SubagentActivity(f) => Some(f), _ => None }).collect();
-        if !frames.is_empty() {
-            for f in frames { harlo_core::subagents::apply_event(&mut self.subagents, f); }
-            out.push(json!({ "ev": "subagents", "key": key, "subagents": self.subagents.iter().map(subagent_json).collect::<Vec<_>>() }));
+            if let SessionUpdate::ExtUi(frame) = u {
+                out.extend(ext_event(key, frame, &mut self.ext_sent));
+            }
         }
         out
     }
@@ -1309,9 +1366,9 @@ impl Conn {
                     self.close_open();
                     match crate::phone_bridge::open(msg["key"].as_str().unwrap_or_default()).await.and_then(|k| crate::registry::get(&k).map(|l| (k, l))) {
                         Some((key, live)) => {
-                            self.subagents.clear();
+                            self.ext_sent.clear();
                             self.window = Window { cwd: live.cwd.clone(), ..Window::default() };
-                            let sub = live.handle.subscribe(Forward(self.updates_tx.clone()));
+                            let sub = live.handle.subscribe(Forward::replace(&mut self.updates_rx));
                             self.open = Some((key.clone(), sub));
                             json!({ "key": key, "harness": live.harness })
                         }
@@ -1329,13 +1386,9 @@ impl Conn {
                     });
                     Value::Null
                 }
-                "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "reviewStep" | "theme" | "setAvatar" | "wiki" | "wikiRun" => crate::phone_bridge::call(msg.clone()).await,
+                "projects" | "sessionMentions" | "limitOf" | "resumeAtReset" | "cancelResume" | "modes" | "setModes" | "rename" | "archive" | "pin" | "putBack" | "theme" | "setAvatar" | "wiki" | "wikiRun" => crate::phone_bridge::call(msg.clone()).await,
                 "workflow" | "workflows" | "workflowAction" => {
                     self.wants_workflows = true;
-                    crate::phone_bridge::call(msg.clone()).await
-                }
-                "plan" | "planEdit" | "planRun" | "planStop" | "helpers" | "answerHelper" => {
-                    self.wants_plans = true;
                     crate::phone_bridge::call(msg.clone()).await
                 }
                 // A picture the conversation shows (or a picture file in the
@@ -1538,6 +1591,26 @@ fn undo_op(op: &str, cwd: &std::path::Path, prompts: &[(String, i64)], row: &str
 pub(crate) mod tests {
     use super::*;
 
+    /// An approval whose details are only in its title (pi's) tells the
+    /// phone what it would do; one with a message keeps it.
+    #[test]
+    fn approvals_say_what_they_would_do() {
+        let ask = |title: &str, message: &str| harlo_core::UiRequest {
+            title: title.into(),
+            message: message.into(),
+            is_approval: true,
+            options: vec!["Approve".into(), "Deny".into()],
+            ..Default::default()
+        };
+        let said = |r: &harlo_core::UiRequest| request_json(r)["message"].as_str().unwrap_or_default().to_owned();
+        assert_eq!(said(&ask("Allow tool: bash\ngit clean -fdx\nReason: this can't be undone: it deletes files", "")), "bash: git clean -fdx");
+        assert_eq!(said(&ask("Allow tool: bash\nCommand: ls\nOutside the sandbox", "")), "bash: ls");
+        assert_eq!(said(&ask("Allow tool: write\nReason: it writes", "")), "");
+        assert_eq!(said(&ask("Allow tool: bash\nls", "bash: npm test")), "bash: npm test");
+        let question = harlo_core::UiRequest { title: "Pick one\nor the other".into(), ..Default::default() };
+        assert_eq!(said(&question), "");
+    }
+
     /// A row says what its call is for, its whole command and its reply's
     /// model; a long command's output keeps its end (its result), a long
     /// read its start.
@@ -1639,12 +1712,39 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A side question's answer goes to phones as it comes.
+    /// A pi extension's views reach phones as plain text, each only when
+    /// what the phone shows of it changes; a screen without its lines.
     #[test]
-    fn side_questions_reach_phones() {
-        let a = json!({ "question": "why?", "text": "Because.", "done": true, "error": null });
-        let ev = event("live:1", &SessionUpdate::Aside(a.clone())).unwrap();
-        assert_eq!(ev, json!({ "ev": "aside", "key": "live:1", "aside": a }));
+    fn extension_views_reach_phones_as_text() {
+        let mut sent = std::collections::HashMap::new();
+        let mut ev = |f: Value| ext_event("live:1", &f, &mut sent);
+        let widget = json!({ "op": "view", "id": "widget:w", "kind": "widget", "placement": "belowEditor", "lines": ["\u{1b}[31mred\u{1b}[0m   "] });
+        let out = ev(widget.clone()).unwrap();
+        assert_eq!((&out["op"], &out["view"]["lines"], &out["view"]["placement"]), (&json!("view"), &json!(["red"]), &json!("belowEditor")));
+        assert!(ev(widget).is_none(), "unchanged: not again");
+        let screen = |n: u32| json!({ "op": "view", "id": "screen:1", "kind": "screen", "lines": [format!("frame {n}")] });
+        assert_eq!(ev(screen(1)).unwrap()["view"]["lines"], json!([]), "a screen: no lines");
+        assert!(ev(screen(2)).is_none(), "its animation sends nothing more");
+        assert_eq!(ev(json!({ "op": "close", "id": "screen:1" })).unwrap(), json!({ "ev": "ext", "key": "live:1", "op": "close", "id": "screen:1" }));
+        assert!(ev(json!({ "op": "close", "id": "never-sent" })).is_none());
+        assert_eq!(ev(json!({ "op": "hello", "shortcuts": [] })).unwrap()["op"], "clear");
+        assert!(ev(json!({ "op": "working", "message": "x" })).is_none());
+
+        // Markdown and pictures come in blocks: the Markdown in parts, a
+        // picture too big for a phone only named.
+        let big = "A".repeat(EXT_PICTURE_MAX + 1);
+        let tool = json!({ "op": "view", "id": "tool:1", "kind": "tool", "lines": ["call"], "result": ["# Hi", "", "pic", "end"], "resultBlocks": [
+            { "kind": "markdown", "text": "# Hi", "rows": 2 },
+            { "kind": "image", "data": big, "mime": "image/png", "cells": 60, "rows": 1 },
+            { "kind": "image", "data": "iVBO", "mime": "image/png", "cells": 60, "rows": 0 },
+            { "kind": "lines", "row": 3, "rows": 1 },
+        ] });
+        let blocks = ev(tool).unwrap()["view"]["resultBlocks"].clone();
+        assert_eq!(blocks[0]["parts"][0]["kind"], "prose");
+        assert!(blocks[0]["parts"][0]["html"].as_str().unwrap_or_default().contains("Hi"));
+        assert_eq!((&blocks[1]["tooBig"], blocks[1].get("data")), (&json!(true), None));
+        assert_eq!(blocks[2]["data"], "iVBO", "a small one whole");
+        assert_eq!(blocks[3], json!({ "kind": "lines", "row": 3, "rows": 1 }));
     }
 
     /// Messages stopped before they were sent go back to phones whole: the
@@ -1654,7 +1754,7 @@ pub(crate) mod tests {
         use harlo_core::{Typed, Unsent};
         let pic = |d: &str| json!({ "type": "image", "data": d, "mimeType": "image/jpeg" });
         let held = vec![
-            Unsent { text: format!("<file a.rs>…</file>fix it{}", harlo_harness::file_blocks::PLAN_NOTE), images: vec![pic("AAAA")], mode: harlo_harness::SendMode::Normal, typed: Some(Typed { words: "fix it".into(), files: vec!["/p/a.rs".into(), "/p/s.jpg".into()], by_you: true }) },
+            Unsent { text: format!("<file a.rs>…</file>fix it{}", harlo_harness::file_blocks::PLAN_NOTE), images: vec![pic("AAAA")], mode: harlo_harness::SendMode::Normal, typed: Some(Typed { words: "fix it".into(), files: vec!["/p/a.rs".into(), "/p/s.jpg".into()] }) },
             Unsent { text: "<file name=\"Photo 1\"></file>\n".into(), images: vec![pic("BBBB")], mode: harlo_harness::SendMode::FollowUp, typed: Some(Typed::default()) },
             Unsent { text: "said elsewhere".into(), images: Vec::new(), mode: harlo_harness::SendMode::Normal, typed: None },
         ];
@@ -1954,6 +2054,18 @@ pub(crate) mod tests {
         let keys = |v: Value| v.as_array().unwrap().iter().map(|r| r["key"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert_eq!(keys(for_phone(list.clone(), false)), ["a", "c"]);
         assert_eq!(keys(for_phone(list, true)), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn switching_sessions_discards_queued_and_late_updates() {
+        let mut rx = mpsc::unbounded_channel().1;
+        let old = Forward::replace(&mut rx);
+        old.deliver(vec![SessionUpdate::UiCleared("old queued".into())]);
+        let new = Forward::replace(&mut rx);
+        old.deliver(vec![SessionUpdate::UiCleared("old late".into())]);
+        new.deliver(vec![SessionUpdate::UiCleared("new".into())]);
+        assert!(matches!(rx.try_recv().unwrap().as_slice(), [SessionUpdate::UiCleared(id)] if id == "new"));
+        assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
     }
 
     use crypto_box::aead::OsRng;

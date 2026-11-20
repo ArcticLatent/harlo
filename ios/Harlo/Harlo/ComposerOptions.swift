@@ -1,9 +1,9 @@
 import HarloKit
 import SwiftUI
 
-/// The thinking level, approval mode and Plan, in one menu, and while it
-/// works whether a message steers the run or waits for it: its icon
-/// lights up while Plan is on or nothing asks first.
+/// The thinking level and approval mode, in one menu, and while it works
+/// whether a message steers the run or waits for it: its icon lights up
+/// while nothing asks first.
 struct ComposerOptions: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -15,7 +15,7 @@ struct ComposerOptions: View {
         let m = session.modes
         let approvals = m?.approvals ?? []
         if session.busy || !levels.isEmpty || !approvals.isEmpty {
-            let plan = m?.plan == true, yolo = m?.approval == "yolo"
+            let yolo = m?.approval == "yolo"
             Menu {
                 if session.busy {
                     Picker(selection: Bindable(session).steer) {
@@ -41,19 +41,16 @@ struct ComposerOptions: View {
                         Label("Approvals: \(Modes.short(m.approval))", systemImage: yolo ? "bolt.shield" : "shield")
                     }
                     .pickerStyle(.menu)
-                    Toggle(isOn: Binding(get: { m.plan }, set: { on in Task { await model.setPlan(on) } })) {
-                        Label("Plan first", systemImage: "list.bullet.clipboard")
-                    }
                 }
             } label: {
-                Image(systemName: plan ? "list.bullet.clipboard" : yolo ? "bolt.shield" : "slider.horizontal.3")
+                Image(systemName: yolo ? "bolt.shield" : "slider.horizontal.3")
                     .font(.system(size: 15, weight: .medium))
                     .frame(width: 34, height: 34)
-                    .background { Circle().fill(Color(plan || yolo ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))) }
-                    .overlay { Circle().strokeBorder(Color(plan || yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1) }
-                    .foregroundStyle(Color(plan || yolo ? p.primary : p.muted))
+                    .background { Circle().fill(Color(yolo ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))) }
+                    .overlay { Circle().strokeBorder(Color(yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1) }
+                    .foregroundStyle(Color(yolo ? p.primary : p.muted))
             }
-            .accessibilityLabel("Options: \(session.busy ? (session.steer ? "messages steer the run, " : "messages wait for the run, ") : "")thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? "")), Plan \(plan ? "on" : "off")")
+            .accessibilityLabel("Options: \(session.busy ? (session.steer ? "messages steer the run, " : "messages wait for the run, ") : "")thinking \(session.info.thinking), approvals \(Modes.label(m?.approval ?? ""))")
         }
     }
 }

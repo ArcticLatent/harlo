@@ -251,6 +251,7 @@ mod tests {
         assert_eq!(facts("bash", &json!({}), "fine", false).0, "");
         assert_eq!(facts("read", &json!({}), "a\nb\nc", false).0, "3 lines");
         assert_eq!(facts("read", &json!({}), "a\nb\nc\n\n[Wiki: this page is out of date.\n- x]", false).0, "3 lines");
+        assert_eq!(facts("read", &json!({}), "a\nb\nc\n\n\n\n[Wiki: this page is out of date.\n- x]", false).0, "3 lines", "pi's");
         assert_eq!(facts("grep", &json!({}), "x:1\ny:2\n", false).0, "2 results");
         assert_eq!(facts("mystery", &json!({}), "", true).0, "failed");
     }

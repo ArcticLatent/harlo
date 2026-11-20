@@ -23,9 +23,9 @@ AppDialog {
     readonly property string machine: host === "" ? "this computer" : host
     readonly property var hostAgents: Accounts.hostServers !== "" ? (JSON.parse(Accounts.hostServers)[host] || {}).agents || {} : ({})
     readonly property var agents: host !== ""
-        ? ["harlo"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: Theme.harnessLabel(id) }))
+        ? ["pi"].filter(id => hostAgents[id] !== undefined).map(id => ({ id: id, label: Theme.harnessLabel(id) }))
         : (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.providersJson()) : [])
-            .filter(p => p.id === "harlo" && p.state !== "missing")
+            .filter(p => p.id === "pi" && p.state !== "missing")
     /// Opens it for `machine` ("" for this computer); while a setup runs,
     /// that one shows, wherever it is.
     function openOn(machine, row) {
@@ -195,7 +195,7 @@ AppDialog {
         }
         if (page === "engine") ServerSetup.refresh()
         // (Another machine's agents may still be being read.)
-        chosen = host !== "" ? ["harlo"] : agents.map(a => a.id)
+        chosen = host !== "" ? ["pi"] : agents.map(a => a.id)
     }
     onClosed: {
         if (job && job.state === "running") return
@@ -242,7 +242,7 @@ AppDialog {
                     enabled: modelData.fit !== "no"
                     hoverEnabled: true
                     padding: 12
-                    background: Rectangle { radius: 10; color: card.hovered ? Theme.hover : Theme.raised; border.color: Theme.hairline }
+                    background: Rectangle { radius: 4; color: card.hovered ? Theme.hover : Theme.raised; border.color: Theme.hairline }
                     contentItem: ColumnLayout {
                         spacing: 3
                         RowLayout {
@@ -337,7 +337,7 @@ AppDialog {
                         padding: 6
                         enabled: modelData.fit !== "no"
                         highlighted: dlg.repo === modelData.repo
-                        background: Rectangle { radius: 6; color: mRow.highlighted ? Theme.rowSelected : mRow.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 2; color: mRow.highlighted ? Theme.rowSelected : mRow.hovered ? Theme.hover : "transparent" }
                         contentItem: RowLayout {
                             spacing: 8
                             ColumnLayout {
@@ -397,7 +397,7 @@ AppDialog {
                             enabled: modelData.fit !== "no"
                             highlighted: dlg.file === modelData.file
                             background: Rectangle {
-                                radius: 6
+                                radius: 2
                                 color: qChip.highlighted ? Theme.rowSelected : qChip.hovered ? Theme.hover : "transparent"
                                 border.color: qChip.highlighted ? Theme.primary : Theme.hairline
                             }
@@ -445,7 +445,7 @@ AppDialog {
                             horizontalPadding: 10
                             highlighted: dlg.strataFamily === modelData.id
                             background: Rectangle {
-                                radius: 6
+                                radius: 2
                                 color: fChip.highlighted ? Theme.rowSelected : fChip.hovered ? Theme.hover : "transparent"
                                 border.color: fChip.highlighted ? Theme.primary : Theme.hairline
                             }
@@ -477,7 +477,7 @@ AppDialog {
                         padding: 6
                         enabled: fits
                         highlighted: dlg.model === modelData.id
-                        background: Rectangle { radius: 6; color: sRow.highlighted ? Theme.rowSelected : sRow.hovered ? Theme.hover : "transparent" }
+                        background: Rectangle { radius: 2; color: sRow.highlighted ? Theme.rowSelected : sRow.hovered ? Theme.hover : "transparent" }
                         contentItem: RowLayout {
                             spacing: 8
                             Label { text: sRow.modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12); Layout.preferredWidth: 80 }
@@ -514,7 +514,7 @@ AppDialog {
                             horizontalPadding: 10
                             highlighted: dlg.context === modelData
                             background: Rectangle {
-                                radius: 6
+                                radius: 2
                                 color: cChip.highlighted ? Theme.rowSelected : cChip.hovered ? Theme.hover : "transparent"
                                 border.color: cChip.highlighted ? Theme.primary : Theme.hairline
                             }
@@ -642,7 +642,7 @@ AppDialog {
                 visible: dlg.job !== null && outputToggle.open
                 Layout.fillWidth: true
                 Layout.preferredHeight: 240
-                radius: 8
+                radius: 3
                 color: Theme.codeBg
                 border.color: Theme.hairline
                 ScrollView {
@@ -692,7 +692,7 @@ AppDialog {
                 }
                 FormNote {
                     visible: dlg.host !== "" && dlg.agents.length === 0
-                    text: "No Harlo on " + dlg.host + " yet: it runs there, to add to it later in Settings → Local models."
+                    text: "No pi on " + dlg.host + " yet: it runs there, to add to it later in Settings → Local models."
                 }
                 FormNote { visible: dlg.error !== ""; color: Theme.error; text: dlg.error }
             }

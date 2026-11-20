@@ -17,7 +17,7 @@ Rectangle {
 
     visible: tasks.length > 0
     implicitHeight: col.implicitHeight + 16
-    radius: 10
+    radius: 4
     color: Theme.elevated
     border.color: Theme.border
 
@@ -72,7 +72,7 @@ Rectangle {
                 padding: 0
                 onClicked: root.expanded = !root.expanded
                 contentItem: Item { Icon { anchors.centerIn: parent; name: "arrow-down-s"; rotation: root.expanded ? 180 : 0; color: toggle.hovered ? Theme.foreground : Theme.muted; implicitWidth: 18; implicitHeight: 18 } }
-                background: Rectangle { radius: 5; color: toggle.hovered ? Theme.hover : "transparent" }
+                background: Rectangle { radius: 2; color: toggle.hovered ? Theme.hover : "transparent" }
                 ToolTip.visible: hovered
                 ToolTip.text: root.expanded ? "Hide the plan" : "Show the whole plan"
             }

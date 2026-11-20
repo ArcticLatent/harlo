@@ -242,7 +242,7 @@ Item {
                     anchors.fill: parent
                     anchors.rightMargin: 8
                     anchors.bottomMargin: 8
-                    radius: 8
+                    radius: 3
                     color: cellItem.current ? Theme.selected : cellHover.hovered ? Theme.hover : "transparent"
                     border.width: cellItem.current && grid.activeFocus ? 1 : 0
                     border.color: Theme.accent
@@ -253,7 +253,7 @@ Item {
                 Rectangle {
                     anchors.fill: thumb
                     visible: thumb.status === "error"
-                    radius: 8
+                    radius: 3
                     color: Theme.isLight ? Qt.darker(root.backdrop, 1.035) : Theme.codeBg
                     border.color: Theme.border
                 }
@@ -301,7 +301,7 @@ Item {
             anchors.topMargin: 12
             implicitWidth: goneLabel.implicitWidth + 20
             implicitHeight: 28
-            radius: 6
+            radius: 2
             color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.16)
             border.color: Theme.warning
             Label { id: goneLabel; anchors.centerIn: parent; text: "This image was deleted on disk."; color: Theme.foreground; font.pixelSize: Theme.px(12) }

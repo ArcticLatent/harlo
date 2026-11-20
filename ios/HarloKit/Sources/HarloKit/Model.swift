@@ -69,9 +69,9 @@ public final class OpenSession {
     public internal(set) var steering: [String] = []
     public internal(set) var followUp: [String] = []
     public internal(set) var todos: [TodoPhase] = []
-    public internal(set) var subagents: [Subagent] = []
-    /// A side question (/btw) and its answer, until dismissed.
-    public var aside: Aside?
+    /// pi extensions' views (widgets, footer, a screen open on the
+    /// computer, their drawing of tool calls and messages), oldest first.
+    public internal(set) var extViews: [ExtView] = []
     /// "busy", "idle", "input", …
     public internal(set) var status = ""
     public internal(set) var rows: [Row] = []
@@ -146,10 +146,6 @@ public final class OpenSession {
     /// When it continues on its own after its limit resets (unix ms, 0 if
     /// it isn't going to).
     public internal(set) var resumesAt: Int64 = 0
-    /// Its shared plan (nil: harlo hasn't said, or doesn't have plans).
-    public internal(set) var plan: Plan?
-    /// The helpers it started (sessions of their own in harlo).
-    public internal(set) var helpers: [Helper] = []
     /// Its repository's wiki (nil: not asked yet).
     public internal(set) var wiki: Wiki?
     /// The workflow run it's part of (nil: none, or harlo hasn't said).
@@ -218,7 +214,7 @@ public final class OpenSession {
     public var canUnqueue: Bool { harness == "demo" }
 
     /// The agent can branch at one of the user's messages (edit & resend).
-    public var canBranch: Bool { ["harlo", "claude"].contains(harness) }
+    public var canBranch: Bool { harness == "pi" }
     public var items: [TranscriptItem] { TranscriptItem.build(rows, opened: opened) }
 
     /// Opens a folded run, or folds an open one (`open`: how it shows now).
@@ -230,10 +226,8 @@ public final class OpenSession {
         self.liveKey = liveKey
         if !harness.isEmpty { self.harness = harness }
         // Opening again (back from the background, a new connection):
-        // harlo sends what's current, so what was shown before goes (a
-        // subagent that ended meanwhile no longer shows as running).
+        // harlo sends what's current, so what was shown before goes.
         todos = []
-        subagents = []
         let waiting = early
         early = []
         for ev in waiting { take(ev) }
@@ -274,10 +268,8 @@ public final class OpenSession {
             followUp = fu
         case .todos(_, let t):
             todos = t
-        case .subagents(_, let list):
-            subagents = list
-        case .aside(_, let a):
-            aside = a
+        case .ext(_, let change):
+            extViews.apply(change)
         case .unsent(_, let text, let photos):
             // Above what's typed meanwhile, not over it.
             if !text.isEmpty {
@@ -312,6 +304,9 @@ public final class HarloModel {
     @ObservationIgnored var lastLimitsWidget: LimitsSnapshot?
     /// Requests answered from the list that harlo still lists (hidden).
     var answered: Set<String> = []
+    /// Requests whose answer is on its way to harlo: their buttons wait, so
+    /// a second tap can't send another answer.
+    public private(set) var answering: Set<String> = []
     public internal(set) var session: OpenSession?
     /// Pairing in progress.
     public private(set) var pairing = false
@@ -585,16 +580,12 @@ public final class HarloModel {
         switch ev {
         case .sessions(let s):
             sessions = s
-            // (A helper's state shows in the list as it changes.)
-            if let open = session { Task { await refreshHelpers(open) } }
         case .revoked:
             forgetHost()
             alert = "This phone was removed in harlo. Pair it again to use it."
         case .limits(let l):
             limits = l
             if let s = session { Task { await refreshLimit(s) } }
-        case .plan(let key):
-            if let s = session, s.liveKey == key { Task { await refreshPlan(s) } }
         case .workflow(let key):
             if let s = session, s.liveKey == key { Task { await refreshWorkflow(s) } }
             if watchingRuns { Task { await loadWorkflows() } }
@@ -679,9 +670,7 @@ public final class HarloModel {
             if !active { suspend() }
             return false
         }
-        let before = alert
-        await answer(req, req.approval(allow), in: content.session)
-        let ok = alert == before || alert == nil
+        let ok = await answer(req, req.approval(allow), in: content.session)
         if !active { suspend() }
         return ok
     }
@@ -785,8 +774,6 @@ public final class HarloModel {
             s.opened(liveKey: r.key, harness: r.harness)
             s.modes = try? await c.modes(r.key)
             await refreshLimit(s)
-            await refreshPlan(s)
-            await refreshHelpers(s)
             await refreshWorkflow(s)
         } catch {
             s.error = Self.describe(error)
@@ -843,90 +830,17 @@ public final class HarloModel {
         }
     }
 
-    // ---- the plan, specs and diagrams --------------------------------------------
+    // ---- diagrams and helpers ------------------------------------------------------
 
-    /// harlo has plans, specs and diagrams for the phone (an older one hasn't).
-    public var hasPlans: Bool { demo || samples != nil || features.contains("plan") }
+    /// harlo draws diagrams for the phone (an older one doesn't).
     public var drawsDiagrams: Bool { demo || samples != nil || features.contains("diagrams") }
 
-    /// The open session's plan, from harlo.
-    func refreshPlan(_ s: OpenSession) async {
-        guard features.contains("plan"), let c = client, !s.liveKey.isEmpty,
-              let plan = try? await c.plan(s.liveKey), session === s else { return }
-        s.plan = plan
-    }
-
-    /// Changes the open session's plan.
-    public func editPlan(_ edit: PlanEdit) async {
-        guard let s = session else { return }
-        if demo || samples != nil { s.plan = Self.demoEdit(s.plan ?? Plan(), edit); return }
-        if let plan = await with({ c, k in try await c.editPlan(k, edit) }) { s.plan = plan }
-    }
-
-    /// harlo runs plans with helpers, and lists a session's helpers.
-    public var runsPlans: Bool { demo || samples != nil || features.contains("planRun") }
-
-    /// Runs the open session's plan with helpers of an agent ("" the
-    /// team's), or goes on with a paused run.
-    public func runPlan(agent: String) async {
-        guard let s = session else { return }
-        if demo || samples != nil {
-            if var plan = s.plan {
-                let id = agent.isEmpty ? plan.team?.agent ?? s.harness : agent
-                plan.run = PlanRun(agent: id, agentName: plan.reviewers.first { $0.id == id }?.label ?? id)
-                s.plan = plan
-            }
-            return
-        }
-        if let plan = await with({ c, k in try await c.runPlan(k, agent: agent) }) { s.plan = plan }
-    }
-
-    /// Stops the open session's plan's run.
-    public func stopPlanRun() async {
-        guard let s = session else { return }
-        if demo || samples != nil { s.plan?.run = nil; return }
-        if let plan = await with({ c, k in try await c.stopPlanRun(k) }) { s.plan = plan }
-    }
-
-    /// The open session's helpers, from harlo.
-    func refreshHelpers(_ s: OpenSession) async {
-        guard features.contains("helpers"), let c = client, !s.liveKey.isEmpty,
-              let list = try? await c.helpers(s.liveKey), session === s, list != s.helpers else { return }
-        s.helpers = list
-    }
-
-    /// Answers a helper's request (a tool's approval) with one of its
-    /// options: Approve, Deny, …
-    public func answerHelper(_ h: Helper, value: String) async {
-        guard let s = session, let ask = h.asks else { return }
-        if demo || samples != nil {
-            if let i = s.helpers.firstIndex(where: { $0.id == h.id }) {
-                s.helpers[i].asks = nil
-                s.helpers[i].status = "running"
-            }
-            return
-        }
-        if let list = await with({ c, k in try await c.answerHelper(k, helper: h.id, request: ask.id, value: value) }), session === s {
-            s.helpers = list
-        }
-    }
-
-    /// harlo answers a helper's requests from the phone.
-    public var answersHelpers: Bool { demo || samples != nil || features.contains("answerHelper") }
-
-    /// Opens a helper's session (false: it isn't in the list).
+    /// Opens a session by its key (false: it isn't in the list).
     @discardableResult
-    public func openHelper(_ key: String) -> Bool {
+    public func openSession(_ key: String) -> Bool {
         guard let row = sessions.first(where: { $0.key == key }) else { return false }
         open(row)
         return true
-    }
-
-    /// Has another agent review a finished step's commit: true when it
-    /// started (its review comes back to the session).
-    public func reviewStep(_ step: PlanStep, with agent: String) async -> Bool {
-        if demo || samples != nil { return true }
-        return await with { c, k in try await c.reviewStep(k, step: step.id, agent: agent) } != nil
     }
 
     // ---- workflow runs ------------------------------------------------------------
@@ -1214,12 +1128,6 @@ public final class HarloModel {
         if let m = await with({ c, k in try await c.setModes(k, approval: mode) }) { s.modes = m }
     }
 
-    public func setPlan(_ on: Bool) async {
-        guard let s = session else { return }
-        if demo { s.modes?.plan = on; return }
-        if let m = await with({ c, k in try await c.setModes(k, plan: on) }) { s.modes = m }
-    }
-
     /// The models the open session can switch to.
     public func models() async -> [ModelChoice] {
         if let s = samples { return s.models }
@@ -1389,7 +1297,7 @@ public final class HarloModel {
     public func connect(_ host: String) async -> RemoteMachine? {
         if demo || samples != nil {
             try? await Task.sleep(for: .milliseconds(600))
-            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["claude", "harlo"])
+            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["pi"])
         }
         return await with(session: false) { c, _ in try await c.connect(host) }
     }
@@ -1452,31 +1360,30 @@ public final class HarloModel {
     }
 
     /// Answers a request from the list, without opening its session.
-    public func answer(_ req: UIRequest, _ answer: JSON, in key: String) async {
-        if let s = session, s.liveKey == key || s.key == key {
-            await self.answer(req, answer)
-            answered.insert(req.id)
-            return
+    @discardableResult
+    public func answer(_ req: UIRequest, _ answer: JSON, in key: String) async -> Bool {
+        guard answering.insert(req.id).inserted else { return false }
+        defer { answering.remove(req.id) }
+        let open = session.flatMap { $0.liveKey == key || $0.key == key ? $0 : nil }
+        if demo {
+            demoAnswered(req, answer, in: key)
+        } else {
+            let target = open?.liveKey ?? key
+            guard !target.isEmpty else { alert = "The session isn't open yet."; return false }
+            guard await with(session: false, { c, _ in try await c.answer(target, requestId: req.id, answer: answer) }) != nil else { return false }
         }
+        open?.requests.removeAll { $0.id == req.id }
         answered.insert(req.id)
-        if demo { return demoAnswered(req, answer, in: key) }
-        if await with(session: false, { c, _ in try await c.answer(key, requestId: req.id, answer: answer) }) == nil {
-            answered.remove(req.id)
-        }
+        return true
     }
 
-    public func answer(_ req: UIRequest, _ answer: JSON) async {
-        if demo, let s = session {
-            s.requests.removeAll { $0.id == req.id }
-            answered.insert(req.id)
-            return demoAnswered(req, answer, in: s.key)
-        }
-        guard let s = session, let c = client, !s.liveKey.isEmpty else {
+    @discardableResult
+    public func answer(_ req: UIRequest, _ answer: JSON) async -> Bool {
+        guard let s = session else {
             alert = "Not connected to harlo."
-            return
+            return false
         }
-        s.requests.removeAll { $0.id == req.id }
-        do { try await c.answer(s.liveKey, requestId: req.id, answer: answer) } catch { alert = Self.describe(error) }
+        return await self.answer(req, answer, in: s.key)
     }
 }
 
@@ -1485,7 +1392,7 @@ extension Event {
     public var sessionKey: String? {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
-             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .subagents(let k, _), .aside(let k, _), .unsent(let k, _, _), .plan(let k), .workflow(let k): return k
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .unsent(let k, _, _), .workflow(let k), .ext(let k, _): return k
         case .sessions, .limits, .revoked: return nil
         }
     }

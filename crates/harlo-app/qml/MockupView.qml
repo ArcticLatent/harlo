@@ -71,7 +71,7 @@ Item {
             color: "transparent"
             border.width: activeFocus ? 2 : 1
             border.color: activeFocus ? Theme.primary : Theme.hairline
-            radius: 3
+            radius: 2
             // (From the keyboard too: Tab to it, Enter or Space.)
             activeFocusOnTab: true
             Keys.onReturnPressed: view.openRequested(view.showBefore && !!view.mock.before)

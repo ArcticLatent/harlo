@@ -1,8 +1,8 @@
 //! Settings → Agents: each agent's install, version and models.
 //!
-//! Whether each agent (Harlo, Claude) is installed. Checked on demand: Claude's
-//! models are a curated list, Harlo's come from a short RPC run with no session
-//! (no prompt is sent, so nothing is spent).
+//! Whether pi is installed. Checked on demand: its models
+//! come from a short RPC run with no session (no prompt is sent, so nothing is
+//! spent).
 
 // Rust guideline compliant 2026-10-09
 
@@ -70,7 +70,7 @@ pub fn version(program: &Path) -> Option<String> {
 }
 
 /// Checks one provider (blocking; run it off the UI thread, inside the
-/// tokio runtime for harlo-agent).
+/// tokio runtime for its harness).
 pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Handle) -> Status {
     let Some(program) = program(kind, configured) else {
         return Status { error: (!configured.trim().is_empty()).then(|| format!("{configured} isn't there")), ..Default::default() };
@@ -79,11 +79,7 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
     let mut status = Status { program: Some(program.clone()), version: version.clone(), ..Default::default() };
     let scratch = std::env::temp_dir();
     let models = match kind {
-        HarnessKind::Claude => Ok(harlo_harness::claude::models(version.as_deref(), harlo_harness::claude::config_dir().map(|d| d.join("settings.json")).as_deref())
-            .into_iter()
-            .map(|(id, name)| (id, name, false))
-            .collect()),
-        HarnessKind::Harlo => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
+        HarnessKind::Pi => runtime.block_on(rpc_models(kind, program.clone(), scratch)),
         HarnessKind::Demo => Ok(Vec::new()),
     };
     match models {
@@ -93,48 +89,11 @@ pub fn check(kind: HarnessKind, configured: &str, runtime: &tokio::runtime::Hand
         }
         Err(e) => status.error = Some(format!("{e:#}")),
     }
-    // Claude's models only when Claude Code is signed in (its own answer;
-    // one it can't give leaves them).
-    if kind == HarnessKind::Claude && claude_signed_out(&program) {
-        status.models.clear();
-        status.error = Some("Not signed in.".to_owned());
-    }
-    // harlo-agent signed out: where to sign in.
-    if kind == HarnessKind::Harlo && status.error.as_deref().is_some_and(|e| e.contains("Not signed in") || e.contains("sign-in has ended")) {
-        status.error = Some("Not signed in.".to_owned());
-    }
     status.version = status.version.as_deref().map(version_number);
     status
 }
 
-/// `claude auth status` says it isn't signed in (an API key in the
-/// environment counts as signed in).
-fn claude_signed_out(program: &Path) -> bool {
-    let Ok(mut child) = std::process::Command::new(program)
-        .args(["auth", "status", "--json"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-    else {
-        return false;
-    };
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while child.try_wait().ok().flatten().is_none() {
-        if std::time::Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(30));
-    }
-    let mut out = String::new();
-    use std::io::Read;
-    let _ = child.stdout.take().map(|mut o| o.read_to_string(&mut out));
-    serde_json::from_str::<Value>(&out).is_ok_and(|v| v["loggedIn"].as_bool() == Some(false))
-}
-
-/// harlo-agent in RPC mode with no session: its model list.
+/// The agent in RPC mode with no session: its model list.
 async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> anyhow::Result<Vec<(String, String, bool)>> {
     models_of(HarnessConfig { kind, program: Some(program), cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: None }).await
 }
@@ -148,17 +107,6 @@ async fn rpc_models(kind: HarnessKind, program: PathBuf, cwd: PathBuf) -> anyhow
 /// doesn't answer.
 pub async fn host_models(kind: HarnessKind, remote: harlo_harness::RemoteLaunch, cwd: PathBuf) -> anyhow::Result<Vec<(String, String, bool)>> {
     models_of(HarnessConfig { kind, program: None, cwd, session: SessionTarget::Ephemeral, extra_args: vec![], env: vec![], remote: Some(remote) }).await
-}
-
-/// Whether Claude Code is signed in on a host (blocking). Its list of models
-/// is the same either way, so that alone doesn't say. `None`: it didn't say.
-pub fn claude_signed_in_on(host: &crate::remote::Host) -> Option<bool> {
-    let out = crate::remote::run(host, "claude auth status", Duration::from_secs(20)).ok()?;
-    signed_in(&String::from_utf8_lossy(&out.stdout))
-}
-
-fn signed_in(status: &str) -> Option<bool> {
-    serde_json::from_str::<Value>(status.trim()).ok()?["loggedIn"].as_bool()
 }
 
 async fn models_of(cfg: HarnessConfig) -> anyhow::Result<Vec<(String, String, bool)>> {
@@ -186,13 +134,6 @@ async fn models_of(cfg: HarnessConfig) -> anyhow::Result<Vec<(String, String, bo
 #[cfg(test)]
 mod tests {
     #[test]
-    fn claude_says_whether_it_is_signed_in() {
-        assert_eq!(super::signed_in(r#"{"loggedIn": false, "authMethod": "none"}"#), Some(false));
-        assert_eq!(super::signed_in("{\"loggedIn\": true}\n"), Some(true));
-        assert_eq!(super::signed_in("command not found"), None);
-    }
-
-    #[test]
     fn version_numbers() {
         assert_eq!(super::version_number("2.1.296 (Claude Code)"), "2.1.296");
         assert_eq!(super::version_number("harlo-agent v2.0.25"), "2.0.25");
@@ -205,7 +146,7 @@ mod tests {
 mod this_computer {
     /// Every provider on this computer (no prompts are sent):
     /// `cargo test -p harlo-core providers -- --ignored --nocapture`
-    /// (`HARLO_CHECK=harlo:5`: only Harlo, five times).
+    /// (`HARLO_CHECK=pi:5`: only pi, five times).
     #[test]
     #[ignore = "spends real model plans"]
     fn checks_each() {

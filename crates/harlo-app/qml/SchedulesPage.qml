@@ -46,7 +46,7 @@ ColumnLayout {
             Layout.fillWidth: true
             Layout.topMargin: 10
             implicitHeight: cardCol.implicitHeight + 24
-            radius: 10
+            radius: 4
             color: Theme.elevated
             border.color: Theme.border
             opacity: sch.enabled ? 1 : 0.7
@@ -184,7 +184,7 @@ ColumnLayout {
                     placeholderTextColor: Theme.muted
                     selectionColor: Theme.selection
                     font.pixelSize: Theme.px(13)
-                    background: Rectangle { radius: 6; color: Theme.background; border.color: promptField.activeFocus ? Theme.primary : Theme.border }
+                    background: Rectangle { radius: 2; color: Theme.background; border.color: promptField.activeFocus ? Theme.primary : Theme.border }
                     onTextChanged: editor.error = ""
                 }
             }
@@ -194,7 +194,7 @@ ColumnLayout {
                 Label { text: "In"; color: Theme.muted; font.pixelSize: Theme.px(12) }
                 ComboField { id: projectBox; Layout.fillWidth: true; model: ["Home folder"].concat(schedules.projects.map(p => p.name)) }
                 Repeater {
-                    model: [["", "Default"], ["harlo", "Harlo"], ["claude", "Claude"]]
+                    model: [["", "Default"], ["pi", "pi"]]
                     ChoicePill { required property var modelData; text: modelData[1]; selected: editor.harness === modelData[0]; onClicked: editor.harness = modelData[0] }
                 }
             }

@@ -72,7 +72,7 @@ Rectangle {
                     implicitHeight: 26
                     onClicked: root.hideRequested()
                     contentItem: Icon { name: "close"; color: hideButton.hovered ? Theme.foreground : Theme.muted }
-                    background: Rectangle { radius: 5; color: hideButton.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: hideButton.hovered ? Theme.hover : "transparent" }
                     ToolTip.visible: hovered
                     ToolTip.text: "Hide (Esc)"
                 }

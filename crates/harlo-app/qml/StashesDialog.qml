@@ -95,7 +95,7 @@ AppDialog {
                 required property var modelData
                 width: ListView.view.width
                 implicitHeight: stashRow.implicitHeight + 16
-                radius: 8
+                radius: 3
                 color: Theme.background
                 border.color: Theme.border
                 RowLayout {

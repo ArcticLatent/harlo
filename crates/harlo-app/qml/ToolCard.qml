@@ -36,7 +36,10 @@ ColumnLayout {
     readonly property bool isRead: /^(read|view|read_?file)$/i.test(title)
     property var askLines: []
     readonly property bool open: card.transcript.listView.expanded[rowKey] === true
-    readonly property var agents: callId !== "" ? card.transcript.subagents.filter(a => a.parentToolCallId === callId) : []
+    // A pi extension draws this call (its tool's renderCall/renderResult):
+    // its lines under the call's line, in place of harlo's well.
+    readonly property var ext: callId !== "" ? (card.transcript.extDrawn["t:" + callId] || null) : null
+    readonly property bool extResult: !!ext && (ext.result || []).length > 0
     // A write: every line added, numbered; an edit: lines out and in,
     // numbered where its new lines are in the file now (a local one).
     readonly property bool preview: diff !== "" && !asking
@@ -149,7 +152,7 @@ ColumnLayout {
     property int cutLines: 0
     readonly property bool canOpen: (text !== "" && !shell && !preview) || hidden > 0 || cutLines > 0 || (commandInWell && shownCommand.split("\n").length > 2)
     // (harlo's tools about a session: its title, not its key.)
-    readonly property bool aboutSession: /^(mcp__harlo__)?(bring_over|send_message|read_session|stop_session)$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
+    readonly property bool aboutSession: /^(mcp__harlo__)?read_session$/.test(title) && /^[\w-]+:\S+$/.test(subtitle)
     readonly property string sessionTitle: aboutSession ? Workspace.sessionTitle(subtitle) : ""
     readonly property string target: reportArgs && reportArgs.summary !== "" ? reportArgs.summary : label !== "" ? label : sessionTitle !== "" ? sessionTitle : subtitle !== "" || rowState !== "pending" ? card.transcript.local(subtitle) : Theme.toolWriting(title)
     // Code type only for code: a command, a path, a pattern, a link. A
@@ -183,13 +186,13 @@ ColumnLayout {
         }
         // (Hover and focus share a left edge: the step's name.)
         Rectangle {
-            x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
+            x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 2
             color: headHover.hovered && card.canOpen ? Theme.hover : "transparent"
         }
         // (Focused: ringed from its name, the run's line left clear.)
         Rectangle {
             visible: card.transcript.keyFocus(headBox)
-            x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 6
+            x: toolNameLabel.x - 6; width: parent.width - x + 6; height: parent.height; radius: 2
             color: "transparent"; border.width: 1; border.color: Theme.accent
         }
         RowLayout {
@@ -323,30 +326,6 @@ ColumnLayout {
         HoverHandler { id: headHover; cursorShape: card.canOpen ? Qt.PointingHandCursor : Qt.ArrowCursor }
         TapHandler { enabled: card.canOpen; onTapped: { card.transcript.clickFocus(headBox); card.toggleOpen() } }
     }
-    // The subagents this call started (the task tool), as a tree.
-    RowLayout {
-        Layout.fillWidth: true
-        Layout.leftMargin: 22
-        visible: card.agents.length > 0
-        spacing: 6
-        Rectangle { Layout.fillHeight: true; Layout.leftMargin: 4; implicitWidth: 2; radius: 1; color: Theme.border }
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 0
-            // (By place: the list is read again a few times a second
-            // while they run, and its rows stay as they are, updated.)
-            Repeater {
-                model: card.agents.length
-                SubagentRow {
-                    required property int index
-                    Layout.fillWidth: true
-                    a: card.agents[index] || ({})
-                    session: card.transcript.session
-                    onViewRequested: (agent, steer) => card.transcript.subagentRequested(agent, steer)
-                }
-            }
-        }
-    }
     // The approval: its details (reason, command…) and the answer.
     // A command that can't be undone says so, and its confirm names
     // what it does rather than looking like good news.
@@ -373,7 +352,7 @@ ColumnLayout {
             && l.replace(/^Command:\s*/, "").trim() !== card.transcript.local(card.subtitle).replace(/…$/, "").trim()).join("\n").trim()
         visible: card.asking && details !== ""
         implicitHeight: askDetails.implicitHeight + 12
-        radius: 4
+        radius: 2
         color: Theme.codeBg
         Label {
             id: askDetails
@@ -436,6 +415,21 @@ ColumnLayout {
         }
         }
     }
+    // The extension's drawing of the call and of its result.
+    Loader {
+        Layout.fillWidth: true
+        Layout.leftMargin: 22
+        active: !!card.ext && (card.ext.lines || []).length > 0
+        visible: active
+        sourceComponent: ExtensionView { objectName: "toolExtCall"; session: card.transcript.session; view: card.ext }
+    }
+    Loader {
+        Layout.fillWidth: true
+        Layout.leftMargin: 22
+        active: card.extResult && !card.asking
+        visible: active
+        sourceComponent: ExtensionView { objectName: "toolExtResult"; session: card.transcript.session; view: card.ext; part: "result" }
+    }
     // The well: a write's or an edit's lines; a command (when its line
     // doesn't say it) and its last lines; any call's output, opened.
     Rectangle {
@@ -443,10 +437,10 @@ ColumnLayout {
         objectName: card.preview ? "toolPreview" : "toolWell"
         Layout.fillWidth: true
         Layout.leftMargin: 22
-        visible: card.preview || card.commandInWell || card.outInWell || card.codeShown
+        visible: !card.extResult && (card.preview || card.commandInWell || card.outInWell || card.codeShown)
         // (As tall as it is: a run's box is what scrolls.)
         implicitHeight: wellCol.implicitHeight + 12
-        radius: 6
+        radius: 2
         color: Theme.codeBg
         // Line numbers on a column of their own, from the code's first
         // line (under a command, if any) to the well's bottom.

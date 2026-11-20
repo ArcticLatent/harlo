@@ -17,7 +17,7 @@ Button {
     contentItem: Item {
         Icon { anchors.centerIn: parent; name: ib.iconName; color: ib.tint; implicitWidth: 18; implicitHeight: 18; opacity: ib.enabled ? 1 : 0.35 }
     }
-    background: Rectangle { radius: 6; color: ib.on ? Theme.selected : ib.hovered ? Theme.hover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
+    background: Rectangle { radius: 2; color: ib.on ? Theme.selected : ib.hovered ? Theme.hover : "transparent"; Behavior on color { ColorAnimation { duration: Theme.hoverMotion } } }
     ToolTip.visible: hovered && tip !== ""
     ToolTip.delay: 400
     ToolTip.text: tip

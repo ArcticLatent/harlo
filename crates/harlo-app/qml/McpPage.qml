@@ -4,16 +4,16 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import harlo
 
-// Settings → Tools for agents: the tool servers your agents (Harlo, Claude)
-// can call, globally or in a project. A grid of servers with their status
+// Settings → Tools for agents: the tool servers pi can call, globally or
+// in a project. A grid of servers with their status
 // (harlo tests them: the agents don't report one), and a page per server
 // to edit it.
 ColumnLayout {
     id: page
     /// Settings is narrow.
     property bool compact: false
-    /// Harlo signing in to a server (Main opens the sign-in).
-    signal signInRequested(string scope, string server)
+    /// pi signing in to a server: `command` in harlo's terminal.
+    signal runInTerminalRequested(string command)
     /// Where the server page's action bar floats (Settings' page bottom).
     property Item footerHost: null
     property bool showAllTools: false
@@ -33,17 +33,17 @@ ColumnLayout {
     }
     property string scope: globalScope
     onGlobalScopeChanged: scope = globalScope
-    readonly property var listing: Mcp.revision >= 0 ? JSON.parse(Mcp.listJson(scope)) : { servers: [], errors: [], files: {} }
+    readonly property var listing: Mcp.revision >= 0 ? JSON.parse(Mcp.listJson(scope)) : { servers: [], errors: [], file: "" }
     readonly property var status: Mcp.revision >= 0 ? JSON.parse(Mcp.statusJson(scope)) : ({})
     onScopeChanged: { editing = null; Mcp.testAll(scope); if (showCatalog) Mcp.catalogRefresh(scope, false) }
     Component.onCompleted: { Mcp.testAll(scope); if (showCatalog) Mcp.catalogRefresh(page.scope, false) }
 
     // ---- the server being edited (null: the grid) ---------------------------
-    /// { oldName, form, harnesses, isNew }
+    /// { oldName, form, isNew }
     property var editing: null
     property string formError: ""
     property bool showSecrets: false
-    readonly property var emptyForm: ({ name: "", enabled: true, transport: "stdio", command: [], url: "", headers: [], env: [], cwd: "", timeoutSecs: null, readOnlyAll: false, readOnly: [], exposure: "", description: "" })
+    readonly property var emptyForm: ({ name: "", enabled: true, transport: "stdio", command: [], url: "", headers: [], env: [], cwd: "", timeoutSecs: null })
     function freeName() {
         let n = "new-server", i = 1
         while (listing.servers.some(s => s.name === n)) n = "new-server-" + i++
@@ -52,12 +52,12 @@ ColumnLayout {
     function openNew(form) {
         const f = Object.assign({}, emptyForm, form || {})
         if (f.name === "" || f.name === "imported") f.name = freeName()
-        editing = { oldName: "", form: f, harnesses: page.defaultAgents(), isNew: true }
+        editing = { oldName: "", form: f, isNew: true }
         formError = ""
         showSecrets = false
     }
     function openServer(s) {
-        editing = { oldName: s.name, form: JSON.parse(JSON.stringify(s.form)), harnesses: s.harnesses.slice(), isNew: false, differs: s.differs, harloUnapproved: s.harloUnapproved === true }
+        editing = { oldName: s.name, form: JSON.parse(JSON.stringify(s.form)), isNew: false }
         formError = ""
         showSecrets = false
         showAllTools = false
@@ -68,20 +68,8 @@ ColumnLayout {
         e.form[key] = value
         editing = e
     }
-    /// The agents that are on (Settings → Agents) and have MCP servers.
-    readonly property var agents: (Workspace.providersRevision >= 0 ? JSON.parse(Workspace.chatProvidersJson()) : []).filter(p => ["claude", "harlo"].includes(p.id))
-    /// A new server is for the installed ones (all of them if none is).
-    function defaultAgents() {
-        const ids = agents.map(a => a.id), installed = ids.filter(id => Mcp.installedOn(id, page.scope))
-        return installed.length > 0 ? installed : ids
-    }
-    function toggleHarness(h, on) {
-        const e = Object.assign({}, editing)
-        e.harnesses = on ? e.harnesses.filter(x => x !== h).concat([h]) : e.harnesses.filter(x => x !== h)
-        editing = e
-    }
     function save() {
-        const err = Mcp.save(scope, editing.oldName, JSON.stringify(editing.form), JSON.stringify(editing.harnesses))
+        const err = Mcp.save(scope, editing.oldName, JSON.stringify(editing.form))
         if (err !== "") { formError = err; return false }
         const name = editing.form.name
         editing = null
@@ -129,7 +117,7 @@ ColumnLayout {
         property string text
         implicitWidth: badgeLabel.implicitWidth + 10
         implicitHeight: 18
-        radius: 5
+        radius: 2
         color: Theme.subtle
         border.color: Theme.border
         Label { id: badgeLabel; anchors.centerIn: parent; text: parent.text; color: Theme.muted; font.pixelSize: Theme.px(10.5) }
@@ -198,6 +186,22 @@ ColumnLayout {
         font.pixelSize: Theme.px(12.5)
         wrapMode: Text.Wrap
     }
+    // Harlo's own tools: past sessions, and asking you to approve.
+    Group {
+        visible: page.editing === null
+        Layout.topMargin: 12
+        SettingRow {
+            title: "Harlo's tools"
+            detail: Workspace.orchestrationOn ? "On: agents can read your past sessions and ask you to approve a step. For sessions started from now on."
+                                              : "Off: agents don't get Harlo's tools. For sessions started from now on."
+            icon: "ai-agent"
+            AppSwitch {
+                objectName: "orchEnabled"
+                checked: Workspace.orchestrationOn
+                onToggled: { Workspace.setOrchestrationEnabled(checked); checked = Qt.binding(() => Workspace.orchestrationOn) }
+            }
+        }
+    }
     RowLayout {
         Layout.fillWidth: true
         Layout.topMargin: page.editing === null ? 12 : 0
@@ -224,8 +228,7 @@ ColumnLayout {
     }
     FormNote {
         Layout.topMargin: 6
-        text: "In " + page.agents.map(a => page.listing.files ? page.listing.files[a.id] : "").filter(x => x).join(", ") + ". Changes apply to new sessions."
-              + (!page.scope.startsWith("host:") && page.scope !== "global" && page.agents.some(a => a.id === "harlo") ? " Harlo starts a project's servers only as saved here." : "")
+        text: (page.listing.file ? "In " + page.listing.file + ". " : "") + "Changes apply to new sessions."
     }
     Repeater {
         model: page.listing.errors
@@ -233,34 +236,28 @@ ColumnLayout {
     }
 
     // ---- servers harlo installs with a click (this computer's global ones):
-    // a switch, the agents, the version and Update --------------------------
+    // a switch, the version and Update ------------------------------------
     // (Global here or on the instance's host: harlo installs them there.)
     readonly property bool showCatalog: page.editing === null && page.scope === page.globalScope
     readonly property var catalog: Mcp.revision >= 0 ? JSON.parse(Mcp.catalogJson(page.scope)) : []
     onShowCatalogChanged: if (showCatalog) Mcp.catalogRefresh(page.scope, false)
     SectionTitle { visible: page.showCatalog; text: "Ready to install" }
-    FormNote { objectName: "mcpCatalogLede"; visible: page.showCatalog; Layout.topMargin: 2; text: "Turn one on and harlo downloads it from its project's releases and sets it up" + (Workspace.instance !== "" ? " on " + Workspace.instance : "") + " for the agents you tick." }
+    FormNote { objectName: "mcpCatalogLede"; visible: page.showCatalog; Layout.topMargin: 2; text: "Turn one on and harlo downloads it from its project's releases and sets it up" + (Workspace.instance !== "" ? " on " + Workspace.instance : "") + " for pi." }
     Repeater {
         model: page.showCatalog ? page.catalog : []
         Rectangle {
             id: bcard
             required property var modelData
             readonly property var b: modelData
-            readonly property bool on: (b.agents || []).length > 0
+            readonly property bool on: b.on === true
             readonly property bool busy: (b.busy || "") !== ""
             readonly property var st: page.status[b.id]
-            /// The agents ticked: those it's on for, else those chosen last
-            /// (none yet: the installed ones).
-            readonly property var ticked: on ? b.agents : ((b.chosen || []).length > 0 ? b.chosen : page.defaultAgents())
-            /// Those of them turned on in Settings → Agents (it's set up
-            /// for these).
-            readonly property var shown: ticked.filter(a => page.agents.some(x => x.id === a))
             readonly property bool newer: (b.latest || "") !== "" && (b.version || "") !== "" && page.newerVersion(b.latest, b.version)
             objectName: "mcpCatalog-" + b.id
             Layout.fillWidth: true
             Layout.topMargin: 10
             implicitHeight: bcol.implicitHeight + 24
-            radius: 10
+            radius: 4
             color: Theme.elevated
             border.color: Theme.border
             ColumnLayout {
@@ -282,39 +279,14 @@ ColumnLayout {
                     Item { Layout.fillWidth: true }
                     AppSwitch {
                         objectName: "mcpCatalogToggle-" + bcard.b.id
-                        enabled: !bcard.busy && !bcard.b.loading && (bcard.on || bcard.shown.length > 0)
+                        enabled: !bcard.busy && !bcard.b.loading
                         checked: bcard.on
-                        onToggled: Mcp.catalogSet(page.scope, bcard.b.id, checked, JSON.stringify(checked ? bcard.shown : bcard.ticked))
+                        onToggled: Mcp.catalogSet(page.scope, bcard.b.id, checked)
                         ToolTip.visible: hovered
-                        ToolTip.text: checked ? "On: new sessions start it. Click to turn it off." : bcard.b.version === "" ? "Off. Click to download it and set it up for the agents ticked." : "Off. Click to set it up for the agents ticked."
+                        ToolTip.text: checked ? "On: new sessions start it. Click to turn it off." : bcard.b.version === "" ? "Off. Click to download it and set it up for pi." : "Off. Click to set it up for pi."
                     }
                 }
                 FormNote { text: bcard.b.about; color: Theme.textMuted }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 12
-                    Label { text: "For"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-                    Repeater {
-                        model: page.agents
-                        AppCheckBox {
-                            required property var modelData
-                            objectName: "mcpCatalogFor-" + bcard.b.id + "-" + modelData.id
-                            text: Theme.harnessLabel(modelData.id)
-                            enabled: !bcard.busy
-                            checked: bcard.ticked.includes(modelData.id)
-                            onToggled: {
-                                // (Only this one changes: an agent turned off in
-                                // Providers keeps its own.)
-                                const next = checked ? bcard.ticked.filter(x => x !== modelData.id).concat([modelData.id]) : bcard.ticked.filter(x => x !== modelData.id)
-                                // (On: set up again for these, or off when none
-                                // is left; off: remembered for turning it on.)
-                                if (bcard.on) Mcp.catalogSet(page.scope, bcard.b.id, next.length > 0, JSON.stringify(next))
-                                else Mcp.catalogSet(page.scope, bcard.b.id, false, JSON.stringify(next))
-                            }
-                        }
-                    }
-                    Item { Layout.fillWidth: true }
-                }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
@@ -341,7 +313,7 @@ ColumnLayout {
                 }
                 FormNote {
                     objectName: "mcpCatalogNote-" + bcard.b.id
-                    readonly property string problem: bcard.b.error || (bcard.b.taken ? "You have another server called " + bcard.b.id + " below: remove it to use Harlo's." : "") || (!bcard.on ? bcard.b.nodeError || "" : "")
+                    readonly property string problem: bcard.b.error || (bcard.b.taken ? "You have another server called " + bcard.b.id + " below: remove it to use this one." : "") || (!bcard.on ? bcard.b.nodeError || "" : "")
                     visible: text !== ""
                     text: problem !== "" ? problem : (bcard.b.message || "")
                     color: problem !== "" ? (bcard.b.error ? Theme.error : Theme.warning) : Theme.muted
@@ -417,7 +389,7 @@ ColumnLayout {
                 Layout.fillHeight: true
                 Layout.preferredWidth: 1
                 implicitHeight: Math.max(96, cardColumn.implicitHeight + 24)
-                radius: 10
+                radius: 4
                 color: cardHover.hovered ? Theme.hover : Theme.elevated
                 border.color: Theme.border
                 opacity: modelData.form.enabled ? 1 : 0.6
@@ -461,9 +433,6 @@ ColumnLayout {
                             Layout.alignment: Qt.AlignVCenter
                             spacing: 5
                             Label { height: 18; verticalAlignment: Text.AlignVCenter; text: card.local ? "Local server" : "Remote server"; color: Theme.muted; font.pixelSize: Theme.px(11) }
-                            Repeater { model: card.modelData.harnesses; Badge_ { required property string modelData; text: Theme.harnessLabel(modelData) } }
-                            Badge_ { visible: card.modelData.differs; text: "copies differ" }
-                            Badge_ { visible: card.modelData.harloUnapproved === true; text: "not allowed for Harlo" }
                         }
                         AppSwitch {
                             objectName: "mcpToggle-" + card.modelData.name
@@ -486,7 +455,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.topMargin: 12
         implicitHeight: emptyLabel.implicitHeight + 32
-        radius: 12
+        radius: 4
         color: Theme.raised
         border.color: Theme.hairline
         Label { id: emptyLabel; x: 16; y: 16; width: parent.width - 32; text: "No MCP servers here yet."; color: Theme.textMuted; font.pixelSize: Theme.px(12.5); wrapMode: Text.Wrap }
@@ -502,8 +471,6 @@ ColumnLayout {
         readonly property var f: page.editing ? page.editing.form : page.emptyForm
         readonly property var st: page.editing ? page.status[page.editing.oldName] : undefined
         readonly property bool local: f.transport === "stdio"
-        /// The tools are listed, for Harlo: each can be marked as only looking.
-        readonly property bool marking: st !== undefined && st !== null && st.state === "connected" && st.tools.length > 0 && page.editing !== null && page.editing.harnesses.includes("harlo")
 
         RowLayout {
             Layout.fillWidth: true
@@ -520,12 +487,6 @@ ColumnLayout {
             Pill_ { visible: text !== "" && page.editing !== null && !page.editing.isNew; text: page.statusText(detail.st, detail.f.enabled); tint: page.statusColor(detail.st, detail.f.enabled) }
             FlatButton { objectName: "mcpImport"; visible: page.editing !== null && page.editing.isNew; text: "Import JSON…"; font.pixelSize: Theme.px(12); onClicked: importDialog.open() }
         }
-        FormNote { visible: page.editing !== null && page.editing.differs === true; color: Theme.warning; text: "The agents' copies of this server differ; saving writes this version to each." }
-        FormNote {
-            visible: page.editing !== null && page.editing.harloUnapproved === true
-            color: Theme.warning
-            text: "Harlo doesn't start this server yet: it's in the project's file, but wasn't saved here as it is now (a repository can bring one that runs a command). Check it, then save to let Harlo use it."
-        }
 
         SectionTitle { text: "Server" }
         RowLayout {
@@ -539,24 +500,6 @@ ColumnLayout {
                 onEditingFinished: page.setField("name", text.trim().replace(/[^A-Za-z0-9_-]/g, "-"))
             }
             AppCheckBox { objectName: "mcpEnabled"; text: "Enabled"; checked: detail.f.enabled; onToggled: page.setField("enabled", checked) }
-        }
-        RowLayout {
-            spacing: 14
-            Label { text: "For"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-            Repeater {
-                model: page.agents
-                AppCheckBox {
-                    required property var modelData
-                    objectName: "mcpFor" + ({ claude: "Claude", harlo: "Harlo" })[modelData.id]
-                    text: modelData.label
-                    checked: page.editing !== null && page.editing.harnesses.includes(modelData.id)
-                    onToggled: page.toggleHarness(modelData.id, checked)
-                }
-            }
-        }
-        FormNote {
-            visible: page.editing !== null && page.editing.harnesses.includes("claude") && !detail.f.enabled
-            text: "Claude has no off switch: it keeps the server on."
         }
 
         SectionTitle { text: "How to reach it" }
@@ -588,7 +531,7 @@ ColumnLayout {
             font.family: Theme.mono
             font.pixelSize: Theme.px(12)
             wrapMode: TextEdit.Wrap
-            background: Rectangle { radius: 6; color: Theme.background; border.color: commandArea.activeFocus ? Theme.primary : Theme.border }
+            background: Rectangle { radius: 2; color: Theme.background; border.color: commandArea.activeFocus ? Theme.primary : Theme.border }
             function commit() {
                 const lines = text.split("\n").map(l => l.trim()).filter(l => l !== "")
                 // A whole command on one line: split it.
@@ -613,7 +556,7 @@ ColumnLayout {
         SectionTitle { text: detail.local ? "Environment variables" : "Request headers" }
         RowLayout {
             Layout.fillWidth: true
-            FormNote { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment; Harlo also runs !command." : "Such as Authorization: Bearer …" }
+            FormNote { text: detail.local ? "Values the server needs, such as an API key. ${VAR} reads one from your environment." : "Such as Authorization: Bearer …" }
             FlatButton { text: page.showSecrets ? "Hide values" : "Show values"; outlined: false; font.pixelSize: Theme.px(12); onClicked: page.showSecrets = !page.showSecrets }
         }
         PairsEditor_ {
@@ -674,67 +617,32 @@ ColumnLayout {
                 text: !detail.st ? "Not tested yet."
                     : detail.st.state === "testing" ? "Testing…"
                     : detail.st.state === "connected" ? "Connected" + (detail.st.server ? " to " + detail.st.server : "") + "."
-                    : detail.st.state === "needs_auth" ? "The server wants you to sign in." + (page.editing.harnesses.includes("harlo") ? " Sign in for Harlo here" + (page.editing.harnesses.includes("claude") ? "; Claude Code signs in from its own /mcp." : ".") : " Claude Code signs in to it from its own /mcp.")
+                    : detail.st.state === "needs_auth" ? "The server wants you to sign in: pi signs in in Harlo's terminal."
                     : detail.st.error
                 color: detail.st && detail.st.state === "failed" ? Theme.error : Theme.muted
             }
             FlatButton {
-                objectName: "mcpSignIn"
-                visible: detail.st !== undefined && detail.st !== null && detail.st.state === "needs_auth" && page.editing.harnesses.includes("harlo")
-                text: "Sign in"
+                objectName: "mcpPiSignIn"
+                visible: detail.st !== undefined && detail.st !== null && detail.st.state === "needs_auth"
+                text: "Sign in…"
                 accent: Theme.primary
                 font.pixelSize: Theme.px(12)
-                onClicked: page.signInRequested(page.scope, page.editing.oldName)
+                onClicked: page.runInTerminalRequested(Mcp.piLoginCommand(page.scope, page.editing.oldName))
             }
             FlatButton { objectName: "mcpTest"; text: "Test"; font.pixelSize: Theme.px(12); enabled: !(detail.st && detail.st.state === "testing"); onClicked: Mcp.test(page.scope, page.editing.oldName) }
-        }
-        // Which tools only look (Harlo's): those run without asking, side by
-        // side, and from its programs.
-        FormNote {
-            objectName: "mcpLooksHint"
-            visible: detail.marking
-            Layout.topMargin: 4
-            text: detail.f.readOnlyAll ? "Harlo's file marks every tool of this server as only looking: it runs them without asking."
-                : "Tick the tools that only look and change nothing: Harlo runs them without asking, several at once, and its programs can call them. Those the server marks itself are ticked."
-        }
-        RowLayout {
-            visible: detail.marking
-            Layout.fillWidth: true
-            Layout.topMargin: 4
-            spacing: 8
-            Label { Layout.fillWidth: true; text: "Tool"; color: Theme.muted; font.pixelSize: Theme.px(12) }
-            Label { text: "Only looks"; color: Theme.muted; font.pixelSize: Theme.px(12) }
         }
         Repeater {
             model: detail.st && detail.st.state === "connected" ? (page.showAllTools ? detail.st.tools : detail.st.tools.slice(0, 12)) : []
             RowLayout {
                 id: toolRow
                 required property var modelData
-                readonly property bool marked: (detail.f.readOnly || []).includes(modelData.name)
                 Layout.fillWidth: true
                 spacing: 8
                 // (A long name cut in the middle, at most 60% of the row.)
                 PlainLabel { Layout.maximumWidth: Math.round(detail.width * 0.6); elide: Text.ElideMiddle; text: toolRow.modelData.name; color: Theme.foreground; font.family: Theme.mono; font.pixelSize: Theme.px(12) }
                 PlainLabel { Layout.fillWidth: true; Layout.minimumWidth: 0; text: toolRow.modelData.description.split("\n")[0]; color: Theme.muted; font.pixelSize: Theme.px(12); elide: Text.ElideRight }
-                AppCheckBox {
-                    objectName: "mcpLooks-" + toolRow.modelData.name
-                    visible: detail.marking
-                    // (Under the column's title.)
-                    Layout.preferredWidth: lookTitle.implicitWidth
-                    leftPadding: (lookTitle.implicitWidth - 16) / 2
-                    checked: toolRow.modelData.looks === true || detail.f.readOnlyAll || toolRow.marked
-                    enabled: toolRow.modelData.looks !== true && !detail.f.readOnlyAll
-                    opacity: enabled ? 1 : 0.55
-                    ToolTip.visible: hovered && !enabled
-                    ToolTip.text: detail.f.readOnlyAll ? "Every tool is marked in Harlo's file." : "The server says it only looks."
-                    onToggled: {
-                        const list = (detail.f.readOnly || []).filter(t => t !== toolRow.modelData.name)
-                        page.setField("readOnly", checked ? list.concat([toolRow.modelData.name]) : list)
-                    }
-                }
             }
         }
-        Label { id: lookTitle; visible: false; text: "Only looks"; font.pixelSize: Theme.px(12) }
 
         FlatButton {
             objectName: "mcpShowAllTools"
@@ -830,7 +738,7 @@ ColumnLayout {
                     wrapMode: TextEdit.Wrap
                     placeholderText: '{ "mcpServers": { "files": { "command": "npx", "args": ["-y", "…"] } } }'
                     placeholderTextColor: Theme.muted
-                    background: Rectangle { radius: 6; color: Theme.background; border.color: Theme.border }
+                    background: Rectangle { radius: 2; color: Theme.background; border.color: Theme.border }
                 }
             }
             FormNote { visible: importDialog.error !== ""; color: Theme.error; text: importDialog.error }
@@ -845,10 +753,10 @@ ColumnLayout {
                         const r = JSON.parse(Mcp.parseImport(importText.text))
                         if (r.error !== "") { importDialog.error = r.error; return }
                         if (r.forms.length === 1) { page.openNew(r.forms[0]); importDialog.close(); return }
-                        // Several: each is added for the agents a new one is for.
+                        // Several: each is added.
                         const failed = []
                         for (const f of r.forms) {
-                            const err = Mcp.save(page.scope, "", JSON.stringify(f), JSON.stringify(page.defaultAgents()))
+                            const err = Mcp.save(page.scope, "", JSON.stringify(f))
                             if (err !== "") failed.push(f.name + ": " + err)
                         }
                         if (failed.length) { importDialog.error = failed.join("\n"); return }

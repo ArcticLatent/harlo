@@ -36,20 +36,14 @@ Rectangle {
     // Per-session modes, kept by the workspace.
     /// The session's approval mode; "" for an agent without a shield.
     readonly property string approvalMode: Workspace.modesRevision >= 0 ? Workspace.approvalMode(session.key) : ""
-    readonly property bool planOn: Workspace.modesRevision >= 0 && Workspace.planMode(session.key)
-    function togglePlan() { Workspace.setPlanMode(session.key, !planOn) }
-    // Helpers it started are at work (Stop stops them too, as it waits).
-    readonly property bool helpersWorking: Workspace.orchestrationRevision >= 0 && session.key !== "" && Workspace.helpersWorking(session.key)
     function stop() {
         if (session.status === "busy" || session.preparing) session.abort()
-        Workspace.stopHelpersOf(session.key)
     }
     readonly property var approvalModes: ["always-ask", "write", "yolo"]
     function cycleApproval() {
         const i = approvalModes.indexOf(approvalMode)
         Workspace.setApprovalMode(session.key, approvalModes[(i + 1) % approvalModes.length])
     }
-    Binding { target: root.session; property: "planMode"; value: root.planOn }
 
     // ---- dictation (built-in whisper.cpp; Settings → Voice) ---------------
     /// This composer started it (others ignore its text).
@@ -141,7 +135,7 @@ Rectangle {
     // The text's height plus what's around it (the input's margins, the bar
     // and its bottom margin): any less and the input scrolls, clipping a line.
     implicitHeight: Math.min(Math.max(input.implicitHeight, 44), 240) + 16 + bar.height + bar.anchors.bottomMargin
-    radius: 14
+    radius: 5
     color: Theme.raised
     border.color: input.activeFocus ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.6) : Theme.controlBorder
 
@@ -211,7 +205,7 @@ Rectangle {
         }
         if (completionMode === "file") {
             const files = root.session.fileMatches.map(f => ({ name: f, detail: "", hint: "", kind: "file" }))
-            const sessions = sessionMatches.map(s => ({ name: s.title, detail: "session · " + Theme.ago(s.modified, Date.now()) + (s.harness === "claude" ? " · Claude Code" : ""),
+            const sessions = sessionMatches.map(s => ({ name: s.title, detail: "session · " + Theme.ago(s.modified, Date.now()),
                                                         hint: "", kind: "session", mention: s.mention, harness: s.harness, path: s.path }))
             // (Named: sessions first; just `@`: files first, a few sessions after.)
             return completionQuery === "" ? files.slice(0, 30).concat(sessions.slice(0, 3)) : sessions.concat(files)
@@ -266,7 +260,7 @@ Rectangle {
         height: Math.min(list.contentHeight, rowHeight * (commands ? 7 : 10)) + (footer.visible ? footer.implicitHeight + 6 : 0) + 12
         padding: 6
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-        background: GlassSurface { radius: 10 }
+        background: GlassSurface { radius: 4 }
         ColumnLayout {
             anchors.fill: parent
             spacing: 6
@@ -294,7 +288,7 @@ Rectangle {
                     leftPadding: 10
                     rightPadding: 10
                     highlighted: ListView.isCurrentItem
-                    background: Rectangle { radius: 6; color: item.highlighted ? Theme.selected : item.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: item.highlighted ? Theme.selected : item.hovered ? Theme.hover : "transparent" }
                     contentItem: Item {
                         // A command: its name and what it takes, then what it does.
                         ColumnLayout {
@@ -397,7 +391,7 @@ Rectangle {
         width: 420
         height: 380
         padding: 8
-        background: GlassSurface { radius: 10 }
+        background: GlassSurface { radius: 4 }
         onOpened: { modelFilter.text = ""; modelFilter.forceActiveFocus(); root.session.loadModels() }
         ColumnLayout {
             anchors.fill: parent
@@ -407,7 +401,7 @@ Rectangle {
                 placeholderText: "Filter models"
                 placeholderTextColor: Theme.muted
                 color: Theme.foreground
-                background: Rectangle { radius: 5; color: Theme.background; border.color: Theme.border }
+                background: Rectangle { radius: 2; color: Theme.background; border.color: Theme.border }
                 Keys.onDownPressed: modelList.incrementCurrentIndex()
                 Keys.onUpPressed: modelList.decrementCurrentIndex()
                 onAccepted: modelList.pick(modelList.currentIndex)
@@ -452,19 +446,21 @@ Rectangle {
             }
             ListView {
                 id: modelList
+                objectName: "modelList"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
                 highlightMoveDuration: 0
                 // Models served on this computer or the local network first,
-                // under "Local"; then the rest, under "Online"; then each
-                // coding plan's (Claude Code on it), under the plan's name.
+                // under "Local"; then the rest, under "Online"; then a
+                // plan's (pi's Claude subscription), under the plan's name.
                 model: {
                     const all = root.session.models
                         .map(m => { const p = m.split("\t"); return { provider: p[0], id: p[1], name: p[2] || p[1], reasoning: p[3] === "1", local: p[4] === "1", plan: p[5] || "" } })
                         .filter(m => (m.provider + " " + m.id + " " + m.name + " " + m.plan).toLowerCase().includes(modelFilter.text.toLowerCase()))
-                        .map(m => Object.assign(m, { group: m.local ? qsTr("Local") : m.plan !== "" ? m.plan : qsTr("Online") }))
-                    return all.filter(m => m.local).concat(all.filter(m => !m.local && m.plan === ""), all.filter(m => m.plan !== ""))
+                        .map(m => Object.assign(m, { group: m.plan !== "" ? m.plan : m.local ? qsTr("Local") : qsTr("Online") }))
+                    // (A plan's model is under its plan, wherever it's served: once.)
+                    return all.filter(m => m.local && m.plan === "").concat(all.filter(m => !m.local && m.plan === ""), all.filter(m => m.plan !== ""))
                 }
                 /// Whether it has more than one group (then each is headed).
                 readonly property bool grouped: model.length > 0 && model[0].group !== model[model.length - 1].group
@@ -486,7 +482,7 @@ Rectangle {
                     topInset: heading
                     topPadding: heading + bottomPadding
                     highlighted: ListView.isCurrentItem
-                    background: Rectangle { radius: 4; color: mrow.highlighted ? Theme.selected : mrow.hovered ? Theme.hover : "transparent" }
+                    background: Rectangle { radius: 2; color: mrow.highlighted ? Theme.selected : mrow.hovered ? Theme.hover : "transparent" }
                     Label {
                         visible: mrow.heading > 0
                         x: 8
@@ -518,29 +514,12 @@ Rectangle {
         }
     }
 
-    // Hand off, second opinion, committee (orchestration).
-    property alias delegatePopover: delegate
-    DelegatePopover {
-        id: delegate
-        session: root.session
-        draft: root.text
-        x: 8
-        y: -height - 6
-        onDraftUsed: root.text = ""
-    }
     // While it works, the ways to send (the send button's right click).
     AppMenu {
         id: sendMenu
         AppMenuItem { objectName: "sendFollowUp"; text: "Queue as a follow-up"; hint: "Enter"; onTriggered: root.send("") }
         AppMenuItem { objectName: "sendSteer"; text: "Steer into this turn"; hint: "Ctrl+Enter"; onTriggered: root.send("steer") }
         AppMenuItem { objectName: "sendStopAndSend"; text: "Stop and send"; hint: "Ctrl+Shift+Enter"; onTriggered: root.send("stopAndSend") }
-    }
-    AppMenu {
-        id: delegateMenu
-        AppMenuItem { objectName: "delegateHandoff"; text: "Hand off…"; hint: "to a new session"; onTriggered: delegate.show("handoff") }
-        AppMenuItem { objectName: "delegateAdvisor"; text: "Second opinion…"; hint: "from another agent"; onTriggered: delegate.show("advisor") }
-        AppMenuItem { objectName: "delegateCommittee"; text: "Committee…"; hint: "two agents plan"; onTriggered: delegate.show("committee") }
-        AppMenuItem { objectName: "delegateSplit"; text: "Split into helpers…"; hint: "parts at once"; onTriggered: delegate.show("split") }
     }
     // The thinking levels, asked for when the model is known (ready for
     // the first click) and again when the menu opens; "reading" until the
@@ -573,10 +552,7 @@ Rectangle {
                 text: modelData
                 // (No level set yet: the agent's default.)
                 marked: modelData === root.session.thinking || (modelData === "default" && root.session.thinking === "")
-                onTriggered: {
-                    root.session.setThinkingLevel(modelData)
-                    Workspace.rememberThinking(root.session.key, modelData)
-                }
+                onTriggered: root.session.setThinkingLevel(modelData)
             }
         }
     }
@@ -594,12 +570,11 @@ Rectangle {
             objectName: "composerInput"
             focus: true
             // (Narrow: short enough for one line; the rest is in the help.)
-            placeholderText: !bar.roomForHint ? (root.session.status === "busy" ? "Follow up, or steer (Ctrl+Enter)…" : root.planOn ? "Describe what to plan…" : "Ask anything…")
+            placeholderText: !bar.roomForHint ? (root.session.status === "busy" ? "Follow up, or steer (Ctrl+Enter)…" : "Ask anything…")
                 : root.session.status === "busy"
                 ? "Queue a follow-up (Enter) or steer now (Ctrl+Enter)…"
                 : root.session.status === "offline" || root.session.status === "exited"
                 ? "Send a message to resume this session with " + Theme.harnessLabel(root.session.harness) + "…"
-                : root.planOn ? "Plan: describe what to plan (no files change)…"
                 : "Ask anything… / for commands, @ for files and sessions"
             placeholderTextColor: Theme.muted
             color: Theme.foreground
@@ -627,13 +602,6 @@ Rectangle {
                 // Recording: Enter inserts the text, Esc drops it.
                 if (root.recording && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Escape)) {
                     event.key === Qt.Key_Escape ? root.cancelDictation() : root.finishDictation()
-                    event.accepted = true
-                    return
-                }
-                // Tab / Shift+Tab: Build ↔ Plan.
-                if (!popup && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
-                        && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier)) === 0) {
-                    root.togglePlan()
                     event.accepted = true
                     return
                 }
@@ -791,15 +759,6 @@ Rectangle {
                 ToolTip.text: root.awaitingModel ? "Stop the download" : "Drop the recording (Esc)"
             }
         }
-        // Other agents take over, advise, or plan (orchestration).
-        ComposerIconButton {
-            objectName: "delegateButton"
-            visible: Workspace.orchestrationOn && !root.dictationActive && root.session.harness !== "demo" && root.session.harness !== ""
-            iconName: "robot-2"
-            on: delegateMenu.opened || delegate.opened
-            tip: "Delegate: hand off to another agent, get a second opinion, or form a committee"
-            onClicked: delegateMenu.popup(this, 0, -delegateMenu.implicitHeight - 6)
-        }
         // What runs without asking; click cycles.
         ComposerIconButton {
             objectName: "permissionsButton"
@@ -882,17 +841,6 @@ Rectangle {
             horizontalAlignment: Text.AlignRight
         }
 
-        // Build or Plan (Tab): plan first, without changing files.
-        ComposerLabelButton {
-            objectName: "modeButton"
-            iconName: "ai-agent"
-            text: bar.tight ? "" : root.planOn ? "Plan" : "Build"
-            tint: root.planOn ? Theme.warning : Theme.success
-            tip: (root.planOn ? "Plan: the agent explores and proposes a plan; no files change"
-                              : "Build: the agent makes changes")
-                 + "\nClick or Tab to switch"
-            onClicked: { root.togglePlan(); input.forceActiveFocus() }
-        }
         ComposerLabelButton {
             objectName: "thinkingButton"
             visible: !bar.tight
@@ -938,11 +886,11 @@ Rectangle {
         // Stop while the agent runs; Send (or queue, while it runs).
         ComposerIconButton {
             objectName: "stopButton"
-            visible: root.session.status === "busy" || root.session.preparing || root.helpersWorking
-            tip: root.session.preparing ? "Stop: it isn't sent yet (Esc)" : root.session.status === "busy" ? "Stop the run, and its helpers (Esc)" : "Stop its helpers"
+            visible: root.session.status === "busy" || root.session.preparing
+            tip: root.session.preparing ? "Stop: it isn't sent yet (Esc)" : "Stop the run (Esc)"
             onClicked: root.stop()
             contentItem: Item {
-                Rectangle { anchors.centerIn: parent; width: 14; height: 14; radius: 3; color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.22); border.color: Theme.error; border.width: 1.5 }
+                Rectangle { anchors.centerIn: parent; width: 14; height: 14; radius: 2; color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.22); border.color: Theme.error; border.width: 1.5 }
             }
         }
         ComposerIconButton {

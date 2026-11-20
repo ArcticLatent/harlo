@@ -2,8 +2,8 @@ import HarloKit
 import SwiftUI
 import UIKit
 
-/// The open session: its transcript, what it's doing (todos, subagents,
-/// the queue), a question waiting, and the composer with its settings.
+/// The open session: its transcript, what it's doing (todos, the queue),
+/// a question waiting, and the composer with its settings.
 struct SessionContent: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -20,9 +20,6 @@ struct SessionContent: View {
     /// The transcript is scrolled to its end (new rows follow then; read
     /// further up and they wait).
     @State private var atBottom = true
-    /// The side question's answer folded to its question (once you send
-    /// the next message; tap it to open it again).
-    @State private var asideFolded = false
     /// The phone's text size (the navigation bar keeps its own at the
     /// default; the header takes this, as far as the bar has room).
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -150,7 +147,6 @@ struct SessionContent: View {
                 atBottom = true
                 Task { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .onChange(of: session.aside?.question) { _, _ in asideFolded = false }
             .modifier(FollowsTheEnd(atBottom: $atBottom) { proxy.scrollTo("bottom", anchor: .bottom) })
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
@@ -159,18 +155,16 @@ struct SessionContent: View {
                     ActivityBar(session: session) { sheet = $0 }
                     // (Under the plan's card: beside the context bar it's about.)
                     CompactLine(session: session)
-                    if let aside = session.aside {
-                        AsideCard(aside: aside, folded: $asideFolded) { session.aside = nil }
-                    }
                     if let req = session.requests.first {
                         RequestCard(request: req)
                             .id(req.id)
                     }
+                    ExtPanel(session: session, below: false)
                     Composer(session: session, openSheet: { sheet = $0 }) {
-                        if session.aside?.done == true { asideFolded = true }
                         atBottom = true
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
+                    ExtPanel(session: session, below: true)
                 }
                 // (Solid, with a hairline: nothing of the conversation shows through.)
                 .background(Color(p.background).ignoresSafeArea(edges: .bottom))
@@ -287,13 +281,6 @@ struct SessionContent: View {
                     } label: {
                         Label("Share as Markdown", systemImage: "square.and.arrow.up")
                     }
-                    if model.hasPlans {
-                        Button {
-                            sheet = .plan
-                        } label: {
-                            Label("Plan", systemImage: "list.bullet.clipboard")
-                        }
-                    }
                     if model.hasWiki && session.wiki?.inProject != false {
                         Button {
                             sheet = .wiki
@@ -308,11 +295,11 @@ struct SessionContent: View {
                             Label("Pictures", systemImage: "photo.on.rectangle")
                         }
                     }
-                    if !session.todos.isEmpty || !session.subagents.isEmpty || !session.helpers.isEmpty {
+                    if !session.todos.isEmpty {
                         Button {
                             sheet = .activity
                         } label: {
-                            Label(session.helpers.isEmpty ? "Todos and subagents" : "Todos and helpers", systemImage: "checklist")
+                            Label("Todos", systemImage: "checklist")
                         }
                     }
                     Divider()
@@ -386,7 +373,6 @@ struct SessionContent: View {
                 case .file(let path, let line): FileView(path: path, line: line)
                 case .branches: BranchesView(busy: session.busy) { branch = $0 }
                 case .changes: ChangesView()
-                case .plan: PlanSheet(session: session)
                 case .wiki: WikiSheet(session: session)
                 case .workflow(let id): WorkflowSheet(id: id)
                 case .activity: ActivityView(session: session)
@@ -421,7 +407,7 @@ extension SessionContent {
         }
     }
 
-    /// A message sent to the agent: yours, or harlo's (a helper's report).
+    /// A message sent to the agent: yours, or harlo's (a workflow's note).
     static func isSent(_ item: TranscriptItem) -> Bool {
         if case .row(let r) = item { return r.isSent }
         return false
