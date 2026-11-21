@@ -4,7 +4,7 @@
 
 use harlo_core::server::Location;
 use iced::widget::{button, column, container, mouse_area, opaque, row, rule, space, text};
-use iced::{Center, Element, Fill, Padding, Shadow, Vector};
+use iced::{Center, Element, Fill, Padding};
 use lucide_icons::Icon;
 
 use crate::app::{App, Message, Status};
@@ -100,21 +100,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let card = container(
         column![
             items,
-            rule::horizontal(1).style(style::divider(t.border_weak_base)),
+            rule::horizontal(1).style(style::divider(style::edge(t, t.surface_raised_strong))),
             container(status).padding([4, 8]),
         ]
         .spacing(6),
     )
     .width(WIDTH)
     .padding(6)
-    .style(move |theme| iced::widget::container::Style {
-        shadow: Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-            offset: Vector::new(0.0, 6.0),
-            blur_radius: 18.0,
-        },
-        ..style::boxed(t.surface_raised_strong, Some(t.border_weak_base), 8.0)(theme)
-    });
+    .style(style::menu_card(t));
 
     let placed = container(opaque(card)).padding(Padding {
         top: TOP,

@@ -194,9 +194,9 @@ fn card<'a>(t: &Tokens, inside: impl Into<Element<'a, Message>>) -> Element<'a, 
             left: 18.0,
             right: 14.0,
         })
-        .style(style::boxed(
+        .style(style::lifted(
             t.surface_raised_base,
-            Some(t.border_weak_base),
+            style::composer_edge(t),
             size::COMPOSER_RADIUS,
         ))
         .into()
@@ -344,10 +344,6 @@ fn menu_view<'a>(t: &Tokens, menu: &'a MenuState) -> Element<'a, Message> {
     .width(Fill)
     .height(height)
     .padding(5)
-    .style(style::boxed(
-        t.surface_raised_strong,
-        Some(t.border_weak_base),
-        size::COMPOSER_RADIUS,
-    ))
+    .style(style::menu_card(t))
     .into()
 }

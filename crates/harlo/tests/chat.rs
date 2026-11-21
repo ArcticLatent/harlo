@@ -7,7 +7,7 @@ mod support;
 
 use std::path::PathBuf;
 
-use harlo::{App, Message, ModelChoice, Variant, ids};
+use harlo::{App, Message, ModelChoice, Picker, Variant, ids};
 use harlo_core::server::{Agent, Catalog, Command, Delivery, Model, Skill, Update};
 use harlo_core::timeline::{Compaction, Entry};
 use harlo_core::workspace::{Event, EventKind, Fetched, InboxItem, Permission};
@@ -425,22 +425,18 @@ fn pickers_choose_the_agent_model_and_reasoning_level() {
     // A new session's choices are kept for when it's created.
     let _ = app.update(Message::NewSession(Some(folder_of(PI_UPDATE))));
     assert_eq!(app.current_agent().as_deref(), Some("build"));
+    // The chip opens its menu, with the current agent ticked.
     let messages = interact(&mut app, |ui| {
-        let target = ui.find(Id::new(ids::AGENT)).expect("the agent picker");
-        let bounds = target.bounds();
         let _ = ui.click(Id::new(ids::AGENT));
-        // Menu entries aren't text the simulator finds: point at the second
-        // one ("plan") under the picker, then click it.
-        let entry = harlo::style::size::LABEL * 1.3 + 12.0;
-        let position = Point::new(
-            bounds.x + bounds.width / 2.0,
-            bounds.y + bounds.height + entry * 1.5,
-        );
-        ui.point_at(position);
-        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
-            position,
-        })]);
-        let _ = ui.simulate(iced_test::simulator::click());
+    });
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::TogglePicker(Picker::Agent)))
+    );
+    assert_eq!(app.picker, Some(Picker::Agent));
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("plan");
     });
     assert!(
         messages
@@ -448,6 +444,7 @@ fn pickers_choose_the_agent_model_and_reasoning_level() {
             .any(|m| matches!(m, Message::PickAgent(a) if a == "plan")),
         "{messages:?}"
     );
+    assert_eq!(app.picker, None, "choosing closes the menu");
     assert_eq!(app.current_agent().as_deref(), Some("plan"));
 
     assert!(
@@ -716,4 +713,162 @@ fn the_line_above_the_composer_says_what_the_agent_is_doing() {
     ));
     assert_eq!(app.activity(PI_UPDATE), None);
     assert!(!shows(&app, "Build is running Bash"));
+}
+
+/// Clicks at `at`, as a separate press, in the same view.
+fn click_at(ui: &mut iced_test::Simulator<'_, Message>, at: Point) {
+    ui.point_at(at);
+    let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position: at,
+    })]);
+    let _ = ui.simulate(iced_test::simulator::click());
+}
+
+#[test]
+fn an_open_picker_closes_when_clicking_anywhere_else() {
+    // The editor and the attach button take the click themselves; the menu
+    // must close all the same.
+    for target in [ids::COMPOSER, ids::ATTACH, ids::SEND] {
+        let mut app = chatting();
+        let _ = app.update(Message::TogglePicker(Picker::Agent));
+        let messages = interact(&mut app, |ui| {
+            let elsewhere = match target {
+                ids::COMPOSER => {
+                    let card = ui.find(Id::new(ids::COMPOSER)).expect("card").bounds();
+                    Point::new(card.x + 40.0, card.y + 25.0)
+                }
+                _ => ui
+                    .find(Id::new(target))
+                    .expect("a button")
+                    .bounds()
+                    .center(),
+            };
+            click_at(ui, elsewhere);
+        });
+        assert!(
+            messages.iter().any(|m| matches!(m, Message::ClosePicker)),
+            "the menu stayed open after a click on {target}: {messages:?}"
+        );
+        assert_eq!(app.picker, None);
+    }
+    // Escape closes it too, and the chip closes its own menu.
+    let mut app = chatting();
+    let _ = app.update(Message::TogglePicker(Picker::Agent));
+    let _ = interact(&mut app, |ui| {
+        let _ = ui.simulate([iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: key::Key::Named(key::Named::Escape),
+            modified_key: key::Key::Named(key::Named::Escape),
+            physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+            location: iced::keyboard::Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+            repeat: false,
+        })]);
+    });
+    assert_eq!(app.picker, None, "Escape closes the menu");
+    let _ = app.update(Message::TogglePicker(Picker::Agent));
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click(Id::new(ids::AGENT));
+    });
+    assert!(
+        matches!(messages.as_slice(), [Message::TogglePicker(Picker::Agent)]),
+        "{messages:?}"
+    );
+    assert_eq!(app.picker, None, "the chip closes its menu");
+}
+
+#[test]
+fn a_long_model_list_scrolls_and_filters() {
+    let mut app = chatting();
+    let mut many = catalog();
+    many.models = (0..40)
+        .map(|i| Model {
+            provider_id: "fake".into(),
+            id: format!("m{i}"),
+            name: format!("Model {i}"),
+            variants: Vec::new(),
+            images: false,
+        })
+        .collect();
+    let _ = app.update(Message::Catalog(folder_of(PI_UPDATE), Ok(Box::new(many))));
+    // A new session keeps its choices here, rather than sending them.
+    let _ = app.update(Message::NewSession(Some(folder_of(PI_UPDATE))));
+    let _ = app.update(Message::TogglePicker(Picker::Model));
+    // Eight rows show; the rest scroll.
+    let _ = interact(&mut app, |ui| {
+        let list = ui
+            .find(Id::new(harlo::MENU_LIST))
+            .expect("the menu's list")
+            .bounds();
+        let rows = f32::from(u8::try_from(harlo::MENU_ROWS).expect("a few rows"));
+        assert!(
+            (list.height - rows * (harlo::MENU_ROW + harlo::ROW_GAP)).abs() < 0.5,
+            "{list:?}"
+        );
+        // Each row names the model's provider.
+        let _ = ui.find("fake").expect("the provider");
+    });
+    // A filter narrows the list, and Enter picks the first match.
+    let _ = app.update(Message::PickerFilter("model 3".into()));
+    assert_eq!(app.picker_index, 0);
+    let _ = interact(&mut app, |ui| {
+        let _ = ui.find("Model 3").expect("a match");
+        let _ = ui.find("Model 39").expect("a match");
+        let _ = ui.find("Model 4").expect_err("not a match");
+    });
+    let _ = app.update(Message::PickerMove(1));
+    let _ = app.update(Message::PickerMove(-2));
+    // Models 3, 13, 23 and 30 to 39 match: moving up from the top wraps
+    // round to the last.
+    assert_eq!(app.picker_index, 12, "moving up from the top wraps round");
+    let _ = app.update(Message::PickerFilter("model 3".into()));
+    // Keys a focused field doesn't use move through the menu and pick.
+    let press = |named| iced::keyboard::Event::KeyPressed {
+        key: key::Key::Named(named),
+        modified_key: key::Key::Named(named),
+        physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+        location: iced::keyboard::Location::Standard,
+        modifiers: Modifiers::empty(),
+        text: None,
+        repeat: false,
+    };
+    assert!(matches!(
+        harlo::app::menu_key(press(key::Named::ArrowDown)),
+        Some(Message::PickerMove(1))
+    ));
+    assert!(matches!(
+        harlo::app::menu_key(press(key::Named::Enter)),
+        Some(Message::PickerSubmit)
+    ));
+    let _ = app.update(Message::PickerSubmit);
+    assert_eq!(
+        app.current_model().map(|m| m.id),
+        Some("m3".to_owned()),
+        "Enter picks the first match"
+    );
+    let _ = app.update(Message::TogglePicker(Picker::Model));
+    let _ = app.update(Message::PickerFilter("nothing like it".into()));
+    assert!(shows(&app, "Nothing matches"));
+}
+
+#[test]
+fn the_folder_menu_offers_to_add_a_project() {
+    let mut app = chatting();
+    let _ = app.update(Message::NewSession(None));
+    let _ = app.update(Message::TogglePicker(Picker::Folder));
+    assert!(shows(&app, "Home folder"));
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("Add project…");
+    });
+    assert!(
+        messages.iter().any(|m| matches!(m, Message::AddProject)),
+        "{messages:?}"
+    );
+    assert_eq!(app.picker, None);
+    // A folder chosen there is where the next session starts, before it's a project.
+    let _ = app.update(Message::ProjectChosen(Some(PathBuf::from(
+        "/tmp/fresh-idea",
+    ))));
+    assert_eq!(app.new_folder.as_deref(), Some("/tmp/fresh-idea"));
+    assert!(shows(&app, "fresh-idea"));
 }

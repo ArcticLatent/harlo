@@ -5,8 +5,8 @@
 mod breathe;
 mod ellipsis;
 mod place;
+mod popover;
 mod reveal;
-mod snug;
 
 #[doc(inline)]
 pub use breathe::{Breathe, breathe};
@@ -15,6 +15,6 @@ pub use ellipsis::{Ellipsis, ellipsis};
 #[doc(inline)]
 pub use place::{Place, place};
 #[doc(inline)]
-pub use reveal::{Edge, Reveal, reveal};
+pub use popover::{Popover, popover};
 #[doc(inline)]
-pub use snug::{Snug, snug};
+pub use reveal::{Edge, Reveal, reveal};

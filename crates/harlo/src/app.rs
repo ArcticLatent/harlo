@@ -19,7 +19,7 @@ use harlo_core::workspace::{EventKind, Fetch, Fetched, InboxItem, ModelRef, Sess
 use iced::animation::Animation;
 use iced::keyboard::{self, Key, key::Named};
 use iced::time::Instant;
-use iced::widget::{Id, combo_box, row, scrollable, space, stack, text_editor};
+use iced::widget::{Id, row, scrollable, space, stack, text_editor};
 use iced::{Element, Fill, Subscription, Task, Theme};
 
 use crate::assets::Assets;
@@ -29,7 +29,7 @@ use crate::style::size;
 use crate::timeline::{self, Activity, Timeline};
 use crate::view;
 use crate::view::composer::Feedback;
-use crate::view::pickers::{AgentChoice, Folder, ModelChoice, Variant};
+use crate::view::pickers::{self, AgentChoice, Folder, ModelChoice, Picker, Variant};
 use crate::widget::{Edge, reveal};
 
 /// How often session ages are refreshed.
@@ -190,6 +190,22 @@ pub enum Message {
     PickAgent(String),
     /// Choose the model.
     PickModel(ModelChoice),
+    /// Open a picker's menu, or close it if it's open.
+    TogglePicker(Picker),
+    /// Close the open picker's menu.
+    ClosePicker,
+    /// The text in the open menu's filter changed.
+    PickerFilter(String),
+    /// Move the open menu's highlight by this many rows.
+    PickerMove(i32),
+    /// Choose the open menu's highlighted row.
+    PickerSubmit,
+    /// The open menu's list scrolled to this offset from its top.
+    PickerScrolled(f32),
+    /// Ask for a folder to start a new session in.
+    AddProject,
+    /// The folder chosen to start a new session in, if any.
+    ProjectChosen(Option<PathBuf>),
     /// Choose the reasoning level.
     PickVariant(Variant),
     /// Open the file dialog to attach files.
@@ -324,8 +340,16 @@ pub struct App {
     /// The model for the next new session, when chosen.
     new_model: Option<ModelRef>,
     /// The model picker's options, for the folder in `models_for`.
-    pub models: combo_box::State<ModelChoice>,
+    pub models: Vec<ModelChoice>,
     models_for: Option<String>,
+    /// The picker whose menu is open.
+    pub picker: Option<Picker>,
+    /// The open menu's filter text.
+    pub picker_filter: String,
+    /// The open menu's highlighted row.
+    pub picker_index: usize,
+    /// How far the open menu's list is scrolled from its top.
+    picker_scroll: f32,
     /// Where the layout is saved; `None` keeps it in memory only.
     store: Option<Store>,
     /// The layout as last saved.
@@ -401,8 +425,12 @@ impl App {
             loading_catalogs: HashSet::new(),
             new_agent: None,
             new_model: None,
-            models: combo_box::State::new(Vec::new()),
+            models: Vec::new(),
             models_for: None,
+            picker: None,
+            picker_filter: String::new(),
+            picker_index: 0,
+            picker_scroll: 0.0,
             store: None,
             other_tabs: layout.tabs.clone(),
             restore: None,
@@ -450,6 +478,15 @@ impl App {
             _ => Instant::now(),
         };
         self.clock = self.clock.max(at);
+        if matches!(
+            message,
+            Message::PickFolder(_)
+                | Message::PickAgent(_)
+                | Message::PickModel(_)
+                | Message::PickVariant(_)
+        ) {
+            self.picker = None;
+        }
         let task = self.apply(message);
         self.sync_motion();
         let task = Task::batch([task, self.follow_folder()]);
@@ -497,6 +534,14 @@ impl App {
             | Message::PickVariant(_)
             | Message::Sent(_)
             | Message::History(..)) => return self.session_action(message),
+            message @ (Message::TogglePicker(_)
+            | Message::ClosePicker
+            | Message::PickerFilter(_)
+            | Message::PickerMove(_)
+            | Message::PickerSubmit
+            | Message::PickerScrolled(_)
+            | Message::AddProject
+            | Message::ProjectChosen(_)) => return self.picker_action(message),
             Message::ToggleLocations => self.picking_location = !self.picking_location,
             Message::PickLocation(location) => self.pick_location(location),
             Message::OpenSession(id) => return self.open(id),
@@ -1347,6 +1392,92 @@ impl App {
         )
     }
 
+    /// Applies a message about the pickers' menus, and adding a project.
+    fn picker_action(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::TogglePicker(picker) => {
+                if self.picker == Some(picker) {
+                    self.picker = None;
+                    return Task::none();
+                }
+                self.picker = Some(picker);
+                self.picker_filter.clear();
+                self.picker_scroll = 0.0;
+                self.picker_index = pickers::items(self, picker)
+                    .iter()
+                    .position(|item| item.selected)
+                    .unwrap_or(0);
+                let reveal = self.reveal_highlight();
+                if picker == Picker::Model {
+                    return Task::batch([
+                        reveal,
+                        iced::widget::operation::focus(Id::new(pickers::MENU_FILTER)),
+                    ]);
+                }
+                return reveal;
+            }
+            Message::ClosePicker => self.picker = None,
+            Message::PickerFilter(filter) => {
+                self.picker_filter = filter;
+                self.picker_index = 0;
+                return self.reveal_highlight();
+            }
+            Message::PickerMove(by) => {
+                let Some(picker) = self.picker else {
+                    return Task::none();
+                };
+                let len = i64::try_from(pickers::items(self, picker).len()).unwrap_or(0);
+                if len > 0 {
+                    let at = i64::try_from(self.picker_index).unwrap_or(0) + i64::from(by);
+                    self.picker_index = usize::try_from(at.rem_euclid(len)).unwrap_or(0);
+                    return self.reveal_highlight();
+                }
+            }
+            Message::PickerSubmit => {
+                if let Some(item) = self.picker.and_then(|picker| {
+                    pickers::items(self, picker)
+                        .into_iter()
+                        .nth(self.picker_index)
+                }) {
+                    return self.update(item.message);
+                }
+            }
+            Message::PickerScrolled(y) => self.picker_scroll = y,
+            Message::AddProject => {
+                self.picker = None;
+                return Task::perform(pick_folder(), Message::ProjectChosen);
+            }
+            Message::ProjectChosen(Some(folder)) => {
+                // A new session there makes it a project.
+                self.active = None;
+                self.new_folder = Some(folder.to_string_lossy().into_owned());
+            }
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// Scrolls the open menu's list so its highlighted row shows.
+    fn reveal_highlight(&mut self) -> Task<Message> {
+        let step = pickers::MENU_ROW + pickers::ROW_GAP;
+        let index = u16::try_from(self.picker_index).unwrap_or(u16::MAX);
+        let rows = u16::try_from(pickers::MENU_ROWS).unwrap_or(u16::MAX);
+        let top = f32::from(index) * step;
+        let shown = f32::from(rows) * step;
+        if top < self.picker_scroll {
+            self.picker_scroll = top;
+        } else if top + step > self.picker_scroll + shown {
+            self.picker_scroll = top + step - shown;
+        }
+        iced::widget::operation::scroll_to(
+            Id::new(pickers::MENU_LIST),
+            scrollable::AbsoluteOffset {
+                x: None,
+                y: Some(self.picker_scroll),
+            },
+        )
+    }
+
     /// Puts a menu row's text in place of the menu word.
     fn pick(&mut self, index: Option<usize>) -> Task<Message> {
         let Some(menu) = self.menu.take() else {
@@ -1451,7 +1582,7 @@ impl App {
                     .collect()
             })
             .unwrap_or_default();
-        self.models = combo_box::State::new(models);
+        self.models = models;
     }
 
     /// Returns what the current folder offers, once loaded.
@@ -1552,6 +1683,15 @@ impl App {
                     label: format!("{} / {}", project.name, worktree.name),
                 });
             }
+        }
+        // A folder just added isn't a project until a session starts in it.
+        if let Some(folder) = &self.new_folder
+            && !list.iter().any(|f| f.directory.as_ref() == Some(folder))
+        {
+            list.push(Folder {
+                directory: Some(folder.clone()),
+                label: folder.rsplit('/').next().unwrap_or(folder).to_owned(),
+            });
         }
         list
     }
@@ -1654,6 +1794,11 @@ impl App {
             .map(Message::Server),
             iced::time::every(TICK).map(|_| Message::Tick(SystemTime::now())),
             keyboard::listen().filter_map(shortcut),
+            if self.picker.is_some() {
+                keyboard::listen().filter_map(menu_key)
+            } else {
+                Subscription::none()
+            },
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
             self.motion(),
         ])
@@ -1688,6 +1833,32 @@ pub fn shortcut(event: keyboard::Event) -> Option<Message> {
         Key::Named(Named::PageUp) => Some(Message::CycleTab { back: true }),
         _ => None,
     }
+}
+
+/// Maps a key press to moving through or choosing from an open picker's menu.
+#[must_use]
+pub fn menu_key(event: keyboard::Event) -> Option<Message> {
+    let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
+        return None;
+    };
+    if modifiers.command() || modifiers.alt() {
+        return None;
+    }
+    match key.as_ref() {
+        Key::Named(Named::ArrowUp) => Some(Message::PickerMove(-1)),
+        Key::Named(Named::ArrowDown) => Some(Message::PickerMove(1)),
+        Key::Named(Named::Enter) => Some(Message::PickerSubmit),
+        _ => None,
+    }
+}
+
+/// Asks for a folder to start a session in; `None` when the dialog is cancelled.
+async fn pick_folder() -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
+        .set_title("Add project")
+        .pick_folder()
+        .await
+        .map(|folder| folder.path().to_path_buf())
 }
 
 /// The user's home folder, where new sessions start unless another is chosen.

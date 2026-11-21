@@ -169,7 +169,9 @@ pub fn chip(t: &Tokens) -> impl Fn(&Theme, button::Status) -> button::Style + us
     move |_, status| {
         let background = match status {
             button::Status::Hovered | button::Status::Pressed => {
-                t.surface_base_hover.over(t.surface_raised_strong, 1.0)
+                // The hover tint is translucent: mix in as much as it covers.
+                t.surface_base_hover
+                    .over(t.surface_raised_strong, t.surface_base_hover.a)
             }
             button::Status::Active | button::Status::Disabled => t.surface_raised_strong,
         };
@@ -183,6 +185,98 @@ pub fn chip(t: &Tokens) -> impl Fn(&Theme, button::Status) -> button::Style + us
             shadow: Shadow::default(),
             snap: true,
         }
+    }
+}
+
+/// A picker's chip: filled like [`chip`], and lit while its menu is open.
+pub fn picker_chip(
+    t: &Tokens,
+    open: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style + use<> {
+    let t = *t;
+    move |theme, status| {
+        let status = if open {
+            button::Status::Hovered
+        } else {
+            status
+        };
+        chip(&t)(theme, status)
+    }
+}
+
+/// The shadow under a menu: deep and soft, so it floats over the window.
+pub const MENU_SHADOW: Shadow = Shadow {
+    color: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+    offset: iced::Vector::new(0.0, 10.0),
+    blur_radius: 28.0,
+};
+
+/// The shadow under the composer: shallow, so it lifts off the page.
+pub const CARD_SHADOW: Shadow = Shadow {
+    color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
+    offset: iced::Vector::new(0.0, 6.0),
+    blur_radius: 22.0,
+};
+
+/// How much text colour mixes into a surface for the edge of a card on it.
+const EDGE: f32 = 0.12;
+
+/// The edge of a card raised on `surface`: a touch lighter in a dark theme,
+/// darker in a light one, so it shows against the window.
+#[must_use]
+pub fn edge(t: &Tokens, surface: Rgba) -> Rgba {
+    t.text_strong.over(surface, EDGE)
+}
+
+/// The edge of the composer: like [`edge`], tinted with the accent.
+#[must_use]
+pub fn composer_edge(t: &Tokens) -> Rgba {
+    t.text_interactive_base.over(t.surface_raised_base, EDGE)
+}
+
+/// The rounding of a menu's corners.
+pub const MENU_RADIUS: f32 = 10.0;
+
+/// A menu's card: raised, outlined, rounded and shadowed.
+pub fn menu_card(t: &Tokens) -> impl Fn(&Theme) -> container::Style + use<> {
+    let t = *t;
+    move |_| container::Style {
+        background: Some(color(t.surface_raised_strong).into()),
+        border: Border {
+            radius: MENU_RADIUS.into(),
+            width: 1.0,
+            color: color(edge(&t, t.surface_raised_strong)),
+        },
+        shadow: MENU_SHADOW,
+        ..container::Style::default()
+    }
+}
+
+/// A raised box with a soft shadow under it, such as the composer.
+pub fn lifted(fill: Rgba, outline: Rgba, radius: f32) -> impl Fn(&Theme) -> container::Style {
+    move |theme| container::Style {
+        shadow: CARD_SHADOW,
+        ..boxed(fill, Some(outline), radius)(theme)
+    }
+}
+
+/// The filter field at the top of a menu, set into the card.
+pub fn menu_filter(t: &Tokens) -> impl Fn(&Theme, text_input::Status) -> text_input::Style + use<> {
+    let t = *t;
+    move |_, status| text_input::Style {
+        background: color(t.surface_raised_base).into(),
+        border: Border {
+            radius: size::RADIUS.into(),
+            width: 1.0,
+            color: color(match status {
+                text_input::Status::Focused { .. } => t.border_base,
+                _ => t.border_weak_base,
+            }),
+        },
+        icon: color(t.icon_base),
+        placeholder: color(t.text_weak),
+        value: color(t.text_strong),
+        selection: color(t.text_interactive_base.alpha(0.3)),
     }
 }
 

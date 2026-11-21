@@ -116,6 +116,7 @@ fn brand(t: &Tokens, assets: &Assets) -> Element<'static, Message> {
         .color(style::color(t.text_strong));
     let add = button(text("+ Project").size(size::SMALL))
         .padding([5, 9])
+        .on_press(Message::AddProject)
         .style(style::chip(t));
     row![mark, space().width(6), wordmark, space().width(Fill), add]
         .height(40)

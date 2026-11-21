@@ -234,20 +234,25 @@ fn a_new_session_opens_in_a_tab_once_sent() {
 fn the_folder_picker_lists_projects() {
     let mut app = demo::app();
     let first = app.projects[0].directory.clone();
-    let messages = interact(&mut app, |ui| {
-        let target = ui.find(Id::new(ids::FOLDER)).expect("the folder picker");
-        let bounds = target.bounds();
+    let _ = interact(&mut app, |ui| {
         let _ = ui.click(Id::new(ids::FOLDER));
-        // The menu opens under the picker; each entry is a line of label text
-        // plus the picker's vertical padding. Entry 0 is the home folder.
-        // The menu hovers what the pointer moves over.
-        let entry = harlo::style::size::LABEL * 1.3 + 12.0;
-        let position = Point::new(
-            bounds.x + bounds.width / 2.0,
-            bounds.y + bounds.height + entry * 1.5,
+    });
+    assert!(app.picker.is_some(), "the chip opens its menu");
+    // The project's name shows in the sidebar too: click the menu's second
+    // row, after the home folder.
+    let messages = interact(&mut app, |ui| {
+        let list = ui
+            .find(Id::new(harlo::MENU_LIST))
+            .expect("the menu's list")
+            .bounds();
+        let at = Point::new(
+            list.center_x(),
+            list.y + harlo::MENU_ROW + harlo::ROW_GAP + harlo::MENU_ROW / 2.0,
         );
-        ui.point_at(position);
-        let _ = ui.simulate([iced::Event::Mouse(mouse::Event::CursorMoved { position })]);
+        ui.point_at(at);
+        let _ = ui.simulate([iced::Event::Mouse(mouse::Event::CursorMoved {
+            position: at,
+        })]);
         let _ = ui.simulate(iced_test::simulator::click());
     });
     assert!(
