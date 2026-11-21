@@ -1,0 +1,17 @@
+[package]
+name = "harlo-spikes"
+version = "0.1.0"
+description = "M0 spikes: live transcript stress and embedded editor/terminal measurements."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+iced = { workspace = true, features = ["wgpu", "tiny-skia", "crisp", "tokio", "x11", "wayland", "markdown", "highlighter", "advanced"] }
+iced-code-editor = { workspace = true }
+iced_term = { workspace = true }
+
+[lints]
+workspace = true
