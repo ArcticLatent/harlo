@@ -10,10 +10,12 @@ use reqwest::{Method, RequestBuilder, Response};
 use serde_json::{Value, json};
 use sse_stream::SseByteStream;
 
+use crate::catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 use crate::generated as g;
+use crate::prompt::Prompt;
 use crate::types::{
-    Delivery, FileDiff, Form, InboxItem, Message, Permission, PermissionReply, Project, Revert,
-    ServerInfo, Session,
+    Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply, Project,
+    Revert, ServerInfo, Session,
 };
 use crate::{Endpoint, Error, Event};
 
@@ -192,28 +194,177 @@ impl Client {
         Ok(serde_json::from_value::<g::SessionInfo>(v["data"].clone())?.into())
     }
 
-    /// Sends a prompt with a client-made message ID (see [`crate::message_id`]).
+    /// Sends a prompt, with its attachments, skills and named subagents.
     ///
-    /// Sending the same `message_id` again stores the message once, so a
-    /// retry after a lost answer is safe.
+    /// Sending a prompt with the same [`Prompt::id`] again stores the message
+    /// once, so a retry after a lost answer is safe.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist, an attachment can't be read (an
+    /// image that doesn't decode, a missing file), or the server can't be reached.
+    pub async fn prompt(&self, session_id: &str, prompt: &Prompt) -> Result<(), Error> {
+        self.post(&format!("/api/session/{session_id}/prompt"), &prompt.json())
+            .await
+    }
+
+    /// Runs a slash command, such as `review`, with the text typed after it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the command doesn't exist or the server can't be reached.
+    pub async fn run_command(
+        &self,
+        session_id: &str,
+        name: &str,
+        text: &str,
+        delivery: Delivery,
+    ) -> Result<(), Error> {
+        let body = json!({ "name": name, "text": text, "delivery": delivery.as_str() });
+        self.post(&format!("/api/session/{session_id}/command"), &body)
+            .await
+    }
+
+    /// Asks OpenCode to compact the session: summarize it to free up context.
     ///
     /// # Errors
     ///
     /// Fails when the session doesn't exist or the server can't be reached.
-    pub async fn prompt(
-        &self,
-        session_id: &str,
-        message_id: &str,
-        text: &str,
-        delivery: Delivery,
-    ) -> Result<(), Error> {
-        let body = json!({ "id": message_id, "text": text, "delivery": delivery.as_str() });
-        Self::send(
-            self.request(Method::POST, &format!("/api/session/{session_id}/prompt"))
-                .json(&body),
+    pub async fn compact(&self, session_id: &str) -> Result<(), Error> {
+        self.post(&format!("/api/session/{session_id}/compact"), &json!({}))
+            .await
+    }
+
+    /// Chooses the model, and its reasoning level, for the session's next steps.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the model doesn't exist or the server can't be reached.
+    pub async fn set_model(&self, session_id: &str, model: &ModelRef) -> Result<(), Error> {
+        let mut reference = json!({ "id": model.id, "providerID": model.provider_id });
+        if let Some(variant) = &model.variant {
+            reference["variant"] = json!(variant);
+        }
+        self.post(
+            &format!("/api/session/{session_id}/model"),
+            &json!({ "model": reference }),
         )
-        .await?;
+        .await
+    }
+
+    /// Chooses the agent that runs the session's next steps.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the agent doesn't exist or the server can't be reached.
+    pub async fn set_agent(&self, session_id: &str, agent: &str) -> Result<(), Error> {
+        self.post(
+            &format!("/api/session/{session_id}/agent"),
+            &json!({ "agent": agent }),
+        )
+        .await
+    }
+
+    async fn post(&self, path: &str, body: &Value) -> Result<(), Error> {
+        Self::send(self.request(Method::POST, path).json(body)).await?;
         Ok(())
+    }
+
+    /// Lists the models available in `directory`, enabled ones only.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn models(&self, directory: &str) -> Result<Vec<Model>, Error> {
+        let v = self.list("/api/model", directory, &[]).await?;
+        Ok(each(&v, Model::from_json))
+    }
+
+    /// Returns the model new sessions in `directory` use, if one is configured.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn default_model(&self, directory: &str) -> Result<Option<Model>, Error> {
+        let v = self.list("/api/model/default", directory, &[]).await?;
+        Ok(Model::from_json(&v))
+    }
+
+    /// Lists the agents in `directory`, hidden ones left out.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn agents(&self, directory: &str) -> Result<Vec<Agent>, Error> {
+        let v = self.list("/api/agent", directory, &[]).await?;
+        Ok(each(&v, Agent::from_json))
+    }
+
+    /// Lists the slash commands in `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn commands(&self, directory: &str) -> Result<Vec<Command>, Error> {
+        let v = self.list("/api/command", directory, &[]).await?;
+        Ok(each(&v, Command::from_json))
+    }
+
+    /// Lists the skills in `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn skills(&self, directory: &str) -> Result<Vec<Skill>, Error> {
+        let v = self.list("/api/skill", directory, &[]).await?;
+        Ok(each(&v, Skill::from_json))
+    }
+
+    /// Lists the resources MCP servers offer in `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn mcp_resources(&self, directory: &str) -> Result<Vec<McpResource>, Error> {
+        let v = self.list("/api/mcp/resource", directory, &[]).await?;
+        Ok(each(&v["resources"], McpResource::from_json))
+    }
+
+    /// Finds files and folders in `directory` whose path matches `query`, best first.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn find_files(
+        &self,
+        directory: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<FileMatch>, Error> {
+        let limit = limit.to_string();
+        let v = self
+            .list(
+                "/api/fs/find",
+                directory,
+                &[("query", query), ("limit", &limit)],
+            )
+            .await?;
+        Ok(each(&v, FileMatch::from_json))
+    }
+
+    /// GETs a folder-scoped list and returns its `data`.
+    async fn list(
+        &self,
+        path: &str,
+        directory: &str,
+        query: &[(&str, &str)],
+    ) -> Result<Value, Error> {
+        let req = self
+            .request(Method::GET, path)
+            .query(&[("location[directory]", directory)])
+            .query(query);
+        let mut v = Self::json(req).await?;
+        Ok(v["data"].take())
     }
 
     /// Returns a session's whole timeline, oldest first.
@@ -378,6 +529,29 @@ impl Client {
             .unwrap_or_default())
     }
 
+    /// Changes how a waiting prompt is delivered: now, into the running turn
+    /// ([`Delivery::Steer`]), or after it ([`Delivery::Queue`]).
+    ///
+    /// # Errors
+    ///
+    /// Fails when the item was already delivered or the server can't be reached.
+    pub async fn set_delivery(
+        &self,
+        session_id: &str,
+        item_id: &str,
+        delivery: Delivery,
+    ) -> Result<(), Error> {
+        Self::send(
+            self.request(
+                Method::PATCH,
+                &format!("/api/session/{session_id}/inbox/{item_id}"),
+            )
+            .json(&json!({ "delivery": delivery.as_str() })),
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Removes a waiting item from a session's inbox.
     ///
     /// Removing an item that is already gone succeeds.
@@ -532,6 +706,13 @@ impl std::fmt::Debug for Events {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Events").finish_non_exhaustive()
     }
+}
+
+/// Decodes each item of a JSON array, skipping items `decode` rejects.
+fn each<T>(list: &Value, decode: impl Fn(&Value) -> Option<T>) -> Vec<T> {
+    list.as_array()
+        .map(|items| items.iter().filter_map(decode).collect())
+        .unwrap_or_default()
 }
 
 /// Decodes each item of a JSON array, skipping kinds the client doesn't know.

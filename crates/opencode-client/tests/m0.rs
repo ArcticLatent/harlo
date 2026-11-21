@@ -11,7 +11,7 @@ mod support;
 use std::time::Duration;
 
 use opencode_client::{
-    Client, Delivery, EventKind, Message, Part, PermissionReply, ToolStatus, message_id,
+    Client, Delivery, EventKind, Message, Part, PermissionReply, Prompt, ToolStatus, message_id,
 };
 use support::{Sandbox, wait_for};
 
@@ -77,9 +77,7 @@ async fn attach_and_detach() {
     harlo
         .prompt(
             &session_id,
-            &message_id(),
-            "say continued in Harlo",
-            Delivery::Steer,
+            &Prompt::new("say continued in Harlo", Delivery::Steer),
         )
         .await
         .expect("prompt");
@@ -113,7 +111,7 @@ async fn approval_across_disconnect() {
     let mut events = harlo.events().await.expect("events");
     let script = r#"tool shell {"command":"echo hi >> c.txt"} ;; say ran it"#;
     harlo
-        .prompt(&session.id, &message_id(), script, Delivery::Steer)
+        .prompt(&session.id, &Prompt::new(script, Delivery::Steer))
         .await
         .expect("prompt");
     let asked = tokio::time::timeout(support::WAIT, async {
@@ -193,7 +191,7 @@ async fn question_across_disconnect() {
     }]});
     let script = format!("tool question {question} ;; say got it");
     harlo
-        .prompt(&session.id, &message_id(), &script, Delivery::Steer)
+        .prompt(&session.id, &Prompt::new(script, Delivery::Steer))
         .await
         .expect("prompt");
     let form = wait_for("a question", || async {
@@ -244,15 +242,19 @@ async fn queued_prompt_across_disconnect() {
     harlo
         .prompt(
             &session.id,
-            &message_id(),
-            "pace 60 | long 4",
-            Delivery::Steer,
+            &Prompt::new("pace 60 | long 4", Delivery::Steer),
         )
         .await
         .expect("slow turn");
     let queued = message_id();
     harlo
-        .prompt(&session.id, &queued, "say the queued one", Delivery::Queue)
+        .prompt(
+            &session.id,
+            &Prompt {
+                id: queued.clone(),
+                ..Prompt::new("say the queued one", Delivery::Queue)
+            },
+        )
         .await
         .expect("queued prompt");
     let inbox = harlo.inbox(&session.id).await.expect("inbox");
@@ -298,11 +300,23 @@ async fn retry_with_same_id_runs_once() {
         .expect("session");
     let id = message_id();
     harlo
-        .prompt(&session.id, &id, "say once", Delivery::Steer)
+        .prompt(
+            &session.id,
+            &Prompt {
+                id: id.clone(),
+                ..Prompt::new("say once", Delivery::Steer)
+            },
+        )
         .await
         .expect("first send");
     harlo
-        .prompt(&session.id, &id, "say once", Delivery::Steer)
+        .prompt(
+            &session.id,
+            &Prompt {
+                id: id.clone(),
+                ..Prompt::new("say once", Delivery::Steer)
+            },
+        )
         .await
         .expect("retry");
     wait_runs(&harlo, &session.id, 1).await;
@@ -331,7 +345,13 @@ async fn undo_with_user_edit() {
     let script =
         r#"tool edit {"path":"a.txt","oldString":"alpha","newString":"ALPHA"} ;; say edited"#;
     harlo
-        .prompt(&session.id, &prompt_id, script, Delivery::Steer)
+        .prompt(
+            &session.id,
+            &Prompt {
+                id: prompt_id.clone(),
+                ..Prompt::new(script, Delivery::Steer)
+            },
+        )
         .await
         .expect("prompt");
     wait_runs(&harlo, &session.id, 1).await;

@@ -7,7 +7,8 @@
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::theme::{Rgba, Tokens};
-use iced::widget::{button, container, rule, scrollable, svg, text_editor, text_input};
+use iced::widget::overlay::menu;
+use iced::widget::{button, container, pick_list, rule, scrollable, svg, text_editor, text_input};
 use iced::{Background, Border, Color, Font, Shadow, Theme, font};
 
 /// Geist, the interface font.
@@ -267,5 +268,91 @@ pub fn thin_scroll(t: &Tokens) -> impl Fn(&Theme, scrollable::Status) -> scrolla
 pub fn tint(c: Rgba) -> impl Fn(&Theme, svg::Status) -> svg::Style {
     move |_, _| svg::Style {
         color: Some(color(c)),
+    }
+}
+
+/// A picker's closed face: plain text on its chip.
+pub fn picker(t: &Tokens) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style + use<> {
+    let t = *t;
+    move |_, _| pick_list::Style {
+        text_color: color(t.text_strong),
+        placeholder_color: color(t.text_weak),
+        handle_color: color(t.icon_base),
+        background: color(t.surface_raised_strong).into(),
+        border: Border {
+            radius: size::RADIUS.into(),
+            ..Border::default()
+        },
+    }
+}
+
+/// A picker's open list.
+pub fn menu(t: &Tokens) -> impl Fn(&Theme) -> menu::Style + use<> {
+    let t = *t;
+    move |_| menu::Style {
+        background: color(t.surface_raised_strong).into(),
+        border: Border {
+            radius: 8.0.into(),
+            width: 1.0,
+            color: color(t.border_weak_base),
+        },
+        text_color: color(t.text_strong),
+        selected_text_color: color(t.text_strong),
+        selected_background: color(t.text_strong.over(t.surface_raised_strong, MENU_ACTIVE)).into(),
+        shadow: Shadow::default(),
+    }
+}
+
+/// How much text colour mixes into a menu's surface for its chosen row.
+const MENU_ACTIVE: f32 = 0.10;
+
+/// How much text colour mixes into a menu's surface for a hovered row.
+const MENU_HOVER: f32 = 0.06;
+
+/// A row in the composer's menu, opaque so it reads on the raised surface.
+pub fn menu_row(
+    t: &Tokens,
+    selected: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style + use<> {
+    let t = *t;
+    move |_, status| {
+        let amount = match status {
+            _ if selected => Some(MENU_ACTIVE),
+            button::Status::Hovered | button::Status::Pressed => Some(MENU_HOVER),
+            button::Status::Active | button::Status::Disabled => None,
+        };
+        button::Style {
+            background: amount
+                .map(|a| Background::Color(color(t.text_strong.over(t.surface_raised_strong, a)))),
+            text_color: color(t.text_base),
+            border: Border {
+                radius: size::RADIUS.into(),
+                ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+}
+
+/// A searchable picker's field, which reads as a chip until it's focused.
+pub fn picker_field(
+    t: &Tokens,
+) -> impl Fn(&Theme, text_input::Status) -> text_input::Style + use<> {
+    let t = *t;
+    move |_, status| text_input::Style {
+        background: color(t.surface_raised_strong).into(),
+        border: Border {
+            radius: size::RADIUS.into(),
+            width: 1.0,
+            color: color(match status {
+                text_input::Status::Focused { .. } => t.border_base,
+                _ => t.surface_raised_strong,
+            }),
+        },
+        icon: color(t.text_interactive_base),
+        placeholder: color(t.text_weak),
+        value: color(t.text_strong),
+        selection: color(t.text_interactive_base.alpha(0.3)),
     }
 }

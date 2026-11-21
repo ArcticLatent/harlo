@@ -102,6 +102,7 @@ pub fn snapshot() -> Snapshot {
             model: Some(ModelRef {
                 provider_id: maker.to_owned(),
                 id: "model".to_owned(),
+                variant: None,
             }),
             created: now_ms - (age as f64) * 1000.0,
             updated: now_ms - (age as f64) * 1000.0,

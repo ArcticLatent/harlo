@@ -32,13 +32,16 @@ fn history() -> Vec<Entry> {
         Entry::Prompt {
             key: "msg_1".into(),
             text: "Fix the port in the README".into(),
+            attachments: Vec::new(),
+            skills: Vec::new(),
         },
         Entry::Thought {
             key: "msg_2/0".into(),
-            summary: "Checking the connectivity notes".into(),
+            text: "**Checking the connectivity notes**\n\nThe README says 8080.".into(),
         },
         Entry::Tool {
             key: "msg_2/1".into(),
+            name: "edit".into(),
             label: "Edit".into(),
             detail: "SPEC.md".into(),
             status: ToolStatus::Completed,
@@ -94,7 +97,6 @@ fn opening_a_session_shows_its_history() {
         "model",
         "Changes",
         "Nothing to show for this session yet.",
-        "Enter to send · Shift+Enter for a new line",
     ] {
         assert!(shows(&app, text), "shows {text:?}");
     }

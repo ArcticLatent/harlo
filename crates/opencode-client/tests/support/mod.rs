@@ -198,6 +198,11 @@ impl Sandbox {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
+    /// The sandbox's scratch folder, which holds the model's log (`model.jsonl`).
+    pub fn root(&self) -> &Path {
+        self.dir.path()
+    }
+
     /// How many requests the scripted model has answered.
     pub fn model_requests(&self) -> usize {
         std::fs::read_to_string(self.dir.path().join("model.jsonl"))

@@ -5,9 +5,13 @@
 pub mod demo;
 
 use std::borrow::Cow;
+use std::time::Duration;
 
 use harlo::{App, Message, style};
 use iced_test::Simulator;
+
+/// Longer than any one-off motion takes.
+const MOTION_SETTLED: Duration = Duration::from_secs(1);
 
 /// The window size the design was drawn at.
 pub const WINDOW: (f32, f32) = (1588.0, 947.0);
@@ -39,7 +43,13 @@ pub fn interact(app: &mut App, interact: impl FnOnce(&mut Simulator<'_, Message>
     for message in messages.clone() {
         let _ = app.update(message);
     }
+    settle(app);
     messages
+}
+
+/// Lets all motion finish, as if a second had passed.
+pub fn settle(app: &mut App) {
+    let _ = app.update(Message::Frame(app.moment().now + MOTION_SETTLED));
 }
 
 /// Returns whether the app's view shows `text`.

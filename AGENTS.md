@@ -35,6 +35,7 @@ Load the skill before touching the code, and follow the guidelines it loads. Thi
   - Never the real `~/.config/opencode`, `~/.local/state/opencode` or the shared service.
   - Scratch folders sit outside this repository.
 - **Test it yourself.** Run the tests and checks yourself and report results, not commands for the user. The user hand-tests only what automation can't reach, once a feature is finished.
+  - For UI work, also drive the real window with `tools/gui-drive.py`. It runs Harlo on a private Xvfb display against `tools/oc-sandbox.sh`, with a scratch `HOME`. It can click, type, press keys, scroll, fill the clipboard, resize and take screenshots. Look at the screenshots, and stop it when done.
 - **Cap memory for heavy runs.** `/tmp` is RAM-backed. Wrap long or parallel runs in `systemd-run --user --scope -q -p MemoryMax=12G …` and clean up leftovers.
 
 ## Done means

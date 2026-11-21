@@ -38,12 +38,14 @@ fn start_shows_the_design_content() -> Result<(), Error> {
         "4h",
         "Show 19 more",
         "What are we working on?",
-        "Default model",
         "Enter to start · Shift+Enter for a new line",
         "Context",
         "No session selected.",
     ] {
         let _ = ui.find(text)?;
+    }
+    for id in [harlo::ids::FOLDER, harlo::ids::MODEL, harlo::ids::ATTACH] {
+        let _ = ui.find(iced::widget::Id::new(id))?;
     }
     // Only the first twelve sessions are listed.
     let _ = ui
@@ -152,6 +154,7 @@ fn the_right_rail_switches_and_closes_panels() {
     assert_eq!(app.panel, None);
 
     let _ = app.update(Message::OpenPanel(Panel::Notes));
+    support::settle(&mut app);
     let _ = interact(&mut app, |ui| {
         ui.click(Id::new(ids::PANEL_CLOSE))
             .expect("the close button");
@@ -364,6 +367,11 @@ fn snapshot() -> Result<(), Error> {
         let _ = app.update(Message::OpenSession(format!("ses_demo_{id}")));
     }
     let _ = app.update(Message::History("ses_demo_04".into(), Ok(design_history())));
+    // The design shows its tool group opened.
+    let _ = app.update(Message::Timeline(
+        "ses_demo_04".into(),
+        harlo::timeline::Event::ToggleGroup("m2/2".into()),
+    ));
     let snapshot = ui(&app).snapshot(&app.theme())?;
     assert!(snapshot.matches_image(path.with_file_name(format!("{stem}-session.png")))?);
     Ok(())
@@ -371,9 +379,10 @@ fn snapshot() -> Result<(), Error> {
 
 /// A history like the one in the session design.
 fn design_history() -> Vec<Entry> {
-    let tool = |key: &str, label: &str, detail: &str, secs: f64| Entry::Tool {
+    let tool = |key: &str, name: &str, detail: &str, secs: f64| Entry::Tool {
         key: key.into(),
-        label: label.into(),
+        name: name.into(),
+        label: harlo_core::timeline::tool_label(name),
         detail: detail.into(),
         status: ToolStatus::Completed,
         took: Some(Duration::from_secs_f64(secs)),
@@ -385,10 +394,12 @@ fn design_history() -> Vec<Entry> {
                 "Write this project's specs: SPEC.md files that hold its intent between sessions. \
                    Start with the connectivity check."
                     .into(),
+            attachments: Vec::new(),
+            skills: Vec::new(),
         },
         Entry::Thought {
             key: "m2/0".into(),
-            summary: "Updating README connectivity notes".into(),
+            text: "**Updating README connectivity notes**".into(),
         },
         Entry::Answer {
             key: "m2/1".into(),
@@ -397,10 +408,10 @@ fn design_history() -> Vec<Entry> {
                    and the Blender addon configuration unchanged."
                 .into(),
         },
-        tool("m2/2", "Edit", "SPEC.md", 15.0),
-        tool("m2/3", "Edit", "README.md", 15.0),
-        tool("m2/4", "Bash", "python3 - <<'PY'", 17.0),
-        tool("m2/5", "Todo", "4 items", 3.7),
+        tool("m2/2", "edit", "SPEC.md", 15.0),
+        tool("m2/3", "edit", "README.md", 15.0),
+        tool("m2/4", "bash", "python3 - <<'PY'", 17.0),
+        tool("m2/5", "todowrite", "4 items", 3.7),
         Entry::Answer {
             key: "m2/6".into(),
             text: "Changed `tests/check_connections.py` to check Blender on **127.0.0.1:9877** \

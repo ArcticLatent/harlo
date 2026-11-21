@@ -17,7 +17,8 @@ by " | " and run in order:
     pace <ms>             delay between streamed chunks from here on
 
 When the steps run out, the reply is "done.". A message without a
-script gets "ok.". Every request body is appended to the log, so a
+script gets "ok.". A request to summarize the conversation (compaction)
+gets a filled-in summary in OpenCode's template. Every request body is appended to the log, so a
 test can see which tools OpenCode offered and what it sent back.
 """
 
@@ -42,12 +43,46 @@ def text_of(content):
     return ""
 
 
+SUMMARY = """## Objective
+- Exercise Harlo against a scripted model.
+
+## Requirements
+- (none)
+
+## Decisions
+- (none)
+
+## Work State
+### Completed
+- (none)
+
+### Active
+- (none)
+
+### Blocked
+- (none)
+
+## Next Move
+1. (none)
+
+## Relevant Files
+(none)
+
+## Important Context
+- (none)
+"""
+
+
 def plan(messages):
     """Returns the parts of the step to run for this request."""
     last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
     if last_user < 0:
         return [("say", "ok.")]
     script = text_of(messages[last_user].get("content")).strip()
+    if script.startswith("You MUST summarize the conversation") or script.startswith(
+        "The previous response did not fill in the required summary template"
+    ):
+        return [("say", SUMMARY)]
     steps = [s.strip() for s in script.split(";;") if s.strip()]
     known = ("think ", "say ", "tool ", "long ", "pace ")
     if not steps or not any(steps[0].startswith(k) for k in known):

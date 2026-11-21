@@ -10,7 +10,7 @@
 use serde_json::Value;
 
 use crate::generated as g;
-use crate::types::{Form, ModelRef, Permission, Revert};
+use crate::types::{Delivery, Form, InboxItem, ModelRef, Permission, Revert};
 
 /// One server event.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +53,15 @@ pub enum Kind {
     Busy { session_id: String },
     /// A session stopped working, with `succeeded`, `failed` or `interrupted`.
     Done { session_id: String, outcome: String },
+    /// A model step started, as a new assistant message.
+    StepStarted {
+        session_id: String,
+        message_id: String,
+        /// The agent running the step.
+        agent: Option<String>,
+        /// The model answering.
+        model: Option<ModelRef>,
+    },
     /// Answer text streamed into an assistant message.
     TextDelta {
         session_id: String,
@@ -67,6 +76,20 @@ pub enum Kind {
         ordinal: i64,
         delta: String,
     },
+    /// An answer text part is complete, with its whole text.
+    TextEnded {
+        session_id: String,
+        message_id: String,
+        ordinal: i64,
+        text: String,
+    },
+    /// A reasoning part is complete, with its whole text.
+    ReasoningEnded {
+        session_id: String,
+        message_id: String,
+        ordinal: i64,
+        text: String,
+    },
     /// The model started a tool call.
     ToolStarted {
         session_id: String,
@@ -74,12 +97,37 @@ pub enum Kind {
         call_id: String,
         name: String,
     },
+    /// The model finished writing a tool call's arguments; it runs next.
+    ToolCalled {
+        session_id: String,
+        message_id: String,
+        call_id: String,
+        input: Value,
+    },
     /// A tool call finished, successfully or not.
     ToolEnded {
         session_id: String,
         message_id: String,
         call_id: String,
         failed: bool,
+        /// Why it failed, when it did.
+        error: Option<String>,
+    },
+    /// A model step failed.
+    StepFailed {
+        session_id: String,
+        message_id: String,
+        error: String,
+    },
+    /// A failed model request will be retried.
+    RetryScheduled {
+        session_id: String,
+        /// Which attempt comes next.
+        attempt: u64,
+        /// When, in milliseconds since the Unix epoch.
+        at: f64,
+        /// Why the last attempt failed.
+        error: String,
     },
     /// A model step ended; the message is complete on the server.
     StepEnded {
@@ -98,9 +146,33 @@ pub enum Kind {
     /// A question was answered or cancelled, here or by another client.
     FormSettled { session_id: String, form_id: String },
     /// A prompt or other item was added to a session's inbox.
-    InboxAdded { session_id: String, item_id: String },
-    /// An inbox item left the inbox (delivered or cancelled).
-    InboxRemoved { session_id: String, item_id: String },
+    InboxAdded { session_id: String, item: InboxItem },
+    /// An inbox item left the inbox: delivered into the session, or cancelled.
+    InboxRemoved {
+        session_id: String,
+        item_id: String,
+        delivered: bool,
+    },
+    /// A waiting item will now be delivered differently.
+    InboxDeliveryChanged {
+        session_id: String,
+        item_id: String,
+        delivery: Delivery,
+    },
+    /// The session started summarizing itself to free up context.
+    CompactionStarted { session_id: String },
+    /// More of the summary was written.
+    CompactionDelta { session_id: String, text: String },
+    /// The summary is done.
+    CompactionEnded { session_id: String, summary: String },
+    /// Summarizing failed.
+    CompactionFailed { session_id: String, error: String },
+    /// A skill was loaded into the session.
+    SkillActivated { session_id: String, name: String },
+    /// The session switched agents.
+    AgentSelected { session_id: String, agent: String },
+    /// The models, agents, commands or skills on offer changed.
+    CatalogChanged,
     /// An undo was staged.
     RevertStaged { session_id: String, revert: Revert },
     /// A staged undo was cancelled.
@@ -125,11 +197,24 @@ impl Kind {
             | Self::ModelSelected { session_id, .. }
             | Self::Busy { session_id }
             | Self::Done { session_id, .. }
+            | Self::StepStarted { session_id, .. }
             | Self::TextDelta { session_id, .. }
             | Self::ReasoningDelta { session_id, .. }
+            | Self::TextEnded { session_id, .. }
+            | Self::ReasoningEnded { session_id, .. }
             | Self::ToolStarted { session_id, .. }
+            | Self::ToolCalled { session_id, .. }
             | Self::ToolEnded { session_id, .. }
             | Self::StepEnded { session_id, .. }
+            | Self::StepFailed { session_id, .. }
+            | Self::RetryScheduled { session_id, .. }
+            | Self::InboxDeliveryChanged { session_id, .. }
+            | Self::CompactionStarted { session_id }
+            | Self::CompactionDelta { session_id, .. }
+            | Self::CompactionEnded { session_id, .. }
+            | Self::CompactionFailed { session_id, .. }
+            | Self::SkillActivated { session_id, .. }
+            | Self::AgentSelected { session_id, .. }
             | Self::PermissionReplied { session_id, .. }
             | Self::FormSettled { session_id, .. }
             | Self::InboxAdded { session_id, .. }
@@ -142,6 +227,7 @@ impl Kind {
             Self::Connected
             | Self::ProjectUpdated { .. }
             | Self::WorktreesChanged { .. }
+            | Self::CatalogChanged
             | Self::Other { .. } => None,
         }
     }
@@ -235,6 +321,86 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
                 outcome,
             }
         }
+        "session.step.started" => Kind::StepStarted {
+            session_id: session_of(&data),
+            message_id: text_of(&data, "assistantMessageID"),
+            agent: data["agent"].as_str().map(str::to_owned),
+            model: serde_json::from_value::<g::ModelRef>(data["model"].clone())
+                .ok()
+                .map(ModelRef::from),
+        },
+        "session.text.ended" | "session.reasoning.ended" => {
+            let (session_id, message_id) =
+                (session_of(&data), text_of(&data, "assistantMessageID"));
+            let ordinal = data["ordinal"].as_i64().unwrap_or_default();
+            let text = text_of(&data, "text");
+            if kind == "session.text.ended" {
+                Kind::TextEnded {
+                    session_id,
+                    message_id,
+                    ordinal,
+                    text,
+                }
+            } else {
+                Kind::ReasoningEnded {
+                    session_id,
+                    message_id,
+                    ordinal,
+                    text,
+                }
+            }
+        }
+        "session.tool.called" => Kind::ToolCalled {
+            session_id: session_of(&data),
+            message_id: text_of(&data, "assistantMessageID"),
+            call_id: text_of(&data, "id"),
+            input: data["input"].clone(),
+        },
+        "session.step.failed" => Kind::StepFailed {
+            session_id: session_of(&data),
+            message_id: text_of(&data, "assistantMessageID"),
+            error: error_of(&data),
+        },
+        "session.retry.scheduled" => Kind::RetryScheduled {
+            session_id: session_of(&data),
+            attempt: data["attempt"].as_u64().unwrap_or(1),
+            at: data["at"].as_f64().unwrap_or_default(),
+            error: error_of(&data),
+        },
+        "session.inbox.delivery.changed" => Kind::InboxDeliveryChanged {
+            session_id: session_of(&data),
+            item_id: text_of(&data, "inboxID"),
+            delivery: if data["delivery"] == "queue" {
+                Delivery::Queue
+            } else {
+                Delivery::Steer
+            },
+        },
+        "session.compaction.started" => Kind::CompactionStarted {
+            session_id: session_of(&data),
+        },
+        "session.compaction.delta" => Kind::CompactionDelta {
+            session_id: session_of(&data),
+            text: text_of(&data, "text"),
+        },
+        "session.compaction.ended" => Kind::CompactionEnded {
+            session_id: session_of(&data),
+            summary: text_of(&data, "text"),
+        },
+        "session.compaction.failed" => Kind::CompactionFailed {
+            session_id: session_of(&data),
+            error: error_of(&data),
+        },
+        "session.skill.activated" => Kind::SkillActivated {
+            session_id: session_of(&data),
+            name: text_of(&data, "name"),
+        },
+        "session.agent.selected" => Kind::AgentSelected {
+            session_id: session_of(&data),
+            agent: text_of(&data, "agent"),
+        },
+        "model.updated" | "provider.updated" | "agent.updated" | "command.updated"
+        | "skill.updated" => Kind::CatalogChanged,
         "session.text.delta" => {
             let d: g::SessionTextDeltaData = from(data)?;
             Kind::TextDelta {
@@ -263,13 +429,11 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             }
         }
         "session.tool.success" | "session.tool.failed" => Kind::ToolEnded {
-            session_id: data["sessionID"].as_str().unwrap_or_default().to_owned(),
-            message_id: data["assistantMessageID"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned(),
-            call_id: data["id"].as_str().unwrap_or_default().to_owned(),
+            session_id: session_of(&data),
+            message_id: text_of(&data, "assistantMessageID"),
+            call_id: text_of(&data, "id"),
             failed: kind == "session.tool.failed",
+            error: (kind == "session.tool.failed").then(|| error_of(&data)),
         },
         "session.step.ended" => {
             let d: g::SessionStepEndedData = from(data)?;
@@ -292,15 +456,17 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             form_id: data["id"].as_str().unwrap_or_default().to_owned(),
         },
         "session.inbox.enqueued" => {
-            let d: g::SessionInboxEnqueuedData = from(data)?;
+            let mut item = data["item"].clone();
+            item["id"] = data["inboxID"].clone();
             Kind::InboxAdded {
-                session_id: d.session_id.to_string(),
-                item_id: d.inbox_id.to_string(),
+                session_id: session_of(&data),
+                item: InboxItem::from_json(&item),
             }
         }
         "session.inbox.delivered" | "session.inbox.cancelled" => Kind::InboxRemoved {
-            session_id: data["sessionID"].as_str().unwrap_or_default().to_owned(),
-            item_id: data["inboxID"].as_str().unwrap_or_default().to_owned(),
+            session_id: session_of(&data),
+            item_id: text_of(&data, "inboxID"),
+            delivered: kind == "session.inbox.delivered",
         },
         "session.revert.staged" => {
             let d: g::SessionRevertStagedData = from(data)?;
@@ -323,5 +489,21 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
 
 /// Reads `sessionID` from an event's data.
 fn session_of(data: &Value) -> String {
-    data["sessionID"].as_str().unwrap_or_default().to_owned()
+    text_of(data, "sessionID")
+}
+
+/// Reads a text field from an event's data; empty when it's missing.
+fn text_of(data: &Value, key: &str) -> String {
+    data[key].as_str().unwrap_or_default().to_owned()
+}
+
+/// Reads an event's error as one line for people.
+fn error_of(data: &Value) -> String {
+    let error = &data["error"];
+    error["message"]
+        .as_str()
+        .or_else(|| error["data"]["message"].as_str())
+        .or_else(|| error["type"].as_str())
+        .unwrap_or("unknown error")
+        .to_owned()
 }

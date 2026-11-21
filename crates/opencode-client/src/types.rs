@@ -59,6 +59,8 @@ pub struct ModelRef {
     pub provider_id: String,
     /// Model ID within the provider.
     pub id: String,
+    /// Reasoning level, such as `high`; `None` uses the model's default.
+    pub variant: Option<String>,
 }
 
 impl From<g::ModelRef> for ModelRef {
@@ -66,6 +68,8 @@ impl From<g::ModelRef> for ModelRef {
         Self {
             provider_id: v.provider_id.to_string(),
             id: v.id,
+            // OpenCode reports "default" when no reasoning level was chosen.
+            variant: v.variant.filter(|s| !s.is_empty() && s != "default"),
         }
     }
 }
@@ -121,6 +125,10 @@ pub enum Message {
         id: String,
         /// The prompt text.
         text: String,
+        /// Names of the files and images sent with it.
+        attachments: Vec<String>,
+        /// Names of the skills loaded with it.
+        skills: Vec<String>,
     },
     /// One model step: text, reasoning and tool calls.
     Assistant {
@@ -138,7 +146,25 @@ pub enum Message {
         /// `succeeded`, `failed` or `interrupted`.
         outcome: String,
     },
-    /// A message kind Harlo doesn't show yet (agent switch, compaction, …).
+    /// The conversation was summarized to free up context.
+    Compaction {
+        /// Message ID (`msg_…`).
+        id: String,
+        /// `running`, `completed` or `failed`.
+        status: String,
+        /// The summary, once written.
+        summary: Option<String>,
+        /// Why it failed, when it did.
+        error: Option<String>,
+    },
+    /// A skill was loaded into the session.
+    Skill {
+        /// Message ID (`msg_…`).
+        id: String,
+        /// The skill's name.
+        name: String,
+    },
+    /// A message kind Harlo doesn't show yet (agent switch, shell, …).
     Other {
         /// Message ID (`msg_…`).
         id: String,
@@ -155,6 +181,8 @@ impl Message {
             Self::User { id, .. }
             | Self::Assistant { id, .. }
             | Self::Idle { id, .. }
+            | Self::Compaction { id, .. }
+            | Self::Skill { id, .. }
             | Self::Other { id, .. } => id,
         }
     }
@@ -164,8 +192,23 @@ impl Message {
         let kind = value["type"].as_str().unwrap_or_default().to_owned();
         Ok(match kind.as_str() {
             "user" => {
+                let attachments = value["files"]
+                    .as_array()
+                    .map(|files| {
+                        files
+                            .iter()
+                            .map(|f| attachment_name(f).to_owned())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let skills = skill_names(&value["skills"]);
                 let m: g::SessionMessageUser = serde_json::from_value(value)?;
-                Self::User { id, text: m.text }
+                Self::User {
+                    id,
+                    text: m.text,
+                    attachments,
+                    skills,
+                }
             }
             "assistant" => {
                 let m: g::SessionMessageAssistant = serde_json::from_value(value)?;
@@ -185,9 +228,31 @@ impl Message {
                     outcome: m.outcome.to_string(),
                 }
             }
+            "compaction" => Self::Compaction {
+                id,
+                status: value["status"].as_str().unwrap_or("running").to_owned(),
+                summary: value["summary"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_owned),
+                error: value["error"]["message"].as_str().map(str::to_owned),
+            },
+            "skill" => Self::Skill {
+                id,
+                name: value["name"].as_str().unwrap_or_default().to_owned(),
+            },
             _ => Self::Other { id, kind },
         })
     }
+}
+
+/// The name an attachment shows: its name, or the last part of its URI.
+pub(crate) fn attachment_name(file: &Value) -> &str {
+    file["name"]
+        .as_str()
+        .or_else(|| file["source"]["uri"].as_str())
+        .or_else(|| file["uri"].as_str())
+        .map_or("attachment", |name| name.rsplit('/').next().unwrap_or(name))
 }
 
 /// A piece of an assistant message.
@@ -373,8 +438,25 @@ pub struct InboxItem {
     pub kind: String,
     /// The prompt text, for a queued prompt.
     pub text: Option<String>,
+    /// Names of the files and images sent with a queued prompt.
+    pub attachments: Vec<String>,
+    /// Names of the skills loaded with a queued prompt.
+    pub skills: Vec<String>,
     /// How it will be delivered.
     pub delivery: Delivery,
+}
+
+/// Names of the skills in a list of `{id, name?}` objects.
+fn skill_names(list: &Value) -> Vec<String> {
+    list.as_array()
+        .map(|skills| {
+            skills
+                .iter()
+                .filter_map(|s| s["name"].as_str().or_else(|| s["id"].as_str()))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl InboxItem {
@@ -383,6 +465,16 @@ impl InboxItem {
             id: value["id"].as_str().unwrap_or_default().to_owned(),
             kind: value["type"].as_str().unwrap_or_default().to_owned(),
             text: value["payload"]["text"].as_str().map(str::to_owned),
+            attachments: value["payload"]["files"]
+                .as_array()
+                .map(|files| {
+                    files
+                        .iter()
+                        .map(|f| attachment_name(f).to_owned())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            skills: skill_names(&value["payload"]["skills"]),
             delivery: if value["delivery"] == "queue" {
                 Delivery::Queue
             } else {

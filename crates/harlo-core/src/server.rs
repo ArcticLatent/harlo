@@ -17,14 +17,17 @@ use std::time::Duration;
 
 use futures_util::Stream;
 use futures_util::future::try_join_all;
-use opencode_client::{Error, Event, read_registration, registration_path};
+use opencode_client::{Event, read_registration, registration_path};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::workspace::{Fetch, Fetched, Snapshot};
 
 #[doc(inline)]
-pub use opencode_client::{Client, Delivery, Endpoint, message_id};
+pub use opencode_client::{
+    Agent, Attachment, Client, Command, Delivery, Endpoint, Error, FileMatch, McpResource, Mention,
+    Model, Prompt, Skill, message_id,
+};
 
 /// The longest wait between reconnection attempts.
 const MAX_BACKOFF: Duration = Duration::from_secs(10);
@@ -344,6 +347,14 @@ pub async fn fetch(client: &Client, what: Fetch) -> Result<Fetched, Error> {
             let folders = client.worktrees(&project).await?;
             Ok(Fetched::Worktrees(project, folders))
         }
+        Fetch::Inbox(id) => {
+            let items = client.inbox(&id).await?;
+            Ok(Fetched::Inbox(id, items))
+        }
+        Fetch::Permissions(id) => {
+            let waiting = client.permissions(&id).await?;
+            Ok(Fetched::Permissions(id, waiting))
+        }
     }
 }
 
@@ -362,4 +373,88 @@ fn describe(error: &Error) -> String {
 fn backoff(attempt: u32) -> Duration {
     let secs = 1_u64 << attempt.saturating_sub(1).min(4);
     Duration::from_secs(secs).min(MAX_BACKOFF)
+}
+
+/// What a folder offers: models, agents, commands, skills and MCP resources.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Catalog {
+    /// Enabled models, in the server's order.
+    pub models: Vec<Model>,
+    /// The model new sessions use, when one is configured.
+    pub default_model: Option<Model>,
+    /// Agents a session can run, and subagents a prompt can name.
+    pub agents: Vec<Agent>,
+    /// Slash commands.
+    pub commands: Vec<Command>,
+    /// Skills a prompt can load.
+    pub skills: Vec<Skill>,
+    /// Resources MCP servers offer.
+    pub resources: Vec<McpResource>,
+}
+
+impl Catalog {
+    /// Returns the model `provider_id`/`id`, if it's offered.
+    #[must_use]
+    pub fn model(&self, provider_id: &str, id: &str) -> Option<&Model> {
+        self.models
+            .iter()
+            .find(|m| m.provider_id == provider_id && m.id == id)
+    }
+
+    /// Agents a session can run, in the server's order.
+    pub fn primary_agents(&self) -> impl Iterator<Item = &Agent> {
+        self.agents.iter().filter(|a| a.primary)
+    }
+}
+
+/// Loads what `directory` offers, all lists at once.
+///
+/// MCP resources are optional: when they fail to load (no MCP servers, or
+/// one that's down), the list is empty rather than failing the rest.
+///
+/// # Errors
+///
+/// Fails when the server can't be reached or a list doesn't decode.
+pub async fn catalog(client: &Client, directory: &str) -> Result<Catalog, Error> {
+    let mut catalog = load_catalog(client, directory).await?;
+    // The first request for a folder can arrive while OpenCode is still
+    // starting that folder's instance, and gets an empty agent list. There's
+    // always a primary agent once it's up, so empty means "ask again".
+    for _ in 0..CATALOG_RETRIES {
+        if !catalog.agents.is_empty() {
+            break;
+        }
+        tokio::time::sleep(CATALOG_RETRY_DELAY).await;
+        catalog = load_catalog(client, directory).await?;
+    }
+    Ok(catalog)
+}
+
+/// How many times a catalog without agents is loaded again.
+///
+/// With [`CATALOG_RETRY_DELAY`], about two seconds: a folder's instance
+/// starts well within that. A folder that still has no agents keeps the
+/// empty list, and the agent picker stays hidden.
+const CATALOG_RETRIES: u32 = 10;
+
+/// The wait before loading a catalog without agents again.
+const CATALOG_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+
+async fn load_catalog(client: &Client, directory: &str) -> Result<Catalog, Error> {
+    let (models, default_model, agents, commands, skills, resources) = futures_util::join!(
+        client.models(directory),
+        client.default_model(directory),
+        client.agents(directory),
+        client.commands(directory),
+        client.skills(directory),
+        client.mcp_resources(directory),
+    );
+    Ok(Catalog {
+        models: models?,
+        default_model: default_model?,
+        agents: agents?,
+        commands: commands?,
+        skills: skills?,
+        resources: resources.unwrap_or_default(),
+    })
 }

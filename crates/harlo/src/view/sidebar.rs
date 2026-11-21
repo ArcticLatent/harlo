@@ -16,8 +16,9 @@ use lucide_icons::Icon;
 use crate::app::{App, Message, Status};
 use crate::assets::Assets;
 use crate::ids;
+use crate::motion::Moment;
 use crate::style::{self, size};
-use crate::view::icon;
+use crate::view::{breathing, icon};
 use crate::widget::ellipsis;
 
 /// Space between the sidebar's edge and its content.
@@ -186,6 +187,7 @@ fn new_session(t: &Tokens) -> Element<'static, Message> {
         .width(Fill)
         .height(34)
         .padding([0, 12])
+        .on_press(Message::NewSession(None))
         .style(style::ghost(t, false))
         .into()
 }
@@ -223,7 +225,10 @@ fn project_group<'a>(app: &'a App, project: &'a Project) -> Element<'a, Message>
 
     let mut counts = row![].spacing(5).align_y(Center);
     if project.working() > 0 {
-        counts = counts.push(icon(Icon::Loader, 12.0, t.text_interactive_base));
+        let working = t.text_interactive_base;
+        counts = counts.push(breathing(
+            icon(Icon::Loader, 12.0, working).style(app.moment().breathing(working)),
+        ));
     }
     let heading = row![
         icon(Icon::Folder, 14.0, t.icon_base),
@@ -304,7 +309,7 @@ fn list<'a>(
     let mut rows: Column<'a, Message> = column![];
     for session in shown {
         let selected = app.active.as_deref() == Some(session.id.as_str());
-        rows = rows.push(session_row(t, &app.assets, session, selected));
+        rows = rows.push(session_row(t, &app.assets, session, selected, app.moment()));
     }
     if hidden > 0 || (expanded && !filtering && sessions.len() > VISIBLE_SESSIONS) {
         let label = if hidden > 0 {
@@ -333,6 +338,7 @@ fn session_row<'a>(
     assets: &Assets,
     session: &'a SessionSummary,
     selected: bool,
+    moment: Moment,
 ) -> Element<'a, Message> {
     let title = if session.title.is_empty() {
         ellipsis("Untitled session")
@@ -348,7 +354,9 @@ fn session_row<'a>(
             }))
     };
     let when: Element<'a, Message> = if session.busy {
-        icon(Icon::Loader, 13.0, t.text_interactive_base).into()
+        // It pulses while the session works.
+        let working = t.text_interactive_base;
+        breathing(icon(Icon::Loader, 13.0, working).style(moment.breathing(working)))
     } else {
         text(compact_age(session.age))
             .size(size::SMALL)

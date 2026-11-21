@@ -6,15 +6,23 @@ pub mod composer;
 pub mod home;
 pub mod locations;
 pub mod panel;
+pub mod pickers;
 pub mod rails;
 pub mod session;
 pub mod sidebar;
 
 use harlo_core::theme::Rgba;
+use iced::Element;
 use iced::widget::Text;
 use lucide_icons::Icon;
 
 /// A Lucide icon at the given size and colour.
+/// Wraps an indicator that breathes (see `Moment::breathing`) so it keeps
+/// redrawing while it's on screen.
+pub fn breathing<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
+    crate::widget::breathe(content, crate::motion::BREATH_FRAME).into()
+}
+
 pub fn icon(glyph: Icon, size: f32, color: Rgba) -> Text<'static> {
     glyph
         .widget()

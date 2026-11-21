@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[doc(inline)]
 pub use opencode_client::{
-    Event, EventKind, Message, ModelRef, Part, Project as ServerProject, Session, ToolCall,
-    ToolStatus,
+    Event, EventKind, InboxItem, Message, ModelRef, Part, Permission, Project as ServerProject,
+    Session, ToolCall, ToolStatus,
 };
 
 use crate::sessions::{Project, SessionSummary, Worktree, folder_name};
@@ -41,6 +41,10 @@ pub enum Fetch {
     Projects,
     /// One project's worktrees, by project ID.
     Worktrees(String),
+    /// A session's inbox: prompts waiting for it, by session ID.
+    Inbox(String),
+    /// A session's requests waiting for approval, by session ID.
+    Permissions(String),
 }
 
 /// The result of a [`Fetch`].
@@ -52,6 +56,10 @@ pub enum Fetched {
     Projects(Vec<ServerProject>),
     /// A project's folders, by project ID.
     Worktrees(String, Vec<String>),
+    /// A session's inbox, by session ID.
+    Inbox(String, Vec<InboxItem>),
+    /// A session's requests waiting for approval, by session ID.
+    Permissions(String, Vec<Permission>),
 }
 
 /// Projects, worktrees and sessions on one server, in the user's sidebar order.
@@ -61,6 +69,10 @@ pub struct Workspace {
     worktrees: HashMap<String, Vec<String>>,
     sessions: HashMap<String, Session>,
     busy: HashSet<String>,
+    /// Inboxes of the sessions that asked for theirs, by session ID.
+    inboxes: HashMap<String, Vec<InboxItem>>,
+    /// Requests waiting for approval, by session ID.
+    permissions: HashMap<String, Vec<Permission>>,
     /// Project folders in sidebar order; see [`Workspace::order`].
     order: Vec<String>,
 }
@@ -92,6 +104,10 @@ impl Workspace {
             .map(|s| (s.id.clone(), s))
             .collect();
         self.busy = snapshot.active.into_iter().collect();
+        // Inboxes and approvals may have changed while away; whoever shows
+        // one asks again.
+        self.inboxes.clear();
+        self.permissions.clear();
         self.adopt_projects();
     }
 
@@ -113,6 +129,44 @@ impl Workspace {
             | EventKind::SessionArchived { session_id } => {
                 self.sessions.remove(session_id);
                 self.busy.remove(session_id);
+                self.inboxes.remove(session_id);
+                Vec::new()
+            }
+            EventKind::AgentSelected { session_id, agent } => {
+                if let Some(s) = self.sessions.get_mut(session_id) {
+                    s.agent = Some(agent.clone());
+                }
+                Vec::new()
+            }
+            EventKind::InboxAdded { session_id, item } => {
+                if let Some(inbox) = self.inboxes.get_mut(session_id) {
+                    inbox.retain(|i| i.id != item.id);
+                    inbox.push(item.clone());
+                }
+                Vec::new()
+            }
+            EventKind::InboxRemoved {
+                session_id,
+                item_id,
+                ..
+            } => {
+                if let Some(inbox) = self.inboxes.get_mut(session_id) {
+                    inbox.retain(|i| i.id != *item_id);
+                }
+                Vec::new()
+            }
+            EventKind::InboxDeliveryChanged {
+                session_id,
+                item_id,
+                delivery,
+            } => {
+                if let Some(item) = self
+                    .inboxes
+                    .get_mut(session_id)
+                    .and_then(|inbox| inbox.iter_mut().find(|i| i.id == *item_id))
+                {
+                    item.delivery = *delivery;
+                }
                 Vec::new()
             }
             EventKind::ModelSelected { session_id, model } => {
@@ -126,7 +180,28 @@ impl Workspace {
                 self.touch(session_id, time);
                 Vec::new()
             }
+            EventKind::PermissionAsked(asked) => {
+                let waiting = self
+                    .permissions
+                    .entry(asked.session_id.clone())
+                    .or_default();
+                if !waiting.iter().any(|p| p.id == asked.id) {
+                    waiting.push(asked.clone());
+                }
+                Vec::new()
+            }
+            EventKind::PermissionReplied {
+                session_id,
+                request_id,
+            } => {
+                if let Some(waiting) = self.permissions.get_mut(session_id) {
+                    waiting.retain(|p| p.id != *request_id);
+                }
+                Vec::new()
+            }
             EventKind::Done { session_id, .. } => {
+                // A run that ended asks for nothing more.
+                self.permissions.remove(session_id);
                 self.busy.remove(session_id);
                 self.touch(session_id, time);
                 Vec::new()
@@ -160,6 +235,14 @@ impl Workspace {
             }
             Fetched::Worktrees(project_id, folders) => {
                 self.worktrees.insert(project_id, folders);
+                Vec::new()
+            }
+            Fetched::Inbox(session_id, items) => {
+                self.inboxes.insert(session_id, items);
+                Vec::new()
+            }
+            Fetched::Permissions(session_id, waiting) => {
+                self.permissions.insert(session_id, waiting);
                 Vec::new()
             }
         }
@@ -203,6 +286,24 @@ impl Workspace {
     #[must_use]
     pub fn session(&self, id: &str) -> Option<&Session> {
         self.sessions.get(id)
+    }
+
+    /// Returns a session's waiting prompts, oldest first.
+    ///
+    /// Empty until the inbox is loaded with [`Fetch::Inbox`]; from then on
+    /// events keep it current.
+    #[must_use]
+    pub fn inbox(&self, id: &str) -> &[InboxItem] {
+        self.inboxes.get(id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Returns a session's requests waiting for approval, oldest first.
+    ///
+    /// Requests asked while Harlo is attached arrive as events; older ones
+    /// are loaded with [`Fetch::Permissions`].
+    #[must_use]
+    pub fn permissions(&self, id: &str) -> &[Permission] {
+        self.permissions.get(id).map_or(&[], Vec::as_slice)
     }
 
     /// Returns whether a session is working right now.

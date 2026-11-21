@@ -23,12 +23,19 @@ futures-util = { version = "0.3.31", default-features = false }
 sse-stream = { version = "0.3.0", default-features = false }
 regress = { version = "0.12.0", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
+base64 = { version = "0.23.1", default-features = false }
 
 # UI.
 iced = { version = "0.14.0", default-features = false }
 iced_test = { version = "0.14.0", default-features = false }
 lucide-icons = { version = "1.77.0", default-features = false }
 mimalloc = { version = "0.1.52", default-features = false }
+# File dialog for attachments (MIT); the XDG portal on Linux, so no GTK.
+rfd = { version = "0.18.0", default-features = false }
+# Pasted images from the clipboard (MIT/Apache); Wayland data-control first, then X11.
+arboard = { version = "3.7.0", default-features = false }
+# Encodes pasted images as PNG (MIT/Apache).
+png = { version = "0.18.1", default-features = false }
 iced-code-editor = { version = "0.7.1", default-features = false }
 # 0.8.0 deadlocks the UI under heavy terminal output; the fix (upstream PR #69)
 # is merged but not yet released. Move back to a crates.io version once one ships.

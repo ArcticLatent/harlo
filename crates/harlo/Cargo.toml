@@ -13,9 +13,13 @@ harlo-core = { workspace = true }
 iced = { workspace = true, features = ["wgpu", "tiny-skia", "crisp", "tokio", "x11", "wayland", "svg", "image", "advanced", "markdown", "highlighter"] }
 lucide-icons = { workspace = true, features = ["iced"] }
 mimalloc = { workspace = true }
+rfd = { workspace = true, features = ["xdg-portal"] }
+arboard = { workspace = true, features = ["image-data", "wayland-data-control"] }
+png = { workspace = true }
 
 [dev-dependencies]
 iced_test = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

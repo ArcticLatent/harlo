@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 futures-util = { workspace = true }
 getrandom = { workspace = true, features = ["std"] }
+base64 = { workspace = true, features = ["std"] }
 reqwest = { workspace = true, features = ["json", "stream", "query"] }
 sse-stream = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync", "rt"] }

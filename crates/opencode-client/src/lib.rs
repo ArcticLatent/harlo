@@ -13,14 +13,18 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod catalog;
 mod client;
 mod endpoint;
 mod error;
 mod event;
 mod generated;
 mod id;
+mod prompt;
 mod types;
 
+#[doc(inline)]
+pub use catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 #[doc(inline)]
 pub use client::{Client, Events};
 #[doc(inline)]
@@ -31,6 +35,8 @@ pub use error::Error;
 pub use event::{Event, Kind as EventKind};
 #[doc(inline)]
 pub use id::message_id;
+#[doc(inline)]
+pub use prompt::{Attachment, Mention, Prompt};
 #[doc(inline)]
 pub use types::{
     Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Part, Permission, PermissionReply,

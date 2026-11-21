@@ -6,7 +6,10 @@
 
 pub mod app;
 pub mod assets;
+mod clipboard;
+pub mod fit;
 pub mod ids;
+pub mod motion;
 pub mod options;
 pub mod style;
 pub mod timeline;
@@ -14,11 +17,13 @@ mod view;
 pub mod widget;
 
 #[doc(inline)]
-pub use app::{App, Message, Panel, Status};
+pub use app::{App, MenuState, Message, Panel, Status};
 #[doc(inline)]
 pub use options::Options;
 #[doc(inline)]
 pub use view::locations::status_text;
+#[doc(inline)]
+pub use view::pickers::{AgentChoice, Folder, ModelChoice, Variant};
 
 /// Opens the window and runs until it closes.
 ///
@@ -49,7 +54,11 @@ pub fn run(options: Options) -> iced::Result {
         .theme(App::theme)
         .subscription(App::subscription)
         .default_font(style::SANS)
-        .window_size((1588.0, 947.0));
+        .window(iced::window::Settings {
+            size: iced::Size::new(fit::WINDOW.0, fit::WINDOW.1),
+            min_size: Some(iced::Size::new(fit::WINDOW_MIN.0, fit::WINDOW_MIN.1)),
+            ..iced::window::Settings::default()
+        });
     for font in style::FONTS {
         app = app.font(font);
     }

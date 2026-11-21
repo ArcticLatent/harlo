@@ -5,6 +5,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+pub mod composer;
 pub mod layout;
 pub mod server;
 pub mod sessions;
