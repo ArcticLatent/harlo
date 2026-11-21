@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 # Our crates.
 opencode-client = { path = "crates/opencode-client", version = "0.1.0" }
+harlo-core = { path = "crates/harlo-core", version = "0.1.0" }
 
 # OpenCode client.
 reqwest = { version = "0.13.5", default-features = false }
@@ -25,6 +26,9 @@ getrandom = { version = "0.4.3", default-features = false }
 
 # UI.
 iced = { version = "0.14.0", default-features = false }
+iced_test = { version = "0.14.0", default-features = false }
+lucide-icons = { version = "1.77.0", default-features = false }
+mimalloc = { version = "0.1.52", default-features = false }
 iced-code-editor = { version = "0.7.1", default-features = false }
 # 0.8.0 deadlocks the UI under heavy terminal output; the fix (upstream PR #69)
 # is merged but not yet released. Move back to a crates.io version once one ships.

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://opencode.ai/desktop-theme.json",
+  "name": "Harlo",
+  "id": "harlo",
+  "light": {
+    "palette": {
+      "neutral": "#eeeeee",
+      "ink": "#404040",
+      "primary": "#1159e3",
+      "success": "#105223",
+      "warning": "#7a6211",
+      "error": "#980313",
+      "info": "#0c42a8",
+      "interactive": "#1159e3"
+    }
+  },
+  "dark": {
+    "palette": {
+      "neutral": "#292929",
+      "ink": "#d5d5d5",
+      "primary": "#c6dafc",
+      "success": "#6ce78a",
+      "warning": "#f3c30e",
+      "error": "#ffb1b2",
+      "info": "#adcafa",
+      "interactive": "#adcafa"
+    },
+    "overrides": {
+      "background-stronger": "#252525",
+      "surface-inset-base": "#2d2d2d",
+      "surface-raised-base": "#2f2f2f",
+      "surface-raised-strong": "#353535",
+      "surface-base-active": "#343434",
+      "border-weak-base": "#383838",
+      "text-base": "#a5a6a9",
+      "text-weak": "#8b8c8e",
+      "text-weaker": "#69696b",
+      "icon-base": "var(--text-base)",
+      "icon-weak-base": "#868689"
+    }
+  }
+}

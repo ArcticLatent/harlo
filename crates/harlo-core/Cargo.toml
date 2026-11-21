@@ -1,0 +1,16 @@
+[package]
+name = "harlo-core"
+version = "0.1.0"
+description = "Harlo's domain model: themes, sessions and the state the app shows. No UI code."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

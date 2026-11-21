@@ -1,0 +1,21 @@
+[package]
+name = "harlo"
+version = "0.1.0"
+description = "A native desktop app for coding agents run by OpenCode."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+harlo-core = { workspace = true }
+iced = { workspace = true, features = ["wgpu", "tiny-skia", "crisp", "tokio", "x11", "wayland", "svg", "image", "advanced"] }
+lucide-icons = { workspace = true, features = ["iced"] }
+mimalloc = { workspace = true }
+
+[dev-dependencies]
+iced_test = { workspace = true }
+
+[lints]
+workspace = true
