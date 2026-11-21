@@ -12,8 +12,8 @@ use sse_stream::SseByteStream;
 
 use crate::generated as g;
 use crate::types::{
-    Delivery, FileDiff, Form, InboxItem, Message, Permission, PermissionReply, Revert, ServerInfo,
-    Session,
+    Delivery, FileDiff, Form, InboxItem, Message, Permission, PermissionReply, Project, Revert,
+    ServerInfo, Session,
 };
 use crate::{Endpoint, Error, Event};
 
@@ -102,6 +102,71 @@ impl Client {
         let v = Self::json(req).await?;
         decode_list(&v["data"], |item| {
             Ok(serde_json::from_value::<g::SessionInfo>(item.clone())?.into())
+        })
+    }
+
+    /// Lists every top-level session that isn't archived, newest first.
+    ///
+    /// Subagent sessions are left out. Follows the server's pages until the
+    /// list ends, so one call returns them all.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or answers with an error.
+    pub async fn root_sessions(&self) -> Result<Vec<Session>, Error> {
+        let mut sessions = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let mut req = self.request(Method::GET, "/api/session").query(&[
+                ("parentID", "null"),
+                ("archived", "false"),
+                ("limit", PAGE),
+            ]);
+            req = match &cursor {
+                Some(c) => req.query(&[("cursor", c.as_str())]),
+                None => req.query(&[("order", "desc")]),
+            };
+            let v = Self::json(req).await?;
+            let page = decode_list(&v["data"], |item| {
+                Ok(serde_json::from_value::<g::SessionInfo>(item.clone())?.into())
+            })?;
+            let full = page.len() >= PAGE.parse().unwrap_or(usize::MAX);
+            sessions.extend(page);
+            cursor = v["cursor"]["next"].as_str().map(str::to_owned);
+            if !full || cursor.is_none() {
+                return Ok(sessions);
+            }
+        }
+    }
+
+    /// Lists the projects OpenCode knows, archived ones left out.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or answers with an error.
+    pub async fn projects(&self) -> Result<Vec<Project>, Error> {
+        let v = Self::json(self.request(Method::GET, "/api/project")).await?;
+        decode_list(&v, |item| {
+            Ok(serde_json::from_value::<g::Project>(item.clone())?.into())
+        })
+    }
+
+    /// Lists a project's folders: its main checkout and its worktrees.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the project doesn't exist or the server can't be reached.
+    pub async fn worktrees(&self, project_id: &str) -> Result<Vec<String>, Error> {
+        let req = self
+            .request(Method::GET, "/api/worktree")
+            .query(&[("projectID", project_id)]);
+        let v = Self::json(req).await?;
+        decode_list(&v, |item| {
+            Ok(
+                serde_json::from_value::<g::WorktreeDirectory>(item.clone())?
+                    .directory
+                    .to_string(),
+            )
         })
     }
 

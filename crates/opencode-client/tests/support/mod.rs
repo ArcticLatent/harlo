@@ -49,6 +49,33 @@ fn binary() -> PathBuf {
         .join("opencode")
 }
 
+/// Starts `opencode serve` for the sandbox in `root`.
+fn spawn_server(root: &Path, port: u16, password: &str) -> Child {
+    let project = root.join("project");
+    let mut server = Command::new(binary());
+    scratch_env(&mut server, root, password);
+    server
+        .args([
+            "serve",
+            "--hostname",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ])
+        .env("PWD", &project)
+        .current_dir(&project)
+        .stdout(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(root.join("opencode.log"))
+                .expect("log"),
+        )
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start opencode serve")
+}
+
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .expect("a free local port")
@@ -85,7 +112,6 @@ impl Sandbox {
         let port = free_port();
         let password = format!("test-{}", opencode_client::message_id());
         prepare(root, model_port);
-        let project = root.join("project");
 
         let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-model.py");
         let model = Command::new("python3")
@@ -98,23 +124,7 @@ impl Sandbox {
             .spawn()
             .expect("start the scripted model");
 
-        let mut server = Command::new(&bin);
-        scratch_env(&mut server, root, &password);
-        let server = server
-            .args([
-                "serve",
-                "--hostname",
-                "127.0.0.1",
-                "--port",
-                &port.to_string(),
-            ])
-            .env("PWD", &project)
-            .current_dir(&project)
-            .stdout(std::fs::File::create(root.join("opencode.log")).expect("log"))
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start opencode serve");
-
+        let server = spawn_server(root, port, &password);
         let url = format!("http://127.0.0.1:{port}");
         let sandbox = Self {
             dir,
@@ -123,13 +133,33 @@ impl Sandbox {
             url,
             password,
         };
-        let client = sandbox.client();
+        sandbox.wait_until_up().await;
+        sandbox
+    }
+
+    async fn wait_until_up(&self) {
+        let client = self.client();
         let started = Instant::now();
         while client.info().await.is_err() {
             assert!(started.elapsed() < START_TIMEOUT, "OpenCode did not start");
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        sandbox
+    }
+
+    /// Stops this private server and starts it again on the same port.
+    ///
+    /// Clients see their connection drop, as when a server restarts.
+    pub async fn restart_server(&mut self) {
+        let _ = self.server.kill();
+        let _ = self.server.wait();
+        let port: u16 = self
+            .url
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse().ok())
+            .expect("the URL ends in a port");
+        self.server = spawn_server(self.dir.path(), port, &self.password);
+        self.wait_until_up().await;
     }
 
     /// A new client for this server.

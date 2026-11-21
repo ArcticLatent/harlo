@@ -44,12 +44,15 @@ impl Assets {
         }
     }
 
-    /// The logo of a model's maker, by provider ID.
+    /// The logo of a model's maker, by OpenCode provider ID, with the logo's key.
+    ///
+    /// Providers that serve one maker's models under several IDs, such as
+    /// `zai` and `zai-coding-plan`, share a logo.
     #[must_use]
-    pub fn provider(&self, id: &str) -> Option<&svg::Handle> {
+    pub fn provider(&self, id: &str) -> Option<(&'static str, &svg::Handle)> {
         self.providers
             .iter()
-            .find(|(p, _)| *p == id)
-            .map(|(_, handle)| handle)
+            .find(|(key, _)| id == *key || id.starts_with(&format!("{key}-")))
+            .map(|(key, handle)| (*key, handle))
     }
 }

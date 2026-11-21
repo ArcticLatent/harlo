@@ -10,7 +10,7 @@ publish.workspace = true
 
 [dependencies]
 harlo-core = { workspace = true }
-iced = { workspace = true, features = ["wgpu", "tiny-skia", "crisp", "tokio", "x11", "wayland", "svg", "image", "advanced"] }
+iced = { workspace = true, features = ["wgpu", "tiny-skia", "crisp", "tokio", "x11", "wayland", "svg", "image", "advanced", "markdown", "highlighter"] }
 lucide-icons = { workspace = true, features = ["iced"] }
 mimalloc = { workspace = true }
 

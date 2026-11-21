@@ -25,11 +25,18 @@ pub const SANS_SEMIBOLD: Font = Font {
     ..SANS
 };
 
+/// The monospace font, for code, paths and commands.
+pub const MONO: Font = Font::with_name("JetBrains Mono");
+
 /// Fonts bundled with the app, loaded at start.
-pub const FONTS: [&[u8]; 4] = [
+pub const FONTS: [&[u8]; 8] = [
     include_bytes!("../assets/fonts/Geist-Regular.ttf"),
     include_bytes!("../assets/fonts/Geist-Medium.ttf"),
     include_bytes!("../assets/fonts/Geist-SemiBold.ttf"),
+    include_bytes!("../assets/fonts/Geist-Bold.ttf"),
+    include_bytes!("../assets/fonts/Geist-Italic.ttf"),
+    include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
+    include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"),
     lucide_icons::LUCIDE_FONT_BYTES,
 ];
 
@@ -47,6 +54,10 @@ pub mod size {
     pub const RAIL_ICON: f32 = 18.0;
     /// Body text.
     pub const TEXT: f32 = 14.0;
+    /// Prompts and answers in the timeline.
+    pub const ANSWER: f32 = 14.5;
+    /// Code, paths and commands.
+    pub const CODE: f32 = 12.5;
     /// Secondary text.
     pub const SMALL: f32 = 12.5;
     /// Project names and hints.
@@ -55,6 +66,12 @@ pub mod size {
     pub const WORDMARK: f32 = 27.0;
     /// Panel titles.
     pub const TITLE: f32 = 19.0;
+    /// The open session's title.
+    pub const SESSION_TITLE: f32 = 18.5;
+    /// Height of the tab bar.
+    pub const TAB_BAR: f32 = 44.0;
+    /// Widest a tab gets.
+    pub const TAB: f32 = 190.0;
     /// The empty state's question.
     pub const HEADLINE: f32 = 26.0;
     /// Corner radius of buttons and fields.

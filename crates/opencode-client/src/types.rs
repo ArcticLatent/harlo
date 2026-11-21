@@ -28,6 +28,48 @@ impl From<g::ServerInfo> for ServerInfo {
     }
 }
 
+/// A project: a folder OpenCode works in, usually a git repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Project {
+    /// Project ID.
+    pub id: String,
+    /// The project's main folder.
+    pub directory: String,
+    /// A name the user gave the project, if any.
+    pub name: Option<String>,
+    /// Whether the folder is under git.
+    pub git: bool,
+}
+
+impl From<g::Project> for Project {
+    fn from(v: g::Project) -> Self {
+        Self {
+            id: v.id.to_string(),
+            directory: v.canonical.to_string(),
+            name: v.name.filter(|n| !n.trim().is_empty()),
+            git: v.vcs.is_some_and(|vcs| vcs.as_str() == "git"),
+        }
+    }
+}
+
+/// A model, by provider and model ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRef {
+    /// Provider ID, such as `anthropic`.
+    pub provider_id: String,
+    /// Model ID within the provider.
+    pub id: String,
+}
+
+impl From<g::ModelRef> for ModelRef {
+    fn from(v: g::ModelRef) -> Self {
+        Self {
+            provider_id: v.provider_id.to_string(),
+            id: v.id,
+        }
+    }
+}
+
 /// A session as listed by the server.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
@@ -41,6 +83,12 @@ pub struct Session {
     pub project_id: String,
     /// Parent session, for subagent sessions.
     pub parent_id: Option<String>,
+    /// The agent the session runs, such as `build`, once one is chosen.
+    pub agent: Option<String>,
+    /// The model the session uses, once one is chosen.
+    pub model: Option<ModelRef>,
+    /// Creation time, in milliseconds since the Unix epoch.
+    pub created: f64,
     /// Last change, in milliseconds since the Unix epoch.
     pub updated: f64,
     /// A staged undo, when one is waiting to be kept or cancelled.
@@ -55,6 +103,9 @@ impl From<g::SessionInfo> for Session {
             directory: v.location.directory.to_string(),
             project_id: v.project_id.to_string(),
             parent_id: v.parent_id.map(|p| p.to_string()),
+            agent: v.agent.map(|a| a.to_string()),
+            model: v.model.map(ModelRef::from),
+            created: v.time.created,
             updated: v.time.updated,
             revert: v.revert.map(Revert::from),
         }
@@ -170,11 +221,13 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
                         (ToolStatus::Failed, Value::Object(s.input))
                     }
                 };
+                let took_ms = t.time.completed.map(|end| (end - t.time.created).max(0.0));
                 Self::Tool(ToolCall {
                     id: t.id,
                     name: t.name,
                     status,
                     input,
+                    took_ms,
                 })
             }
         }
@@ -192,6 +245,8 @@ pub struct ToolCall {
     pub status: ToolStatus,
     /// The call's arguments.
     pub input: Value,
+    /// How long the call took, in milliseconds, once it finished.
+    pub took_ms: Option<f64>,
 }
 
 /// Where a tool call is.

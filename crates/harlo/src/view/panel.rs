@@ -1,4 +1,4 @@
-//! The right panel. Each panel shows its empty state until a session is open.
+//! The right panel. Each panel shows an empty state until its content lands.
 
 // Rust guideline compliant 2026-10-09
 
@@ -13,7 +13,9 @@ use crate::style::{self, size};
 use crate::view::icon;
 
 /// The open panel, with a divider on its left edge.
-pub fn view(t: &Tokens, panel: Panel) -> Element<'static, Message> {
+///
+/// `session_open` says whether a session is shown, which changes the empty state.
+pub fn view(t: &Tokens, panel: Panel, session_open: bool) -> Element<'static, Message> {
     let close = button(center(icon(Icon::X, 14.0, t.icon_base)))
         .width(30)
         .height(30)
@@ -35,9 +37,13 @@ pub fn view(t: &Tokens, panel: Panel) -> Element<'static, Message> {
         header = header.push(icon(Icon::RefreshCw, 15.0, t.icon_base));
     }
     let header = header.push(container(close).id(ids::PANEL_CLOSE));
-    let body = text("No session selected.")
-        .size(size::LABEL)
-        .color(style::color(t.text_base));
+    let body = text(if session_open {
+        "Nothing to show for this session yet."
+    } else {
+        "No session selected."
+    })
+    .size(size::LABEL)
+    .color(style::color(t.text_base));
     let content = column![
         header,
         rule::horizontal(1).style(style::divider(t.border_weaker_base)),

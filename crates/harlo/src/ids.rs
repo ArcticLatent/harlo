@@ -13,3 +13,15 @@ pub const PANEL_CLOSE: &str = "panel-close";
 
 /// The composer box on the start screen.
 pub const COMPOSER: &str = "composer";
+
+/// The location picker's button.
+pub const LOCATION: &str = "location";
+
+/// The composer's send button.
+pub const SEND: &str = "send";
+
+/// The active tab's close button.
+pub const TAB_CLOSE: &str = "tab-close";
+
+/// The folder picker on the start screen.
+pub const FOLDER: &str = "folder";

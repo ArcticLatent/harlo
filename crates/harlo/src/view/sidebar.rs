@@ -2,15 +2,18 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::sessions::{Project, SessionSummary, compact_age};
+use harlo_core::server::Location;
+use harlo_core::sessions::{
+    Project, SessionSummary, VISIBLE_SESSIONS, Worktree, compact_age, visible,
+};
 use harlo_core::theme::{Rgba, Tokens};
 use iced::widget::{
-    button, center, column, container, row, rule, scrollable, space, svg, text, text_input,
+    Column, button, center, column, container, row, rule, scrollable, space, svg, text, text_input,
 };
 use iced::{Center, Element, Fill, Padding};
 use lucide_icons::Icon;
 
-use crate::app::{App, Message};
+use crate::app::{App, Message, Status};
 use crate::assets::Assets;
 use crate::ids;
 use crate::style::{self, size};
@@ -23,11 +26,17 @@ const INSET: f32 = 14.0;
 /// Height of a project heading.
 const PROJECT_ROW: f32 = 36.0;
 
+/// Height of a worktree heading.
+const WORKTREE_ROW: f32 = 32.0;
+
 /// Height of a session row.
 const SESSION_ROW: f32 = 42.0;
 
 /// Side of a session's maker logo tile.
 const MAKER_TILE: f32 = 26.0;
+
+/// How far worktree groups are indented under their project.
+const WORKTREE_INDENT: f32 = 12.0;
 
 /// The whole sidebar.
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -35,7 +44,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let header = column![
         brand(t, &app.assets),
         space().height(6),
-        location(t),
+        location(t, &app.location, &app.status),
         space().height(14),
         new_session(t),
         space().height(12),
@@ -49,32 +58,51 @@ pub fn view(app: &App) -> Element<'_, Message> {
         right: INSET,
     });
 
-    let mut groups = column![].padding(Padding {
-        top: 0.0,
-        bottom: 12.0,
-        left: INSET,
-        right: INSET,
-    });
-    for (index, project) in app.projects.iter().enumerate() {
-        groups = groups.push(group(
-            t,
-            &app.assets,
-            index,
-            project,
-            &app.filter,
-            app.expanded.contains(&index),
-        ));
-    }
-    let list = scrollable(groups).height(Fill).style(style::thin_scroll(t));
+    let body: Element<'_, Message> = if app.projects.is_empty() {
+        notice(t, empty_text(&app.status))
+    } else {
+        let mut groups = column![].padding(Padding {
+            top: 0.0,
+            bottom: 12.0,
+            left: INSET,
+            right: INSET,
+        });
+        for project in &app.projects {
+            groups = groups.push(project_group(app, project));
+        }
+        scrollable(groups)
+            .height(Fill)
+            .style(style::thin_scroll(t))
+            .into()
+    };
 
-    let body = container(column![header, list])
+    let content = container(column![header, body])
         .width(size::SIDEBAR)
         .height(Fill)
         .style(style::fill(t.background_stronger));
     row![
-        body,
+        content,
         rule::vertical(1).style(style::divider(t.border_weak_base))
     ]
+    .into()
+}
+
+/// What the list says when it has no projects to show.
+fn empty_text(status: &Status) -> String {
+    match status {
+        Status::Connecting { .. } => "Connecting to OpenCode…".to_owned(),
+        Status::Lost { reason, .. } => format!("Can't connect: {reason}."),
+        Status::Connected { .. } => "No projects yet. Add a folder with + Project.".to_owned(),
+    }
+}
+
+fn notice(t: &Tokens, message: String) -> Element<'static, Message> {
+    container(
+        text(message)
+            .size(size::LABEL)
+            .color(style::color(t.text_weak)),
+    )
+    .padding([12.0, INSET + 4.0])
     .into()
 }
 
@@ -94,14 +122,34 @@ fn brand(t: &Tokens, assets: &Assets) -> Element<'static, Message> {
         .into()
 }
 
-/// The location picker: which OpenCode server Harlo is attached to.
-fn location(t: &Tokens) -> Element<'static, Message> {
-    let dot =
-        container(space().width(7).height(7)).style(style::boxed(t.icon_success_base, None, 4.0));
+/// The colour of the connection dot.
+pub fn status_color(t: &Tokens, status: &Status) -> Rgba {
+    match status {
+        Status::Connected { .. } => t.icon_success_base,
+        Status::Connecting { .. } => t.icon_warning_base,
+        Status::Lost { .. } => t.icon_critical_base,
+    }
+}
+
+/// The icon for a location: this computer, or another server.
+pub fn location_icon(location: &Location) -> Icon {
+    match location {
+        Location::Shared => Icon::Monitor,
+        Location::Server { .. } => Icon::Server,
+    }
+}
+
+/// The location picker's button: which server Harlo follows, and how that's going.
+fn location(t: &Tokens, location: &Location, status: &Status) -> Element<'static, Message> {
+    let dot = container(space().width(7).height(7)).style(style::boxed(
+        status_color(t, status),
+        None,
+        4.0,
+    ));
     let label = row![
         dot,
-        icon(Icon::Monitor, 13.0, t.icon_base),
-        text("Local")
+        icon(location_icon(location), 13.0, t.icon_base),
+        text(location.label())
             .size(size::LABEL)
             .color(style::color(t.text_strong)),
         space().width(Fill),
@@ -110,12 +158,13 @@ fn location(t: &Tokens) -> Element<'static, Message> {
     .spacing(7)
     .height(Fill)
     .align_y(Center);
-    button(label)
+    let picker = button(label)
         .width(Fill)
         .height(31)
         .padding([0, 10])
-        .style(style::chip(t))
-        .into()
+        .on_press(Message::ToggleLocations)
+        .style(style::chip(t));
+    container(picker).id(ids::LOCATION).into()
 }
 
 fn new_session(t: &Tokens) -> Element<'static, Message> {
@@ -158,24 +207,23 @@ fn filter<'a>(t: &Tokens, value: &'a str) -> Element<'a, Message> {
         .into()
 }
 
-/// A project heading and its sessions.
-fn group<'a>(
-    t: &Tokens,
-    assets: &Assets,
-    index: usize,
-    project: &'a Project,
-    filter: &str,
-    expanded: bool,
-) -> Element<'a, Message> {
-    let (sessions, hidden) = project.visible(filter, expanded);
-    let filtering = !filter.trim().is_empty();
-    if filtering && sessions.is_empty() {
+/// A project heading, its sessions, then its worktrees.
+fn project_group<'a>(app: &'a App, project: &'a Project) -> Element<'a, Message> {
+    let t = &app.tokens;
+    let filtering = !app.filter.trim().is_empty();
+    let main = list(app, &project.directory, &project.sessions);
+    let worktrees: Vec<Element<'a, Message>> = project
+        .worktrees
+        .iter()
+        .filter_map(|w| worktree_group(app, w))
+        .collect();
+    if filtering && main.is_none() && worktrees.is_empty() {
         return column![].into();
     }
 
     let mut counts = row![].spacing(5).align_y(Center);
-    if project.working > 0 {
-        counts = counts.push(icon(Icon::Loader, 12.0, t.icon_weak_base));
+    if project.working() > 0 {
+        counts = counts.push(icon(Icon::Loader, 12.0, t.text_interactive_base));
     }
     let heading = row![
         icon(Icon::Folder, 14.0, t.icon_base),
@@ -184,7 +232,7 @@ fn group<'a>(
             .size(size::LABEL)
             .color(style::color(t.text_base)),
         counts.push(
-            text(project.sessions.len())
+            text(project.total())
                 .size(size::SMALL)
                 .color(style::color(t.text_weak))
         ),
@@ -195,15 +243,70 @@ fn group<'a>(
     .padding([0, 4])
     .align_y(Center);
 
-    let mut rows = column![heading];
-    for session in sessions {
-        rows = rows.push(session_row(t, assets, session));
+    let mut group = column![heading];
+    if let Some(main) = main {
+        group = group.push(main);
     }
-    if hidden > 0
-        || (expanded
-            && !filtering
-            && project.sessions.len() > harlo_core::sessions::VISIBLE_SESSIONS)
-    {
+    group = group.extend(worktrees);
+    group.push(space().height(13)).into()
+}
+
+/// A worktree heading and its sessions; `None` when a filter hides them all.
+fn worktree_group<'a>(app: &'a App, worktree: &'a Worktree) -> Option<Element<'a, Message>> {
+    let t = &app.tokens;
+    let filtering = !app.filter.trim().is_empty();
+    let sessions = list(app, &worktree.directory, &worktree.sessions);
+    if filtering && sessions.is_none() {
+        return None;
+    }
+    let heading = row![
+        icon(Icon::GitBranch, 13.0, t.icon_weak_base),
+        ellipsis(worktree.name.as_str())
+            .font(style::SANS_MEDIUM)
+            .size(size::LABEL)
+            .color(style::color(t.text_base)),
+        text(worktree.sessions.len())
+            .size(size::SMALL)
+            .color(style::color(t.text_weak)),
+        icon(Icon::Plus, 14.0, t.icon_base),
+    ]
+    .spacing(9)
+    .height(WORKTREE_ROW)
+    .padding([0, 4])
+    .align_y(Center);
+    let mut group = column![heading];
+    if let Some(sessions) = sessions {
+        group = group.push(sessions);
+    }
+    Some(
+        container(group)
+            .padding(Padding {
+                left: WORKTREE_INDENT,
+                ..Padding::ZERO
+            })
+            .into(),
+    )
+}
+
+/// The session rows of one folder, with "Show N more"; `None` when there are none to show.
+fn list<'a>(
+    app: &'a App,
+    folder: &'a str,
+    sessions: &'a [SessionSummary],
+) -> Option<Element<'a, Message>> {
+    let t = &app.tokens;
+    let filtering = !app.filter.trim().is_empty();
+    let expanded = app.expanded.contains(folder);
+    let (shown, hidden) = visible(sessions, &app.filter, expanded);
+    if shown.is_empty() {
+        return None;
+    }
+    let mut rows: Column<'a, Message> = column![];
+    for session in shown {
+        let selected = app.active.as_deref() == Some(session.id.as_str());
+        rows = rows.push(session_row(t, &app.assets, session, selected));
+    }
+    if hidden > 0 || (expanded && !filtering && sessions.len() > VISIBLE_SESSIONS) {
         let label = if hidden > 0 {
             format!("Show {hidden} more")
         } else {
@@ -215,57 +318,75 @@ fn group<'a>(
                 .color(style::color(t.text_weak)),
         )
         .padding([6, 8])
-        .on_press(Message::ToggleMore(index))
+        .on_press(Message::ToggleMore(folder.to_owned()))
         .style(style::ghost(t, false));
         rows = rows.push(container(more).padding(Padding {
             left: 16.0,
             ..Padding::ZERO
         }));
     }
-    rows.push(space().height(13)).into()
+    Some(rows.into())
 }
 
 fn session_row<'a>(
     t: &Tokens,
     assets: &Assets,
     session: &'a SessionSummary,
+    selected: bool,
 ) -> Element<'a, Message> {
-    let content = row![
-        maker(t, assets, session.maker.as_deref()),
+    let title = if session.title.is_empty() {
+        ellipsis("Untitled session")
+            .size(size::TEXT)
+            .color(style::color(t.text_weaker))
+    } else {
         ellipsis(session.title.as_str())
             .size(size::TEXT)
-            .color(style::color(t.text_base)),
+            .color(style::color(if selected {
+                t.text_strong
+            } else {
+                t.text_base
+            }))
+    };
+    let when: Element<'a, Message> = if session.busy {
+        icon(Icon::Loader, 13.0, t.text_interactive_base).into()
+    } else {
         text(compact_age(session.age))
             .size(size::SMALL)
-            .color(style::color(t.text_weak)),
-    ]
-    .spacing(11)
-    .align_y(Center);
-    container(content)
+            .color(style::color(t.text_weak))
+            .into()
+    };
+    let content = row![maker(t, assets, session.maker.as_deref()), title, when]
+        .spacing(11)
+        .height(Fill)
+        .align_y(Center);
+    button(content)
+        .width(Fill)
         .height(SESSION_ROW)
         .padding([0, 4])
-        .align_y(Center)
+        .on_press(Message::OpenSession(session.id.clone()))
+        .style(style::ghost(t, selected))
         .into()
 }
 
 /// The tile showing who made a session's model.
-fn maker(t: &Tokens, assets: &Assets, id: Option<&str>) -> Element<'static, Message> {
-    // Each maker's own colour; unknown makers use the text colour.
-    let tone = match id {
+fn maker(t: &Tokens, assets: &Assets, provider: Option<&str>) -> Element<'static, Message> {
+    let logo = provider.and_then(|id| assets.provider(id));
+    // Each maker's own colour; others use the text colour.
+    let tone = match logo.map(|(key, _)| key) {
         Some("anthropic") => Rgba::parse("#e99b73"),
         Some("zai") => Rgba::parse("#849cff"),
         _ => None,
     }
     .unwrap_or(t.text_base);
-    let logo: Element<'static, Message> = match id.and_then(|id| assets.provider(id)) {
-        Some(handle) => svg(handle.clone())
+    let glyph: Element<'static, Message> = match logo {
+        Some((_, handle)) => svg(handle.clone())
             .width(15)
             .height(15)
             .style(style::tint(tone))
             .into(),
         None => icon(Icon::Bot, 14.0, tone).into(),
     };
-    container(center(logo))
+    container(center(glyph))
         .width(MAKER_TILE)
         .height(MAKER_TILE)
         .style(style::boxed(

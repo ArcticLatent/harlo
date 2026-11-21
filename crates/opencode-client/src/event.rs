@@ -10,7 +10,7 @@
 use serde_json::Value;
 
 use crate::generated as g;
-use crate::types::{Form, Permission, Revert};
+use crate::types::{Form, ModelRef, Permission, Revert};
 
 /// One server event.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +19,8 @@ pub struct Event {
     pub id: String,
     /// The per-session sequence number, for durable session events.
     pub seq: Option<u64>,
+    /// When it happened, in milliseconds since the Unix epoch.
+    pub time: f64,
     /// What happened.
     pub kind: Kind,
 }
@@ -35,6 +37,18 @@ pub enum Kind {
     SessionRenamed { session_id: String, title: String },
     /// A session was deleted.
     SessionDeleted { session_id: String },
+    /// A session moved to another folder or project.
+    SessionMoved { session_id: String },
+    /// A session was archived.
+    SessionArchived { session_id: String },
+    /// A session was brought back from the archive.
+    SessionUnarchived { session_id: String },
+    /// A session switched model.
+    ModelSelected { session_id: String, model: ModelRef },
+    /// A project's details changed, or a project appeared.
+    ProjectUpdated { project_id: String },
+    /// A project's worktrees changed.
+    WorktreesChanged { project_id: String },
     /// A session started working.
     Busy { session_id: String },
     /// A session stopped working, with `succeeded`, `failed` or `interrupted`.
@@ -97,6 +111,42 @@ pub enum Kind {
     Other { kind: String },
 }
 
+impl Kind {
+    /// The session the event is about, if it's about one.
+    #[must_use]
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            Self::SessionCreated { session_id }
+            | Self::SessionRenamed { session_id, .. }
+            | Self::SessionDeleted { session_id }
+            | Self::SessionMoved { session_id }
+            | Self::SessionArchived { session_id }
+            | Self::SessionUnarchived { session_id }
+            | Self::ModelSelected { session_id, .. }
+            | Self::Busy { session_id }
+            | Self::Done { session_id, .. }
+            | Self::TextDelta { session_id, .. }
+            | Self::ReasoningDelta { session_id, .. }
+            | Self::ToolStarted { session_id, .. }
+            | Self::ToolEnded { session_id, .. }
+            | Self::StepEnded { session_id, .. }
+            | Self::PermissionReplied { session_id, .. }
+            | Self::FormSettled { session_id, .. }
+            | Self::InboxAdded { session_id, .. }
+            | Self::InboxRemoved { session_id, .. }
+            | Self::RevertStaged { session_id, .. }
+            | Self::RevertCleared { session_id }
+            | Self::RevertCommitted { session_id } => Some(session_id),
+            Self::PermissionAsked(p) => Some(&p.session_id),
+            Self::FormCreated(f) => Some(&f.session_id),
+            Self::Connected
+            | Self::ProjectUpdated { .. }
+            | Self::WorktreesChanged { .. }
+            | Self::Other { .. } => None,
+        }
+    }
+}
+
 impl Event {
     /// Decodes one SSE `data` payload.
     ///
@@ -108,11 +158,13 @@ impl Event {
         let mut raw: Value = serde_json::from_str(data)?;
         let id = raw["id"].as_str().unwrap_or_default().to_owned();
         let seq = raw["durable"]["seq"].as_u64();
+        let time = raw["created"].as_f64().unwrap_or_default();
         let kind = raw["type"].as_str().unwrap_or_default().to_owned();
         let data = raw["data"].take();
         Ok(Self {
             id,
             seq,
+            time,
             kind: decode(&kind, data)?,
         })
     }
@@ -142,6 +194,31 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
                 session_id: d.session_id.to_string(),
             }
         }
+        "session.moved" => {
+            let d: g::SessionMovedData = from(data)?;
+            Kind::SessionMoved {
+                session_id: d.session_id.to_string(),
+            }
+        }
+        "session.archived" => Kind::SessionArchived {
+            session_id: session_of(&data),
+        },
+        "session.unarchived" => Kind::SessionUnarchived {
+            session_id: session_of(&data),
+        },
+        "session.model.selected" => {
+            let d: g::SessionModelSelectedData = from(data)?;
+            Kind::ModelSelected {
+                session_id: d.session_id.to_string(),
+                model: d.model.into(),
+            }
+        }
+        "project.updated" => Kind::ProjectUpdated {
+            project_id: data["id"].as_str().unwrap_or_default().to_owned(),
+        },
+        "worktree.updated" | "worktree.resolved" => Kind::WorktreesChanged {
+            project_id: data["projectID"].as_str().unwrap_or_default().to_owned(),
+        },
         "session.execution.started" => {
             let d: g::SessionExecutionStartedData = from(data)?;
             Kind::Busy {
@@ -242,4 +319,9 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             kind: other.to_owned(),
         },
     })
+}
+
+/// Reads `sessionID` from an event's data.
+fn session_of(data: &Value) -> String {
+    data["sessionID"].as_str().unwrap_or_default().to_owned()
 }

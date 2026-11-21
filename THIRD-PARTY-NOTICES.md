@@ -6,6 +6,14 @@ Harlo bundles the following assets. Rust crates are listed in `Cargo.lock`, and 
 
 `crates/harlo/assets/fonts/Geist-*.ttf`. Copyright 2024 The Geist Project Authors. These fonts are licensed under the SIL Open Font License 1.1; the full text is in `crates/harlo/assets/fonts/Geist-OFL.txt`.
 
+## JetBrains Mono (fonts)
+
+`crates/harlo/assets/fonts/JetBrainsMono-*.ttf`. Copyright 2020 The JetBrains Mono Project Authors. These fonts are licensed under the SIL Open Font License 1.1; the full text is in `crates/harlo/assets/fonts/JetBrainsMono-OFL.txt`.
+
+## SQLite
+
+The layout database is built into the app through `rusqlite`'s bundled SQLite, which is in the public domain.
+
 ## Lucide (icon font)
 
 The icon font is embedded through the `lucide-icons` crate. It is licensed under the ISC License:

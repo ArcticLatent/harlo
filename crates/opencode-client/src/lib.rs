@@ -33,8 +33,8 @@ pub use event::{Event, Kind as EventKind};
 pub use id::message_id;
 #[doc(inline)]
 pub use types::{
-    Delivery, FileDiff, Form, InboxItem, Message, Part, Permission, PermissionReply, Revert,
-    ServerInfo, Session, ToolCall, ToolStatus,
+    Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Part, Permission, PermissionReply,
+    Project, Revert, ServerInfo, Session, ToolCall, ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

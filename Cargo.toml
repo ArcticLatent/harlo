@@ -41,6 +41,8 @@ syn = { version = "3.0.10", default-features = false }
 prettyplease = { version = "0.3.0", default-features = false }
 
 # Shared.
+rusqlite = { version = "0.43.0", default-features = false }
+dirs = { version = "7.0.0", default-features = false }
 tempfile = { version = "3.27.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
