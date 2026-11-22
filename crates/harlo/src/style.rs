@@ -30,7 +30,7 @@ pub const SANS_SEMIBOLD: Font = Font {
 pub const MONO: Font = Font::with_name("JetBrains Mono");
 
 /// Fonts bundled with the app, loaded at start.
-pub const FONTS: [&[u8]; 8] = [
+pub const FONTS: [&[u8]; 9] = [
     include_bytes!("../assets/fonts/Geist-Regular.ttf"),
     include_bytes!("../assets/fonts/Geist-Medium.ttf"),
     include_bytes!("../assets/fonts/Geist-SemiBold.ttf"),
@@ -39,6 +39,7 @@ pub const FONTS: [&[u8]; 8] = [
     include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
     include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"),
     lucide_icons::LUCIDE_FONT_BYTES,
+    include_bytes!("../assets/fonts/FileIcons.ttf"),
 ];
 
 /// Sizes in logical pixels, measured from the design.
@@ -49,9 +50,6 @@ pub mod size {
     pub const SIDEBAR: f32 = 288.0;
     /// Width of the right panel.
     pub const PANEL: f32 = 260.0;
-    /// Width of the right panel when it shows diffs (Changes): room for a
-    /// line number, a mark and about 45 characters of code.
-    pub const WIDE_PANEL: f32 = 440.0;
     /// A square rail button.
     pub const RAIL_BUTTON: f32 = 36.0;
     /// Rail icons.

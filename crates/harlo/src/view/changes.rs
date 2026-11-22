@@ -204,6 +204,7 @@ fn file_view<'a>(
     };
     let mut label = row![
         icon(chevron, 13.0, t.icon_weak_base),
+        view::file_icon(name, 13.0, false),
         text(name.to_owned())
             .font(MONO)
             .size(size::CODE)

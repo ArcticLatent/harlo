@@ -24,6 +24,7 @@ iced-code-editor = { workspace = true }
 [dev-dependencies]
 iced_test = { workspace = true }
 serde_json = { workspace = true }
+ttf-parser = { workspace = true }
 
 [lints]
 workspace = true

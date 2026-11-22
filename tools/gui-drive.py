@@ -10,7 +10,7 @@ the private bus are logged instead of shown.
 
     tools/gui-drive.py start [--size 1588x947]   build, then start everything
     tools/gui-drive.py shot [name]               screenshot; prints the PNG path
-    tools/gui-drive.py click X Y [--right] [--double]
+    tools/gui-drive.py click X Y [--right|--middle] [--double]
     tools/gui-drive.py move X Y
     tools/gui-drive.py drag X1 Y1 X2 Y2
     tools/gui-drive.py scroll X Y up|down [N]
@@ -199,7 +199,7 @@ def cmd_shot(args):
 
 def cmd_click(args):
     state = load()
-    button = "3" if "--right" in args else "1"
+    button = "3" if "--right" in args else "2" if "--middle" in args else "1"
     x, y = [a for a in args if not a.startswith("--")][:2]
     xdotool(state, "mousemove", x, y)
     time.sleep(0.05)

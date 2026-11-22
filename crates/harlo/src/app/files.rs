@@ -108,6 +108,8 @@ pub struct OpenFile {
     pub body: Body,
     /// Whether closing it waits for the user to save or drop changes.
     pub closing: bool,
+    /// The file to open in its place once it closes, by folder and path.
+    pub then_open: Option<(String, String)>,
 }
 
 impl OpenFile {
@@ -369,7 +371,7 @@ impl App {
                         file.outside = None;
                         file.error = None;
                         if file.close_after_save && !file.dirty {
-                            return self.close_file(&key);
+                            return self.finish_closing(&key);
                         }
                     }
                     Err(error) => file.error = Some(error),
@@ -386,10 +388,11 @@ impl App {
                 }
                 self.fs.shown = Some(key);
             }
-            FilesEvent::Discard(key) => return self.close_file(&key),
+            FilesEvent::Discard(key) => return self.finish_closing(&key),
             FilesEvent::KeepOpen(key) => {
                 if let Some(file) = self.file_mut(&key) {
                     file.closing = false;
+                    file.then_open = None;
                 }
             }
             FilesEvent::Reload(key) => {
@@ -426,28 +429,44 @@ impl App {
         Task::none()
     }
 
-    /// Opens `path` in `folder` in a tab, or shows its tab if it has one.
+    /// Opens `path` in `folder` in the editor tab, in place of the file
+    /// there; one with unsaved changes asks first.
     fn open_file(&mut self, folder: String, path: String) -> Task<Message> {
         let key = Path::new(&folder)
             .join(&path)
             .to_string_lossy()
             .into_owned();
-        self.fs.shown = Some(key.clone());
         if let Some(file) = self.file(&key) {
             if let Body::Text(text) = &file.body {
                 text.editor.request_focus();
             }
+            self.fs.shown = Some(key);
             return Task::none();
         }
+        // There's one editor tab: the file in it makes way.
+        let mut closed = Task::none();
+        if let Some(index) = self.fs.open.iter().position(|f| f.key != key) {
+            let current = &mut self.fs.open[index];
+            if current.is_dirty() {
+                current.closing = true;
+                current.then_open = Some((folder, path));
+                self.fs.shown = Some(current.key.clone());
+                return Task::none();
+            }
+            let current = current.key.clone();
+            closed = self.close_file(&current);
+        }
+        self.fs.shown = Some(key.clone());
         self.fs.open.push(OpenFile {
             key: key.clone(),
             folder: folder.clone(),
             path: path.clone(),
             body: Body::Loading,
             closing: false,
+            then_open: None,
         });
         let Some(client) = self.client.clone() else {
-            return Task::none();
+            return closed;
         };
         let watcher = client.clone();
         let (watch_folder, watch_path) = (folder.clone(), path.clone());
@@ -467,6 +486,7 @@ impl App {
                 let _ = watcher.watch_file(&watch_folder, &watch_path).await;
             })
             .discard(),
+            closed,
         ])
     }
 
@@ -574,6 +594,17 @@ impl App {
             },
             Message::Files,
         )
+    }
+
+    /// Closes a file's tab once the user saved or dropped its changes, and
+    /// opens the file that was waiting for it.
+    fn finish_closing(&mut self, key: &str) -> Task<Message> {
+        let next = self.file_mut(key).and_then(|f| f.then_open.take());
+        let closed = self.close_file(key);
+        match next {
+            Some((folder, path)) => Task::batch([closed, self.open_file(folder, path)]),
+            None => closed,
+        }
     }
 
     /// Closes a file's tab; the file beside it, or the session, takes its place.

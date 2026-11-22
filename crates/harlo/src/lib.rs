@@ -7,6 +7,7 @@
 pub mod app;
 pub mod assets;
 mod clipboard;
+pub mod file_icons;
 pub mod fit;
 pub mod ids;
 pub mod motion;

@@ -103,7 +103,14 @@ fn bars<'a>(t: &Tokens, file: &'a OpenFile, text: &'a TextFile) -> Element<'a, M
     if file.closing {
         bars = bars.push(bar(
             t,
-            format!("Save your changes to {} before closing?", file.name()),
+            match &file.then_open {
+                Some((_, next)) => format!(
+                    "Save your changes to {} before opening {}?",
+                    file.name(),
+                    harlo_core::files::name_of(next)
+                ),
+                None => format!("Save your changes to {} before closing?", file.name()),
+            },
             vec![
                 (
                     "Save",

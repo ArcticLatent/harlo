@@ -117,13 +117,10 @@ impl Panel {
         }
     }
 
-    /// How wide the panel is: Changes is wider, to show diffs.
+    /// How wide the panel is: every panel is as wide as the others.
     #[must_use]
     pub fn width(self) -> f32 {
-        match self {
-            Self::Changes => size::WIDE_PANEL,
-            Self::Context | Self::Todos | Self::Files | Self::Notes => size::PANEL,
-        }
+        size::PANEL
     }
 
     /// The panel's title.

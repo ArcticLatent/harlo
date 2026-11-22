@@ -11,7 +11,7 @@ use lucide_icons::Icon;
 
 use crate::app::{App, FilesEvent, Message};
 use crate::style::{self, size};
-use crate::view::icon;
+use crate::view::{file_icon, icon};
 use crate::widget::ellipsis;
 
 /// How far each level of folders indents its entries.
@@ -78,22 +78,11 @@ fn entry<'a>(t: &Tokens, line: Row, selected: bool) -> Element<'a, Message> {
     } else {
         t.text_base
     };
-    let (chevron, glyph) = if node.directory {
-        (
-            Some(if line.open {
-                Icon::ChevronDown
-            } else {
-                Icon::ChevronRight
-            }),
-            if line.open {
-                Icon::FolderOpen
-            } else {
-                Icon::Folder
-            },
-        )
+    let chevron = node.directory.then_some(if line.open {
+        Icon::ChevronDown
     } else {
-        (None, Icon::File)
-    };
+        Icon::ChevronRight
+    });
     #[expect(
         clippy::cast_precision_loss,
         reason = "folders don't nest anywhere near 2^24 deep"
@@ -109,15 +98,23 @@ fn entry<'a>(t: &Tokens, line: Row, selected: bool) -> Element<'a, Message> {
     .spacing(6)
     .align_y(Center)
     .padding(padding::left(indent));
-    content = content.push(icon(
-        glyph,
-        14.0,
-        if node.ignored {
-            t.text_weaker
-        } else {
-            t.icon_base
-        },
-    ));
+    content = content.push(if node.directory {
+        icon(
+            if line.open {
+                Icon::FolderOpen
+            } else {
+                Icon::Folder
+            },
+            14.0,
+            if node.ignored {
+                t.text_weaker
+            } else {
+                t.icon_base
+            },
+        )
+    } else {
+        file_icon(&node.path, 14.0, node.ignored)
+    });
     content = content.push(
         ellipsis(node.name.clone())
             .size(size::LABEL)

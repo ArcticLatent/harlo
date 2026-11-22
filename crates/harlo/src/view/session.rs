@@ -5,11 +5,11 @@
 use harlo_core::server::Delivery;
 use harlo_core::theme::Tokens;
 use harlo_core::timeline::{Todo, TodoStatus, todo_counts};
-use iced::widget::{button, center, column, container, row, rule, space, text};
+use iced::widget::{button, center, column, container, mouse_area, row, rule, space, text};
 use iced::{Center, Element, Fill, Length, Padding};
 use lucide_icons::Icon;
 
-use crate::app::{App, Child, FileBody, FilesEvent, Message, OpenFile, Panel};
+use crate::app::{App, Child, FilesEvent, Message, OpenFile, Panel};
 use crate::style::{self, size};
 use crate::timeline::{self, Activity, Timeline};
 use crate::view::composer::{self, Composer};
@@ -383,25 +383,16 @@ fn tab<'a>(t: &Tokens, id: &str, title: &str, active: bool) -> Element<'a, Messa
             }
             style
         });
-    container(tab).max_width(size::TAB).into()
+    closable(
+        container(tab).max_width(size::TAB),
+        Message::CloseTab(id.to_owned()),
+    )
 }
 
 /// An open file's tab: its name, and a dot while it has unsaved changes.
 fn file_tab<'a>(t: &Tokens, file: &OpenFile, active: bool) -> Element<'a, Message> {
-    let glyph = match file.body {
-        FileBody::Image(_) | FileBody::Svg(_) => Icon::Image,
-        _ => Icon::FileCode,
-    };
     let mut content = row![
-        icon(
-            glyph,
-            13.0,
-            if active {
-                t.icon_selected
-            } else {
-                t.icon_weak_base
-            }
-        ),
+        crate::view::file_icon(&file.path, 13.0, !active),
         ellipsis(file.name().to_owned())
             .size(size::LABEL)
             .font(style::MONO)
@@ -443,7 +434,15 @@ fn file_tab<'a>(t: &Tokens, file: &OpenFile, active: bool) -> Element<'a, Messag
             }
             style
         });
-    container(tab).max_width(size::TAB).into()
+    closable(
+        container(tab).max_width(size::TAB),
+        Message::Files(FilesEvent::Close(file.key.clone())),
+    )
+}
+
+/// A tab that a middle click closes.
+fn closable<'a>(tab: impl Into<Element<'a, Message>>, close: Message) -> Element<'a, Message> {
+    mouse_area(tab).on_middle_press(close).into()
 }
 
 /// The size of the dot on a tab whose file has unsaved changes.

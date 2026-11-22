@@ -40,6 +40,23 @@ pub fn icon(glyph: Icon, size: f32, color: Rgba) -> Text<'static> {
         .line_height(1.0)
 }
 
+/// A file's type icon in its colour, faded when `dim`.
+pub fn file_icon(path: &str, size: f32, dim: bool) -> Text<'static> {
+    let icon = crate::file_icons::icon(path);
+    let mut color = icon.iced_color();
+    if dim {
+        color.a = DIM_ICON;
+    }
+    Text::new(icon.glyph.to_string())
+        .font(crate::file_icons::FONT)
+        .size(size)
+        .color(color)
+        .line_height(1.0)
+}
+
+/// How opaque a faded file icon is, as for an entry Git ignores.
+const DIM_ICON: f32 = 0.45;
+
 /// Formats how long something took: `850ms`, `3.7s`, `15s`, `2m 5s`.
 #[must_use]
 pub fn duration(d: std::time::Duration) -> String {

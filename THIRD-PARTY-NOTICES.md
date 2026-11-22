@@ -10,6 +10,10 @@ Harlo bundles the following assets. Rust crates are listed in `Cargo.lock`, and 
 
 `crates/harlo/assets/fonts/JetBrainsMono-*.ttf`. Copyright 2020 The JetBrains Mono Project Authors. These fonts are licensed under the SIL Open Font License 1.1; the full text is in `crates/harlo/assets/fonts/JetBrainsMono-OFL.txt`.
 
+## Harlo File Icons (font)
+
+`crates/harlo/assets/fonts/FileIcons.ttf`: file-type glyphs cut by `tools/file-icons.py` from the symbols font of [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts) 3.4.0, which gathers them from Seti-UI, Devicons, Material Design Icons, Codicons, Octicons, Font Awesome and Font Logos. The font is licensed under the SIL Open Font License 1.1 and Nerd Fonts' own work under the MIT License; the glyphs are under MIT, Apache 2.0, CC BY 4.0 or the Unlicense. The details and full texts are in `crates/harlo/assets/fonts/FileIcons-LICENSE.txt`.
+
 ## SQLite
 
 The layout database is built into the app through `rusqlite`'s bundled SQLite, which is in the public domain.

@@ -13,9 +13,11 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use harlo::app::OpenFile;
+use harlo::style::size;
 use harlo::{App, FilesEvent, Message, Panel};
 use harlo_core::server::{FileChange, FileMatch, Update};
 use harlo_core::workspace::{Event, EventKind};
+use iced::mouse;
 use iced_code_editor::Message as EditorMessage;
 use support::{demo, interact, shows};
 
@@ -237,7 +239,7 @@ fn files_change_reports_are_followed() {
 }
 
 #[test]
-fn file_tabs_sit_beside_the_sessions() {
+fn one_editor_tab_takes_each_file_opened() {
     let (mut app, root) = with_tree();
     let readme = open(&mut app, &root, "README.md", "# Demo\n");
     let picture = {
@@ -248,22 +250,22 @@ fn file_tabs_sit_beside_the_sessions() {
             .into_owned()
     };
     assert!(shows(&app, "Opening…"));
+    assert_eq!(app.fs.open.len(), 1, "the picture took README's tab");
+    assert!(!app.fs.open.iter().any(|f| f.key == readme));
     let _ = app.update(files(FilesEvent::Read {
         key: picture.clone(),
         bytes: Ok(vec![0x89, b'P', b'N', b'G']),
     }));
     assert!(app.file_text(&picture).is_none(), "a picture isn't edited");
 
-    // The tabs cycle: session, README, logo, and round again.
+    // The tabs cycle: the session, the file, and round again.
     let shown = |app: &App| app.fs.shown.clone();
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
     assert_eq!(shown(&app), None, "the session shows");
     let _ = app.update(Message::CycleTab { back: false });
-    assert_eq!(shown(&app), Some(readme.clone()));
-    let _ = app.update(Message::CycleTab { back: false });
     assert_eq!(shown(&app), Some(picture.clone()));
-    let _ = app.update(Message::CycleTab { back: true });
-    assert_eq!(shown(&app), Some(readme));
+    let _ = app.update(Message::CycleTab { back: false });
+    assert_eq!(shown(&app), None);
 
     // A file that isn't text says so.
     let blob = open(&mut app, &root, "data.bin", "a\0b");
@@ -273,4 +275,104 @@ fn file_tabs_sit_beside_the_sessions() {
     ));
     let _ = app.update(Message::CloseActiveTab);
     assert!(!app.fs.open.iter().any(|f| f.key == blob));
+}
+
+#[test]
+fn opening_another_file_asks_about_unsaved_changes() {
+    let (mut app, root) = with_tree();
+    let readme = open(&mut app, &root, "README.md", "# Demo\n");
+    type_text(&mut app, &readme, "x");
+
+    let _ = app.update(files(FilesEvent::Open("notes.txt".into())));
+    assert!(shows(
+        &app,
+        "Save your changes to README.md before opening notes.txt?"
+    ));
+    assert_eq!(
+        app.fs.shown,
+        Some(readme.clone()),
+        "the changes stay in view"
+    );
+
+    // Cancel keeps it; asking again and not saving opens the other file.
+    let _ = app.update(files(FilesEvent::KeepOpen(readme.clone())));
+    assert!(app.fs.open.iter().all(|f| f.then_open.is_none()));
+    let _ = app.update(files(FilesEvent::Open("notes.txt".into())));
+    let _ = app.update(files(FilesEvent::Discard(readme.clone())));
+    let notes = Path::new(&root)
+        .join("notes.txt")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(app.fs.shown, Some(notes));
+    assert_eq!(app.fs.open.len(), 1);
+
+    // Saving first works too: the other file opens once the save lands.
+    let notes_key = app.fs.shown.clone().expect("notes");
+    let _ = app.update(files(FilesEvent::Read {
+        key: notes_key.clone(),
+        bytes: Ok(b"n\n".to_vec()),
+    }));
+    type_text(&mut app, &notes_key, "y");
+    let _ = app.update(files(FilesEvent::Open("README.md".into())));
+    let _ = app.update(files(FilesEvent::SaveAndClose(notes_key.clone())));
+    assert_eq!(
+        app.fs.shown,
+        Some(notes_key.clone()),
+        "waiting for the save"
+    );
+    let text = app.file_text(&notes_key).expect("text");
+    let _ = app.update(files(FilesEvent::Saved {
+        key: notes_key,
+        text,
+        result: Ok(()),
+    }));
+    assert_eq!(app.fs.shown, Some(readme));
+}
+
+#[test]
+fn a_middle_click_closes_a_tab() {
+    let (mut app, root) = with_tree();
+    let _ = open(&mut app, &root, "README.md", "# Demo\n");
+    let messages = middle_click(&mut app, "README.md");
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::Files(FilesEvent::Close(_)))),
+        "{messages:?}"
+    );
+    assert!(app.fs.open.is_empty());
+
+    // The session's title is in the sidebar too, so aim at its tab: the
+    // first one in the bar.
+    let first_tab = iced::Point::new(size::RAIL + size::SIDEBAR + 40.0, size::TAB_BAR / 2.0);
+    let messages = middle_click_at(&mut app, first_tab);
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::CloseTab(id) if id == PI_UPDATE)),
+        "{messages:?}"
+    );
+    assert!(!app.tabs.iter().any(|id| id == PI_UPDATE));
+}
+
+/// Presses the middle button over the first `text` found, which in these
+/// tests is a tab's.
+fn middle_click(app: &mut App, text: &str) -> Vec<Message> {
+    let mut at = None;
+    let _ = interact(app, |ui| {
+        let target = ui.find(text).expect("the tab");
+        at = target.visible_bounds().map(|bounds| bounds.center());
+    });
+    middle_click_at(app, at.expect("on screen"))
+}
+
+/// Presses and releases the middle button at `point`.
+fn middle_click_at(app: &mut App, point: iced::Point) -> Vec<Message> {
+    interact(app, |ui| {
+        ui.point_at(point);
+        let _ = ui.simulate([
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle)),
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)),
+        ]);
+    })
 }

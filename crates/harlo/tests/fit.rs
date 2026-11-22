@@ -55,13 +55,16 @@ fn a_panel_opened_without_room_stays_and_the_other_makes_way() {
 }
 
 #[test]
-fn the_wider_changes_panel_makes_way_sooner() {
-    let width = 1_300.0;
-    let wide = Some(Panel::Changes.width());
-    assert_eq!(sides(fit::shown(width, true, PANEL, None)), both());
-    let shown = fit::shown(width, true, wide, None);
-    assert_eq!(sides(shown), (true, false));
-    assert!(shown.main_width(width) >= MAIN_MIN);
+fn every_panel_is_as_wide_as_the_others() {
+    for panel in [
+        Panel::Context,
+        Panel::Todos,
+        Panel::Changes,
+        Panel::Files,
+        Panel::Notes,
+    ] {
+        assert_eq!(Some(panel.width()), PANEL, "{panel:?}");
+    }
 }
 
 #[test]
