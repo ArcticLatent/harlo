@@ -163,12 +163,8 @@ export component AppWindow inherits Window {
 
         if State.picking-location: Locations { }
         if State.picker >= 0: PickerMenu { }
-        // Over everything between the rails, so the rail buttons still
-        // switch pages.
-        if State.sheet > 0: SheetLayer {
-            x: Size.rail;
-            width: root.width - 2 * Size.rail;
-        }
+        // Over the whole window; the rail buttons still switch pages.
+        if State.sheet > 0: SheetLayer { }
     }
 }
 

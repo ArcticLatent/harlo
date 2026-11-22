@@ -127,3 +127,20 @@ fn search_finds_themes_by_name() {
     assert!(ui.shows("Light or dark"), "the choice is found too");
     assert!(!ui.shows("Gruvbox"));
 }
+
+#[test]
+fn the_shade_behind_settings_is_fainter_on_a_light_theme() {
+    let ui = appearance(demo::app());
+    let scrim = |ui: &Ui| ui.window.global::<Theme>().get_scrim();
+    let dark = scrim(&ui);
+    assert_eq!(
+        dark,
+        harlo::theme::color(harlo::theme::scrim(&tokens("harlo", Mode::Dark)))
+    );
+    ui.press("Light");
+    let light = scrim(&ui);
+    assert!(
+        light.alpha() < dark.alpha(),
+        "{light:?} over a light window, {dark:?} over a dark one"
+    );
+}

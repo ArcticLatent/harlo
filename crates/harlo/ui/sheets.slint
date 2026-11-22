@@ -490,17 +490,20 @@ component StatsHead inherits VerticalLayout {
     }
 }
 
-/// The card over the window.
+/// The card over the window, which it shades. The shade takes no clicks, so
+/// the rail buttons at either edge still switch pages.
 export component SheetLayer inherits Rectangle {
-    background: #00000066;
+    background: Theme.scrim;
 
-    // A click outside the card closes it.
+    // A click outside the card, between the rails, closes it.
     TouchArea {
+        x: Size.rail;
+        width: root.width - 2 * Size.rail;
         clicked => { Logic.close-sheet(); }
     }
 
     card := Rectangle {
-        width: min(State.sheet == 2 ? 900px : 720px, root.width - 64px);
+        width: min(State.sheet == 2 ? 900px : 720px, root.width - 2 * Size.rail - 64px);
         height: min(State.sheet == 2 ? 640px : 680px, root.height - 96px);
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;

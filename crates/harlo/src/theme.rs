@@ -88,7 +88,28 @@ pub fn apply(window: &AppWindow, t: &Tokens) {
         t.text_interactive_base
             .over(t.surface_raised_base, WAITING_EDGE),
     ));
+    g.set_scrim(color(scrim(t)));
 }
+
+/// The shade over the window behind a dialog. Black at the dark themes'
+/// strength would turn a light window grey, so a light theme's is fainter.
+#[must_use]
+pub fn scrim(t: &Tokens) -> Rgba {
+    let Rgba { r, g, b, .. } = t.background_base;
+    let light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
+    Rgba {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: if light { SCRIM_LIGHT } else { SCRIM_DARK },
+    }
+}
+
+/// How dark the shade behind a dialog is on a dark theme.
+const SCRIM_DARK: f32 = 0.4;
+
+/// How dark the shade behind a dialog is on a light theme.
+const SCRIM_LIGHT: f32 = 0.14;
 
 /// How much of the background the main button's fill takes under the pointer.
 const PRIMARY_HOVER: f32 = 0.18;
