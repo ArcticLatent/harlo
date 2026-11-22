@@ -24,7 +24,7 @@ fn with_notes() -> Ui {
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
     let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
     let ui = ui(app);
-    ui.press("Notes");
+    ui.open("Notes");
     ui
 }
 

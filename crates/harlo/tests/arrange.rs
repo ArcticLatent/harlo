@@ -11,6 +11,7 @@ mod support;
 
 use harlo::app::{Message, Panel};
 use harlo::fit;
+use slint::ComponentHandle as _;
 use support::{demo, ui, ui_at};
 
 /// Two sessions from the demo, and their titles.
@@ -22,28 +23,77 @@ fn the_right_rail_shows_one_panel_at_a_time() {
     let ui = ui(demo::app());
     assert_eq!(ui.app().panel, None, "it starts with no panel");
 
-    ui.press("Todos");
+    ui.open("Todos");
     assert!(ui.app().panel_shown(Panel::Todos));
     assert!(ui.shows("Close Todos"), "its header");
 
     // The next one takes its place.
-    ui.press("Context");
+    ui.open("Context");
     assert!(ui.app().panel_shown(Panel::Context));
     assert!(!ui.app().panel_shown(Panel::Todos));
 
     // The lit button closes it, and so does its header's close button.
-    ui.press("Context");
+    ui.open("Context");
     assert_eq!(ui.app().panel, None);
     assert!(!ui.shows("Close Context"));
-    ui.press("Notes");
+    ui.open("Notes");
     ui.press("Close Notes");
     assert_eq!(ui.app().panel, None);
+}
+
+/// Where the home page's question is: it sits in the middle of the center,
+/// so it moves as a panel or the terminals take room.
+fn question_at(ui: &support::Ui) -> (f32, f32) {
+    let found = ui.find("What are we working on?");
+    let at = found.first().expect("the home page").absolute_position();
+    (at.x, at.y)
+}
+
+#[test]
+fn a_panel_slides_in_and_out() {
+    let ui = ui(demo::app());
+    let (closed, _) = question_at(&ui);
+
+    ui.press("Todos");
+    ui.wait(100);
+    let (halfway, _) = question_at(&ui);
+    ui.wait(support::SLIDE_MS);
+    let (open, _) = question_at(&ui);
+    assert!(
+        open < halfway && halfway < closed,
+        "the center makes way gradually: {closed}, {halfway}, {open}"
+    );
+    let note = ui
+        .window
+        .global::<harlo::ui::State>()
+        .get_todos_card()
+        .note
+        .to_string();
+    assert!(
+        !note.is_empty() && ui.shows(&note),
+        "the panel's body: {note:?}"
+    );
+
+    // Closing, it keeps its body as it slides away.
+    ui.press("Close Todos");
+    assert_eq!(ui.app().panel, None);
+    ui.wait(50);
+    assert!(ui.shows(&note), "still sliding, not blank");
+    let (going, _) = question_at(&ui);
+    assert!(open < going && going < closed, "{open}, {going}, {closed}");
+    ui.wait(support::SLIDE_MS);
+    let back = question_at(&ui).0;
+    assert!(
+        (back - closed).abs() < 0.5,
+        "back where it was: {back}, {closed}"
+    );
+    assert!(!ui.shows("Close Todos"));
 }
 
 #[test]
 fn a_panel_maximizes_and_comes_back() {
     let ui = ui(demo::app());
-    ui.press("Changes");
+    ui.open("Changes");
     ui.press("Maximize");
     assert_eq!(ui.app().maximized, Some(Panel::Changes));
     assert!(ui.shows("Restore"));
@@ -62,7 +112,7 @@ fn a_panel_maximizes_and_comes_back() {
 #[test]
 fn a_narrow_window_folds_the_panel_then_the_sidebar() {
     let ui = ui(demo::app());
-    ui.press("Changes");
+    ui.open("Changes");
     assert!(ui.app().shown().sidebar.is_some());
 
     // 1,100 px leaves room for the sidebar beside the main area, not the panel too.
@@ -85,7 +135,7 @@ fn a_narrow_window_folds_the_panel_then_the_sidebar() {
 #[test]
 fn a_panel_opened_without_room_stays_and_the_sidebar_makes_way() {
     let ui = ui_at(demo::app(), (1100.0, fit::WINDOW.1));
-    ui.press("Files");
+    ui.open("Files");
     assert!(ui.app().panel_shown(Panel::Files), "kept on screen");
     assert_eq!(ui.app().shown().sidebar, None, "the sidebar made way");
 
@@ -105,7 +155,7 @@ fn a_panel_opened_without_room_stays_and_the_sidebar_makes_way() {
 #[test]
 fn dragging_the_edges_resizes_within_limits() {
     let ui = ui(demo::app());
-    ui.press("Notes");
+    ui.open("Notes");
 
     ui.drag("Sidebar width", (40.0, 0.0));
     assert_eq!(ui.app().shown().sidebar, Some(fit::SIDEBAR + 40.0));
@@ -136,9 +186,15 @@ fn the_terminals_open_in_a_strip_under_the_center() {
     let ui = ui(demo::app().terminal_shell("/bin/sh", folder.to_string_lossy()));
     assert!(!ui.app().terminals_shown());
 
-    // The rail button starts the first terminal.
+    // The rail button starts the first terminal, and its strip rises.
+    let (_, down) = question_at(&ui);
     ui.press("Terminal");
     assert!(ui.app().terminals_shown());
+    ui.wait(100);
+    let (_, rising) = question_at(&ui);
+    ui.wait(support::SLIDE_MS);
+    let (_, up) = question_at(&ui);
+    assert!(up < rising && rising < down, "{down}, {rising}, {up}");
     assert_eq!(ui.tabs("harlo").len(), 1);
 
     // Another one opens beside it and is shown.
@@ -169,7 +225,13 @@ fn the_terminals_open_in_a_strip_under_the_center() {
     ui.press("Hide terminals");
     assert!(!ui.app().terminals_shown());
     assert_eq!(ui.app().terminals.shells().len(), 1);
-    ui.press("Terminal");
+    ui.wait(100);
+    let (_, sinking) = question_at(&ui);
+    assert!(up < sinking && sinking < down, "it slides down: {sinking}");
+    ui.wait(support::SLIDE_MS);
+    let (_, gone) = question_at(&ui);
+    assert!((gone - down).abs() < 0.5, "and is gone: {gone}, {down}");
+    ui.open("Terminal");
     assert!(ui.app().terminals_shown());
 }
 

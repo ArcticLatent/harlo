@@ -42,7 +42,7 @@ fn with_tree() -> (Ui, String) {
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
     let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
     let ui = ui(app);
-    ui.press("Files");
+    ui.open("Files");
     let root = ui.app().file_tree().0;
     ui.send(files(FilesEvent::Listed {
         root: root.clone(),

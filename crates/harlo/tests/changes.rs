@@ -84,7 +84,7 @@ fn panel_at(loaded: ChangesLoaded, size: (f32, f32)) -> Ui {
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
     let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
     let ui = ui_at(app, size);
-    ui.press("Changes");
+    ui.open("Changes");
     // Opening it starts the first load.
     ui.send(Message::Changes(ChangesEvent::Loaded(1, Box::new(loaded))));
     ui

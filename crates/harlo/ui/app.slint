@@ -60,6 +60,34 @@ export component AppWindow inherits Window {
         easing: Motion.glide;
     }
     property <length> sidebar-room: State.sidebar-width * root.sidebar-open;
+
+    /// How far the tool panel on the right is open, from 0 to 1, sliding
+    /// as the sidebar does. A maximized panel covers the window instead,
+    /// and takes no room here.
+    property <float> panel-open: State.panel >= 0 ? 1 : 0;
+    animate panel-open {
+        duration: Motion.slide;
+        easing: Motion.glide;
+    }
+    property <length> panel-room: State.maximized ? 0 : State.panel-width * root.panel-open;
+    /// The panel shown: the open one, or the last one while it slides away.
+    property <int> last-panel: -1;
+    property <int> open-panel: State.panel;
+    changed open-panel => {
+        if self.open-panel >= 0 {
+            self.last-panel = self.open-panel;
+        }
+    }
+    property <int> shown-panel: State.panel >= 0 ? State.panel : root.last-panel;
+
+    /// How far the terminals are open, from 0 to 1: they rise from the
+    /// bottom rather than appearing at once.
+    property <float> terminal-open: State.terminals-shown ? 1 : 0;
+    animate terminal-open {
+        duration: Motion.slide;
+        easing: Motion.glide;
+    }
+    property <length> terminal-room: State.terminal-height * root.terminal-open;
     default-font-family: Fonts.sans;
     default-font-size: Size.text;
     // Keys reach the window's shortcuts even before a field is focused.
@@ -114,15 +142,33 @@ export component AppWindow inherits Window {
                         }
                         if State.content == Content.editor: EditorView { }
                     }
-                    if State.terminals-shown: TerminalStrip {
-                        height: State.terminal-height;
-                        TerminalView { }
+                    // The strip keeps its full height as it rises, so the
+                    // shell isn't resized on every frame of the slide.
+                    if State.terminals-shown || root.terminal-open > 0: Rectangle {
+                        height: root.terminal-room;
+                        clip: true;
+                        TerminalStrip {
+                            y: 0;
+                            width: parent.width;
+                            height: State.terminal-height;
+                            TerminalView { }
+                        }
                     }
                 }
             }
-            if State.panel >= 0 && !State.maximized: PanelFrame {
-                width: State.panel-width;
-                PanelBody { }
+            // The panel keeps its full width as it slides, so its content
+            // doesn't reflow on every frame.
+            if (State.panel >= 0 || root.panel-open > 0) && !State.maximized: Rectangle {
+                width: root.panel-room;
+                clip: true;
+                PanelFrame {
+                    x: 0;
+                    width: State.panel-width;
+                    height: parent.height;
+                    PanelBody {
+                        panel: root.shown-panel;
+                    }
+                }
             }
             RightRail { }
         }
@@ -138,7 +184,7 @@ export component AppWindow inherits Window {
         if State.panel >= 0 && !State.maximized: Grip {
             edge: 1;
             label: "Panel width";
-            x: root.width - Size.rail - State.panel-width - self.width / 2;
+            x: root.width - Size.rail - root.panel-room - self.width / 2;
             width: 7px;
             height: root.height;
         }
@@ -147,9 +193,8 @@ export component AppWindow inherits Window {
             across: true;
             label: "Terminal height";
             x: Size.rail + root.sidebar-room;
-            y: root.height - State.terminal-height - self.height / 2;
-            width: root.width - 2 * Size.rail - root.sidebar-room
-                - (State.panel >= 0 ? State.panel-width : 0);
+            y: root.height - root.terminal-room - self.height / 2;
+            width: root.width - 2 * Size.rail - root.sidebar-room - root.panel-room;
             height: 7px;
         }
 

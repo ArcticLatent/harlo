@@ -276,13 +276,17 @@ export component TodosPanel inherits Rectangle {
 }
 
 /// The shown tool panel's body, by its number in the rail's order.
+///
+/// `panel` is the one shown, the open one unless a closing panel is still
+/// sliding away.
 export component PanelBody inherits Rectangle {
+    in property <int> panel: State.panel;
     background: Theme.background-base;
-    if State.panel == 0: ContextPanel { }
-    if State.panel == 1: TodosPanel { }
-    if State.panel == 2: ChangesPanel {
+    if root.panel == 0: ContextPanel { }
+    if root.panel == 1: TodosPanel { }
+    if root.panel == 2: ChangesPanel {
         wide: State.maximized;
     }
-    if State.panel == 3: FilesPanel { }
-    if State.panel == 4: NotesPanel { }
+    if root.panel == 3: FilesPanel { }
+    if root.panel == 4: NotesPanel { }
 }

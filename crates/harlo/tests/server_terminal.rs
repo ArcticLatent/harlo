@@ -57,7 +57,7 @@ fn a_server_shell_answers_and_closing_its_tab_removes_it() {
     let project = sandbox.project_str();
     let ui = window(&sandbox);
 
-    ui.press("Terminal");
+    ui.open("Terminal");
     assert!(ui.app().terminals_shown());
     // Typed before the shell has started; it arrives once connected.
     type_text(&ui, "echo $((6 * 7)); pwd\n");
@@ -91,7 +91,7 @@ fn a_server_shell_that_exits_closes_its_tab() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
     let ui = window(&sandbox);
-    ui.press("Terminal");
+    ui.open("Terminal");
     type_text(&ui, "exit\n");
     let closed = tasks.until(&ui, WAIT, |ui| ui.app().terminals.get(0).is_none());
     assert!(closed, "the tab closes with the shell");

@@ -89,7 +89,7 @@ fn control(ui: &Ui, c: &str) {
 fn started(folder: &Path) -> (Ui, Tasks) {
     let ui = ui(app(folder));
     let mut tasks = Tasks::new();
-    ui.press("Terminal");
+    ui.open("Terminal");
     assert!(ui.app().terminals_shown());
     assert!(
         tasks.until(&ui, ANSWER, |ui| !lines(ui).concat().is_empty()),
@@ -109,7 +109,11 @@ fn a_shell_answers_what_is_typed_into_the_window() {
         "{:?}",
         lines(&ui)
     );
-    assert!(ui.shows("42"), "the window draws it");
+    // The reader fills the screen before its message reaches the window.
+    assert!(
+        tasks.until(&ui, ANSWER, |ui| ui.shows("42")),
+        "the window draws it"
+    );
 
     // The shell knows the strip's size, not the size it started at.
     type_text(&ui, "stty size\n");
@@ -279,7 +283,7 @@ fn the_rail_button_hides_and_shows_the_running_shell() {
     assert!(tasks.until(&ui, ANSWER, |ui| has_line(ui, "kept")));
     ui.press("Hide terminals");
     assert!(!ui.app().terminals_shown());
-    ui.press("Terminal");
+    ui.open("Terminal");
     assert!(ui.app().terminals_shown());
     assert_eq!(ui.app().terminals.shells().len(), 1, "the same shell");
     assert!(

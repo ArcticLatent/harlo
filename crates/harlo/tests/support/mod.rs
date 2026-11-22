@@ -26,6 +26,10 @@ pub struct Ui {
     pub driver: Driver,
 }
 
+/// How long a panel, the sidebar or the terminals take to slide open or
+/// closed, with room to spare: `Motion.slide` is 200 ms.
+pub const SLIDE_MS: u64 = 250;
+
 /// Opens the window on the testing backend, showing `app`.
 pub fn ui(app: App) -> Ui {
     ui_at(app, WINDOW)
@@ -101,6 +105,13 @@ impl Ui {
     /// Presses the button labelled `label`.
     pub fn press(&self, label: &str) {
         self.button(label).invoke_accessible_default_action();
+    }
+
+    /// Presses the rail button labelled `label`, such as `Changes` or
+    /// `Terminal`, and lets what it opens slide fully into view.
+    pub fn open(&self, label: &str) {
+        self.press(label);
+        self.wait(SLIDE_MS);
     }
 
     /// Types `text` into the field labelled `label`, replacing what's there.

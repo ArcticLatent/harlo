@@ -103,7 +103,7 @@ fn loaded(context: SessionContext, files: Option<Vec<File>>) -> ContextLoaded {
 /// The Context panel from the rail, showing what its first load `found`.
 fn context(found: ContextLoaded) -> Ui {
     let ui = open(Vec::new(), deep());
-    ui.press("Context");
+    ui.open("Context");
     ui.send(Message::Context(ContextEvent::Loaded(1, Box::new(found))));
     ui
 }
@@ -226,9 +226,9 @@ fn counts_near_a_million_round_to_millions() {
 #[test]
 fn without_a_session_it_says_so() {
     let ui = ui(demo::app());
-    ui.press("Context");
+    ui.open("Context");
     assert!(ui.shows("No session selected."));
-    ui.press("Todos");
+    ui.open("Todos");
     assert!(ui.shows("No session selected."));
 }
 
@@ -279,7 +279,7 @@ fn the_panel_lists_the_last_list_written() {
         vec![written("a", first), written("b", halfway())],
         todo_tool(true),
     );
-    ui.press("Todos");
+    ui.open("Todos");
     assert!(ui.shows("1 of 3 done"), "dropped items don't count");
     for item in ["Read the spec", "Write the parser", "Add tests"] {
         assert!(ui.shows(item), "{item}");
@@ -290,7 +290,7 @@ fn the_panel_lists_the_last_list_written() {
 #[test]
 fn the_open_panel_follows_the_next_list() {
     let ui = open(vec![written("a", halfway())], todo_tool(true));
-    ui.press("Todos");
+    ui.open("Todos");
     ui.send(event(EventKind::ToolStarted {
         session_id: PI_UPDATE.into(),
         message_id: "msg_b".into(),
@@ -313,18 +313,18 @@ fn the_open_panel_follows_the_next_list() {
 #[test]
 fn without_a_list_the_panel_says_why() {
     let ui = open(Vec::new(), todo_tool(true));
-    ui.press("Todos");
+    ui.open("Todos");
     assert!(
         ui.shows("No list yet. The agent writes one when a task has several steps."),
         "the tool is on"
     );
 
     let ui = open(Vec::new(), todo_tool(false));
-    ui.press("Todos");
+    ui.open("Todos");
     assert!(ui.shows("Agents here don't keep a todo list."));
     assert!(ui.shows(TODO_SETTING), "how to turn it on");
 
     let ui = open(vec![written("a", Vec::new())], todo_tool(true));
-    ui.press("Todos");
+    ui.open("Todos");
     assert!(ui.shows("The agent cleared its list."));
 }
