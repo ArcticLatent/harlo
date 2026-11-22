@@ -3,13 +3,12 @@
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::server::Delivery;
-use harlo_core::theme::Tokens;
 use harlo_core::timeline::{Todo, TodoStatus, todo_counts};
-use iced::widget::{button, center, column, container, mouse_area, row, rule, space, text};
-use iced::{Center, Element, Fill, Length, Padding};
+use iced::widget::{button, column, container, responsive, row, rule, space, text};
+use iced::{Center, Element, Fill, Padding};
 use lucide_icons::Icon;
 
-use crate::app::{App, Child, FilesEvent, Message, OpenFile, Panel};
+use crate::app::{App, Child, Message, Panel};
 use crate::style::{self, size};
 use crate::timeline::{self, Activity, Timeline};
 use crate::view::composer::{self, Composer};
@@ -20,8 +19,18 @@ use crate::widget::ellipsis;
 /// Space either side of the composer.
 const MARGIN: f32 = 24.0;
 
-/// The open session's view.
+/// A session's tab: its header, the timeline and the composer.
 pub fn view<'a>(app: &'a App, id: &'a str, timeline: &'a Timeline) -> Element<'a, Message> {
+    responsive(move |size| at_width(app, id, timeline, size.width)).into()
+}
+
+/// A session's tab in a pane `pane` wide.
+fn at_width<'a>(
+    app: &'a App,
+    id: &'a str,
+    timeline: &'a Timeline,
+    pane: f32,
+) -> Element<'a, Message> {
     let t = &app.tokens;
     let owned = id.to_owned();
     let crew = app.crew(id);
@@ -30,7 +39,7 @@ pub fn view<'a>(app: &'a App, id: &'a str, timeline: &'a Timeline) -> Element<'a
         .map(move |event| Message::Timeline(owned.clone(), event));
     let busy = app.is_busy(id);
     // The composer is as wide as the timeline column, less its margins.
-    let width = (app.main_width() - 2.0 * MARGIN).min(timeline::WIDTH);
+    let width = (pane - 2.0 * MARGIN).min(timeline::WIDTH);
     let wide = width >= composer::INLINE_CONTROLS;
     // The pickers fill the tool row, so the keys are told in the placeholder.
     let placeholder = if busy {
@@ -67,7 +76,6 @@ pub fn view<'a>(app: &'a App, id: &'a str, timeline: &'a Timeline) -> Element<'a
             right: 0.0,
         });
     let content = column![
-        tabs(app),
         header(app, id),
         rule::horizontal(1).style(style::divider(t.border_weaker_base)),
         body,
@@ -314,139 +322,6 @@ fn activity_line(app: &App, activity: Activity) -> Element<'_, Message> {
     }
     container(line).padding([4, 4]).into()
 }
-
-/// The tab bar: one tab per open session, then one per open file.
-pub fn tabs(app: &App) -> Element<'_, Message> {
-    let t = &app.tokens;
-    let mut bar = row![].spacing(2).padding([6, 10]).align_y(Center);
-    let file_shown = app.fs.shown.is_some();
-    for id in &app.tabs {
-        let active = !file_shown && app.active.as_deref() == Some(id.as_str());
-        bar = bar.push(tab(t, id, &app.title(id), active));
-    }
-    for file in &app.fs.open {
-        let active = app.fs.shown.as_deref() == Some(file.key.as_str());
-        bar = bar.push(file_tab(t, file, active));
-    }
-    column![
-        container(bar).height(size::TAB_BAR).width(Fill),
-        rule::horizontal(1).style(style::divider(t.border_weaker_base)),
-    ]
-    .into()
-}
-
-fn tab<'a>(t: &Tokens, id: &str, title: &str, active: bool) -> Element<'a, Message> {
-    let label = if title.is_empty() {
-        "Untitled session".to_owned()
-    } else {
-        title.to_owned()
-    };
-    let mut content = row![
-        icon(
-            Icon::Bot,
-            13.0,
-            if active {
-                t.icon_selected
-            } else {
-                t.icon_weak_base
-            }
-        ),
-        ellipsis(label)
-            .size(size::LABEL)
-            .color(style::color(if active {
-                t.text_strong
-            } else {
-                t.text_base
-            })),
-    ]
-    .spacing(7)
-    .align_y(Center);
-    if active {
-        let close = button(center(icon(Icon::X, 12.0, t.icon_base)))
-            .width(20)
-            .height(20)
-            .padding(0)
-            .on_press(Message::CloseTab(id.to_owned()))
-            .style(style::ghost(t, false));
-        content = content.push(container(close).id(crate::ids::TAB_CLOSE));
-    }
-    let t = *t;
-    let tab = button(content.height(Fill))
-        .width(Length::Fill)
-        .height(30)
-        .padding([0, 10])
-        .on_press(Message::OpenSession(id.to_owned()))
-        .style(move |theme, status| {
-            let mut style = style::ghost(&t, false)(theme, status);
-            if active {
-                style.background = Some(style::color(t.surface_raised_base).into());
-            }
-            style
-        });
-    closable(
-        container(tab).max_width(size::TAB),
-        Message::CloseTab(id.to_owned()),
-    )
-}
-
-/// An open file's tab: its name, and a dot while it has unsaved changes.
-fn file_tab<'a>(t: &Tokens, file: &OpenFile, active: bool) -> Element<'a, Message> {
-    let mut content = row![
-        crate::view::file_icon(&file.path, 13.0, !active),
-        ellipsis(file.name().to_owned())
-            .size(size::LABEL)
-            .font(style::MONO)
-            .color(style::color(if active {
-                t.text_strong
-            } else {
-                t.text_base
-            })),
-    ]
-    .spacing(7)
-    .align_y(Center);
-    if file.is_dirty() {
-        content = content.push(
-            container(space())
-                .width(UNSAVED_DOT)
-                .height(UNSAVED_DOT)
-                .style(style::boxed(t.text_strong, None, UNSAVED_DOT / 2.0)),
-        );
-    }
-    if active {
-        let close = button(center(icon(Icon::X, 12.0, t.icon_base)))
-            .width(20)
-            .height(20)
-            .padding(0)
-            .on_press(Message::Files(FilesEvent::Close(file.key.clone())))
-            .style(style::ghost(t, false));
-        content = content.push(close);
-    }
-    let t = *t;
-    let tab = button(content.height(Fill))
-        .width(Length::Fill)
-        .height(30)
-        .padding([0, 10])
-        .on_press(Message::Files(FilesEvent::Show(file.key.clone())))
-        .style(move |theme, status| {
-            let mut style = style::ghost(&t, false)(theme, status);
-            if active {
-                style.background = Some(style::color(t.surface_raised_base).into());
-            }
-            style
-        });
-    closable(
-        container(tab).max_width(size::TAB),
-        Message::Files(FilesEvent::Close(file.key.clone())),
-    )
-}
-
-/// A tab that a middle click closes.
-fn closable<'a>(tab: impl Into<Element<'a, Message>>, close: Message) -> Element<'a, Message> {
-    mouse_area(tab).on_middle_press(close).into()
-}
-
-/// The size of the dot on a tab whose file has unsaved changes.
-const UNSAVED_DOT: f32 = 7.0;
 
 /// A link back to the session that handed this one its work, for a subagent's.
 fn parent_link<'a>(app: &'a App, id: &str) -> Option<Element<'a, Message>> {

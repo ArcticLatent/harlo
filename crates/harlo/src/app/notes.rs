@@ -131,7 +131,7 @@ impl App {
 
     /// Reads the current folder's note once the Notes panel is shown.
     pub(super) fn follow_notes(&mut self) -> Task<Message> {
-        if self.panel != Some(Panel::Notes) || !self.shown().panel {
+        if !self.panel_shown(Panel::Notes) {
             return Task::none();
         }
         let key = self.note_key();

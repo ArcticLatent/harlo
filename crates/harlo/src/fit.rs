@@ -1,16 +1,15 @@
-//! Which side panels fit beside the conversation at a window width.
+//! Whether the sidebar fits beside the main area at a window width.
 //!
-//! The conversation column comes first. When it would get narrower than
-//! [`MAIN_MIN`], the right panel makes way, then the sidebar. Hiding a panel
-//! for space doesn't change the user's choice: once there's room it's back,
-//! and a panel the user closed stays closed. A panel the user opens while
-//! there's no room for it is kept, and the other one makes way instead.
+//! The main area comes first. When it would get narrower than [`MAIN_MIN`],
+//! the sidebar makes way. Hiding it for space doesn't change the user's
+//! choice: once there's room it's back, and a sidebar the user closed stays
+//! closed. A sidebar the user opens while there's no room for it is kept.
 
 // Rust guideline compliant 2026-10-09
 
 use crate::style::size;
 
-/// The narrowest the conversation column gets before side panels make way.
+/// The narrowest the main area gets before the sidebar makes way.
 ///
 /// Room for the composer with its pickers on one line (about 600 px)
 /// would be roomier, but at 560 a 1,100 px window keeps the sidebar open
@@ -20,82 +19,38 @@ pub const MAIN_MIN: f32 = 560.0;
 /// The window's size when Harlo opens.
 pub const WINDOW: (f32, f32) = (1588.0, 947.0);
 
-/// The smallest window Harlo can be made: both rails and a conversation
-/// column of [`MAIN_MIN`], rounded up.
+/// The smallest window Harlo can be made: both rails and a main area of
+/// [`MAIN_MIN`], rounded up.
 pub const WINDOW_MIN: (f32, f32) = (720.0, 480.0);
 
-/// One of the side panels.
+/// What's on screen beside the main area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Side {
-    /// The sessions sidebar on the left.
-    Sidebar,
-    /// The panel on the right (context, todos, changes, files, notes).
-    Panel,
-}
-
-/// Which side panels are on screen.
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shown {
     /// The sidebar is on screen.
     pub sidebar: bool,
-    /// The right panel is on screen.
-    pub panel: bool,
-    /// How wide the right panel is, when it's on screen.
-    pub panel_width: f32,
 }
 
 impl Shown {
-    /// The width left for the conversation column in a window `width` wide.
+    /// The width left for the main area in a window `width` wide.
     #[must_use]
     pub fn main_width(self, width: f32) -> f32 {
         let mut main = width - 2.0 * size::RAIL;
         if self.sidebar {
             main -= size::SIDEBAR;
         }
-        if self.panel {
-            main -= self.panel_width;
-        }
         main
-    }
-
-    /// Whether `side` is on screen.
-    #[must_use]
-    pub fn has(self, side: Side) -> bool {
-        match side {
-            Side::Sidebar => self.sidebar,
-            Side::Panel => self.panel,
-        }
     }
 }
 
-/// Works out which of the wanted panels are on screen in a window `width` wide.
+/// Works out whether the sidebar is on screen in a window `width` wide.
 ///
-/// `panel` is the width of the right panel the user has open, if any.
-/// `keep` is a panel the user opened while it didn't fit; it stays, and the
-/// other one makes way.
+/// `sidebar` is whether the user has it open; `keep` is whether they opened
+/// it while it didn't fit, so it stays.
 #[must_use]
-pub fn shown(width: f32, sidebar: bool, panel: Option<f32>, keep: Option<Side>) -> Shown {
-    let mut shown = Shown {
-        sidebar,
-        panel: panel.is_some(),
-        panel_width: panel.unwrap_or_default(),
-    };
-    let order = if keep == Some(Side::Panel) {
-        [Side::Sidebar, Side::Panel]
-    } else {
-        [Side::Panel, Side::Sidebar]
-    };
-    for side in order {
-        if shown.main_width(width) >= MAIN_MIN {
-            break;
-        }
-        if keep == Some(side) {
-            continue;
-        }
-        match side {
-            Side::Sidebar => shown.sidebar = false,
-            Side::Panel => shown.panel = false,
-        }
+pub fn shown(width: f32, sidebar: bool, keep: bool) -> Shown {
+    let mut shown = Shown { sidebar };
+    if !keep && shown.main_width(width) < MAIN_MIN {
+        shown.sidebar = false;
     }
     shown
 }

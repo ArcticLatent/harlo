@@ -14,7 +14,7 @@ use std::path::Path;
 
 use harlo::app::OpenFile;
 use harlo::style::size;
-use harlo::{App, FilesEvent, Message, Panel};
+use harlo::{App, DockKey, FilesEvent, Message, Panel};
 use harlo_core::server::{FileChange, FileMatch, Update};
 use harlo_core::workspace::{Event, EventKind};
 use iced::mouse;
@@ -40,9 +40,7 @@ fn files(event: FilesEvent) -> Message {
 fn with_tree() -> (App, String) {
     let mut app = demo::app();
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
-    if app.panel != Some(Panel::Files) {
-        let _ = app.update(Message::OpenPanel(Panel::Files));
-    }
+    let _ = app.update(Message::OpenPanel(Panel::Files));
     let root = app.file_tree().0;
     let _ = app.update(files(FilesEvent::Listed {
         root: root.clone(),
@@ -337,10 +335,11 @@ fn a_middle_click_closes_a_tab() {
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::Files(FilesEvent::Close(_)))),
+            .any(|m| matches!(m, Message::CloseDocked(DockKey::Editor))),
         "{messages:?}"
     );
     assert!(app.fs.open.is_empty());
+    assert!(!app.dock.has(DockKey::Editor));
 
     // The session's title is in the sidebar too, so aim at its tab: the
     // first one in the bar.
@@ -349,7 +348,7 @@ fn a_middle_click_closes_a_tab() {
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::CloseTab(id) if id == PI_UPDATE)),
+            .any(|m| matches!(m, Message::CloseDocked(DockKey::Session(_)))),
         "{messages:?}"
     );
     assert!(!app.tabs.iter().any(|id| id == PI_UPDATE));

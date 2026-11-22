@@ -7,7 +7,7 @@
 
 mod support;
 
-use harlo::{App, Message, Panel, ids};
+use harlo::{App, DockKey, Message, Panel, ids};
 use iced::widget::Id;
 use std::time::Duration;
 use support::{demo, interact, shows, ui};
@@ -39,8 +39,8 @@ fn start_shows_the_design_content() -> Result<(), Error> {
         "Show 19 more",
         "What are we working on?",
         "Enter to start · Shift+Enter for a new line",
-        "Context",
-        "No session selected.",
+        "Changes",
+        "Notes",
     ] {
         let _ = ui.find(text)?;
     }
@@ -123,44 +123,52 @@ fn the_sidebar_toggles() {
             .expect("the sidebar toggle");
     });
     assert!(!app.sidebar);
-    assert!(!shows(&app, "New session"));
+    assert!(!shows(&app, "Ctrl+N"));
     assert!(shows(&app, "What are we working on?"));
 
     let _ = interact(&mut app, |ui| {
         ui.click(Id::new(ids::SIDEBAR_TOGGLE))
             .expect("the sidebar toggle");
     });
-    assert!(shows(&app, "New session"));
+    assert!(shows(&app, "Ctrl+N"));
 }
 
 #[test]
-fn the_right_rail_switches_and_closes_panels() {
+fn the_right_rail_opens_shows_and_closes_panels() {
     let mut app = demo::app();
-    assert_eq!(app.panel, Some(Panel::Context));
+    // The dock starts with Changes, and Notes beside it.
+    assert!(app.panel_shown(Panel::Changes));
+    assert!(app.panel_open(Panel::Notes));
 
-    let _ = interact(&mut app, |ui| {
-        ui.click(Id::new(Panel::Todos.id()))
-            .expect("the todos button");
-    });
-    assert_eq!(app.panel, Some(Panel::Todos));
-    assert!(shows(&app, "Todos"));
-    assert!(!shows(&app, "Context"));
+    // A tool opens in the right dock, beside the tools placed there.
+    let click = |app: &mut harlo::App, panel: Panel| {
+        let _ = interact(app, |ui| {
+            ui.click(Id::new(panel.id())).expect("the rail button");
+        });
+    };
+    click(&mut app, Panel::Todos);
+    assert!(app.panel_shown(Panel::Todos));
+    assert!(app.panel_open(Panel::Changes), "still open, behind it");
+    assert!(!app.panel_shown(Panel::Changes));
 
-    // The open panel's button closes it.
-    let _ = interact(&mut app, |ui| {
-        ui.click(Id::new(Panel::Todos.id()))
-            .expect("the todos button");
-    });
-    assert_eq!(app.panel, None);
+    // The next tool from the rail takes its place.
+    click(&mut app, Panel::Context);
+    assert!(app.panel_shown(Panel::Context));
+    assert!(!app.panel_open(Panel::Todos));
+    assert!(app.panel_open(Panel::Changes));
 
-    let _ = app.update(Message::OpenPanel(Panel::Notes));
-    support::settle(&mut app);
-    let _ = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::PANEL_CLOSE))
-            .expect("the close button");
-    });
-    assert_eq!(app.panel, None);
-    assert!(!shows(&app, "No session selected."));
+    // A shown tool's button closes it, and a hidden one's shows it.
+    click(&mut app, Panel::Context);
+    assert!(!app.panel_open(Panel::Context));
+    assert!(app.panel_shown(Panel::Notes), "the tab beside it shows");
+    click(&mut app, Panel::Changes);
+    assert!(app.panel_shown(Panel::Changes));
+    assert!(app.panel_open(Panel::Notes));
+
+    // Its tab closes it too.
+    let _ = app.update(Message::CloseDocked(DockKey::Panel(Panel::Notes)));
+    assert!(!app.panel_open(Panel::Notes));
+    assert!(app.panel_shown(Panel::Changes));
 }
 
 #[test]

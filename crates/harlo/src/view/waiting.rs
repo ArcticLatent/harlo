@@ -131,7 +131,7 @@ fn undo<'a>(app: &'a App, staged: StagedUndo<'_>) -> Element<'a, Message> {
         let file = &restore.file;
         let shown = diff::lines(&file.patch);
         let name = (file.file.as_str(), file.additions, file.deletions);
-        body = body.push(view::diff::file(t, name, &shown, UNDO_LINES, None));
+        body = body.push(view::diff::file(t, name, shown, UNDO_LINES, None));
         if let Some(lost) = restore.lost.filter(|n| *n > 0) {
             let lines = if lost == 1 { "line" } else { "lines" };
             body = body.push(
@@ -200,7 +200,7 @@ fn approval<'a>(app: &'a App, asked: &'a Permission, count: usize) -> Element<'a
         for file in &asked.files {
             let shown = diff::lines(&file.patch);
             let name = (file.file.as_str(), file.additions, file.deletions);
-            body = body.push(view::diff::file(t, name, &shown, PATCH_LINES, None));
+            body = body.push(view::diff::file(t, name, shown, PATCH_LINES, None));
         }
     }
     if let Some(message) = asked.message.as_deref().filter(|m| !m.is_empty()) {

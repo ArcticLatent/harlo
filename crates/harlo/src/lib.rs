@@ -19,8 +19,8 @@ pub mod widget;
 
 #[doc(inline)]
 pub use app::{
-    App, ChangesEvent, ChangesLoaded, ContextEvent, ContextLoaded, FilesEvent, GitAction,
-    MenuState, Message, NotesEvent, Panel, Status,
+    App, BOTTOM, CENTER, ChangesEvent, ChangesLoaded, ContextEvent, ContextLoaded, DockKey,
+    DockMove, FilesEvent, GitAction, MenuState, Message, NotesEvent, Panel, Status, TerminalEvent,
 };
 #[doc(inline)]
 pub use options::Options;

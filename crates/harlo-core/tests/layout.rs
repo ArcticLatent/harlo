@@ -6,19 +6,36 @@
 
 use std::collections::BTreeMap;
 
-use harlo_core::layout::{Layout, Store, Tabs};
+use harlo_core::layout::{DockNode, Layout, Store, Tabs};
 
 fn sample() -> Layout {
     Layout {
         order: vec!["/home/u/code/harlo".into(), "/home/u".into()],
         sidebar: false,
-        panel: Some("Notes".into()),
         expanded: vec!["/home/u".into()],
         tabs: BTreeMap::from([(
             "Local".to_owned(),
             Tabs {
                 open: vec!["ses_a".into(), "ses_b".into()],
                 active: Some("ses_b".into()),
+                dock: Some(DockNode::Split {
+                    across: true,
+                    shares: vec![700, 300],
+                    parts: vec![
+                        DockNode::Tabs {
+                            name: Some("center".into()),
+                            group: Some("documents".into()),
+                            tabs: vec!["session:ses_a".into(), "session:ses_b".into()],
+                            shown: Some("session:ses_b".into()),
+                        },
+                        DockNode::Tabs {
+                            name: Some("right".into()),
+                            group: Some("tools".into()),
+                            tabs: vec!["panel:notes".into()],
+                            shown: Some("panel:notes".into()),
+                        },
+                    ],
+                }),
             },
         )]),
     }
@@ -31,7 +48,6 @@ fn a_missing_file_gives_the_default_layout() {
     let layout = store.load().expect("no file is fine");
     assert_eq!(layout, Layout::default());
     assert!(layout.sidebar);
-    assert_eq!(layout.panel.as_deref(), Some("Context"));
     assert!(!store.path().exists(), "loading creates nothing");
 }
 
@@ -44,9 +60,19 @@ fn a_saved_layout_loads_back_and_overwrites() {
 
     let mut changed = sample();
     changed.sidebar = true;
-    changed.panel = None;
+    changed.expanded.clear();
     store.save(&changed).expect("the second save");
     assert_eq!(store.load().expect("the saved layout"), changed);
+}
+
+#[test]
+fn a_layout_saved_before_the_dock_still_loads() {
+    // Older layouts also named the one open right panel.
+    let json = r#"{"panel":"Context","tabs":{"Local":{"open":["ses_a"],"active":"ses_a"}}}"#;
+    let layout: Layout = serde_json::from_str(json).expect("the older layout");
+    let tabs = layout.tabs.get("Local").expect("its tabs");
+    assert_eq!(tabs.open, ["ses_a"]);
+    assert_eq!(tabs.dock, None);
 }
 
 #[tokio::test]

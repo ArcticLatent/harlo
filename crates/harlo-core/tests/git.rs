@@ -187,6 +187,37 @@ fn stage_commit_and_push_in_a_real_repository() {
 }
 
 #[test]
+fn commit_all_takes_every_listed_file_whatever_was_staged() {
+    let scratch = Scratch::new();
+    let repo = scratch.repo();
+    let rt = runtime();
+    scratch.write("a.txt", "one\n");
+    rt.block_on(repo.commit_all(&["a.txt".to_owned()], "Start"))
+        .expect("first commit");
+    scratch.write("a.txt", "one\nchanged\n");
+    scratch.write("new.txt", "new\n");
+    // One staged elsewhere, one not: both go in.
+    rt.block_on(repo.stage(&["new.txt".to_owned()]))
+        .expect("stage");
+    std::fs::remove_file(scratch.work.join("a.txt")).expect("delete");
+    let listed: Vec<String> = rt
+        .block_on(repo.status())
+        .expect("status")
+        .files
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    let summary = rt
+        .block_on(repo.commit_all(&listed, "Everything"))
+        .expect("commit");
+    assert!(summary.ends_with(" Everything"), "{summary}");
+    let status = rt.block_on(repo.status()).expect("status");
+    assert!(status.files.is_empty(), "nothing left: {:?}", status.files);
+    assert!(!scratch.work.join("a.txt").exists());
+}
+
+#[test]
 fn failures_carry_what_git_said() {
     let scratch = Scratch::new();
     let rt = runtime();

@@ -48,8 +48,6 @@ pub mod size {
     pub const RAIL: f32 = 56.0;
     /// Width of the sidebar.
     pub const SIDEBAR: f32 = 288.0;
-    /// Width of the right panel.
-    pub const PANEL: f32 = 260.0;
     /// A square rail button.
     pub const RAIL_BUTTON: f32 = 36.0;
     /// Rail icons.
@@ -70,10 +68,8 @@ pub mod size {
     pub const TITLE: f32 = 19.0;
     /// The open session's title.
     pub const SESSION_TITLE: f32 = 18.5;
-    /// Height of the tab bar.
-    pub const TAB_BAR: f32 = 44.0;
-    /// Widest a tab gets.
-    pub const TAB: f32 = 190.0;
+    /// Height of a pane's tab bar.
+    pub const TAB_BAR: f32 = 34.0;
     /// The empty state's question.
     pub const HEADLINE: f32 = 26.0;
     /// Corner radius of buttons and fields.
@@ -321,7 +317,7 @@ pub fn waiting_card(t: &Tokens, accent: Rgba) -> impl Fn(&Theme) -> container::S
 }
 
 /// How much colour a patch line's background takes.
-const PATCH_TINT: f32 = 0.16;
+pub const PATCH_TINT: f32 = 0.16;
 
 /// A line of a patch preview: green where added, red where removed.
 pub fn patch_line(t: &Tokens, tint: Option<Rgba>) -> impl Fn(&Theme) -> container::Style + use<> {

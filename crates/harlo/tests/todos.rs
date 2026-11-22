@@ -63,9 +63,7 @@ fn open_with(rows: Vec<Entry>, todo_tool: bool) -> App {
 }
 
 fn open_todos(app: &mut App) {
-    if app.panel != Some(Panel::Todos) {
-        let _ = app.update(Message::OpenPanel(Panel::Todos));
-    }
+    let _ = app.update(Message::OpenPanel(Panel::Todos));
 }
 
 fn halfway() -> Vec<Todo> {
@@ -92,15 +90,15 @@ fn the_panel_lists_the_last_list_written() {
 #[test]
 fn a_line_above_the_composer_follows_the_work_left() {
     let mut app = open_with(vec![written("a", halfway())], true);
-    if app.panel == Some(Panel::Todos) {
-        let _ = app.update(Message::ClosePanel);
+    if app.panel_shown(Panel::Todos) {
+        let _ = app.update(Message::TogglePanel(Panel::Todos));
     }
     assert!(shows(&app, "1 of 3"));
     assert!(shows(&app, "Write the parser"), "what it's on");
     let _ = interact(&mut app, |ui| {
         let _ = ui.click("Todos");
     });
-    assert_eq!(app.panel, Some(Panel::Todos), "it opens the whole list");
+    assert!(app.panel_shown(Panel::Todos), "it opens the whole list");
 
     // The next call, live, finishes the list: the line goes.
     let event = |kind| {

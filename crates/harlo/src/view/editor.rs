@@ -1,5 +1,5 @@
-//! An open file in place of the session: the tab bar, a header with its
-//! path and Save, and the editor, or the picture for an image.
+//! The open file's tab: a header with its path and Save, and the editor,
+//! or the picture for an image.
 
 // Rust guideline compliant 2026-10-09
 
@@ -10,7 +10,7 @@ use lucide_icons::Icon;
 
 use crate::app::{App, FileBody, FilesEvent, Message, OpenFile, Outside, TextFile};
 use crate::style::{self, MONO, size};
-use crate::view::{icon, session};
+use crate::view::icon;
 
 /// The space around a picture.
 const PICTURE_MARGIN: f32 = 24.0;
@@ -49,7 +49,6 @@ pub fn view<'a>(app: &'a App, file: &'a OpenFile) -> Element<'a, Message> {
         FileBody::Failed(error) => note(t, format!("Couldn't open it: {error}")),
     };
     column![
-        session::tabs(app),
         header(t, file),
         rule::horizontal(1).style(style::divider(t.border_weaker_base)),
         container(body).width(Fill).height(Fill),

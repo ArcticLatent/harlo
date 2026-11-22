@@ -6,6 +6,7 @@ pub mod changes;
 pub mod composer;
 pub mod context;
 pub mod diff;
+pub mod dock;
 pub mod editor;
 pub mod files;
 pub mod home;
@@ -55,7 +56,7 @@ pub fn file_icon(path: &str, size: f32, dim: bool) -> Text<'static> {
 }
 
 /// How opaque a faded file icon is, as for an entry Git ignores.
-const DIM_ICON: f32 = 0.45;
+pub const DIM_ICON: f32 = 0.45;
 
 /// Formats how long something took: `850ms`, `3.7s`, `15s`, `2m 5s`.
 #[must_use]

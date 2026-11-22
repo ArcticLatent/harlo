@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 harlo-core = { workspace = true }
+iced_dock = { workspace = true }
 iced = { workspace = true, features = ["wgpu", "tiny-skia", "crisp", "tokio", "x11", "wayland", "svg", "image", "advanced", "markdown", "highlighter"] }
 lucide-icons = { workspace = true, features = ["iced"] }
 mimalloc = { workspace = true }
@@ -18,13 +19,26 @@ arboard = { workspace = true, features = ["image-data", "wayland-data-control"] 
 png = { workspace = true }
 notify-rust = { workspace = true, features = ["z"] }
 open = { workspace = true }
+# Whole characters (grapheme clusters), where shortened text may be cut (MIT/Apache).
+unicode-segmentation = { workspace = true }
 # The editor for files open in tabs (MIT); syntax highlighting through syntect.
 iced-code-editor = { workspace = true }
+# The terminal widget (MIT), vendored; local shells and remote PTYs.
+iced_term = { workspace = true }
+# The channel a remote terminal's input goes through, read as a stream, and
+# parsing large diffs off the window's thread.
+tokio = { workspace = true, features = ["sync", "rt", "time"] }
+futures-util = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 iced_test = { workspace = true }
 serde_json = { workspace = true }
 ttf-parser = { workspace = true }
+tempfile = { workspace = true }
+# A private OpenCode server for the tests that need one, and a runtime to drive the app's tasks.
+opencode-client = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+futures-util = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

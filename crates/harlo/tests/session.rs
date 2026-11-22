@@ -98,8 +98,6 @@ fn opening_a_session_shows_its_history() {
         "build",
         "model",
         "Changes",
-        // The Context panel, open from the start.
-        "Context window",
     ] {
         assert!(shows(&app, text), "shows {text:?}");
     }
@@ -143,15 +141,11 @@ fn tabs_switch_cycle_and_close() {
     let _ = app.update(Message::CycleTab { back: true });
     assert_eq!(app.active.as_deref(), Some(HI));
 
-    // The active tab's × closes it; its left neighbour takes over at the end.
-    let messages = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::TAB_CLOSE)).expect("the close button");
-    });
-    assert!(
-        matches!(messages.as_slice(), [Message::CloseTab(id)] if id == HI),
-        "{messages:?}"
-    );
+    // Closing the active tab, its left neighbour takes over at the end.
+    let key = app.dock.session_key(HI);
+    let _ = app.update(Message::CloseDocked(key));
     assert_eq!(app.tabs, [PI_UPDATE, third]);
+    assert!(!app.dock.has(key), "its dock tab went too");
     assert_eq!(app.active.as_deref(), Some(third));
 
     let _ = app.update(Message::CloseActiveTab);
@@ -331,15 +325,11 @@ fn the_layout_follows_the_window() {
     let _ = app.update(Message::ToggleMore(demo::HOME.into()));
     let layout = app.layout();
     assert!(!layout.sidebar);
-    assert_eq!(layout.panel.as_deref(), Some("Notes"));
     assert_eq!(layout.expanded, [demo::HOME]);
-    assert_eq!(
-        layout.tabs.get("Local"),
-        Some(&Tabs {
-            open: vec![PI_UPDATE.into(), HI.into()],
-            active: Some(HI.into()),
-        })
-    );
+    let tabs = layout.tabs.get("Local").expect("the server's tabs");
+    assert_eq!(tabs.open, [PI_UPDATE, HI]);
+    assert_eq!(tabs.active.as_deref(), Some(HI));
+    assert!(tabs.dock.is_some(), "and how the dock is arranged");
     assert_eq!(layout.order, order);
 }
 
@@ -347,18 +337,18 @@ fn the_layout_follows_the_window() {
 fn saved_tabs_reopen_once_connected() {
     let mut layout = demo::layout();
     layout.sidebar = false;
-    layout.panel = None;
     layout.tabs.insert(
         "Local".into(),
         Tabs {
             open: vec![PI_UPDATE.into(), "ses_gone".into(), HI.into()],
             active: Some(PI_UPDATE.into()),
+            dock: None,
         },
     );
     let mut app = App::new(Location::Shared, vec![Location::Shared], layout.clone());
     let _ = app.update(Message::Tick(demo::now()));
     assert!(!app.sidebar);
-    assert_eq!(app.panel, None);
+    assert!(app.panel_shown(Panel::Changes), "the starting tools");
     assert!(app.tabs.is_empty(), "tabs wait for the server");
     assert_eq!(app.layout(), layout, "waiting tabs are still saved");
 

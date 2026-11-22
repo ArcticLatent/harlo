@@ -94,10 +94,7 @@ fn panel(found: ContextLoaded) -> App {
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
     let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
     let _ = app.update(Message::Catalog(folder(), Ok(Box::new(catalog()))));
-    // It opens on the Context panel; opening it again would close it.
-    if app.panel != Some(Panel::Context) {
-        let _ = app.update(Message::OpenPanel(Panel::Context));
-    }
+    let _ = app.update(Message::OpenPanel(Panel::Context));
     // Showing it for the session started the first load.
     let _ = app.update(Message::Context(ContextEvent::Loaded(1, Box::new(found))));
     support::settle(&mut app);

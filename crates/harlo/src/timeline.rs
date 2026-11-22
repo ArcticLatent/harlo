@@ -107,6 +107,14 @@ pub enum Event {
     Undo(String),
     /// A subagent's child session was chosen, to open it.
     OpenSession(String),
+    /// A file in an edit was clicked, to review it: the tool row's key, and
+    /// which of its files.
+    Review {
+        /// The tool row's key.
+        tool: String,
+        /// Which of the row's files.
+        file: usize,
+    },
 }
 
 /// Where loading a session's history stands.
@@ -610,7 +618,7 @@ impl Timeline {
             }
             Event::Hover(key) => self.hovered.clone_from(key),
             // The app acts on these.
-            Event::Link(_) | Event::Undo(_) | Event::OpenSession(_) => {}
+            Event::Link(_) | Event::Undo(_) | Event::OpenSession(_) | Event::Review { .. } => {}
         }
     }
 
@@ -1117,26 +1125,40 @@ fn tool_view<'a>(t: &Tokens, row: &'a Row, whole: bool) -> Element<'a, Event> {
     if files.is_empty() {
         return line;
     }
+    // A changed file opens the Changes panel on it, at this edit's turn.
+    let review = |element: Element<'a, Event>, file: usize| -> Element<'a, Event> {
+        mouse_area(element)
+            .on_press(Event::Review {
+                tool: key.clone(),
+                file,
+            })
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into()
+    };
     let limit = if whole { usize::MAX } else { DIFF_LINES };
-    let mut body = column![line].spacing(6);
-    for (file, lines) in files.iter().zip(&row.diffs) {
+    let mut body = column![review(line, 0)].spacing(6);
+    for (index, (file, lines)) in files.iter().zip(&row.diffs).enumerate() {
         // A single file is named on the row; several get headers.
         if files.len() > 1 {
-            body = body.push(
+            body = body.push(review(
                 container(diff_view::header(
                     t,
                     &file.file,
                     file.additions,
                     file.deletions,
                 ))
-                .padding(padding::left(DIFF_INDENT)),
-            );
+                .padding(padding::left(DIFF_INDENT))
+                .into(),
+                index,
+            ));
         }
         let more = Event::ToggleDiff(key.clone());
-        body = body.push(
+        body = body.push(review(
             container(diff_view::lines(t, lines, limit, Some(more)))
-                .padding(padding::left(DIFF_INDENT)),
-        );
+                .padding(padding::left(DIFF_INDENT))
+                .into(),
+            index,
+        ));
     }
     body.into()
 }

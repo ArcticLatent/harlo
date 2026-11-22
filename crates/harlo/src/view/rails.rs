@@ -7,7 +7,7 @@ use iced::widget::{button, center, column, container, image, row, rule, space};
 use iced::{Element, Fill, Padding};
 use lucide_icons::Icon;
 
-use crate::app::{Message, Panel};
+use crate::app::{App, Message, Panel, TerminalEvent};
 use crate::assets::Assets;
 use crate::ids;
 use crate::style::{self, size};
@@ -47,32 +47,38 @@ pub fn left(t: &Tokens, assets: &Assets) -> Element<'static, Message> {
 }
 
 /// The right rail: one button per panel, and the terminal at the bottom.
-pub fn right(t: &Tokens, open: Option<Panel>) -> Element<'static, Message> {
+pub fn right(app: &App) -> Element<'static, Message> {
+    let t = &app.tokens;
     let mut items = column![].spacing(GAP).align_x(iced::Center);
     for panel in Panel::ALL {
-        let glyph = match panel {
-            Panel::Context => Icon::Clock,
-            Panel::Todos => Icon::ListChecks,
-            Panel::Changes => Icon::GitBranch,
-            Panel::Files => Icon::Files,
-            Panel::Notes => Icon::FileText,
-        };
         items = items.push(rail_button(
             t,
-            glyph,
+            glyph(panel),
             panel.id(),
-            open == Some(panel),
-            Some(Message::OpenPanel(panel)),
+            app.panel_shown(panel),
+            Some(Message::TogglePanel(panel)),
         ));
     }
     let items = items.push(space().height(Fill)).push(rail_button(
         t,
         Icon::SquareTerminal,
-        "rail-terminal",
-        false,
-        None,
+        crate::ids::RAIL_TERMINAL,
+        app.terminals_shown(),
+        Some(Message::Terminal(TerminalEvent::Toggle)),
     ));
     rail(t, Edge::Right, items)
+}
+
+/// A tool panel's icon, on the rail and its tab.
+#[must_use]
+pub fn glyph(panel: Panel) -> Icon {
+    match panel {
+        Panel::Context => Icon::Clock,
+        Panel::Todos => Icon::ListChecks,
+        Panel::Changes => Icon::GitBranch,
+        Panel::Files => Icon::Files,
+        Panel::Notes => Icon::FileText,
+    }
 }
 
 /// Which window edge a rail sits on; its divider goes on the inner side.

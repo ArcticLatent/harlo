@@ -13,6 +13,8 @@ the private bus are logged instead of shown.
     tools/gui-drive.py click X Y [--right|--middle] [--double]
     tools/gui-drive.py move X Y
     tools/gui-drive.py drag X1 Y1 X2 Y2
+    tools/gui-drive.py down X Y                  presses and holds the left button
+    tools/gui-drive.py up X Y [--keep]           moves there in steps, then lets go
     tools/gui-drive.py scroll X Y up|down [N]
     tools/gui-drive.py type TEXT                 types into the focused widget
     tools/gui-drive.py key COMBO...              e.g. Return ctrl+Return Escape ctrl+v
@@ -217,6 +219,29 @@ def cmd_drag(args):
     xdotool(state, "mousemove", x2, y2, "mouseup", "1")
 
 
+def cmd_down(args):
+    """Presses the left button at x y and keeps it down, for a drag to look at midway."""
+    state = load()
+    xdotool(state, "mousemove", args[0], args[1], "mousedown", "1")
+
+
+def cmd_up(args):
+    """Moves to x y in small steps, as a hand would, then lets go if --keep isn't given."""
+    state = load()
+    x, y = int(args[0]), int(args[1])
+    loc = subprocess.run(
+        ["xdotool", "getmouselocation", "--shell"],
+        env=x_env(state), capture_output=True, text=True, check=True,
+    ).stdout
+    pos = dict(line.split("=") for line in loc.split())
+    x0, y0 = int(pos["X"]), int(pos["Y"])
+    for i in range(1, 9):
+        xdotool(state, "mousemove", str(x0 + (x - x0) * i // 8), str(y0 + (y - y0) * i // 8))
+        time.sleep(0.03)
+    if "--keep" not in args:
+        xdotool(state, "mouseup", "1")
+
+
 def cmd_scroll(args):
     state = load()
     x, y, way = args[:3]
@@ -360,7 +385,7 @@ def cmd_stop(_args):
 
 COMMANDS = {
     "start": cmd_start, "shot": cmd_shot, "click": cmd_click, "move": cmd_move,
-    "drag": cmd_drag, "scroll": cmd_scroll, "type": cmd_type, "key": cmd_key,
+    "drag": cmd_drag, "down": cmd_down, "up": cmd_up, "scroll": cmd_scroll, "type": cmd_type, "key": cmd_key,
     "clip-text": cmd_clip_text, "clip-image": cmd_clip_image, "resize": cmd_resize,
     "api": cmd_api, "file": cmd_file, "env": cmd_env, "log": cmd_log,
     "notifications": cmd_notifications,

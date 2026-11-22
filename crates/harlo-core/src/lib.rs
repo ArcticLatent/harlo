@@ -15,6 +15,7 @@ pub mod layout;
 pub mod notes;
 pub mod server;
 pub mod sessions;
+pub mod terminal;
 pub mod theme;
 pub mod timeline;
 pub mod undo;

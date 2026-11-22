@@ -8,8 +8,11 @@ pub const SIDEBAR_TOGGLE: &str = "sidebar-toggle";
 /// The session filter.
 pub const SESSION_FILTER: &str = "session-filter";
 
-/// The right panel's close button.
-pub const PANEL_CLOSE: &str = "panel-close";
+/// The right rail's terminal button.
+pub const RAIL_TERMINAL: &str = "rail-terminal";
+
+/// The maximized panel's Restore button.
+pub const PANEL_RESTORE: &str = "panel-restore";
 
 /// The composer box.
 pub const COMPOSER: &str = "composer";
@@ -25,9 +28,6 @@ pub const LOCATION: &str = "location";
 
 /// The composer's send button.
 pub const SEND: &str = "send";
-
-/// The active tab's close button.
-pub const TAB_CLOSE: &str = "tab-close";
 
 /// The folder picker on the start screen.
 pub const FOLDER: &str = "folder";
@@ -76,3 +76,9 @@ pub const UNDO_KEEP: &str = "undo-keep";
 
 /// The Changes panel's commit message.
 pub const COMMIT_MESSAGE: &str = "commit-message";
+
+/// The Changes panel's lists.
+pub const CHANGES_LIST: &str = "changes-list";
+
+/// The maximized Changes panel's diff.
+pub const CHANGES_DIFF: &str = "changes-diff";

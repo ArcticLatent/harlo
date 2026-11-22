@@ -1,21 +1,26 @@
 //! A diff drawn as lines: numbers, `+`/`-` marks, tinted backgrounds, and the
 //! changed words highlighted. Used by tool rows, approvals and the Changes panel.
+//!
+//! The lines are one [`widget::DiffLines`], which measures only the lines in
+//! view, so long diffs stay quick to open, resize and scroll.
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::diff::{Line, LineKind};
+use std::borrow::Cow;
+
+use harlo_core::diff::Line;
 use harlo_core::theme::{Rgba, Tokens};
-use iced::widget::text::Span;
-use iced::widget::{Column, column, container, rich_text, row, space, text};
-use iced::{Center, Element, Fill, Font};
+use iced::widget::{Column, column, container, row, scrollable, space, text};
+use iced::{Center, Element, Fill};
 
 use crate::style::{self, MONO, size};
-
-/// The width of the line-number gutter, enough for five digits.
-const GUTTER: f32 = 40.0;
+use crate::widget;
 
 /// How far the "N more lines" note is indented, to sit under the text.
-const NOTE_INDENT: f32 = GUTTER - 6.0;
+const NOTE_INDENT: f32 = 34.0;
+
+/// The width of the sideways scrollbar under a wide diff.
+const SCROLLBAR: f32 = 4.0;
 
 /// How much colour a changed word's background takes, over the line's tint.
 const WORD_TINT: f32 = 0.38;
@@ -57,19 +62,35 @@ pub fn counts<'a, M: 'a>(t: &Tokens, added: u64, removed: u64) -> Element<'a, M>
 
 /// The first `limit` lines of a diff in a sunken box, then how many are left.
 ///
-/// `more` is sent by the "N more lines" note, if given; without it the note
-/// is plain text.
+/// Lines don't wrap; a line wider than the box scrolls sideways. `more` is
+/// sent by the "N more lines" note, if given; without it the note is plain
+/// text.
 pub fn lines<'a, M: Clone + 'a>(
     t: &Tokens,
-    lines: &[Line],
+    lines: impl Into<Cow<'a, [Line]>>,
     limit: usize,
     more: Option<M>,
 ) -> Element<'a, M> {
-    let mut list = Column::new();
-    for line in lines.iter().take(limit) {
-        list = list.push(line_view(t, line));
+    let mut shown = lines.into();
+    let hidden = shown.len().saturating_sub(limit);
+    match &mut shown {
+        Cow::Borrowed(all) => *all = &all[..all.len().min(limit)],
+        Cow::Owned(all) => all.truncate(limit),
     }
-    let hidden = lines.len().saturating_sub(limit);
+    let drawn = scrollable(widget::diff_lines(
+        shown,
+        colors(t),
+        MONO,
+        size::CODE,
+        size::SMALL,
+    ))
+    .direction(scrollable::Direction::Horizontal(
+        scrollable::Scrollbar::new()
+            .width(SCROLLBAR)
+            .scroller_width(SCROLLBAR),
+    ))
+    .style(style::thin_scroll(t));
+    let mut list = Column::new().push(drawn);
     if hidden > 0 {
         let note = text(format!("… {hidden} more lines"))
             .size(size::SMALL)
@@ -91,70 +112,24 @@ pub fn lines<'a, M: Clone + 'a>(
         .into()
 }
 
-/// One line: its number, its mark, and its text with changed words lit.
-fn line_view<'a, M: 'a>(t: &Tokens, line: &Line) -> Element<'a, M> {
-    let (mark, tint, colour) = match line.kind {
-        LineKind::Added => ("+", Some(t.icon_success_base), t.text_strong),
-        LineKind::Removed => ("-", Some(t.icon_critical_base), t.text_strong),
-        LineKind::Context => (" ", None, t.text_base),
-        LineKind::Gap => ("⋯", None, t.text_weaker),
-    };
-    let number = line.number.map(|n| n.to_string()).unwrap_or_default();
-    let word = tint.map(|c| style::color(c.over(t.surface_inset_base, WORD_TINT)));
-    // Only a line with changed words needs rich text; most are plain.
-    let body: Element<'a, M> = if line.spans.iter().any(|piece| piece.changed) {
-        let spans: Vec<Span<'a, (), Font>> = line
-            .spans
-            .iter()
-            .map(|piece| {
-                let span = iced::widget::span(piece.text.clone())
-                    .font(MONO)
-                    .color(style::color(colour));
-                match word.filter(|_| piece.changed) {
-                    Some(background) => span.background(background),
-                    None => span,
-                }
-            })
-            .collect();
-        rich_text(spans).size(size::CODE).width(Fill).into()
-    } else {
-        text(line.text())
-            .font(MONO)
-            .size(size::CODE)
-            .color(style::color(colour))
-            .width(Fill)
-            .into()
-    };
-    let content = row![
-        container(
-            text(number)
-                .font(MONO)
-                .size(size::SMALL)
-                .color(style::color(t.text_weak)),
-        )
-        .width(GUTTER)
-        .align_right(GUTTER)
-        .padding(iced::padding::right(6)),
-        text(mark)
-            .font(MONO)
-            .size(size::CODE)
-            .color(style::color(sign(t, line.kind))),
-        body,
-    ]
-    .spacing(6);
-    container(content)
-        .width(Fill)
-        .padding(iced::padding::vertical(1).right(10))
-        .style(style::patch_line(t, tint))
-        .into()
-}
-
-/// The colour of a line's `+` or `-`.
-fn sign(t: &Tokens, kind: LineKind) -> Rgba {
-    match kind {
-        LineKind::Added => t.icon_success_base,
-        LineKind::Removed => t.icon_critical_base,
-        LineKind::Context | LineKind::Gap => t.text_weaker,
+/// A diff's colours, from the theme: tints and changed words over the
+/// sunken background.
+fn colors(t: &Tokens) -> widget::DiffColors {
+    let back = t.surface_inset_base;
+    let tint = |c: Rgba| style::color(c.over(back, style::PATCH_TINT));
+    let word = |c: Rgba| style::color(c.over(back, WORD_TINT));
+    widget::DiffColors {
+        number: style::color(t.text_weak),
+        context: style::color(t.text_base),
+        changed: style::color(t.text_strong),
+        gap: style::color(t.text_weaker),
+        added: style::color(t.icon_success_base),
+        removed: style::color(t.icon_critical_base),
+        plain: style::color(t.text_weaker),
+        added_line: tint(t.icon_success_base),
+        removed_line: tint(t.icon_critical_base),
+        added_word: word(t.icon_success_base),
+        removed_word: word(t.icon_critical_base),
     }
 }
 
@@ -162,7 +137,7 @@ fn sign(t: &Tokens, kind: LineKind) -> Rgba {
 pub fn file<'a, M: Clone + 'a>(
     t: &Tokens,
     (name, added, removed): (&str, u64, u64),
-    shown: &[Line],
+    shown: impl Into<Cow<'a, [Line]>>,
     limit: usize,
     more: Option<M>,
 ) -> Element<'a, M> {

@@ -24,9 +24,7 @@ fn notes(event: NotesEvent) -> Message {
 fn with_notes() -> App {
     let mut app = demo::app();
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
-    if app.panel != Some(Panel::Notes) {
-        let _ = app.update(Message::OpenPanel(Panel::Notes));
-    }
+    let _ = app.update(Message::OpenPanel(Panel::Notes));
     app
 }
 

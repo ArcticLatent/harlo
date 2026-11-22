@@ -2,7 +2,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use iced::widget::{column, container, row, space, text};
+use iced::widget::{column, container, responsive, row, space, text};
 use iced::{Center, Element, Fill, Padding};
 
 use crate::app::{App, Message};
@@ -16,11 +16,16 @@ const COMPOSER_WIDTH: f32 = 760.0;
 /// Space either side of the composer.
 const MARGIN: f32 = 24.0;
 
-/// The empty state, centred in the main area.
+/// The empty state, centred in its pane.
 pub fn view(app: &App) -> Element<'_, Message> {
+    responsive(move |size| at_width(app, size.width)).into()
+}
+
+/// The empty state in a pane `pane` wide.
+fn at_width(app: &App, pane: f32) -> Element<'_, Message> {
     let t = &app.tokens;
     // The key hint shares the tool row; a narrow composer leaves it out.
-    let width = (app.main_width() - 2.0 * MARGIN).min(COMPOSER_WIDTH);
+    let width = (pane - 2.0 * MARGIN).min(COMPOSER_WIDTH);
     let hint = if app.starting() {
         Some("Starting the session…")
     } else {

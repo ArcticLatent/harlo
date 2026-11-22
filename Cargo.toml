@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "vendor/iced_dock", "vendor/iced_term"]
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +13,9 @@ publish = false
 # Our crates.
 opencode-client = { path = "crates/opencode-client", version = "0.1.0" }
 harlo-core = { path = "crates/harlo-core", version = "0.1.0" }
+# Docking panes for the main area: Fee0/iced_dock (MIT) at commit 495cbea,
+# vendored with small changes listed in vendor/iced_dock/VENDORED.md.
+iced_dock = { path = "vendor/iced_dock", version = "0.1.0" }
 
 # OpenCode client.
 reqwest = { version = "0.13.5", default-features = false }
@@ -21,6 +24,8 @@ serde_json = { version = "1.0.150", default-features = false }
 tokio = { version = "1.50.0", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 sse-stream = { version = "0.3.0", default-features = false }
+tokio-tungstenite = { version = "0.30.0", default-features = false }
+unicode-segmentation = { version = "1.13.3", default-features = false }
 regress = { version = "0.12.0", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
 base64 = { version = "0.23.1", default-features = false }
@@ -45,9 +50,10 @@ notify-rust = { version = "4.19.0", default-features = false }
 # Opens a link a question points to in the user's browser (MIT).
 open = { version = "5.4.5", default-features = false }
 iced-code-editor = { version = "0.7.1", default-features = false }
-# 0.8.0 deadlocks the UI under heavy terminal output; the fix (upstream PR #69)
-# is merged but not yet released. Move back to a crates.io version once one ships.
-iced_term = { git = "https://github.com/Harzu/iced_term", rev = "d7c8187bd426d19a2c0d1abe615332c2c8fffab0", default-features = false }
+# Terminal widget: Harzu/iced_term (MIT) at commit d7c8187, past 0.8.0 for the
+# fix to a UI deadlock under heavy output. Vendored with the changes listed in
+# vendor/iced_term/VENDORED.md (OpenCode PTYs over a WebSocket, no panics).
+iced_term = { path = "vendor/iced_term", version = "0.8.0" }
 
 # Code generation (dev tool only).
 typify = { version = "0.10.1", default-features = false }
@@ -108,3 +114,9 @@ literal_string_with_formatting_args = "allow"
 cargo_common_metadata = "allow"
 # Transitive dependency version splits (iced, wgpu, reqwest) are outside our control.
 multiple_crate_versions = "allow"
+
+# Debug builds optimise the libraries (iced, its text shaping and renderer,
+# the diff and SQLite code) and leave Harlo's own crates quick to rebuild and
+# debug. Unoptimised, laying out the window takes several times longer.
+[profile.dev.package."*"]
+opt-level = 2

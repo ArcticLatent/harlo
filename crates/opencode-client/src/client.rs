@@ -55,11 +55,19 @@ impl Client {
         &self.endpoint
     }
 
-    fn request(&self, method: Method, path: &str) -> RequestBuilder {
+    pub(crate) fn request(&self, method: Method, path: &str) -> RequestBuilder {
         let builder = self
             .http
             .request(method, format!("{}{path}", self.endpoint.url()));
         self.authorized(builder)
+    }
+
+    /// The `Authorization` header's value, when the server has a password.
+    pub(crate) fn basic_auth(&self) -> Option<String> {
+        use base64::Engine as _;
+        let password = self.endpoint.password()?;
+        let token = base64::engine::general_purpose::STANDARD.encode(format!("{USER}:{password}"));
+        Some(format!("Basic {token}"))
     }
 
     fn authorized(&self, builder: RequestBuilder) -> RequestBuilder {
@@ -69,7 +77,7 @@ impl Client {
         }
     }
 
-    async fn send(builder: RequestBuilder) -> Result<Response, Error> {
+    pub(crate) async fn send(builder: RequestBuilder) -> Result<Response, Error> {
         let response = builder.send().await?;
         let status = response.status();
         if status.is_success() {
@@ -79,7 +87,7 @@ impl Client {
         Err(Error::status(status.as_u16(), &body))
     }
 
-    async fn json(builder: RequestBuilder) -> Result<Value, Error> {
+    pub(crate) async fn json(builder: RequestBuilder) -> Result<Value, Error> {
         let text = Self::send(builder).await?.text().await?;
         Ok(serde_json::from_str(&text)?)
     }

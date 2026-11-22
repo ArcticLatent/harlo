@@ -21,6 +21,7 @@ mod event;
 mod generated;
 mod id;
 mod prompt;
+mod pty;
 mod setup;
 mod types;
 
@@ -38,6 +39,8 @@ pub use event::{Event, FileChange, Kind as EventKind};
 pub use id::message_id;
 #[doc(inline)]
 pub use prompt::{Attachment, Mention, Prompt};
+#[doc(inline)]
+pub use pty::{Pty, PtyInput, PtyOutput};
 #[doc(inline)]
 pub use setup::{CommandSetup, Setup};
 #[doc(inline)]

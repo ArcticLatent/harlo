@@ -1,0 +1,105 @@
+# Vendored from https://github.com/Fee0/iced_dock at commit
+# 495cbea7af91aea668decb27c52cd53561cf78e3 (2026-10-07), MIT per its manifest.
+# Harlo's changes are listed in VENDORED.md.
+[package]
+name = "iced_dock"
+version = "0.1.0"
+edition = "2021"
+description = "Docking layout system for iced"
+license = "MIT"
+publish = false
+
+[features]
+default = []
+serde = ["dep:serde", "slotmap/serde"]
+
+[dependencies]
+iced = { workspace = true, features = ["advanced", "svg"] }
+serde = { workspace = true, optional = true, features = ["derive"] }
+slotmap = "1.1.1"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+iced = { workspace = true, features = ["advanced", "svg", "tiny-skia", "tokio", "x11", "wayland"] }
+iced_test = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+
+[[test]]
+name = "serde_roundtrip"
+path = "tests/serde_roundtrip.rs"
+required-features = ["serde"]
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -2 }
+restriction = { level = "warn", priority = -3 }
+
+# Whitelist
+blanket_clippy_restriction_lints = "allow"
+implicit_return = "allow"
+single_match_else = "allow"
+single_call_fn = "allow"
+arbitrary_source_item_ordering = "allow"
+question_mark_used = "allow"
+pattern_type_mismatch = "allow"
+min_ident_chars = "allow"
+std_instead_of_core = "allow"
+std_instead_of_alloc = "allow"
+missing_trait_methods = "allow"
+non_ascii_literal = "allow"
+pub_with_shorthand = "allow"
+self_named_module_files = "allow"
+single_char_lifetime_names = "allow"
+separated_literal_suffix = "allow"
+too_many_lines = "allow"
+exhaustive_enums = "allow"
+exhaustive_structs = "allow"
+pub_use = "allow"
+error_impl_error = "allow"
+missing_inline_in_public_items = "allow"
+missing_docs_in_private_items = "allow"
+missing_errors_doc = "allow"
+float_arithmetic = "allow"
+print_stderr = "allow"
+print_stdout = "allow"
+use_debug = "allow"
+wildcard_enum_match_arm = "allow"
+indexing_slicing = "allow"
+else_if_without_else = "allow"
+similar_names = "allow"
+trivially_copy_pass_by_ref = "allow"
+shadow_reuse = "allow"
+struct_excessive_bools = "allow"
+shadow_unrelated = "allow"
+cognitive_complexity = "allow"
+absolute_paths = "allow"
+allow_attributes_without_reason = "allow"
+arithmetic_side_effects = "allow"
+as_conversions = "allow"
+cast_precision_loss = "allow"
+default_numeric_fallback = "allow"
+default_trait_access = "allow"
+expect_used = "allow"
+float_cmp = "allow"
+impl_trait_in_params = "allow"
+implicit_hasher = "allow"
+integer_division_remainder_used = "allow"
+iter_over_hash_type = "allow"
+let_underscore_must_use = "allow"
+let_underscore_untyped = "allow"
+map_with_unused_argument_over_ranges = "allow"
+module_name_repetitions = "allow"
+multiple_inherent_impl = "allow"
+needless_pass_by_value = "allow"
+panic = "allow"
+tests_outside_test_module = "allow"
+too_many_arguments = "allow"
+uninlined_format_args = "allow"
+unseparated_literal_suffix = "allow"
+unused_self = "allow"
+unwrap_used = "allow"
+type_complexity = "allow"
+doc_markdown = "allow"
+# Restriction lints added to clippy after the vendored commit.
+inline_trait_bounds = "allow"
+inline_modules = "allow"

@@ -182,6 +182,21 @@ impl Repo {
         Ok(summary.trim().to_owned())
     }
 
+    /// Stages `paths` as they are now and commits them with whatever else
+    /// is staged, with `message`; returns the commit's short hash and subject.
+    ///
+    /// Paths are relative to the repository's root, as [`Status`] gives them.
+    /// Given every file `git status` lists, it commits all uncommitted changes.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a path can't be staged, nothing is left to commit, a hook
+    /// refuses, or `git` can't run.
+    pub async fn commit_all(&self, paths: &[String], message: &str) -> Result<String, Error> {
+        self.stage(paths).await?;
+        self.commit(message).await
+    }
+
     /// Pushes the current branch to its upstream.
     ///
     /// # Errors

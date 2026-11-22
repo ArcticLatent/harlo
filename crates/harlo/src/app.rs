@@ -24,7 +24,7 @@ use iced::widget::{Id, row, scrollable, space, stack, text_editor};
 use iced::{Element, Fill, Subscription, Task, Theme};
 
 use crate::assets::Assets;
-use crate::fit::{self, Shown, Side};
+use crate::fit::{self, Shown};
 use crate::motion::{self, Moment};
 use crate::style::size;
 use crate::timeline::{self, Activity, Timeline};
@@ -35,9 +35,11 @@ use crate::widget::{Edge, reveal};
 
 mod changes;
 mod context;
+mod dock;
 mod files;
 mod notes;
 mod subagents;
+mod terminal;
 mod todos;
 mod undo;
 
@@ -47,9 +49,11 @@ pub use changes::{
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
+pub use dock::{BOTTOM, CENTER, DockKey, DockMove, Docking, RIGHT};
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use subagents::Child;
+pub use terminal::{Event as TerminalEvent, Shell, Terminals, palette as terminal_palette};
 pub use undo::StagedUndo;
 mod waiting;
 pub(crate) use waiting::capitalized;
@@ -80,8 +84,8 @@ pub struct MenuState {
     pub scroller: Id,
 }
 
-/// Panels the right rail opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Tool panels: the right rail opens them in the dock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     /// Context window use and session facts.
     Context,
@@ -117,12 +121,6 @@ impl Panel {
         }
     }
 
-    /// How wide the panel is: every panel is as wide as the others.
-    #[must_use]
-    pub fn width(self) -> f32 {
-        size::PANEL
-    }
-
     /// The panel's title.
     #[must_use]
     pub fn title(self) -> &'static str {
@@ -134,15 +132,6 @@ impl Panel {
             Self::Notes => "Notes",
         }
     }
-}
-
-/// A tab in the tab bar: a session's, or an open file's.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TabRef {
-    /// A session, by ID.
-    Session(String),
-    /// An open file, by key.
-    File(String),
 }
 
 /// How the connection to the current server stands.
@@ -176,10 +165,22 @@ pub enum Message {
     Filter(String),
     /// Show all of a folder's sessions, or fewer again, by folder.
     ToggleMore(String),
-    /// Open a right panel, or close it when it's already open.
+    /// Show a tool panel, opening it if it isn't open.
     OpenPanel(Panel),
-    /// Close the right panel.
-    ClosePanel,
+    /// Open a tool panel, show it, or close it when it's shown.
+    TogglePanel(Panel),
+    /// Something the user did in the dock: picked a tab, focused a pane, dragged.
+    Dock(iced_dock::DockEvent<DockKey>),
+    /// The user asked to close a dock tab.
+    CloseDocked(DockKey),
+    /// Move focus, or the current tab, around the dock from the keyboard.
+    DockMove(DockMove),
+    /// Give a tool panel the whole space between the rails, until [`Message::Restore`].
+    Maximize(Panel),
+    /// Put the maximized panel back where it was, and the layout with it.
+    Restore,
+    /// Something happened to the terminals.
+    Terminal(TerminalEvent),
     /// The composer was edited.
     Compose(text_editor::Action),
     /// Open or close the location picker.
@@ -408,12 +409,16 @@ pub struct App {
     pub expanded: HashSet<String>,
     /// Whether the sidebar is shown.
     pub sidebar: bool,
-    /// The open right panel.
-    pub panel: Option<Panel>,
+    /// The main area: the documents in the center, the tool panels docked around them.
+    pub dock: Docking,
+    /// The tool panel covering the space between the rails, if one is.
+    pub maximized: Option<Panel>,
+    /// The terminals, shown in the dock or hidden.
+    pub terminals: Terminals,
     /// The window's width, which decides which panels fit.
     width: f32,
-    /// A panel the user opened while it didn't fit, kept on screen.
-    keep: Option<Side>,
+    /// Whether the user opened the sidebar while it didn't fit, so it stays.
+    keep: bool,
     /// Open sessions, in tab order.
     pub tabs: Vec<String>,
     /// The session shown, if any; `None` shows the start screen.
@@ -441,8 +446,6 @@ pub struct App {
     since: Instant,
     /// The sidebar sliding open or closed.
     sidebar_slide: Animation<bool>,
-    /// The right panel sliding open or closed, and the last one shown.
-    panel_slide: (Animation<bool>, Option<Panel>),
     /// What the composer brings along with its text.
     pub draft: Draft,
     /// The open `/` or `@` menu.
@@ -523,10 +526,6 @@ impl App {
         let theme = theme::parse(harlo_core::DEFAULT_THEME).expect("the bundled theme is valid");
         let tokens = theme.tokens(Mode::Dark);
         let clock = Instant::now();
-        let panel = layout
-            .panel
-            .as_deref()
-            .and_then(|title| Panel::ALL.into_iter().find(|p| p.title() == title));
         let mut app = Self {
             theme: crate::style::iced_theme(&theme.name, &tokens),
             tokens,
@@ -542,9 +541,11 @@ impl App {
             filter: String::new(),
             expanded: layout.expanded.iter().cloned().collect(),
             sidebar: layout.sidebar,
-            panel,
+            dock: Docking::new(),
+            maximized: None,
+            terminals: Terminals::default(),
             width: fit::WINDOW.0,
-            keep: None,
+            keep: false,
             tabs: Vec::new(),
             active: None,
             timelines: HashMap::new(),
@@ -559,7 +560,6 @@ impl App {
             settle: clock,
             since: clock,
             sidebar_slide: motion::slide(layout.sidebar),
-            panel_slide: (motion::slide(panel.is_some()), panel),
             draft: Draft::default(),
             menu: None,
             dismissed: None,
@@ -596,8 +596,17 @@ impl App {
             saved: layout,
         };
         app.restore = app.other_tabs.remove(&app.location.label());
+        app.dock = app.saved_dock();
         app.refresh();
         app
+    }
+
+    /// The dock as saved for the current server, or the starting one.
+    fn saved_dock(&self) -> Docking {
+        match self.restore.as_ref().and_then(|tabs| tabs.dock.as_ref()) {
+            Some(saved) => Docking::restore(saved),
+            None => Docking::new(),
+        }
     }
 
     /// Saves the layout to `store` after each change.
@@ -622,8 +631,9 @@ impl App {
         let current = self.restore.clone().unwrap_or_else(|| Tabs {
             open: self.tabs.clone(),
             active: self.active.clone(),
+            dock: self.dock.saved(),
         });
-        if !current.open.is_empty() {
+        if !current.open.is_empty() || current.dock.is_some() {
             tabs.insert(self.location.label(), current);
         }
         let mut expanded: Vec<String> = self.expanded.iter().cloned().collect();
@@ -631,7 +641,6 @@ impl App {
         Layout {
             order: self.workspace.order().to_vec(),
             sidebar: self.sidebar,
-            panel: self.panel.map(|p| p.title().to_owned()),
             expanded,
             tabs,
         }
@@ -656,9 +665,11 @@ impl App {
             self.picker = None;
         }
         let task = self.apply(message);
+        let docked = self.sync_dock();
         self.sync_motion();
         let task = Task::batch([
             task,
+            docked,
             self.follow_folder(),
             self.follow_changes(),
             self.follow_context(),
@@ -679,10 +690,15 @@ impl App {
 
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
-            message @ (Message::ToggleSidebar
-            | Message::OpenPanel(_)
-            | Message::ClosePanel
-            | Message::Resized(_)) => self.panels(&message),
+            message @ (Message::ToggleSidebar | Message::Resized(_)) => self.panels(&message),
+            message @ (Message::OpenPanel(_)
+            | Message::TogglePanel(_)
+            | Message::Dock(_)
+            | Message::CloseDocked(_)
+            | Message::DockMove(_)
+            | Message::Maximize(_)
+            | Message::Restore) => return self.dock_action(message),
+            Message::Terminal(event) => return self.terminal_event(event),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => {
                 if !self.expanded.remove(&folder) {
@@ -783,6 +799,9 @@ impl App {
             crate::timeline::Event::Undo(message_id) => return self.start_undo(id, message_id),
             crate::timeline::Event::OpenSession(child) => {
                 return self.update(Message::OpenSession(child));
+            }
+            crate::timeline::Event::Review { tool, file } => {
+                return self.review_edit(&id, &tool, file);
             }
             _ => {}
         }
@@ -1095,39 +1114,10 @@ impl App {
                     self.close(&id);
                 }
             }
-            Message::CycleTab { back } => match self.neighbour(back) {
-                Some(TabRef::Session(id)) => return self.open(id),
-                Some(TabRef::File(key)) => return self.files_action(FilesEvent::Show(key)),
-                None => {}
-            },
+            Message::CycleTab { back } => return self.cycle_dock(back),
             _ => {}
         }
         Task::none()
-    }
-
-    /// The tab after (or before) the shown one, wrapping around: session
-    /// tabs first, then file tabs, as the tab bar shows them.
-    fn neighbour(&self, back: bool) -> Option<TabRef> {
-        let all: Vec<TabRef> = self
-            .tabs
-            .iter()
-            .cloned()
-            .map(TabRef::Session)
-            .chain(self.fs.open.iter().map(|f| TabRef::File(f.key.clone())))
-            .collect();
-        let shown = match (&self.fs.shown, &self.active) {
-            (Some(key), _) => TabRef::File(key.clone()),
-            (None, Some(id)) => TabRef::Session(id.clone()),
-            (None, None) => return all.first().cloned(),
-        };
-        let count = all.len();
-        let current = all.iter().position(|t| *t == shown)?;
-        let next = if back {
-            (current + count - 1) % count
-        } else {
-            (current + 1) % count
-        };
-        all.get(next).cloned()
     }
 
     /// Loads a session's history into its timeline, its inbox, what it's
@@ -1162,69 +1152,35 @@ impl App {
         )
     }
 
-    /// Opens, closes and fits the side panels.
+    /// Opens, closes and fits the sidebar.
     ///
-    /// Opening a panel that doesn't fit keeps it on screen, and the other
-    /// panel makes way; see [`fit`].
+    /// Opening the sidebar when it doesn't fit keeps it on screen; see [`fit`].
     fn panels(&mut self, message: &Message) {
         match *message {
             Message::ToggleSidebar => {
                 if self.shown().sidebar {
                     self.sidebar = false;
-                    self.forget_keep(Side::Sidebar);
+                    self.keep = false;
                 } else {
                     self.sidebar = true;
-                    self.keep_if_hidden(Side::Sidebar);
+                    self.keep = !self.shown().sidebar;
                 }
-            }
-            Message::OpenPanel(panel) => {
-                if self.panel == Some(panel) && self.shown().panel {
-                    self.panel = None;
-                    self.forget_keep(Side::Panel);
-                } else {
-                    self.panel = Some(panel);
-                    self.keep_if_hidden(Side::Panel);
-                }
-            }
-            Message::ClosePanel => {
-                self.panel = None;
-                self.forget_keep(Side::Panel);
             }
             Message::Resized(size) => {
                 self.width = size.width;
-                // Once the kept panel fits by itself, it no longer needs keeping.
-                if let Some(side) = self.keep
-                    && fit::shown(self.width, self.sidebar, self.panel.map(Panel::width), None)
-                        .has(side)
-                {
-                    self.keep = None;
+                // Once the kept sidebar fits by itself, it no longer needs keeping.
+                if self.keep && fit::shown(self.width, self.sidebar, false).sidebar {
+                    self.keep = false;
                 }
             }
             _ => {}
         }
     }
 
-    fn keep_if_hidden(&mut self, side: Side) {
-        if !self.shown().has(side) {
-            self.keep = Some(side);
-        }
-    }
-
-    fn forget_keep(&mut self, side: Side) {
-        if self.keep == Some(side) {
-            self.keep = None;
-        }
-    }
-
-    /// Returns which side panels are on screen at the window's width.
+    /// Returns whether the sidebar is on screen at the window's width.
     #[must_use]
     pub fn shown(&self) -> Shown {
-        fit::shown(
-            self.width,
-            self.sidebar,
-            self.panel.map(Panel::width),
-            self.keep,
-        )
+        fit::shown(self.width, self.sidebar, self.keep)
     }
 
     /// Returns the width left for the conversation column.
@@ -1239,14 +1195,6 @@ impl App {
         let shown = self.shown();
         if self.sidebar_slide.value() != shown.sidebar {
             self.sidebar_slide.go_mut(shown.sidebar, now);
-            self.settle_after(motion::SLIDE);
-        }
-        let panel = self.panel.filter(|_| shown.panel);
-        if panel.is_some() {
-            self.panel_slide.1 = panel;
-        }
-        if self.panel_slide.0.value() != panel.is_some() {
-            self.panel_slide.0.go_mut(panel.is_some(), now);
             self.settle_after(motion::SLIDE);
         }
         let names: Vec<String> = self.draft.attached.iter().map(|a| a.name.clone()).collect();
@@ -1302,11 +1250,13 @@ impl App {
             let left = self.restore.take().unwrap_or_else(|| Tabs {
                 open: std::mem::take(&mut self.tabs),
                 active: self.active.take(),
+                dock: self.dock.saved(),
             });
-            if !left.open.is_empty() {
+            if !left.open.is_empty() || left.dock.is_some() {
                 self.other_tabs.insert(self.location.label(), left);
             }
             self.restore = self.other_tabs.remove(&location.label());
+            self.dock = self.saved_dock();
             self.location = location;
             self.status = Status::Connecting { attempt: 1 };
             self.client = None;
@@ -1999,6 +1949,18 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// A session's timeline, once its tab is open.
+    #[must_use]
+    pub fn timeline(&self, id: &str) -> Option<&Timeline> {
+        self.timelines.get(id)
+    }
+
+    /// The folder a session works in.
+    #[must_use]
+    pub fn session_folder(&self, id: &str) -> Option<String> {
+        self.workspace.session(id).map(|s| s.directory.clone())
+    }
+
     /// Returns the open session's title, or `None` when no session is open.
     #[must_use]
     pub fn active_title(&self) -> Option<String> {
@@ -2012,15 +1974,15 @@ impl App {
         self.timelines.get(id).map(Timeline::len)
     }
 
-    /// Lays out the window: rails on both edges, the sidebar, the main area and the panel.
+    /// Lays out the window: rails on both edges, and between them the
+    /// sidebar and the dock, or a maximized tool panel over both.
     pub fn view(&self) -> Element<'_, Message> {
         let t = &self.tokens;
         let shown = self.shown();
-        let mut layout = row![view::rails::left(t, &self.assets)];
-        // Side panels slide open and closed. Each keeps its place in the row
-        // (empty while closed), so the conversation's widgets keep their state.
+        // The sidebar slides open and closed. It keeps its place in the row
+        // (empty while closed), so the dock's widgets keep their state.
         let sidebar = size::SIDEBAR * motion::shown(&self.sidebar_slide, self.clock);
-        layout = layout.push(if sidebar > 0.0 {
+        let sidebar = if sidebar > 0.0 {
             reveal(
                 view::sidebar::view(self),
                 size::SIDEBAR,
@@ -2030,33 +1992,18 @@ impl App {
             .into()
         } else {
             Element::from(space())
-        });
-        let main = match self.shown_file() {
-            Some(file) => view::editor::view(self, file),
-            None => self
-                .active
-                .as_deref()
-                .and_then(|id| Some((id, self.timelines.get(id)?)))
-                .map_or_else(
-                    || view::home::view(self),
-                    |(id, timeline)| view::session::view(self, id, timeline),
-                ),
         };
-        layout = layout.push(main);
-        let panel = self.panel.filter(|_| shown.panel);
-        let slide = motion::shown(&self.panel_slide.0, self.clock);
-        // While closing, the panel last shown slides away.
-        layout = layout.push(match self.panel_slide.1.filter(|_| slide > 0.0) {
-            Some(sliding) => reveal(
-                view::panel::view(self, sliding),
-                sliding.width() + 1.0,
-                (sliding.width() + 1.0) * slide,
-                Edge::Right,
-            )
-            .into(),
-            None => Element::from(space()),
-        });
-        let layout = layout.push(view::rails::right(t, panel)).height(Fill);
+        // A maximized panel covers the sidebar and the dock, which stay
+        // underneath as they were: the draft, the scroll positions and the
+        // splits come back with them.
+        let cover: Element<'_, Message> = match self.maximized {
+            Some(tool) => iced::widget::opaque(view::panel::maximized(self, tool)),
+            None => space().into(),
+        };
+        let middle = stack![row![sidebar, view::dock::view(self)], cover];
+        let layout = row![view::rails::left(t, &self.assets), middle]
+            .push(view::rails::right(self))
+            .height(Fill);
         if self.picking_location && shown.sidebar {
             stack![layout, view::locations::view(self)].into()
         } else {
@@ -2078,6 +2025,11 @@ impl App {
             } else {
                 Subscription::none()
             },
+            if self.maximized.is_some() {
+                keyboard::listen().filter_map(restore_key)
+            } else {
+                Subscription::none()
+            },
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
             iced::window::events().filter_map(|(_, event)| match event {
                 iced::window::Event::Focused => Some(Message::Focused(true)),
@@ -2085,6 +2037,7 @@ impl App {
                 _ => None,
             }),
             self.motion(),
+            self.terminals.subscription(),
             // The shown editor's cursor blinks.
             if matches!(self.shown_file().map(|f| &f.body), Some(FileBody::Text(_))) {
                 iced::time::every(files::BLINK).map(|_| Message::Files(FilesEvent::Blink))
@@ -2121,6 +2074,41 @@ pub fn shortcut(event: keyboard::Event) -> Option<Message> {
         }),
         Key::Named(Named::PageDown) => Some(Message::CycleTab { back: false }),
         Key::Named(Named::PageUp) => Some(Message::CycleTab { back: true }),
+        Key::Named(arrow) if modifiers.alt() => {
+            let direction = match arrow {
+                Named::ArrowLeft => iced_dock::Direction::Left,
+                Named::ArrowRight => iced_dock::Direction::Right,
+                Named::ArrowUp => iced_dock::Direction::Up,
+                Named::ArrowDown => iced_dock::Direction::Down,
+                _ => return None,
+            };
+            Some(Message::DockMove(if modifiers.shift() {
+                DockMove::Carry(direction)
+            } else {
+                DockMove::Focus(direction)
+            }))
+        }
+        Key::Character("\\") => Some(Message::DockMove(DockMove::Split(if modifiers.shift() {
+            iced_dock::Direction::Down
+        } else {
+            iced_dock::Direction::Right
+        }))),
+        _ => None,
+    }
+}
+
+/// Maps Escape, while a panel is maximized, to putting it back.
+#[must_use]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "a keyboard subscription's filter takes its events by value"
+)]
+pub fn restore_key(event: keyboard::Event) -> Option<Message> {
+    match event {
+        keyboard::Event::KeyPressed {
+            key: Key::Named(Named::Escape),
+            ..
+        } => Some(Message::Restore),
         _ => None,
     }
 }

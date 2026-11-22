@@ -14,6 +14,14 @@ Harlo bundles the following assets. Rust crates are listed in `Cargo.lock`, and 
 
 `crates/harlo/assets/fonts/FileIcons.ttf`: file-type glyphs cut by `tools/file-icons.py` from the symbols font of [Nerd Fonts](https://github.com/ryanoasis/nerd-fonts) 3.4.0, which gathers them from Seti-UI, Devicons, Material Design Icons, Codicons, Octicons, Font Awesome and Font Logos. The font is licensed under the SIL Open Font License 1.1 and Nerd Fonts' own work under the MIT License; the glyphs are under MIT, Apache 2.0, CC BY 4.0 or the Unlicense. The details and full texts are in `crates/harlo/assets/fonts/FileIcons-LICENSE.txt`.
 
+## iced_dock (vendored code)
+
+`vendor/iced_dock`: the docking layout used for the main area, copied from [Fee0/iced_dock](https://github.com/Fee0/iced_dock) at commit `495cbea7af91aea668decb27c52cd53561cf78e3` with small changes listed in `vendor/iced_dock/VENDORED.md`. Its manifest declares the MIT License; the repository holds no licence file, so the standard MIT text is in `vendor/iced_dock/LICENSE`.
+
+## iced_term (vendored code)
+
+`vendor/iced_term`: the terminal widget, copied from [Harzu/iced_term](https://github.com/Harzu/iced_term) at commit `d7c8187bd426d19a2c0d1abe615332c2c8fffab0` with changes listed in `vendor/iced_term/VENDORED.md`. MIT License, Copyright (c) 2024 Ilia Shvyrialkin; the full text is in `vendor/iced_term/LICENSE`.
+
 ## SQLite
 
 The layout database is built into the app through `rusqlite`'s bundled SQLite, which is in the public domain.

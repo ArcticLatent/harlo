@@ -166,7 +166,7 @@ impl App {
 
     /// Loads the panel when it's on screen and out of date.
     pub(super) fn follow_context(&mut self) -> Task<Message> {
-        let visible = self.panel == Some(Panel::Context) && self.shown().panel;
+        let visible = self.panel_shown(Panel::Context);
         let opened = visible && !self.context.visible;
         self.context.visible = visible;
         if !visible {

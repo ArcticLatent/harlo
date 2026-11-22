@@ -2,6 +2,8 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::fmt::Write as _;
+
 use harlo_core::diff::{LineKind, Span, lines, written};
 
 fn kinds(patch: &str) -> Vec<(LineKind, Option<u32>, String)> {
@@ -68,4 +70,19 @@ fn a_written_file_shows_every_line_added() {
             (LineKind::Added, Some(2), "file".to_owned()),
         ]
     );
+}
+
+#[test]
+fn a_long_run_of_added_lines_is_read_once() {
+    // A new file's worth of added lines, then an edit. Counting the rest of
+    // the run again for each line would take minutes here.
+    let mut patch = String::from("@@ -1,1 +1,50001 @@\n");
+    for n in 0..50_000 {
+        let _ = writeln!(patch, "+line {n}");
+    }
+    patch.push_str("-port 9876\n+port 9877\n");
+    let shown = lines(&patch);
+    assert_eq!(shown.len(), 50_002);
+    assert_eq!(changed(&shown[50_000].spans), ["9876"]);
+    assert_eq!(changed(&shown[50_001].spans), ["9877"]);
 }

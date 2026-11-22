@@ -127,7 +127,9 @@ fn mark_words(lines: &mut [Line]) {
         let removed = run(lines, at, LineKind::Removed);
         let added = run(lines, at + removed, LineKind::Added);
         if removed == 0 || added == 0 {
-            at += removed.max(1);
+            // Past the whole run: stepping one line at a time would count
+            // the rest of a long run again for each of its lines.
+            at += (removed + added).max(1);
             continue;
         }
         for pair in 0..removed.min(added) {

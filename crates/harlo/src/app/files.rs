@@ -191,7 +191,7 @@ pub struct Files {
     pub trees: HashMap<String, Tree>,
     /// Open files, in tab order.
     pub open: Vec<OpenFile>,
-    /// The file whose tab is shown in place of the session.
+    /// The open file, while its tab is the current document.
     pub shown: Option<String>,
     /// Folders whose trees may be out of date: an agent changed files there,
     /// or the window was away.
@@ -209,7 +209,7 @@ impl App {
         (folder, tree)
     }
 
-    /// The open file shown in place of the session, if one is.
+    /// The open file, while its tab is the current document.
     #[must_use]
     pub fn shown_file(&self) -> Option<&OpenFile> {
         let key = self.fs.shown.as_deref()?;
@@ -244,7 +244,13 @@ impl App {
     /// its root the first time, and its open folders again when it's opened
     /// or out of date.
     pub(super) fn follow_files(&mut self) -> Task<Message> {
-        let visible = self.panel == Some(Panel::Files) && self.shown().panel;
+        // Nothing can be listed before the server connects; listing then
+        // counts as opening the panel.
+        if self.client.is_none() {
+            self.fs.visible = false;
+            return Task::none();
+        }
+        let visible = self.panel_shown(Panel::Files);
         let opened = visible && !self.fs.visible;
         self.fs.visible = visible;
         if !visible {

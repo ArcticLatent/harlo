@@ -15,7 +15,9 @@ base64 = { workspace = true, features = ["std"] }
 gray_matter = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream", "query"] }
 sse-stream = { workspace = true }
-tokio = { workspace = true, features = ["time", "sync", "rt"] }
+tokio = { workspace = true, features = ["time", "sync", "rt", "net"] }
+# The terminal's WebSocket for PTYs on the server (MIT); plain ws, as the HTTP client has no TLS.
+tokio-tungstenite = { workspace = true, features = ["connect", "handshake"] }
 tracing = { workspace = true, features = ["std"] }
 regress = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std", "derive"] }
