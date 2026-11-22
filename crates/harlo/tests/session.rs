@@ -539,10 +539,7 @@ fn patch(file: &str, patch: &str) -> FileDiff {
 fn undo_shows_what_goes_back_and_whose_edits_it_overwrites() {
     let ui = with_history();
     assert!(!ui.shows("Undo"), "offered only under the pointer");
-    ui.send(Message::Timeline(
-        PI_UPDATE.into(),
-        TimelineEvent::Hover(Some("msg_p1".into())),
-    ));
+    ui.hover("Change the port to 9877");
     ui.press("Undo");
     assert!(
         ui.messages().iter().any(|m| matches!(
@@ -623,9 +620,38 @@ fn a_cancelled_undo_leaves_the_composer_alone() {
 fn a_working_session_offers_no_undo() {
     let ui = with_history();
     busy(&ui);
-    ui.send(Message::Timeline(
-        PI_UPDATE.into(),
-        TimelineEvent::Hover(Some("msg_p1".into())),
-    ));
+    ui.hover("Change the port to 9877");
     assert!(!ui.shows("Undo"));
+}
+
+#[test]
+fn a_long_session_opens_at_its_end() {
+    let ui = chatting();
+    let rows = (0..300)
+        .flat_map(|i| {
+            [
+                Entry::Prompt {
+                    key: format!("msg_p{i}"),
+                    text: format!("Question number {i}"),
+                    attachments: Vec::new(),
+                    skills: Vec::new(),
+                },
+                Entry::Answer {
+                    key: format!("msg_a{i}/text/0"),
+                    text: "A paragraph long enough to wrap onto a second line of the \
+                           transcript, so rows differ in height. "
+                        .repeat(1 + i % 4),
+                },
+            ]
+        })
+        .collect();
+    ui.send(Message::History(PI_UPDATE.into(), Ok(rows)));
+    // It catches up with the end on the event loop's next turns.
+    for _ in 0..5 {
+        // Looking lays the rows out, as a frame would.
+        let _ = ui.shows("Question number 299");
+        slint::platform::update_timers_and_animations();
+    }
+    assert!(ui.shows("Question number 299"), "the newest prompt");
+    assert!(!ui.shows("Question number 0"), "the oldest is far above");
 }

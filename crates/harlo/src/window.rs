@@ -140,6 +140,9 @@ impl Shell {
                 let Some(message) = next else {
                     break;
                 };
+                if *TRACE {
+                    eprintln!("harlo: {}", kind(&message));
+                }
                 let task = self.app.update(message);
                 if let Some(runtime) = &self.runtime {
                     runtime.spawn(task);
@@ -153,6 +156,18 @@ impl Shell {
             }
         }
     }
+}
+
+/// Whether to print each message's kind to stderr (`HARLO_TRACE=1`), to see
+/// what the window was doing around Slint's own warnings.
+static TRACE: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| std::env::var_os("HARLO_TRACE").is_some_and(|v| v == "1"));
+
+/// A message's kind: its name, without what it carries.
+fn kind(message: &Message) -> String {
+    let full = format!("{message:?}");
+    let end = full.find(['(', ' ', '{']).unwrap_or(full.len());
+    full[..end].to_owned()
 }
 
 /// Carries out an effect in the window.
@@ -431,10 +446,6 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send_with!(on_toggle_diff, |app, key| in_session(
         app,
         TimelineEvent::ToggleDiff(key.to_string())
-    ));
-    send_with!(on_hover_prompt, |app, key| in_session(
-        app,
-        TimelineEvent::Hover((!key.is_empty()).then(|| key.to_string()))
     ));
     send_with!(on_undo, |app, key| in_session(
         app,

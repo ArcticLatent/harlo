@@ -136,6 +136,25 @@ impl Ui {
         }
     }
 
+    /// Moves the pointer onto the middle of the element showing `text`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if nothing shows it.
+    pub fn hover(&self, text: &str) {
+        let handle = self
+            .find(text)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("nothing shows {text:?}"));
+        let at = handle.absolute_position();
+        let size = handle.size();
+        let position = LogicalPosition::new(at.x + size.width / 2.0, at.y + size.height / 2.0);
+        self.window
+            .window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+    }
+
     /// Makes the window `width` wide, at the design's height.
     pub fn resize(&self, width: f32) {
         self.window

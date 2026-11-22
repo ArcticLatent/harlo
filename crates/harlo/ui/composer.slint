@@ -111,11 +111,18 @@ export component Composer inherits Rectangle {
             input.focus();
         }
     }
+    // Set while Rust's text goes in, so the field doesn't send it back.
+    property <bool> loading;
     function load() {
+        root.loading = true;
         input.text = State.composer-text;
         input.set-selection-offsets(State.composer-anchor, State.composer-cursor);
+        root.loading = false;
     }
     function report() {
+        if root.loading {
+            return;
+        }
         Logic.composer-edited(input.text, input.cursor-position-byte-offset,
             input.anchor-position-byte-offset);
     }

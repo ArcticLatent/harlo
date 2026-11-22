@@ -278,6 +278,15 @@ export component SessionView inherits Rectangle {
         }
     }
 
+    follow := Timer {
+        interval: 0ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            timeline.catch-up();
+        }
+    }
+
     VerticalLayout {
         Header {
             column: root.column;
@@ -285,6 +294,9 @@ export component SessionView inherits Rectangle {
         HLine { }
         timeline := Timeline {
             vertical-stretch: 1;
+            end-moved => {
+                follow.running = true;
+            }
         }
         HorizontalLayout {
             padding-top: 4px;

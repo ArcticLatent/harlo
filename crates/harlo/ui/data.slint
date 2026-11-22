@@ -161,7 +161,8 @@ export struct TimelineRow {
     level: int,
     /// Whether a group's calls show below it.
     open: bool,
-    /// Whether a prompt offers Undo, and whether it's still on its way.
+    /// Whether a prompt can be undone (offered under the pointer), and
+    /// whether it's still on its way.
     undo: bool,
     sending: bool,
     /// A tool's or a file's added and removed lines.
@@ -481,7 +482,6 @@ export global Logic {
     callback open-panel(int);
     callback toggle-group(string);
     callback toggle-diff(string);
-    callback hover-prompt(string);
     callback undo(string);
     callback review(string, int);
     callback link(string);

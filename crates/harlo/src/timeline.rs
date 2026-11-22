@@ -25,8 +25,6 @@ pub enum Event {
     ToggleGroup(String),
     /// A tool row's diff was shown whole, or cut short again, by the row's key.
     ToggleDiff(String),
-    /// The pointer moved onto a prompt, by its key, or off it.
-    Hover(Option<String>),
     /// Undo was chosen on a prompt: it and everything after it, by its message ID.
     Undo(String),
     /// A subagent's child session was chosen, to open it.
@@ -133,8 +131,6 @@ pub struct Timeline {
     choices: HashMap<String, bool>,
     /// Tool rows whose diffs are shown whole.
     whole: HashSet<String>,
-    /// The prompt under the pointer, which offers Undo.
-    hovered: Option<String>,
     live: Live,
     busy: bool,
     /// Counts changes to what's shown, so the window rebuilds the list only
@@ -155,7 +151,6 @@ impl Timeline {
             items: Vec::new(),
             choices: HashMap::new(),
             whole: HashSet::new(),
-            hovered: None,
             live: Live::new(),
             busy: false,
             revision: 0,
@@ -456,12 +451,6 @@ impl Timeline {
                 }
                 self.revision += 1;
             }
-            Event::Hover(key) => {
-                if &self.hovered != key {
-                    self.hovered.clone_from(key);
-                    self.revision += 1;
-                }
-            }
             // The app acts on these.
             Event::Link(_) | Event::Undo(_) | Event::OpenSession(_) | Event::Review { .. } => {}
         }
@@ -490,7 +479,7 @@ impl Timeline {
                         diffs: &row.diffs,
                         whole: self.whole.contains(key),
                         // A run must end first, and a prompt must be stored to be undone.
-                        undo: !self.busy && !row.unsaved && self.hovered.as_deref() == Some(key),
+                        undo: !self.busy && !row.unsaved,
                         nested: group.as_ref().is_some_and(|rows| rows.contains(at)),
                         sending: row.unsaved,
                     })
@@ -567,7 +556,8 @@ pub struct RowView<'a> {
     pub diffs: &'a [Vec<diff::Line>],
     /// Whether its diffs show whole rather than cut short.
     pub whole: bool,
-    /// Whether it offers Undo: a stored prompt under the pointer, with no run going.
+    /// Whether it can be undone, which the window offers under the pointer:
+    /// a stored prompt, with no run going.
     pub undo: bool,
     /// Whether it's inside an open group, and indented.
     pub nested: bool,

@@ -105,11 +105,10 @@ component PromptRow inherits Rectangle {
     // The bubble and its Undo sit inside, so the pointer over either
     // counts as on the prompt.
     hover := TouchArea {
-        changed has-hover => {
-            Logic.hover-prompt(self.has-hover ? root.item.key : "");
-        }
-
         bubble := Rectangle {
+            // Read out as the prompt; its Prose reads out nothing itself.
+            accessible-role: groupbox;
+            accessible-label: root.item.label;
             background: Theme.surface-raised-base;
             border-color: Theme.border-weak-base;
             border-width: 1px;
@@ -154,7 +153,7 @@ component PromptRow inherits Rectangle {
             }
         }
 
-        if root.item.undo: Press {
+        if root.item.undo && hover.has-hover: Press {
             x: parent.width - self.width - 6px;
             y: 6px;
             width: undo-label.preferred-width;
@@ -557,17 +556,25 @@ export component Timeline inherits ListView {
     // Rows fit the width; the timeline only scrolls up and down.
     horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
 
+    /// The end moved while following: the view catches up on the event
+    /// loop's next turn, by calling `catch-up()`.
+    ///
+    /// Not straight away: rows are made as they scroll into view, and their
+    /// heights move the end again. Catching up inside the change handler
+    /// chains those rounds within one frame.
+    callback end-moved();
+
     scrolled => {
         root.following = self.content-y <= root.end + 4px;
     }
     changed content-height => {
         if root.following {
-            self.content-y = root.end;
+            root.end-moved();
         }
     }
     changed visible-height => {
         if root.following {
-            self.content-y = root.end;
+            root.end-moved();
         }
     }
 
@@ -575,6 +582,13 @@ export component Timeline inherits ListView {
     public function to-end() {
         root.following = true;
         self.content-y = root.end;
+    }
+
+    /// Goes to the end again, if still following.
+    public function catch-up() {
+        if root.following {
+            self.content-y = root.end;
+        }
     }
 
     for row in State.timeline: RowView {
