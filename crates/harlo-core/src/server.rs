@@ -383,6 +383,10 @@ pub async fn fetch(client: &Client, what: Fetch) -> Result<Fetched, Error> {
             let waiting = client.forms(&id).await?;
             Ok(Fetched::Forms(id, waiting))
         }
+        Fetch::Children(id) => {
+            let children = client.child_sessions(&id).await?;
+            Ok(Fetched::Children(id, children))
+        }
     }
 }
 
@@ -418,6 +422,9 @@ pub struct Catalog {
     pub skills: Vec<Skill>,
     /// Resources MCP servers offer.
     pub resources: Vec<McpResource>,
+    /// Whether agents here have the todo tool, which the configuration
+    /// turns on with `experimental.todo`.
+    pub todo_tool: bool,
 }
 
 impl Catalog {
@@ -469,20 +476,31 @@ const CATALOG_RETRIES: u32 = 10;
 const CATALOG_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
 async fn load_catalog(client: &Client, directory: &str) -> Result<Catalog, Error> {
-    let (models, default_model, agents, commands, skills, resources) = futures_util::join!(
+    let (models, default_model, agents, commands, skills, resources, setup) = futures_util::join!(
         client.models(directory),
         client.default_model(directory),
         client.agents(directory),
         client.commands(directory),
         client.skills(directory),
         client.mcp_resources(directory),
+        client.setup(directory),
     );
+    // Without the configuration, commands still run; they just don't say how.
+    let setup = setup.unwrap_or_default();
+    let mut commands = commands?;
+    for command in &mut commands {
+        if let Some(how) = setup.commands.get(&command.name) {
+            command.agent.clone_from(&how.agent);
+            command.subagent = how.subagent;
+        }
+    }
     Ok(Catalog {
         models: models?,
         default_model: default_model?,
         agents: agents?,
-        commands: commands?,
+        commands,
         skills: skills?,
         resources: resources.unwrap_or_default(),
+        todo_tool: setup.todo_tool,
     })
 }

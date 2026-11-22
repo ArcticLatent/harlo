@@ -13,6 +13,8 @@ pub mod pickers;
 pub mod rails;
 pub mod session;
 pub mod sidebar;
+pub mod subagents;
+pub mod todos;
 pub mod waiting;
 
 use harlo_core::theme::Rgba;

@@ -44,8 +44,13 @@ pub struct SessionSummary {
     pub age: Duration,
     /// Whether the session is working right now.
     pub busy: bool,
-    /// Whether it waits for the user: an approval or an answer.
+    /// The agent it runs, such as `explore`, when known.
+    pub agent: Option<String>,
+    /// Whether it waits for the user: an approval or an answer, its
+    /// subagents' included.
     pub waiting: bool,
+    /// The sessions it handed work to, oldest first.
+    pub children: Vec<SessionSummary>,
 }
 
 impl Project {

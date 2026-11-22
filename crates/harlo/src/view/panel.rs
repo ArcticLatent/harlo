@@ -51,6 +51,8 @@ pub fn view(app: &App, panel: Panel) -> Element<'_, Message> {
         crate::view::changes::body(app)
     } else if panel == Panel::Context {
         crate::view::context::body(app)
+    } else if panel == Panel::Todos {
+        crate::view::todos::body(app)
     } else {
         container(
             text(if app.active.is_some() {

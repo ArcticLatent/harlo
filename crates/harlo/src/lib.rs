@@ -29,6 +29,8 @@ pub use view::locations::status_text;
 pub use view::pickers::{
     AgentChoice, Folder, MENU_LIST, MENU_ROW, MENU_ROWS, ModelChoice, Picker, ROW_GAP, Variant,
 };
+#[doc(inline)]
+pub use view::todos::TODO_SETTING;
 
 /// Opens the window and runs until it closes.
 ///

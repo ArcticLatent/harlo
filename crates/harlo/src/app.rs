@@ -14,7 +14,7 @@ use harlo_core::server::{
     self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
 };
 use harlo_core::sessions::Project;
-use harlo_core::theme::{self, Mode, Tokens};
+use harlo_core::theme::{self, Mode, Rgba, Tokens};
 use harlo_core::timeline::{Entry, entries};
 use harlo_core::workspace::{EventKind, Fetch, Fetched, InboxItem, ModelRef, Session, Workspace};
 use iced::animation::Animation;
@@ -35,6 +35,8 @@ use crate::widget::{Edge, reveal};
 
 mod changes;
 mod context;
+mod subagents;
+mod todos;
 mod undo;
 
 pub use changes::{
@@ -43,8 +45,10 @@ pub use changes::{
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
+pub use subagents::Child;
 pub use undo::StagedUndo;
 mod waiting;
+pub(crate) use waiting::capitalized;
 
 /// How often session ages are refreshed.
 const TICK: Duration = Duration::from_secs(30);
@@ -211,6 +215,11 @@ pub enum Message {
     Catalog(String, Result<Box<Catalog>, String>),
     /// Choose the agent, by ID.
     PickAgent(String),
+    /// Switch to the next agent a session can run, or the one before.
+    CycleAgent {
+        /// Go back rather than forward.
+        back: bool,
+    },
     /// Choose the model.
     PickModel(ModelChoice),
     /// Open a picker's menu, or close it if it's open.
@@ -674,6 +683,7 @@ impl App {
             | Message::Acted(_)
             | Message::Catalog(..)
             | Message::PickAgent(_)
+            | Message::CycleAgent { .. }
             | Message::PickModel(_)
             | Message::PickVariant(_)
             | Message::Sent(_)
@@ -752,8 +762,12 @@ impl App {
 
     /// Applies something a session's timeline reported.
     fn timeline_event(&mut self, id: String, event: crate::timeline::Event) -> Task<Message> {
-        if let crate::timeline::Event::Undo(message_id) = event {
-            return self.start_undo(id, message_id);
+        match event {
+            crate::timeline::Event::Undo(message_id) => return self.start_undo(id, message_id),
+            crate::timeline::Event::OpenSession(child) => {
+                return self.update(Message::OpenSession(child));
+            }
+            _ => {}
         }
         match self.timelines.get_mut(&id) {
             Some(timeline) => {
@@ -876,6 +890,23 @@ impl App {
                     return self
                         .act(|client, id| async move { client.set_agent(&id, &agent).await });
                 }
+            }
+            Message::CycleAgent { back } => {
+                let agents = self.agent_choices();
+                if agents.len() < 2 {
+                    return Task::none();
+                }
+                let current = self.current_agent();
+                let at = agents
+                    .iter()
+                    .position(|a| Some(&a.id) == current.as_ref())
+                    .unwrap_or(0);
+                let next = if back {
+                    at.checked_sub(1).unwrap_or(agents.len() - 1)
+                } else {
+                    (at + 1) % agents.len()
+                };
+                return self.update(Message::PickAgent(agents[next].id.clone()));
             }
             Message::PickModel(choice) => {
                 return self.choose_model(ModelRef {
@@ -1047,14 +1078,15 @@ impl App {
         self.tabs.get(next).cloned()
     }
 
-    /// Loads a session's history into its timeline, its inbox, and what it's
-    /// waiting to have approved.
+    /// Loads a session's history into its timeline, its inbox, what it's
+    /// waiting to have approved, and the sessions it handed work to.
     fn load(&self, id: String) -> Task<Message> {
         Task::batch([
             self.fetch(vec![
                 Fetch::Inbox(id.clone()),
                 Fetch::Permissions(id.clone()),
                 Fetch::Forms(id.clone()),
+                Fetch::Children(id.clone()),
             ]),
             self.load_history(id),
         ])
@@ -1782,15 +1814,18 @@ impl App {
     #[must_use]
     pub fn agent_choices(&self) -> Vec<AgentChoice> {
         self.catalog()
-            .map(|c| {
-                c.primary_agents()
-                    .map(|a| AgentChoice {
-                        id: a.id.clone(),
-                        name: a.name.clone(),
-                    })
-                    .collect()
-            })
+            .map(|c| c.primary_agents().map(agent_choice).collect())
             .unwrap_or_default()
+    }
+
+    /// Any agent of the current folder, subagents included, by ID.
+    #[must_use]
+    pub fn agent(&self, id: &str) -> Option<AgentChoice> {
+        self.catalog()?
+            .agents
+            .iter()
+            .find(|a| a.id == id)
+            .map(agent_choice)
     }
 
     /// The agent the open session, or the next new one, runs.
@@ -2041,6 +2076,17 @@ pub fn menu_key(event: keyboard::Event) -> Option<Message> {
         Key::Named(Named::ArrowDown) => Some(Message::PickerMove(1)),
         Key::Named(Named::Enter) => Some(Message::PickerSubmit),
         _ => None,
+    }
+}
+
+/// An agent as the pickers and headers show it.
+fn agent_choice(agent: &server::Agent) -> AgentChoice {
+    AgentChoice {
+        id: agent.id.clone(),
+        name: agent.name.clone(),
+        description: agent.description.clone(),
+        color: agent.color.as_deref().and_then(Rgba::parse),
+        read_only: agent.read_only,
     }
 }
 

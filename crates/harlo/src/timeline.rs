@@ -38,6 +38,7 @@ use crate::motion::{self, Moment};
 use crate::style::{self, size};
 use crate::view::diff as diff_view;
 use crate::view::icon;
+use crate::view::subagents::{self, Crew};
 
 /// Stack slots for items near the viewport.
 const SLOTS: usize = 64;
@@ -50,6 +51,12 @@ const SPACING: f32 = 14.0;
 
 /// Height of one-line rows: thoughts, tools, notes, group headers.
 const LINE: f32 = 24.0;
+
+/// A first guess at a subagent card's height.
+const CARD: f32 = 40.0;
+
+/// A first guess at the height of one line of a subagent's report.
+const REPORT_LINE: f32 = 17.0;
 
 /// The timeline column's widest size; it narrows with the window.
 pub const WIDTH: f32 = 780.0;
@@ -98,6 +105,8 @@ pub enum Event {
     Hover(Option<String>),
     /// Undo was chosen on a prompt: it and everything after it, by its message ID.
     Undo(String),
+    /// A subagent's child session was chosen, to open it.
+    OpenSession(String),
 }
 
 /// Where loading a session's history stands.
@@ -268,7 +277,8 @@ impl Timeline {
     }
 
     /// Returns the rows' entries, oldest first.
-    pub fn entries(&self) -> impl Iterator<Item = &Entry> {
+    #[must_use]
+    pub fn entries(&self) -> impl DoubleEndedIterator<Item = &Entry> {
         self.rows.iter().map(|row| &row.entry)
     }
 
@@ -600,7 +610,7 @@ impl Timeline {
             }
             Event::Hover(key) => self.hovered.clone_from(key),
             // The app acts on these.
-            Event::Link(_) | Event::Undo(_) => {}
+            Event::Link(_) | Event::Undo(_) | Event::OpenSession(_) => {}
         }
     }
 
@@ -727,14 +737,15 @@ impl Timeline {
     #[must_use]
     ///
     /// New prompts fade in as of `moment`.
-    pub fn view<'a>(&'a self, t: &Tokens, moment: Moment) -> Element<'a, Event> {
+    /// `crew` says how the session's subagents stand, for their cards.
+    pub fn view<'a>(&'a self, t: &Tokens, moment: Moment, crew: &Crew) -> Element<'a, Event> {
         let body: Element<'a, Event> = match (&self.load, self.rows.is_empty()) {
             (Load::Loading, true) => return note(t, "Loading…"),
             (Load::Failed(reason), true) => {
                 return note(t, &format!("Couldn't load this session: {reason}"));
             }
             (_, true) => return note(t, "No messages yet."),
-            _ => self.slots(t, moment),
+            _ => self.slots(t, moment, crew),
         };
         let column = container(body)
             .max_width(WIDTH)
@@ -753,7 +764,7 @@ impl Timeline {
     }
 
     /// Pins the items near the viewport at their offsets, item `i` in slot `i % SLOTS`.
-    fn slots<'a>(&'a self, t: &Tokens, moment: Moment) -> Element<'a, Event> {
+    fn slots<'a>(&'a self, t: &Tokens, moment: Moment, crew: &Crew) -> Element<'a, Event> {
         let heights: Vec<f32> = self.items.iter().map(|item| self.height(item)).collect();
         let total: f32 = heights.iter().map(|h| h + SPACING).sum::<f32>() - SPACING;
         let bottom = total - self.from_bottom;
@@ -762,7 +773,7 @@ impl Timeline {
         let mut top = 0.0;
         for (i, (item, height)) in self.items.iter().zip(&heights).enumerate() {
             if top + height >= low && top <= high {
-                slots[i % SLOTS] = Some(self.measured(t, item, top, moment));
+                slots[i % SLOTS] = Some(self.measured(t, item, top, moment, crew));
             }
             top += height + SPACING;
         }
@@ -782,6 +793,7 @@ impl Timeline {
         item: &'a Item,
         top: f32,
         moment: Moment,
+        crew: &Crew,
     ) -> Element<'a, Event> {
         let mut rise = 0.0;
         let (key, content): (&'a str, Element<'a, Event>) = match item {
@@ -799,7 +811,7 @@ impl Timeline {
                     // A run must end first, and a prompt must be stored to be undone.
                     undo: !self.busy && !row.unsaved && self.hovered.as_deref() == Some(key),
                 };
-                let view = row_view(t, row, look);
+                let view = row_view(t, row, look, (moment, crew));
                 let view = if self.in_open_group(*at) {
                     container(view).padding(padding::left(22)).into()
                 } else {
@@ -915,6 +927,10 @@ fn estimate(row: &Row) -> f32 {
                 .sum();
             LINE + shown as f32 * DIFF_LINE
         }
+        Entry::Subagent { .. } => CARD,
+        Entry::Report { report, .. } => {
+            LINE + subagents::gist(&report.text).lines().count() as f32 * REPORT_LINE
+        }
         Entry::Thought { .. }
         | Entry::Stopped { .. }
         | Entry::Compaction { .. }
@@ -957,8 +973,13 @@ struct Look {
     undo: bool,
 }
 
-/// A row's view.
-fn row_view<'a>(t: &Tokens, row: &'a Row, look: Look) -> Element<'a, Event> {
+/// A row's view; subagent cards also need the time and how the crew stands.
+fn row_view<'a>(
+    t: &Tokens,
+    row: &'a Row,
+    look: Look,
+    (moment, crew): (Moment, &Crew),
+) -> Element<'a, Event> {
     let Look { shown, whole, undo } = look;
     match &row.entry {
         Entry::Prompt {
@@ -966,57 +987,7 @@ fn row_view<'a>(t: &Tokens, row: &'a Row, look: Look) -> Element<'a, Event> {
             attachments,
             skills,
             ..
-        } => {
-            let fade = |c: Rgba| motion::fade(c, shown);
-            let mut body = column![].spacing(8);
-            // A prompt can be only attachments, such as a pasted screenshot.
-            if !prompt.is_empty() {
-                body = body.push(
-                    text(prompt.as_str())
-                        .size(size::ANSWER)
-                        .color(style::color(fade(t.text_strong))),
-                );
-            }
-            if !attachments.is_empty() || !skills.is_empty() {
-                body = body.push(chips(t, attachments, skills, shown));
-            }
-            let bubble = container(body)
-                .width(Fill)
-                .padding([11, 16])
-                .style(style::boxed(
-                    fade(t.surface_raised_base),
-                    Some(fade(t.border_weak_base)),
-                    size::COMPOSER_RADIUS,
-                ));
-            // Undo floats in the corner while the pointer is on the prompt,
-            // so the row's height never changes.
-            let corner: Element<'a, Event> = if undo {
-                let label = row![
-                    icon(Icon::Undo2, 12.0, t.icon_base),
-                    text("Undo")
-                        .size(size::SMALL)
-                        .color(style::color(t.text_base)),
-                ]
-                .spacing(5)
-                .align_y(Center);
-                container(
-                    button(label)
-                        .padding([3, 8])
-                        .on_press(Event::Undo(row.entry.key().to_owned()))
-                        .style(style::chip(t)),
-                )
-                .align_right(Fill)
-                .padding(6)
-                .into()
-            } else {
-                space().into()
-            };
-            let key = row.entry.key().to_owned();
-            mouse_area(stack![bubble, corner])
-                .on_enter(Event::Hover(Some(key)))
-                .on_exit(Event::Hover(None))
-                .into()
-        }
+        } => prompt_view(t, row, (prompt, attachments, skills), (shown, undo)),
         Entry::Answer { .. } => {
             let items = row
                 .markdown
@@ -1059,7 +1030,73 @@ fn row_view<'a>(t: &Tokens, row: &'a Row, look: Look) -> Element<'a, Event> {
             line(t, marker, text.clone(), String::new(), None, false, None)
         }
         Entry::Compaction { state, .. } => compaction_row(t, state),
+        Entry::Subagent {
+            agent,
+            task,
+            child,
+            status,
+            ..
+        } => subagents::card(t, crew, moment, (agent, task, child.as_ref(), *status)),
+        Entry::Report { report, .. } => subagents::report(t, crew, report),
     }
+}
+
+/// A prompt's bubble, with Undo in its corner while the pointer is on it.
+fn prompt_view<'a>(
+    t: &Tokens,
+    row: &'a Row,
+    (prompt, attachments, skills): (&'a str, &'a [String], &'a [String]),
+    (shown, undo): (f32, bool),
+) -> Element<'a, Event> {
+    let fade = |c: Rgba| motion::fade(c, shown);
+    let mut body = column![].spacing(8);
+    // A prompt can be only attachments, such as a pasted screenshot.
+    if !prompt.is_empty() {
+        body = body.push(
+            text(prompt)
+                .size(size::ANSWER)
+                .color(style::color(fade(t.text_strong))),
+        );
+    }
+    if !attachments.is_empty() || !skills.is_empty() {
+        body = body.push(chips(t, attachments, skills, shown));
+    }
+    let bubble = container(body)
+        .width(Fill)
+        .padding([11, 16])
+        .style(style::boxed(
+            fade(t.surface_raised_base),
+            Some(fade(t.border_weak_base)),
+            size::COMPOSER_RADIUS,
+        ));
+    // Undo floats in the corner while the pointer is on the prompt,
+    // so the row's height never changes.
+    let corner: Element<'a, Event> = if undo {
+        let label = row![
+            icon(Icon::Undo2, 12.0, t.icon_base),
+            text("Undo")
+                .size(size::SMALL)
+                .color(style::color(t.text_base)),
+        ]
+        .spacing(5)
+        .align_y(Center);
+        container(
+            button(label)
+                .padding([3, 8])
+                .on_press(Event::Undo(row.entry.key().to_owned()))
+                .style(style::chip(t)),
+        )
+        .align_right(Fill)
+        .padding(6)
+        .into()
+    } else {
+        space().into()
+    };
+    let key = row.entry.key().to_owned();
+    mouse_area(stack![bubble, corner])
+        .on_enter(Event::Hover(Some(key)))
+        .on_exit(Event::Hover(None))
+        .into()
 }
 
 /// A tool row, with the diffs of the files it changed below it.

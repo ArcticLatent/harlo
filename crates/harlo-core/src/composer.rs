@@ -9,7 +9,7 @@
 
 use opencode_client::{Attachment, Delivery, Mention, Prompt};
 
-use crate::server::{Catalog, FileMatch};
+use crate::server::{Catalog, Command, FileMatch};
 
 /// The built-in command that summarizes the conversation.
 pub const COMPACT: &str = "compact";
@@ -100,6 +100,39 @@ pub struct MenuItem {
     pub label: String,
     /// A description, or where it comes from.
     pub detail: String,
+    /// How a command runs, when it says.
+    pub runner: Option<Runner>,
+}
+
+/// How a command runs, as its menu row shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Runner {
+    /// The agent's name for people, when the command names one.
+    pub agent: Option<String>,
+    /// That agent's configured colour, such as `#4f9dff`.
+    pub color: Option<String>,
+    /// Whether it runs as a subagent, in a child session of its own.
+    pub subagent: bool,
+}
+
+impl Runner {
+    /// How `command` runs, or `None` when it runs like a message would.
+    fn of(catalog: &Catalog, command: &Command) -> Option<Self> {
+        if command.agent.is_none() && !command.subagent {
+            return None;
+        }
+        let known = command
+            .agent
+            .as_deref()
+            .and_then(|id| catalog.agents.iter().find(|a| a.id == id));
+        Some(Self {
+            agent: known
+                .map(|a| a.name.clone())
+                .or_else(|| command.agent.clone()),
+            color: known.and_then(|a| a.color.clone()),
+            subagent: command.subagent,
+        })
+    }
 }
 
 /// How the slash menu reads for `query`: matching commands, skills and `compact`.
@@ -112,6 +145,7 @@ pub fn slash_options(catalog: &Catalog, query: &str) -> Vec<MenuItem> {
             choice: Choice::Command(c.name.clone()),
             label: format!("/{}", c.name),
             detail: c.description.clone().unwrap_or_default(),
+            runner: Runner::of(catalog, c),
         })
         .collect();
     if !catalog.commands.iter().any(|c| c.name == COMPACT) {
@@ -119,12 +153,14 @@ pub fn slash_options(catalog: &Catalog, query: &str) -> Vec<MenuItem> {
             choice: Choice::Compact,
             label: format!("/{COMPACT}"),
             detail: "Summarize the conversation to free up context".to_owned(),
+            runner: None,
         });
     }
     options.extend(catalog.skills.iter().map(|s| MenuItem {
         choice: Choice::Skill(s.id.clone()),
         label: format!("/{}", s.name),
         detail: s.description.clone().unwrap_or_else(|| "Skill".to_owned()),
+        runner: None,
     }));
     rank(options, query)
 }
@@ -143,6 +179,7 @@ pub fn at_options(catalog: &Catalog, files: &[FileMatch], query: &str) -> Vec<Me
                 .description
                 .clone()
                 .unwrap_or_else(|| "Subagent".to_owned()),
+            runner: None,
         });
     let resources = catalog.resources.iter().map(|r| MenuItem {
         choice: Choice::Resource {
@@ -151,6 +188,7 @@ pub fn at_options(catalog: &Catalog, files: &[FileMatch], query: &str) -> Vec<Me
         },
         label: format!("@{}", r.name),
         detail: r.server.clone(),
+        runner: None,
     });
     let mut options = rank(agents.chain(resources).collect(), query);
     // The server already matched and ordered the files; they only move
@@ -162,6 +200,7 @@ pub fn at_options(catalog: &Catalog, files: &[FileMatch], query: &str) -> Vec<Me
         },
         label: format!("@{}", f.path),
         detail: if f.directory { "Folder" } else { "File" }.to_owned(),
+        runner: None,
     }));
     let query = query.to_lowercase();
     options.sort_by_key(|option| !starts_with(option, &query));

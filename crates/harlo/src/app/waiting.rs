@@ -333,7 +333,7 @@ fn settled(result: Result<(), server::Error>) -> Result<(), String> {
 }
 
 /// `word` with its first letter in upper case.
-fn capitalized(word: &str) -> String {
+pub(crate) fn capitalized(word: &str) -> String {
     let mut chars = word.chars();
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().chain(chars).collect()

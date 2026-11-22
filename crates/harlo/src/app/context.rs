@@ -97,10 +97,18 @@ impl App {
         let model = context
             .and_then(|c| c.model.clone())
             .or_else(|| self.current_model());
-        let known = model.as_ref().and_then(|m| {
-            self.catalogs
-                .get(&session.directory)?
-                .model(&m.provider_id, &m.id)
+        let catalog = self.catalogs.get(&session.directory);
+        let known = model
+            .as_ref()
+            .and_then(|m| catalog?.model(&m.provider_id, &m.id));
+        let agent = context
+            .and_then(|c| c.agent.clone())
+            .or_else(|| self.current_agent());
+        // The agent by name, when the folder's catalog knows it.
+        let agent = agent.map(|id| {
+            catalog
+                .and_then(|c| c.agents.iter().find(|a| a.id == id))
+                .map_or(id, |a| a.name.clone())
         });
         Some(Facts {
             cost: session.cost,
@@ -111,9 +119,7 @@ impl App {
                 .map(|m| m.name.clone())
                 .or_else(|| model.map(|m| m.id)),
             limit: known.and_then(|m| m.context),
-            agent: context
-                .and_then(|c| c.agent.clone())
-                .or_else(|| self.current_agent()),
+            agent,
             files: loaded.and_then(|l| l.files.as_deref()),
             loading: loaded.is_none(),
             home: loaded

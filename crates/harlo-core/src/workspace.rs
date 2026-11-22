@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[doc(inline)]
 pub use opencode_client::{
     Event, EventKind, Form, InboxItem, Message, ModelRef, Part, Permission,
-    Project as ServerProject, Revert, Session, Tokens, ToolCall, ToolStatus,
+    Project as ServerProject, Report, Revert, Session, Tokens, ToolCall, ToolStatus,
 };
 
 use crate::sessions::{Project, SessionSummary, Worktree, folder_name};
@@ -51,6 +51,8 @@ pub enum Fetch {
     Permissions(String),
     /// A session's questions waiting for an answer, by session ID.
     Forms(String),
+    /// The sessions a session handed work to, by its ID.
+    Children(String),
 }
 
 /// The result of a [`Fetch`].
@@ -68,6 +70,8 @@ pub enum Fetched {
     Permissions(String, Vec<Permission>),
     /// A session's questions waiting for an answer, by session ID.
     Forms(String, Vec<Form>),
+    /// The sessions a session handed work to, by its ID.
+    Children(String, Vec<Session>),
 }
 
 /// Projects, worktrees and sessions on one server, in the user's sidebar order.
@@ -110,7 +114,6 @@ impl Workspace {
         self.sessions = snapshot
             .sessions
             .into_iter()
-            .filter(|s| s.parent_id.is_none())
             .map(|s| (s.id.clone(), s))
             .collect();
         self.busy = snapshot.active.into_iter().collect();
@@ -234,7 +237,6 @@ impl Workspace {
         }
     }
 
-    /// Applies an event about what waits for the user: approvals and questions.
     /// Applies a change to a session's own rules, usage or staged undo.
     fn apply_session_state(&mut self, kind: &EventKind) {
         let Some(session) = kind.session_id().and_then(|id| self.sessions.get_mut(id)) else {
@@ -254,6 +256,7 @@ impl Workspace {
         }
     }
 
+    /// Applies an event about what waits for the user: approvals and questions.
     fn apply_waiting(&mut self, kind: &EventKind) {
         match kind {
             EventKind::PermissionAsked(asked) => add(
@@ -315,14 +318,15 @@ impl Workspace {
                 self.forms.insert(session_id, waiting);
                 Vec::new()
             }
+            Fetched::Children(_, children) => children
+                .into_iter()
+                .flat_map(|child| self.upsert(child))
+                .collect(),
         }
     }
 
-    /// Adds or updates a session; subagent sessions are ignored.
+    /// Adds or updates a session, a subagent's child session included.
     pub fn upsert(&mut self, session: Session) -> Vec<Fetch> {
-        if session.parent_id.is_some() {
-            return Vec::new();
-        }
         let unknown_project = !self.projects.contains_key(&session.project_id);
         self.sessions.insert(session.id.clone(), session);
         if unknown_project {
@@ -420,9 +424,22 @@ impl Workspace {
         self.busy.contains(id)
     }
 
+    /// Returns the sessions `id` handed work to, in the order it started them.
+    #[must_use]
+    pub fn children(&self, id: &str) -> Vec<&Session> {
+        let mut children: Vec<&Session> = self
+            .sessions
+            .values()
+            .filter(|s| s.parent_id.as_deref() == Some(id))
+            .collect();
+        children.sort_by(|a, b| a.created.total_cmp(&b.created).then(a.id.cmp(&b.id)));
+        children
+    }
+
     /// Builds the sidebar: projects in order, each with its sessions and worktrees.
     ///
-    /// Ages are measured from `now`. Sessions are listed newest first.
+    /// Ages are measured from `now`. Top-level sessions are listed newest
+    /// first, each with the sessions it handed work to beneath it.
     #[must_use]
     pub fn sidebar(&self, now: SystemTime) -> Vec<Project> {
         let now_ms = now
@@ -434,7 +451,11 @@ impl Workspace {
             .map(|p| (p.directory.as_str(), p))
             .collect();
 
-        let mut sessions: Vec<&Session> = self.sessions.values().collect();
+        let mut sessions: Vec<&Session> = self
+            .sessions
+            .values()
+            .filter(|s| s.parent_id.is_none())
+            .collect();
         sessions.sort_by(|a, b| b.updated.total_cmp(&a.updated).then(a.id.cmp(&b.id)));
 
         self.order
@@ -495,13 +516,21 @@ impl Workspace {
 
     fn summary(&self, session: &Session, now_ms: f64) -> SessionSummary {
         let age_ms = (now_ms - session.updated).max(0.0);
+        let children: Vec<SessionSummary> = self
+            .children(&session.id)
+            .into_iter()
+            .map(|child| self.summary(child, now_ms))
+            .collect();
         SessionSummary {
             id: session.id.clone(),
             title: session.title.clone().unwrap_or_default(),
             maker: session.model.as_ref().map(|m| m.provider_id.clone()),
+            agent: session.agent.clone(),
             age: Duration::from_secs_f64(age_ms / 1000.0),
             busy: self.busy.contains(&session.id),
-            waiting: self.needs_user(&session.id),
+            // A subagent asking for the user needs them as much as its parent.
+            waiting: self.needs_user(&session.id) || children.iter().any(|c| c.waiting),
+            children,
         }
     }
 
@@ -514,7 +543,8 @@ impl Workspace {
     /// Appends projects that have sessions but aren't in the sidebar yet, newest first.
     fn adopt_projects(&mut self) {
         let mut newest: HashMap<&str, f64> = HashMap::new();
-        for session in self.sessions.values() {
+        // Subagents' sessions sit under their parents and don't reorder projects.
+        for session in self.sessions.values().filter(|s| s.parent_id.is_none()) {
             let Some(project) = self.projects.get(&session.project_id) else {
                 continue;
             };

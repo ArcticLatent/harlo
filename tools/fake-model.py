@@ -16,6 +16,9 @@ by " | " and run in order:
     long <n>              n blocks of Markdown: prose, a code block, a list
     pace <ms>             delay between streamed chunks from here on
 
+A subagent's prompt starts with OpenCode's line telling it it's one; the
+script is what follows.
+
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
 gets a filled-in summary in OpenCode's template. Every request body is appended to the log, so a
@@ -33,6 +36,10 @@ LOREM = (
     "Harlo keeps the transcript readable while the agent works, wrapping long "
     "lines of prose so the reader never scrolls sideways to follow an argument. "
 )
+
+
+# The line OpenCode puts before the prompt it gives a subagent.
+SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
 
 
 def text_of(content):
@@ -79,6 +86,8 @@ def plan(messages):
     if last_user < 0:
         return [("say", "ok.")]
     script = text_of(messages[last_user].get("content")).strip()
+    if script.startswith(SUBAGENT_PREAMBLE):
+        script = script[len(SUBAGENT_PREAMBLE) :].strip()
     if script.startswith("You MUST summarize the conversation") or script.startswith(
         "The previous response did not fill in the required summary template"
     ):

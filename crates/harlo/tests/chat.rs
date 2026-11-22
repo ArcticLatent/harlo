@@ -70,23 +70,34 @@ fn catalog() -> Catalog {
                 name: "build".into(),
                 description: None,
                 primary: true,
+                subagent: false,
+                color: None,
+                read_only: false,
             },
             Agent {
                 id: "plan".into(),
                 name: "plan".into(),
                 description: None,
                 primary: true,
+                subagent: false,
+                color: None,
+                read_only: false,
             },
             Agent {
                 id: "explore".into(),
                 name: "explore".into(),
                 description: Some("Looks around".into()),
                 primary: false,
+                subagent: true,
+                color: None,
+                read_only: false,
             },
         ],
         commands: vec![Command {
             name: "review".into(),
             description: Some("Review changes".into()),
+            agent: Some("explore".into()),
+            subagent: true,
         }],
         skills: vec![Skill {
             id: "browser".into(),
@@ -94,6 +105,7 @@ fn catalog() -> Catalog {
             description: None,
         }],
         resources: Vec::new(),
+        todo_tool: false,
     }
 }
 
@@ -239,6 +251,7 @@ fn a_run_streams_in_and_its_tools_fold_up_when_done() {
                 failed: false,
                 error: None,
                 files: Vec::new(),
+                child: None,
             },
             time,
         ));
@@ -402,6 +415,10 @@ fn slash_and_at_open_menus_from_the_catalog() {
     let _ = type_in(&mut app, "/rev");
     assert!(shows(&app, "/review"), "the command is offered");
     assert!(shows(&app, "Review changes"));
+    assert!(
+        shows(&app, "explore · subagent"),
+        "it runs as the explore subagent"
+    );
     let _ = interact(&mut app, |ui| {
         ui.click(Id::new(ids::COMPOSER)).expect("the composer");
         let _ = ui.tap_key(key::Named::Enter);
@@ -1142,6 +1159,7 @@ fn edit_events(app: &mut App, call: &str, patch: &str, (added, removed): (u64, u
                 deletions: removed,
                 status: "modified".into(),
             }],
+            child: None,
         },
     ];
     for (kind, at) in kinds.into_iter().zip([1.0, 2.0, 3.0]) {

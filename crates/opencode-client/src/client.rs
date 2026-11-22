@@ -13,6 +13,7 @@ use sse_stream::SseByteStream;
 use crate::catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 use crate::generated as g;
 use crate::prompt::Prompt;
+use crate::setup::Setup;
 use crate::types::{
     Answer, Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply,
     Project, Revert, Rule, ServerInfo, Session, SessionContext,
@@ -116,11 +117,29 @@ impl Client {
     ///
     /// Fails when the server can't be reached or answers with an error.
     pub async fn root_sessions(&self) -> Result<Vec<Session>, Error> {
+        self.sessions_under("null").await
+    }
+
+    /// Lists the sessions `parent_id` handed work to, newest first.
+    ///
+    /// These are its subagents' child sessions. Follows the server's pages
+    /// until the list ends.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or answers with an error.
+    pub async fn child_sessions(&self, parent_id: &str) -> Result<Vec<Session>, Error> {
+        self.sessions_under(parent_id).await
+    }
+
+    /// Lists the unarchived sessions whose parent is `parent`, or `null` for
+    /// top-level ones, page after page.
+    async fn sessions_under(&self, parent: &str) -> Result<Vec<Session>, Error> {
         let mut sessions = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
             let mut req = self.request(Method::GET, "/api/session").query(&[
-                ("parentID", "null"),
+                ("parentID", parent),
                 ("archived", "false"),
                 ("limit", PAGE),
             ]);
@@ -325,6 +344,24 @@ impl Client {
     pub async fn commands(&self, directory: &str) -> Result<Vec<Command>, Error> {
         let v = self.list("/api/command", directory, &[]).await?;
         Ok(each(&v, Command::from_json))
+    }
+
+    /// Reads how `directory`'s configuration sets up commands and tools.
+    ///
+    /// The command files it names are read from disk, so this sees them
+    /// when the server runs on this machine, as the shared server does.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn setup(&self, directory: &str) -> Result<Setup, Error> {
+        let req = self
+            .request(Method::GET, "/api/config")
+            .query(&[("location[directory]", directory)]);
+        let entries = Self::json(req).await?;
+        tokio::task::spawn_blocking(move || Setup::from_entries(&entries))
+            .await
+            .map_err(|e| Error::other(format!("reading command files: {e}")))
     }
 
     /// Lists the skills in `directory`.

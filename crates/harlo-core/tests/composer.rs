@@ -3,8 +3,8 @@
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::composer::{
-    Attached, Choice, Draft, Menu, Outgoing, at_options, insertion, outgoing, slash_options,
-    trigger,
+    Attached, Choice, Draft, Menu, Outgoing, Runner, at_options, insertion, outgoing,
+    slash_options, trigger,
 };
 use harlo_core::server::{
     Agent, Attachment, Catalog, Command, Delivery, FileMatch, McpResource, Skill,
@@ -18,22 +18,32 @@ fn catalog() -> Catalog {
                 name: "Build".into(),
                 description: None,
                 primary: true,
+                subagent: false,
+                color: None,
+                read_only: false,
             },
             Agent {
                 id: "explore".into(),
                 name: "Explore".into(),
                 description: Some("Looks around".into()),
                 primary: false,
+                subagent: true,
+                color: None,
+                read_only: false,
             },
         ],
         commands: vec![
             Command {
                 name: "init".into(),
                 description: Some("Write AGENTS.md".into()),
+                agent: None,
+                subagent: false,
             },
             Command {
                 name: "review".into(),
                 description: None,
+                agent: Some("explore".into()),
+                subagent: true,
             },
         ],
         skills: vec![Skill {
@@ -90,6 +100,40 @@ fn the_slash_menu_lists_commands_compact_and_skills() {
     assert_eq!(labels("r"), ["/review", "/browser"], "prefix matches first");
     assert_eq!(labels("COMP"), ["/compact"]);
     assert!(labels("zzz").is_empty());
+}
+
+#[test]
+fn a_command_says_which_agent_runs_it() {
+    let mut catalog = catalog();
+    catalog.agents[1].color = Some("#4f9dff".into());
+    catalog.commands.push(Command {
+        name: "ask".into(),
+        description: None,
+        agent: Some("oracle".into()),
+        subagent: false,
+    });
+    let runner = |name: &str| {
+        slash_options(&catalog, name)
+            .into_iter()
+            .find(|o| o.label == format!("/{name}"))
+            .expect("the command")
+            .runner
+    };
+    assert_eq!(runner("init"), None, "it runs like a message");
+    assert_eq!(
+        runner("review"),
+        Some(Runner {
+            agent: Some("Explore".into()),
+            color: Some("#4f9dff".into()),
+            subagent: true,
+        }),
+        "the agent by name, and its colour"
+    );
+    assert_eq!(
+        runner("ask").and_then(|r| r.agent),
+        Some("oracle".into()),
+        "an agent the folder doesn't list keeps its ID"
+    );
 }
 
 #[test]

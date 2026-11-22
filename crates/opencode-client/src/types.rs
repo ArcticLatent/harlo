@@ -351,6 +351,13 @@ pub enum Message {
         /// The skill's name.
         name: String,
     },
+    /// A subagent this session started reported back.
+    Report {
+        /// Message ID (`msg_…`).
+        id: String,
+        /// What it said.
+        report: Report,
+    },
     /// A message kind Harlo doesn't show yet (agent switch, shell, …).
     Other {
         /// Message ID (`msg_…`).
@@ -370,6 +377,7 @@ impl Message {
             | Self::Idle { id, .. }
             | Self::Compaction { id, .. }
             | Self::Skill { id, .. }
+            | Self::Report { id, .. }
             | Self::Other { id, .. } => id,
         }
     }
@@ -428,9 +436,66 @@ impl Message {
                 id,
                 name: value["name"].as_str().unwrap_or_default().to_owned(),
             },
+            "synthetic" => match Report::from_json(&value) {
+                Some(report) => Self::Report { id, report },
+                None => Self::Other { id, kind },
+            },
             _ => Self::Other { id, kind },
         })
     }
+}
+
+/// What a subagent said when it went idle, as the session that started it heard.
+///
+/// OpenCode sends one each time the child session goes idle, so a child
+/// given more work reports again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    /// The child session's ID.
+    pub child: String,
+    /// The agent's name for people, such as `Explore`.
+    pub agent: String,
+    /// The task's short label.
+    pub task: String,
+    /// How its work ended, as OpenCode says: `completed`, `failed`, …
+    pub state: String,
+    /// What it said, without OpenCode's wrapping.
+    pub text: String,
+}
+
+impl Report {
+    /// Reads a synthetic message, or a live one's data, that a subagent sent.
+    ///
+    /// Returns `None` for OpenCode's other notes to the agent.
+    pub(crate) fn from_json(value: &Value) -> Option<Self> {
+        let metadata = &value["metadata"];
+        if metadata["source"] != "subagent" {
+            return None;
+        }
+        let child = metadata["childID"].as_str()?.to_owned();
+        let text = value["text"].as_str().unwrap_or_default();
+        Some(Self {
+            agent: metadata["agent"].as_str().unwrap_or("Subagent").to_owned(),
+            task: value["description"].as_str().unwrap_or_default().to_owned(),
+            state: metadata["state"].as_str().unwrap_or("completed").to_owned(),
+            text: unwrap_report(text).to_owned(),
+            child,
+        })
+    }
+}
+
+/// The text inside OpenCode's `<subagent …>…</subagent>` wrapping, trimmed.
+fn unwrap_report(text: &str) -> &str {
+    let text = text.trim();
+    let Some(rest) = text.strip_prefix("<subagent") else {
+        return text;
+    };
+    let inner = rest.split_once('>').map_or(rest, |(_, inner)| inner);
+    inner
+        .trim_end()
+        .strip_suffix("</subagent>")
+        .unwrap_or(inner)
+        .trim()
 }
 
 /// The name an attachment shows: its name, or the last part of its URI.
@@ -459,19 +524,23 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
             g::SessionMessageAssistantContentItem::Text(t) => Self::Text(t.text),
             g::SessionMessageAssistantContentItem::Reasoning(r) => Self::Reasoning(r.text),
             g::SessionMessageAssistantContentItem::Tool(t) => {
-                let (status, input, files) = match t.state {
+                let (status, input, files, child) = match t.state {
                     g::SessionMessageAssistantToolState::Streaming(_) => {
-                        (ToolStatus::Streaming, Value::Null, Vec::new())
+                        (ToolStatus::Streaming, Value::Null, Vec::new(), None)
                     }
-                    g::SessionMessageAssistantToolState::Running(s) => {
-                        (ToolStatus::Running, Value::Object(s.input), Vec::new())
-                    }
+                    g::SessionMessageAssistantToolState::Running(s) => (
+                        ToolStatus::Running,
+                        Value::Object(s.input),
+                        Vec::new(),
+                        None,
+                    ),
                     g::SessionMessageAssistantToolState::Completed(s) => {
                         let files = proposed_files(&s.metadata);
-                        (ToolStatus::Completed, Value::Object(s.input), files)
+                        let child = child_session(&s.metadata);
+                        (ToolStatus::Completed, Value::Object(s.input), files, child)
                     }
                     g::SessionMessageAssistantToolState::Error(s) => {
-                        (ToolStatus::Failed, Value::Object(s.input), Vec::new())
+                        (ToolStatus::Failed, Value::Object(s.input), Vec::new(), None)
                     }
                 };
                 let took_ms = t.time.completed.map(|end| (end - t.time.created).max(0.0));
@@ -482,6 +551,7 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
                     input,
                     took_ms,
                     files,
+                    child,
                 })
             }
         }
@@ -503,6 +573,8 @@ pub struct ToolCall {
     pub took_ms: Option<f64>,
     /// The files it changed, such as an edit's, once it finished.
     pub files: Vec<FileDiff>,
+    /// The child session it started, for a call handing work to a subagent.
+    pub child: Option<String>,
 }
 
 /// Where a tool call is.
@@ -535,6 +607,15 @@ pub struct Permission {
     pub message: Option<String>,
     /// The changes an edit would make, one per file.
     pub files: Vec<FileDiff>,
+}
+
+/// The child session a finished `subagent` call started, from its metadata.
+pub(crate) fn child_session(metadata: &serde_json::Map<String, Value>) -> Option<String> {
+    metadata
+        .get("sessionID")
+        .and_then(Value::as_str)
+        .filter(|id| id.starts_with("ses"))
+        .map(str::to_owned)
 }
 
 /// Reads the file changes an edit request carries in its metadata.

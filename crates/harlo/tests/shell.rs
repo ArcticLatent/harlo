@@ -387,6 +387,7 @@ fn design_history() -> Vec<Entry> {
         status: ToolStatus::Completed,
         took: Some(Duration::from_secs_f64(secs)),
         files: Vec::new(),
+        todos: None,
     };
     vec![
         Entry::Prompt {

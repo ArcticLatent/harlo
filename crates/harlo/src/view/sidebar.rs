@@ -13,7 +13,7 @@ use iced::widget::{
 use iced::{Center, Element, Fill, Padding};
 use lucide_icons::Icon;
 
-use crate::app::{App, Message, Status};
+use crate::app::{App, Message, Status, capitalized};
 use crate::assets::Assets;
 use crate::ids;
 use crate::motion::Moment;
@@ -32,6 +32,12 @@ const WORKTREE_ROW: f32 = 32.0;
 
 /// Height of a session row.
 const SESSION_ROW: f32 = 42.0;
+
+/// The height of a subagent's row under its parent.
+const CHILD_ROW: f32 = 28.0;
+
+/// How far a subagent's row is indented under its parent.
+const CHILD_INDENT: f32 = 14.0;
 
 /// Side of a session's maker logo tile.
 const MAKER_TILE: f32 = 26.0;
@@ -311,6 +317,18 @@ fn list<'a>(
     for session in shown {
         let selected = app.active.as_deref() == Some(session.id.as_str());
         rows = rows.push(session_row(t, &app.assets, session, selected, app.moment()));
+        // Its subagents, while they matter: it or one of them is open, or
+        // one is still working or asking.
+        let open = selected
+            || session
+                .children
+                .iter()
+                .any(|c| app.active.as_deref() == Some(c.id.as_str()));
+        for child in &session.children {
+            if open || child.busy || child.waiting {
+                rows = rows.push(child_row(app, child));
+            }
+        }
     }
     if hidden > 0 || (expanded && !filtering && sessions.len() > VISIBLE_SESSIONS) {
         let label = if hidden > 0 {
@@ -376,6 +394,57 @@ fn session_row<'a>(
         .height(SESSION_ROW)
         .padding([0, 4])
         .on_press(Message::OpenSession(session.id.clone()))
+        .style(style::ghost(t, selected))
+        .into()
+}
+
+/// A subagent's session under its parent: the agent, its task, and how it stands.
+fn child_row<'a>(app: &'a App, child: &'a SessionSummary) -> Element<'a, Message> {
+    let t = &app.tokens;
+    let selected = app.active.as_deref() == Some(child.id.as_str());
+    let agent = child.agent.as_deref().and_then(|id| app.agent(id));
+    let name = agent.as_ref().map_or_else(
+        || {
+            child
+                .agent
+                .as_deref()
+                .map_or_else(|| "Subagent".to_owned(), capitalized)
+        },
+        |a| a.name.clone(),
+    );
+    let colour = agent.and_then(|a| a.color).unwrap_or(t.icon_weak_base);
+    let when: Element<'a, Message> = if child.waiting {
+        icon(Icon::ShieldAlert, 13.0, t.icon_warning_base).into()
+    } else if child.busy {
+        let working = t.text_interactive_base;
+        let moment = app.moment();
+        breathing(icon(Icon::Loader, 12.0, working).style(moment.breathing(working)))
+    } else {
+        space().into()
+    };
+    let content = row![
+        icon(Icon::CornerDownRight, 12.0, t.icon_weak_base),
+        icon(Icon::Bot, 12.0, colour),
+        text(name)
+            .size(size::SMALL)
+            .color(style::color(t.text_base)),
+        ellipsis(child.title.as_str())
+            .size(size::SMALL)
+            .color(style::color(t.text_weak)),
+        when,
+    ]
+    .spacing(7)
+    .height(Fill)
+    .align_y(Center);
+    button(content)
+        .width(Fill)
+        .height(CHILD_ROW)
+        .padding(Padding {
+            left: CHILD_INDENT,
+            right: 4.0,
+            ..Padding::ZERO
+        })
+        .on_press(Message::OpenSession(child.id.clone()))
         .style(style::ghost(t, selected))
         .into()
 }

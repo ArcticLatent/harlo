@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::generated as g;
 use crate::types::{
-    Delivery, FileDiff, Form, InboxItem, ModelRef, Permission, Revert, Rule, Tokens,
+    Delivery, FileDiff, Form, InboxItem, ModelRef, Permission, Report, Revert, Rule, Tokens,
 };
 
 /// One server event.
@@ -116,6 +116,17 @@ pub enum Kind {
         error: Option<String>,
         /// The files it changed, such as an edit's.
         files: Vec<FileDiff>,
+        /// The child session it started, for a call handing work to a subagent.
+        child: Option<String>,
+    },
+    /// A subagent the session started reported back.
+    ///
+    /// The report waits in the session's inbox until the agent reads it, as
+    /// the message `id`.
+    SubagentReported {
+        session_id: String,
+        id: String,
+        report: Report,
     },
     /// A model step failed.
     StepFailed {
@@ -224,6 +235,7 @@ impl Kind {
             | Self::ToolStarted { session_id, .. }
             | Self::ToolCalled { session_id, .. }
             | Self::ToolEnded { session_id, .. }
+            | Self::SubagentReported { session_id, .. }
             | Self::StepEnded { session_id, .. }
             | Self::UsageUpdated { session_id, .. }
             | Self::StepFailed { session_id, .. }
@@ -465,6 +477,9 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
                 .as_object()
                 .map(crate::types::proposed_files)
                 .unwrap_or_default(),
+            child: data["metadata"]
+                .as_object()
+                .and_then(crate::types::child_session),
         },
         "session.step.ended" => {
             let d: g::SessionStepEndedData = from(data)?;
@@ -498,9 +513,17 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
         "session.inbox.enqueued" => {
             let mut item = data["item"].clone();
             item["id"] = data["inboxID"].clone();
-            Kind::InboxAdded {
-                session_id: session_of(&data),
-                item: InboxItem::from_json(&item),
+            // A subagent's report arrives as a note queued for its parent.
+            match Report::from_json(&item["payload"]) {
+                Some(report) if item["type"] == "synthetic" => Kind::SubagentReported {
+                    session_id: session_of(&data),
+                    id: text_of(&data, "inboxID"),
+                    report,
+                },
+                _ => Kind::InboxAdded {
+                    session_id: session_of(&data),
+                    item: InboxItem::from_json(&item),
+                },
             }
         }
         "session.inbox.delivered" | "session.inbox.cancelled" => Kind::InboxRemoved {

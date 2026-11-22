@@ -10,7 +10,7 @@
 
 use std::fmt;
 
-use harlo_core::theme::Tokens;
+use harlo_core::theme::{Rgba, Tokens};
 use iced::widget::{Id, button, column, container, row, rule, scrollable, space, text, text_input};
 use iced::{Center, Element, Fill, Length, Padding};
 use lucide_icons::Icon;
@@ -35,6 +35,12 @@ const CARD_PADDING: f32 = 6.0;
 
 /// The space between a scrolling menu's rows and its scrollbar.
 const SCROLLBAR_GAP: f32 = 4.0;
+
+/// The note on an agent whose rules stop it from editing files.
+pub const READ_ONLY: &str = "read-only";
+
+/// The size of the colour dot before an agent's name.
+const DOT: f32 = 8.0;
 
 /// The ID of the open menu's scrolling list.
 pub const MENU_LIST: &str = "picker-menu-list";
@@ -61,8 +67,8 @@ impl Picker {
     /// The width of this picker's menu.
     fn width(self) -> f32 {
         match self {
-            Self::Agent | Self::Variant => 200.0,
-            Self::Folder => 260.0,
+            Self::Variant => 200.0,
+            Self::Agent | Self::Folder => 260.0,
             Self::Model | Self::Shield => 320.0,
         }
     }
@@ -86,6 +92,8 @@ pub struct Item {
     pub label: String,
     /// A note on the right, such as a model's provider.
     pub detail: Option<String>,
+    /// A colour dot before the name, such as an agent's.
+    pub dot: Option<Rgba>,
     /// Whether it's the current choice.
     pub selected: bool,
     /// What choosing it does.
@@ -110,12 +118,18 @@ impl fmt::Display for ModelChoice {
 }
 
 /// An agent the picker offers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentChoice {
     /// The agent's ID.
     pub id: String,
     /// The name shown.
     pub name: String,
+    /// What it's for.
+    pub description: Option<String>,
+    /// Its configured colour.
+    pub color: Option<Rgba>,
+    /// Whether it leaves files alone, as for planning.
+    pub read_only: bool,
 }
 
 impl fmt::Display for AgentChoice {
@@ -172,6 +186,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 selected: folder.directory == app.new_folder,
                 label: folder.label,
                 detail: None,
+                dot: None,
                 message: Message::PickFolder(folder.directory),
             })
             .collect(),
@@ -182,7 +197,8 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 .map(|agent| Item {
                     selected: Some(&agent.id) == current.as_ref(),
                     label: agent.name,
-                    detail: None,
+                    detail: agent.read_only.then(|| READ_ONLY.to_owned()),
+                    dot: agent.color,
                     message: Message::PickAgent(agent.id),
                 })
                 .collect()
@@ -195,6 +211,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     selected: variant == current,
                     label: variant.to_string(),
                     detail: None,
+                    dot: None,
                     message: Message::PickVariant(variant),
                 })
                 .collect()
@@ -207,6 +224,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     selected: mode == current,
                     label: mode.label().to_owned(),
                     detail: None,
+                    dot: None,
                     message: Message::PickShield(mode),
                 })
                 .collect()
@@ -225,6 +243,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     selected: Some(model) == current.as_ref(),
                     label: model.name.clone(),
                     detail: Some(model.provider_id.clone()),
+                    dot: None,
                     message: Message::PickModel(model.clone()),
                 })
                 .collect()
@@ -238,20 +257,30 @@ pub fn controls(app: &App) -> Element<'_, Message> {
     let agents = app.agent_choices();
     if !agents.is_empty() {
         let current = app.current_agent();
-        let label = agents
-            .iter()
-            .find(|a| Some(&a.id) == current.as_ref())
-            .map_or_else(|| "Agent".to_owned(), |a| a.name.clone());
-        chips = chips.push(chip(app, Picker::Agent, Icon::Bot, label));
+        // A subagent's session runs an agent the picker doesn't offer.
+        let agent = current.as_deref().and_then(|id| app.agent(id));
+        let agent = agent.as_ref();
+        let face = Face {
+            // An agent that leaves files alone looks, rather than builds.
+            glyph: if agent.is_some_and(|a| a.read_only) {
+                Icon::Eye
+            } else {
+                Icon::Bot
+            },
+            colour: agent.and_then(|a| a.color),
+            label: agent.map_or_else(|| "Agent".to_owned(), |a| a.name.clone()),
+            note: agent.is_some_and(|a| a.read_only).then_some(READ_ONLY),
+        };
+        chips = chips.push(chip(app, Picker::Agent, face));
     }
     if app.variant_choices().len() > 1 {
         let label = Variant(app.current_model().and_then(|m| m.variant)).to_string();
-        chips = chips.push(chip(app, Picker::Variant, Icon::Brain, label));
+        chips = chips.push(chip(app, Picker::Variant, Face::plain(Icon::Brain, label)));
     }
     let label = app
         .current_model_choice()
         .map_or_else(|| "Model".to_owned(), |m| m.name);
-    chips = chips.push(chip(app, Picker::Model, Icon::Sparkles, label));
+    chips = chips.push(chip(app, Picker::Model, Face::plain(Icon::Sparkles, label)));
     // Where they don't fit on one line, the pickers wrap.
     chips.wrap().vertical_spacing(6).into()
 }
@@ -269,7 +298,7 @@ pub fn folder(app: &App) -> Element<'_, Message> {
     } else {
         Icon::House
     };
-    chip(app, Picker::Folder, glyph, label)
+    chip(app, Picker::Folder, Face::plain(glyph, label))
 }
 
 /// The shield: how much the session may do without asking, and a menu to change it.
@@ -295,18 +324,29 @@ pub fn shield(app: &App) -> Element<'_, Message> {
 }
 
 /// A chip showing the current choice, which opens `picker`'s menu.
-fn chip(app: &App, picker: Picker, glyph: Icon, label: String) -> Element<'_, Message> {
+fn chip(app: &App, picker: Picker, face: Face) -> Element<'_, Message> {
     let t = &app.tokens;
     let open = app.picker == Some(picker);
-    let face = row![
-        icon(glyph, 14.0, t.text_interactive_base),
-        text(label)
+    let mut row = row![
+        icon(
+            face.glyph,
+            14.0,
+            face.colour.unwrap_or(t.text_interactive_base)
+        ),
+        text(face.label)
             .size(size::LABEL)
             .color(style::color(t.text_strong)),
-        icon(Icon::ChevronDown, 13.0, t.icon_base),
     ]
     .spacing(8)
     .align_y(Center);
+    if let Some(note) = face.note {
+        row = row.push(
+            text(note)
+                .size(size::SMALL)
+                .color(style::color(t.text_weak)),
+        );
+    }
+    let face = row.push(icon(Icon::ChevronDown, 13.0, t.icon_base));
     let face = button(face)
         .padding(Padding {
             top: 6.0,
@@ -319,6 +359,30 @@ fn chip(app: &App, picker: Picker, glyph: Icon, label: String) -> Element<'_, Me
     let anchor = container(face).id(picker.id());
     let menu = open.then(|| menu(app, picker));
     popover(anchor, menu, Message::ClosePicker).into()
+}
+
+/// What a picker's chip shows.
+struct Face {
+    /// The icon before the label.
+    glyph: Icon,
+    /// The icon's colour, when not the usual.
+    colour: Option<Rgba>,
+    /// The current choice.
+    label: String,
+    /// A weaker note after the label.
+    note: Option<&'static str>,
+}
+
+impl Face {
+    /// A chip with `glyph` and `label` alone.
+    fn plain(glyph: Icon, label: String) -> Self {
+        Self {
+            glyph,
+            colour: None,
+            label,
+            note: None,
+        }
+    }
 }
 
 /// The open menu of `picker`: an optional filter, its rows, and any actions.
@@ -365,6 +429,26 @@ fn menu(app: &App, picker: Picker) -> Element<'_, Message> {
         }
         card = card.push(list);
     }
+    if picker == Picker::Agent
+        && let Some(about) = app
+            .agent_choices()
+            .into_iter()
+            .nth(app.picker_index)
+            .and_then(|agent| agent.description)
+    {
+        card = card
+            .push(
+                rule::horizontal(1).style(style::divider(style::edge(t, t.surface_raised_strong))),
+            )
+            .push(
+                container(
+                    text(about)
+                        .size(size::SMALL)
+                        .color(style::color(t.text_weak)),
+                )
+                .padding([4, 10]),
+            );
+    }
     if picker == Picker::Shield {
         card = card
             .push(
@@ -395,14 +479,15 @@ fn menu(app: &App, picker: Picker) -> Element<'_, Message> {
 
 /// A menu row: the name, a note on the right, and a tick on the current choice.
 fn entry<'a>(t: &Tokens, item: &Item, highlighted: bool) -> Element<'a, Message> {
-    let mut content = row![
+    let mut content = row![].spacing(8).align_y(Center).height(Fill);
+    if let Some(colour) = item.dot {
+        content = content.push(dot(colour));
+    }
+    content = content.push(
         ellipsis(item.label.clone())
             .size(size::LABEL)
             .color(style::color(t.text_strong)),
-    ]
-    .spacing(8)
-    .align_y(Center)
-    .height(Fill);
+    );
     if let Some(detail) = &item.detail {
         content = content.push(
             text(detail.clone())
@@ -421,6 +506,16 @@ fn entry<'a>(t: &Tokens, item: &Item, highlighted: bool) -> Element<'a, Message>
         .padding([0, 10])
         .on_press(item.message.clone())
         .style(style::menu_row(t, highlighted))
+        .into()
+}
+
+/// A round dot of `colour`, marking an agent.
+#[must_use]
+pub fn dot<'a, M: 'a>(colour: Rgba) -> Element<'a, M> {
+    container(space())
+        .width(DOT)
+        .height(DOT)
+        .style(style::boxed(colour, None, DOT / 2.0))
         .into()
 }
 

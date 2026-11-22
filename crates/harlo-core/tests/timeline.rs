@@ -7,9 +7,10 @@ use std::time::Duration;
 use harlo_core::server::Delivery;
 use harlo_core::server::FileDiff;
 use harlo_core::timeline::{
-    Change, Compaction, Entry, Live, entries, summarize, tool_detail, tool_label, tools_summary,
+    Change, Compaction, Entry, Live, Todo, TodoStatus, current_todos, entries, summarize,
+    tool_detail, tool_label, tools_summary,
 };
-use harlo_core::workspace::{EventKind, InboxItem, Message, Part, ToolCall, ToolStatus};
+use harlo_core::workspace::{EventKind, InboxItem, Message, Part, Report, ToolCall, ToolStatus};
 use serde_json::json;
 
 fn call(name: &str, input: serde_json::Value, took_ms: Option<f64>) -> Part {
@@ -20,6 +21,7 @@ fn call(name: &str, input: serde_json::Value, took_ms: Option<f64>) -> Part {
         input,
         took_ms,
         files: Vec::new(),
+        child: None,
     })
 }
 
@@ -102,6 +104,7 @@ fn messages_become_rows_in_order() {
             status: ToolStatus::Completed,
             took: Some(Duration::from_secs(15)),
             files: Vec::new(),
+            todos: None,
         }
     );
     assert!(
@@ -150,8 +153,21 @@ fn tools_have_readable_labels_and_details() {
         "/a/b.rs"
     );
     assert_eq!(
-        tool_detail("todowrite", &json!({ "todos": [1, 2, 3] })),
-        "3 items"
+        tool_detail(
+            "todowrite",
+            &json!({ "todos": [
+                { "content": "a", "status": "completed" },
+                { "content": "b", "status": "in_progress" },
+                { "content": "c", "status": "pending" },
+                { "content": "d", "status": "cancelled" },
+            ] })
+        ),
+        "1 of 3 done",
+        "a dropped item counts for neither"
+    );
+    assert_eq!(
+        tool_detail("todowrite", &json!({ "todos": [] })),
+        "Cleared the list"
     );
     assert_eq!(
         tool_detail("mystery", &json!({ "n": 1, "what": "this" })),
@@ -202,6 +218,7 @@ fn glob(status: ToolStatus, detail: &str, took_ms: Option<u64>) -> Change {
         status,
         took: took_ms.map(Duration::from_millis),
         files: Vec::new(),
+        todos: None,
     })
 }
 
@@ -268,6 +285,7 @@ fn stream() -> Vec<(EventKind, f64)> {
             failed: false,
             error: None,
             files: Vec::new(),
+            child: None,
         }),
         3_500.0,
     );
@@ -352,6 +370,7 @@ fn events_it_cannot_place_ask_for_a_reload() {
             failed: true,
             error: Some("boom".into()),
             files: Vec::new(),
+            child: None,
         }),
         0.0,
     );
@@ -425,6 +444,7 @@ fn edits_and_writes_carry_their_changes() {
     };
     let stored = Part::Tool(ToolCall {
         files: vec![edit.clone()],
+        child: None,
         ..match call("edit", json!({ "path": "a.txt" }), Some(5.0)) {
             Part::Tool(call) => call,
             _ => unreachable!("a tool call"),
@@ -487,6 +507,7 @@ fn edits_and_writes_carry_their_changes() {
                 failed: false,
                 error: None,
                 files,
+                child: None,
             }),
             2.0,
         );
@@ -495,4 +516,244 @@ fn edits_and_writes_carry_their_changes() {
         };
         assert_eq!(files_of(done).len(), 1, "{done:?}");
     }
+}
+
+fn report(child: &str) -> Report {
+    Report {
+        child: child.into(),
+        agent: "Explore".into(),
+        task: "Find the docs".into(),
+        state: "completed".into(),
+        text: "Found them.".into(),
+    }
+}
+
+#[test]
+fn handing_work_to_a_subagent_is_a_card_and_its_report_a_row() {
+    let input = json!({ "agent": "explore", "description": "Find the docs", "prompt": "Look." });
+    let rows = entries(&[
+        Message::Assistant {
+            id: "msg_a".into(),
+            parts: vec![Part::Tool(ToolCall {
+                child: Some("ses_child".into()),
+                ..match call("subagent", input.clone(), Some(5.0)) {
+                    Part::Tool(call) => call,
+                    _ => unreachable!("a tool call"),
+                }
+            })],
+            files: Vec::new(),
+        },
+        Message::Report {
+            id: "msg_r".into(),
+            report: report("ses_child"),
+        },
+    ]);
+    assert_eq!(
+        rows,
+        [
+            Entry::Subagent {
+                key: "msg_a/tool/call_subagent".into(),
+                agent: "explore".into(),
+                task: "Find the docs".into(),
+                child: Some("ses_child".into()),
+                status: ToolStatus::Completed,
+            },
+            Entry::Report {
+                key: "msg_r".into(),
+                report: report("ses_child"),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_follow_up_names_the_child_it_goes_to() {
+    let input = json!({
+        "agent": "explore",
+        "description": "Look again",
+        "prompt": "And the tests?",
+        "sessionID": "ses_child",
+    });
+    let rows = entries(&[Message::Assistant {
+        id: "msg_a".into(),
+        parts: vec![call("subagent", input, None)],
+        files: Vec::new(),
+    }]);
+    assert!(
+        matches!(rows.as_slice(), [Entry::Subagent { child: Some(c), .. }] if c == "ses_child"),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn a_live_subagent_call_and_report_need_no_reload() {
+    let mut live = Live::new();
+    let _ = live.apply(
+        &session(|session_id| EventKind::ToolStarted {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            name: "subagent".into(),
+        }),
+        1.0,
+    );
+    let _ = live.apply(
+        &session(|session_id| EventKind::ToolCalled {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            input: json!({ "agent": "explore", "description": "Find the docs", "prompt": "Look." }),
+        }),
+        2.0,
+    );
+    let ended = live.apply(
+        &session(|session_id| EventKind::ToolEnded {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            failed: false,
+            error: None,
+            files: Vec::new(),
+            child: Some("ses_child".into()),
+        }),
+        3.0,
+    );
+    assert_eq!(
+        ended,
+        [Change::Put(Entry::Subagent {
+            key: "msg_a/tool/call_1".into(),
+            agent: "explore".into(),
+            task: "Find the docs".into(),
+            child: Some("ses_child".into()),
+            status: ToolStatus::Completed,
+        })]
+    );
+    let reported = live.apply(
+        &session(|session_id| EventKind::SubagentReported {
+            session_id,
+            id: "msg_r".into(),
+            report: report("ses_child"),
+        }),
+        4.0,
+    );
+    assert_eq!(
+        reported,
+        [Change::Put(Entry::Report {
+            key: "msg_r".into(),
+            report: report("ses_child"),
+        })]
+    );
+    // The agent reading it later changes nothing on screen.
+    let read = live.apply(
+        &session(|session_id| EventKind::InboxRemoved {
+            session_id,
+            item_id: "msg_r".into(),
+            delivered: true,
+        }),
+        5.0,
+    );
+    assert!(read.is_empty(), "{read:?}");
+}
+
+fn todos(items: &[(&str, &str)]) -> serde_json::Value {
+    let items: Vec<_> = items
+        .iter()
+        .map(|(content, status)| json!({ "content": content, "status": status }))
+        .collect();
+    json!({ "todos": items })
+}
+
+#[test]
+fn the_todo_list_is_the_last_one_written() {
+    let first = call(
+        "todowrite",
+        todos(&[("Read the spec", "in_progress"), ("Write it", "pending")]),
+        Some(1.0),
+    );
+    let Part::Tool(second) = call(
+        "todowrite",
+        todos(&[
+            ("Read the spec", "completed"),
+            ("Write it", "in_progress"),
+            ("Ship it", "someday"),
+        ]),
+        Some(1.0),
+    ) else {
+        unreachable!("a tool call")
+    };
+    let failed = ToolCall {
+        id: "call_failed".into(),
+        status: ToolStatus::Failed,
+        input: todos(&[]),
+        ..second.clone()
+    };
+    let rows = entries(&[Message::Assistant {
+        id: "msg_a".into(),
+        parts: vec![
+            first,
+            Part::Tool(ToolCall {
+                id: "call_second".into(),
+                ..second
+            }),
+            Part::Tool(failed),
+        ],
+        files: Vec::new(),
+    }]);
+    assert_eq!(
+        current_todos(&rows),
+        Some(
+            [
+                Todo {
+                    content: "Read the spec".into(),
+                    status: TodoStatus::Completed,
+                },
+                Todo {
+                    content: "Write it".into(),
+                    status: TodoStatus::InProgress,
+                },
+            ]
+            .as_slice()
+        ),
+        "a failed call doesn't count, nor does an unknown status"
+    );
+    assert_eq!(current_todos(&rows[..0]), None, "none written yet");
+}
+
+#[test]
+fn a_live_todo_call_shows_its_list_once_its_arguments_arrive() {
+    let mut live = Live::new();
+    let started = live.apply(
+        &session(|session_id| EventKind::ToolStarted {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            name: "todowrite".into(),
+        }),
+        1.0,
+    );
+    let rows: Vec<Entry> = started
+        .into_iter()
+        .filter_map(|c| match c {
+            Change::Put(entry) => Some(entry),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(current_todos(&rows), None, "still streaming");
+    let called = live.apply(
+        &session(|session_id| EventKind::ToolCalled {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            input: todos(&[("Plan", "in_progress")]),
+        }),
+        2.0,
+    );
+    let [Change::Put(entry)] = called.as_slice() else {
+        panic!("one row: {called:?}")
+    };
+    assert_eq!(
+        current_todos([entry]).map(<[Todo]>::len),
+        Some(1),
+        "shown while it runs"
+    );
 }

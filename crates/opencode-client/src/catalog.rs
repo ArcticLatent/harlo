@@ -74,6 +74,12 @@ pub struct Agent {
     pub description: Option<String>,
     /// Whether a session can run it; otherwise it's only called by other agents.
     pub primary: bool,
+    /// Whether other agents can hand it work in a child session.
+    pub subagent: bool,
+    /// Its colour as `#rrggbb`, when one is configured.
+    pub color: Option<String>,
+    /// Whether its rules stop it from editing files, as for planning.
+    pub read_only: bool,
 }
 
 impl Agent {
@@ -85,13 +91,43 @@ impl Agent {
         if id.is_empty() {
             return None;
         }
+        let mode = value["mode"].as_str().unwrap_or("primary");
         Some(Self {
             name: optional(value, "name").unwrap_or_else(|| id.clone()),
             description: optional(value, "description"),
-            primary: value["mode"] != "subagent",
+            primary: mode != "subagent",
+            subagent: mode != "primary",
+            color: optional(value, "color").filter(|c| is_hex_colour(c)),
+            read_only: edits_denied(&value["permissions"]),
             id,
         })
     }
+}
+
+/// Whether `colour` is written `#rrggbb`.
+fn is_hex_colour(colour: &str) -> bool {
+    colour.len() == 7
+        && colour.starts_with('#')
+        && colour[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Whether an agent's permission rules deny editing files everywhere.
+///
+/// The last rule for editing that covers every file decides, as in OpenCode,
+/// where the last matching rule wins. Rules for some files only (such as the
+/// plan agent's own plan files) are exceptions, not its general stance. An
+/// action matches when it's `edit` or `*`.
+fn edits_denied(rules: &Value) -> bool {
+    rules
+        .as_array()
+        .into_iter()
+        .flatten()
+        .rev()
+        .find(|rule| {
+            matches!(rule["action"].as_str(), Some("edit" | "*"))
+                && matches!(rule["resource"].as_str(), Some("*" | "**"))
+        })
+        .is_some_and(|rule| rule["effect"] == "deny")
 }
 
 /// A slash command, such as `review`.
@@ -101,6 +137,12 @@ pub struct Command {
     pub name: String,
     /// What it does.
     pub description: Option<String>,
+    /// The agent that runs it, when it names one.
+    ///
+    /// The command list doesn't say; [`Client::setup`](crate::Client::setup) does.
+    pub agent: Option<String>,
+    /// Whether it runs as a subagent, in a child session of its own.
+    pub subagent: bool,
 }
 
 impl Command {
@@ -109,6 +151,8 @@ impl Command {
         (!name.is_empty()).then(|| Self {
             description: optional(value, "description"),
             name,
+            agent: None,
+            subagent: false,
         })
     }
 }

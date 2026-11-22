@@ -47,6 +47,7 @@ fn history() -> Vec<Entry> {
             status: ToolStatus::Completed,
             took: Some(Duration::from_secs(15)),
             files: Vec::new(),
+            todos: None,
         },
         Entry::Answer {
             key: "msg_2/2".into(),

@@ -24,6 +24,8 @@ sse-stream = { version = "0.3.0", default-features = false }
 regress = { version = "0.12.0", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
 base64 = { version = "0.23.1", default-features = false }
+# Reads the front matter of OpenCode's command files (MIT); YAML, as OpenCode writes it.
+gray_matter = { version = "0.3.2", default-features = false, features = ["yaml"] }
 
 # UI.
 iced = { version = "0.14.0", default-features = false }

@@ -15,8 +15,10 @@ fn rows(titles: &[&str]) -> Vec<SessionSummary> {
             title: (*t).into(),
             maker: None,
             age: Duration::ZERO,
+            agent: None,
             busy: false,
             waiting: false,
+            children: Vec::new(),
         })
         .collect()
 }

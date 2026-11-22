@@ -21,6 +21,7 @@ mod event;
 mod generated;
 mod id;
 mod prompt;
+mod setup;
 mod types;
 
 #[doc(inline)]
@@ -38,10 +39,12 @@ pub use id::message_id;
 #[doc(inline)]
 pub use prompt::{Attachment, Mention, Prompt};
 #[doc(inline)]
+pub use setup::{CommandSetup, Setup};
+#[doc(inline)]
 pub use types::{
     Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, InboxItem,
-    Message, ModelRef, Part, Permission, PermissionReply, Project, Revert, Rule, ServerInfo,
-    Session, SessionContext, Tokens, ToolCall, ToolStatus,
+    Message, ModelRef, Part, Permission, PermissionReply, Project, Report, Revert, Rule,
+    ServerInfo, Session, SessionContext, Tokens, ToolCall, ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

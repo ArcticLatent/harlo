@@ -109,8 +109,10 @@ fn a_snapshot_groups_sessions_by_project_and_worktree() {
     assert_eq!(
         (app.total(), app.working()),
         (3, 1),
-        "the subagent session is left out"
+        "the subagent session isn't counted as the project's own"
     );
+    let s1 = &app.sessions[1];
+    assert_eq!(ids(&s1.children), ["child"], "it sits under its parent");
 
     let s2 = &app.sessions[0];
     assert_eq!(s2.maker.as_deref(), Some("anthropic"));
@@ -502,4 +504,35 @@ fn a_staged_undo_follows_events() {
         NOW_MS,
     );
     assert_eq!(staged(&ws), None, "kept elsewhere, the card goes");
+}
+
+#[test]
+fn children_load_with_their_parent_and_flag_it_when_they_ask() {
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    let later = Session {
+        parent_id: Some("s1".into()),
+        agent: Some("explore".into()),
+        ..session("later", "p_app", "/code/app", 0.05)
+    };
+    let more = ws.fetched(Fetched::Children("s1".into(), vec![later]));
+    assert!(more.is_empty());
+    let children: Vec<&str> = ws.children("s1").iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(children, ["child", "later"], "in the order they started");
+
+    // A child asking for approval makes its parent's row ask too.
+    let mut waiting = asked("per_child");
+    waiting.session_id = "later".into();
+    let _ = ws.apply(&EventKind::PermissionAsked(waiting), NOW_MS);
+    let app = ws
+        .sidebar(now())
+        .into_iter()
+        .find(|p| p.name == "app")
+        .expect("app");
+    let s1 = app.sessions.iter().find(|s| s.id == "s1").expect("s1");
+    assert!(s1.waiting, "the parent asks for its child");
+    let later = s1.children.iter().find(|c| c.id == "later").expect("later");
+    assert!(later.waiting);
+    assert_eq!(later.agent.as_deref(), Some("explore"));
+    assert!(!ws.needs_user("s1"), "the parent itself asks for nothing");
 }

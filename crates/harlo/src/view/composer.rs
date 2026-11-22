@@ -2,7 +2,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::composer::Attached;
+use harlo_core::composer::{Attached, Runner};
 use std::collections::HashMap;
 
 use harlo_core::theme::{Rgba, Tokens};
@@ -12,7 +12,7 @@ use iced::widget::{button, column, container, row, scrollable, space, text, text
 use iced::{Center, Element, Fill, Padding, padding};
 use lucide_icons::Icon;
 
-use crate::app::{MenuState, Message};
+use crate::app::{MenuState, Message, capitalized};
 use crate::ids;
 use crate::motion::{self, Moment};
 use crate::style::{self, size};
@@ -220,6 +220,12 @@ fn binding(
             Some(Binding::Custom(Message::MenuPick(None)))
         }
         Key::Named(Named::Escape) if menu_open => Some(Binding::Custom(Message::MenuClose)),
+        // Tab switches agents, such as from building to planning.
+        Key::Named(Named::Tab) if !menu_open && !modifiers.command() && !modifiers.alt() => {
+            Some(Binding::Custom(Message::CycleAgent {
+                back: modifiers.shift(),
+            }))
+        }
         Key::Named(Named::Enter) if modifiers.command() => Some(Binding::Custom(Message::Steer)),
         Key::Named(Named::Enter) if !modifiers.shift() => Some(Binding::Custom(Message::Send)),
         // An image on the clipboard is attached; text, if any, is pasted as usual.
@@ -304,12 +310,43 @@ fn attachments<'a>(
     list.wrap().into()
 }
 
+/// Which agent runs a command, and whether as a subagent, at the end of its row.
+fn runner_tag<'a>(t: &Tokens, runner: &Runner) -> Element<'a, Message> {
+    let says = match (&runner.agent, runner.subagent) {
+        (Some(agent), true) => format!("{agent} · {SUBAGENT}"),
+        (Some(agent), false) => agent.clone(),
+        (None, _) => capitalized(SUBAGENT),
+    };
+    let accent = runner
+        .color
+        .as_deref()
+        .and_then(Rgba::parse)
+        .unwrap_or(t.icon_base);
+    let glyph = if runner.agent.is_some() {
+        Icon::Bot
+    } else {
+        Icon::GitFork
+    };
+    row![
+        icon(glyph, 12.0, accent),
+        text(says)
+            .size(size::SMALL)
+            .color(style::color(t.text_base)),
+    ]
+    .spacing(5)
+    .align_y(Center)
+    .into()
+}
+
+/// How a command that runs in a child session of its own is marked.
+const SUBAGENT: &str = "subagent";
+
 /// The `/` or `@` menu, above the composer.
 fn menu_view<'a>(t: &Tokens, menu: &'a MenuState) -> Element<'a, Message> {
     let mut list = column![].spacing(2);
     for (index, item) in menu.items.iter().enumerate() {
         let selected = index == menu.selected;
-        let content = row![
+        let mut content = row![
             text(item.label.as_str())
                 .size(size::LABEL)
                 .font(style::SANS_MEDIUM)
@@ -321,6 +358,9 @@ fn menu_view<'a>(t: &Tokens, menu: &'a MenuState) -> Element<'a, Message> {
         .spacing(10)
         .align_y(Center)
         .height(Fill);
+        if let Some(runner) = &item.runner {
+            content = content.push(runner_tag(t, runner));
+        }
         list = list.push(
             button(content)
                 .width(Fill)

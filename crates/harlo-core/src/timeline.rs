@@ -7,15 +7,22 @@
 //!
 //! Keys: a prompt is its message ID; text and reasoning are
 //! `{message}/text/{n}` and `{message}/thought/{n}`, counted per kind within
-//! the message; a tool call is `{message}/tool/{call ID}`.
+//! the message; a tool call is `{message}/tool/{call ID}`; a subagent's
+//! report is the ID of the message it arrives as.
 
 // Rust guideline compliant 2026-10-09
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use opencode_client::{EventKind, FileDiff, Message, Part, ToolCall, ToolStatus};
+use opencode_client::{EventKind, FileDiff, Message, Part, Report, ToolCall, ToolStatus};
 use serde_json::Value;
+
+/// The tool that hands work to a subagent in a child session.
+const SUBAGENT: &str = "subagent";
+
+/// The tool an agent keeps its todo list with; each call sends the whole list.
+const TODO_WRITE: &str = "todowrite";
 
 /// Characters a tool detail or thought summary keeps before "…".
 const SUMMARY_CHARS: usize = 120;
@@ -64,6 +71,29 @@ pub enum Entry {
         took: Option<Duration>,
         /// The files it changed, once it finished: an edit's or a write's.
         files: Vec<FileDiff>,
+        /// The list a todo call wrote, once its arguments are known.
+        todos: Option<Vec<Todo>>,
+    },
+    /// Work handed to a subagent, which runs in a child session.
+    Subagent {
+        /// Stable row key.
+        key: String,
+        /// The agent's ID, such as `explore`.
+        agent: String,
+        /// The task's short label.
+        task: String,
+        /// The child session, once known: the one started, or the one a
+        /// follow-up went to.
+        child: Option<String>,
+        /// Where the handing over is; it finishes as soon as the child starts.
+        status: ToolStatus,
+    },
+    /// What a subagent said when it went idle.
+    Report {
+        /// Stable row key.
+        key: String,
+        /// The report.
+        report: Report,
     },
     /// A run that didn't succeed.
     Stopped {
@@ -110,6 +140,8 @@ impl Entry {
             | Self::Answer { key, .. }
             | Self::Thought { key, .. }
             | Self::Tool { key, .. }
+            | Self::Subagent { key, .. }
+            | Self::Report { key, .. }
             | Self::Stopped { key, .. }
             | Self::Compaction { key, .. }
             | Self::Note { key, .. } => key,
@@ -127,6 +159,108 @@ impl Entry {
             }
         )
     }
+}
+
+/// An item on an agent's todo list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Todo {
+    /// What's to be done.
+    pub content: String,
+    /// Where it stands.
+    pub status: TodoStatus,
+}
+
+/// Where a todo stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TodoStatus {
+    /// Not started.
+    Pending,
+    /// Being worked on.
+    InProgress,
+    /// Done.
+    Completed,
+    /// Dropped.
+    Cancelled,
+}
+
+impl TodoStatus {
+    fn parse(status: &str) -> Option<Self> {
+        Some(match status {
+            "pending" => Self::Pending,
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            "cancelled" => Self::Cancelled,
+            _ => return None,
+        })
+    }
+
+    /// Whether nothing more will happen to it: it's done or dropped.
+    #[must_use]
+    pub fn is_settled(self) -> bool {
+        matches!(self, Self::Completed | Self::Cancelled)
+    }
+}
+
+/// The list a `todowrite` call's arguments hold, or `None` for any other call.
+///
+/// Items with an unknown status are left out.
+fn todo_list(name: &str, input: &Value) -> Option<Vec<Todo>> {
+    if name != TODO_WRITE {
+        return None;
+    }
+    let items = input["todos"].as_array()?;
+    Some(
+        items
+            .iter()
+            .filter_map(|item| {
+                Some(Todo {
+                    content: item["content"].as_str()?.trim().to_owned(),
+                    status: TodoStatus::parse(item["status"].as_str()?)?,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The agent's todo list as it stands: the one its last todo call wrote.
+///
+/// `None` when it hasn't written one; a call that failed doesn't count.
+pub fn current_todos<'a, I>(entries: I) -> Option<&'a [Todo]>
+where
+    I: IntoIterator<Item = &'a Entry>,
+    I::IntoIter: DoubleEndedIterator,
+{
+    entries.into_iter().rev().find_map(|entry| match entry {
+        Entry::Tool {
+            todos: Some(todos),
+            status,
+            ..
+        } if *status != ToolStatus::Failed => Some(todos.as_slice()),
+        _ => None,
+    })
+}
+
+/// How many items are done, and how many there are to do in all.
+///
+/// Dropped items count for neither.
+#[must_use]
+pub fn todo_counts(todos: &[Todo]) -> (usize, usize) {
+    let done = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Completed)
+        .count();
+    let dropped = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Cancelled)
+        .count();
+    (done, todos.len() - dropped)
+}
+
+/// How far a todo list is, such as "2 of 5 done".
+#[must_use]
+pub fn todo_progress(todos: &[Todo]) -> String {
+    let (done, total) = todo_counts(todos);
+    format!("{done} of {total} done")
 }
 
 /// Turns a session's messages into timeline rows, oldest first.
@@ -201,6 +335,10 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
                 text: format!("Loaded the {name} skill"),
                 warning: false,
             }),
+            Message::Report { id, report } => rows.push(Entry::Report {
+                key: id.clone(),
+                report: report.clone(),
+            }),
             Message::Idle { .. } | Message::Other { .. } => {}
         }
     }
@@ -220,6 +358,14 @@ fn tool_key(message: &str, call: &str) -> String {
 }
 
 fn tool(message: &str, call: &ToolCall) -> Entry {
+    if call.name == SUBAGENT {
+        return subagent(
+            tool_key(message, &call.id),
+            &call.input,
+            call.child.clone(),
+            call.status,
+        );
+    }
     Entry::Tool {
         key: tool_key(message, &call.id),
         name: call.name.clone(),
@@ -228,6 +374,20 @@ fn tool(message: &str, call: &ToolCall) -> Entry {
         status: call.status,
         took: call.took_ms.map(millis),
         files: changes(&call.name, call.status, &call.input, &call.files),
+        todos: todo_list(&call.name, &call.input),
+    }
+}
+
+/// A `subagent` call's row, from its arguments and the child it started.
+fn subagent(key: String, input: &Value, child: Option<String>, status: ToolStatus) -> Entry {
+    let text = |name: &str| input[name].as_str().unwrap_or_default().to_owned();
+    Entry::Subagent {
+        key,
+        agent: text("agent"),
+        task: text("description"),
+        // A follow-up names the child it goes to.
+        child: child.or_else(|| input["sessionID"].as_str().map(str::to_owned)),
+        status,
     }
 }
 
@@ -300,6 +460,8 @@ struct Waiting {
 pub struct Live {
     tools: HashMap<String, OpenTool>,
     waiting: HashMap<String, Waiting>,
+    /// Reports from subagents shown already, waiting to be read by the agent.
+    reported: HashSet<String>,
 }
 
 impl Live {
@@ -328,6 +490,15 @@ impl Live {
                     );
                 }
                 Vec::new()
+            }
+            // A report already shown needs nothing more once the agent reads it.
+            EventKind::InboxRemoved { item_id, .. } if self.reported.remove(item_id) => Vec::new(),
+            EventKind::SubagentReported { id, report, .. } => {
+                self.reported.insert(id.clone());
+                vec![Change::Put(Entry::Report {
+                    key: id.clone(),
+                    report: report.clone(),
+                })]
             }
             EventKind::InboxRemoved {
                 item_id, delivered, ..
@@ -408,6 +579,7 @@ impl Live {
                 call_id,
                 failed,
                 files,
+                child,
                 ..
             } => match self.tools.remove(call_id) {
                 Some(open) => {
@@ -416,6 +588,14 @@ impl Live {
                     } else {
                         ToolStatus::Completed
                     };
+                    if open.name == SUBAGENT {
+                        return vec![Change::Put(subagent(
+                            open.key,
+                            &open.input,
+                            child.clone(),
+                            status,
+                        ))];
+                    }
                     let took = millis(time - open.started);
                     vec![Change::Put(open.entry(status, Some(took), files))]
                 }
@@ -476,6 +656,9 @@ impl Live {
 
 impl OpenTool {
     fn entry(&self, status: ToolStatus, took: Option<Duration>, files: &[FileDiff]) -> Entry {
+        if self.name == SUBAGENT {
+            return subagent(self.key.clone(), &self.input, None, status);
+        }
         Entry::Tool {
             key: self.key.clone(),
             name: self.name.clone(),
@@ -484,6 +667,7 @@ impl OpenTool {
             status,
             took,
             files: changes(&self.name, status, &self.input, files),
+            todos: todo_list(&self.name, &self.input),
         }
     }
 }
@@ -580,15 +764,11 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
     if let Some(path) = ["filePath", "path", "file"].into_iter().find_map(field) {
         return path.to_owned();
     }
-    if name.starts_with("todo") {
-        let count = input
-            .get("todos")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len);
-        return match count {
-            0 => String::new(),
-            1 => "1 item".to_owned(),
-            n => format!("{n} items"),
+    if let Some(todos) = todo_list(name, input) {
+        return if todos.is_empty() {
+            "Cleared the list".to_owned()
+        } else {
+            todo_progress(&todos)
         };
     }
     // Otherwise the first short text argument, if any.

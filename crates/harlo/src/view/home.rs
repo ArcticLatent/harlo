@@ -44,7 +44,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             t,
             Composer {
                 content: &app.composer,
-                placeholder: "Ask, or describe what to build.",
+                placeholder: "Ask, or describe what to build · Tab switches agents",
                 hint,
                 error: app.send_error.as_deref(),
                 attached: &app.draft.attached,
