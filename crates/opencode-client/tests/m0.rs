@@ -11,7 +11,8 @@ mod support;
 use std::time::Duration;
 
 use opencode_client::{
-    Client, Delivery, EventKind, Message, Part, PermissionReply, Prompt, ToolStatus, message_id,
+    Answer, Client, Delivery, EventKind, Message, Part, PermissionReply, Prompt, ToolStatus,
+    message_id,
 };
 use support::{Sandbox, wait_for};
 
@@ -166,7 +167,7 @@ async fn approval_across_disconnect() {
 
     // The stale card's button is harmless and the command ran once.
     let stale = harlo
-        .reply_permission(&session.id, &asked.id, PermissionReply::Once)
+        .reply_permission(&session.id, &asked.id, PermissionReply::Once, None)
         .await
         .expect_err("already answered");
     assert!(stale.is_settled(), "{stale}");
@@ -198,10 +199,7 @@ async fn question_across_disconnect() {
         harlo.forms(&session.id).await.ok()?.into_iter().next()
     })
     .await;
-    let key = form.fields[0]["key"]
-        .as_str()
-        .expect("field key")
-        .to_owned();
+    let key = form.fields[0].key.clone();
 
     let path = format!("/api/session/{}/form/{}/reply", session.id, form.id);
     let answer = serde_json::json!({ "answer": { key.clone(): "Blue" } }).to_string();
@@ -224,7 +222,7 @@ async fn question_across_disconnect() {
         ["got it"]
     );
     let stale = harlo
-        .reply_form(&session.id, &form.id, serde_json::json!({ key: "Red" }))
+        .reply_form(&session.id, &form.id, &[(key, Answer::Text("Red".into()))])
         .await
         .expect_err("already answered");
     assert!(stale.is_settled(), "{stale}");

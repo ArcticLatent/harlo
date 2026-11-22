@@ -10,7 +10,7 @@
 use serde_json::Value;
 
 use crate::generated as g;
-use crate::types::{Delivery, Form, InboxItem, ModelRef, Permission, Revert};
+use crate::types::{Delivery, FileDiff, Form, InboxItem, ModelRef, Permission, Revert, Rule};
 
 /// One server event.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,6 +112,8 @@ pub enum Kind {
         failed: bool,
         /// Why it failed, when it did.
         error: Option<String>,
+        /// The files it changed, such as an edit's.
+        files: Vec<FileDiff>,
     },
     /// A model step failed.
     StepFailed {
@@ -140,6 +142,11 @@ pub enum Kind {
     PermissionReplied {
         session_id: String,
         request_id: String,
+    },
+    /// A session's own permission rules changed.
+    SessionPermissions {
+        session_id: String,
+        rules: Vec<Rule>,
     },
     /// The agent asked a question.
     FormCreated(Form),
@@ -221,7 +228,8 @@ impl Kind {
             | Self::InboxRemoved { session_id, .. }
             | Self::RevertStaged { session_id, .. }
             | Self::RevertCleared { session_id }
-            | Self::RevertCommitted { session_id } => Some(session_id),
+            | Self::RevertCommitted { session_id }
+            | Self::SessionPermissions { session_id, .. } => Some(session_id),
             Self::PermissionAsked(p) => Some(&p.session_id),
             Self::FormCreated(f) => Some(&f.session_id),
             Self::Connected
@@ -395,6 +403,12 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             session_id: session_of(&data),
             name: text_of(&data, "name"),
         },
+        "session.permissions" => Kind::SessionPermissions {
+            session_id: session_of(&data),
+            rules: from::<Option<g::PermissionRuleset>>(data["permissions"].clone())?
+                .map(|rules| rules.0.into_iter().map(Rule::from).collect())
+                .unwrap_or_default(),
+        },
         "session.agent.selected" => Kind::AgentSelected {
             session_id: session_of(&data),
             agent: text_of(&data, "agent"),
@@ -434,6 +448,10 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             call_id: text_of(&data, "id"),
             failed: kind == "session.tool.failed",
             error: (kind == "session.tool.failed").then(|| error_of(&data)),
+            files: data["metadata"]
+                .as_object()
+                .map(crate::types::proposed_files)
+                .unwrap_or_default(),
         },
         "session.step.ended" => {
             let d: g::SessionStepEndedData = from(data)?;

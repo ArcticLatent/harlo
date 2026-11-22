@@ -49,6 +49,9 @@ pub mod size {
     pub const SIDEBAR: f32 = 288.0;
     /// Width of the right panel.
     pub const PANEL: f32 = 260.0;
+    /// Width of the right panel when it shows diffs (Changes): room for a
+    /// line number, a mark and about 45 characters of code.
+    pub const WIDE_PANEL: f32 = 440.0;
     /// A square rail button.
     pub const RAIL_BUTTON: f32 = 36.0;
     /// Rail icons.
@@ -277,6 +280,57 @@ pub fn menu_filter(t: &Tokens) -> impl Fn(&Theme, text_input::Status) -> text_in
         placeholder: color(t.text_weak),
         value: color(t.text_strong),
         selection: color(t.text_interactive_base.alpha(0.3)),
+    }
+}
+
+/// How much text colour mixes into the accent for a hovered primary button.
+const PRIMARY_HOVER: f32 = 0.18;
+
+/// The main action of a card, such as Allow or Send: filled with the accent.
+pub fn primary(t: &Tokens) -> impl Fn(&Theme, button::Status) -> button::Style + use<> {
+    let t = *t;
+    move |_, status| {
+        let fill = match status {
+            button::Status::Hovered | button::Status::Pressed => {
+                t.background_base.over(t.surface_brand_base, PRIMARY_HOVER)
+            }
+            button::Status::Active => t.surface_brand_base,
+            button::Status::Disabled => t.surface_brand_base.over(t.surface_raised_strong, 0.4),
+        };
+        button::Style {
+            background: Some(color(fill).into()),
+            text_color: color(t.background_base),
+            border: Border {
+                radius: size::RADIUS.into(),
+                ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+}
+
+/// How much of its accent colour a waiting card's edge takes.
+const WAITING_EDGE: f32 = 0.45;
+
+/// A card waiting for the user, such as an approval: lifted, edged in `accent`.
+pub fn waiting_card(t: &Tokens, accent: Rgba) -> impl Fn(&Theme) -> container::Style + use<> {
+    lifted(
+        t.surface_raised_base,
+        accent.over(t.surface_raised_base, WAITING_EDGE),
+        size::COMPOSER_RADIUS,
+    )
+}
+
+/// How much colour a patch line's background takes.
+const PATCH_TINT: f32 = 0.16;
+
+/// A line of a patch preview: green where added, red where removed.
+pub fn patch_line(t: &Tokens, tint: Option<Rgba>) -> impl Fn(&Theme) -> container::Style + use<> {
+    let t = *t;
+    move |_| container::Style {
+        background: tint.map(|c| color(c.over(t.surface_inset_base, PATCH_TINT)).into()),
+        ..container::Style::default()
     }
 }
 

@@ -16,6 +16,7 @@ fn rows(titles: &[&str]) -> Vec<SessionSummary> {
             maker: None,
             age: Duration::ZERO,
             busy: false,
+            waiting: false,
         })
         .collect()
 }

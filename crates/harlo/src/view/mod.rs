@@ -2,7 +2,9 @@
 
 // Rust guideline compliant 2026-10-09
 
+pub mod changes;
 pub mod composer;
+pub mod diff;
 pub mod home;
 pub mod locations;
 pub mod panel;
@@ -10,6 +12,7 @@ pub mod pickers;
 pub mod rails;
 pub mod session;
 pub mod sidebar;
+pub mod waiting;
 
 use harlo_core::theme::Rgba;
 use iced::Element;

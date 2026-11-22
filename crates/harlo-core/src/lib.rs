@@ -5,12 +5,16 @@
 
 // Rust guideline compliant 2026-10-09
 
+pub mod approvals;
 pub mod composer;
+pub mod diff;
+pub mod git;
 pub mod layout;
 pub mod server;
 pub mod sessions;
 pub mod theme;
 pub mod timeline;
+pub mod undo;
 pub mod workspace;
 
 /// The OpenCode release Harlo is built and tested against.

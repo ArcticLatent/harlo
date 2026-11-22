@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use harlo_core::server::Delivery;
+use harlo_core::server::FileDiff;
 use harlo_core::timeline::{
     Change, Compaction, Entry, Live, entries, summarize, tool_detail, tool_label, tools_summary,
 };
@@ -18,6 +19,7 @@ fn call(name: &str, input: serde_json::Value, took_ms: Option<f64>) -> Part {
         status: ToolStatus::Completed,
         input,
         took_ms,
+        files: Vec::new(),
     })
 }
 
@@ -99,6 +101,7 @@ fn messages_become_rows_in_order() {
             detail: "SPEC.md".into(),
             status: ToolStatus::Completed,
             took: Some(Duration::from_secs(15)),
+            files: Vec::new(),
         }
     );
     assert!(
@@ -198,6 +201,7 @@ fn glob(status: ToolStatus, detail: &str, took_ms: Option<u64>) -> Change {
         detail: detail.into(),
         status,
         took: took_ms.map(Duration::from_millis),
+        files: Vec::new(),
     })
 }
 
@@ -263,6 +267,7 @@ fn stream() -> Vec<(EventKind, f64)> {
             call_id: "call_1".into(),
             failed: false,
             error: None,
+            files: Vec::new(),
         }),
         3_500.0,
     );
@@ -346,6 +351,7 @@ fn events_it_cannot_place_ask_for_a_reload() {
             call_id: "c".into(),
             failed: true,
             error: Some("boom".into()),
+            files: Vec::new(),
         }),
         0.0,
     );
@@ -396,4 +402,97 @@ fn compaction_and_retries_show_as_rows() {
         matches!(&*retry, [Change::Put(Entry::Note { text, warning: true, .. })]
         if text == "Retrying (attempt 2): rate limited")
     );
+}
+
+fn files_of(entry: &Entry) -> Vec<(String, u64, u64)> {
+    match entry {
+        Entry::Tool { files, .. } => files
+            .iter()
+            .map(|f| (f.file.clone(), f.additions, f.deletions))
+            .collect(),
+        other => panic!("not a tool row: {other:?}"),
+    }
+}
+
+#[test]
+fn edits_and_writes_carry_their_changes() {
+    let edit = FileDiff {
+        file: "a.txt".into(),
+        patch: "@@ -1 +1 @@\n-alpha\n+ALPHA\n".into(),
+        additions: 1,
+        deletions: 1,
+        status: "modified".into(),
+    };
+    let stored = Part::Tool(ToolCall {
+        files: vec![edit.clone()],
+        ..match call("edit", json!({ "path": "a.txt" }), Some(5.0)) {
+            Part::Tool(call) => call,
+            _ => unreachable!("a tool call"),
+        }
+    });
+    let messages = vec![Message::Assistant {
+        id: "msg_1".into(),
+        parts: vec![
+            stored,
+            call(
+                "write",
+                json!({ "path": "new.txt", "content": "one\ntwo\n" }),
+                Some(5.0),
+            ),
+        ],
+        files: Vec::new(),
+    }];
+    let rows = entries(&messages);
+    assert_eq!(files_of(&rows[0]), [("a.txt".to_owned(), 1, 1)]);
+    assert_eq!(files_of(&rows[1]), [("new.txt".to_owned(), 2, 0)]);
+
+    // Live, the edit's patch comes with the success; a write's from its input.
+    let mut live = Live::new();
+    for (call_id, name, input, files) in [
+        ("c1", "edit", json!({ "path": "a.txt" }), vec![edit]),
+        (
+            "c2",
+            "write",
+            json!({ "path": "new.txt", "content": "x\n" }),
+            Vec::new(),
+        ),
+    ] {
+        let _ = live.apply(
+            &session(|session_id| EventKind::ToolStarted {
+                session_id,
+                message_id: "m".into(),
+                call_id: call_id.into(),
+                name: name.into(),
+            }),
+            0.0,
+        );
+        let called = live.apply(
+            &session(|session_id| EventKind::ToolCalled {
+                session_id,
+                message_id: "m".into(),
+                call_id: call_id.into(),
+                input,
+            }),
+            1.0,
+        );
+        let [Change::Put(running)] = called.as_slice() else {
+            panic!("{called:?}");
+        };
+        assert!(files_of(running).is_empty(), "nothing shown while it runs");
+        let ended = live.apply(
+            &session(|session_id| EventKind::ToolEnded {
+                session_id,
+                message_id: "m".into(),
+                call_id: call_id.into(),
+                failed: false,
+                error: None,
+                files,
+            }),
+            2.0,
+        );
+        let [Change::Put(done)] = ended.as_slice() else {
+            panic!("{ended:?}");
+        };
+        assert_eq!(files_of(done).len(), 1, "{done:?}");
+    }
 }

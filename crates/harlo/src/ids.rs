@@ -43,3 +43,30 @@ pub const VARIANT: &str = "variant";
 
 /// The model picker.
 pub const MODEL: &str = "model";
+
+/// The composer's shield, which sets what asks first.
+pub const SHIELD: &str = "shield";
+
+/// The card asking to approve an action.
+pub const APPROVAL: &str = "approval";
+
+/// The approval card's "Allow once" button.
+pub const ALLOW: &str = "allow";
+
+/// The reason typed when refusing an approval.
+pub const REFUSE_REASON: &str = "refuse-reason";
+
+/// The card with the agent's questions.
+pub const QUESTION: &str = "question";
+
+/// The question card's "Send answer" button.
+pub const ANSWER: &str = "answer";
+
+/// The card for a staged undo.
+pub const UNDO: &str = "undo";
+
+/// The undo card's "Undo" button, which keeps it.
+pub const UNDO_KEEP: &str = "undo-keep";
+
+/// The Changes panel's commit message.
+pub const COMMIT_MESSAGE: &str = "commit-message";

@@ -15,29 +15,24 @@ use iced::widget::Id;
 use iced_test::Simulator;
 use support::{demo, settings, settle};
 
-fn both() -> Shown {
-    Shown {
-        sidebar: true,
-        panel: true,
-    }
+/// The context panel's width.
+const PANEL: Option<f32> = Some(harlo::style::size::PANEL);
+
+/// Which sides are on screen: (sidebar, panel).
+fn sides(shown: Shown) -> (bool, bool) {
+    (shown.sidebar, shown.panel)
+}
+
+fn both() -> (bool, bool) {
+    (true, true)
 }
 
 #[test]
 fn the_right_panel_makes_way_first_then_the_sidebar() {
-    let shown = |width| fit::shown(width, true, true, None);
-    assert_eq!(shown(1_588.0), both());
-    let sidebar_only = Shown {
-        sidebar: true,
-        panel: false,
-    };
-    assert_eq!(shown(1_100.0), sidebar_only);
-    assert_eq!(
-        shown(900.0),
-        Shown {
-            sidebar: false,
-            panel: false,
-        }
-    );
+    let shown = |width| fit::shown(width, true, PANEL, None);
+    assert_eq!(sides(shown(1_588.0)), both());
+    assert_eq!(sides(shown(1_100.0)), (true, false));
+    assert_eq!(sides(shown(900.0)), (false, false));
     for width in [720.0, 900.0, 1_100.0, 1_588.0] {
         assert!(
             shown(width).main_width(width) >= MAIN_MIN,
@@ -49,30 +44,31 @@ fn the_right_panel_makes_way_first_then_the_sidebar() {
 #[test]
 fn a_panel_opened_without_room_stays_and_the_other_makes_way() {
     assert_eq!(
-        fit::shown(1_100.0, true, true, Some(Side::Panel)),
-        Shown {
-            sidebar: false,
-            panel: true,
-        }
+        sides(fit::shown(1_100.0, true, PANEL, Some(Side::Panel))),
+        (false, true)
     );
     // Alone and still too wide, it stays: the user asked for it.
     assert_eq!(
-        fit::shown(800.0, true, false, Some(Side::Sidebar)),
-        Shown {
-            sidebar: true,
-            panel: false,
-        }
+        sides(fit::shown(800.0, true, None, Some(Side::Sidebar))),
+        (true, false)
     );
+}
+
+#[test]
+fn the_wider_changes_panel_makes_way_sooner() {
+    let width = 1_300.0;
+    let wide = Some(Panel::Changes.width());
+    assert_eq!(sides(fit::shown(width, true, PANEL, None)), both());
+    let shown = fit::shown(width, true, wide, None);
+    assert_eq!(sides(shown), (true, false));
+    assert!(shown.main_width(width) >= MAIN_MIN);
 }
 
 #[test]
 fn a_closed_panel_never_comes_back_by_itself() {
     assert_eq!(
-        fit::shown(1_588.0, false, false, None),
-        Shown {
-            sidebar: false,
-            panel: false,
-        }
+        sides(fit::shown(1_588.0, false, None, None)),
+        (false, false)
     );
 }
 

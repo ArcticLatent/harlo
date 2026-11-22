@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use opencode_client::{EventKind, Message, Part, ToolCall, ToolStatus};
+use opencode_client::{EventKind, FileDiff, Message, Part, ToolCall, ToolStatus};
 use serde_json::Value;
 
 /// Characters a tool detail or thought summary keeps before "…".
@@ -48,7 +48,7 @@ pub enum Entry {
         /// The whole reasoning text.
         text: String,
     },
-    /// A tool call, shown as one line.
+    /// A tool call, shown as one line, with the changes it made below.
     Tool {
         /// Stable row key.
         key: String,
@@ -62,6 +62,8 @@ pub enum Entry {
         status: ToolStatus,
         /// How long it took, once finished.
         took: Option<Duration>,
+        /// The files it changed, once it finished: an edit's or a write's.
+        files: Vec<FileDiff>,
     },
     /// A run that didn't succeed.
     Stopped {
@@ -225,6 +227,27 @@ fn tool(message: &str, call: &ToolCall) -> Entry {
         detail: shorten(&tool_detail(&call.name, &call.input)),
         status: call.status,
         took: call.took_ms.map(millis),
+        files: changes(&call.name, call.status, &call.input, &call.files),
+    }
+}
+
+/// The files a finished tool call changed.
+///
+/// An edit reports its patches. A write reports only its input, so the
+/// content it wrote is shown as added.
+fn changes(name: &str, status: ToolStatus, input: &Value, files: &[FileDiff]) -> Vec<FileDiff> {
+    if status != ToolStatus::Completed {
+        return Vec::new();
+    }
+    if !files.is_empty() || name != "write" {
+        return files.to_vec();
+    }
+    let path = input["path"]
+        .as_str()
+        .or_else(|| input["filePath"].as_str());
+    match (path, input["content"].as_str()) {
+        (Some(path), Some(content)) => vec![crate::diff::written(path, content)],
+        _ => Vec::new(),
     }
 }
 
@@ -257,6 +280,7 @@ struct OpenTool {
     name: String,
     started: f64,
     detail: String,
+    input: Value,
 }
 
 /// A prompt waiting in the inbox, shown once it's delivered.
@@ -366,20 +390,25 @@ impl Live {
                     name: name.clone(),
                     started: time,
                     detail: String::new(),
+                    input: Value::Null,
                 };
-                let change = Change::Put(open.entry(ToolStatus::Streaming, None));
+                let change = Change::Put(open.entry(ToolStatus::Streaming, None, &[]));
                 self.tools.insert(call_id.clone(), open);
                 vec![change]
             }
             EventKind::ToolCalled { call_id, input, .. } => match self.tools.get_mut(call_id) {
                 Some(open) => {
                     open.detail = shorten(&tool_detail(&open.name, input));
-                    vec![Change::Put(open.entry(ToolStatus::Running, None))]
+                    open.input = input.clone();
+                    vec![Change::Put(open.entry(ToolStatus::Running, None, &[]))]
                 }
                 None => vec![Change::Reload],
             },
             EventKind::ToolEnded {
-                call_id, failed, ..
+                call_id,
+                failed,
+                files,
+                ..
             } => match self.tools.remove(call_id) {
                 Some(open) => {
                     let status = if *failed {
@@ -388,7 +417,7 @@ impl Live {
                         ToolStatus::Completed
                     };
                     let took = millis(time - open.started);
-                    vec![Change::Put(open.entry(status, Some(took)))]
+                    vec![Change::Put(open.entry(status, Some(took), files))]
                 }
                 None => vec![Change::Reload],
             },
@@ -433,6 +462,8 @@ impl Live {
                     state: Compaction::Failed(error.clone()),
                 })]
             }
+            // A kept undo removed messages.
+            EventKind::RevertCommitted { .. } => vec![Change::Reload],
             // A finished run reloads, so the rows match what the server stored.
             EventKind::Done { .. } => {
                 self.tools.clear();
@@ -444,7 +475,7 @@ impl Live {
 }
 
 impl OpenTool {
-    fn entry(&self, status: ToolStatus, took: Option<Duration>) -> Entry {
+    fn entry(&self, status: ToolStatus, took: Option<Duration>, files: &[FileDiff]) -> Entry {
         Entry::Tool {
             key: self.key.clone(),
             name: self.name.clone(),
@@ -452,6 +483,7 @@ impl OpenTool {
             detail: self.detail.clone(),
             status,
             took,
+            files: changes(&self.name, status, &self.input, files),
         }
     }
 }

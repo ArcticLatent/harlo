@@ -44,6 +44,8 @@ pub struct SessionSummary {
     pub age: Duration,
     /// Whether the session is working right now.
     pub busy: bool,
+    /// Whether it waits for the user: an approval or an answer.
+    pub waiting: bool,
 }
 
 impl Project {

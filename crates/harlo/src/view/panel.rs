@@ -2,20 +2,18 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::theme::Tokens;
 use iced::widget::{button, center, column, container, row, rule, space, text};
 use iced::{Center, Element, Fill};
 use lucide_icons::Icon;
 
-use crate::app::{Message, Panel};
+use crate::app::{App, ChangesEvent, Message, Panel};
 use crate::ids;
 use crate::style::{self, size};
 use crate::view::icon;
 
 /// The open panel, with a divider on its left edge.
-///
-/// `session_open` says whether a session is shown, which changes the empty state.
-pub fn view(t: &Tokens, panel: Panel, session_open: bool) -> Element<'static, Message> {
+pub fn view(app: &App, panel: Panel) -> Element<'_, Message> {
+    let t = &app.tokens;
     let close = button(center(icon(Icon::X, 14.0, t.icon_base)))
         .width(30)
         .height(30)
@@ -33,27 +31,46 @@ pub fn view(t: &Tokens, panel: Panel, session_open: bool) -> Element<'static, Me
     .height(74)
     .padding([0, 18]);
     header = header.push(space().width(Fill));
-    if panel == Panel::Context {
-        header = header.push(icon(Icon::RefreshCw, 15.0, t.icon_base));
+    match panel {
+        Panel::Context => header = header.push(icon(Icon::RefreshCw, 15.0, t.icon_base)),
+        Panel::Changes => {
+            header = header.push(
+                button(center(icon(Icon::RefreshCw, 14.0, t.icon_base)))
+                    .width(30)
+                    .height(30)
+                    .padding(0)
+                    .on_press(Message::Changes(ChangesEvent::Refresh))
+                    .style(style::round(t)),
+            );
+        }
+        Panel::Todos | Panel::Files | Panel::Notes => {}
     }
     let header = header.push(container(close).id(ids::PANEL_CLOSE));
-    let body = text(if session_open {
-        "Nothing to show for this session yet."
+    let body: Element<'_, Message> = if panel == Panel::Changes {
+        crate::view::changes::body(app)
     } else {
-        "No session selected."
-    })
-    .size(size::LABEL)
-    .color(style::color(t.text_base));
+        container(
+            text(if app.active.is_some() {
+                "Nothing to show for this session yet."
+            } else {
+                "No session selected."
+            })
+            .size(size::LABEL)
+            .color(style::color(t.text_base)),
+        )
+        .padding([20, 18])
+        .into()
+    };
     let content = column![
         header,
         rule::horizontal(1).style(style::divider(t.border_weaker_base)),
-        container(body).padding([20, 18])
+        body
     ];
     row![
         rule::vertical(1).style(style::divider(t.border_weak_base)),
         content
     ]
-    .width(size::PANEL + 1.0)
+    .width(panel.width() + 1.0)
     .height(Fill)
     .into()
 }

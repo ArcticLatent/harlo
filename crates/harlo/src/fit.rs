@@ -34,12 +34,14 @@ pub enum Side {
 }
 
 /// Which side panels are on screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shown {
     /// The sidebar is on screen.
     pub sidebar: bool,
     /// The right panel is on screen.
     pub panel: bool,
+    /// How wide the right panel is, when it's on screen.
+    pub panel_width: f32,
 }
 
 impl Shown {
@@ -51,7 +53,7 @@ impl Shown {
             main -= size::SIDEBAR;
         }
         if self.panel {
-            main -= size::PANEL;
+            main -= self.panel_width;
         }
         main
     }
@@ -68,11 +70,16 @@ impl Shown {
 
 /// Works out which of the wanted panels are on screen in a window `width` wide.
 ///
+/// `panel` is the width of the right panel the user has open, if any.
 /// `keep` is a panel the user opened while it didn't fit; it stays, and the
 /// other one makes way.
 #[must_use]
-pub fn shown(width: f32, sidebar: bool, panel: bool, keep: Option<Side>) -> Shown {
-    let mut shown = Shown { sidebar, panel };
+pub fn shown(width: f32, sidebar: bool, panel: Option<f32>, keep: Option<Side>) -> Shown {
+    let mut shown = Shown {
+        sidebar,
+        panel: panel.is_some(),
+        panel_width: panel.unwrap_or_default(),
+    };
     let order = if keep == Some(Side::Panel) {
         [Side::Sidebar, Side::Panel]
     } else {

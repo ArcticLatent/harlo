@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use harlo_core::workspace::{Fetch, Fetched, Snapshot, Workspace};
-use opencode_client::{Delivery, EventKind, InboxItem, ModelRef, Permission, Project, Session};
+use opencode_client::{
+    Delivery, Effect, EventKind, Form, InboxItem, ModelRef, Permission, Project, Revert, Rule,
+    Session,
+};
 
 /// "Now" in the tests: 2026-11-21, in milliseconds.
 const NOW_MS: f64 = 1_795_000_000_000.0;
@@ -41,6 +44,7 @@ fn session(id: &str, project: &str, directory: &str, hours_ago: f64) -> Session 
         created: NOW_MS - hours_ago * HOUR_MS,
         updated: NOW_MS - hours_ago * HOUR_MS,
         revert: None,
+        permissions: Vec::new(),
     }
 }
 
@@ -71,6 +75,8 @@ fn snapshot() -> Snapshot {
             },
         ],
         active: vec!["s3".into()],
+        permissions: Vec::new(),
+        forms: Vec::new(),
     }
 }
 
@@ -344,6 +350,17 @@ fn asked(id: &str) -> Permission {
         action: "shell".into(),
         resources: vec!["cargo test".into()],
         save: vec!["cargo *".into()],
+        message: None,
+        files: Vec::new(),
+    }
+}
+
+fn question(id: &str, session: &str) -> Form {
+    Form {
+        id: id.into(),
+        session_id: session.into(),
+        title: "Questions".into(),
+        fields: Vec::new(),
     }
 }
 
@@ -381,4 +398,106 @@ fn requests_waiting_for_approval_follow_events_and_end_with_the_run() {
         NOW_MS,
     );
     assert!(ws.permissions("s1").is_empty());
+}
+
+#[test]
+fn questions_follow_events_and_end_with_the_run() {
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    let _ = ws.fetched(Fetched::Forms("s1".into(), vec![question("frm_1", "s1")]));
+    let _ = ws.apply(&EventKind::FormCreated(question("frm_2", "s1")), NOW_MS);
+    let _ = ws.apply(&EventKind::FormCreated(question("frm_2", "s1")), NOW_MS);
+    let ids =
+        |ws: &Workspace| -> Vec<String> { ws.forms("s1").iter().map(|f| f.id.clone()).collect() };
+    assert_eq!(
+        ids(&ws),
+        ["frm_1", "frm_2"],
+        "asked once each, oldest first"
+    );
+    assert!(ws.needs_user("s1"));
+
+    let _ = ws.apply(
+        &EventKind::FormSettled {
+            session_id: "s1".into(),
+            form_id: "frm_1".into(),
+        },
+        NOW_MS,
+    );
+    assert_eq!(ids(&ws), ["frm_2"]);
+    // Answered here: gone at once, before the server says so.
+    ws.settle_form("s1", "frm_2");
+    assert!(!ws.needs_user("s1"));
+
+    let _ = ws.apply(&EventKind::FormCreated(question("frm_3", "s1")), NOW_MS);
+    let _ = ws.apply(
+        &EventKind::Done {
+            session_id: "s1".into(),
+            outcome: "interrupted".into(),
+        },
+        NOW_MS,
+    );
+    assert!(ws.forms("s1").is_empty());
+}
+
+#[test]
+fn a_reconnect_replaces_what_waits_for_the_user() {
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    // Asked before the connection dropped, then answered elsewhere.
+    let _ = ws.apply(&EventKind::PermissionAsked(asked("per_old")), NOW_MS);
+    let _ = ws.apply(&EventKind::FormCreated(question("frm_old", "s1")), NOW_MS);
+    // While away, s3 asked for approval and s4 asked a question.
+    let away = Snapshot {
+        permissions: vec![Permission {
+            session_id: "s3".into(),
+            ..asked("per_new")
+        }],
+        forms: vec![question("frm_new", "s4")],
+        ..snapshot()
+    };
+    ws.resync(away);
+    assert!(!ws.needs_user("s1"), "answered elsewhere, so gone");
+    assert_eq!(ws.permissions("s3")[0].id, "per_new");
+    assert_eq!(ws.forms("s4")[0].id, "frm_new");
+}
+
+#[test]
+fn a_sessions_rules_follow_events() {
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    let rules = vec![Rule::any("*", Effect::Allow)];
+    let _ = ws.apply(
+        &EventKind::SessionPermissions {
+            session_id: "s1".into(),
+            rules: rules.clone(),
+        },
+        NOW_MS,
+    );
+    assert_eq!(ws.session("s1").map(|s| s.permissions.clone()), Some(rules));
+}
+
+#[test]
+fn a_staged_undo_follows_events() {
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    let revert = Revert {
+        message_id: "msg_1".into(),
+        files: Vec::new(),
+    };
+    let staged = |ws: &Workspace| ws.session("s1").and_then(|s| s.revert.clone());
+    let _ = ws.apply(
+        &EventKind::RevertStaged {
+            session_id: "s1".into(),
+            revert: revert.clone(),
+        },
+        NOW_MS,
+    );
+    assert_eq!(staged(&ws), Some(revert));
+    let _ = ws.apply(
+        &EventKind::RevertCommitted {
+            session_id: "s1".into(),
+        },
+        NOW_MS,
+    );
+    assert_eq!(staged(&ws), None, "kept elsewhere, the card goes");
 }

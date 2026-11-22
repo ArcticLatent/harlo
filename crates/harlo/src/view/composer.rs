@@ -81,6 +81,7 @@ pub fn view<'a>(
     t: &Tokens,
     composer: Composer<'a>,
     controls: Option<Element<'a, Message>>,
+    shield: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let menu_open = composer.menu.is_some_and(|m| !m.items.is_empty());
     let editor = text_editor(composer.content)
@@ -115,7 +116,7 @@ pub fn view<'a>(
         .style(style::ghost(t, false));
     let mut tools = row![
         container(attach).id(ids::ATTACH),
-        icon(Icon::ShieldUser, 17.0, t.icon_base),
+        shield,
         space().width(Fill),
     ]
     .spacing(14)

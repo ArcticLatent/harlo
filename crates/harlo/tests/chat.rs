@@ -1,5 +1,6 @@
 //! Live chat in an open session: streaming rows, tool groups, stop/queue/steer,
-//! the `/` and `@` menus, the pickers and attachments.
+//! the `/` and `@` menus, the pickers and attachments, and the cards asking
+//! for approvals and answers.
 
 // Rust guideline compliant 2026-10-09
 
@@ -8,9 +9,13 @@ mod support;
 use std::path::PathBuf;
 
 use harlo::{App, Message, ModelChoice, Picker, Variant, ids};
-use harlo_core::server::{Agent, Catalog, Command, Delivery, Model, Skill, Update};
+use harlo_core::approvals::Shield;
+use harlo_core::server::{
+    Agent, Answer, Catalog, Choice, Command, Delivery, Effect, Field, FieldKind, FileDiff, Model,
+    PermissionReply, Rule, Skill, Update,
+};
 use harlo_core::timeline::{Compaction, Entry};
-use harlo_core::workspace::{Event, EventKind, Fetched, InboxItem, Permission};
+use harlo_core::workspace::{Event, EventKind, Fetched, Form, InboxItem, Permission, Revert};
 use iced::Point;
 use iced::keyboard::{Modifiers, key};
 use iced::widget::Id;
@@ -231,6 +236,7 @@ fn a_run_streams_in_and_its_tools_fold_up_when_done() {
                 call_id: call.into(),
                 failed: false,
                 error: None,
+                files: Vec::new(),
             },
             time,
         ));
@@ -691,10 +697,14 @@ fn the_line_above_the_composer_says_what_the_agent_is_doing() {
             action: "shell".into(),
             resources: vec!["cargo test".into()],
             save: Vec::new(),
+            message: None,
+            files: Vec::new(),
         }),
         2.0,
     ));
-    assert!(shows(&app, "Build is waiting for approval to shell"));
+    // A card asks instead of the line.
+    assert!(shows(&app, "Build wants to run a command"));
+    assert!(!shows(&app, "Build is running Bash"));
     let _ = app.update(event(
         EventKind::PermissionReplied {
             session_id: PI_UPDATE.into(),
@@ -871,4 +881,441 @@ fn the_folder_menu_offers_to_add_a_project() {
     ))));
     assert_eq!(app.new_folder.as_deref(), Some("/tmp/fresh-idea"));
     assert!(shows(&app, "fresh-idea"));
+}
+
+fn approval(id: &str, action: &str, resources: &[&str]) -> Permission {
+    Permission {
+        id: id.into(),
+        session_id: PI_UPDATE.into(),
+        action: action.into(),
+        resources: resources.iter().map(|r| (*r).to_owned()).collect(),
+        save: vec!["cargo *".into()],
+        message: None,
+        files: Vec::new(),
+    }
+}
+
+/// Whether the sidebar marks "pi update" as waiting for the user.
+fn marked_waiting(app: &App) -> bool {
+    app.projects
+        .iter()
+        .flat_map(|p| p.sessions.iter())
+        .any(|s| s.id == PI_UPDATE && s.waiting)
+}
+
+#[test]
+fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
+    let mut app = chatting();
+    let _ = app.update(event(
+        EventKind::PermissionAsked(approval("per_1", "shell", &["cargo test"])),
+        1.0,
+    ));
+    assert!(shows(&app, "Build wants to run a command"));
+    assert!(shows(&app, "cargo test"));
+    assert!(shows(&app, "Always allow cargo *"));
+    assert!(marked_waiting(&app), "the sidebar marks the session");
+
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click(Id::new(ids::ALLOW));
+    });
+    assert!(
+        messages.iter().any(|m| matches!(
+            m,
+            Message::Approve { request, reply: PermissionReply::Once } if request == "per_1"
+        )),
+        "{messages:?}"
+    );
+
+    // While the answer is on its way, the card takes no other.
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("Deny");
+    });
+    assert!(messages.is_empty(), "{messages:?}");
+    // A failed answer says so, and the card can be answered again.
+    let _ = app.update(Message::Answered(
+        PI_UPDATE.into(),
+        "per_1".into(),
+        Err("Couldn't answer: the server went away".into()),
+    ));
+    assert!(shows(&app, "Couldn't answer: the server went away"));
+
+    // Refusing with a reason swaps the buttons for a box to say why.
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("Deny with a reason…");
+    });
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::Refuse(id) if id == "per_1")),
+        "{messages:?}"
+    );
+    assert!(shows(&app, "Tell Build what to do instead"));
+    let _ = app.update(Message::RefuseReason("run cargo check".into()));
+    let _ = app.update(Message::RefuseCancel);
+    assert!(shows(&app, "Allow once"), "cancelled, the buttons are back");
+
+    // Answered, here or elsewhere, the card goes.
+    let _ = app.update(Message::Answered(PI_UPDATE.into(), "per_1".into(), Ok(())));
+    assert!(!shows(&app, "Build wants to run a command"));
+    assert!(!marked_waiting(&app));
+}
+
+#[test]
+fn an_edit_approval_shows_the_change_and_how_many_wait() {
+    let mut app = chatting();
+    let edit = Permission {
+        files: vec![FileDiff {
+            file: "e.txt".into(),
+            patch: "--- e.txt\n+++ e.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n".into(),
+            additions: 1,
+            deletions: 1,
+            status: "modified".into(),
+        }],
+        ..approval("per_1", "edit", &["e.txt"])
+    };
+    let _ = app.update(event(EventKind::PermissionAsked(edit), 1.0));
+    let _ = app.update(event(
+        EventKind::PermissionAsked(approval("per_2", "shell", &["ls"])),
+        2.0,
+    ));
+    assert!(shows(&app, "Build wants to edit a file"));
+    assert!(shows(&app, "e.txt"));
+    assert!(shows(&app, "three"), "the patch's lines");
+    assert!(shows(&app, "two"));
+    assert!(shows(&app, "1 of 2"));
+}
+
+fn colour_question() -> Form {
+    let field = |key: &str, title: &str, kind: FieldKind| Field {
+        key: key.into(),
+        title: Some(title.into()),
+        description: None,
+        required: true,
+        hidden: false,
+        when: Vec::new(),
+        kind,
+    };
+    let choices = |labels: &[&str]| -> Vec<Choice> {
+        labels
+            .iter()
+            .map(|l| Choice {
+                value: (*l).into(),
+                label: (*l).into(),
+                description: None,
+            })
+            .collect()
+    };
+    Form {
+        id: "frm_1".into(),
+        session_id: PI_UPDATE.into(),
+        title: "Questions".into(),
+        fields: vec![
+            field(
+                "colour",
+                "Which colour?",
+                FieldKind::Text {
+                    options: choices(&["Red", "Blue"]),
+                    custom: true,
+                    placeholder: None,
+                    default: None,
+                },
+            ),
+            field(
+                "extras",
+                "Which extras?",
+                FieldKind::Multiselect {
+                    options: choices(&["Tests", "Docs"]),
+                    custom: false,
+                    min_items: None,
+                    max_items: None,
+                    default: Vec::new(),
+                },
+            ),
+        ],
+    }
+}
+
+#[test]
+fn a_question_card_takes_answers_and_says_what_is_missing() {
+    let mut app = chatting();
+    let _ = app.update(event(EventKind::FormCreated(colour_question()), 1.0));
+    assert!(shows(&app, "Build has a question"));
+    assert!(shows(&app, "Which colour?"));
+    assert!(marked_waiting(&app));
+
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("Blue");
+    });
+    assert!(messages.iter().any(|m| matches!(
+        m,
+        Message::FormChoose { key, value, .. } if key == "colour" && value == "Blue"
+    )));
+
+    // Nothing chosen for the extras yet: sending says so instead.
+    let _ = app.update(Message::FormSend("frm_1".into()));
+    assert!(shows(&app, "Needs an answer"));
+    let _ = interact(&mut app, |ui| {
+        let _ = ui.click("Docs");
+    });
+    assert!(!shows(&app, "Needs an answer"), "answering clears it");
+    let draft = app.drafts.get("frm_1").expect("a draft");
+    let form = colour_question();
+    assert_eq!(
+        draft.answers(&form),
+        Ok(vec![
+            ("colour".into(), Answer::Text("Blue".into())),
+            ("extras".into(), Answer::List(vec!["Docs".into()])),
+        ])
+    );
+
+    let _ = app.update(Message::Answered(PI_UPDATE.into(), "frm_1".into(), Ok(())));
+    assert!(!shows(&app, "Build has a question"));
+    assert!(!marked_waiting(&app));
+}
+
+#[test]
+fn the_shield_sets_what_asks_first() {
+    let mut app = chatting();
+    assert_eq!(app.current_shield(), Shield::Agent);
+    // Rules set from another client show here.
+    let _ = app.update(event(
+        EventKind::SessionPermissions {
+            session_id: PI_UPDATE.into(),
+            rules: vec![Rule::any("*", Effect::Allow)],
+        },
+        1.0,
+    ));
+    assert_eq!(app.current_shield(), Shield::Trusted);
+
+    // A new session keeps its choice for when it's created.
+    let _ = app.update(Message::NewSession(None));
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click(Id::new(ids::SHIELD));
+    });
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::TogglePicker(Picker::Shield)))
+    );
+    assert!(shows(&app, "Ask before edits and commands"));
+    assert!(shows(&app, "The agent's own rules decide"));
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("Ask before edits and commands");
+    });
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::PickShield(Shield::Careful)))
+    );
+    assert_eq!(app.current_shield(), Shield::Careful);
+    assert_eq!(app.picker, None, "choosing closes the menu");
+}
+
+/// An edit's events, ending with its patch.
+fn edit_events(app: &mut App, call: &str, patch: &str, (added, removed): (u64, u64)) {
+    let kinds = [
+        EventKind::ToolStarted {
+            session_id: PI_UPDATE.into(),
+            message_id: "msg_e".into(),
+            call_id: call.into(),
+            name: "edit".into(),
+        },
+        EventKind::ToolCalled {
+            session_id: PI_UPDATE.into(),
+            message_id: "msg_e".into(),
+            call_id: call.into(),
+            input: json!({ "path": "README.md" }),
+        },
+        EventKind::ToolEnded {
+            session_id: PI_UPDATE.into(),
+            message_id: "msg_e".into(),
+            call_id: call.into(),
+            failed: false,
+            error: None,
+            files: vec![FileDiff {
+                file: "README.md".into(),
+                patch: patch.into(),
+                additions: added,
+                deletions: removed,
+                status: "modified".into(),
+            }],
+        },
+    ];
+    for (kind, at) in kinds.into_iter().zip([1.0, 2.0, 3.0]) {
+        let _ = app.update(event(kind, at));
+    }
+    support::settle(app);
+}
+
+#[test]
+fn an_edit_shows_its_diff_under_the_row() {
+    let mut app = chatting();
+    edit_events(
+        &mut app,
+        "call_e",
+        "@@ -11 +11 @@\n-Open Blender; it serves 9876.\n+Open Blender; it serves 9877.\n",
+        (1, 1),
+    );
+    assert!(shows(&app, "Edit"));
+    assert!(shows(&app, "+1"));
+    assert!(shows(&app, "−1"));
+    assert!(shows(&app, "11"), "line numbers in the gutter");
+
+    // A long one shows its first lines, and the rest on request.
+    let long = (1..=30).fold(String::new(), |all, n| all + &format!("+line {n}\n"));
+    edit_events(
+        &mut app,
+        "call_l",
+        &format!("@@ -0,0 +1,30 @@\n{long}"),
+        (30, 0),
+    );
+    // Two calls fold into a group, closed once they're done.
+    let _ = app.update(Message::Timeline(
+        PI_UPDATE.into(),
+        harlo::timeline::Event::ToggleGroup("msg_e/tool/call_e".into()),
+    ));
+    assert!(shows(&app, "Edited 2 files"));
+    assert!(shows(&app, "… 18 more lines"));
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("… 18 more lines");
+    });
+    assert!(
+        messages.iter().any(|m| matches!(
+            m,
+            Message::Timeline(_, harlo::timeline::Event::ToggleDiff(_))
+        )),
+        "{messages:?}"
+    );
+    assert!(!shows(&app, "… 18 more lines"), "shown whole");
+}
+
+/// "pi update" with one stored prompt and the agent's edit after it.
+fn with_history() -> App {
+    let mut app = chatting();
+    let rows = vec![
+        Entry::Prompt {
+            key: "msg_p1".into(),
+            text: "Change the port to 9877".into(),
+            attachments: Vec::new(),
+            skills: Vec::new(),
+        },
+        Entry::Answer {
+            key: "msg_a1/text/0".into(),
+            text: "Done.".into(),
+        },
+    ];
+    let _ = app.update(Message::History(PI_UPDATE.into(), Ok(rows)));
+    support::settle(&mut app);
+    app
+}
+
+fn patch(file: &str, patch: &str) -> FileDiff {
+    FileDiff {
+        file: file.into(),
+        patch: patch.into(),
+        additions: 1,
+        deletions: 1,
+        status: "modified".into(),
+    }
+}
+
+#[test]
+fn undo_shows_what_goes_back_and_whose_edits_it_overwrites() {
+    let mut app = with_history();
+    assert!(!shows(&app, "Undo"), "offered only under the pointer");
+    let _ = app.update(Message::Timeline(
+        PI_UPDATE.into(),
+        harlo::timeline::Event::Hover(Some("msg_p1".into())),
+    ));
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click("Undo");
+    });
+    assert!(
+        messages.iter().any(|m| matches!(
+            m,
+            Message::Timeline(_, harlo::timeline::Event::Undo(id)) if id == "msg_p1"
+        )),
+        "{messages:?}"
+    );
+
+    // Staged: the agent changed 9876 to 9877, and the user added a line since.
+    let agent = vec![patch("README.md", "@@ -1 +1 @@\n-port 9876\n+port 9877\n")];
+    let revert = Revert {
+        message_id: "msg_p1".into(),
+        files: vec![patch(
+            "README.md",
+            "@@ -1,2 +1 @@\n-port 9877\n-my own note\n+port 9876\n",
+        )],
+    };
+    let _ = app.update(Message::UndoStaged(PI_UPDATE.into(), Ok((agent, revert))));
+    assert!(shows(
+        &app,
+        "Undo “Change the port to 9877” and everything after it?"
+    ));
+    assert!(shows(&app, "README.md"));
+    assert!(shows(
+        &app,
+        "This overwrites your own edits to README.md (1 line)."
+    ));
+
+    let messages = interact(&mut app, |ui| {
+        let _ = ui.click(Id::new(ids::UNDO_KEEP));
+    });
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::UndoKeep(id) if id == PI_UPDATE)),
+        "{messages:?}"
+    );
+    let _ = app.update(Message::UndoSettled {
+        session: PI_UPDATE.into(),
+        kept: true,
+        result: Ok(()),
+    });
+    assert!(!shows(&app, "and everything after it?"), "the card goes");
+    assert_eq!(
+        app.composer.text().trim(),
+        "Change the port to 9877",
+        "the prompt comes back to send again"
+    );
+}
+
+#[test]
+fn a_cancelled_undo_leaves_the_composer_alone() {
+    let mut app = with_history();
+    let revert = Revert {
+        message_id: "msg_p1".into(),
+        files: Vec::new(),
+    };
+    let _ = app.update(Message::UndoStaged(
+        PI_UPDATE.into(),
+        Ok((Vec::new(), revert)),
+    ));
+    assert!(shows(
+        &app,
+        "No files change; the conversation goes back to before this prompt."
+    ));
+    let _ = app.update(Message::UndoSettled {
+        session: PI_UPDATE.into(),
+        kept: false,
+        result: Ok(()),
+    });
+    assert!(!shows(&app, "and everything after it?"));
+    assert!(app.composer.text().trim().is_empty());
+}
+
+#[test]
+fn a_working_session_offers_no_undo() {
+    let mut app = with_history();
+    let _ = app.update(event(
+        EventKind::Busy {
+            session_id: PI_UPDATE.into(),
+        },
+        1.0,
+    ));
+    let _ = app.update(Message::Timeline(
+        PI_UPDATE.into(),
+        harlo::timeline::Event::Hover(Some("msg_p1".into())),
+    ));
+    assert!(!shows(&app, "Undo"));
 }

@@ -54,6 +54,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 feedback: app.feedback(),
             },
             None,
+            pickers::shield(app),
         )
     ]
     .align_x(Center)

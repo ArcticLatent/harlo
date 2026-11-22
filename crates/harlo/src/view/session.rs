@@ -12,7 +12,7 @@ use crate::app::{App, Message, Panel};
 use crate::style::{self, size};
 use crate::timeline::{self, Activity, Timeline};
 use crate::view::composer::{self, Composer};
-use crate::view::{breathing, icon, pickers};
+use crate::view::{breathing, icon, pickers, waiting};
 use crate::widget::ellipsis;
 
 /// Space either side of the composer.
@@ -49,8 +49,13 @@ pub fn view<'a>(app: &'a App, id: &'a str, timeline: &'a Timeline) -> Element<'a
             feedback: app.feedback(),
         },
         Some(pickers::controls(app)),
+        pickers::shield(app),
     );
-    let composer = container(column![inbox(app, id), composer].spacing(8))
+    let mut stack = column![].spacing(8);
+    if let Some(cards) = waiting::view(app) {
+        stack = stack.push(cards);
+    }
+    let composer = container(stack.push(inbox(app, id)).push(composer))
         .max_width(timeline::WIDTH)
         .padding(Padding {
             top: 4.0,
@@ -83,7 +88,8 @@ fn inbox<'a>(app: &'a App, id: &str) -> Element<'a, Message> {
     let busy = app.is_busy(id);
     let moment = app.moment();
     let mut list = column![].spacing(4);
-    if let Some(activity) = app.activity(id) {
+    // While a card asks the user, it says what the agent waits for.
+    if let Some(activity) = app.activity(id).filter(|_| !app.needs_user(id)) {
         list = list.push(activity_line(app, activity));
     }
     let waiting = app.inbox(id).iter().map(|item| (item, false));
@@ -160,16 +166,7 @@ fn inbox<'a>(app: &'a App, id: &str) -> Element<'a, Message> {
 fn activity_line(app: &App, activity: Activity) -> Element<'_, Message> {
     let t = &app.tokens;
     let moment = app.moment();
-    let agent = app.current_agent().map_or_else(
-        || "The agent".to_owned(),
-        |name| {
-            let mut chars = name.chars();
-            chars
-                .next()
-                .map(|first| first.to_uppercase().chain(chars).collect())
-                .unwrap_or(name)
-        },
-    );
+    let agent = app.agent_name();
     let mut accent = t.text_interactive_base;
     let (glyph, says, detail) = match activity {
         // It can't go on until someone approves; that's not "working".

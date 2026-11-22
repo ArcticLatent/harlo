@@ -3,8 +3,10 @@
 
 Everything runs in scratch folders: a private OpenCode server with the
 scripted model (tools/oc-sandbox.sh), an invisible Xvfb display, and Harlo
-with HOME and every XDG folder inside the scratch folder. The desktop session,
-the shared OpenCode service and the real config are never touched.
+with HOME and every XDG folder inside the scratch folder, and a private D-Bus
+session bus. The desktop session, its notifications and portals, the shared
+OpenCode service and the real config are never touched. Notifications sent on
+the private bus are logged instead of shown.
 
     tools/gui-drive.py start [--size 1588x947]   build, then start everything
     tools/gui-drive.py shot [name]               screenshot; prints the PNG path
@@ -21,6 +23,7 @@ the shared OpenCode service and the real config are never touched.
     tools/gui-drive.py file PATH TEXT            writes a file in the sandbox project
     tools/gui-drive.py env                       prints the sandbox's URL, folders and display
     tools/gui-drive.py log [N]                   the last N lines of Harlo's output
+    tools/gui-drive.py notifications             desktop notifications Harlo sent
     tools/gui-drive.py restart                   restarts Harlo only (its saved layout stays)
     tools/gui-drive.py stop                      stops everything and removes the scratch folders
 
@@ -106,6 +109,7 @@ def harlo_env(state):
         XDG_STATE_HOME=f"{root}/state",
         XDG_CACHE_HOME=f"{root}/cache",
         HARLO_OPENCODE_PASSWORD=state["password"],
+        DBUS_SESSION_BUS_ADDRESS=state["bus"],
         RUST_BACKTRACE="1",
     )
     return env
@@ -158,6 +162,22 @@ def cmd_start(args):
         if os.path.exists(f"/tmp/.X11-unix/X{state['display'][1:]}"):
             break
         time.sleep(0.1)
+    # A private session bus: notifications and portals never reach the desktop.
+    socket = f"{gui_root}/bus"
+    state["bus"] = f"unix:path={socket}"
+    state["bus_pid"] = spawn(
+        ["dbus-daemon", "--session", "--nofork", "--nopidfile", f"--address={state['bus']}"],
+        dict(os.environ), f"{gui_root}/bus.log",
+    )
+    for _ in range(50):
+        if os.path.exists(socket):
+            break
+        time.sleep(0.1)
+    state["monitor_pid"] = spawn(
+        ["dbus-monitor", "--address", state["bus"],
+         "type='method_call',interface='org.freedesktop.Notifications',member='Notify'"],
+        dict(os.environ), f"{gui_root}/notifications.log",
+    )
     save(state)
     start_harlo(state)
     xdotool(state, "windowmove", state["window"], "0", "0")
@@ -285,6 +305,26 @@ def cmd_log(args):
         print("".join(f.readlines()[-n:]), end="")
 
 
+def cmd_notifications(_args):
+    """Prints each notification sent on the private bus: its summary and body."""
+    state = load()
+    with open(f"{state['gui_root']}/notifications.log", errors="replace") as f:
+        lines = f.read().splitlines()
+    calls, current = [], None
+    for line in lines:
+        if "member=Notify" in line:
+            current = []
+            calls.append(current)
+        elif current is not None and line.strip().startswith("string "):
+            current.append(line.strip()[len("string "):].strip('"'))
+    for strings in calls:
+        # app name, icon, summary, body (then hint keys).
+        if len(strings) >= 4:
+            print(f"{strings[0]}: {strings[2]} — {strings[3]}")
+    if not calls:
+        print("none")
+
+
 def kill(pid):
     try:
         os.kill(pid, signal.SIGTERM)
@@ -304,7 +344,10 @@ def cmd_restart(_args):
 
 def cmd_stop(_args):
     state = load()
-    for pid in [state.get("harlo_pid"), *state.get("clip_pids", []), state.get("xvfb_pid")]:
+    for pid in [
+        state.get("harlo_pid"), *state.get("clip_pids", []), state.get("xvfb_pid"),
+        state.get("monitor_pid"), state.get("bus_pid"),
+    ]:
         if pid:
             kill(pid)
     subprocess.run([f"{REPO}/tools/oc-sandbox.sh", "stop", state["sandbox"]], check=False)
@@ -320,6 +363,7 @@ COMMANDS = {
     "drag": cmd_drag, "scroll": cmd_scroll, "type": cmd_type, "key": cmd_key,
     "clip-text": cmd_clip_text, "clip-image": cmd_clip_image, "resize": cmd_resize,
     "api": cmd_api, "file": cmd_file, "env": cmd_env, "log": cmd_log,
+    "notifications": cmd_notifications,
     "restart": cmd_restart, "stop": cmd_stop,
 }
 

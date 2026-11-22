@@ -14,8 +14,8 @@ use crate::catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 use crate::generated as g;
 use crate::prompt::Prompt;
 use crate::types::{
-    Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply, Project,
-    Revert, ServerInfo, Session,
+    Answer, Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply,
+    Project, Revert, Rule, ServerInfo, Session,
 };
 use crate::{Endpoint, Error, Event};
 
@@ -265,6 +265,23 @@ impl Client {
         .await
     }
 
+    /// Replaces the session's own permission rules, which apply after its agent's.
+    ///
+    /// An empty list leaves the agent's rules alone.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist or the server can't be reached.
+    pub async fn set_permissions(&self, session_id: &str, rules: &[Rule]) -> Result<(), Error> {
+        let rules: Vec<Value> = rules.iter().map(Rule::json).collect();
+        Self::send(
+            self.request(Method::PATCH, &format!("/api/session/{session_id}"))
+                .json(&json!({ "permissions": rules })),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn post(&self, path: &str, body: &Value) -> Result<(), Error> {
         Self::send(self.request(Method::POST, path).json(body)).await?;
         Ok(())
@@ -443,7 +460,10 @@ impl Client {
         })
     }
 
-    /// Answers an approval request.
+    /// Answers an approval request, optionally telling the agent why.
+    ///
+    /// A `message` with [`PermissionReply::Reject`] tells the agent what to
+    /// do instead.
     ///
     /// # Errors
     ///
@@ -454,13 +474,14 @@ impl Client {
         session_id: &str,
         request_id: &str,
         reply: PermissionReply,
+        message: Option<&str>,
     ) -> Result<(), Error> {
         let path = format!("/api/session/{session_id}/permission/{request_id}/reply");
-        Self::send(
-            self.request(Method::POST, &path)
-                .json(&json!({ "decision": reply.as_str() })),
-        )
-        .await?;
+        let mut body = json!({ "decision": reply.as_str() });
+        if let Some(message) = message {
+            body["message"] = Value::from(message);
+        }
+        Self::send(self.request(Method::POST, &path).json(&body)).await?;
         Ok(())
     }
 
@@ -494,7 +515,7 @@ impl Client {
             .unwrap_or_default())
     }
 
-    /// Answers a question; `answer` maps each field key to its value.
+    /// Answers a question with each field's answer, by field key.
     ///
     /// # Errors
     ///
@@ -504,13 +525,32 @@ impl Client {
         &self,
         session_id: &str,
         form_id: &str,
-        answer: Value,
+        answers: &[(String, Answer)],
     ) -> Result<(), Error> {
         let path = format!("/api/session/{session_id}/form/{form_id}/reply");
+        let answer: serde_json::Map<String, Value> = answers
+            .iter()
+            .map(|(key, answer)| (key.clone(), answer.json()))
+            .collect();
         Self::send(
             self.request(Method::POST, &path)
                 .json(&json!({ "answer": answer })),
         )
+        .await?;
+        Ok(())
+    }
+
+    /// Dismisses a question without answering it.
+    ///
+    /// # Errors
+    ///
+    /// When another client answered first, the error's
+    /// [`is_settled`](Error::is_settled) is true: drop the question, don't retry.
+    pub async fn cancel_form(&self, session_id: &str, form_id: &str) -> Result<(), Error> {
+        Self::send(self.request(
+            Method::DELETE,
+            &format!("/api/session/{session_id}/form/{form_id}"),
+        ))
         .await?;
         Ok(())
     }
@@ -576,6 +616,55 @@ impl Client {
     pub async fn diff(&self, session_id: &str) -> Result<Vec<FileDiff>, Error> {
         let v = Self::json(self.request(Method::GET, &format!("/api/session/{session_id}/diff")))
             .await?;
+        decode_list(&v["data"], |item| {
+            Ok(serde_json::from_value::<g::FileDiffInfo>(item.clone())?.into())
+        })
+    }
+
+    /// Returns the uncommitted changes in `directory`'s repository, as diffs.
+    ///
+    /// Each file's patch compares it with the last commit, so staged and
+    /// unstaged changes show together. Untracked files count as added.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or `directory` has no repository.
+    pub async fn working_changes(&self, directory: &str) -> Result<Vec<FileDiff>, Error> {
+        let v = self
+            .list(
+                "/api/vcs/diff",
+                directory,
+                &[("mode", "working"), ("untracked", "files")],
+            )
+            .await?;
+        decode_list(&v, |item| {
+            Ok(serde_json::from_value::<g::FileDiffInfo>(item.clone())?.into())
+        })
+    }
+
+    /// Returns the files the agent changed in `from`'s turn through `to`'s.
+    ///
+    /// Both are user messages; without `to`, only `from`'s turn counts. The
+    /// patches compare the agent's own snapshots, so edits the user made to
+    /// the files since don't show.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a message isn't in the session, `to` comes before `from`,
+    /// or the server can't be reached.
+    pub async fn diff_since(
+        &self,
+        session_id: &str,
+        from: &str,
+        to: Option<&str>,
+    ) -> Result<Vec<FileDiff>, Error> {
+        let mut req = self
+            .request(Method::GET, &format!("/api/session/{session_id}/diff"))
+            .query(&[("from", from)]);
+        if let Some(to) = to {
+            req = req.query(&[("to", to)]);
+        }
+        let v = Self::json(req).await?;
         decode_list(&v["data"], |item| {
             Ok(serde_json::from_value::<g::FileDiffInfo>(item.clone())?.into())
         })

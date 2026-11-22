@@ -36,6 +36,10 @@ rfd = { version = "0.18.0", default-features = false }
 arboard = { version = "3.7.0", default-features = false }
 # Encodes pasted images as PNG (MIT/Apache).
 png = { version = "0.18.1", default-features = false }
+# Desktop notifications when a session needs the user (MIT/Apache); D-Bus in pure Rust.
+notify-rust = { version = "4.19.0", default-features = false }
+# Opens a link a question points to in the user's browser (MIT).
+open = { version = "5.4.5", default-features = false }
 iced-code-editor = { version = "0.7.1", default-features = false }
 # 0.8.0 deadlocks the UI under heavy terminal output; the fix (upstream PR #69)
 # is merged but not yet released. Move back to a crates.io version once one ships.
@@ -48,6 +52,8 @@ syn = { version = "3.0.10", default-features = false }
 prettyplease = { version = "0.3.0", default-features = false }
 
 # Shared.
+# Word-level highlights inside changed diff lines (Apache-2.0).
+similar = { version = "3.2.1", default-features = false }
 rusqlite = { version = "0.43.0", default-features = false }
 dirs = { version = "7.0.0", default-features = false }
 tempfile = { version = "3.27.0", default-features = false }

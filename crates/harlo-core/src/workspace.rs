@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[doc(inline)]
 pub use opencode_client::{
-    Event, EventKind, InboxItem, Message, ModelRef, Part, Permission, Project as ServerProject,
-    Session, ToolCall, ToolStatus,
+    Event, EventKind, Form, InboxItem, Message, ModelRef, Part, Permission,
+    Project as ServerProject, Revert, Session, ToolCall, ToolStatus,
 };
 
 use crate::sessions::{Project, SessionSummary, Worktree, folder_name};
@@ -30,6 +30,10 @@ pub struct Snapshot {
     pub sessions: Vec<Session>,
     /// IDs of sessions working right now.
     pub active: Vec<String>,
+    /// Requests waiting for approval in the working sessions.
+    pub permissions: Vec<Permission>,
+    /// Questions waiting for an answer in the working sessions.
+    pub forms: Vec<Form>,
 }
 
 /// Something the workspace needs loaded to follow an event.
@@ -45,6 +49,8 @@ pub enum Fetch {
     Inbox(String),
     /// A session's requests waiting for approval, by session ID.
     Permissions(String),
+    /// A session's questions waiting for an answer, by session ID.
+    Forms(String),
 }
 
 /// The result of a [`Fetch`].
@@ -60,6 +66,8 @@ pub enum Fetched {
     Inbox(String, Vec<InboxItem>),
     /// A session's requests waiting for approval, by session ID.
     Permissions(String, Vec<Permission>),
+    /// A session's questions waiting for an answer, by session ID.
+    Forms(String, Vec<Form>),
 }
 
 /// Projects, worktrees and sessions on one server, in the user's sidebar order.
@@ -73,6 +81,8 @@ pub struct Workspace {
     inboxes: HashMap<String, Vec<InboxItem>>,
     /// Requests waiting for approval, by session ID.
     permissions: HashMap<String, Vec<Permission>>,
+    /// Questions waiting for an answer, by session ID.
+    forms: HashMap<String, Vec<Form>>,
     /// Project folders in sidebar order; see [`Workspace::order`].
     order: Vec<String>,
 }
@@ -104,10 +114,23 @@ impl Workspace {
             .map(|s| (s.id.clone(), s))
             .collect();
         self.busy = snapshot.active.into_iter().collect();
-        // Inboxes and approvals may have changed while away; whoever shows
-        // one asks again.
+        // Inboxes may have changed while away; whoever shows one asks again.
         self.inboxes.clear();
+        // What waits for the user is replaced: requests answered elsewhere
+        // go, and ones asked while away appear.
         self.permissions.clear();
+        for asked in snapshot.permissions {
+            add(
+                &mut self.permissions,
+                asked.session_id.clone(),
+                asked,
+                |p| &p.id,
+            );
+        }
+        self.forms.clear();
+        for asked in snapshot.forms {
+            add(&mut self.forms, asked.session_id.clone(), asked, |f| &f.id);
+        }
         self.adopt_projects();
     }
 
@@ -180,28 +203,24 @@ impl Workspace {
                 self.touch(session_id, time);
                 Vec::new()
             }
-            EventKind::PermissionAsked(asked) => {
-                let waiting = self
-                    .permissions
-                    .entry(asked.session_id.clone())
-                    .or_default();
-                if !waiting.iter().any(|p| p.id == asked.id) {
-                    waiting.push(asked.clone());
-                }
+            EventKind::PermissionAsked(_)
+            | EventKind::PermissionReplied { .. }
+            | EventKind::FormCreated(_)
+            | EventKind::FormSettled { .. } => {
+                self.apply_waiting(kind);
                 Vec::new()
             }
-            EventKind::PermissionReplied {
-                session_id,
-                request_id,
-            } => {
-                if let Some(waiting) = self.permissions.get_mut(session_id) {
-                    waiting.retain(|p| p.id != *request_id);
-                }
+            EventKind::SessionPermissions { .. }
+            | EventKind::RevertStaged { .. }
+            | EventKind::RevertCleared { .. }
+            | EventKind::RevertCommitted { .. } => {
+                self.apply_session_state(kind);
                 Vec::new()
             }
             EventKind::Done { session_id, .. } => {
                 // A run that ended asks for nothing more.
                 self.permissions.remove(session_id);
+                self.forms.remove(session_id);
                 self.busy.remove(session_id);
                 self.touch(session_id, time);
                 Vec::new()
@@ -211,6 +230,48 @@ impl Workspace {
                 vec![Fetch::Worktrees(project_id.clone())]
             }
             _ => Vec::new(),
+        }
+    }
+
+    /// Applies an event about what waits for the user: approvals and questions.
+    /// Applies a change to a session's own rules or staged undo.
+    fn apply_session_state(&mut self, kind: &EventKind) {
+        let Some(session) = kind.session_id().and_then(|id| self.sessions.get_mut(id)) else {
+            return;
+        };
+        match kind {
+            EventKind::SessionPermissions { rules, .. } => session.permissions.clone_from(rules),
+            EventKind::RevertStaged { revert, .. } => session.revert = Some(revert.clone()),
+            EventKind::RevertCleared { .. } | EventKind::RevertCommitted { .. } => {
+                session.revert = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_waiting(&mut self, kind: &EventKind) {
+        match kind {
+            EventKind::PermissionAsked(asked) => add(
+                &mut self.permissions,
+                asked.session_id.clone(),
+                asked.clone(),
+                |p| &p.id,
+            ),
+            EventKind::PermissionReplied {
+                session_id,
+                request_id,
+            } => self.settle_permission(session_id, request_id),
+            EventKind::FormCreated(asked) => add(
+                &mut self.forms,
+                asked.session_id.clone(),
+                asked.clone(),
+                |f| &f.id,
+            ),
+            EventKind::FormSettled {
+                session_id,
+                form_id,
+            } => self.settle_form(session_id, form_id),
+            _ => {}
         }
     }
 
@@ -243,6 +304,10 @@ impl Workspace {
             }
             Fetched::Permissions(session_id, waiting) => {
                 self.permissions.insert(session_id, waiting);
+                Vec::new()
+            }
+            Fetched::Forms(session_id, waiting) => {
+                self.forms.insert(session_id, waiting);
                 Vec::new()
             }
         }
@@ -304,6 +369,44 @@ impl Workspace {
     #[must_use]
     pub fn permissions(&self, id: &str) -> &[Permission] {
         self.permissions.get(id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Returns a session's questions waiting for an answer, oldest first.
+    ///
+    /// Questions asked while Harlo is attached arrive as events; older ones
+    /// are loaded with [`Fetch::Forms`].
+    #[must_use]
+    pub fn forms(&self, id: &str) -> &[Form] {
+        self.forms.get(id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Returns whether a session waits for the user: an approval or an answer.
+    #[must_use]
+    pub fn needs_user(&self, id: &str) -> bool {
+        !self.permissions(id).is_empty() || !self.forms(id).is_empty()
+    }
+
+    /// Forgets an approval request, answered here or elsewhere.
+    pub fn settle_permission(&mut self, session_id: &str, request_id: &str) {
+        if let Some(waiting) = self.permissions.get_mut(session_id) {
+            waiting.retain(|p| p.id != request_id);
+        }
+    }
+
+    /// Forgets a question, answered or dismissed here or elsewhere.
+    pub fn settle_form(&mut self, session_id: &str, form_id: &str) {
+        if let Some(waiting) = self.forms.get_mut(session_id) {
+            waiting.retain(|f| f.id != form_id);
+        }
+    }
+
+    /// Records a session's staged undo, or that none is staged.
+    ///
+    /// The server announces the same; this shows it without waiting for that.
+    pub fn set_revert(&mut self, session_id: &str, revert: Option<Revert>) {
+        if let Some(s) = self.sessions.get_mut(session_id) {
+            s.revert = revert;
+        }
     }
 
     /// Returns whether a session is working right now.
@@ -393,6 +496,7 @@ impl Workspace {
             maker: session.model.as_ref().map(|m| m.provider_id.clone()),
             age: Duration::from_secs_f64(age_ms / 1000.0),
             busy: self.busy.contains(&session.id),
+            waiting: self.needs_user(&session.id),
         }
     }
 
@@ -426,4 +530,12 @@ impl Workspace {
 fn inside(path: &str, parent: &str) -> bool {
     path.strip_prefix(parent.trim_end_matches('/'))
         .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Adds `item` to `session`'s list in `map`, unless one with its ID is there.
+fn add<T>(map: &mut HashMap<String, Vec<T>>, session: String, item: T, id: impl Fn(&T) -> &String) {
+    let list = map.entry(session).or_default();
+    if !list.iter().any(|other| id(other) == id(&item)) {
+        list.push(item);
+    }
 }

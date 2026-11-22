@@ -46,6 +46,7 @@ fn history() -> Vec<Entry> {
             detail: "SPEC.md".into(),
             status: ToolStatus::Completed,
             took: Some(Duration::from_secs(15)),
+            files: Vec::new(),
         },
         Entry::Answer {
             key: "msg_2/2".into(),

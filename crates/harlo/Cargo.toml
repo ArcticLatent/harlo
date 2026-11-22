@@ -16,6 +16,8 @@ mimalloc = { workspace = true }
 rfd = { workspace = true, features = ["xdg-portal"] }
 arboard = { workspace = true, features = ["image-data", "wayland-data-control"] }
 png = { workspace = true }
+notify-rust = { workspace = true, features = ["z"] }
+open = { workspace = true }
 
 [dev-dependencies]
 iced_test = { workspace = true }

@@ -107,6 +107,7 @@ pub fn snapshot() -> Snapshot {
             created: now_ms - (age as f64) * 1000.0,
             updated: now_ms - (age as f64) * 1000.0,
             revert: None,
+            permissions: Vec::new(),
         })
         .collect();
     Snapshot {
@@ -125,6 +126,8 @@ pub fn snapshot() -> Snapshot {
         .collect(),
         sessions,
         active: Vec::new(),
+        permissions: Vec::new(),
+        forms: Vec::new(),
     }
 }
 

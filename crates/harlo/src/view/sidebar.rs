@@ -354,7 +354,10 @@ fn session_row<'a>(
                 t.text_base
             }))
     };
-    let when: Element<'a, Message> = if session.busy {
+    let when: Element<'a, Message> = if session.waiting {
+        // It waits for an approval or an answer.
+        icon(Icon::ShieldAlert, 14.0, t.icon_warning_base).into()
+    } else if session.busy {
         // It pulses while the session works.
         let working = t.text_interactive_base;
         breathing(icon(Icon::Loader, 13.0, working).style(moment.breathing(working)))

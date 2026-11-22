@@ -19,6 +19,7 @@ use crate::app::{App, Message};
 use crate::style::{self, size};
 use crate::view::icon;
 use crate::widget::{ellipsis, popover};
+use harlo_core::approvals::Shield;
 
 /// Rows a menu shows before it scrolls.
 pub const MENU_ROWS: usize = 8;
@@ -52,6 +53,8 @@ pub enum Picker {
     Variant,
     /// The model.
     Model,
+    /// How much the session may do without asking.
+    Shield,
 }
 
 impl Picker {
@@ -60,7 +63,7 @@ impl Picker {
         match self {
             Self::Agent | Self::Variant => 200.0,
             Self::Folder => 260.0,
-            Self::Model => 320.0,
+            Self::Model | Self::Shield => 320.0,
         }
     }
 
@@ -71,6 +74,7 @@ impl Picker {
             Self::Agent => crate::ids::AGENT,
             Self::Variant => crate::ids::VARIANT,
             Self::Model => crate::ids::MODEL,
+            Self::Shield => crate::ids::SHIELD,
         }
     }
 }
@@ -195,6 +199,18 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 })
                 .collect()
         }
+        Picker::Shield => {
+            let current = app.current_shield();
+            Shield::CHOICES
+                .into_iter()
+                .map(|mode| Item {
+                    selected: mode == current,
+                    label: mode.label().to_owned(),
+                    detail: None,
+                    message: Message::PickShield(mode),
+                })
+                .collect()
+        }
         Picker::Model => {
             let current = app.current_model_choice();
             app.models
@@ -254,6 +270,28 @@ pub fn folder(app: &App) -> Element<'_, Message> {
         Icon::House
     };
     chip(app, Picker::Folder, glyph, label)
+}
+
+/// The shield: how much the session may do without asking, and a menu to change it.
+///
+/// It's lit in the warning colour while nothing asks first.
+pub fn shield(app: &App) -> Element<'_, Message> {
+    let t = &app.tokens;
+    let mode = app.current_shield();
+    let (glyph, colour) = match mode {
+        Shield::Agent => (Icon::ShieldUser, t.icon_base),
+        Shield::Careful => (Icon::ShieldCheck, t.text_interactive_base),
+        Shield::Trusted => (Icon::ShieldOff, t.icon_warning_base),
+        Shield::Custom => (Icon::ShieldEllipsis, t.icon_base),
+    };
+    let open = app.picker == Some(Picker::Shield);
+    let face = button(icon(glyph, 17.0, colour))
+        .padding(2)
+        .on_press(Message::TogglePicker(Picker::Shield))
+        .style(style::ghost(t, open));
+    let anchor: Element<'_, Message> = container(face).id(Picker::Shield.id()).into();
+    let menu = open.then(|| menu(app, Picker::Shield));
+    popover(anchor, menu, Message::ClosePicker).into()
 }
 
 /// A chip showing the current choice, which opens `picker`'s menu.
@@ -326,6 +364,20 @@ fn menu(app: &App, picker: Picker) -> Element<'_, Message> {
             list = list.spacing(SCROLLBAR_GAP);
         }
         card = card.push(list);
+    }
+    if picker == Picker::Shield {
+        card = card
+            .push(
+                rule::horizontal(1).style(style::divider(style::edge(t, t.surface_raised_strong))),
+            )
+            .push(
+                container(
+                    text(app.current_shield().detail())
+                        .size(size::SMALL)
+                        .color(style::color(t.text_weak)),
+                )
+                .padding([4, 10]),
+            );
     }
     if picker == Picker::Folder {
         card = card

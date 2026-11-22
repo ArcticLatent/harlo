@@ -17,7 +17,7 @@ mod view;
 pub mod widget;
 
 #[doc(inline)]
-pub use app::{App, MenuState, Message, Panel, Status};
+pub use app::{App, ChangesEvent, ChangesLoaded, GitAction, MenuState, Message, Panel, Status};
 #[doc(inline)]
 pub use options::Options;
 #[doc(inline)]
@@ -45,7 +45,7 @@ pub fn run(options: Options) -> iced::Result {
             .as_ref()
             .and_then(|store| store.load().ok())
             .unwrap_or_default();
-        let app = App::new(location, locations, layout);
+        let app = App::new(location, locations, layout).notifying();
         match store {
             Some(store) => app.saving_to(store),
             None => app,

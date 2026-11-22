@@ -39,8 +39,9 @@ pub use id::message_id;
 pub use prompt::{Attachment, Mention, Prompt};
 #[doc(inline)]
 pub use types::{
-    Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Part, Permission, PermissionReply,
-    Project, Revert, ServerInfo, Session, ToolCall, ToolStatus,
+    Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, InboxItem,
+    Message, ModelRef, Part, Permission, PermissionReply, Project, Revert, Rule, ServerInfo,
+    Session, ToolCall, ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

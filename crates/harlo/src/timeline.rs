@@ -16,9 +16,11 @@
 
 // Rust guideline compliant 2026-10-09
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
+use harlo_core::diff;
+use harlo_core::server::FileDiff;
 use harlo_core::theme::{Rgba, Tokens};
 use harlo_core::timeline::{Change, Compaction, Entry, Live, summarize, tools_summary};
 use harlo_core::workspace::{EventKind, ToolStatus};
@@ -26,13 +28,15 @@ use iced::animation::Animation;
 use iced::time::Instant;
 use iced::widget::scrollable::AbsoluteOffset;
 use iced::widget::{
-    Id, button, center, column, container, markdown, row, scrollable, sensor, space, stack, text,
+    Id, button, center, column, container, markdown, mouse_area, row, scrollable, sensor, space,
+    stack, text,
 };
 use iced::{Center, Element, Fill, Size, Task, padding};
 use lucide_icons::Icon;
 
 use crate::motion::{self, Moment};
 use crate::style::{self, size};
+use crate::view::diff as diff_view;
 use crate::view::icon;
 
 /// Stack slots for items near the viewport.
@@ -59,6 +63,16 @@ const PAD: f32 = 18.0;
 /// Within this distance of the end, the view follows the newest rows.
 const FOLLOW: f32 = 4.0;
 
+/// Diff lines a tool row shows before "N more lines".
+const DIFF_LINES: usize = 12;
+
+/// How far a tool row's diffs are indented: past its marker (14) and gap (9),
+/// so they line up with the tool's name.
+const DIFF_INDENT: f32 = 23.0;
+
+/// Height of one diff line, for estimates before it's measured.
+const DIFF_LINE: f32 = 19.0;
+
 /// Scroll reports that may disagree with a requested offset before it's dropped.
 const STALE_REPORTS: u8 = 4;
 
@@ -78,6 +92,12 @@ pub enum Event {
     Link(String),
     /// A tool group was opened or closed, by its key.
     ToggleGroup(String),
+    /// A tool row's diff was shown whole, or cut short again, by the row's key.
+    ToggleDiff(String),
+    /// The pointer moved onto a prompt, by its key, or off it.
+    Hover(Option<String>),
+    /// Undo was chosen on a prompt: it and everything after it, by its message ID.
+    Undo(String),
 }
 
 /// Where loading a session's history stands.
@@ -121,6 +141,8 @@ pub enum Activity {
 struct Row {
     entry: Entry,
     markdown: Option<markdown::Content>,
+    /// A tool's changed files as diff lines, parsed once.
+    diffs: Vec<Vec<diff::Line>>,
     /// Built from live events rather than loaded.
     live: bool,
     /// A prompt Harlo sent that OpenCode's copy hasn't replaced yet; reloads keep it.
@@ -133,9 +155,14 @@ impl Row {
             Entry::Answer { text, .. } => Some(markdown::Content::parse(text)),
             _ => None,
         };
+        let diffs = match &entry {
+            Entry::Tool { files, .. } => files.iter().map(|f| diff::lines(&f.patch)).collect(),
+            _ => Vec::new(),
+        };
         Self {
             entry,
             markdown,
+            diffs,
             live,
             unsaved: false,
         }
@@ -187,6 +214,10 @@ pub struct Timeline {
     heights: HashMap<String, f32>,
     /// Groups the user opened (`true`) or closed (`false`).
     choices: HashMap<String, bool>,
+    /// Tool rows whose diffs are shown whole.
+    whole: HashSet<String>,
+    /// The prompt under the pointer, which offers Undo.
+    hovered: Option<String>,
     live: Live,
     busy: bool,
     from_bottom: f32,
@@ -211,6 +242,8 @@ impl Timeline {
             items: Vec::new(),
             heights: HashMap::new(),
             choices: HashMap::new(),
+            whole: HashSet::new(),
+            hovered: None,
             live: Live::new(),
             busy: false,
             from_bottom: 0.0,
@@ -391,6 +424,24 @@ impl Timeline {
         self.settle
     }
 
+    /// Returns the text of the prompt with this key, if it's shown.
+    #[must_use]
+    pub fn prompt_text(&self, key: &str) -> Option<&str> {
+        match &self.rows.get(*self.index.get(key)?)?.entry {
+            Entry::Prompt { text, .. } => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Returns the newest stored prompt's key, which is its message ID.
+    #[must_use]
+    pub fn last_prompt(&self) -> Option<&str> {
+        self.rows.iter().rev().find_map(|row| match &row.entry {
+            Entry::Prompt { key, .. } if !row.unsaved => Some(key.as_str()),
+            _ => None,
+        })
+    }
+
     /// Returns what the session is doing in its current run, judged from
     /// its newest rows: a running tool, an answer being written, or
     /// thinking (which covers the wait before anything arrives).
@@ -542,7 +593,14 @@ impl Timeline {
                 self.choices.insert(key.clone(), !open);
                 self.regroup();
             }
-            Event::Link(_) => {}
+            Event::ToggleDiff(key) => {
+                if !self.whole.remove(key) {
+                    self.whole.insert(key.clone());
+                }
+            }
+            Event::Hover(key) => self.hovered.clone_from(key),
+            // The app acts on these.
+            Event::Link(_) | Event::Undo(_) => {}
         }
     }
 
@@ -660,7 +718,7 @@ impl Timeline {
             .get(&self.item_key(item))
             .copied()
             .unwrap_or_else(|| match item {
-                Item::Row(at) => estimate(&self.rows[*at].entry),
+                Item::Row(at) => estimate(&self.rows[*at]),
                 Item::Group { .. } => LINE,
             })
     }
@@ -734,7 +792,14 @@ impl Timeline {
                     .get(row.entry.key())
                     .map_or(1.0, |appear| motion::shown(appear, moment.now));
                 rise = (1.0 - shown) * motion::RISE;
-                let view = row_view(t, row, shown);
+                let key = row.entry.key();
+                let look = Look {
+                    shown,
+                    whole: self.whole.contains(key),
+                    // A run must end first, and a prompt must be stored to be undone.
+                    undo: !self.busy && !row.unsaved && self.hovered.as_deref() == Some(key),
+                };
+                let view = row_view(t, row, look);
                 let view = if self.in_open_group(*at) {
                     container(view).padding(padding::left(22)).into()
                 } else {
@@ -820,7 +885,8 @@ fn note<'a>(t: &Tokens, message: &str) -> Element<'a, Event> {
     clippy::cast_precision_loss,
     reason = "line counts fit easily in an f32"
 )]
-fn estimate(entry: &Entry) -> f32 {
+fn estimate(row: &Row) -> f32 {
+    let entry = &row.entry;
     let lines = |text: &str| {
         text.lines()
             .map(|line| line.chars().count() / 95 + 1)
@@ -841,8 +907,15 @@ fn estimate(entry: &Entry) -> f32 {
             lines(text) * 22.0 + 26.0 + chips
         }
         Entry::Answer { text, .. } => lines(text) * 24.0,
+        Entry::Tool { .. } => {
+            let shown: usize = row
+                .diffs
+                .iter()
+                .map(|lines| lines.len().min(DIFF_LINES + 1) + 1)
+                .sum();
+            LINE + shown as f32 * DIFF_LINE
+        }
         Entry::Thought { .. }
-        | Entry::Tool { .. }
         | Entry::Stopped { .. }
         | Entry::Compaction { .. }
         | Entry::Note { .. } => LINE,
@@ -873,8 +946,20 @@ fn markdown_settings(t: &Tokens) -> markdown::Settings {
     settings
 }
 
-/// A row's view. A prompt is drawn `shown` faded in (0 to 1).
-fn row_view<'a>(t: &Tokens, row: &'a Row, shown: f32) -> Element<'a, Event> {
+/// How a row is drawn right now.
+#[derive(Debug, Clone, Copy)]
+struct Look {
+    /// How far a new prompt has faded in, from 0 to 1.
+    shown: f32,
+    /// Whether a tool's diffs are shown whole rather than cut short.
+    whole: bool,
+    /// Whether a prompt offers Undo, while the pointer is on it.
+    undo: bool,
+}
+
+/// A row's view.
+fn row_view<'a>(t: &Tokens, row: &'a Row, look: Look) -> Element<'a, Event> {
+    let Look { shown, whole, undo } = look;
     match &row.entry {
         Entry::Prompt {
             text: prompt,
@@ -895,14 +980,41 @@ fn row_view<'a>(t: &Tokens, row: &'a Row, shown: f32) -> Element<'a, Event> {
             if !attachments.is_empty() || !skills.is_empty() {
                 body = body.push(chips(t, attachments, skills, shown));
             }
-            container(body)
+            let bubble = container(body)
                 .width(Fill)
                 .padding([11, 16])
                 .style(style::boxed(
                     fade(t.surface_raised_base),
                     Some(fade(t.border_weak_base)),
                     size::COMPOSER_RADIUS,
-                ))
+                ));
+            // Undo floats in the corner while the pointer is on the prompt,
+            // so the row's height never changes.
+            let corner: Element<'a, Event> = if undo {
+                let label = row![
+                    icon(Icon::Undo2, 12.0, t.icon_base),
+                    text("Undo")
+                        .size(size::SMALL)
+                        .color(style::color(t.text_base)),
+                ]
+                .spacing(5)
+                .align_y(Center);
+                container(
+                    button(label)
+                        .padding([3, 8])
+                        .on_press(Event::Undo(row.entry.key().to_owned()))
+                        .style(style::chip(t)),
+                )
+                .align_right(Fill)
+                .padding(6)
+                .into()
+            } else {
+                space().into()
+            };
+            let key = row.entry.key().to_owned();
+            mouse_area(stack![bubble, corner])
+                .on_enter(Event::Hover(Some(key)))
+                .on_exit(Event::Hover(None))
                 .into()
         }
         Entry::Answer { .. } => {
@@ -919,14 +1031,9 @@ fn row_view<'a>(t: &Tokens, row: &'a Row, shown: f32) -> Element<'a, Event> {
             summarize(text),
             None,
             false,
+            None,
         ),
-        Entry::Tool {
-            label,
-            detail,
-            status,
-            took,
-            ..
-        } => tool_row(t, label, detail, *status, *took),
+        Entry::Tool { .. } => tool_view(t, row, whole),
         Entry::Stopped { outcome, .. } => {
             let what = if outcome == "interrupted" {
                 "Stopped"
@@ -940,6 +1047,7 @@ fn row_view<'a>(t: &Tokens, row: &'a Row, shown: f32) -> Element<'a, Event> {
                 String::new(),
                 None,
                 false,
+                None,
             )
         }
         Entry::Note { text, warning, .. } => {
@@ -948,10 +1056,52 @@ fn row_view<'a>(t: &Tokens, row: &'a Row, shown: f32) -> Element<'a, Event> {
             } else {
                 icon(Icon::Sparkles, 13.0, t.icon_base)
             };
-            line(t, marker, text.clone(), String::new(), None, false)
+            line(t, marker, text.clone(), String::new(), None, false, None)
         }
         Entry::Compaction { state, .. } => compaction_row(t, state),
     }
+}
+
+/// A tool row, with the diffs of the files it changed below it.
+fn tool_view<'a>(t: &Tokens, row: &'a Row, whole: bool) -> Element<'a, Event> {
+    let Entry::Tool {
+        key,
+        label,
+        detail,
+        status,
+        took,
+        files,
+        ..
+    } = &row.entry
+    else {
+        return space().into();
+    };
+    let line = tool_row(t, label, detail, *status, *took, files);
+    if files.is_empty() {
+        return line;
+    }
+    let limit = if whole { usize::MAX } else { DIFF_LINES };
+    let mut body = column![line].spacing(6);
+    for (file, lines) in files.iter().zip(&row.diffs) {
+        // A single file is named on the row; several get headers.
+        if files.len() > 1 {
+            body = body.push(
+                container(diff_view::header(
+                    t,
+                    &file.file,
+                    file.additions,
+                    file.deletions,
+                ))
+                .padding(padding::left(DIFF_INDENT)),
+            );
+        }
+        let more = Event::ToggleDiff(key.clone());
+        body = body.push(
+            container(diff_view::lines(t, lines, limit, Some(more)))
+                .padding(padding::left(DIFF_INDENT)),
+        );
+    }
+    body.into()
 }
 
 fn tool_row<'a>(
@@ -960,12 +1110,18 @@ fn tool_row<'a>(
     detail: &str,
     status: ToolStatus,
     took: Option<std::time::Duration>,
+    files: &[FileDiff],
 ) -> Element<'a, Event> {
     let (glyph, color) = match status {
         ToolStatus::Completed => (Icon::Dot, t.icon_base),
         ToolStatus::Failed => (Icon::X, t.icon_critical_base),
         ToolStatus::Running | ToolStatus::Streaming => (Icon::Loader, t.text_interactive_base),
     };
+    let counts = (!files.is_empty()).then(|| {
+        let added = files.iter().map(|f| f.additions).sum();
+        let removed = files.iter().map(|f| f.deletions).sum();
+        diff_view::counts(t, added, removed)
+    });
     line(
         t,
         icon(glyph, 14.0, color),
@@ -973,6 +1129,7 @@ fn tool_row<'a>(
         detail.to_owned(),
         took.map(crate::view::duration),
         true,
+        counts,
     )
 }
 
@@ -994,7 +1151,7 @@ fn compaction_row<'a>(t: &Tokens, state: &Compaction) -> Element<'a, Event> {
             String::new(),
         ),
     };
-    line(t, marker, label.to_owned(), detail, None, false)
+    line(t, marker, label.to_owned(), detail, None, false, None)
 }
 
 /// Attachment and skill names as small chips.
@@ -1041,6 +1198,7 @@ fn line<'a, M: Into<Element<'a, Event>>>(
     detail: String,
     took: Option<String>,
     mono: bool,
+    counts: Option<Element<'a, Event>>,
 ) -> Element<'a, Event> {
     let mut content = row![container(marker.into()).width(14).center_x(14)]
         .spacing(9)
@@ -1067,6 +1225,9 @@ fn line<'a, M: Into<Element<'a, Event>>>(
                     .font(if mono { style::MONO } else { style::SANS })
                     .color(style::color(t.text_weak)),
             );
+    }
+    if let Some(counts) = counts {
+        content = content.push(counts);
     }
     if let Some(took) = took {
         content = content.push(

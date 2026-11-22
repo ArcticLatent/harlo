@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use harlo_core::approvals::{self, Shield};
 use harlo_core::composer::{self as compose, Attached, Choice, Draft, MenuItem, Outgoing, Trigger};
 use harlo_core::layout::{Layout, Store, Tabs};
 use harlo_core::server::{
@@ -31,6 +32,15 @@ use crate::view;
 use crate::view::composer::Feedback;
 use crate::view::pickers::{self, AgentChoice, Folder, ModelChoice, Picker, Variant};
 use crate::widget::{Edge, reveal};
+
+mod changes;
+mod undo;
+
+pub use changes::{
+    ChangedFile, Changes, Event as ChangesEvent, GitAction, List, Loaded as ChangesLoaded,
+};
+pub use undo::StagedUndo;
+mod waiting;
 
 /// How often session ages are refreshed.
 const TICK: Duration = Duration::from_secs(30);
@@ -92,6 +102,15 @@ impl Panel {
             Self::Changes => "panel-changes",
             Self::Files => "panel-files",
             Self::Notes => "panel-notes",
+        }
+    }
+
+    /// How wide the panel is: Changes is wider, to show diffs.
+    #[must_use]
+    pub fn width(self) -> f32 {
+        match self {
+            Self::Changes => size::WIDE_PANEL,
+            Self::Context | Self::Todos | Self::Files | Self::Notes => size::PANEL,
         }
     }
 
@@ -234,6 +253,81 @@ pub enum Message {
     Resized(iced::Size),
     /// A frame of motion is due, at this time.
     Frame(Instant),
+    /// Answer an approval request in the open session.
+    Approve {
+        /// The request's ID.
+        request: String,
+        /// Allow once, always, or refuse.
+        reply: server::PermissionReply,
+    },
+    /// Start refusing an approval request with a reason, by request ID.
+    Refuse(String),
+    /// The reason typed for refusing.
+    RefuseReason(String),
+    /// Send the refusal with its reason.
+    RefuseSend,
+    /// Stop refusing with a reason.
+    RefuseCancel,
+    /// An answer to an approval or a question finished: the session, the
+    /// request or form ID, and why it failed.
+    Answered(String, String, Result<(), String>),
+    /// Choose an option in a question, or toggle it in a multiple choice.
+    FormChoose {
+        /// The question's ID.
+        form: String,
+        /// The field's key.
+        key: String,
+        /// The option's value.
+        value: String,
+    },
+    /// Type into a question's field.
+    FormType {
+        /// The question's ID.
+        form: String,
+        /// The field's key.
+        key: String,
+        /// The text.
+        text: String,
+    },
+    /// Answer yes or no in a question.
+    FormFlag {
+        /// The question's ID.
+        form: String,
+        /// The field's key.
+        key: String,
+        /// The answer.
+        flag: bool,
+    },
+    /// Send a question's answers, by question ID.
+    FormSend(String),
+    /// Dismiss a question without answering, by question ID.
+    FormDismiss(String),
+    /// Open a link a question points to.
+    OpenLink(String),
+    /// Choose how much the session may do without asking.
+    PickShield(Shield),
+    /// The window gained or lost focus.
+    Focused(bool),
+    /// An undo was staged in a session, or couldn't be.
+    UndoStaged(String, Result<undo::Staged, String>),
+    /// The agent's changes a staged undo is checked against, fetched for a
+    /// session whose undo was staged before Harlo opened or by another app.
+    UndoChecked(String, Result<Vec<server::FileDiff>, String>),
+    /// Keep a session's staged undo.
+    UndoKeep(String),
+    /// Cancel a session's staged undo, putting its files back.
+    UndoCancel(String),
+    /// The Changes panel reported something, or its load or git action finished.
+    Changes(ChangesEvent),
+    /// A staged undo was kept or cancelled, or couldn't be.
+    UndoSettled {
+        /// The session.
+        session: String,
+        /// Whether it was kept, rather than cancelled.
+        kept: bool,
+        /// Whether that worked.
+        result: Result<(), String>,
+    },
 }
 
 /// How long reading a pasted image takes before the composer says so.
@@ -350,6 +444,22 @@ pub struct App {
     pub picker_index: usize,
     /// How far the open menu's list is scrolled from its top.
     picker_scroll: f32,
+    /// Answers being filled into questions, by question ID.
+    pub drafts: HashMap<String, approvals::Draft>,
+    /// Why a question's answers can't be sent yet, by question ID.
+    pub problems: HashMap<String, Vec<approvals::Problem>>,
+    /// The approval being refused with a reason: its request ID and the reason so far.
+    pub refusing: Option<(String, String)>,
+    /// Approvals and questions whose answer is on its way, by ID.
+    pub answering: HashSet<String>,
+    /// How much the next new session may do without asking.
+    new_shield: Shield,
+    /// Undos staged from here, and requests about them on their way.
+    pub(crate) undos: undo::Undos,
+    /// The Changes panel's lists and git actions.
+    pub changes: Changes,
+    /// When to show desktop notifications.
+    notices: Notices,
     /// Where the layout is saved; `None` keeps it in memory only.
     store: Option<Store>,
     /// The layout as last saved.
@@ -431,6 +541,17 @@ impl App {
             picker_filter: String::new(),
             picker_index: 0,
             picker_scroll: 0.0,
+            drafts: HashMap::new(),
+            problems: HashMap::new(),
+            refusing: None,
+            answering: HashSet::new(),
+            new_shield: Shield::Agent,
+            undos: undo::Undos::default(),
+            changes: Changes::default(),
+            notices: Notices {
+                enabled: false,
+                focused: true,
+            },
             store: None,
             other_tabs: layout.tabs.clone(),
             restore: None,
@@ -445,6 +566,14 @@ impl App {
     #[must_use]
     pub fn saving_to(mut self, store: Store) -> Self {
         self.store = Some(store);
+        self
+    }
+
+    /// Shows a desktop notification when a session needs the user while
+    /// they're looking elsewhere.
+    #[must_use]
+    pub fn notifying(mut self) -> Self {
+        self.notices.enabled = true;
         self
     }
 
@@ -484,12 +613,13 @@ impl App {
                 | Message::PickAgent(_)
                 | Message::PickModel(_)
                 | Message::PickVariant(_)
+                | Message::PickShield(_)
         ) {
             self.picker = None;
         }
         let task = self.apply(message);
         self.sync_motion();
-        let task = Task::batch([task, self.follow_folder()]);
+        let task = Task::batch([task, self.follow_folder(), self.follow_changes()]);
         let layout = self.layout();
         if layout == self.saved {
             return task;
@@ -542,6 +672,26 @@ impl App {
             | Message::PickerScrolled(_)
             | Message::AddProject
             | Message::ProjectChosen(_)) => return self.picker_action(message),
+            message @ (Message::Approve { .. }
+            | Message::Refuse(_)
+            | Message::RefuseReason(_)
+            | Message::RefuseSend
+            | Message::RefuseCancel
+            | Message::Answered(..)
+            | Message::FormChoose { .. }
+            | Message::FormType { .. }
+            | Message::FormFlag { .. }
+            | Message::FormSend(_)
+            | Message::FormDismiss(_)
+            | Message::OpenLink(_)
+            | Message::PickShield(_)
+            | Message::Focused(_)) => return self.waiting_action(message),
+            Message::Changes(event) => return self.changes_action(event),
+            message @ (Message::UndoStaged(..)
+            | Message::UndoChecked(..)
+            | Message::UndoKeep(_)
+            | Message::UndoCancel(_)
+            | Message::UndoSettled { .. }) => return self.undo_action(message),
             Message::ToggleLocations => self.picking_location = !self.picking_location,
             Message::PickLocation(location) => self.pick_location(location),
             Message::OpenSession(id) => return self.open(id),
@@ -566,12 +716,7 @@ impl App {
             Message::PickFolder(folder) => self.new_folder = folder,
             Message::Send => return self.send(None),
             Message::Steer => return self.send(Some(Delivery::Steer)),
-            Message::Timeline(id, event) => {
-                if let Some(timeline) = self.timelines.get_mut(&id) {
-                    timeline.update(&event);
-                    return timeline.scroll();
-                }
-            }
+            Message::Timeline(id, event) => return self.timeline_event(id, event),
             Message::Server(update) => return self.server(update),
             Message::Fetched(Ok(result)) => {
                 let fetches = self.workspace.fetched(result);
@@ -588,6 +733,20 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    /// Applies something a session's timeline reported.
+    fn timeline_event(&mut self, id: String, event: crate::timeline::Event) -> Task<Message> {
+        if let crate::timeline::Event::Undo(message_id) = event {
+            return self.start_undo(id, message_id);
+        }
+        match self.timelines.get_mut(&id) {
+            Some(timeline) => {
+                timeline.update(&event);
+                timeline.scroll()
+            }
+            None => Task::none(),
+        }
     }
 
     /// Applies a message from the composer: typing, its menu and attachments.
@@ -767,12 +926,14 @@ impl App {
             }
             Update::Event(event) => {
                 let fetches = self.workspace.apply(&event.kind, event.time);
+                let notice = self.notice(&event.kind);
                 if let EventKind::SessionDeleted { session_id }
                 | EventKind::SessionArchived { session_id } = &event.kind
                 {
                     self.close(session_id);
                 }
                 self.refresh();
+                self.changes_event(&event.kind);
                 if matches!(event.kind, EventKind::CatalogChanged) {
                     // Reloaded for the current folder once this update ends.
                     self.catalogs.clear();
@@ -790,7 +951,7 @@ impl App {
                         }
                     }
                 }
-                return Task::batch([self.fetch(fetches), reload, scroll]);
+                return Task::batch([self.fetch(fetches), reload, scroll, notice]);
             }
             Update::Lost { reason, retry_in } => {
                 self.status = Status::Lost { reason, retry_in };
@@ -877,6 +1038,7 @@ impl App {
             self.fetch(vec![
                 Fetch::Inbox(id.clone()),
                 Fetch::Permissions(id.clone()),
+                Fetch::Forms(id.clone()),
             ]),
             self.load_history(id),
         ])
@@ -932,7 +1094,8 @@ impl App {
                 self.width = size.width;
                 // Once the kept panel fits by itself, it no longer needs keeping.
                 if let Some(side) = self.keep
-                    && fit::shown(self.width, self.sidebar, self.panel.is_some(), None).has(side)
+                    && fit::shown(self.width, self.sidebar, self.panel.map(Panel::width), None)
+                        .has(side)
                 {
                     self.keep = None;
                 }
@@ -956,7 +1119,12 @@ impl App {
     /// Returns which side panels are on screen at the window's width.
     #[must_use]
     pub fn shown(&self) -> Shown {
-        fit::shown(self.width, self.sidebar, self.panel.is_some(), self.keep)
+        fit::shown(
+            self.width,
+            self.sidebar,
+            self.panel.map(Panel::width),
+            self.keep,
+        )
     }
 
     /// Returns the width left for the conversation column.
@@ -1213,7 +1381,8 @@ impl App {
             Ok(rows) => timeline.set(rows),
             Err(reason) => timeline.fail(reason),
         }
-        timeline.scroll()
+        let scroll = timeline.scroll();
+        Task::batch([scroll, self.check_undo(id)])
     }
 
     /// Sends the composer: to the open session, or as the start of a new one.
@@ -1245,9 +1414,11 @@ impl App {
         self.send_error = None;
         self.menu = None;
         let scroll = self.show_sending(target.as_deref(), &text, &outgoing, delivery);
-        let new = target
-            .is_none()
-            .then(|| (self.new_agent.clone(), self.new_model.clone()));
+        let new = target.is_none().then(|| NewChoices {
+            agent: self.new_agent.clone(),
+            model: self.new_model.clone(),
+            rules: self.new_shield.rules().filter(|rules| !rules.is_empty()),
+        });
         Task::batch([
             Task::perform(
                 send(client, target, folder, new, outgoing, delivery),
@@ -1765,13 +1936,13 @@ impl App {
             );
         layout = layout.push(main);
         let panel = self.panel.filter(|_| shown.panel);
-        let open = (size::PANEL + 1.0) * motion::shown(&self.panel_slide.0, self.clock);
+        let slide = motion::shown(&self.panel_slide.0, self.clock);
         // While closing, the panel last shown slides away.
-        layout = layout.push(match self.panel_slide.1.filter(|_| open > 0.0) {
+        layout = layout.push(match self.panel_slide.1.filter(|_| slide > 0.0) {
             Some(sliding) => reveal(
-                view::panel::view(t, sliding, self.active.is_some()),
-                size::PANEL + 1.0,
-                open,
+                view::panel::view(self, sliding),
+                sliding.width() + 1.0,
+                (sliding.width() + 1.0) * slide,
                 Edge::Right,
             )
             .into(),
@@ -1800,6 +1971,11 @@ impl App {
                 Subscription::none()
             },
             iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
+            iced::window::events().filter_map(|(_, event)| match event {
+                iced::window::Event::Focused => Some(Message::Focused(true)),
+                iced::window::Event::Unfocused => Some(Message::Focused(false)),
+                _ => None,
+            }),
             self.motion(),
         ])
     }
@@ -1878,14 +2054,33 @@ async fn pick_files() -> Vec<PathBuf> {
         .collect()
 }
 
+/// When a session that needs the user gets a desktop notification.
+#[derive(Debug, Clone, Copy)]
+struct Notices {
+    /// Whether notifications are shown at all; tests leave them off.
+    enabled: bool,
+    /// Whether the window has focus; the open session needs none while it does.
+    focused: bool,
+}
+
+/// What a new session gets before its first prompt, as chosen on the start screen.
+struct NewChoices {
+    /// Its agent.
+    agent: Option<String>,
+    /// Its model.
+    model: Option<ModelRef>,
+    /// Its own permission rules, from the shield.
+    rules: Option<Vec<server::Rule>>,
+}
+
 /// Sends `outgoing` to `target`, or creates a session in `folder` and sends it there.
 ///
-/// A new session first gets the chosen agent and model in `new`.
+/// A new session first gets the choices in `new`.
 async fn send(
     client: Client,
     target: Option<String>,
     folder: String,
-    new: Option<(Option<String>, Option<ModelRef>)>,
+    new: Option<NewChoices>,
     outgoing: Outgoing,
     delivery: Delivery,
 ) -> Result<Box<Session>, String> {
@@ -1895,7 +2090,18 @@ async fn send(
         None => client.create_session(&folder).await,
     }
     .map_err(failed)?;
-    if let Some((agent, model)) = new {
+    if let Some(NewChoices {
+        agent,
+        model,
+        rules,
+    }) = new
+    {
+        if let Some(rules) = rules {
+            client
+                .set_permissions(&session.id, &rules)
+                .await
+                .map_err(failed)?;
+        }
         if let Some(agent) = agent {
             client
                 .set_agent(&session.id, &agent)

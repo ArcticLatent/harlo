@@ -25,8 +25,9 @@ use crate::workspace::{Fetch, Fetched, Snapshot};
 
 #[doc(inline)]
 pub use opencode_client::{
-    Agent, Attachment, Client, Command, Delivery, Endpoint, Error, FileMatch, McpResource, Mention,
-    Model, Prompt, Skill, message_id,
+    Agent, Answer, Attachment, Choice, Client, Command, Condition, Delivery, Effect, Endpoint,
+    Error, Field, FieldKind, FileDiff, FileMatch, McpResource, Mention, Model, PermissionReply,
+    Prompt, Rule, Skill, message_id,
 };
 
 /// The longest wait between reconnection attempts.
@@ -62,6 +63,22 @@ impl std::fmt::Debug for Location {
 }
 
 impl Location {
+    /// Returns whether the server runs on this computer, so its folders are here too.
+    #[must_use]
+    pub fn is_local(&self) -> bool {
+        match self {
+            Self::Shared => true,
+            Self::Server { url, .. } => {
+                let rest = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
+                let host = match rest.strip_prefix('[') {
+                    Some(v6) => v6.split(']').next().unwrap_or_default(),
+                    None => rest.split([':', '/']).next().unwrap_or_default(),
+                };
+                matches!(host, "localhost" | "::1") || host.starts_with("127.")
+            }
+        }
+    }
+
     /// The name the location picker shows.
     #[must_use]
     pub fn label(&self) -> String {
@@ -321,11 +338,18 @@ pub async fn load(client: &Client) -> Result<Snapshot, Error> {
         .collect();
     let folders = try_join_all(git.iter().map(|id| client.worktrees(id))).await?;
     let worktrees = git.into_iter().map(str::to_owned).zip(folders).collect();
+    // Only a working session can wait for the user.
+    let (permissions, forms) = tokio::try_join!(
+        try_join_all(active.iter().map(|id| client.permissions(id))),
+        try_join_all(active.iter().map(|id| client.forms(id))),
+    )?;
     Ok(Snapshot {
         projects,
         worktrees,
         sessions,
         active,
+        permissions: permissions.into_iter().flatten().collect(),
+        forms: forms.into_iter().flatten().collect(),
     })
 }
 
@@ -354,6 +378,10 @@ pub async fn fetch(client: &Client, what: Fetch) -> Result<Fetched, Error> {
         Fetch::Permissions(id) => {
             let waiting = client.permissions(&id).await?;
             Ok(Fetched::Permissions(id, waiting))
+        }
+        Fetch::Forms(id) => {
+            let waiting = client.forms(&id).await?;
+            Ok(Fetched::Forms(id, waiting))
         }
     }
 }
