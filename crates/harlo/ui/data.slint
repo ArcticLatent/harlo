@@ -498,6 +498,7 @@ export struct SheetRow {
     name: string,
     value: string,
     tone: int,
+    /// A value's tone: 0 plain, 1 good, 2 bad, 3 quiet, 4 a warning.
     /// For a switch (kind 3): whether it's on, and the setting it turns.
     /// For a name and value (kind 1) with a button: the button's label,
     /// and `setting` numbers its step.

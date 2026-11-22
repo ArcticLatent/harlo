@@ -24,7 +24,8 @@ use support::{Ui, demo, ui};
 
 /// A stand-in Claude Code: signed out until `auth login` runs, then signed
 /// in to a Max plan; asked for its models the way OpenCode's Claude Agent
-/// asks, it offers Opus and Sonnet.
+/// asks, it offers Opus and Sonnet, and asked for the plan's usage, the
+/// session's limit is 42% used.
 const STAND_IN: &str = r#"#!/usr/bin/env python3
 import json, os, sys
 status = os.path.join(os.path.dirname(os.path.abspath(__file__)), "status.json")
@@ -43,7 +44,16 @@ else:
                "supportedEffortLevels": efforts} for v, n in (("opus", "Opus"), ("sonnet", "Sonnet"))]
     for line in sys.stdin:
         request = json.loads(line)
-        if request.get("type") == "control_request":
+        if request.get("type") != "control_request":
+            continue
+        if request["request"]["subtype"] == "get_usage":
+            print(json.dumps({"type": "control_response", "response": {
+                "subtype": "success", "request_id": request["request_id"],
+                "response": {"rate_limits_available": True, "rate_limits": {"limits": [
+                    {"kind": "session", "group": "session", "percent": 42,
+                     "severity": "normal", "resets_at": None, "is_active": True,
+                     "scope": None}]}}}}), flush=True)
+        else:
             print(json.dumps({"type": "control_response", "response": {
                 "subtype": "success", "request_id": request["request_id"],
                 "response": {"commands": [], "agents": [], "models": models,
@@ -128,6 +138,10 @@ fn a_claude_subscription_signs_in_connects_and_disconnects() {
         "the account and its plan"
     );
     assert!(ui.button("Switch account").accessible_label().is_some());
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui.shows("42% used")),
+        "the plan's usage"
+    );
 
     ui.press("Connect");
     assert!(

@@ -12,9 +12,12 @@ use slint::{ModelRc, VecModel};
 use lucide_icons::Icon;
 
 use super::{glyph, sync};
-use harlo_core::claude::{ClaudeCode, Login};
+use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 
-use crate::app::{App, ClaudeAction, Load, Range, Section, SetUp, Setting, Sheet, Status};
+use crate::app::{
+    App, ClaudeAction, Load, Range, Section, SetUp, Setting, Sheet, Status, epoch_seconds,
+    resets_in,
+};
 use crate::model::{compact as tokens_text, dollars as money};
 use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State};
 
@@ -322,6 +325,7 @@ fn claude_rows(app: &App) -> Vec<SheetRow> {
             Load::Loaded(ClaudeCode::Installed { version, login }) => {
                 rows.push(acting(pair("Claude Code", version, 0), ClaudeAction::Check));
                 rows.push(account_row(login));
+                rows.extend(usage_rows(app));
             }
         }
     }
@@ -367,6 +371,55 @@ fn account_row(login: &Login) -> SheetRow {
             let mut row = acting(pair("Account", &parts.join(" · "), 1), ClaudeAction::SignIn);
             row.action = "Switch account".into();
             row
+        }
+    }
+}
+
+/// How much of the plan's limits is used, a row each.
+fn usage_rows(app: &App) -> Vec<SheetRow> {
+    match &app.claude.usage {
+        Load::Idle | Load::Loaded(None) => Vec::new(),
+        Load::Loading => vec![pair("Plan usage", "Checking…", 3)],
+        Load::Failed(why) => vec![pair("Plan usage", &format!("Couldn't read it: {why}"), 2)],
+        Load::Loaded(Some(limits)) => {
+            let now = epoch_seconds(app.now);
+            limits
+                .iter()
+                .map(|limit| {
+                    let mut value = format!("{}% used", limit.percent.round());
+                    if let Some(at) = limit.resets_at {
+                        value.push_str(" · resets ");
+                        value.push_str(&resets_in(at - now));
+                    }
+                    let tone = match limit.severity {
+                        Severity::Normal => 0,
+                        Severity::Warning => 4,
+                        Severity::Critical => 2,
+                    };
+                    pair(&limit_name(limit), &value, tone)
+                })
+                .collect()
+        }
+    }
+}
+
+/// What a limit is for, in words.
+fn limit_name(limit: &Limit) -> String {
+    let model = limit.model.as_deref();
+    match (limit.kind.as_str(), model) {
+        ("session", _) => "Current session".to_owned(),
+        ("weekly_all", _) => "This week, all models".to_owned(),
+        (_, Some(model)) if limit.group == "weekly" => format!("This week, {model}"),
+        (_, model) => {
+            let mut chars = limit.group.chars();
+            let group: String = chars.next().map_or_else(
+                || "Limit".to_owned(),
+                |c| c.to_uppercase().chain(chars).collect(),
+            );
+            match model {
+                Some(model) => format!("{group}, {model}"),
+                None => group,
+            }
         }
     }
 }

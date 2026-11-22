@@ -72,6 +72,8 @@ prettyplease = { version = "0.3.0", default-features = false }
 # Shared.
 # Word-level highlights inside changed diff lines (Apache-2.0).
 similar = { version = "3.2.1", default-features = false }
+# Reads the reset times of Claude plan limits (MIT/Apache).
+jiff = { version = "1.0.2", default-features = false, features = ["std"] }
 rusqlite = { version = "0.43.0", default-features = false }
 dirs = { version = "7.0.0", default-features = false }
 tempfile = { version = "3.27.0", default-features = false }

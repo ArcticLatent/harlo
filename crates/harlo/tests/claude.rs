@@ -1,4 +1,5 @@
-//! The Claude subscription in Settings → Models, with Claude Code's checks
+//! The Claude subscription in Settings → Models, with Claude Code's checks,
+//! the plan's usage
 //! and OpenCode's answers fed in as messages. The real flow, against a
 //! private server and a stand-in Claude Code, is in `server_claude.rs`.
 
@@ -7,7 +8,7 @@
 mod support;
 
 use harlo::app::{App, ClaudeEvent, Message};
-use harlo_core::claude::{Account, ClaudeCode, Login};
+use harlo_core::claude::{Account, ClaudeCode, Limit, Login, Severity};
 use harlo_core::server::{Connection, Integration, Location};
 use support::{Ui, demo, ui};
 
@@ -122,4 +123,66 @@ fn a_server_elsewhere_only_shows_its_connection() {
     ));
     assert!(ui.shows("Not connected"));
     assert!(ui.find("Install").is_empty());
+}
+
+#[test]
+fn a_plans_usage_shows_each_limit_and_when_it_resets() {
+    let now = demo::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after 1970")
+        .as_secs();
+    let now = i64::try_from(now).expect("fits");
+    let limit =
+        |kind: &str, group: &str, model: Option<&str>, percent, resets: Option<i64>| Limit {
+            kind: kind.into(),
+            group: group.into(),
+            model: model.map(str::to_owned),
+            percent,
+            resets_at: resets.map(|s| now + s),
+            severity: if percent > 90.0 {
+                Severity::Critical
+            } else if percent > 70.0 {
+                Severity::Warning
+            } else {
+                Severity::Normal
+            },
+            active: false,
+        };
+    let ui = models(
+        demo::app(),
+        Some(ClaudeCode::Installed {
+            version: "2.1.330".into(),
+            login: Login::Subscription(Account::default()),
+        }),
+        agent(Vec::new()),
+    );
+    assert!(ui.shows("Plan usage"), "asked once signed in to a plan");
+    ui.send(Message::Claude(ClaudeEvent::Usage(Ok(Some(vec![
+        limit(
+            "session",
+            "session",
+            None,
+            37.0,
+            Some(2 * 3600 + 14 * 60 + 5),
+        ),
+        limit(
+            "weekly_all",
+            "weekly",
+            None,
+            74.4,
+            Some(3 * 86_400 + 4 * 3600),
+        ),
+        limit("weekly_scoped", "weekly", Some("Fable"), 91.5, None),
+    ])))));
+    assert!(ui.shows("Current session"));
+    assert!(ui.shows("37% used · resets in 2 h 14 min"));
+    assert!(ui.shows("This week, all models"));
+    assert!(ui.shows("74% used · resets in 3 days 4 h"));
+    assert!(ui.shows("This week, Fable"));
+    assert!(ui.shows("92% used"));
+    assert!(!ui.shows("Plan usage"), "the checking row goes");
+
+    // Without a plan there's nothing to show.
+    ui.send(Message::Claude(ClaudeEvent::Usage(Ok(None))));
+    assert!(!ui.shows("Current session"));
 }

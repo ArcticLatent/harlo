@@ -63,7 +63,8 @@ component Row inherits VerticalLayout {
             overflow: elide;
             color: root.entry.tone == 1 ? Theme.icon-success-base
                 : root.entry.tone == 2 ? Theme.icon-critical-base
-                : root.entry.tone == 3 ? Theme.text-weak : Theme.text-base;
+                : root.entry.tone == 3 ? Theme.text-weak
+                : root.entry.tone == 4 ? Theme.icon-warning-base : Theme.text-base;
             accessible-role: AccessibleRole.text;
         }
         if root.entry.action != "": VerticalLayout {

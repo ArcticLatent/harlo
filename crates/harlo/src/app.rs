@@ -52,6 +52,7 @@ pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;
 mod waiting;
+pub(crate) use claude::{epoch_seconds, resets_in};
 pub(crate) use waiting::capitalized;
 
 /// How often session ages are refreshed.
@@ -822,6 +823,7 @@ impl App {
             Message::Tick(now) => {
                 self.now = now;
                 self.refresh();
+                return self.claude_tick();
             }
         }
         Task::none()
@@ -1929,7 +1931,11 @@ impl App {
             tokio::time::sleep(TICK).await;
             Some((Message::Tick(SystemTime::now()), ()))
         });
-        Task::batch([self.follow_location(), Task::stream(ticks)])
+        Task::batch([
+            self.follow_location(),
+            Task::stream(ticks),
+            claude::watch_usage(),
+        ])
     }
 
     /// Follows the current server, dropping the connection to any other.
