@@ -498,6 +498,8 @@ export struct SheetRow {
     name: string,
     value: string,
     tone: int,
+    /// The kind: 0 a heading, 1 a name and value, 2 a note, 3 a switch, 4
+    /// the light-or-dark choice, whose `setting` is the option chosen.
     /// A value's tone: 0 plain, 1 good, 2 bad, 3 quiet, 4 a warning.
     /// For a switch (kind 3): whether it's on, and the setting it turns.
     /// For a name and value (kind 1) with a button: the button's label,
@@ -505,6 +507,23 @@ export struct SheetRow {
     on: bool,
     setting: int,
     action: string,
+}
+
+/// A theme in Settings → Appearance: its id and name, whether it's the one
+/// chosen, and the colours its card previews, in the variant shown.
+export struct ThemeCard {
+    id: string,
+    name: string,
+    chosen: bool,
+    background: color,
+    sidebar: color,
+    raised: color,
+    text: color,
+    weak: color,
+    brand: color,
+    keyword: color,
+    function: color,
+    text-string: color,
 }
 
 /// A section in Settings' list: its title, the group it's listed under
@@ -572,6 +591,10 @@ export global State {
     /// Settings' sections, the one shown by its place, and what Settings
     /// is searched for.
     in property <[SettingsSection]> settings-sections;
+    /// Which of them is Shortcuts, which the rail's keyboard button opens.
+    in property <int> shortcuts-section;
+    /// The themes Settings → Appearance lists, or those a search found.
+    in property <[ThemeCard]> theme-cards;
     in property <int> settings-section;
     in-out property <string> settings-query;
 
@@ -706,6 +729,12 @@ export global Logic {
     callback switch-setting(int);
     /// Take a step a row's button offers, by its number.
     callback settings-action(int);
+    /// Use the theme with this id.
+    callback pick-theme(string);
+    /// Show the theme's variant: 0 as the desktop is, 1 light, 2 dark.
+    callback pick-appearance(int);
+    /// The desktop's colour scheme changed: dark, or not.
+    callback system-dark(bool);
     /// Show the stats for a range by its number.
     callback stats-range(int);
     /// A key pressed in the shown terminal, with Control, Alt and Shift;

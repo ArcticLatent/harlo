@@ -209,8 +209,12 @@ fn the_reopen_tabs_switch_turns_off_reopening() {
                 active: Some("ses_demo_03".into()),
             },
         )]);
-        let mut app = App::new(Location::Shared, vec![Location::Shared], layout)
-            .with_preferences(Preferences { reopen_tabs });
+        let mut app = App::new(Location::Shared, vec![Location::Shared], layout).with_preferences(
+            Preferences {
+                reopen_tabs,
+                ..Preferences::default()
+            },
+        );
         let _ = app.update(Message::Tick(demo::now()));
         let _ = app.update(demo::connected(demo::snapshot()));
         app.tabs.clone()

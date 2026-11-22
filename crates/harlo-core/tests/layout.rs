@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use harlo_core::layout::{Layout, Preferences, Store, Tabs};
+use harlo_core::layout::{Appearance, Layout, Preferences, Store, Tabs};
 
 fn sample() -> Layout {
     Layout {
@@ -107,7 +107,11 @@ fn preferences_load_back_beside_the_layout() {
     );
 
     store.save(&sample()).expect("the layout");
-    let chosen = Preferences { reopen_tabs: false };
+    let chosen = Preferences {
+        reopen_tabs: false,
+        theme: "dracula".to_owned(),
+        appearance: Appearance::Light,
+    };
     store.save_preferences(&chosen).expect("the preferences");
     assert_eq!(store.load_preferences().expect("saved"), chosen);
     assert_eq!(

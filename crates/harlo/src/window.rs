@@ -380,6 +380,17 @@ fn section_of(number: i32) -> Option<app::Section> {
         .copied()
 }
 
+/// The light-or-dark option the UI numbers `number`.
+fn appearance_of(number: i32) -> Option<harlo_core::layout::Appearance> {
+    use harlo_core::layout::Appearance;
+    match number {
+        0 => Some(Appearance::System),
+        1 => Some(Appearance::Light),
+        2 => Some(Appearance::Dark),
+        _ => None,
+    }
+}
+
 /// The Claude subscription step the UI numbers `number`.
 fn claude_action_of(number: i32) -> Option<app::ClaudeAction> {
     match number {
@@ -528,6 +539,16 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         .map(|setting| Message::Sheet(SheetEvent::Switch(setting))));
     send_with!(on_settings_action, |_app, number| claude_action_of(number)
         .map(|action| Message::Claude(app::ClaudeEvent::Act(action))));
+    send!(on_pick_theme, |id| Message::Sheet(SheetEvent::Theme(
+        id.to_string()
+    )));
+    send_with!(on_pick_appearance, |_app, number| appearance_of(number)
+        .map(|appearance| Message::Sheet(SheetEvent::Appearance(
+            appearance
+        ))));
+    send!(on_system_dark, |dark| Message::SystemDark(dark));
+    // The desktop's scheme as the window opens; changes come by the callback.
+    controller.dispatch(Message::SystemDark(window.get_system_dark()));
     send_with!(on_stats_range, |_app, number| range_of(number)
         .map(|range| Message::Sheet(SheetEvent::Range(range))));
     send_with!(on_maximize, |_app, number| present::panel_of(number)

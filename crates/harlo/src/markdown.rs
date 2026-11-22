@@ -10,9 +10,14 @@
 
 use std::fmt::Write as _;
 
+use std::str::FromStr as _;
+
+use harlo_core::theme::{Rgba, Tokens};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Color, Theme, ThemeSet};
+use syntect::highlighting::{
+    Color, FontStyle, ScopeSelectors, StyleModifier, Theme, ThemeItem, ThemeSettings,
+};
 use syntect::parsing::SyntaxSet;
 
 /// One block of an answer.
@@ -238,6 +243,8 @@ fn aligned(rows: &[Vec<String>]) -> String {
 pub struct Highlighter {
     syntaxes: SyntaxSet,
     theme: Theme,
+    /// The tokens the code colours come from.
+    tokens: Tokens,
 }
 
 impl std::fmt::Debug for Highlighter {
@@ -246,25 +253,26 @@ impl std::fmt::Debug for Highlighter {
     }
 }
 
-impl Default for Highlighter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// The colour theme code is drawn in.
-const THEME: &str = "base16-ocean.dark";
-
 impl Highlighter {
-    /// Loads the bundled syntaxes and the code colours.
+    /// Loads the bundled syntaxes, colouring code with `tokens`' colours.
     #[must_use]
-    pub fn new() -> Self {
-        let mut themes = ThemeSet::load_defaults();
-        let theme = themes.themes.remove(THEME).unwrap_or_default();
+    pub fn new(tokens: &Tokens) -> Self {
         Self {
             syntaxes: SyntaxSet::load_defaults_newlines(),
-            theme,
+            theme: code_theme(tokens),
+            tokens: *tokens,
         }
+    }
+
+    /// Colours code with `tokens` from now on; returns whether that changes
+    /// its colours.
+    pub fn use_tokens(&mut self, tokens: &Tokens) -> bool {
+        if self.tokens == *tokens {
+            return false;
+        }
+        self.theme = code_theme(tokens);
+        self.tokens = *tokens;
+        true
     }
 
     /// `code` in `language` as Markdown: each line its own paragraph, the
@@ -311,6 +319,103 @@ impl Highlighter {
             }
         }
         out
+    }
+}
+
+/// Picks one of a theme's code colours.
+type CodeColor = fn(&Tokens) -> Rgba;
+
+/// Which code the theme's code colours go to, as OpenCode assigns them: the
+/// grammar's scopes, and the token for them. A narrower scope wins.
+const CODE_SCOPES: &[(&str, CodeColor)] = &[
+    ("comment, punctuation.definition.comment", |t| {
+        t.syntax_comment
+    }),
+    ("keyword, storage, entity.name.tag, keyword.control", |t| {
+        t.syntax_keyword
+    }),
+    ("keyword.operator, punctuation.accessor", |t| {
+        t.syntax_operator
+    }),
+    ("string, markup.raw", |t| t.syntax_string),
+    (
+        "constant, constant.numeric, constant.language, constant.character, \
+         string.regexp, entity.name.namespace, entity.name.module, entity.name.label",
+        |t| t.syntax_constant,
+    ),
+    (
+        "entity.name.function, support.function, meta.function-call variable.function, \
+         variable.function",
+        |t| t.syntax_primitive,
+    ),
+    (
+        "entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, \
+         entity.name.trait, entity.name.union, entity.name.interface, support.type, \
+         support.class, storage.type.primitive, storage.type.numeric",
+        |t| t.syntax_type,
+    ),
+    (
+        "entity.other.attribute-name, support.type.property-name",
+        |t| t.syntax_property,
+    ),
+    ("variable, variable.parameter, variable.other", |t| {
+        t.syntax_variable
+    }),
+    ("punctuation", |t| t.syntax_punctuation),
+    ("markup.heading, entity.name.section", |t| t.syntax_keyword),
+];
+
+/// A highlighting theme whose colours are `t`'s code colours.
+fn code_theme(t: &Tokens) -> Theme {
+    let scopes = CODE_SCOPES
+        .iter()
+        .filter_map(|(scopes, color)| {
+            Some(ThemeItem {
+                scope: ScopeSelectors::from_str(scopes).ok()?,
+                style: StyleModifier {
+                    foreground: Some(code_color(color(t))),
+                    background: None,
+                    font_style: None,
+                },
+            })
+        })
+        .chain(
+            ScopeSelectors::from_str("markup.bold")
+                .ok()
+                .map(|scope| ThemeItem {
+                    scope,
+                    style: StyleModifier {
+                        foreground: None,
+                        background: None,
+                        font_style: Some(FontStyle::BOLD),
+                    },
+                }),
+        )
+        .collect();
+    Theme {
+        name: Some("Harlo".to_owned()),
+        author: None,
+        settings: ThemeSettings {
+            foreground: Some(code_color(t.text_base)),
+            ..ThemeSettings::default()
+        },
+        scopes,
+    }
+}
+
+/// A theme colour as the highlighter's, without its alpha.
+fn code_color(c: Rgba) -> Color {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to 0..=1 first, so the scaled value fits a u8"
+    )]
+    let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Color {
+        r: channel(c.r),
+        g: channel(c.g),
+        b: channel(c.b),
+        a: 255,
     }
 }
 
@@ -400,7 +505,7 @@ mod tests {
 
     #[test]
     fn code_markup_parses_and_keeps_the_text() {
-        let highlighter = Highlighter::new();
+        let highlighter = Highlighter::new(&crate::theme::default_tokens());
         let code = "fn main() {\n    let x = a * b; // <tag> & `tick`\n\n}";
         let markup = highlighter.markup("rust", code);
         let styled = slint::StyledText::from_markdown(&markup).expect("valid markup");
@@ -410,6 +515,28 @@ mod tests {
             "{shown}"
         );
         assert!(markup.contains("<font color="));
+    }
+
+    #[test]
+    fn code_takes_the_themes_colours() {
+        let dracula = harlo_core::theme::bundled()
+            .into_iter()
+            .find(|t| t.id == "dracula")
+            .expect("dracula")
+            .tokens(harlo_core::theme::Mode::Dark);
+        let mut highlighter = Highlighter::new(&crate::theme::default_tokens());
+        assert!(highlighter.use_tokens(&dracula), "another theme");
+        assert!(!highlighter.use_tokens(&dracula), "the same theme");
+        let markup = highlighter.markup("rust", "fn main() { let s = \"hi\"; } // done");
+        for (what, colour) in [
+            ("keyword", dracula.syntax_keyword),
+            ("string", dracula.syntax_string),
+            ("comment", dracula.syntax_comment),
+            ("function", dracula.syntax_primitive),
+        ] {
+            let colour = format!("<font color=\"{colour}\">");
+            assert!(markup.contains(&colour), "{what} in {colour}: {markup}");
+        }
     }
 
     #[test]

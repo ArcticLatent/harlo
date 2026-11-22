@@ -13,13 +13,16 @@ use lucide_icons::Icon;
 
 use super::{glyph, sync};
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
+use harlo_core::layout::Appearance;
+use harlo_core::theme::Theme;
 
 use crate::app::{
     App, ClaudeAction, Load, Range, Section, SetUp, Setting, Sheet, Status, epoch_seconds,
     resets_in,
 };
 use crate::model::{compact as tokens_text, dollars as money};
-use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State};
+use crate::theme::color;
+use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State, ThemeCard};
 
 /// How many days of activity the bars show.
 const DAYS: usize = 30;
@@ -72,6 +75,7 @@ pub struct Sheets {
     rows: Rc<VecModel<SheetRow>>,
     tiles: Rc<VecModel<StatTile>>,
     days: Rc<VecModel<DayBar>>,
+    themes: Rc<VecModel<ThemeCard>>,
 }
 
 impl std::fmt::Debug for Sheets {
@@ -87,7 +91,9 @@ impl Sheets {
             rows: Rc::new(VecModel::default()),
             tiles: Rc::new(VecModel::default()),
             days: Rc::new(VecModel::default()),
+            themes: Rc::new(VecModel::default()),
         };
+        state.set_theme_cards(ModelRc::from(Rc::clone(&sheets.themes)));
         state.set_sheet_rows(ModelRc::from(Rc::clone(&sheets.rows)));
         state.set_stat_tiles(ModelRc::from(Rc::clone(&sheets.tiles)));
         state.set_stat_days(ModelRc::from(Rc::clone(&sheets.days)));
@@ -101,6 +107,13 @@ impl Sheets {
             })
             .collect();
         state.set_settings_sections(ModelRc::from(Rc::new(VecModel::from(sections))));
+        state.set_shortcuts_section(
+            Section::ALL
+                .iter()
+                .position(|s| *s == Section::Shortcuts)
+                .and_then(|i| i32::try_from(i).ok())
+                .unwrap_or_default(),
+        );
         sheets
     }
 
@@ -108,8 +121,15 @@ impl Sheets {
     pub fn show(&self, app: &App, state: &State<'_>) {
         let Some(sheet) = app.sheets.open else {
             state.set_sheet(0);
+            sync(&self.themes, Vec::new());
             return;
         };
+        let cards = if sheet == Sheet::Settings {
+            theme_cards(app)
+        } else {
+            Vec::new()
+        };
+        sync(&self.themes, cards);
         let (note, rows) = match sheet {
             Sheet::Stats => {
                 state.set_sheet(1);
@@ -214,6 +234,7 @@ impl Sheets {
 fn section_icon(section: Section) -> Icon {
     match section {
         Section::General => Icon::Settings,
+        Section::Appearance => Icon::Palette,
         Section::Shortcuts => Icon::Keyboard,
         Section::Models => Icon::Bot,
         Section::Tools => Icon::Plug,
@@ -226,6 +247,7 @@ fn section_icon(section: Section) -> Icon {
 fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
     match section {
         Section::General => general_rows(app),
+        Section::Appearance => appearance_rows(app),
         Section::Shortcuts => shortcuts(),
         Section::Models => {
             let mut rows = claude_rows(app);
@@ -260,7 +282,7 @@ fn setup_note(app: &App, section: Section) -> String {
 fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
     let needle = query.trim().to_lowercase();
     let matches = |row: &SheetRow| {
-        matches!(row.kind, 1 | 3)
+        matches!(row.kind, 1 | 3 | 4)
             && (row.name.to_lowercase().contains(&needle)
                 || row.value.to_lowercase().contains(&needle))
     };
@@ -277,12 +299,86 @@ fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
             rows.extend(hits);
         }
     }
+    // The themes found show after the rows, as cards.
+    if !themes_found(app, &needle).is_empty() {
+        rows.push(heading("Themes"));
+    }
     let note = if rows.is_empty() {
         format!("No setting matches “{}”.", query.trim())
     } else {
         String::new()
     };
     (note, rows)
+}
+
+/// Light or dark, and the theme; the themes themselves show as cards.
+fn appearance_rows(app: &App) -> Vec<SheetRow> {
+    vec![
+        SheetRow {
+            kind: 4,
+            name: "Light or dark".into(),
+            value: "System follows the desktop".into(),
+            setting: match app.preferences.appearance {
+                Appearance::System => 0,
+                Appearance::Light => 1,
+                Appearance::Dark => 2,
+            },
+            ..SheetRow::default()
+        },
+        heading("Theme"),
+        note(
+            "Harlo's own theme, then OpenCode's built-in ones. This choice is Harlo's; \
+             OpenCode's own theme setting stays as it is.",
+        ),
+    ]
+}
+
+/// The theme cards Settings shows: all of them in Appearance, or those a
+/// search finds.
+fn theme_cards(app: &App) -> Vec<ThemeCard> {
+    let needle = app.sheets.query.trim().to_lowercase();
+    let themes = if needle.is_empty() {
+        if app.sheets.section != Section::Appearance {
+            return Vec::new();
+        }
+        app.themes.iter().collect()
+    } else {
+        themes_found(app, &needle)
+    };
+    let mode = app.mode();
+    let chosen = &app.theme().id;
+    themes
+        .into_iter()
+        .map(|theme| {
+            let t = theme.tokens(mode);
+            ThemeCard {
+                id: theme.id.as_str().into(),
+                name: theme.name.as_str().into(),
+                chosen: theme.id == *chosen,
+                background: color(t.background_base),
+                sidebar: color(t.background_stronger),
+                raised: color(t.surface_raised_strong),
+                text: color(t.text_strong),
+                weak: color(t.text_weak),
+                brand: color(t.surface_brand_base),
+                keyword: color(t.syntax_keyword),
+                function: color(t.syntax_primitive),
+                text_string: color(t.syntax_string),
+            }
+        })
+        .collect()
+}
+
+/// The themes a search for `needle` (lower case) finds: by name, or all of
+/// them for a search for themes or appearance.
+fn themes_found<'a>(app: &'a App, needle: &str) -> Vec<&'a Theme> {
+    let all = ["theme", "themes", "appearance", "colours", "colors"]
+        .iter()
+        .any(|word| word.starts_with(needle) && needle.len() >= 3);
+    app.themes
+        .iter()
+        .filter(|t| all || t.name.to_lowercase().contains(needle))
+        .collect()
 }
 
 /// Harlo's own general settings.

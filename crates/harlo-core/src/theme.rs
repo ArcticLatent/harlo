@@ -4,9 +4,11 @@
 //! `palette` (`neutral` background, `ink` text, `primary`, status colours) and
 //! optional `overrides` keyed by token name, such as `"text-weak": "#8b8c8e"`
 //! or `"icon-base": "var(--text-base)"`. Harlo derives every token it uses
-//! from the palette, then applies the overrides it knows. Token names are
-//! OpenCode's, so its theme files load as they are; overrides for tokens Harlo
-//! doesn't use, and `v2Overrides`, are ignored.
+//! from the palette the way OpenCode's desktop app does (its OKLCH scales,
+//! in [`color`]), then applies the overrides it knows, so a theme looks as it
+//! does in OpenCode. Token names are OpenCode's, so its theme files load as
+//! they are; overrides for tokens Harlo doesn't use, and `v2Overrides`, are
+//! ignored.
 
 // Rust guideline compliant 2026-10-09
 
@@ -15,6 +17,10 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 
 use serde::Deserialize;
+
+use color::Hex;
+
+mod color;
 
 /// How many rounds of `var(--…)` references are applied.
 ///
@@ -73,6 +79,18 @@ impl Rgba {
         })
     }
 
+    /// The colour as 8-bit channels, without its opacity.
+    #[must_use]
+    fn hex(self) -> color::Hex {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "clamped to 0..=1 first, so the scaled value fits a u8"
+        )]
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        [byte(self.r), byte(self.g), byte(self.b)]
+    }
+
     /// Returns this colour with the given opacity.
     #[must_use]
     pub fn alpha(self, a: f32) -> Self {
@@ -87,6 +105,17 @@ impl Rgba {
             r: mix(self.r, base.r),
             g: mix(self.g, base.g),
             b: mix(self.b, base.b),
+            a: 1.0,
+        }
+    }
+}
+
+impl From<color::Hex> for Rgba {
+    fn from([r, g, b]: color::Hex) -> Self {
+        Self {
+            r: f32::from(r) / 255.0,
+            g: f32::from(g) / 255.0,
+            b: f32::from(b) / 255.0,
             a: 1.0,
         }
     }
@@ -142,7 +171,9 @@ macro_rules! tokens {
                 }
             }
 
-            fn get(&self, name: &str) -> Option<Rgba> {
+            /// The token OpenCode names `name`, such as `text-weak`.
+            #[must_use]
+            pub fn get(&self, name: &str) -> Option<Rgba> {
                 match name {
                     $( $name => Some(self.$field), )*
                     _ => None,
@@ -199,6 +230,44 @@ tokens! {
     icon_critical_base = "icon-critical-base",
     /// Information.
     icon_info_base = "icon-info-base",
+    /// Comments in code.
+    syntax_comment = "syntax-comment",
+    /// Keywords, such as `fn` and `if`.
+    syntax_keyword = "syntax-keyword",
+    /// Strings.
+    syntax_string = "syntax-string",
+    /// Built-in types and values, such as `bool` and `true`.
+    syntax_primitive = "syntax-primitive",
+    /// Properties and fields.
+    syntax_property = "syntax-property",
+    /// Type names.
+    syntax_type = "syntax-type",
+    /// Constants and numbers.
+    syntax_constant = "syntax-constant",
+    /// Operators.
+    syntax_operator = "syntax-operator",
+    /// Punctuation, such as brackets.
+    syntax_punctuation = "syntax-punctuation",
+    /// Variables and parameters.
+    syntax_variable = "syntax-variable",
+}
+
+/// OpenCode's built-in desktop themes, bundled from the pinned release.
+const OPENCODE_THEMES: &[&str] = include!(concat!(env!("OUT_DIR"), "/opencode_themes.rs"));
+
+/// Every bundled theme: Harlo's own first, then OpenCode's by name.
+///
+/// A file that doesn't parse is left out; the tests check they all do.
+#[must_use]
+pub fn bundled() -> Vec<Theme> {
+    let mut opencode: Vec<Theme> = OPENCODE_THEMES
+        .iter()
+        .filter_map(|json| parse(json).ok())
+        .collect();
+    opencode.sort_by_cached_key(|theme| theme.name.to_lowercase());
+    let mut themes: Vec<Theme> = parse(crate::DEFAULT_THEME).into_iter().collect();
+    themes.extend(opencode);
+    themes
 }
 
 /// A theme read from a file, with both variants.
@@ -218,16 +287,21 @@ struct Variant {
     overrides: BTreeMap<String, String>,
 }
 
+/// A variant's colours as its file gives them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Palette {
-    neutral: Rgba,
-    ink: Rgba,
-    primary: Rgba,
-    success: Rgba,
-    warning: Rgba,
-    error: Rgba,
-    info: Rgba,
-    interactive: Rgba,
+    /// Whether the file gives a `palette`, rather than OpenCode's older
+    /// `seeds`; the two derive text and code colours differently.
+    compact: bool,
+    neutral: Hex,
+    ink: Option<Hex>,
+    primary: Hex,
+    accent: Hex,
+    success: Hex,
+    warning: Hex,
+    error: Hex,
+    info: Hex,
+    interactive: Hex,
 }
 
 #[derive(Deserialize)]
@@ -240,9 +314,8 @@ struct FileTheme {
 
 #[derive(Deserialize)]
 struct FileVariant {
-    // OpenCode's older files call the palette `seeds`.
-    #[serde(alias = "seeds")]
-    palette: FilePalette,
+    palette: Option<FilePalette>,
+    seeds: Option<FilePalette>,
     #[serde(default)]
     overrides: BTreeMap<String, String>,
 }
@@ -252,6 +325,7 @@ struct FilePalette {
     neutral: String,
     ink: Option<String>,
     primary: String,
+    accent: Option<String>,
     success: String,
     warning: String,
     error: String,
@@ -277,26 +351,43 @@ pub fn parse(json: &str) -> Result<Theme, ThemeError> {
 }
 
 fn variant(file: FileVariant, mode: Mode) -> Result<Variant, ThemeError> {
+    let (p, compact) = match (file.palette, file.seeds) {
+        (Some(palette), None) => (palette, true),
+        (None, Some(seeds)) => (seeds, false),
+        _ => {
+            return Err(ThemeError::bad_color(
+                mode,
+                "palette",
+                "needs one of palette or seeds",
+            ));
+        }
+    };
     let color = |name: &'static str, value: &str| {
-        Rgba::parse(value).ok_or_else(|| ThemeError::bad_color(mode, name, value))
+        Rgba::parse(value)
+            .map(Rgba::hex)
+            .ok_or_else(|| ThemeError::bad_color(mode, name, value))
     };
-    let p = &file.palette;
-    let neutral = color("neutral", &p.neutral)?;
+    let info = color("info", &p.info)?;
     let primary = color("primary", &p.primary)?;
-    let ink = match &p.ink {
-        Some(ink) => color("ink", ink)?,
-        // Without ink, text contrasts with the background.
-        None if mode == Mode::Dark => Rgba::parse("#ececec").unwrap_or(Rgba::BLACK),
-        None => Rgba::parse("#1c1c1c").unwrap_or(Rgba::BLACK),
-    };
     let palette = Palette {
-        neutral,
-        ink,
+        compact,
+        neutral: color("neutral", &p.neutral)?,
+        // OpenCode's older seeds have no ink.
+        ink: match (&p.ink, compact) {
+            (Some(ink), true) => Some(color("ink", ink)?),
+            _ => None,
+        },
         primary,
+        // As in OpenCode, a theme without an accent uses its info colour,
+        // and one without an interactive colour its primary.
+        accent: match &p.accent {
+            Some(value) if compact => color("accent", value)?,
+            _ => info,
+        },
         success: color("success", &p.success)?,
         warning: color("warning", &p.warning)?,
         error: color("error", &p.error)?,
-        info: color("info", &p.info)?,
+        info,
         interactive: match &p.interactive {
             Some(value) => color("interactive", value)?,
             None => primary,
@@ -316,47 +407,247 @@ impl Theme {
             Mode::Light => &self.light,
             Mode::Dark => &self.dark,
         };
-        let mut tokens = derive(&variant.palette, mode);
-        apply_overrides(&mut tokens, &variant.overrides);
+        let (mut tokens, references) = derive(&variant.palette, &variant.overrides, mode);
+        // Some colours follow other tokens, as in OpenCode, so an override of
+        // those reaches them too, unless the theme sets them itself.
+        let mut overrides = variant.overrides.clone();
+        for (name, target) in references {
+            overrides
+                .entry(name.to_owned())
+                .or_insert_with(|| format!("var(--{target})"));
+        }
+        apply_overrides(&mut tokens, &overrides);
+        // A compact theme's own weak text sets its weaker text too.
+        let weak = variant.overrides.get("text-weak").map(|v| v.trim());
+        if variant.palette.compact && !variant.overrides.contains_key("text-weaker") {
+            match weak.and_then(Rgba::parse) {
+                Some(weak) => {
+                    let (l, c) = match mode {
+                        Mode::Dark => (-0.12, 0.75),
+                        Mode::Light => (0.12, 0.75),
+                    };
+                    tokens.text_weaker = Rgba::from(color::shift(weak.hex(), l, c, 0.0));
+                }
+                None if weak.is_some() => tokens.text_weaker = tokens.text_weak,
+                None => {}
+            }
+        }
         tokens
     }
 }
 
-/// Derives every token from the palette by mixing ink into the background.
+/// Derives every token from the palette as OpenCode's desktop app does,
+/// and names the tokens that follow others (`syntax-comment` follows
+/// `text-weak`, say), which overrides are then applied through.
 ///
-/// The amounts make a dark grey palette of `#292929` and `#d5d5d5` give
-/// Harlo's own greys within one step of 255.
-fn derive(p: &Palette, mode: Mode) -> Tokens {
-    let tint = |amount: f32| p.ink.over(p.neutral, amount);
-    let text_base = tint(0.72);
-    Tokens {
-        background_base: p.neutral,
-        background_stronger: match mode {
-            Mode::Dark => Rgba::BLACK.over(p.neutral, 0.1),
-            Mode::Light => tint(0.04),
-        },
-        surface_inset_base: tint(0.025),
-        surface_raised_base: tint(0.035),
-        surface_raised_strong: tint(0.07),
-        surface_base_hover: p.ink.alpha(0.05),
-        surface_base_active: p.ink.alpha(0.07),
-        surface_brand_base: p.primary,
-        border_weaker_base: tint(0.05),
-        border_weak_base: tint(0.08),
-        border_base: tint(0.14),
-        text_strong: p.ink,
-        text_base,
-        text_weak: tint(0.58),
-        text_weaker: tint(0.37),
-        text_interactive_base: p.interactive,
-        icon_base: text_base,
-        icon_weak_base: tint(0.5),
-        icon_selected: p.primary,
-        icon_success_base: p.success,
-        icon_warning_base: p.warning,
-        icon_critical_base: p.error,
-        icon_info_base: p.info,
+/// Ported from OpenCode's `packages/ui/src/theme/resolve.ts`, Copyright (c)
+/// 2025 opencode, under the MIT licence in `themes/opencode/LICENSE`.
+fn derive(
+    p: &Palette,
+    overrides: &BTreeMap<String, String>,
+    mode: Mode,
+) -> (Tokens, Vec<(&'static str, &'static str)>) {
+    use color::{blend, neutral_scale};
+
+    let dark = mode == Mode::Dark;
+    // The first value for the dark variant, the second for the light.
+    macro_rules! pick {
+        ($dark:expr, $light:expr $(,)?) => {
+            if dark { $dark } else { $light }
+        };
     }
+    let neutral = neutral_scale(p.neutral, dark, p.ink);
+    let scales = Scales::new(p, dark);
+    let ink = p.ink.unwrap_or(p.neutral);
+    // Translucent tones are laid over the background, or over a theme's own
+    // background colour when it sets one.
+    let background = overrides
+        .get("background-base")
+        .and_then(|v| Rgba::parse(v.trim()))
+        .map_or(neutral[0], Rgba::hex);
+    let border = |light: f64, dark_amount: f64| {
+        let extra = if p.compact { 0.08 } else { 0.0 };
+        let alpha = if dark {
+            (dark_amount + 0.024 + extra).min(1.0)
+        } else {
+            (light + 0.024).min(1.0)
+        };
+        blend(ink, background, alpha)
+    };
+    let alphas = pick!(
+        [
+            0.038, 0.066, 0.1, 0.142, 0.19, 0.252, 0.334, 0.446, 0.58, 0.718, 0.854, 0.985,
+        ],
+        [
+            0.03, 0.06, 0.1, 0.145, 0.2, 0.265, 0.35, 0.47, 0.61, 0.74, 0.86, 0.97,
+        ],
+    );
+    let neutral_alpha = alphas.map(|alpha| blend(neutral[11], neutral[0], alpha));
+    let [text_base, text_weak, text_weaker, text_strong] = text_colors(p, &neutral, dark);
+    let (icon_base, icon_selected) = if p.compact && !dark {
+        (text_weak, text_strong)
+    } else {
+        (neutral[pick!(9, 8)], neutral[11])
+    };
+    let (border_base, border_weak, border_weaker) = if p.compact {
+        (border(0.22, 0.16), border(0.1, 0.08), border(0.06, 0.04))
+    } else {
+        (
+            neutral_alpha[6],
+            neutral_alpha[pick!(5, 4)],
+            neutral_alpha[2],
+        )
+    };
+    let [string, keyword, primitive, property, kind, constant] =
+        code_colors(p, &scales, text_weak, dark);
+    let quiet = pick!("text-weak", "text-base");
+    let mut references = vec![
+        ("syntax-comment", "text-weak"),
+        ("syntax-operator", quiet),
+        ("syntax-punctuation", quiet),
+        ("syntax-variable", "text-strong"),
+    ];
+    if !p.compact {
+        references.push(("syntax-keyword", "text-weak"));
+    }
+    let tokens = Tokens {
+        background_base: neutral[0].into(),
+        background_stronger: pick!(neutral[1], [0xfc, 0xfc, 0xfc]).into(),
+        surface_inset_base: neutral_alpha[1].into(),
+        surface_raised_base: neutral_alpha[0].into(),
+        surface_raised_strong: pick!(neutral_alpha[3], neutral[0]).into(),
+        surface_base_hover: neutral_alpha[2].into(),
+        surface_base_active: neutral_alpha[2].into(),
+        surface_brand_base: scales.primary[8].into(),
+        border_weaker_base: border_weaker.into(),
+        border_weak_base: border_weak.into(),
+        border_base: border_base.into(),
+        text_strong: text_strong.into(),
+        text_base: text_base.into(),
+        text_weak: text_weak.into(),
+        text_weaker: text_weaker.into(),
+        text_interactive_base: scales.interactive[pick!(10, 9)].into(),
+        icon_base: icon_base.into(),
+        icon_weak_base: neutral[pick!(5, 6)].into(),
+        icon_selected: icon_selected.into(),
+        icon_success_base: scales.success[pick!(8, 6)].into(),
+        icon_warning_base: scales.amber[pick!(8, 6)].into(),
+        icon_critical_base: scales.error[pick!(8, 9)].into(),
+        icon_info_base: scales.info[pick!(8, 6)].into(),
+        syntax_comment: text_weak.into(),
+        syntax_keyword: keyword.into(),
+        syntax_string: string.into(),
+        syntax_primitive: primitive.into(),
+        syntax_property: property.into(),
+        syntax_type: kind.into(),
+        syntax_constant: constant.into(),
+        syntax_operator: pick!(text_weak, text_base).into(),
+        syntax_punctuation: pick!(text_weak, text_base).into(),
+        syntax_variable: text_strong.into(),
+    };
+    (tokens, references)
+}
+
+/// The palette's colour scales for one variant.
+struct Scales {
+    primary: [Hex; 12],
+    accent: [Hex; 12],
+    success: [Hex; 12],
+    warning: [Hex; 12],
+    /// The warning colour turned towards amber, for warning icons.
+    amber: [Hex; 12],
+    error: [Hex; 12],
+    info: [Hex; 12],
+    interactive: [Hex; 12],
+}
+
+impl Scales {
+    fn new(p: &Palette, dark: bool) -> Self {
+        use color::{scale, shift};
+        let amber = if dark {
+            shift(p.warning, -0.058, 1.14, -16.0)
+        } else {
+            shift(p.warning, -0.082, 0.94, -22.0)
+        };
+        Self {
+            primary: scale(p.primary, dark),
+            accent: scale(p.accent, dark),
+            success: scale(p.success, dark),
+            warning: scale(p.warning, dark),
+            amber: scale(amber, dark),
+            error: scale(p.error, dark),
+            info: scale(p.info, dark),
+            interactive: scale(p.interactive, dark),
+        }
+    }
+}
+
+/// Body, weak, weaker and strong text: a compact theme's from its ink,
+/// the older seeds' from the greys.
+fn text_colors(p: &Palette, neutral: &[Hex; 12], dark: bool) -> [Hex; 4] {
+    use color::{blend, oklch, shift};
+    if !p.compact {
+        return [neutral[10], neutral[8], neutral[7], neutral[11]];
+    }
+    let ink = p.ink.unwrap_or(p.neutral);
+    let tint = oklch(ink);
+    if dark {
+        let body = shift(ink, (0.88 - tint.l).max(0.0) * 0.4, 1.04, 0.0);
+        [
+            body,
+            shift(body, -0.11, 0.9, 0.0),
+            shift(body, -0.2, 0.78, 0.0),
+            blend([255, 255, 255], body, 0.9),
+        ]
+    } else {
+        let body = shift(ink, -(tint.l - 0.18).max(0.0) * 0.24, 1.02, 0.0);
+        [
+            body,
+            shift(body, 0.11, 0.9, 0.0),
+            shift(body, 0.21, 0.72, 0.0),
+            shift(body, -0.07, 1.04, 0.0),
+        ]
+    }
+}
+
+/// String, keyword, primitive, property, type and constant colours: a
+/// compact theme's from its palette, the older seeds' fixed.
+fn code_colors(p: &Palette, s: &Scales, text_weak: Hex, dark: bool) -> [Hex; 6] {
+    use color::{oklch, shift};
+    if !p.compact {
+        let fixed = |dark_value: &str, light_value: &str| {
+            Rgba::parse(if dark { dark_value } else { light_value }).map_or([0, 0, 0], Rgba::hex)
+        };
+        return [
+            fixed("#00ceb9", "#006656"),
+            text_weak,
+            fixed("#ffba92", "#fb4804"),
+            fixed("#ff9ae2", "#ed6dc8"),
+            fixed("#ecf58c", "#596600"),
+            fixed("#93e9f6", "#007b80"),
+        ];
+    }
+    // A content colour: the seed's scale, made a little livelier.
+    let content = |seed: Hex, steps: &[Hex; 12]| {
+        let value = if dark && oklch(seed).l > 0.84 {
+            shift(seed, 0.0, 1.18, 0.0)
+        } else {
+            steps[10]
+        };
+        if dark {
+            shift(value, 0.034, 1.3, 0.0)
+        } else {
+            shift(value, -0.024, 1.18, 0.0)
+        }
+    };
+    [
+        content(p.success, &s.success),
+        content(p.accent, &s.accent),
+        content(p.primary, &s.primary),
+        content(p.info, &s.info),
+        content(p.warning, &s.warning),
+        content(p.accent, &s.accent),
+    ]
 }
 
 /// Applies overrides for tokens Harlo uses, following `var(--token)` references.

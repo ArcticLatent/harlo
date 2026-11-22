@@ -5,7 +5,7 @@
 import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, SheetRow } from "data.slint";
+import { State, Logic, SheetRow, ThemeCard } from "data.slint";
 import { Field, Icon, IconButton, Press, HLine, VLine, Switch } from "widgets.slint";
 
 /// A small button with a word on it, at the end of a row.
@@ -28,8 +28,30 @@ component ActionButton inherits Press {
     }
 }
 
-/// One row: a heading, a name with its value, a note, or a switch with
-/// what it does.
+/// One of a few options side by side; the chosen one stands out.
+component ChoiceButton inherits Press {
+    in property <string> text;
+    height: 24px;
+    label: root.text;
+    rest: transparent;
+    lit: Theme.background-base;
+    border-width: root.selected ? 1px : 0px;
+    border-color: Theme.border-base;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+
+    Text {
+        text: root.text;
+        font-size: Size.small;
+        color: root.selected ? Theme.text-strong : Theme.text-weak;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
+/// One row: a heading, a name with its value, a note, a switch with what
+/// it does, or the light-or-dark choice.
 component Row inherits VerticalLayout {
     in property <SheetRow> entry;
 
@@ -82,6 +104,35 @@ component Row inherits VerticalLayout {
         wrap: word-wrap;
         accessible-role: AccessibleRole.text;
     }
+    if root.entry.kind == 4: HorizontalLayout {
+        height: 36px;
+        spacing: 16px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.name;
+            font-size: Size.small;
+            color: Theme.text-base;
+            vertical-alignment: center;
+            accessible-role: AccessibleRole.text;
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                background: Theme.surface-inset-base;
+                border-radius: Size.radius + 2px;
+                HorizontalLayout {
+                    padding: 2px;
+                    spacing: 2px;
+                    for option[index] in ["System", "Light", "Dark"]: ChoiceButton {
+                        width: 70px;
+                        text: option;
+                        selected: root.entry.setting == index;
+                        clicked => { Logic.pick-appearance(index); }
+                    }
+                }
+            }
+        }
+    }
     if root.entry.kind == 3: HorizontalLayout {
         padding-top: 6px;
         padding-bottom: 6px;
@@ -111,6 +162,120 @@ component Row inherits VerticalLayout {
                 toggled => { Logic.switch-setting(root.entry.setting); }
             }
         }
+    }
+}
+
+/// A preview of a theme: a small window in its colours, and its name.
+component ThemeTile inherits Press {
+    in property <ThemeCard> card;
+    height: 96px;
+    label: root.card.name;
+    rest: transparent;
+    hover: transparent;
+    lit: transparent;
+    accessible-checkable: true;
+    accessible-checked: root.card.chosen;
+
+    preview := Rectangle {
+        y: 0;
+        height: 68px;
+        border-radius: 6px;
+        background: root.card.background;
+        border-width: root.card.chosen ? 2px : 1px;
+        border-color: root.card.chosen ? Theme.text-interactive-base
+            : root.hovered ? Theme.border-base : Theme.border-weak-base;
+        clip: true;
+
+        // The sidebar, with two sessions.
+        Rectangle {
+            x: 0;
+            width: parent.width * 0.28;
+            background: root.card.sidebar;
+            for line[index] in 2: Rectangle {
+                x: 8px;
+                y: 12px + index * 10px;
+                width: parent.width - 16px - index * 8px;
+                height: 4px;
+                border-radius: 2px;
+                background: root.card.weak;
+            }
+        }
+        // A reply: a line of text, a quieter one, and a line of code.
+        Rectangle {
+            x: parent.width * 0.28 + 10px;
+            y: 12px;
+            width: parent.width * 0.4;
+            height: 5px;
+            border-radius: 2.5px;
+            background: root.card.text;
+        }
+        Rectangle {
+            x: parent.width * 0.28 + 10px;
+            y: 23px;
+            width: parent.width * 0.52;
+            height: 4px;
+            border-radius: 2px;
+            background: root.card.weak;
+        }
+        Rectangle {
+            x: parent.width * 0.28 + 10px;
+            y: 34px;
+            width: parent.width * 0.62;
+            height: 12px;
+            border-radius: 3px;
+            background: root.card.raised;
+            HorizontalLayout {
+                padding-left: 5px;
+                padding-right: 5px;
+                spacing: 4px;
+                alignment: start;
+                for colour[index] in [root.card.keyword, root.card.function, root.card.text-string]: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: index == 2 ? 22px : 12px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: colour;
+                    }
+                }
+            }
+        }
+        // The main button.
+        Rectangle {
+            x: parent.width - self.width - 8px;
+            y: parent.height - self.height - 8px;
+            width: 22px;
+            height: 9px;
+            border-radius: 4.5px;
+            background: root.card.brand;
+        }
+    }
+    Text {
+        y: preview.height + 6px;
+        width: parent.width;
+        text: root.card.name;
+        font-size: Size.small;
+        font-weight: root.card.chosen ? 600 : 400;
+        color: root.card.chosen ? Theme.text-strong : Theme.text-base;
+        overflow: elide;
+        accessible-role: none;
+    }
+}
+
+/// The themes as cards, as many to a row as fit.
+component ThemeGrid inherits Rectangle {
+    property <length> gap: 12px;
+    property <int> columns: max(1, floor((root.width + root.gap) / (150px + root.gap)));
+    property <length> tile-width: (root.width - (root.columns - 1) * root.gap) / root.columns;
+    property <int> rows: ceil(State.theme-cards.length / root.columns);
+    height: root.rows * (96px + root.gap);
+
+    for card[index] in State.theme-cards: ThemeTile {
+        x: mod(index, root.columns) * (root.tile-width + root.gap);
+        y: floor(index / root.columns) * (96px + root.gap);
+        width: root.tile-width;
+        card: card;
+        clicked => { Logic.pick-theme(card.id); }
     }
 }
 
@@ -384,6 +549,7 @@ export component SheetLayer inherits Rectangle {
                         padding-top: 4px;
                         spacing: 6px;
                         SheetRows { }
+                        if State.theme-cards.length > 0: ThemeGrid { }
                         // The last section, About, ends with Slint's notice.
                         if State.settings-section == State.settings-sections.length - 1
                             && State.settings-query == "": HorizontalLayout {

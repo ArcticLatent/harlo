@@ -1,6 +1,6 @@
 //! Pages that open over the window from the left rail: usage stats across
-//! sessions, and Settings, whose sections hold Harlo's own settings, the
-//! keyboard shortcuts, the server's set-up and About.
+//! sessions, and Settings, whose sections hold Harlo's own settings, its
+//! appearance, the keyboard shortcuts, the server's set-up and About.
 //!
 //! Harlo's own settings are saved with the layout. The server's set-up
 //! (providers, web search, MCP servers, plugins) belongs to the shared
@@ -10,6 +10,7 @@
 
 use std::time::{Duration, UNIX_EPOCH};
 
+use harlo_core::layout::Appearance;
 use harlo_core::server::{McpServer, Plugin, Provider, Stats, WebSearch};
 
 use super::{App, Message};
@@ -30,6 +31,8 @@ pub enum Section {
     /// Harlo's general settings.
     #[default]
     General,
+    /// The colour theme, light or dark.
+    Appearance,
     /// The keyboard shortcuts.
     Shortcuts,
     /// The server's model providers.
@@ -44,8 +47,9 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::General,
+        Self::Appearance,
         Self::Shortcuts,
         Self::Models,
         Self::Tools,
@@ -58,6 +62,7 @@ impl Section {
     pub fn title(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Appearance => "Appearance",
             Self::Shortcuts => "Shortcuts",
             Self::Models => "Models",
             Self::Tools => "Tools for agents",
@@ -70,7 +75,7 @@ impl Section {
     #[must_use]
     pub fn group(self) -> Option<&'static str> {
         match self {
-            Self::General | Self::Shortcuts | Self::About => None,
+            Self::General | Self::Appearance | Self::Shortcuts | Self::About => None,
             Self::Models | Self::Tools => Some("Agents and models"),
             Self::Server => Some("Connections"),
         }
@@ -151,6 +156,10 @@ pub enum Event {
     Query(String),
     /// Turn one of Harlo's own settings on or off.
     Switch(Setting),
+    /// Use the theme with this id.
+    Theme(String),
+    /// Show the theme's light or dark variant, or follow the desktop.
+    Appearance(Appearance),
     /// Show stats for another range.
     Range(Range),
     /// Stats arrived for load `serial`.
@@ -233,6 +242,18 @@ impl App {
                         self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
                     }
                 }
+                return self.save_preferences();
+            }
+            Event::Theme(id) => {
+                if self.themes.iter().any(|t| t.id == id) {
+                    self.preferences.theme = id;
+                    self.retheme();
+                    return self.save_preferences();
+                }
+            }
+            Event::Appearance(appearance) => {
+                self.preferences.appearance = appearance;
+                self.retheme();
                 return self.save_preferences();
             }
             Event::Range(range) => {

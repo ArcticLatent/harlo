@@ -1,4 +1,5 @@
-//! Themes: Harlo's default matches the design, and OpenCode's own theme files load.
+//! Themes: Harlo's default matches the design, OpenCode's own theme files load,
+//! and every bundled theme gives both variants.
 
 // Rust guideline compliant 2026-10-09
 
@@ -40,32 +41,35 @@ fn default_dark_theme_matches_the_mockup() {
     }
 }
 
-/// Without overrides, the derivation alone lands within one step of the mockup's greys.
+/// Backgrounds come from the neutral colour as OpenCode's do: a dark one
+/// sinks, and a mid grey lifts most of the way to white for light.
 #[test]
-fn derived_greys_are_close_to_the_mockup() {
-    let json = r##"{ "id": "t", "name": "T",
-        "light": { "palette": { "neutral": "#eeeeee", "ink": "#404040", "primary": "#1159e3",
-            "success": "#105223", "warning": "#7a6211", "error": "#980313", "info": "#0c42a8" } },
-        "dark": { "palette": { "neutral": "#292929", "ink": "#d5d5d5", "primary": "#c6dafc",
-            "success": "#6ce78a", "warning": "#f3c30e", "error": "#ffb1b2", "info": "#adcafa" } } }"##;
-    let tokens = theme::parse(json).expect("theme").tokens(Mode::Dark);
-    let grey = |c: Rgba| c.r * 255.0;
-    for (name, actual, want) in [
-        ("background-stronger", tokens.background_stronger, 0x25_u8),
-        ("surface-inset-base", tokens.surface_inset_base, 0x2d),
-        ("surface-raised-base", tokens.surface_raised_base, 0x2f),
-        ("surface-raised-strong", tokens.surface_raised_strong, 0x35),
-        ("border-weak-base", tokens.border_weak_base, 0x38),
-        ("text-weak", tokens.text_weak, 0x8b),
-        ("text-weaker", tokens.text_weaker, 0x69),
-    ] {
-        assert!(
-            (grey(actual) - f32::from(want)).abs() <= 2.0,
-            "{name}: {actual} vs {want:#x}"
-        );
-    }
-    // An unset `interactive` falls back to `primary`.
-    assert_eq!(tokens.text_interactive_base, tokens.icon_selected);
+fn backgrounds_follow_opencodes_greys() {
+    let carbonfox = theme::bundled()
+        .into_iter()
+        .find(|t| t.id == "carbonfox")
+        .expect("carbonfox");
+    // Its light neutral is #8e8e8e; OpenCode shows it nearly white.
+    let light = carbonfox.tokens(Mode::Light);
+    assert!(light.background_base.r > 0.9, "{}", light.background_base);
+    assert!(
+        light.text_strong.r < 0.3,
+        "dark text: {}",
+        light.text_strong
+    );
+    // A dark neutral sinks below itself.
+    let dracula = theme::bundled()
+        .into_iter()
+        .find(|t| t.id == "dracula")
+        .expect("dracula");
+    let dark = dracula.tokens(Mode::Dark);
+    let neutral = Rgba::parse("#282a36").expect("dracula's neutral");
+    assert!(
+        dark.background_base.r < neutral.r,
+        "{}",
+        dark.background_base
+    );
+    assert!(dark.text_strong.r > 0.8, "light text: {}", dark.text_strong);
 }
 
 /// OpenCode's theme files load unchanged, with their overrides applied.
@@ -78,19 +82,18 @@ fn opencode_theme_files_load() {
         ("catppuccin-macchiato", "Catppuccin Macchiato")
     );
     let dark = catppuccin.tokens(Mode::Dark);
-    assert_eq!(dark.background_base.to_string(), "#24273a");
     assert_eq!(dark.text_weak.to_string(), "#b8c0e0", "override applied");
-    assert_eq!(
-        catppuccin.tokens(Mode::Light).text_strong.to_string(),
-        "#4c4f69"
+    assert_ne!(
+        dark.background_base,
+        catppuccin.tokens(Mode::Light).background_base
     );
 
     // OpenCode's own theme uses `var(--v2-…)` references Harlo doesn't model;
     // those are skipped and the tokens Harlo knows still come through.
     let opencode = theme::parse(include_str!("fixtures/oc-2.json")).expect("oc-2");
     let light = opencode.tokens(Mode::Light);
-    assert_eq!(light.text_strong.to_string(), "#171717");
-    assert_eq!(light.text_weak.to_string(), "#8f8f8f");
+    assert!(light.text_strong.r < 0.2, "{}", light.text_strong);
+    assert!(light.background_base.r > 0.9, "{}", light.background_base);
 }
 
 #[test]
@@ -146,4 +149,121 @@ fn hex_colors_parse_in_every_length() {
     for bad in ["", "fff", "#ff", "#ggg", "#12345", "#+12345"] {
         assert_eq!(parse(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn every_bundled_theme_loads_with_harlo_first() {
+    let themes = theme::bundled();
+    assert_eq!(themes[0].id, "harlo", "Harlo's own theme leads");
+    assert!(
+        themes.len() >= 37,
+        "Harlo's and OpenCode's: {}",
+        themes.len()
+    );
+    let names: Vec<&str> = themes[1..].iter().map(|t| t.name.as_str()).collect();
+    let mut sorted = names.clone();
+    sorted.sort_by_key(|name| name.to_lowercase());
+    assert_eq!(names, sorted, "OpenCode's by name");
+    for id in [
+        "oc-2",
+        "dracula",
+        "nord",
+        "tokyonight",
+        "github",
+        "solarized",
+    ] {
+        assert!(themes.iter().any(|t| t.id == id), "{id} is bundled");
+    }
+    for t in &themes {
+        let (light, dark) = (t.tokens(Mode::Light), t.tokens(Mode::Dark));
+        assert_ne!(
+            light.background_base, dark.background_base,
+            "{} has two variants",
+            t.id
+        );
+    }
+}
+
+#[test]
+fn code_colours_come_from_the_theme() {
+    let dracula = theme::bundled()
+        .into_iter()
+        .find(|t| t.id == "dracula")
+        .expect("dracula");
+    let dark = dracula.tokens(Mode::Dark);
+    // Set by the theme.
+    assert_eq!(dark.syntax_keyword.to_string(), "#ff79c6");
+    assert_eq!(dark.syntax_string.to_string(), "#f1fa8c");
+    assert_eq!(dark.syntax_comment.to_string(), "#6272a4");
+    // Not set: punctuation follows its weak text, as OpenCode's does.
+    assert_eq!(dark.syntax_punctuation, dark.text_weak);
+
+    // A theme without code colours takes them from its palette by role.
+    let plain = theme::parse(
+        r##"{"id": "p", "name": "P",
+            "light": {"palette": {"neutral": "#ffffff", "ink": "#000000", "primary": "#0000ff",
+              "success": "#00ff00", "warning": "#ffff00", "error": "#ff0000", "info": "#00ffff"}},
+            "dark": {"palette": {"neutral": "#000000", "ink": "#ffffff", "primary": "#0000ff",
+              "accent": "#ff00ff", "success": "#00ff00", "warning": "#ffff00", "error": "#ff0000",
+              "info": "#00ffff"},
+              "overrides": {"text-weak": "#123456"}}}"##,
+    )
+    .expect("a theme");
+    let dark = plain.tokens(Mode::Dark);
+    // Keywords and constants share the accent; strings, types and the rest
+    // each have their own.
+    assert_eq!(dark.syntax_keyword, dark.syntax_constant);
+    assert_ne!(dark.syntax_keyword, dark.syntax_string);
+    assert_ne!(dark.syntax_string, dark.syntax_type);
+    assert!(
+        dark.syntax_string.g > dark.syntax_string.r,
+        "green: {}",
+        dark.syntax_string
+    );
+    assert_eq!(
+        dark.syntax_comment.to_string(),
+        "#123456",
+        "follows text-weak"
+    );
+    assert_eq!(dark.syntax_operator.to_string(), "#123456");
+    let light = plain.tokens(Mode::Light);
+    assert_eq!(
+        light.syntax_keyword, light.syntax_property,
+        "no accent: info"
+    );
+    assert_eq!(light.syntax_operator, light.text_base);
+}
+
+/// OpenCode's own theme code, run on every bundled theme at the pinned
+/// version (tools/opencode-theme-reference.sh), gives exactly these colours.
+#[test]
+fn bundled_themes_match_opencode_exactly() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/opencode-resolved.json"))
+            .expect("the reference is JSON");
+    let reference = reference.as_object().expect("themes by id");
+    let themes = theme::bundled();
+    assert_eq!(reference.len(), themes.len() - 1, "every OpenCode theme");
+    let mut wrong = Vec::new();
+    for (id, modes) in reference {
+        let theme = themes
+            .iter()
+            .find(|t| &t.id == id)
+            .unwrap_or_else(|| panic!("{id} is bundled"));
+        for (mode, name) in [(Mode::Light, "light"), (Mode::Dark, "dark")] {
+            let tokens = theme.tokens(mode);
+            for (token, want) in modes[name].as_object().expect("tokens") {
+                let got = tokens.get(token).map(|c| c.to_string());
+                if got.as_deref() != want.as_str() {
+                    wrong.push(format!("{id} {name} {token}: {got:?}, OpenCode {want}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} differ:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }

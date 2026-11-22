@@ -13,7 +13,7 @@ use harlo_core::server::{
     self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
 };
 use harlo_core::sessions::Project;
-use harlo_core::theme::{self, Mode, Tokens};
+use harlo_core::theme::{self, Mode, Theme, Tokens};
 use harlo_core::timeline::{Entry, entries};
 use harlo_core::workspace::{EventKind, Fetch, Fetched, InboxItem, ModelRef, Session, Workspace};
 use std::time::Instant;
@@ -25,6 +25,7 @@ use crate::task::{Effect, Task};
 use crate::text::{Cursor, Edit, Position, TextBox};
 use crate::timeline::{self, Activity, Timeline};
 
+mod appearance;
 mod arrange;
 mod changes;
 mod claude;
@@ -309,6 +310,8 @@ pub enum Message {
     Fetched(Result<Fetched, String>),
     /// The clock moved on; ages are measured from this time.
     Tick(SystemTime),
+    /// The desktop's colour scheme is dark (`true`) or light.
+    SystemDark(bool),
     /// A fade ended; the window shows the rows once more, still.
     Settled,
     /// The window was resized, to this width and height.
@@ -420,8 +423,12 @@ struct Sending {
 /// Everything the window shows.
 #[derive(Debug)]
 pub struct App {
-    /// Colours for every widget.
+    /// Colours for every widget, from the chosen theme.
     pub tokens: Tokens,
+    /// The bundled themes: Harlo's own first, then OpenCode's.
+    pub themes: Vec<Theme>,
+    /// The variant the desktop prefers, which Appearance's System follows.
+    system_mode: harlo_core::theme::Mode,
     /// Servers the location picker offers.
     pub locations: Vec<Location>,
     /// The server being followed.
@@ -565,6 +572,11 @@ impl App {
         let tokens = theme.tokens(Mode::Dark);
         let mut app = Self {
             tokens,
+            // Harlo's own theme parsed above, so the list starts with it.
+            themes: theme::bundled(),
+            // Until the window says otherwise, as Harlo looked before it
+            // followed the desktop.
+            system_mode: harlo_core::theme::Mode::Dark,
             locations,
             location,
             status: Status::Connecting { attempt: 1 },
@@ -653,6 +665,7 @@ impl App {
     #[must_use]
     pub fn with_preferences(mut self, preferences: Preferences) -> Self {
         self.preferences = preferences;
+        self.retheme();
         self
     }
 
@@ -742,6 +755,7 @@ impl App {
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Sheet(event) => return self.sheet_event(event),
             Message::Claude(event) => return self.claude_event(event),
+            Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => {
                 if !self.expanded.remove(&folder) {

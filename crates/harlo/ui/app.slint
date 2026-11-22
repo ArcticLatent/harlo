@@ -1,6 +1,7 @@
 // The main window: the rails, the sidebar, the center with the terminals
 // under it, the tool panel on the right, and the popovers over them.
 
+import { Palette } from "std-widgets.slint";
 import { TerminalView } from "terminal.slint";
 import { EditorView } from "editor.slint";
 import { SheetLayer } from "sheets.slint";
@@ -42,6 +43,14 @@ export component AppWindow inherits Window {
     min-width: 720px;
     min-height: 480px;
     background: Theme.background-base;
+
+    /// Whether the desktop prefers dark colours; Harlo reads it at start,
+    /// and is told when it changes. A desktop that doesn't say counts as
+    /// dark.
+    out property <bool> system-dark: Palette.color-scheme != ColorScheme.light;
+    changed system-dark => {
+        Logic.system-dark(self.system-dark);
+    }
 
     /// How far the sidebar is open, from 0 to 1: it slides rather than
     /// jumping, and the space it takes follows it.

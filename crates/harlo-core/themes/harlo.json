@@ -26,6 +26,7 @@
       "interactive": "#adcafa"
     },
     "overrides": {
+      "background-base": "#292929",
       "background-stronger": "#252525",
       "surface-inset-base": "#2d2d2d",
       "surface-raised-base": "#2f2f2f",
@@ -36,7 +37,18 @@
       "text-weak": "#8b8c8e",
       "text-weaker": "#69696b",
       "icon-base": "var(--text-base)",
-      "icon-weak-base": "#868689"
+      "icon-weak-base": "#868689",
+      "surface-base-hover": "#d5d5d50d",
+      "surface-brand-base": "#c6dafc",
+      "border-weaker-base": "#323232",
+      "border-base": "#414141",
+      "text-strong": "#d5d5d5",
+      "text-interactive-base": "#adcafa",
+      "icon-selected": "#c6dafc",
+      "icon-success-base": "#6ce78a",
+      "icon-warning-base": "#f3c30e",
+      "icon-critical-base": "#ffb1b2",
+      "icon-info-base": "#adcafa"
     }
   }
 }

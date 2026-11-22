@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 use std::rc::Rc;
 
 use harlo_core::files::{Listing, name_of};
+use harlo_core::theme::Tokens;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, StyledText, VecModel};
 
 use super::{sync, timeline};
@@ -28,8 +29,9 @@ pub struct Files {
     loaded: Option<(String, u64)>,
     /// Counts the times the field was given new text.
     revision: i32,
-    /// The text last coloured, so unchanged text isn't coloured again.
-    coloured: String,
+    /// The text last coloured, and the theme's tokens it was coloured
+    /// with, so unchanged text isn't coloured again.
+    coloured: (String, Option<Tokens>),
     /// The line count the numbers were last written for.
     lines: usize,
     /// The file whose picture shows.
@@ -53,7 +55,7 @@ impl Files {
             rows,
             loaded: None,
             revision: 0,
-            coloured: String::new(),
+            coloured: (String::new(), None),
             lines: 0,
             picture: None,
         }
@@ -125,9 +127,10 @@ impl Files {
                     state.set_editor_revision(self.revision);
                 }
                 let source = text.editor.as_str();
-                if source != self.coloured {
-                    source.clone_into(&mut self.coloured);
-                    state.set_editor_colored(colour(source, &file.path, timeline));
+                if source != self.coloured.0 || self.coloured.1.as_ref() != Some(&app.tokens) {
+                    source.clone_into(&mut self.coloured.0);
+                    self.coloured.1 = Some(app.tokens);
+                    state.set_editor_colored(colour(source, &file.path, &app.tokens, timeline));
                 }
                 let lines = source.split('\n').count();
                 if lines != self.lines {
@@ -201,12 +204,12 @@ fn card(file: &OpenFile) -> EditorCard {
 
 /// `source` coloured for the language its path names; plain when it's
 /// large, or has tabs, whose width the coloured copy can't match.
-fn colour(source: &str, path: &str, timeline: &mut timeline::Rows) -> StyledText {
+fn colour(source: &str, path: &str, t: &Tokens, timeline: &mut timeline::Rows) -> StyledText {
     let language = path.rsplit_once('.').map_or("", |(_, extension)| extension);
     let markup = if source.len() > COLOURED_BYTES || source.contains('\t') {
         escaped(source)
     } else {
-        timeline.highlighter().markup(language, source)
+        timeline.highlighter(t).markup(language, source)
     };
     StyledText::from_markdown(&markup).unwrap_or_else(|_| StyledText::from_plain_text(source))
 }

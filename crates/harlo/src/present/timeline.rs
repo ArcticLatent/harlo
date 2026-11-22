@@ -69,6 +69,8 @@ pub struct Rows {
     /// only the blocks that changed.
     answers: HashMap<String, Vec<(Block, TimelineRow)>>,
     highlighter: Option<Highlighter>,
+    /// The theme's tokens the rows were built with.
+    tokens: Option<Tokens>,
 }
 
 impl std::fmt::Debug for Rows {
@@ -96,6 +98,7 @@ impl Rows {
             session: None,
             answers: HashMap::new(),
             highlighter: None,
+            tokens: None,
         }
     }
 
@@ -105,9 +108,12 @@ impl Rows {
         ModelRc::from(Rc::clone(&self.model))
     }
 
-    /// The code colourer, loaded the first time it's needed.
-    pub fn highlighter(&mut self) -> &Highlighter {
-        self.highlighter.get_or_insert_with(Highlighter::new)
+    /// The code colourer, loaded the first time it's needed, colouring
+    /// with `t`.
+    pub fn highlighter(&mut self, t: &Tokens) -> &Highlighter {
+        let highlighter = self.highlighter.get_or_insert_with(|| Highlighter::new(t));
+        highlighter.use_tokens(t);
+        highlighter
     }
 
     /// Shows `timeline`, of session `session`, or nothing.
@@ -119,6 +125,14 @@ impl Rows {
             self.clear();
             return;
         };
+        // Another theme colours every row anew.
+        if self.tokens.as_ref() != Some(t) {
+            self.tokens = Some(*t);
+            if let Some(highlighter) = &mut self.highlighter {
+                highlighter.use_tokens(t);
+            }
+            self.clear();
+        }
         if self.session.as_deref() != Some(id) {
             self.clear();
             self.session = Some(id.to_owned());
@@ -218,7 +232,7 @@ impl Rows {
             Next::Shown(Shown::Row(view), gap) => {
                 let key = view.entry.key();
                 let rows = if let Entry::Answer { text, .. } = view.entry {
-                    let highlighter = self.highlighter.get_or_insert_with(Highlighter::new);
+                    let highlighter = self.highlighter.get_or_insert_with(|| Highlighter::new(t));
                     let blocks = self.answers.entry(key.to_owned()).or_default();
                     answer_rows(key, text, gap, highlighter, blocks)
                 } else {

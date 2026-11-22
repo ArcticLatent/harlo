@@ -61,6 +61,8 @@ pub struct Presenter {
     notes: notes::Notes,
     terminal: terminal::Terminal,
     sheets: sheets::Sheets,
+    /// The theme's tokens the window was last coloured with.
+    applied: Option<Tokens>,
 }
 
 impl std::fmt::Debug for Presenter {
@@ -96,6 +98,7 @@ impl Presenter {
             notes: notes::Notes::default(),
             terminal: terminal::Terminal::new(&state),
             sheets: sheets::Sheets::new(&state),
+            applied: None,
         };
         state.set_sidebar_rows(ModelRc::from(Rc::clone(&presenter.sidebar)));
         state.set_locations(ModelRc::from(Rc::clone(&presenter.locations)));
@@ -115,6 +118,10 @@ impl Presenter {
     pub fn present(&mut self, app: &App, window: &AppWindow) {
         let state = window.global::<State>();
         let t = &app.tokens;
+        if self.applied.as_ref() != Some(t) {
+            crate::theme::apply(window, t);
+            self.applied = Some(*t);
+        }
         sync(
             &self.panels,
             Panel::ALL.iter().map(|&p| app.panel_shown(p)).collect(),
