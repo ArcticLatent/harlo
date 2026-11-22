@@ -95,10 +95,15 @@ fn the_sidebar_toggles() {
     let ui = ui(demo::app());
     ui.press("Toggle sidebar");
     assert!(!ui.app().sidebar);
+    assert!(ui.shows("Ctrl+N"), "it slides away rather than vanishing");
+    ui.wait(250);
     assert!(!ui.shows("Ctrl+N"));
     assert!(ui.shows("What are we working on?"));
 
     ui.press("Toggle sidebar");
+    ui.wait(100);
+    assert!(ui.shows("Ctrl+N"), "halfway in");
+    ui.wait(150);
     assert!(ui.shows("Ctrl+N"));
 }
 

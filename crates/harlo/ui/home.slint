@@ -4,6 +4,7 @@
 import { Theme, Size } from "theme.slint";
 import { State } from "data.slint";
 import { Composer, PickerChip } from "composer.slint";
+import { ErrorLine } from "widgets.slint";
 
 export component Home inherits Rectangle {
     background: Theme.background-base;
@@ -52,12 +53,9 @@ export component Home inherits Rectangle {
         if State.send-error != "": HorizontalLayout {
             alignment: center;
             padding-top: 8px;
-            Text {
+            ErrorLine {
                 width: root.column;
                 text: State.send-error;
-                wrap: word-wrap;
-                font-size: Size.small;
-                color: Theme.icon-critical-base;
             }
         }
     }

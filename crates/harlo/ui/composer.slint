@@ -2,10 +2,10 @@
 // and menus that choose a session's folder, agent, model and shield.
 
 import { ListView } from "std-widgets.slint";
-import { Theme, Size } from "theme.slint";
+import { Theme, Size, Motion } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, Requests, Chip, MenuItem } from "data.slint";
-import { Icon, Press, Dot, Breathing, Field } from "widgets.slint";
+import { State, Logic, Requests, Chip, MenuItem, AttachedChip } from "data.slint";
+import { Icon, IconButton, Press, Dot, Breathing, Field } from "widgets.slint";
 
 /// The picker numbers, as Rust's `Picker::index` gives them.
 export global Pickers {
@@ -14,6 +14,92 @@ export global Pickers {
     out property <int> variant: 2;
     out property <int> model: 3;
     out property <int> shield: 4;
+}
+
+/// An attached file or image, with a button to remove it. A new one
+/// fades in.
+component AttachedView inherits Rectangle {
+    in property <AttachedChip> chip;
+    in property <int> index;
+    property <float> shown: root.chip.fresh ? 0 : 1;
+    animate shown {
+        duration: Motion.appear;
+        easing: Motion.settle;
+    }
+    init => {
+        root.shown = 1;
+    }
+
+    opacity: root.shown;
+    background: Theme.surface-raised-strong;
+    border-radius: Size.radius;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.chip.label;
+
+    HorizontalLayout {
+        padding-top: 3px;
+        padding-bottom: 3px;
+        padding-left: 8px;
+        padding-right: 4px;
+        spacing: 6px;
+        Icon {
+            text: root.chip.glyph;
+            font-size: 12px;
+        }
+        Text {
+            text: root.chip.label;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-base;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                width: 18px;
+                height: 18px;
+                label: "Remove " + root.chip.label;
+                glyph: Icons.close;
+                glyph-size: 11px;
+                clicked => { Logic.detach(root.index); }
+            }
+        }
+    }
+}
+
+/// The attachments as chips, and a pasted image still being read as a
+/// breathing chip at the end.
+component Attachments inherits HorizontalLayout {
+    alignment: start;
+    spacing: 6px;
+    for chip[index] in State.attached: AttachedView {
+        chip: chip;
+        index: index;
+    }
+    if State.pasting: Rectangle {
+        background: Theme.surface-raised-strong;
+        border-radius: Size.radius;
+        Breathing {
+            HorizontalLayout {
+                padding-top: 3px;
+                padding-bottom: 3px;
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 6px;
+                Icon {
+                    text: Icons.image;
+                    font-size: 12px;
+                    color: Theme.text-weak;
+                }
+                Text {
+                    text: "Reading the pasted image…";
+                    vertical-alignment: center;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+            }
+        }
+    }
 }
 
 /// A chip showing a picker's current choice, which opens its menu.
@@ -142,6 +228,8 @@ export component Composer inherits Rectangle {
         padding-left: 18px;
         padding-right: 14px;
         spacing: 10px;
+
+        if State.attached.length > 0 || State.pasting: Attachments { }
 
         keys := FocusScope {
             height: 56px;

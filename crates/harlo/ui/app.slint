@@ -4,7 +4,7 @@
 import { TerminalView } from "terminal.slint";
 import { EditorView } from "editor.slint";
 import { SheetLayer } from "sheets.slint";
-import { Theme, Size, Fonts } from "theme.slint";
+import { Theme, Size, Fonts, Motion } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Keyboard, Content } from "data.slint";
 import { LeftRail, RightRail } from "rails.slint";
@@ -42,6 +42,15 @@ export component AppWindow inherits Window {
     min-width: 720px;
     min-height: 480px;
     background: Theme.background-base;
+
+    /// How far the sidebar is open, from 0 to 1: it slides rather than
+    /// jumping, and the space it takes follows it.
+    property <float> sidebar-open: State.sidebar-shown ? 1 : 0;
+    animate sidebar-open {
+        duration: Motion.slide;
+        easing: Motion.glide;
+    }
+    property <length> sidebar-room: State.sidebar-width * root.sidebar-open;
     default-font-family: Fonts.sans;
     default-font-size: Size.text;
     // Keys reach the window's shortcuts even before a field is focused.
@@ -73,8 +82,12 @@ export component AppWindow inherits Window {
 
         HorizontalLayout {
             LeftRail { }
-            if State.sidebar-shown: Sidebar {
-                width: State.sidebar-width;
+            if State.sidebar-shown || root.sidebar-open > 0: Rectangle {
+                width: root.sidebar-room;
+                clip: true;
+                Sidebar {
+                    x: parent.width - self.width;
+                }
             }
             Rectangle {
                 horizontal-stretch: 1;
@@ -109,7 +122,7 @@ export component AppWindow inherits Window {
         if State.sidebar-shown && !State.maximized: Grip {
             edge: 0;
             label: "Sidebar width";
-            x: Size.rail + State.sidebar-width - self.width / 2;
+            x: Size.rail + root.sidebar-room - self.width / 2;
             width: 7px;
             height: root.height;
         }
@@ -124,9 +137,9 @@ export component AppWindow inherits Window {
             edge: 2;
             across: true;
             label: "Terminal height";
-            x: Size.rail + (State.sidebar-shown ? State.sidebar-width : 0);
+            x: Size.rail + root.sidebar-room;
             y: root.height - State.terminal-height - self.height / 2;
-            width: root.width - 2 * Size.rail - (State.sidebar-shown ? State.sidebar-width : 0)
+            width: root.width - 2 * Size.rail - root.sidebar-room
                 - (State.panel >= 0 ? State.panel-width : 0);
             height: 7px;
         }

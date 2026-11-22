@@ -2,7 +2,7 @@
 // calls and their diffs, and subagents, in one virtualized list.
 
 import { ListView } from "std-widgets.slint";
-import { Theme, Size, Fonts } from "theme.slint";
+import { Theme, Size, Fonts, Motion } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Shape, TimelineRow, DiffLine, Chip } from "data.slint";
 import { Icon, Press, HLine, Breathing } from "widgets.slint";
@@ -99,13 +99,24 @@ component Prose inherits StyledText {
 /// A prompt's bubble, with Undo in its corner while the pointer is on it.
 component PromptRow inherits Rectangle {
     in property <TimelineRow> item;
+    // A prompt that just arrived fades in, rising a little.
+    property <float> shown: root.item.fresh ? 0 : 1;
+    animate shown {
+        duration: Motion.appear;
+        easing: Motion.settle;
+    }
+    init => {
+        root.shown = 1;
+    }
 
     height: bubble.preferred-height;
+    opacity: root.shown;
 
     // The bubble and its Undo sit inside, so the pointer over either
     // counts as on the prompt.
     hover := TouchArea {
         bubble := Rectangle {
+            y: (1 - root.shown) * Motion.rise;
             // Read out as the prompt; its Prose reads out nothing itself.
             accessible-role: groupbox;
             accessible-label: root.item.label;

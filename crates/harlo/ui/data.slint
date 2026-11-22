@@ -165,6 +165,8 @@ export struct TimelineRow {
     /// whether it's still on its way.
     undo: bool,
     sending: bool,
+    /// Whether it's a prompt that just arrived, which fades in.
+    fresh: bool,
     /// A tool's or a file's added and removed lines.
     added: int,
     removed: int,
@@ -481,6 +483,14 @@ export struct TermCursor {
     text: string,
 }
 
+/// A file or image attached to the message being written; a new one
+/// fades in.
+export struct AttachedChip {
+    label: string,
+    glyph: string,
+    fresh: bool,
+}
+
 /// A row on a page over the window: 0 a heading, 1 a name and its value,
 /// 2 a note. Tone 1 is good, 2 bad and 3 quiet.
 export struct SheetRow {
@@ -611,6 +621,9 @@ export global State {
     in property <int> composer-anchor;
     in property <string> send-error;
     in property <bool> sending;
+    /// The files and images attached to the message, and whether a pasted
+    /// image is still being read.
+    in property <[AttachedChip]> attached;
     in property <bool> pasting;
     in property <bool> can-send;
     in property <Chip> folder-chip;
@@ -657,6 +670,8 @@ export global Logic {
     callback toggle-panel(int);
     callback toggle-terminal();
     callback new-terminal();
+    /// Remove an attachment from the message by its place.
+    callback detach(int);
     /// Open a page over the window by its number, or close it if open.
     callback toggle-sheet(int);
     callback close-sheet();

@@ -351,7 +351,15 @@ fn built(row: TimelineRow) -> Built {
     row.note.as_str().hash(&mut hasher);
     row.more.as_str().hash(&mut hasher);
     row.gap.to_bits().hash(&mut hasher);
-    (row.open, row.working, row.undo, row.sending, row.nested).hash(&mut hasher);
+    (
+        row.open,
+        row.working,
+        row.undo,
+        row.sending,
+        row.nested,
+        row.fresh,
+    )
+        .hash(&mut hasher);
     (row.added, row.removed, row.file, row.level).hash(&mut hasher);
     raw(&row.text).hash(&mut hasher);
     row.lines.row_count().hash(&mut hasher);
@@ -371,7 +379,7 @@ fn raw(text: &StyledText) -> String {
 fn look(view: &RowView<'_>, gap: f32, crew: &Crew) -> u64 {
     let mut hasher = DefaultHasher::new();
     view.stamp.hash(&mut hasher);
-    (view.whole, view.undo, view.nested, view.sending).hash(&mut hasher);
+    (view.whole, view.undo, view.nested, view.sending, view.fresh).hash(&mut hasher);
     gap.to_bits().hash(&mut hasher);
     if let Entry::Subagent {
         child: Some(child), ..
@@ -429,6 +437,7 @@ fn entry_rows(t: &Tokens, view: &RowView<'_>, gap: f32, crew: &Crew) -> Vec<Time
             row.text = styled(&markdown::escaped(text));
             row.undo = view.undo;
             row.sending = view.sending;
+            row.fresh = view.fresh;
             let chips: Vec<Chip> = attachments
                 .iter()
                 .map(|name| (Icon::Paperclip, name))

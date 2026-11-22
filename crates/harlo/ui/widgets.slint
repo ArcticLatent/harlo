@@ -1,7 +1,7 @@
 // Small parts the window is built from: icons, pressable surfaces, lines,
-// a breathing indicator and a one-line text field.
+// a breathing indicator, a fading error line and a one-line text field.
 
-import { Theme, Size, Fonts } from "theme.slint";
+import { Theme, Size, Fonts, Motion } from "theme.slint";
 import { Icons } from "icons.slint";
 
 /// A Lucide icon: set `text` to one of `Icons`' glyphs.
@@ -93,9 +93,47 @@ export component Dot inherits Rectangle {
 }
 
 /// Children that fade in and out, slowly, while something works.
+///
+/// Every breathing indicator keeps time with the same clock, so they
+/// breathe together.
 export component Breathing inherits Rectangle {
-    opacity: 0.6 + 0.4 * sin(animation-tick() / 1.4s * 360deg);
+    opacity: Motion.breath-low + (1 - Motion.breath-low)
+        * (0.5 - 0.5 * cos(animation-tick() / Motion.breath * 360deg));
     @children
+}
+
+/// A line that fades in, rising a little, when it first shows and again
+/// whenever its text changes, so a new error catches the eye.
+export component ErrorLine inherits Rectangle {
+    in property <string> text;
+    property <float> shown: 0;
+    // Lets a changed text start the fade again from nothing.
+    property <bool> jump;
+    animate shown {
+        duration: Motion.appear;
+        easing: Motion.settle;
+        enabled: !root.jump;
+    }
+    init => {
+        root.shown = 1;
+    }
+    changed text => {
+        root.jump = true;
+        root.shown = 0;
+        root.jump = false;
+        root.shown = 1;
+    }
+
+    height: line.preferred-height + Motion.rise / 2;
+    line := Text {
+        y: (1 - root.shown) * Motion.rise / 2;
+        width: parent.width;
+        text: root.text;
+        wrap: word-wrap;
+        font-size: Size.small;
+        color: Theme.icon-critical-base;
+        opacity: root.shown;
+    }
 }
 
 /// A one-line text field with a placeholder and an optional leading icon.

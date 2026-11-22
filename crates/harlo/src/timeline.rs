@@ -11,10 +11,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use harlo_core::diff;
 use harlo_core::timeline::{Change, Entry, Live, tools_summary};
 use harlo_core::workspace::{EventKind, ToolStatus};
+
+/// How long a new prompt takes to fade in, rising a little.
+pub const APPEAR: Duration = Duration::from_millis(220);
 
 /// Something the timeline reports.
 #[derive(Debug, Clone)]
@@ -87,6 +91,8 @@ struct Row {
     unsaved: bool,
     /// Changes whenever the entry does, so the window rebuilds only changed rows.
     stamp: u64,
+    /// When a prompt that wasn't here before arrived, to fade it in.
+    appeared: Option<Instant>,
 }
 
 impl Row {
@@ -101,6 +107,7 @@ impl Row {
             live,
             unsaved: false,
             stamp,
+            appeared: None,
         }
     }
 }
@@ -138,6 +145,8 @@ pub struct Timeline {
     revision: u64,
     /// The last row stamp handed out; stamps are unique within the timeline.
     stamps: u64,
+    /// Whether a fade started since [`Timeline::take_fading`] last asked.
+    fading: bool,
 }
 
 impl Timeline {
@@ -155,6 +164,7 @@ impl Timeline {
             busy: false,
             revision: 0,
             stamps: 0,
+            fading: false,
         }
     }
 
@@ -231,11 +241,18 @@ impl Timeline {
                     if let Some(&index) = self.index.get(entry.key()) {
                         structure |=
                             self.rows[index].entry.is_running_tool() != entry.is_running_tool();
-                        // OpenCode's copy replaces a prompt Harlo showed while sending it.
+                        // OpenCode's copy replaces a prompt Harlo showed while sending it;
+                        // a fade under way carries on.
                         let stamp = self.stamp();
+                        let appeared = self.rows[index].appeared;
                         self.rows[index] = Row::new(entry, true, stamp);
+                        self.rows[index].appeared = appeared;
                     } else {
+                        let prompt = matches!(entry, Entry::Prompt { .. });
                         self.push(entry);
+                        if prompt {
+                            self.fade_in();
+                        }
                         structure = true;
                     }
                 }
@@ -294,8 +311,23 @@ impl Timeline {
         let mut row = Row::new(entry, true, self.stamp());
         row.unsaved = true;
         self.rows.push(row);
+        self.fade_in();
         self.load = Load::Ready;
         self.regroup();
+    }
+
+    /// Fades in the last row, a prompt that just arrived.
+    fn fade_in(&mut self) {
+        if let Some(row) = self.rows.last_mut() {
+            row.appeared = Some(Instant::now());
+            self.fading = true;
+        }
+    }
+
+    /// Whether a fade started since the last call, so the window shows
+    /// the row once more when it ends, without its fade.
+    pub fn take_fading(&mut self) -> bool {
+        std::mem::take(&mut self.fading)
     }
 
     /// Takes away a pending prompt that couldn't be sent.
@@ -482,6 +514,7 @@ impl Timeline {
                         undo: !self.busy && !row.unsaved,
                         nested: group.as_ref().is_some_and(|rows| rows.contains(at)),
                         sending: row.unsaved,
+                        fresh: row.appeared.is_some_and(|at| at.elapsed() < APPEAR),
                     })
                 }
                 Item::Group {
@@ -563,4 +596,6 @@ pub struct RowView<'a> {
     pub nested: bool,
     /// Whether it's a prompt still on its way to OpenCode.
     pub sending: bool,
+    /// Whether it's a prompt that just arrived, which fades in.
+    pub fresh: bool,
 }

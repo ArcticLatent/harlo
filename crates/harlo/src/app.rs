@@ -304,6 +304,8 @@ pub enum Message {
     Fetched(Result<Fetched, String>),
     /// The clock moved on; ages are measured from this time.
     Tick(SystemTime),
+    /// A fade ended; the window shows the rows once more, still.
+    Settled,
     /// The window was resized, to this width and height.
     Resized(f32, f32),
     /// Answer an approval request in the open session.
@@ -796,8 +798,9 @@ impl App {
                 return self.fetch(fetches);
             }
             // A failed fetch leaves the row as it was until the next event or
-            // resync corrects it.
-            Message::Fetched(Err(_)) => {}
+            // resync corrects it; after a fade, only the window's next showing
+            // changes.
+            Message::Fetched(Err(_)) | Message::Settled => {}
             Message::Tick(now) => {
                 self.now = now;
                 self.refresh();
@@ -1049,8 +1052,11 @@ impl App {
                     if let Some(timeline) = self.timelines.get_mut(id) {
                         let stale = timeline.apply(&event.kind, event.time);
                         timeline.set_busy(busy);
+                        let fading = timeline.take_fading();
                         if stale {
                             reload = self.load_history(id.to_owned());
+                        } else if fading {
+                            reload = settle();
                         }
                     }
                 }
@@ -1253,7 +1259,11 @@ impl App {
                     skills,
                 };
                 timeline.pend(entry);
+                let fading = timeline.take_fading();
                 scroll = Task::effect(Effect::ToEnd(crate::ids::TIMELINE));
+                if fading {
+                    scroll = Task::batch([scroll, settle()]);
+                }
             }
         }
         let draft = if target.is_some() {
@@ -1997,6 +2007,14 @@ fn home_folder() -> String {
 }
 
 /// Asks for files to attach; an empty list when the dialog is cancelled.
+/// Waits out a fade, then has the window show the rows once more, still.
+fn settle() -> Task<Message> {
+    Task::future(async {
+        tokio::time::sleep(crate::timeline::APPEAR).await;
+        Message::Settled
+    })
+}
+
 async fn pick_files() -> Vec<PathBuf> {
     rfd::AsyncFileDialog::new()
         .set_title("Attach files")

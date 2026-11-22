@@ -585,6 +585,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_send, || Message::Send);
     send!(on_stop, || Message::Stop);
     send!(on_attach, || Message::Attach);
+    send_with!(on_detach, |_app, index| usize::try_from(index)
+        .ok()
+        .map(Message::Detach));
 
     send_with!(on_toggle_picker, |_app, number| Picker::from_index(number)
         .map(Message::TogglePicker));

@@ -5,7 +5,7 @@
 import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, InboxRow } from "data.slint";
-import { Icon, Press, HLine, Breathing } from "widgets.slint";
+import { Icon, Press, HLine, Breathing, ErrorLine } from "widgets.slint";
 import { Composer, PickerChip } from "composer.slint";
 import { Timeline, Column } from "timeline.slint";
 import { WaitingCards } from "waiting.slint";
@@ -324,11 +324,8 @@ export component SessionView inherits Rectangle {
                         }
                     }
                 }
-                if State.send-error != "": Text {
+                if State.send-error != "": ErrorLine {
                     text: State.send-error;
-                    wrap: word-wrap;
-                    font-size: Size.small;
-                    color: Theme.icon-critical-base;
                 }
             }
         }

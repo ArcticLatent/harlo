@@ -57,6 +57,20 @@ impl Ui {
         self.driver.send(message);
     }
 
+    /// Lets `ms` milliseconds pass on the window's clock, so motion under
+    /// way ends.
+    #[expect(
+        clippy::unused_self,
+        reason = "the clock is the backend's, but tests read better asking the window to wait"
+    )]
+    pub fn wait(&self, ms: u64) {
+        // Motion asked for since the clock last moved starts first, then
+        // runs its course.
+        slint::platform::update_timers_and_animations();
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(ms));
+        slint::platform::update_timers_and_animations();
+    }
+
     /// The messages the window sent since the last call.
     pub fn messages(&self) -> Vec<Message> {
         self.driver.take_messages()

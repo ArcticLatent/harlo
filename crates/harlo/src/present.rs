@@ -31,8 +31,8 @@ use crate::app::{App, Document, FileBody, Panel, Status, capitalized};
 use crate::model::{self, Picker, READ_ONLY, Variant};
 use crate::theme::color;
 use crate::ui::{
-    AppWindow, Chip, Content, InboxRow, LocationRow, MenuItem, Question, RowKind, SidebarRow,
-    State, Tab,
+    AppWindow, AttachedChip, Chip, Content, InboxRow, LocationRow, MenuItem, Question, RowKind,
+    SidebarRow, State, Tab,
 };
 
 /// The models the window's lists show, kept for the window's lifetime.
@@ -44,6 +44,10 @@ pub struct Presenter {
     /// The terminals' tabs.
     terminals: Rc<VecModel<Tab>>,
     chips: Rc<VecModel<Chip>>,
+    /// The message's attachments, and the names shown last, so only new
+    /// ones fade in; `None` before the first showing.
+    attached: Rc<VecModel<AttachedChip>>,
+    attached_names: Option<Vec<String>>,
     menu: Rc<VecModel<MenuItem>>,
     panels: Rc<VecModel<bool>>,
     /// The open session's timeline.
@@ -79,6 +83,8 @@ impl Presenter {
             documents: Rc::new(VecModel::default()),
             terminals: Rc::new(VecModel::default()),
             chips: Rc::new(VecModel::default()),
+            attached: Rc::new(VecModel::default()),
+            attached_names: None,
             menu: Rc::new(VecModel::default()),
             panels: Rc::new(VecModel::from(vec![false; Panel::ALL.len()])),
             timeline: timeline::Rows::new(),
@@ -96,6 +102,7 @@ impl Presenter {
         state.set_documents(ModelRc::from(Rc::clone(&presenter.documents)));
         state.set_terminals(ModelRc::from(Rc::clone(&presenter.terminals)));
         state.set_chips(ModelRc::from(Rc::clone(&presenter.chips)));
+        state.set_attached(ModelRc::from(Rc::clone(&presenter.attached)));
         state.set_menu_items(ModelRc::from(Rc::clone(&presenter.menu)));
         state.set_panels_shown(ModelRc::from(Rc::clone(&presenter.panels)));
         state.set_timeline(presenter.timeline.model());
@@ -116,6 +123,7 @@ impl Presenter {
         self.sidebar(app, &state);
         self.center(app, &state);
         Self::composer(app, &state, t);
+        self.attachments(app);
         self.pickers(app, &state, t);
         self.session(app, &state);
         self.bodies.show(app, &state);
@@ -230,6 +238,34 @@ impl Presenter {
                 })
                 .collect(),
         );
+    }
+
+    /// The message's attachments, rebuilt when they change; the ones not
+    /// shown before fade in.
+    fn attachments(&mut self, app: &App) {
+        let names: Vec<String> = app.draft.attached.iter().map(|a| a.name.clone()).collect();
+        if self.attached_names.as_ref() == Some(&names) {
+            return;
+        }
+        let before = self.attached_names.take();
+        let chips: Vec<AttachedChip> = app
+            .draft
+            .attached
+            .iter()
+            .map(|a| AttachedChip {
+                label: a.name.as_str().into(),
+                glyph: glyph(if a.attachment.uri.starts_with("data:image/") {
+                    Icon::Image
+                } else {
+                    Icon::Paperclip
+                }),
+                fresh: before
+                    .as_ref()
+                    .is_some_and(|shown| !shown.contains(&a.name)),
+            })
+            .collect();
+        self.attached.set_vec(chips);
+        self.attached_names = Some(names);
     }
 
     /// The composer's text, when the app changed it, and its feedback.
