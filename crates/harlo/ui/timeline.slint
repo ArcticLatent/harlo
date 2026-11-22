@@ -578,15 +578,12 @@ export component Timeline inherits ListView {
     scrolled => {
         root.following = self.content-y <= root.end + 4px;
     }
-    changed content-height => {
-        if root.following {
-            root.end-moved();
-        }
-    }
-    changed visible-height => {
-        if root.following {
-            root.end-moved();
-        }
+    // The end, watched only while following. Scrolled away, it stays put,
+    // so rows measured while scrolling run no handler here: Slint counts
+    // every handler run as a change and lays out once more for it.
+    property <length> followed-end: root.following ? root.end : 1px;
+    changed followed-end => {
+        root.end-moved();
     }
 
     /// Goes to the end, and follows it from there.
