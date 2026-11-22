@@ -7,7 +7,7 @@ import { Icons } from "icons.slint";
 import { State, Logic, Requests, InboxRow } from "data.slint";
 import { Icon, Press, HLine, Breathing, ErrorLine } from "widgets.slint";
 import { Composer, PickerChip } from "composer.slint";
-import { Timeline, Column } from "timeline.slint";
+import { Timeline, Column, TimelineScrollbar, PromptRail } from "timeline.slint";
 import { WaitingCards } from "waiting.slint";
 
 /// The Changes panel's number, as Rust's `panel_number` gives it.
@@ -265,17 +265,44 @@ component Header inherits Rectangle {
 }
 
 /// An open session.
+/// A round button over the timeline's foot that goes back to the end.
+component JumpToEnd inherits Press {
+    width: 34px;
+    height: 34px;
+    border-radius: self.height / 2;
+    label: "Jump to the end";
+    rest: Theme.menu-edge;
+    hover: Theme.menu-edge.mix(Theme.icon-selected, 0.88);
+    lit: Theme.menu-edge.mix(Theme.icon-selected, 0.78);
+    border-width: 1px;
+    border-color: Theme.border-base;
+    drop-shadow-color: #00000066;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-blur: 10px;
+
+    Icon {
+        text: Icons.arrow-down;
+        font-size: 16px;
+        color: Theme.icon-selected;
+    }
+}
+
 export component SessionView inherits Rectangle {
     property <length> column: min(Column.width, root.width - 48px);
 
     background: Theme.background-base;
 
-    // Rust asks for the end when a prompt is sent or the session opens.
+    // Rust asks for the end when a prompt is sent.
     property <int> scroll-serial: Requests.scroll-serial;
     changed scroll-serial => {
         if Requests.scroll == "timeline" {
             timeline.to-end();
         }
+    }
+    // Another session opens at its end, however far up the last was read.
+    property <string> session: State.session-id;
+    changed session => {
+        timeline.to-end();
     }
 
     follow := Timer {
@@ -329,5 +356,34 @@ export component SessionView inherits Rectangle {
                 }
             }
         }
+    }
+
+    // The rail sits in the space right of the column, when there's room.
+    if State.prompt-marks.length >= 2 && timeline.shown < 1
+        && (timeline.width - root.column) / 2 >= 56px: PromptRail {
+        x: timeline.x + (timeline.width + root.column) / 2
+            + ((timeline.width - root.column) / 2 - 16px - self.width) / 2;
+        y: timeline.y + 24px;
+        height: timeline.height - 48px;
+        reading-row: timeline.reading-row;
+        fraction: timeline.fraction;
+        jump(row) => { timeline.jump-to(row); }
+    }
+
+    if timeline.shown < 1: TimelineScrollbar {
+        x: timeline.x + timeline.width - self.width;
+        y: timeline.y;
+        height: timeline.height;
+        fraction: timeline.fraction;
+        shown: timeline.shown;
+        scroll-to(fraction) => { timeline.scroll-to(fraction); }
+        page(direction) => { timeline.page(direction); }
+    }
+
+    // Shown once the reader has scrolled away from the end.
+    if !timeline.following && timeline.content-height > timeline.visible-height: JumpToEnd {
+        x: (root.width - self.width) / 2;
+        y: timeline.y + timeline.height - self.height - 12px;
+        clicked => { timeline.to-end(); }
     }
 }

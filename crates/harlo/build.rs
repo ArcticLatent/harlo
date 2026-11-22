@@ -66,6 +66,7 @@ const ICONS: &[(&str, Icon)] = &[
     ("image", Icon::Image),
     ("eye", Icon::Eye),
     ("arrow-up", Icon::ArrowUp),
+    ("arrow-down", Icon::ArrowDown),
     ("arrow-left", Icon::ArrowLeft),
     ("arrow-right", Icon::ArrowRight),
     ("dot", Icon::Dot),

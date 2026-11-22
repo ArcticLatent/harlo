@@ -15,6 +15,7 @@ use harlo_core::server::{
 };
 use harlo_core::timeline::Entry;
 use harlo_core::workspace::{Event, EventKind, Fetched, Form, InboxItem, Permission, Revert};
+use i_slint_backend_testing::AccessibleRole;
 use serde_json::json;
 use support::{Ui, demo, ui};
 
@@ -624,10 +625,17 @@ fn a_working_session_offers_no_undo() {
     assert!(!ui.shows("Undo"));
 }
 
-#[test]
-fn a_long_session_opens_at_its_end() {
-    let ui = chatting();
-    let rows = (0..300)
+/// Whether the timeline shows a row reading `text`, not counting the rail's
+/// mark for a prompt of the same words.
+fn in_view(ui: &Ui, text: &str) -> bool {
+    ui.find(text)
+        .iter()
+        .any(|e| e.accessible_role() != Some(AccessibleRole::Button))
+}
+
+/// A transcript of `count` questions with answers of different lengths.
+fn long_history(count: usize) -> Vec<Entry> {
+    (0..count)
         .flat_map(|i| {
             [
                 Entry::Prompt {
@@ -644,14 +652,139 @@ fn a_long_session_opens_at_its_end() {
                 },
             ]
         })
-        .collect();
-    ui.send(Message::History(PI_UPDATE.into(), Ok(rows)));
-    // It catches up with the end on the event loop's next turns.
+        .collect()
+}
+
+/// Lets the timeline catch up with its end, as the event loop's next turns would.
+fn settle_at_end(ui: &Ui, newest: &str) {
     for _ in 0..5 {
         // Looking lays the rows out, as a frame would.
-        let _ = ui.shows("Question number 299");
-        slint::platform::update_timers_and_animations();
+        let _ = in_view(ui, newest);
+        ui.wait(50);
     }
-    assert!(ui.shows("Question number 299"), "the newest prompt");
-    assert!(!ui.shows("Question number 0"), "the oldest is far above");
+}
+
+#[test]
+fn a_long_session_opens_at_its_end() {
+    let ui = chatting();
+    ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(300))));
+    settle_at_end(&ui, "Question number 299");
+    assert!(in_view(&ui, "Question number 299"), "the newest prompt");
+    assert!(
+        !in_view(&ui, "Question number 0"),
+        "the oldest is far above"
+    );
+}
+
+#[test]
+fn scrolled_up_a_button_jumps_back_to_the_end() {
+    let ui = chatting();
+    ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
+    settle_at_end(&ui, "Question number 59");
+    assert!(!ui.shows("Jump to the end"), "none while at the end");
+
+    ui.wheel("Question number 59", 8);
+    assert!(!in_view(&ui, "Question number 59"), "scrolled up");
+    ui.press("Jump to the end");
+    settle_at_end(&ui, "Question number 59");
+    assert!(in_view(&ui, "Question number 59"), "back at the newest");
+    assert!(!ui.shows("Jump to the end"), "gone again");
+}
+
+#[test]
+fn another_session_opens_at_its_end_after_scrolling_up() {
+    let ui = chatting();
+    ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
+    settle_at_end(&ui, "Question number 59");
+    ui.wheel("Question number 59", 8);
+    assert!(!in_view(&ui, "Question number 59"), "scrolled up");
+
+    let other = "ses_demo_04";
+    ui.send(Message::OpenSession(other.into()));
+    let rows = long_history(40)
+        .into_iter()
+        .map(|entry| match entry {
+            Entry::Prompt {
+                key,
+                text,
+                attachments,
+                skills,
+            } => Entry::Prompt {
+                key,
+                text: text.replace("Question", "Other question"),
+                attachments,
+                skills,
+            },
+            entry => entry,
+        })
+        .collect();
+    ui.send(Message::History(other.into(), Ok(rows)));
+    settle_at_end(&ui, "Other question number 39");
+    assert!(
+        in_view(&ui, "Other question number 39"),
+        "the other's newest"
+    );
+    assert!(!ui.shows("Jump to the end"), "following its end");
+}
+
+/// How far below the timeline's top the row reading `text` starts.
+///
+/// # Panics
+///
+/// Panics if the timeline doesn't show it.
+fn below_top(ui: &Ui, text: &str) -> f32 {
+    let timeline = ui.find("Timeline").into_iter().next().expect("a timeline");
+    let row = ui
+        .find(text)
+        .into_iter()
+        .find(|e| e.accessible_role() != Some(AccessibleRole::Button))
+        .unwrap_or_else(|| panic!("no row reading {text:?}"));
+    row.absolute_position().y - timeline.absolute_position().y
+}
+
+/// Lets the timeline lay out where it was sent, as frames would.
+fn settle(ui: &Ui, text: &str) {
+    for _ in 0..5 {
+        let _ = in_view(ui, text);
+        ui.wait(50);
+    }
+}
+
+#[test]
+fn a_prompt_mark_jumps_up_to_its_question() {
+    let ui = chatting();
+    ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
+    settle_at_end(&ui, "Question number 59");
+
+    ui.press("Question number 20");
+    settle(&ui, "Question number 20");
+    assert!(in_view(&ui, "Question number 20"), "the question shows");
+    assert!(
+        (0.0..60.0).contains(&below_top(&ui, "Question number 20")),
+        "at the top, {} below it",
+        below_top(&ui, "Question number 20")
+    );
+    assert!(!in_view(&ui, "Question number 59"), "the end is far below");
+    assert!(ui.shows("Jump to the end"), "away from the end");
+}
+
+#[test]
+fn a_prompt_mark_jumps_down_to_a_later_question() {
+    let ui = chatting();
+    ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
+    settle_at_end(&ui, "Question number 59");
+    ui.press("Question number 12");
+    settle(&ui, "Question number 12");
+
+    ui.press("Question number 40");
+    settle(&ui, "Question number 40");
+    assert!(
+        (0.0..60.0).contains(&below_top(&ui, "Question number 40")),
+        "at the top, {} below it",
+        below_top(&ui, "Question number 40")
+    );
+    assert!(
+        !in_view(&ui, "Question number 12"),
+        "the earlier one is gone"
+    );
 }

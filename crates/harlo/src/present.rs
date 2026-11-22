@@ -109,6 +109,7 @@ impl Presenter {
         state.set_menu_items(ModelRc::from(Rc::clone(&presenter.menu)));
         state.set_panels_shown(ModelRc::from(Rc::clone(&presenter.panels)));
         state.set_timeline(presenter.timeline.model());
+        state.set_prompt_marks(presenter.timeline.marks());
         state.set_inbox(ModelRc::from(Rc::clone(&presenter.inbox)));
         state.set_questions(ModelRc::from(Rc::clone(&presenter.questions)));
         presenter

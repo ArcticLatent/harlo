@@ -24,7 +24,7 @@ use crate::markdown::{self, Block, Highlighter};
 use crate::model::{ChildState, Crew, duration, gist};
 use crate::theme::color;
 use crate::timeline::{Load, RowView, Shown, Timeline};
-use crate::ui::{Chip, DiffLine, Shape, TimelineRow};
+use crate::ui::{Chip, DiffLine, PromptMark, Shape, TimelineRow};
 
 /// Space above a row that starts an entry.
 const SPACING: f32 = 14.0;
@@ -61,6 +61,8 @@ struct Item {
 /// The timeline's rows, kept between presents.
 pub struct Rows {
     model: Rc<VecModel<TimelineRow>>,
+    /// The prompts among the rows, for the rail that jumps to them.
+    marks: Rc<VecModel<PromptMark>>,
     /// The items shown, in order, with their rows.
     items: Vec<Item>,
     /// The session the rows are of.
@@ -94,6 +96,7 @@ impl Rows {
     pub fn new() -> Self {
         Self {
             model: Rc::new(VecModel::default()),
+            marks: Rc::new(VecModel::default()),
             items: Vec::new(),
             session: None,
             answers: HashMap::new(),
@@ -106,6 +109,12 @@ impl Rows {
     #[must_use]
     pub fn model(&self) -> ModelRc<TimelineRow> {
         ModelRc::from(Rc::clone(&self.model))
+    }
+
+    /// The prompts among the rows, in order.
+    #[must_use]
+    pub fn marks(&self) -> ModelRc<PromptMark> {
+        ModelRc::from(Rc::clone(&self.marks))
     }
 
     /// The code colourer, loaded the first time it's needed, colouring
@@ -197,6 +206,7 @@ impl Rows {
         let tail = self.items.split_off(prefix);
         self.items.extend(fresh);
         self.items.extend(tail);
+        self.mark_prompts();
     }
 
     fn clear(&mut self) {
@@ -204,6 +214,28 @@ impl Rows {
         self.items.clear();
         self.answers.clear();
         self.model.set_vec(Vec::new());
+        self.mark_prompts();
+    }
+
+    /// Lists the prompts among the rows, when they differ from the list
+    /// shown: a streaming answer moves no prompt, and leaves the rail alone.
+    fn mark_prompts(&self) {
+        let mut marks = Vec::new();
+        let mut at = 0_usize;
+        for item in &self.items {
+            if let Some(first) = item.rows.first()
+                && first.row.shape == Shape::Prompt
+            {
+                marks.push(PromptMark {
+                    row: i32::try_from(at).unwrap_or(i32::MAX),
+                    text: first_line(&first.row.label),
+                });
+            }
+            at += item.rows.len();
+        }
+        if !self.marks.iter().eq(marks.iter().cloned()) {
+            self.marks.set_vec(marks);
+        }
     }
 
     /// The rows of one item.
@@ -281,6 +313,15 @@ impl Rows {
             self.model.remove(start + both);
         }
     }
+}
+
+/// The first line of `text` with words on it, for a one-line label.
+fn first_line(text: &str) -> SharedString {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
+        .into()
 }
 
 /// What the timeline shows now, each item with the space above it, then

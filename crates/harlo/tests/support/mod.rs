@@ -170,6 +170,33 @@ impl Ui {
             .dispatch_event(WindowEvent::PointerMoved { position });
     }
 
+    /// Turns the mouse wheel over the element showing `text`, `clicks` times
+    /// (up when positive), letting each turn's motion end.
+    ///
+    /// # Panics
+    ///
+    /// Panics if nothing shows it.
+    pub fn wheel(&self, text: &str, clicks: i32) {
+        let handle = self
+            .find(text)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("nothing shows {text:?}"));
+        let at = handle.absolute_position();
+        let size = handle.size();
+        let position = LogicalPosition::new(at.x + size.width / 2.0, at.y + size.height / 2.0);
+        let window = self.window.window();
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        for _ in 0..clicks.unsigned_abs() {
+            window.dispatch_event(WindowEvent::PointerScrolled {
+                position,
+                delta_x: 0.0,
+                delta_y: if clicks > 0 { 120.0 } else { -120.0 },
+            });
+            self.wait(400);
+        }
+    }
+
     /// Makes the window `width` wide, at the design's height.
     pub fn resize(&self, width: f32) {
         self.window

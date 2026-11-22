@@ -133,6 +133,14 @@ export struct DiffLine {
     kind: int,
 }
 
+/// One of the session's prompts, on the rail that jumps to it.
+export struct PromptMark {
+    /// The prompt's row in the timeline.
+    row: int,
+    /// The prompt's first line.
+    text: string,
+}
+
 /// One row of a session's timeline.
 export struct TimelineRow {
     shape: Shape,
@@ -689,6 +697,7 @@ export global State {
     in property <bool> session-busy;
     in property <string> session-placeholder;
     in property <[TimelineRow]> timeline;
+    in property <[PromptMark]> prompt-marks;
     in property <[InboxRow]> inbox;
     // What the open session waits on.
     in property <UndoCard> undo-card;

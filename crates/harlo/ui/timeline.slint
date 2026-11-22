@@ -4,7 +4,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts, Motion } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, Shape, TimelineRow, DiffLine, Chip } from "data.slint";
+import { State, Logic, Shape, TimelineRow, DiffLine, Chip, PromptMark } from "data.slint";
 import { Icon, Press, HLine, Breathing } from "widgets.slint";
 
 /// The timeline column's widest size.
@@ -558,14 +558,29 @@ component RowView inherits Rectangle {
 /// The timeline, which follows the newest row while it's at the end.
 export component Timeline inherits ListView {
     /// Whether the view is at the end, and keeps there as rows grow.
-    property <bool> following: true;
+    out property <bool> following: true;
     property <length> column: min(Column.width, self.visible-width - 48px);
     property <length> left: (self.visible-width - self.column) / 2;
     property <length> end: min(0, self.visible-height - self.content-height);
 
+    /// How far down the view is, from 0 at the top to 1 at the end.
+    out property <float> fraction: root.end < 0 ? clamp(self.content-y / root.end, 0, 1) : 1;
+    /// The share of the whole that shows, from 0 to 1.
+    out property <float> shown: self.content-height > 0 ? min(1, self.visible-height / self.content-height) : 1;
+    /// The row being read: as far down the view as the view is down the
+    /// whole, so the top row at the top and the last row at the end.
+    /// Estimated the way the list places rows: each counts as the average
+    /// height.
+    out property <float> reading-row: self.content-height > 0
+        ? (self.visible-height * root.fraction - self.content-y) / self.content-height * State.timeline.length
+        : 0;
+
     accessible-label: "Timeline";
-    // Rows fit the width; the timeline only scrolls up and down.
+    // Rows fit the width; the timeline only scrolls up and down. Its scroll
+    // bar is drawn beside it (`TimelineScrollbar`), with a thumb that stays
+    // long enough to see in a long session.
     horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
 
     /// The end moved while following: the view catches up on the event
     /// loop's next turn, by calling `catch-up()`.
@@ -592,6 +607,31 @@ export component Timeline inherits ListView {
         self.content-y = root.end;
     }
 
+    /// Puts the top of `row` at the top of the view, or goes to the end if
+    /// the row is in the last screenful.
+    ///
+    /// From the end, every earlier row lies above the view, so the list
+    /// places the row at its top edge once it lays the rows out.
+    public function jump-to(row: int) {
+        self.content-y = root.end;
+        self.ensure-row-visible(row, ScrollBehavior.instant);
+        root.following = self.content-y <= root.end + 4px;
+    }
+
+    /// Scrolls to `fraction` of the way down, from 0 at the top to 1 at
+    /// the end, following the end when there.
+    public function scroll-to(fraction: float) {
+        self.content-y = root.end * clamp(fraction, 0, 1);
+        root.following = fraction >= 1;
+    }
+
+    /// Scrolls a page up (`direction` -1) or down (1), keeping a little of
+    /// the page before in view.
+    public function page(direction: int) {
+        self.content-y = clamp(self.content-y - direction * (self.visible-height - 48px), root.end, 0);
+        root.following = self.content-y <= root.end + 4px;
+    }
+
     /// Goes to the end again, if still following.
     public function catch-up() {
         if root.following {
@@ -603,5 +643,148 @@ export component Timeline inherits ListView {
         item: row;
         column: root.column;
         left: root.left;
+    }
+}
+
+/// The timeline's scroll bar. Its thumb never gets shorter than
+/// `min-thumb`, so a long session still shows where the view is; it widens
+/// under the pointer. Drag the thumb, or press above or below it to page.
+export component TimelineScrollbar inherits Rectangle {
+    /// How far down the view is, from 0 at the top to 1 at the end.
+    in property <float> fraction;
+    /// The share of the whole that shows, from 0 to 1.
+    in property <float> shown;
+    /// Asks to scroll to `fraction` of the way down.
+    callback scroll-to(fraction: float);
+    /// Asks to go a page up (-1) or down (1).
+    callback page(direction: int);
+
+    /// Long enough to find and grab, however long the session.
+    property <length> min-thumb: 48px;
+    property <length> pad: 6px;
+    property <length> track: root.height - 2 * root.pad;
+    property <length> thumb-height: min(root.track, max(root.min-thumb, root.track * root.shown));
+    property <length> travel: root.track - root.thumb-height;
+    property <bool> active: touch.has-hover || touch.pressed;
+
+    width: 16px;
+
+    thumb := Rectangle {
+        width: root.active ? 8px : 4px;
+        height: root.thumb-height;
+        x: root.width - self.width - 4px;
+        y: root.pad + root.travel * clamp(root.fraction, 0, 1);
+        border-radius: self.width / 2;
+        background: Theme.icon-weak-base;
+        opacity: root.active ? 0.9 : 0.55;
+
+        animate width, opacity { duration: 120ms; easing: ease-out; }
+    }
+
+    touch := TouchArea {
+        property <float> start-fraction;
+        property <length> start-y;
+        property <bool> dragging;
+
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                self.dragging = self.mouse-y >= thumb.y && self.mouse-y <= thumb.y + thumb.height;
+                if self.dragging {
+                    self.start-fraction = root.fraction;
+                    self.start-y = self.mouse-y;
+                } else {
+                    root.page(self.mouse-y < thumb.y ? -1 : 1);
+                }
+            }
+        }
+        moved => {
+            if self.dragging && root.travel > 0 {
+                root.scroll-to(self.start-fraction + (self.mouse-y - self.start-y) / root.travel);
+            }
+        }
+    }
+}
+
+/// A mark beside the timeline for each of the session's prompts: a short
+/// line, longer and brighter for the prompt in view. Hovering one shows the
+/// prompt's first line; a click jumps to it. When the prompts don't all
+/// fit, the marks around the view show.
+export component PromptRail inherits Rectangle {
+    /// The row the timeline's reader is at.
+    in property <float> reading-row;
+    /// How far down the timeline is, from 0 at the top to 1 at the end.
+    in property <float> fraction;
+    /// Asks to jump to the prompt at `row`.
+    callback jump(row: int);
+
+    /// The space each mark takes, which is also where it can be pressed.
+    property <length> pitch: 12px;
+    property <int> count: State.prompt-marks.length;
+    property <int> fit: max(1, floor(root.height / root.pitch));
+    property <int> shown: min(root.count, root.fit);
+    property <int> first: clamp(round(root.fraction * root.count - root.shown / 2), 0, root.count - root.shown);
+    property <length> top: (root.height - root.shown * root.pitch) / 2;
+
+    width: 28px;
+    accessible-role: navigation;
+    accessible-label: "Prompts";
+
+    for mark[i] in State.prompt-marks: Rectangle {
+        // The last prompt at or above the reader is the one being read.
+        property <bool> current: mark.row <= root.reading-row
+            && (i == root.count - 1 || State.prompt-marks[i + 1].row > root.reading-row);
+        property <bool> hot: touch.has-hover;
+
+        visible: i >= root.first && i < root.first + root.shown;
+        x: 0;
+        y: root.top + (i - root.first) * root.pitch;
+        width: root.width;
+        height: root.pitch;
+        accessible-role: button;
+        accessible-label: mark.text;
+        accessible-action-default => { root.jump(mark.row); }
+
+        Rectangle {
+            width: parent.hot ? 22px : parent.current ? 18px : 12px;
+            height: parent.hot || parent.current ? 3px : 2px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.height / 2;
+            background: parent.hot ? Theme.text-strong : parent.current ? Theme.icon-base : Theme.icon-weak-base;
+            opacity: parent.hot || parent.current ? 1 : 0.6;
+
+            animate width { duration: 120ms; easing: ease-out; }
+        }
+
+        touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => { root.jump(mark.row); }
+        }
+
+        // The prompt's first line, to the left of the mark.
+        if touch.has-hover: Rectangle {
+            width: min(420px, tip.preferred-width + 20px);
+            height: tip.preferred-height + 12px;
+            x: -self.width - 4px;
+            y: (parent.height - self.height) / 2;
+            background: Theme.surface-raised-strong;
+            border-radius: Size.radius;
+            border-width: 1px;
+            border-color: Theme.menu-edge;
+            drop-shadow-color: #00000059;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-blur: 14px;
+
+            tip := Text {
+                x: 10px;
+                width: parent.width - 20px;
+                text: mark.text;
+                overflow: elide;
+                font-size: Size.small;
+                color: Theme.text-strong;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+        }
     }
 }
