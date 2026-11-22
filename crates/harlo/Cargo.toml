@@ -24,6 +24,7 @@ rfd = { workspace = true, features = ["xdg-portal"] }
 arboard = { workspace = true, features = ["image-data", "wayland-data-control"] }
 png = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
+alacritty_terminal = { workspace = true }
 notify-rust = { workspace = true, features = ["z"] }
 open = { workspace = true }
 # Runs the app's background work (requests to OpenCode, git, disk) off the
@@ -43,6 +44,9 @@ lucide-icons = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tempfile = { workspace = true }
+# A private OpenCode server for the tests that need one.
+opencode-client = { workspace = true }
 # The stress example times frames with Slint's rendering notifier, which the
 # default Skia surface (wgpu) serves only with its graphics API exposed.
 # Dev-only, so the app itself doesn't take the unstable API.

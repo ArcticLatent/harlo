@@ -129,7 +129,11 @@ fn dragging_the_edges_resizes_within_limits() {
 
 #[test]
 fn the_terminals_open_in_a_strip_under_the_center() {
-    let ui = ui(demo::app().terminal_folder("/home/u/code/harlo"));
+    // Real shells, in a scratch folder named like the project.
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let folder = scratch.path().join("harlo");
+    std::fs::create_dir(&folder).expect("the folder");
+    let ui = ui(demo::app().terminal_shell("/bin/sh", folder.to_string_lossy()));
     assert!(!ui.app().terminals_shown());
 
     // The rail button starts the first terminal.

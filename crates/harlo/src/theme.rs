@@ -106,7 +106,7 @@ const PATCH_TINT: f32 = 0.16;
 const EDGE: f32 = 0.12;
 
 /// How opaque selected text's highlight is.
-const SELECTION: f32 = 0.3;
+pub(crate) const SELECTION: f32 = 0.3;
 
 /// An outline for a card of colour `surface`.
 fn edge(t: &Tokens, surface: Rgba) -> Rgba {

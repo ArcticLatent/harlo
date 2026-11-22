@@ -8,6 +8,7 @@
 // Rust guideline compliant 2026-10-09
 
 pub mod demo;
+pub mod tasks;
 
 use harlo::Driver;
 use harlo::app::{App, Message};

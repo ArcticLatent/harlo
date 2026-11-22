@@ -1,0 +1,220 @@
+// The shown terminal: its lines drawn on a grid of cells, the cursor, and
+// the keyboard, mouse and clipboard going to its shell.
+//
+// Rust sends each line as runs of text in one style, starting at a column;
+// each run is placed by the cell grid, so the font's own spacing never
+// pushes text out of its column.
+
+import { Theme, Size, Fonts } from "theme.slint";
+import { State, Logic, Requests, TermLine } from "data.slint";
+
+/// The terminal's text size.
+global Cells {
+    out property <length> font: Size.code;
+    /// Room around the grid.
+    out property <length> pad: 6px;
+}
+
+/// One line: its runs' backgrounds, text and lines.
+component GridLine inherits Rectangle {
+    in property <TermLine> entry;
+    in property <length> cell-width;
+
+    for run in root.entry.runs: Rectangle {
+        x: run.column * root.cell-width;
+        width: run.cells * root.cell-width;
+        height: root.height;
+        background: run.filled ? run.background : transparent;
+
+        Text {
+            x: 0;
+            height: parent.height;
+            text: run.text;
+            color: run.color;
+            font-family: Fonts.mono;
+            font-size: Cells.font;
+            font-weight: run.bold ? 700 : 400;
+            font-italic: run.italic;
+            vertical-alignment: center;
+        }
+        if run.underline: Rectangle {
+            y: parent.height - 2px;
+            height: 1px;
+            background: run.color;
+        }
+        if run.strike: Rectangle {
+            y: parent.height / 2;
+            height: 1px;
+            background: run.color;
+        }
+    }
+}
+
+/// The shown terminal.
+export component TerminalView inherits Rectangle {
+    background: State.term-background;
+    clip: true;
+
+    // A cell's size, from the font's width for ten digits.
+    metrics := Text {
+        visible: false;
+        text: "0000000000";
+        font-family: Fonts.mono;
+        font-size: Cells.font;
+    }
+    property <length> cell-width: max(1px, metrics.preferred-width / 10);
+    property <length> cell-height: max(1px, ceil(metrics.preferred-height / 1px) * 1px);
+    property <int> columns: max(2, floor((root.width - 2 * Cells.pad) / root.cell-width));
+    property <int> lines: max(1, floor((root.height - 2 * Cells.pad) / root.cell-height));
+
+    // Sizes go to Rust after the layout settles, not in its middle.
+    report := Timer {
+        interval: 0ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            Logic.terminal-resized(root.columns, root.lines);
+        }
+    }
+    changed columns => {
+        report.running = true;
+    }
+    changed lines => {
+        report.running = true;
+    }
+    init => {
+        report.running = true;
+    }
+
+    property <int> focus-serial: Requests.focus-serial;
+    changed focus-serial => {
+        if Requests.focus == "terminal" {
+            keys.focus();
+        }
+    }
+
+    // Copies and pastes through a field's clipboard, the only one the
+    // window has.
+    clip := TextInput {
+        visible: false;
+        single-line: false;
+        width: 0;
+        height: 0;
+    }
+    function copy() {
+        clip.text = Logic.terminal-selection();
+        if clip.text != "" {
+            clip.select-all();
+            clip.copy();
+        }
+    }
+    function paste() {
+        clip.text = "";
+        clip.paste();
+        if clip.text != "" {
+            Logic.terminal-paste(clip.text);
+        }
+    }
+
+    // Where a pointer position falls on the grid.
+    function line-at(y: length) -> int {
+        return clamp(floor((y - Cells.pad) / root.cell-height), 0, root.lines - 1);
+    }
+    function column-at(x: length) -> float {
+        return max(0, (x - Cells.pad) / root.cell-width);
+    }
+
+    mouse := TouchArea {
+        mouse-cursor: text;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                keys.focus();
+                Logic.terminal-select-from(root.line-at(self.mouse-y), root.column-at(self.mouse-x), false);
+            }
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.middle {
+                keys.focus();
+                root.paste();
+            }
+        }
+        moved => {
+            if self.pressed {
+                Logic.terminal-select-to(root.line-at(self.mouse-y), root.column-at(self.mouse-x));
+            }
+        }
+        double-clicked => {
+            Logic.terminal-select-from(root.line-at(self.mouse-y), root.column-at(self.mouse-x), true);
+            Logic.terminal-select-to(root.line-at(self.mouse-y), root.column-at(self.mouse-x));
+        }
+        scroll-event(event) => {
+            if event.delta-y == 0 {
+                return reject;
+            }
+            // Slint makes a wheel notch 60px; three lines a notch, and at
+            // least one a step, however small the step.
+            Logic.terminal-scroll(event.delta-y > 0
+                ? max(1, round(event.delta-y / 20px))
+                : min(-1, round(event.delta-y / 20px)));
+            accept
+        }
+    }
+
+    keys := FocusScope {
+        accessible-role: AccessibleRole.text-input;
+        accessible-label: "Terminal screen";
+        key-pressed(event) => {
+            if event.modifiers.control && event.modifiers.shift {
+                if event.text.to-lowercase() == "c" {
+                    root.copy();
+                    return accept;
+                }
+                if event.text.to-lowercase() == "v" {
+                    root.paste();
+                    return accept;
+                }
+            }
+            if event.modifiers.shift && event.text == Key.Insert {
+                root.paste();
+                return accept;
+            }
+            Logic.terminal-key(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift) ? accept : reject
+        }
+    }
+
+    grid := Rectangle {
+        x: Cells.pad;
+        y: Cells.pad;
+        width: root.columns * root.cell-width;
+        height: root.lines * root.cell-height;
+
+        for entry[index] in State.term-lines: GridLine {
+            y: index * root.cell-height;
+            height: root.cell-height;
+            width: grid.width;
+            entry: entry;
+            cell-width: root.cell-width;
+        }
+
+        if State.term-cursor.shown: cursor := Rectangle {
+            property <bool> solid: keys.has-focus && State.term-cursor.shape == 0;
+            x: State.term-cursor.column * root.cell-width;
+            y: State.term-cursor.line * root.cell-height
+                + (State.term-cursor.shape == 1 ? root.cell-height - 2px : 0);
+            width: State.term-cursor.shape == 2 ? 2px : root.cell-width;
+            height: State.term-cursor.shape == 1 ? 2px : root.cell-height;
+            background: self.solid || State.term-cursor.shape == 1 || State.term-cursor.shape == 2
+                ? State.term-cursor-color : transparent;
+            border-width: self.solid ? 0 : (State.term-cursor.shape == 0 || State.term-cursor.shape == 3 ? 1px : 0);
+            border-color: State.term-cursor-color;
+
+            if cursor.solid: Text {
+                x: 0;
+                height: parent.height;
+                text: State.term-cursor.text;
+                color: State.term-background;
+                font-family: Fonts.mono;
+                font-size: Cells.font;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

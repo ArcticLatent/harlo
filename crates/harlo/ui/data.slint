@@ -452,6 +452,35 @@ export struct TodosCard {
     total: int,
 }
 
+/// Text in one style in a terminal line, from a column on.
+export struct TermRun {
+    column: int,
+    cells: int,
+    text: string,
+    color: color,
+    background: color,
+    filled: bool,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strike: bool,
+}
+
+/// A terminal line: its runs, left to right.
+export struct TermLine {
+    runs: [TermRun],
+}
+
+/// The terminal's cursor. Shape 0 is a block, 1 an underline, 2 a beam and
+/// 3 a hollow block.
+export struct TermCursor {
+    shown: bool,
+    line: int,
+    column: int,
+    shape: int,
+    text: string,
+}
+
 export global State {
     // The shell.
     in property <bool> sidebar-shown: true;
@@ -472,6 +501,14 @@ export global State {
     in property <bool> terminals-shown;
     in property <length> terminal-height: 260px;
     in property <[Tab]> terminals;
+    /// The shown terminal's visible lines, cursor and colours, and whether
+    /// it's scrolled back from its newest output.
+    in property <[TermLine]> term-lines;
+    in property <TermCursor> term-cursor;
+    in property <color> term-background;
+    in property <color> term-foreground;
+    in property <color> term-cursor-color;
+    in property <bool> term-scrolled;
 
     // The tool panels.
     in property <ContextCard> context-card;
@@ -586,6 +623,21 @@ export global Logic {
     callback toggle-panel(int);
     callback toggle-terminal();
     callback new-terminal();
+    /// A key pressed in the shown terminal, with Control, Alt and Shift;
+    /// true when the terminal took it.
+    callback terminal-key(string, bool, bool, bool) -> bool;
+    /// Text pasted into the shown terminal.
+    callback terminal-paste(string);
+    /// The shown terminal's selected text, to copy.
+    pure callback terminal-selection() -> string;
+    /// The terminals have room for this many columns and lines.
+    callback terminal-resized(int, int);
+    /// The wheel turned over the shown terminal, by lines; up is positive.
+    callback terminal-scroll(int);
+    /// A press at a visible line and fractional column, by word when
+    /// double; then a drag to another.
+    callback terminal-select-from(int, float, bool);
+    callback terminal-select-to(int, float);
     callback maximize(int);
     callback restore();
     callback close-panel();

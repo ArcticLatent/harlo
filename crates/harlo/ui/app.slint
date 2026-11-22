@@ -1,6 +1,7 @@
 // The main window: the rails, the sidebar, the center with the terminals
 // under it, the tool panel on the right, and the popovers over them.
 
+import { TerminalView } from "terminal.slint";
 import { EditorView } from "editor.slint";
 import { AboutSlint } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
@@ -86,7 +87,7 @@ export component AppWindow inherits Window {
                     }
                     if State.terminals-shown: TerminalStrip {
                         height: State.terminal-height;
-                        Quiet { text: ""; }
+                        TerminalView { }
                     }
                 }
             }

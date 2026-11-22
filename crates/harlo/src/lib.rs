@@ -17,6 +17,7 @@ pub mod options;
 pub mod present;
 pub mod runtime;
 pub mod task;
+pub mod term;
 pub mod text;
 pub mod theme;
 pub mod timeline;

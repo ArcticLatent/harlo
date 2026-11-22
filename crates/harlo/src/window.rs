@@ -28,6 +28,7 @@ use crate::options::Options;
 use crate::present::{self, Presenter};
 use crate::runtime::Runtime;
 use crate::task::{Action, Effect};
+use crate::term::{self, Key, Mods};
 use crate::text::Edit;
 use crate::timeline::Event as TimelineEvent;
 use crate::ui::{AppWindow, Logic, Requests};
@@ -68,8 +69,10 @@ impl From<slint::PlatformError> for RunError {
 /// The app with what runs it, shared by the window's callbacks.
 struct Shell {
     app: App,
-    /// Runs the app's tasks; tests leave it out, and the tasks are dropped.
+    /// Runs the app's tasks; tests leave it out, and the tasks wait in
+    /// `kept` for the test to run or drop.
     runtime: Option<Runtime<Message>>,
+    kept: Vec<crate::task::Task<Message>>,
     presenter: Presenter,
     window: slint::Weak<AppWindow>,
 }
@@ -147,6 +150,8 @@ impl Shell {
                 let task = self.app.update(message);
                 if let Some(runtime) = &self.runtime {
                     runtime.spawn(task);
+                } else if !task.is_none() {
+                    self.kept.push(task);
                 }
             }
             if let Some(window) = self.window.upgrade() {
@@ -228,6 +233,7 @@ pub fn run(options: &Options) -> Result<(), RunError> {
         shell: RefCell::new(Shell {
             app,
             runtime: Some(runtime),
+            kept: Vec::new(),
             presenter,
             window: window.as_weak(),
         }),
@@ -264,7 +270,7 @@ pub fn run(options: &Options) -> Result<(), RunError> {
 ///
 /// The window's callbacks and the shown state are the real ones; the
 /// requests to OpenCode and the disk that the app's tasks would make
-/// don't happen.
+/// don't happen unless the test takes the tasks and runs them.
 #[derive(Clone)]
 pub struct Driver {
     controller: Rc<Controller>,
@@ -286,6 +292,7 @@ impl Driver {
             shell: RefCell::new(Shell {
                 app,
                 runtime: None,
+                kept: Vec::new(),
                 presenter,
                 window: window.as_weak(),
             }),
@@ -317,6 +324,13 @@ impl Driver {
         self.controller.dispatch(message);
     }
 
+    /// The tasks the app started since the last call, oldest first, for
+    /// the test to run.
+    #[must_use]
+    pub fn take_tasks(&self) -> Vec<crate::task::Task<Message>> {
+        std::mem::take(&mut self.controller.shell.borrow_mut().kept)
+    }
+
     /// The messages sent since the last call, oldest first.
     #[must_use]
     pub fn take_messages(&self) -> Vec<Message> {
@@ -343,6 +357,70 @@ fn edge_of(number: i32) -> Option<Edge> {
         2 => Some(Edge::Terminal),
         _ => None,
     }
+}
+
+/// Connects the shown terminal's keys, clipboard, mouse and size.
+fn connect_terminal(logic: &Logic<'_>, controller: &Rc<Controller>) {
+    let c = Rc::clone(controller);
+    logic.on_terminal_key(move |text, ctrl, alt, shift| {
+        let Some(key) = Key::from_text(&text) else {
+            return false;
+        };
+        // Ctrl+Tab and Ctrl+Page Up/Down switch tabs instead.
+        if ctrl && matches!(key, Key::Tab | Key::PageUp | Key::PageDown) {
+            return false;
+        }
+        let mods = Mods { ctrl, alt, shift };
+        let bytes = c.shell.try_borrow().ok().and_then(|shell| {
+            let active = shell.app.terminals.active()?;
+            term::encode(&key, mods, active.screen.mode())
+        });
+        let Some(bytes) = bytes else {
+            return false;
+        };
+        c.dispatch(Message::Terminal(TerminalEvent::Typed(bytes)));
+        true
+    });
+    let c = Rc::clone(controller);
+    logic.on_terminal_selection(move || {
+        c.shell
+            .try_borrow()
+            .ok()
+            .and_then(|shell| shell.app.terminals.active()?.screen.selected())
+            .unwrap_or_default()
+            .into()
+    });
+    let c = Rc::clone(controller);
+    logic.on_terminal_paste(move |text| {
+        c.dispatch(Message::Terminal(TerminalEvent::Paste(text.to_string())));
+    });
+    let c = Rc::clone(controller);
+    logic.on_terminal_resized(move |columns, lines| {
+        let count = |n: i32| usize::try_from(n).unwrap_or(1);
+        c.dispatch(Message::Terminal(TerminalEvent::Resized(
+            count(columns),
+            count(lines),
+        )));
+    });
+    let c = Rc::clone(controller);
+    logic.on_terminal_scroll(move |lines| {
+        c.dispatch(Message::Terminal(TerminalEvent::Scroll(lines)));
+    });
+    let c = Rc::clone(controller);
+    logic.on_terminal_select_from(move |line, column, words| {
+        c.dispatch(Message::Terminal(TerminalEvent::SelectFrom {
+            line: usize::try_from(line).unwrap_or(0),
+            column,
+            words,
+        }));
+    });
+    let c = Rc::clone(controller);
+    logic.on_terminal_select_to(move |line, column| {
+        c.dispatch(Message::Terminal(TerminalEvent::SelectTo(
+            usize::try_from(line).unwrap_or(0),
+            column,
+        )));
+    });
 }
 
 /// Turns the window's callbacks into messages.
@@ -408,6 +486,7 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send_with!(on_terminal_closed, |_app, id| u32::try_from(id)
         .ok()
         .map(|id| Message::Terminal(TerminalEvent::Close(id))));
+    connect_terminal(&logic, controller);
     send_with!(on_resize, |_app, edge, by| edge_of(edge)
         .map(|edge| Message::Resize { edge, by }));
     send!(on_resize_done, || Message::ResizeEnd);
