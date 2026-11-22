@@ -41,7 +41,11 @@ export component Press inherits Rectangle {
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: root.enabled;
-    accessible-action-default => { root.clicked(); }
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
 
     touch := TouchArea {
         enabled: root.enabled;

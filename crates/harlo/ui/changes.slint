@@ -1,0 +1,380 @@
+// The Changes panel: the reviewed turn's changes, the open session's, then
+// the folder's uncommitted ones, with a commit message, Commit and Push.
+//
+// On the right, a file opens its diff under it. Maximized, the lists sit on
+// the left and the selected file's diff fills the right, its lit hunk marked.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Size, Fonts } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, Requests, ChangeRow } from "data.slint";
+import { Icon, FileIcon, Press, IconButton, Field, HLine, VLine } from "widgets.slint";
+import { Counts, PatchLine, LinkButton } from "timeline.slint";
+import { CardButton } from "waiting.slint";
+
+/// The space at the lists' sides.
+global Sides {
+    out property <length> padding: 18px;
+}
+
+/// A section's title, with its count or branch, or a close button.
+component TitleRow inherits HorizontalLayout {
+    in property <ChangeRow> entry;
+
+    padding-top: root.entry.gap;
+    spacing: 6px;
+    Text {
+        horizontal-stretch: 1;
+        text: root.entry.text;
+        vertical-alignment: center;
+        font-size: Size.label;
+        font-weight: 500;
+        color: Theme.text-strong;
+    }
+    if root.entry.branch: Icon {
+        text: Icons.git-branch;
+        font-size: 12px;
+        color: Theme.icon-weak-base;
+    }
+    if root.entry.aside != "": Text {
+        text: root.entry.aside;
+        vertical-alignment: center;
+        font-size: Size.small;
+        color: Theme.text-weak;
+    }
+    if root.entry.closes: VerticalLayout {
+        alignment: center;
+        IconButton {
+            width: 20px;
+            height: 20px;
+            label: "End review";
+            glyph: Icons.close;
+            glyph-size: 12px;
+            glyph-color: Theme.icon-weak-base;
+            clicked => { Logic.end-review(); }
+        }
+    }
+}
+
+/// A file: its name whole, its folder shortened, and its counts.
+component FileRow inherits Press {
+    in property <ChangeRow> entry;
+
+    label: root.entry.aside == "" ? root.entry.text : root.entry.aside + "/" + root.entry.text;
+    selected: root.entry.selected;
+    enabled: root.entry.clickable;
+    // Disabled rows still read as files, not greyed out.
+    accessible-enabled: true;
+    clicked => {
+        if root.entry.chevron {
+            Logic.change-toggle(root.entry.key);
+        } else {
+            Logic.change-select(root.entry.key);
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 6px;
+        if root.entry.chevron: Icon {
+            width: 14px;
+            text: root.entry.open ? Icons.chevron-down : Icons.chevron-right;
+            font-size: 13px;
+            color: root.entry.clickable ? Theme.icon-weak-base : transparent;
+        }
+        FileIcon {
+            text: root.entry.icon;
+            color: root.entry.icon-color;
+            font-size: 13px;
+        }
+        Text {
+            text: root.entry.text;
+            vertical-alignment: center;
+            font-family: Fonts.mono;
+            font-size: Size.code;
+            color: Theme.text-strong;
+        }
+        Text {
+            horizontal-stretch: 1;
+            min-width: 0;
+            text: root.entry.aside;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        if root.entry.counts: Counts {
+            added: root.entry.added;
+            removed: root.entry.removed;
+        }
+    }
+}
+
+/// A line of a diff: in the side list, indented under its file; in the
+/// maximized diff, marked when its hunk is lit.
+component LineRow inherits Rectangle {
+    in property <ChangeRow> entry;
+    in property <bool> marks;
+
+    PatchLine {
+        x: root.marks ? 3px : 0;
+        width: parent.width - self.x;
+        line: root.entry.line;
+    }
+    if root.marks && root.entry.selected: Rectangle {
+        x: 0;
+        width: 3px;
+        background: Theme.text-interactive-base;
+    }
+    if root.marks: TouchArea {
+        clicked => { Logic.change-hunk(root.entry.hunk); }
+    }
+}
+
+/// One row of either list.
+component Row inherits Rectangle {
+    in property <ChangeRow> entry;
+    in property <bool> marks;
+
+    height: root.entry.height;
+
+    HorizontalLayout {
+        padding-left: Sides.padding;
+        padding-right: Sides.padding;
+        if root.entry.kind == 0: TitleRow {
+            entry: root.entry;
+        }
+        if root.entry.kind == 1 || root.entry.kind == 2 || root.entry.kind == 3: VerticalLayout {
+            padding-top: root.entry.gap;
+            Text {
+                text: root.entry.text;
+                vertical-alignment: center;
+                overflow: elide;
+                font-size: Size.small;
+                color: root.entry.kind == 3 ? Theme.icon-critical-base : Theme.text-weak;
+            }
+        }
+        if root.entry.kind == 4: VerticalLayout {
+            padding-top: root.entry.gap;
+            FileRow {
+                entry: root.entry;
+            }
+        }
+        if root.entry.kind == 5: VerticalLayout {
+            padding-top: root.entry.gap;
+            Rectangle {
+                background: Theme.surface-inset-base;
+                LineRow {
+                    entry: root.entry;
+                    marks: root.marks;
+                }
+            }
+        }
+        if root.entry.kind == 6: Rectangle {
+            background: Theme.surface-inset-base;
+            HorizontalLayout {
+                padding-left: 40px;
+                alignment: start;
+                VerticalLayout {
+                    alignment: center;
+                    LinkButton {
+                        text: root.entry.text;
+                        clicked => { Logic.change-whole(root.entry.key); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The lists, which scroll; `marks` for the maximized diff's lines.
+component Rows inherits ListView {
+    in property <[ChangeRow]> rows;
+    in property <bool> marks;
+    /// The name Rust scrolls it by, and where in it Rust asks for.
+    in property <string> name;
+    in property <length> reveal-y;
+
+    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+
+    property <int> scroll-serial: Requests.scroll-serial;
+    changed scroll-serial => {
+        if Requests.scroll == root.name {
+            self.content-y = -min(root.reveal-y,
+                max(0, self.content-height - self.visible-height));
+        }
+    }
+
+    for row in root.rows: Row {
+        entry: row;
+        marks: root.marks;
+    }
+}
+
+/// The foot: the commit message and Commit, Push, and how the last went.
+component Foot inherits VerticalLayout {
+    property <bool> shown: State.changes-foot.commit || State.changes-foot.push != ""
+        || State.changes-foot.note != "" || State.changes-foot.outcome != "";
+
+    if root.shown: HLine { }
+    if root.shown: VerticalLayout {
+        padding-top: 12px;
+        padding-bottom: 14px;
+        padding-left: Sides.padding;
+        padding-right: Sides.padding;
+        spacing: 10px;
+        if State.changes-foot.commit: HorizontalLayout {
+            spacing: 8px;
+            message := Field {
+                horizontal-stretch: 1;
+                min-height: 30px;
+                placeholder: "Commit message";
+                text-size: Size.label;
+                // Rust's message replaces the field's when it changes there,
+                // as when a commit uses it up.
+                property <string> from-app: State.commit-message;
+                changed from-app => {
+                    if self.text != self.from-app {
+                        self.text = self.from-app;
+                    }
+                }
+                init => {
+                    self.text = State.commit-message;
+                }
+                edited(text) => { Logic.commit-message-edited(text); }
+                accepted => {
+                    if State.changes-foot.ready {
+                        Logic.commit();
+                    }
+                }
+            }
+            CardButton {
+                text: State.changes-foot.committing ? "Committing…" : "Commit";
+                main: true;
+                enabled: State.changes-foot.ready;
+                clicked => { Logic.commit(); }
+            }
+        }
+        if State.changes-foot.push != "": HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            CardButton {
+                text: State.changes-foot.push;
+                enabled: State.changes-foot.can-push;
+                clicked => { Logic.push(); }
+            }
+            Text {
+                text: State.changes-foot.upstream;
+                vertical-alignment: center;
+                font-size: Size.small;
+                color: Theme.text-weak;
+            }
+            if State.changes-foot.behind != "": Text {
+                text: State.changes-foot.behind;
+                vertical-alignment: center;
+                font-size: Size.small;
+                color: Theme.text-weak;
+            }
+        }
+        if State.changes-foot.note != "": Text {
+            text: State.changes-foot.note;
+            wrap: word-wrap;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        // What git said can run long; it scrolls past a few lines.
+        if State.changes-foot.outcome != "": Flickable {
+            height: min(outcome.preferred-height, 96px);
+            viewport-height: outcome.preferred-height;
+            outcome := Text {
+                width: parent.width;
+                text: State.changes-foot.outcome;
+                wrap: word-wrap;
+                font-size: Size.small;
+                color: State.changes-foot.failed ? Theme.icon-critical-base : Theme.text-weak;
+            }
+        }
+    }
+}
+
+/// The lists over their foot.
+component Lists inherits VerticalLayout {
+    if State.changes-note != "": VerticalLayout {
+        vertical-stretch: 1;
+        padding-top: 20px;
+        padding-left: Sides.padding;
+        padding-right: Sides.padding;
+        alignment: start;
+        Text {
+            text: State.changes-note;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-base;
+        }
+    }
+    if State.changes-note == "": Rows {
+        vertical-stretch: 1;
+        accessible-label: "Changed files";
+        rows: State.change-rows;
+        name: "changes-list";
+        reveal-y: State.change-rows-y;
+    }
+    Foot { }
+}
+
+/// The selected file's path over its whole diff.
+component SelectedDiff inherits VerticalLayout {
+    if State.change-path == "": Rectangle {
+        vertical-stretch: 1;
+        Text {
+            text: "Select a file to see its changes.";
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+    }
+    if State.change-path != "": HorizontalLayout {
+        height: 44px;
+        padding-left: Sides.padding + 2px;
+        padding-right: Sides.padding;
+        spacing: 8px;
+        Icon {
+            text: Icons.folder;
+            font-size: 14px;
+            color: Theme.icon-weak-base;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: State.change-path;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.label;
+            color: Theme.text-strong;
+        }
+    }
+    if State.change-path != "": HLine { }
+    if State.change-path != "": Rows {
+        vertical-stretch: 1;
+        accessible-label: "Selected diff";
+        rows: State.change-diff;
+        marks: true;
+        name: "changes-diff";
+        reveal-y: State.change-diff-y;
+    }
+}
+
+/// The Changes panel's body; `wide` when maximized.
+export component ChangesPanel inherits Rectangle {
+    in property <bool> wide;
+
+    if !root.wide: Lists { }
+    if root.wide: HorizontalLayout {
+        Lists {
+            width: min(380px, parent.width / 2);
+        }
+        VLine { }
+        SelectedDiff {
+            horizontal-stretch: 1;
+        }
+    }
+}

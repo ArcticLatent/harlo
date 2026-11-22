@@ -6,6 +6,9 @@ import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State } from "data.slint";
 import { Icon } from "widgets.slint";
+import { ChangesPanel } from "changes.slint";
+import { FilesPanel } from "files.slint";
+import { NotesPanel } from "notes.slint";
 
 /// The height of the panels' bars.
 global Bar {
@@ -277,4 +280,9 @@ export component PanelBody inherits Rectangle {
     background: Theme.background-base;
     if State.panel == 0: ContextPanel { }
     if State.panel == 1: TodosPanel { }
+    if State.panel == 2: ChangesPanel {
+        wide: State.maximized;
+    }
+    if State.panel == 3: FilesPanel { }
+    if State.panel == 4: NotesPanel { }
 }

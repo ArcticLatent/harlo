@@ -48,6 +48,9 @@ rfd = { version = "0.18.0", default-features = false }
 arboard = { version = "3.7.0", default-features = false }
 # Encodes pasted images as PNG (MIT/Apache).
 png = { version = "0.18.1", default-features = false }
+# Decodes pictures opened in the editor tab (MIT/Apache); the version Slint
+# already builds, so it costs no extra compile.
+image = { version = "=0.25.10", default-features = false }
 # Desktop notifications when a session needs the user (MIT/Apache); D-Bus in pure Rust.
 notify-rust = { version = "4.19.0", default-features = false }
 # Splits answers into blocks (paragraphs, headings, code) for the timeline

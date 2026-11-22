@@ -1,0 +1,188 @@
+// The Notes panel: the current folder's note, how many of its todos are
+// open, and buttons to add a todo or put the note into the message.
+
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, Requests } from "data.slint";
+import { Icon } from "widgets.slint";
+import { CardButton } from "waiting.slint";
+
+/// The note's text, which scrolls when long. Ctrl+Enter ticks the todo on
+/// the cursor's line.
+component NoteField inherits Rectangle {
+    in property <string> placeholder;
+
+    // Rust's text replaces the field's when Rust changed it.
+    property <int> revision: State.notes-revision;
+    changed revision => {
+        root.load();
+    }
+    init => {
+        root.load();
+    }
+    property <int> focus-serial: Requests.focus-serial;
+    changed focus-serial => {
+        if Requests.focus == "notes" {
+            input.focus();
+        }
+    }
+    // Set while Rust's text goes in, so the field doesn't send it back.
+    property <bool> loading;
+    function load() {
+        root.loading = true;
+        input.text = State.notes-text;
+        input.set-selection-offsets(State.notes-anchor, State.notes-cursor);
+        root.loading = false;
+    }
+    function report() {
+        if root.loading {
+            return;
+        }
+        Logic.notes-edited(input.text, input.cursor-position-byte-offset,
+            input.anchor-position-byte-offset);
+    }
+    /// Keeps the cursor in view as it moves.
+    function follow(at: Point) {
+        let top = at.y + flick.viewport-y;
+        if top < 0 {
+            flick.viewport-y = -at.y;
+        } else if top + input.font-size * 1.6 > flick.height {
+            flick.viewport-y = flick.height - at.y - input.font-size * 1.6;
+        }
+    }
+
+    background: Theme.surface-inset-base;
+    border-radius: Size.radius;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.border-base : Theme.surface-inset-base;
+
+    flick := Flickable {
+        x: 12px;
+        y: 10px;
+        width: parent.width - 24px;
+        height: parent.height - 20px;
+        viewport-height: max(self.height, input.preferred-height);
+
+        TouchArea {
+            mouse-cursor: MouseCursor.text;
+            clicked => { input.focus(); }
+        }
+        Text {
+            width: parent.width;
+            text: root.placeholder;
+            visible: input.text == "";
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-weaker;
+            accessible-role: none;
+        }
+        keys := FocusScope {
+            width: parent.width;
+            height: input.height;
+            capture-key-pressed(event) => {
+                if event.modifiers.control && event.text == Key.Return {
+                    Logic.toggle-todo();
+                    return accept;
+                }
+                reject
+            }
+            input := TextInput {
+                width: parent.width;
+                height: max(self.preferred-height, flick.height);
+                single-line: false;
+                wrap: word-wrap;
+                font-size: Size.label;
+                color: Theme.text-strong;
+                selection-background-color: Theme.selection;
+                accessible-label: "Note";
+                edited => { root.report(); }
+                cursor-position-changed(at) => {
+                    root.follow(at);
+                    root.report();
+                }
+            }
+        }
+    }
+}
+
+/// The Notes panel's body.
+export component NotesPanel inherits VerticalLayout {
+    HorizontalLayout {
+        height: 44px;
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 8px;
+        Icon {
+            text: Icons.folder;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: State.notes-folder;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.label;
+            font-weight: 500;
+            color: Theme.text-strong;
+        }
+    }
+    if !State.notes-loaded: VerticalLayout {
+        vertical-stretch: 1;
+        padding-top: 8px;
+        padding-left: 18px;
+        padding-right: 18px;
+        alignment: start;
+        Text {
+            text: "Opening the note…";
+            font-size: Size.label;
+            color: Theme.text-base;
+        }
+    }
+    if State.notes-loaded: VerticalLayout {
+        vertical-stretch: 1;
+        padding-left: 14px;
+        padding-right: 14px;
+        NoteField {
+            vertical-stretch: 1;
+            placeholder: "Notes for " + State.notes-folder
+                + ": ideas, decisions, things to remember.\n\n"
+                + "Lines like \"- [ ] task\" are todos; Ctrl+Enter ticks one.";
+        }
+    }
+    if State.notes-loaded: VerticalLayout {
+        padding-top: 10px;
+        padding-bottom: 12px;
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        if State.notes-todos != "" || State.notes-error != "": HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: State.notes-todos;
+                font-size: Size.small;
+                color: Theme.text-weak;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: State.notes-error;
+                overflow: elide;
+                font-size: Size.small;
+                color: Theme.icon-critical-base;
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            CardButton {
+                height: 28px;
+                text: "Add a todo";
+                clicked => { Logic.add-todo(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            CardButton {
+                height: 28px;
+                text: "Insert into message";
+                enabled: State.notes-has-text;
+                clicked => { Logic.insert-note(); }
+            }
+        }
+    }
+}

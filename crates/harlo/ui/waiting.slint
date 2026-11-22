@@ -36,7 +36,7 @@ component Card inherits Rectangle {
 }
 
 /// A card's button: filled when it's the main action, plain otherwise.
-component CardButton inherits Press {
+export component CardButton inherits Press {
     in property <string> text;
     in property <bool> main;
     /// Whether a long label shortens to fit, such as the patterns "Always

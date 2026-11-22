@@ -23,6 +23,7 @@ mimalloc = { workspace = true }
 rfd = { workspace = true, features = ["xdg-portal"] }
 arboard = { workspace = true, features = ["image-data", "wayland-data-control"] }
 png = { workspace = true }
+image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 notify-rust = { workspace = true, features = ["z"] }
 open = { workspace = true }
 # Runs the app's background work (requests to OpenCode, git, disk) off the

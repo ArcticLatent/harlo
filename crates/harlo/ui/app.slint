@@ -1,6 +1,7 @@
 // The main window: the rails, the sidebar, the center with the terminals
 // under it, the tool panel on the right, and the popovers over them.
 
+import { EditorView } from "editor.slint";
 import { AboutSlint } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
@@ -81,9 +82,7 @@ export component AppWindow inherits Window {
                         if State.content == Content.quiet: Quiet {
                             text: State.quiet;
                         }
-                        if State.content == Content.editor: Quiet {
-                            text: "No file is open.";
-                        }
+                        if State.content == Content.editor: EditorView { }
                     }
                     if State.terminals-shown: TerminalStrip {
                         height: State.terminal-height;

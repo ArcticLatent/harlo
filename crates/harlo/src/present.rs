@@ -8,6 +8,9 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod changes;
+mod files;
+mod notes;
 mod panels;
 mod session;
 mod timeline;
@@ -47,6 +50,9 @@ pub struct Presenter {
     questions: Rc<VecModel<Question>>,
     /// The tool panels' lists.
     bodies: panels::Lists,
+    changes: changes::Lists,
+    files: files::Files,
+    notes: notes::Notes,
 }
 
 impl std::fmt::Debug for Presenter {
@@ -75,6 +81,9 @@ impl Presenter {
             inbox: Rc::new(VecModel::default()),
             questions: Rc::new(VecModel::default()),
             bodies: panels::Lists::new(&state),
+            changes: changes::Lists::new(&state),
+            files: files::Files::new(&state),
+            notes: notes::Notes::default(),
         };
         state.set_sidebar_rows(ModelRc::from(Rc::clone(&presenter.sidebar)));
         state.set_locations(ModelRc::from(Rc::clone(&presenter.locations)));
@@ -104,6 +113,10 @@ impl Presenter {
         self.pickers(app, &state, t);
         self.session(app, &state);
         self.bodies.show(app, &state);
+        self.changes.show(app, &state);
+        self.files.tree(app, &state);
+        self.files.editor(app, &state, &mut self.timeline);
+        self.notes.show(app, &state);
     }
 
     /// The open session: its header, timeline, inbox and waiting cards.

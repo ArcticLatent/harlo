@@ -337,6 +337,107 @@ export struct TodoRow {
     status: int,
 }
 
+/// One row of the Changes panel's list: a section's title, a note, a file,
+/// or a line of a file's open diff. Rust gives each its height, so it knows
+/// where every row sits.
+export struct ChangeRow {
+    /// 0 a title, 1 the turn's question, 2 a note, 3 a failure, 4 a file,
+    /// 5 a diff line, 6 "N more lines", 7 the space between hunks.
+    kind: int,
+    height: length,
+    /// Space above, inside the height.
+    gap: length,
+    /// The file's key, which its actions name.
+    key: string,
+    /// A title, a note, a file's name, or what "more" says.
+    text: string,
+    /// Beside a title: its count or the branch. Beside a file: its folder.
+    aside: string,
+    /// Whether the aside is a branch, with its icon.
+    branch: bool,
+    /// Whether the title ends the review it names.
+    closes: bool,
+    /// A file's icon, from the file-icon font, and its colour.
+    icon: string,
+    icon-color: color,
+    added: int,
+    removed: int,
+    /// Whether the counts show (not for a deleted file).
+    counts: bool,
+    /// Whether a file's diff is open under it; whether it shows a chevron
+    /// for that.
+    open: bool,
+    chevron: bool,
+    /// Whether it's the selected file, or a line of the lit hunk.
+    selected: bool,
+    /// Whether it does anything when clicked.
+    clickable: bool,
+    /// A diff line, and its hunk's place in the file.
+    line: DiffLine,
+    hunk: int,
+}
+
+/// The Changes panel's foot: committing and pushing, and how the last git
+/// action went.
+export struct ChangesFoot {
+    /// A commit can be written: there's something to commit, here, in Git.
+    commit: bool,
+    /// The message is written and nothing's running.
+    ready: bool,
+    committing: bool,
+    /// "Push 2 commits" or "Pushing…"; empty with nothing to push.
+    push: string,
+    can-push: bool,
+    /// "to origin/main", and "(3 behind)".
+    upstream: string,
+    behind: string,
+    /// Why nothing can be committed here.
+    note: string,
+    /// What the last git action did, or why it failed.
+    outcome: string,
+    failed: bool,
+}
+
+/// A file or folder in the Files panel's tree.
+export struct FileRow {
+    /// Its path in the folder, which its actions name.
+    path: string,
+    name: string,
+    /// How many folders it's inside.
+    depth: int,
+    directory: bool,
+    /// For a folder: whether it's open, and its list still on the way.
+    open: bool,
+    loading: bool,
+    /// Whether Git ignores it.
+    ignored: bool,
+    /// Whether it's the file in the editor.
+    selected: bool,
+    /// A file's icon, from the file-icon font, and its colour.
+    icon: string,
+    icon-color: color,
+}
+
+/// The file in the editor: its path, what shows, how saving stands, and
+/// any question to answer.
+export struct EditorCard {
+    path: string,
+    /// 0 a note, 1 the text, 2 a picture.
+    body: int,
+    /// Why the file doesn't show, or that it's opening.
+    note: string,
+    /// "Saving…", "Unsaved changes" or why saving failed.
+    status: string,
+    failed: bool,
+    /// Whether it's text, which can be saved, and whether Save does anything.
+    text: bool,
+    can-save: bool,
+    /// The question before closing, if one's asked.
+    closing: string,
+    /// 0 nothing, 1 it changed on disk under unsaved changes, 2 it was deleted.
+    outside: int,
+}
+
 /// The Todos panel's words; its items are `State.todo-rows`.
 export struct TodosCard {
     /// Shown alone, when there's no list.
@@ -378,6 +479,45 @@ export global State {
     in property <[InstructionFile]> context-files;
     in property <TodosCard> todos-card;
     in property <[TodoRow]> todo-rows;
+    /// The Changes panel: a note instead of its lists while loading, the
+    /// lists, the selected file's path and diff (maximized), its foot, the
+    /// commit message, and where the selected rows sit in each list.
+    /// The Files panel: the folder's name, a note instead of its tree, and
+    /// the tree's rows.
+    in property <string> files-folder;
+    in property <string> files-note;
+    in property <[FileRow]> file-rows;
+    /// The editor: its file, its text with the cursor and selection (by
+    /// byte), which the field reloads when the revision moves, the text
+    /// coloured, the line numbers, and a picture.
+    in property <EditorCard> editor-card;
+    in property <string> editor-text;
+    in property <int> editor-cursor;
+    in property <int> editor-anchor;
+    in property <int> editor-revision;
+    in property <styled-text> editor-colored;
+    in property <string> editor-numbers;
+    in property <image> editor-picture;
+    /// The Notes panel: the folder's name, whether the note is read yet,
+    /// its text with the cursor and selection (by byte), which the field
+    /// reloads when the revision moves, the todo count and an error.
+    in property <string> notes-folder;
+    in property <bool> notes-loaded;
+    in property <string> notes-text;
+    in property <int> notes-cursor;
+    in property <int> notes-anchor;
+    in property <int> notes-revision;
+    in property <bool> notes-has-text;
+    in property <string> notes-todos;
+    in property <string> notes-error;
+    in property <string> changes-note;
+    in property <[ChangeRow]> change-rows;
+    in property <string> change-path;
+    in property <[ChangeRow]> change-diff;
+    in property <ChangesFoot> changes-foot;
+    in property <string> commit-message;
+    in property <length> change-rows-y;
+    in property <length> change-diff-y;
 
     // The sidebar.
     in property <string> location-label;
@@ -449,6 +589,34 @@ export global Logic {
     callback maximize(int);
     callback restore();
     callback close-panel();
+    /// The Changes panel: a file's diff opened or closed, a file selected,
+    /// a diff shown whole, a hunk lit, the review ended, the commit message
+    /// edited, commit and push.
+    /// The Notes panel: the note edited, the todo on the cursor's line
+    /// ticked, a todo added, the note put into the message.
+    callback notes-edited(string, int, int);
+    callback toggle-todo();
+    callback add-todo();
+    callback insert-note();
+    /// The Files panel: a folder opened or closed, a file opened, by path.
+    callback file-toggle(string);
+    callback file-open(string);
+    /// The editor: its text edited, Save, and the answers to its questions.
+    callback editor-edited(string, int, int);
+    callback file-save();
+    callback file-save-and-close();
+    callback file-discard();
+    callback file-keep-open();
+    callback file-reload();
+    callback file-keep-mine();
+    callback change-toggle(string);
+    callback change-select(string);
+    callback change-whole(string);
+    callback change-hunk(int);
+    callback end-review();
+    callback commit-message-edited(string);
+    callback commit();
+    callback push();
     callback refresh(int);
 
     callback toggle-locations();

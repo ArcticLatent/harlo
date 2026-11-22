@@ -105,6 +105,11 @@ impl Rows {
         ModelRc::from(Rc::clone(&self.model))
     }
 
+    /// The code colourer, loaded the first time it's needed.
+    pub fn highlighter(&mut self) -> &Highlighter {
+        self.highlighter.get_or_insert_with(Highlighter::new)
+    }
+
     /// Shows `timeline`, of session `session`, or nothing.
     ///
     /// Only the items that changed since the last call are built again, and

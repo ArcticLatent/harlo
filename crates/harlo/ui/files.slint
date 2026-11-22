@@ -1,0 +1,107 @@
+// The Files panel: the current folder as a tree. Folders open in place; a
+// file opens in the editor tab.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, FileRow } from "data.slint";
+import { Icon, FileIcon, Press } from "widgets.slint";
+
+/// One file or folder, indented by depth; folders with a chevron.
+component Entry inherits Press {
+    in property <FileRow> entry;
+
+    height: 26px;
+    label: root.entry.path;
+    selected: root.entry.selected;
+    clicked => {
+        if root.entry.directory {
+            Logic.file-toggle(root.entry.path);
+        } else {
+            Logic.file-open(root.entry.path);
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 6px + root.entry.depth * 14px;
+        padding-right: 6px;
+        spacing: 6px;
+        Icon {
+            width: 12px;
+            text: root.entry.open ? Icons.chevron-down : Icons.chevron-right;
+            font-size: 12px;
+            color: root.entry.directory ? Theme.icon-weak-base : transparent;
+        }
+        if root.entry.directory: Icon {
+            text: root.entry.open ? Icons.folder-open : Icons.folder;
+            color: root.entry.ignored ? Theme.text-weaker : Theme.icon-base;
+        }
+        if !root.entry.directory: FileIcon {
+            text: root.entry.icon;
+            color: root.entry.icon-color;
+            opacity: root.entry.ignored ? 0.5 : 1;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.name;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.label;
+            color: root.entry.selected ? Theme.text-strong
+                : root.entry.ignored ? Theme.text-weaker : Theme.text-base;
+        }
+        if root.entry.loading: Text {
+            text: "…";
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+    }
+}
+
+/// The Files panel's body.
+export component FilesPanel inherits VerticalLayout {
+    HorizontalLayout {
+        height: 44px;
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 8px;
+        Icon {
+            text: Icons.folder;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: State.files-folder;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.label;
+            font-weight: 500;
+            color: Theme.text-strong;
+        }
+    }
+    if State.files-note != "": VerticalLayout {
+        vertical-stretch: 1;
+        padding-top: 8px;
+        padding-left: 18px;
+        padding-right: 18px;
+        alignment: start;
+        Text {
+            text: State.files-note;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-base;
+        }
+    }
+    if State.files-note == "": ListView {
+        vertical-stretch: 1;
+        accessible-label: "Folder";
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        for entry in State.file-rows: HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            Entry {
+                entry: entry;
+            }
+        }
+    }
+}

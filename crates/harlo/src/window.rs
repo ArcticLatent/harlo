@@ -19,7 +19,8 @@ use slint::ComponentHandle as _;
 use slint::winit_030::{EventResult, WinitWindowAccessor as _, winit::event::WindowEvent};
 
 use crate::app::{
-    self, App, ChangesEvent, ContextEvent, Edge, FilesEvent, Message, Panel, TerminalEvent,
+    self, App, ChangesEvent, ContextEvent, Edge, FilesEvent, Message, NotesEvent, Panel,
+    TerminalEvent,
 };
 use crate::keys::KeyPress;
 use crate::model::{self, Picker};
@@ -411,6 +412,65 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         .map(|edge| Message::Resize { edge, by }));
     send!(on_resize_done, || Message::ResizeEnd);
 
+    send_with!(on_notes_edited, |app, text, cursor, anchor| Some(
+        Message::Notes(NotesEvent::Edit(
+            app.note_key(),
+            Edit {
+                text: text.to_string(),
+                cursor: usize::try_from(cursor).unwrap_or(0),
+                anchor: usize::try_from(anchor).unwrap_or(0),
+            }
+        ))
+    ));
+    send!(on_toggle_todo, || Message::Notes(NotesEvent::ToggleTodo));
+    send!(on_add_todo, || Message::Notes(NotesEvent::AddTodo));
+    send!(on_insert_note, || Message::Notes(NotesEvent::Insert));
+    send!(on_file_toggle, |path| Message::Files(FilesEvent::Toggle(
+        path.to_string()
+    )));
+    send!(on_file_open, |path| Message::Files(FilesEvent::Open(
+        path.to_string()
+    )));
+    send_with!(on_editor_edited, |app, text, cursor, anchor| editing(app)
+        .map(|key| Message::Files(FilesEvent::Editor(
+            key,
+            Edit {
+                text: text.to_string(),
+                cursor: usize::try_from(cursor).unwrap_or(0),
+                anchor: usize::try_from(anchor).unwrap_or(0),
+            }
+        ))));
+    send_with!(on_file_save, |app| editing(app)
+        .map(|key| Message::Files(FilesEvent::Save(key))));
+    send_with!(on_file_save_and_close, |app| editing(app)
+        .map(|key| Message::Files(FilesEvent::SaveAndClose(key))));
+    send_with!(on_file_discard, |app| editing(app)
+        .map(|key| Message::Files(FilesEvent::Discard(key))));
+    send_with!(on_file_keep_open, |app| editing(app)
+        .map(|key| Message::Files(FilesEvent::KeepOpen(key))));
+    send_with!(on_file_reload, |app| editing(app)
+        .map(|key| Message::Files(FilesEvent::Reload(key))));
+    send_with!(on_file_keep_mine, |app| editing(app)
+        .map(|key| Message::Files(FilesEvent::KeepMine(key))));
+    send!(on_change_toggle, |key| Message::Changes(
+        ChangesEvent::Toggle(key.to_string())
+    ));
+    send!(on_change_select, |key| Message::Changes(
+        ChangesEvent::Select(key.to_string())
+    ));
+    send!(on_change_whole, |key| Message::Changes(
+        ChangesEvent::Whole(key.to_string())
+    ));
+    send_with!(on_change_hunk, |_app, hunk| usize::try_from(hunk)
+        .ok()
+        .map(|hunk| Message::Changes(ChangesEvent::Hunk(hunk))));
+    send!(on_end_review, || Message::Changes(ChangesEvent::EndReview));
+    send!(on_commit_message_edited, |text| Message::Changes(
+        ChangesEvent::Message(text.to_string())
+    ));
+    send!(on_commit, || Message::Changes(ChangesEvent::Commit));
+    send!(on_push, || Message::Changes(ChangesEvent::Push));
+
     send!(on_composer_edited, |text, cursor, anchor| Message::Compose(
         Edit {
             text: text.to_string(),
@@ -557,6 +617,11 @@ pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
         return Some(message);
     }
     app::shortcut(press)
+}
+
+/// The key of the file in the editor tab, if one's open.
+fn editing(app: &App) -> Option<String> {
+    app.fs.open.first().map(|f| f.key.clone())
 }
 
 /// Sends `event` to the open session's timeline.
