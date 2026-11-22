@@ -498,6 +498,17 @@ export struct SheetRow {
     name: string,
     value: string,
     tone: int,
+    /// For a switch (kind 3): whether it's on, and the setting it turns.
+    on: bool,
+    setting: int,
+}
+
+/// A section in Settings' list: its title, the group it's listed under
+/// (empty for none) and its icon.
+export struct SettingsSection {
+    title: string,
+    group: string,
+    glyph: string,
 }
 
 /// A number on the stats page and what it counts.
@@ -542,8 +553,9 @@ export global State {
     in property <color> term-foreground;
     in property <color> term-cursor-color;
     in property <bool> term-scrolled;
-    /// The page over the window: 0 none, 1 shortcuts, 2 stats, 3 settings;
-    /// its title, rows and a note on how its loading stands.
+    /// The page over the window: 0 none, 1 stats, 2 settings; its title,
+    /// rows (0 heading, 1 name and value, 2 note, 3 switch) and a note on
+    /// how its loading stands.
     in property <int> sheet;
     in property <string> sheet-title;
     in property <[SheetRow]> sheet-rows;
@@ -553,6 +565,11 @@ export global State {
     in property <[DayBar]> stat-days;
     in property <int> stat-range: 1;
     in property <string> harlo-version;
+    /// Settings' sections, the one shown by its place, and what Settings
+    /// is searched for.
+    in property <[SettingsSection]> settings-sections;
+    in property <int> settings-section;
+    in-out property <string> settings-query;
 
     // The tool panels.
     in property <ContextCard> context-card;
@@ -675,6 +692,14 @@ export global Logic {
     /// Open a page over the window by its number, or close it if open.
     callback toggle-sheet(int);
     callback close-sheet();
+    /// Open Settings at a section by its place, or close it if it's there.
+    callback open-section(int);
+    /// Show another section of Settings by its place.
+    callback pick-section(int);
+    /// Search Settings for this text.
+    callback settings-search(string);
+    /// Turn a setting, by its number, on or off.
+    callback switch-setting(int);
     /// Show the stats for a range by its number.
     callback stats-range(int);
     /// A key pressed in the shown terminal, with Control, Alt and Shift;

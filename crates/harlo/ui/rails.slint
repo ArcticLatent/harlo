@@ -21,6 +21,9 @@ component RailButton inherits Press {
 /// The left rail: the sidebar toggle, then the phone link, shortcuts,
 /// stats, settings and the avatar.
 export component LeftRail inherits Rectangle {
+    // Settings showing its Shortcuts section lights the keyboard button.
+    property <bool> shortcuts-shown: State.sheet == 2 && State.settings-section == 1
+        && State.settings-query == "";
     width: Size.rail;
     background: Theme.background-stronger;
 
@@ -54,17 +57,31 @@ export component LeftRail inherits Rectangle {
                     enabled: false;
                 }
             }
-            for item[index] in [
-                { glyph: Icons.keyboard, label: "Keyboard shortcuts" },
-                { glyph: Icons.stats, label: "Stats" },
-                { glyph: Icons.settings, label: "Settings" },
-            ]: HorizontalLayout {
+            HorizontalLayout {
                 alignment: center;
                 RailButton {
-                    glyph: item.glyph;
-                    label: item.label;
-                    selected: State.sheet == index + 1;
-                    clicked => { Logic.toggle-sheet(index + 1); }
+                    glyph: Icons.keyboard;
+                    label: "Keyboard shortcuts";
+                    selected: root.shortcuts-shown;
+                    clicked => { Logic.open-section(1); }
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                RailButton {
+                    glyph: Icons.stats;
+                    label: "Stats";
+                    selected: State.sheet == 1;
+                    clicked => { Logic.toggle-sheet(1); }
+                }
+            }
+            HorizontalLayout {
+                alignment: center;
+                RailButton {
+                    glyph: Icons.settings;
+                    label: "Settings";
+                    selected: State.sheet == 2 && !root.shortcuts-shown;
+                    clicked => { Logic.toggle-sheet(2); }
                 }
             }
 

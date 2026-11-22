@@ -202,3 +202,36 @@ export component Field inherits Rectangle {
         }
     }
 }
+
+/// An on/off switch, labelled for screen readers and tests.
+export component Switch inherits Rectangle {
+    in property <bool> on;
+    in property <string> label;
+    callback toggled();
+
+    width: 34px;
+    height: 20px;
+    border-radius: self.height / 2;
+    background: root.on ? Theme.text-interactive-base : Theme.border-base;
+    animate background { duration: Motion.appear; easing: Motion.settle; }
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: root.on;
+    accessible-label: root.label;
+    accessible-action-default => { root.toggled(); }
+
+    Rectangle {
+        width: parent.height - 4px;
+        height: self.width;
+        y: 2px;
+        x: root.on ? parent.width - self.width - 2px : 2px;
+        animate x { duration: Motion.appear; easing: Motion.settle; }
+        border-radius: self.height / 2;
+        background: white;
+    }
+
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.toggled(); }
+    }
+}

@@ -1,5 +1,6 @@
-//! The pages over the window from the left rail: keyboard shortcuts, stats
-//! across sessions, and the server's set-up with About.
+//! The pages over the window from the left rail: stats across sessions,
+//! and Settings with its sections (Harlo's own settings, the keyboard
+//! shortcuts, the server's set-up, About) and its search.
 //!
 //! Loads are fed in as their results; the endpoints are tested in
 //! `opencode-client`, and against a private server in `server_sheets.rs`.
@@ -8,14 +9,46 @@
 
 mod support;
 
-use harlo::app::{Message, Range, SetUp, Sheet, SheetEvent};
+use std::collections::BTreeMap;
+
+use harlo::app::{App, Message, Range, Section, SetUp, Sheet, SheetEvent};
+use harlo_core::layout::{Preferences, Tabs};
+use harlo_core::server::Location;
 use harlo_core::server::{
     Day, McpServer, McpStatus, ModelUsage, Plugin, PluginSource, Provider, Stats, Tokens, WebSearch,
 };
 use slint::ComponentHandle as _;
 use slint::Model as _;
 use slint::platform::{Key, WindowEvent};
-use support::{demo, ui};
+use support::{Ui, demo, ui};
+
+/// Presses and lets go of `key`, with Control held when `control` is set.
+fn key(ui: &Ui, key: impl Into<slint::SharedString>, control: bool) {
+    let window = ui.window.window();
+    let control_key = slint::SharedString::from(Key::Control);
+    if control {
+        window.dispatch_event(WindowEvent::KeyPressed {
+            text: control_key.clone(),
+        });
+    }
+    let text = key.into();
+    window.dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+    window.dispatch_event(WindowEvent::KeyReleased { text });
+    if control {
+        window.dispatch_event(WindowEvent::KeyReleased { text: control_key });
+    }
+}
+
+/// The switch labelled `label`, and whether it's on.
+fn switch(ui: &Ui, label: &str) -> (i_slint_backend_testing::ElementHandle, bool) {
+    let found = ui
+        .find(label)
+        .into_iter()
+        .find(|e| e.accessible_checkable() == Some(true))
+        .unwrap_or_else(|| panic!("no switch labelled {label:?}"));
+    let on = found.accessible_checked() == Some(true);
+    (found, on)
+}
 
 fn stats() -> Stats {
     Stats {
@@ -77,21 +110,17 @@ fn setup() -> SetUp {
 }
 
 #[test]
-fn the_shortcuts_page_lists_the_keys_and_closes() {
+fn the_shortcuts_section_lists_the_keys_and_closes() {
     let ui = ui(demo::app());
     ui.press("Keyboard shortcuts");
-    assert_eq!(ui.app().sheets.open, Some(Sheet::Shortcuts));
+    assert_eq!(ui.app().sheets.open, Some(Sheet::Settings));
+    assert_eq!(ui.app().sheets.section, Section::Shortcuts);
     assert!(ui.shows("Ctrl+N"));
     assert!(ui.shows("Start a new session"));
     assert!(ui.shows("Ctrl+Shift+C"), "the terminal's keys too");
 
     // Esc closes it.
-    let escape = slint::SharedString::from(Key::Escape);
-    let window = ui.window.window();
-    window.dispatch_event(WindowEvent::KeyPressed {
-        text: escape.clone(),
-    });
-    window.dispatch_event(WindowEvent::KeyReleased { text: escape });
+    key(&ui, Key::Escape, false);
     assert_eq!(ui.app().sheets.open, None);
     assert!(!ui.shows("Start a new session"));
 
@@ -102,6 +131,92 @@ fn the_shortcuts_page_lists_the_keys_and_closes() {
     ui.press("Keyboard shortcuts");
     ui.press("Keyboard shortcuts");
     assert_eq!(ui.app().sheets.open, None);
+
+    // Settings reopens where it was left; from another section, the rail
+    // button moves to the shortcuts.
+    ui.press("Settings");
+    assert_eq!(ui.app().sheets.section, Section::Shortcuts);
+    ui.press("General");
+    ui.press("Keyboard shortcuts");
+    assert_eq!(ui.app().sheets.open, Some(Sheet::Settings));
+    assert_eq!(ui.app().sheets.section, Section::Shortcuts);
+}
+
+#[test]
+fn settings_list_their_sections_and_open_with_ctrl_comma() {
+    let ui = ui(demo::app());
+    key(&ui, ',', true);
+    assert_eq!(ui.app().sheets.open, Some(Sheet::Settings));
+    assert_eq!(ui.app().sheets.section, Section::General);
+    for section in Section::ALL {
+        assert!(ui.shows(section.title()), "{} is listed", section.title());
+    }
+    assert!(ui.shows("Agents and models"), "a group heading");
+    assert!(ui.shows("Reopen tabs"));
+
+    ui.press("Server");
+    assert_eq!(ui.app().sheets.section, Section::Server);
+    assert!(ui.shows("Connected · OpenCode 2.3.2"));
+    assert!(!ui.shows("Reopen tabs"), "only the section shown");
+
+    key(&ui, ',', true);
+    assert_eq!(ui.app().sheets.open, None);
+}
+
+#[test]
+fn searching_settings_finds_rows_in_every_section() {
+    let ui = ui(demo::app());
+    ui.press("Settings");
+    ui.send(Message::Sheet(SheetEvent::SetUp(1, Box::new(setup()))));
+    ui.fill("Search settings", "ctrl+w");
+    assert_eq!(ui.app().sheets.query, "ctrl+w");
+    assert!(ui.shows("Search results"));
+    assert!(ui.shows("Close the tab"));
+    assert!(!ui.shows("Reopen tabs"));
+
+    ui.fill("Search settings", "exa");
+    assert!(ui.shows("Exa"), "the server's set-up is searched too");
+    assert!(ui.shows("Tools for agents"));
+
+    ui.fill("Search settings", "nothing like this");
+    assert!(ui.shows("No setting matches “nothing like this”."));
+
+    // Picking a section ends the search.
+    ui.press("General");
+    assert_eq!(ui.app().sheets.query, "");
+    assert!(ui.shows("Reopen tabs"));
+    let query = ui.window.global::<harlo::ui::State>().get_settings_query();
+    assert_eq!(query, "", "the field is cleared too");
+}
+
+#[test]
+fn the_reopen_tabs_switch_turns_off_reopening() {
+    let ui = ui(demo::app());
+    ui.press("Settings");
+    let (reopen, on) = switch(&ui, "Reopen tabs");
+    assert!(on);
+    reopen.invoke_accessible_default_action();
+    assert!(!ui.app().preferences.reopen_tabs);
+    assert!(!switch(&ui, "Reopen tabs").1, "the switch shows it");
+
+    // Saved tabs stay closed when it's off, and reopen when it's on.
+    let opened = |reopen_tabs: bool| {
+        let mut layout = demo::layout();
+        layout.tabs = BTreeMap::from([(
+            Location::Shared.label(),
+            Tabs {
+                open: vec!["ses_demo_03".into()],
+                active: Some("ses_demo_03".into()),
+            },
+        )]);
+        let mut app = App::new(Location::Shared, vec![Location::Shared], layout)
+            .with_preferences(Preferences { reopen_tabs });
+        let _ = app.update(Message::Tick(demo::now()));
+        let _ = app.update(demo::connected(demo::snapshot()));
+        app.tabs.clone()
+    };
+    assert!(opened(false).is_empty());
+    assert_eq!(opened(true), vec!["ses_demo_03".to_owned()]);
 }
 
 #[test]
@@ -152,22 +267,21 @@ fn a_failed_count_says_why() {
 fn settings_show_the_servers_set_up_and_about() {
     let ui = ui(demo::app());
     ui.press("Settings");
-    assert!(ui.shows("Connected · OpenCode 2.3.2"));
+    ui.press("Models");
     assert!(ui.shows("Loading…"));
     ui.send(Message::Sheet(SheetEvent::SetUp(1, Box::new(setup()))));
     assert!(ui.shows("Fake"));
     assert!(ui.shows("on"));
+    ui.press("Tools for agents");
     assert!(ui.shows("Exa"));
     assert!(
         ui.shows("failed: no such command"),
         "an MCP server's failure"
     );
     assert!(ui.shows("Couldn't list them: server went away"));
-    assert!(ui.shows("About"));
-    assert!(ui.shows(&format!(
-        "Harlo {}. A desktop window for coding agents run by OpenCode.",
-        env!("CARGO_PKG_VERSION")
-    )));
+    ui.press("About");
+    assert!(ui.shows(env!("CARGO_PKG_VERSION")));
+    assert!(ui.shows("2.3.2"), "the server's version");
 }
 
 #[test]
@@ -197,6 +311,7 @@ fn plugins_show_where_they_come_from() {
         },
     ]);
     ui.send(Message::Sheet(SheetEvent::SetUp(1, Box::new(set_up))));
+    ui.press("Tools for agents");
     assert!(ui.shows("built in"));
     assert!(ui.shows("@acme/lint 1.2.0 · update available"));
     assert!(ui.shows("failed: syntax error"));

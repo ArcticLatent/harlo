@@ -1,4 +1,4 @@
-//! Saving and loading the window layout.
+//! Saving and loading the window layout and Harlo's own settings.
 //!
 //! Each test uses a scratch folder outside the repository, never the user's state folder.
 
@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use harlo_core::layout::{Layout, Store, Tabs};
+use harlo_core::layout::{Layout, Preferences, Store, Tabs};
 
 fn sample() -> Layout {
     Layout {
@@ -90,5 +90,29 @@ fn an_unreadable_layout_is_an_error() {
     assert!(
         error.to_string().starts_with("Harlo's database failed"),
         "{error}"
+    );
+}
+
+#[test]
+fn preferences_load_back_beside_the_layout() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let store = Store::new(scratch.path().join("harlo.db"));
+    assert_eq!(
+        store.load_preferences().expect("no file is fine"),
+        Preferences::default()
+    );
+    assert!(
+        Preferences::default().reopen_tabs,
+        "tabs reopen unless turned off"
+    );
+
+    store.save(&sample()).expect("the layout");
+    let chosen = Preferences { reopen_tabs: false };
+    store.save_preferences(&chosen).expect("the preferences");
+    assert_eq!(store.load_preferences().expect("saved"), chosen);
+    assert_eq!(
+        store.load().expect("the layout"),
+        sample(),
+        "each keeps its own row"
     );
 }

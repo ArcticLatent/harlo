@@ -208,7 +208,13 @@ fn boot(options: &Options) -> App {
         .as_ref()
         .and_then(|store| store.load().ok())
         .unwrap_or_default();
-    let app = App::new(location, locations, layout).notifying();
+    let preferences = store
+        .as_ref()
+        .and_then(|store| store.load_preferences().ok())
+        .unwrap_or_default();
+    let app = App::new(location, locations, layout)
+        .with_preferences(preferences)
+        .notifying();
     match store {
         Some(store) => app.saving_to(store),
         None => app,
@@ -352,9 +358,23 @@ fn document(app: &App, index: i32) -> Option<app::Document> {
 /// The page over the window the UI numbers `number`.
 fn sheet_of(number: i32) -> Option<app::Sheet> {
     match number {
-        1 => Some(app::Sheet::Shortcuts),
-        2 => Some(app::Sheet::Stats),
-        3 => Some(app::Sheet::Settings),
+        1 => Some(app::Sheet::Stats),
+        2 => Some(app::Sheet::Settings),
+        _ => None,
+    }
+}
+
+/// The section of Settings the UI numbers `number`.
+fn section_of(number: i32) -> Option<app::Section> {
+    app::Section::ALL
+        .get(usize::try_from(number).ok()?)
+        .copied()
+}
+
+/// The setting the UI numbers `number`.
+fn setting_of(number: i32) -> Option<app::Setting> {
+    match number {
+        0 => Some(app::Setting::ReopenTabs),
         _ => None,
     }
 }
@@ -476,6 +496,15 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send_with!(on_toggle_sheet, |_app, number| sheet_of(number)
         .map(|sheet| Message::Sheet(SheetEvent::Toggle(sheet))));
     send!(on_close_sheet, || Message::Sheet(SheetEvent::Close));
+    send_with!(on_open_section, |_app, number| section_of(number)
+        .map(|section| Message::Sheet(SheetEvent::Open(section))));
+    send_with!(on_pick_section, |_app, number| section_of(number)
+        .map(|section| Message::Sheet(SheetEvent::Section(section))));
+    send!(on_settings_search, |text| Message::Sheet(
+        SheetEvent::Query(text.to_string())
+    ));
+    send_with!(on_switch_setting, |_app, number| setting_of(number)
+        .map(|setting| Message::Sheet(SheetEvent::Switch(setting))));
     send_with!(on_stats_range, |_app, number| range_of(number)
         .map(|range| Message::Sheet(SheetEvent::Range(range))));
     send_with!(on_maximize, |_app, number| present::panel_of(number)

@@ -1,14 +1,15 @@
-// The pages that open over the window from the left rail: the keyboard
-// shortcuts, the stats across sessions, and the server's set-up with
-// About. A click outside the card or Esc closes them.
+// The pages that open over the window from the left rail: the stats
+// across sessions, and Settings with its list of sections and search. A
+// click outside the card or Esc closes them.
 
 import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SheetRow } from "data.slint";
-import { IconButton, Press, HLine } from "widgets.slint";
+import { Field, Icon, IconButton, Press, HLine, VLine, Switch } from "widgets.slint";
 
-/// One row: a heading, a name with its value, or a note.
+/// One row: a heading, a name with its value, a note, or a switch with
+/// what it does.
 component Row inherits VerticalLayout {
     in property <SheetRow> entry;
 
@@ -52,6 +53,159 @@ component Row inherits VerticalLayout {
         color: Theme.text-weak;
         wrap: word-wrap;
         accessible-role: AccessibleRole.text;
+    }
+    if root.entry.kind == 3: HorizontalLayout {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 16px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: root.entry.name;
+                font-size: Size.small;
+                color: Theme.text-base;
+                accessible-role: AccessibleRole.text;
+            }
+            Text {
+                text: root.entry.value;
+                font-size: Size.small;
+                color: Theme.text-weak;
+                wrap: word-wrap;
+                accessible-role: AccessibleRole.text;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Switch {
+                on: root.entry.on;
+                label: root.entry.name;
+                toggled => { Logic.switch-setting(root.entry.setting); }
+            }
+        }
+    }
+}
+
+/// A section in Settings' list.
+component SectionButton inherits Press {
+    in property <string> text;
+    in property <string> glyph;
+    height: 30px;
+    label: root.text;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        Icon {
+            text: root.glyph;
+            font-size: 14px;
+            color: root.selected ? Theme.icon-selected : Theme.icon-base;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-size: Size.small;
+            color: root.selected ? Theme.text-strong : Theme.text-base;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+    }
+}
+
+/// The page's title and its close button.
+component SheetHead inherits HorizontalLayout {
+    height: 52px;
+    padding-left: 20px;
+    padding-right: 12px;
+    Text {
+        horizontal-stretch: 1;
+        text: State.sheet-title;
+        font-size: 16px;
+        font-weight: 600;
+        color: Theme.text-strong;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: AccessibleRole.text;
+    }
+    VerticalLayout {
+        alignment: center;
+        IconButton {
+            label: "Close";
+            glyph: Icons.close;
+            clicked => { Logic.close-sheet(); }
+        }
+    }
+}
+
+/// The page's note and rows.
+component SheetRows inherits VerticalLayout {
+    spacing: 6px;
+    if State.sheet-note != "": Text {
+        text: State.sheet-note;
+        font-size: Size.small;
+        color: Theme.text-weak;
+        wrap: word-wrap;
+        accessible-role: AccessibleRole.text;
+    }
+    VerticalLayout {
+        spacing: 0;
+        for entry in State.sheet-rows: Row {
+            entry: entry;
+        }
+    }
+}
+
+/// Settings' search and its list of sections, under their groups.
+component SectionList inherits Rectangle {
+    background: Theme.surface-inset-base;
+
+    VerticalLayout {
+        padding: 12px;
+        padding-top: 14px;
+        spacing: 2px;
+
+        Text {
+            height: 26px;
+            text: "Settings";
+            font-size: 16px;
+            font-weight: 600;
+            color: Theme.text-strong;
+            accessible-role: AccessibleRole.text;
+        }
+        Field {
+            height: 32px;
+            glyph: Icons.search;
+            placeholder: "Search settings";
+            fill: Theme.surface-raised-strong;
+            text <=> State.settings-query;
+            edited(text) => { Logic.settings-search(text); }
+        }
+        Rectangle { height: 8px; }
+
+        for section[index] in State.settings-sections: VerticalLayout {
+            if section.group != ""
+                && (index == 0 || State.settings-sections[index - 1].group != section.group): Text {
+                height: 28px;
+                text: section.group;
+                font-size: Size.small;
+                color: Theme.text-weak;
+                vertical-alignment: bottom;
+                accessible-role: AccessibleRole.text;
+            }
+            if section.group == "" && index > 0
+                && State.settings-sections[index - 1].group != "": Rectangle {
+                height: 10px;
+            }
+            SectionButton {
+                text: section.title;
+                glyph: section.glyph;
+                selected: State.settings-section == index && State.settings-query == "";
+                clicked => { Logic.pick-section(index); }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
     }
 }
 
@@ -153,8 +307,8 @@ export component SheetLayer inherits Rectangle {
     }
 
     card := Rectangle {
-        width: min(720px, root.width - 64px);
-        height: min(680px, root.height - 96px);
+        width: min(State.sheet == 2 ? 900px : 720px, root.width - 64px);
+        height: min(State.sheet == 2 ? 640px : 680px, root.height - 96px);
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
         background: Theme.surface-raised-strong;
@@ -169,31 +323,9 @@ export component SheetLayer inherits Rectangle {
         // Clicks on the card stay on it.
         TouchArea { }
 
-        VerticalLayout {
-            HorizontalLayout {
-                height: 52px;
-                padding-left: 20px;
-                padding-right: 12px;
-                Text {
-                    horizontal-stretch: 1;
-                    text: State.sheet-title;
-                    font-size: 16px;
-                    font-weight: 600;
-                    color: Theme.text-strong;
-                    vertical-alignment: center;
-                    accessible-role: AccessibleRole.text;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    IconButton {
-                        label: "Close";
-                        glyph: Icons.close;
-                        clicked => { Logic.close-sheet(); }
-                    }
-                }
-            }
+        if State.sheet == 1: VerticalLayout {
+            SheetHead { }
             HLine { }
-
             ScrollView {
                 vertical-stretch: 1;
                 VerticalLayout {
@@ -201,41 +333,33 @@ export component SheetLayer inherits Rectangle {
                     padding: 20px;
                     padding-top: 4px;
                     spacing: 6px;
+                    StatsHead { }
+                    SheetRows { }
+                }
+            }
+        }
 
-                    if State.sheet == 2: StatsHead { }
-                    if State.sheet-note != "": Text {
-                        text: State.sheet-note;
-                        font-size: Size.small;
-                        color: Theme.text-weak;
-                        wrap: word-wrap;
-                        accessible-role: AccessibleRole.text;
-                    }
+        if State.sheet == 2: HorizontalLayout {
+            SectionList {
+                width: min(220px, card.width * 0.32);
+            }
+            VLine { }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                SheetHead { }
+                HLine { }
+                ScrollView {
+                    vertical-stretch: 1;
                     VerticalLayout {
-                        spacing: 0;
-                        for entry in State.sheet-rows: Row {
-                            entry: entry;
-                        }
-                    }
-
-                    if State.sheet == 3: VerticalLayout {
+                        alignment: start;
+                        padding: 20px;
+                        padding-top: 4px;
                         spacing: 6px;
-                        padding-top: 14px;
-                        Text {
-                            text: "About";
-                            font-size: Size.label;
-                            font-weight: 600;
-                            color: Theme.text-strong;
-                            accessible-role: AccessibleRole.text;
-                        }
-                        Text {
-                            text: "Harlo " + State.harlo-version
-                                + ". A desktop window for coding agents run by OpenCode.";
-                            font-size: Size.small;
-                            color: Theme.text-base;
-                            wrap: word-wrap;
-                            accessible-role: AccessibleRole.text;
-                        }
-                        HorizontalLayout {
+                        SheetRows { }
+                        // The last section, About, ends with Slint's notice.
+                        if State.settings-section == State.settings-sections.length - 1
+                            && State.settings-query == "": HorizontalLayout {
+                            padding-top: 14px;
                             alignment: start;
                             AboutSlint { }
                         }

@@ -35,11 +35,13 @@ fn settings_and_stats_load_from_the_server() {
     let ui = window(&sandbox);
 
     ui.press("Settings");
+    ui.press("Models");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Fake")),
         "the scripted model's provider"
     );
     assert!(ui.shows("Model providers"));
+    ui.press("Tools for agents");
     assert!(ui.shows("Plugins"));
 
     ui.press("Stats");

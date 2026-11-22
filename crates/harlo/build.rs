@@ -34,6 +34,8 @@ const ICONS: &[(&str, Icon)] = &[
     ("stats", Icon::ChartColumn),
     ("settings", Icon::Settings),
     ("keyboard", Icon::Keyboard),
+    ("plug", Icon::Plug),
+    ("info", Icon::Info),
     ("phone", Icon::Smartphone),
     ("refresh", Icon::RefreshCw),
     ("maximize", Icon::Maximize2),

@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use harlo_core::approvals::{self, Shield};
 use harlo_core::composer::{self as compose, Attached, Choice, Draft, MenuItem, Outgoing, Trigger};
-use harlo_core::layout::{Layout, Store, Tabs};
+use harlo_core::layout::{Layout, Preferences, Store, Tabs};
 use harlo_core::server::{
     self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
 };
@@ -45,7 +45,7 @@ pub use context::{
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
-pub use sheets::{Event as SheetEvent, Load, Range, SetUp, Sheet, Sheets};
+pub use sheets::{Event as SheetEvent, Load, Range, Section, SetUp, Setting, Sheet, Sheets};
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;
@@ -527,6 +527,8 @@ pub struct App {
     notices: Notices,
     /// Where the layout is saved; `None` keeps it in memory only.
     store: Option<Store>,
+    /// Harlo's own settings.
+    pub preferences: Preferences,
     /// The layout as last saved.
     saved: Layout,
     /// Tabs saved for the other locations.
@@ -623,6 +625,7 @@ impl App {
             store: None,
             other_tabs: layout.tabs.clone(),
             restore: None,
+            preferences: Preferences::default(),
             following: None,
             saved: layout,
         };
@@ -635,6 +638,13 @@ impl App {
     #[must_use]
     pub fn saving_to(mut self, store: Store) -> Self {
         self.store = Some(store);
+        self
+    }
+
+    /// Uses Harlo's own settings as saved last time.
+    #[must_use]
+    pub fn with_preferences(mut self, preferences: Preferences) -> Self {
+        self.preferences = preferences;
         self
     }
 
@@ -998,8 +1008,9 @@ impl App {
                 self.client = Some(connected.client.clone());
                 self.workspace.resync(connected.snapshot.clone());
                 self.forget_catalogs();
-                // Tabs saved from last time reopen, then load below.
-                if let Some(saved) = self.restore.take() {
+                // Tabs saved from last time reopen, unless the user turned
+                // that off, then load below.
+                if let Some(saved) = self.restore.take().filter(|_| self.preferences.reopen_tabs) {
                     for id in saved.open {
                         if self.workspace.session(&id).is_some() && !self.tabs.contains(&id) {
                             self.timelines.insert(id.clone(), Timeline::new(&id));
@@ -1922,8 +1933,8 @@ impl App {
     }
 }
 
-/// Maps a key press to a window-wide shortcut: a new session, and closing
-/// or cycling tabs.
+/// Maps a key press to a window-wide shortcut: a new session, closing or
+/// cycling tabs, and Settings.
 #[must_use]
 pub fn shortcut(press: &KeyPress) -> Option<Message> {
     if !press.command {
@@ -1932,6 +1943,7 @@ pub fn shortcut(press: &KeyPress) -> Option<Message> {
     match &press.key {
         Key::Character('n') => Some(Message::NewSession(None)),
         Key::Character('w') => Some(Message::CloseActiveTab),
+        Key::Character(',') => Some(Message::Sheet(SheetEvent::Toggle(Sheet::Settings))),
         Key::Tab => Some(Message::CycleTab { back: press.shift }),
         Key::PageDown => Some(Message::CycleTab { back: false }),
         Key::PageUp => Some(Message::CycleTab { back: true }),

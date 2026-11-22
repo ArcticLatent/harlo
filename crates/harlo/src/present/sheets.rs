@@ -1,5 +1,6 @@
-//! The pages over the window: the shortcuts list, the stats, and the
-//! server's set-up with About.
+//! The pages over the window: the stats, and Settings with its sections
+//! (Harlo's own settings, the shortcuts, the server's set-up, About) and
+//! its search.
 
 // Rust guideline compliant 2026-10-09
 
@@ -8,10 +9,12 @@ use std::rc::Rc;
 use harlo_core::server::{Day, McpStatus, PluginSource, Stats, Tokens};
 use slint::{ModelRc, VecModel};
 
-use super::sync;
-use crate::app::{App, Load, Range, SetUp, Sheet, Status};
+use lucide_icons::Icon;
+
+use super::{glyph, sync};
+use crate::app::{App, Load, Range, Section, SetUp, Setting, Sheet, Status};
 use crate::model::{compact as tokens_text, dollars as money};
-use crate::ui::{DayBar, SheetRow, StatTile, State};
+use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State};
 
 /// How many days of activity the bars show.
 const DAYS: usize = 30;
@@ -23,6 +26,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Ctrl+N", "Start a new session"),
             ("Ctrl+W", "Close the tab"),
+            ("Ctrl+,", "Open or close Settings"),
             ("Ctrl+Tab, Ctrl+Page Down", "Next tab"),
             ("Ctrl+Shift+Tab, Ctrl+Page Up", "Previous tab"),
             ("Esc", "Close a page or menu, or put a maximized panel back"),
@@ -83,6 +87,15 @@ impl Sheets {
         state.set_stat_tiles(ModelRc::from(Rc::clone(&sheets.tiles)));
         state.set_stat_days(ModelRc::from(Rc::clone(&sheets.days)));
         state.set_harlo_version(env!("CARGO_PKG_VERSION").into());
+        let sections: Vec<SettingsSection> = Section::ALL
+            .iter()
+            .map(|section| SettingsSection {
+                title: section.title().into(),
+                group: section.group().unwrap_or_default().into(),
+                glyph: glyph(section_icon(*section)),
+            })
+            .collect();
+        state.set_settings_sections(ModelRc::from(Rc::new(VecModel::from(sections))));
         sheets
     }
 
@@ -92,16 +105,10 @@ impl Sheets {
             state.set_sheet(0);
             return;
         };
-        let (number, title) = match sheet {
-            Sheet::Shortcuts => (1, "Keyboard shortcuts"),
-            Sheet::Stats => (2, "Stats"),
-            Sheet::Settings => (3, "Settings"),
-        };
-        state.set_sheet(number);
-        state.set_sheet_title(title.into());
         let (note, rows) = match sheet {
-            Sheet::Shortcuts => (String::new(), shortcuts()),
             Sheet::Stats => {
+                state.set_sheet(1);
+                state.set_sheet_title("Stats".into());
                 state.set_stat_range(match app.sheets.range {
                     Range::Week => 0,
                     Range::Month => 1,
@@ -120,15 +127,29 @@ impl Sheets {
                     }
                 }
             }
-            Sheet::Settings => match &app.sheets.setup {
-                Load::Idle | Load::Loading => ("Loading…".to_owned(), server_rows(app)),
-                Load::Failed(error) => (format!("Couldn't load it: {error}"), server_rows(app)),
-                Load::Loaded(setup) => {
-                    let mut rows = server_rows(app);
-                    rows.extend(setup_rows(setup));
-                    (String::new(), rows)
+            Sheet::Settings => {
+                state.set_sheet(2);
+                let section = app.sheets.section;
+                state.set_settings_section(
+                    Section::ALL
+                        .iter()
+                        .position(|s| *s == section)
+                        .and_then(|i| i32::try_from(i).ok())
+                        .unwrap_or(0),
+                );
+                // Only a change from Harlo's side is written back, so the
+                // field keeps its cursor while the user types.
+                if state.get_settings_query().as_str() != app.sheets.query {
+                    state.set_settings_query(app.sheets.query.as_str().into());
                 }
-            },
+                if app.sheets.query.trim().is_empty() {
+                    state.set_sheet_title(section.title().into());
+                    (setup_note(app, section), section_rows(app, section))
+                } else {
+                    state.set_sheet_title("Search results".into());
+                    found(app, &app.sheets.query)
+                }
+            }
         };
         state.set_sheet_note(note.into());
         sync(&self.rows, rows);
@@ -184,6 +205,87 @@ impl Sheets {
     }
 }
 
+/// A section's icon.
+fn section_icon(section: Section) -> Icon {
+    match section {
+        Section::General => Icon::Settings,
+        Section::Shortcuts => Icon::Keyboard,
+        Section::Models => Icon::Bot,
+        Section::Tools => Icon::Plug,
+        Section::Server => Icon::Server,
+        Section::About => Icon::Info,
+    }
+}
+
+/// A section's rows.
+fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
+    match section {
+        Section::General => general_rows(app),
+        Section::Shortcuts => shortcuts(),
+        Section::Models | Section::Tools => match &app.sheets.setup {
+            Load::Loaded(setup) => setup_rows(setup, section),
+            Load::Idle | Load::Loading | Load::Failed(_) => Vec::new(),
+        },
+        Section::Server => server_rows(app),
+        Section::About => about_rows(app),
+    }
+}
+
+/// How loading the server's set-up stands, for the sections that show it.
+fn setup_note(app: &App, section: Section) -> String {
+    if !matches!(section, Section::Models | Section::Tools) {
+        return String::new();
+    }
+    match &app.sheets.setup {
+        Load::Idle | Load::Loading => "Loading…".to_owned(),
+        Load::Failed(error) => format!("Couldn't load it: {error}"),
+        Load::Loaded(_) => String::new(),
+    }
+}
+
+/// The rows of every section that match `query`, under their sections'
+/// titles, and a note when none do.
+fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
+    let needle = query.trim().to_lowercase();
+    let matches = |row: &SheetRow| {
+        matches!(row.kind, 1 | 3)
+            && (row.name.to_lowercase().contains(&needle)
+                || row.value.to_lowercase().contains(&needle))
+    };
+    let mut rows = Vec::new();
+    for section in Section::ALL {
+        let titled = section.title().to_lowercase().contains(&needle);
+        let hits: Vec<SheetRow> = section_rows(app, section)
+            .into_iter()
+            .filter(|row| titled || matches(row))
+            .filter(|row| row.kind != 0)
+            .collect();
+        if !hits.is_empty() {
+            rows.push(heading(section.title()));
+            rows.extend(hits);
+        }
+    }
+    let note = if rows.is_empty() {
+        format!("No setting matches “{}”.", query.trim())
+    } else {
+        String::new()
+    };
+    (note, rows)
+}
+
+/// Harlo's own general settings.
+fn general_rows(app: &App) -> Vec<SheetRow> {
+    vec![
+        heading("Startup"),
+        switch(
+            Setting::ReopenTabs,
+            "Reopen tabs",
+            "Open the sessions that were open when Harlo last closed.",
+            app.preferences.reopen_tabs,
+        ),
+    ]
+}
+
 /// The shortcuts, by section.
 fn shortcuts() -> Vec<SheetRow> {
     let mut rows = Vec::new();
@@ -198,8 +300,7 @@ fn shortcuts() -> Vec<SheetRow> {
 
 /// The server Harlo follows, and how the connection stands.
 fn server_rows(app: &App) -> Vec<SheetRow> {
-    let mut rows = vec![heading("Server")];
-    rows.push(pair("Address", &app.location.label(), 0));
+    let mut rows = vec![pair("Address", &app.location.label(), 0)];
     let (status, tone) = match &app.status {
         Status::Connected { version } => (format!("Connected · OpenCode {version}"), 1),
         Status::Connecting { .. } => ("Connecting…".to_owned(), 3),
@@ -207,19 +308,36 @@ fn server_rows(app: &App) -> Vec<SheetRow> {
     };
     rows.push(pair("Status", &status, tone));
     rows.push(note(
-        "These are the shared server's settings, shown as they are. Harlo doesn't change \
-         them, since other clients use the same server; change them with OpenCode itself.",
+        "Harlo attaches to this shared OpenCode server and leaves it running when it closes. \
+         Its settings apply to every app that uses it.",
     ));
     rows
 }
 
-/// The server's providers, web search, MCP servers and plugins.
-fn setup_rows(setup: &SetUp) -> Vec<SheetRow> {
+/// Harlo's version and the server's.
+fn about_rows(app: &App) -> Vec<SheetRow> {
+    let mut rows = vec![
+        heading("Harlo"),
+        pair("Version", env!("CARGO_PKG_VERSION"), 0),
+    ];
+    if let Status::Connected { version } = &app.status {
+        rows.push(pair("OpenCode", version, 0));
+    }
+    rows
+}
+
+/// The server's providers for Models, or its web search, MCP servers and
+/// plugins for Tools.
+fn setup_rows(setup: &SetUp, part: Section) -> Vec<SheetRow> {
     let mut rows = Vec::new();
-    section(&mut rows, "Model providers", &setup.providers, |p| {
-        let (state, tone) = if p.enabled { ("on", 1) } else { ("off", 3) };
-        pair(&p.name, state, tone)
-    });
+    if part == Section::Models {
+        section(&mut rows, "Model providers", &setup.providers, |p| {
+            let (state, tone) = if p.enabled { ("on", 1) } else { ("off", 3) };
+            pair(&p.name, state, tone)
+        });
+        rows.push(shared_note());
+        return rows;
+    }
     section(&mut rows, "Web search", &setup.search, |s| {
         pair(&s.name, "", 0)
     });
@@ -259,7 +377,13 @@ fn setup_rows(setup: &SetUp) -> Vec<SheetRow> {
             None => pair(&p.id, &source, 3),
         }
     });
+    rows.push(shared_note());
     rows
+}
+
+/// That the server's set-up is shared.
+fn shared_note() -> SheetRow {
+    note("These belong to the shared OpenCode server; every app that uses it sees the same ones.")
 }
 
 /// A heading and a row per item, or why the items couldn't be listed.
@@ -371,6 +495,21 @@ fn pair(name: &str, value: &str, tone: i32) -> SheetRow {
         name: name.into(),
         value: value.into(),
         tone,
+        ..SheetRow::default()
+    }
+}
+
+/// A switch for one of Harlo's own settings, with what it does.
+fn switch(setting: Setting, name: &str, what: &str, on: bool) -> SheetRow {
+    SheetRow {
+        kind: 3,
+        name: name.into(),
+        value: what.into(),
+        on,
+        setting: match setting {
+            Setting::ReopenTabs => 0,
+        },
+        ..SheetRow::default()
     }
 }
 

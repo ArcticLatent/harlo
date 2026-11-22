@@ -1,10 +1,12 @@
-//! The window's saved layout and the notes, kept in a small SQLite database.
+//! The window's saved layout, Harlo's own settings and the notes, kept in a
+//! small SQLite database.
 //!
 //! The layout covers the project folders in the sidebar, which panels and
 //! lists are open and how big the user made them, and the open tabs for
-//! each server. It's saved after each
-//! change, off the UI thread, and read once at start. Notes are kept one per
-//! folder on each server.
+//! each server. The preferences are what the user chose in Settings that
+//! belongs to Harlo rather than to the OpenCode server. Both are saved after
+//! each change, off the UI thread, and read once at start. Notes are kept one
+//! per folder on each server.
 
 // Rust guideline compliant 2026-10-09
 
@@ -18,6 +20,26 @@ use serde::{Deserialize, Serialize};
 
 /// The row the layout is stored under.
 const LAYOUT_KEY: &str = "layout";
+
+/// The row the preferences are stored under.
+const PREFERENCES_KEY: &str = "preferences";
+
+/// Harlo's own settings, as the user chose them in Settings.
+///
+/// Settings that belong to the OpenCode server aren't here; Harlo reads and
+/// changes those through the server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Preferences {
+    /// Whether the sessions open when Harlo last closed open again.
+    pub reopen_tabs: bool,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self { reopen_tabs: true }
+    }
+}
 
 /// How the window was arranged when it was last changed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,22 +126,17 @@ impl Store {
     /// Returns an error when the file exists but can't be read, or holds a
     /// layout this version can't parse.
     pub fn load(&self) -> Result<Layout, Error> {
-        if !self.path.exists() {
-            return Ok(Layout::default());
-        }
-        let connection = self.connect()?;
-        let saved: Option<String> = connection
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![LAYOUT_KEY],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(Error::database)?;
-        match saved {
-            Some(json) => serde_json::from_str(&json).map_err(Error::format),
-            None => Ok(Layout::default()),
-        }
+        self.read(LAYOUT_KEY)
+    }
+
+    /// Reads the saved preferences, or the defaults when none were saved.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file exists but can't be read, or holds
+    /// preferences this version can't parse.
+    pub fn load_preferences(&self) -> Result<Preferences, Error> {
+        self.read(PREFERENCES_KEY)
     }
 
     /// Saves the layout, creating the file and its folder if needed.
@@ -130,15 +147,64 @@ impl Store {
     ///
     /// Returns an error when the folder or file can't be created or written.
     pub fn save(&self, layout: &Layout) -> Result<(), Error> {
+        self.write(LAYOUT_KEY, layout)
+    }
+
+    /// Saves the preferences, creating the file and its folder if needed.
+    ///
+    /// This blocks on disk I/O; from async code use
+    /// [`Store::save_preferences_later`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the folder or file can't be created or written.
+    pub fn save_preferences(&self, preferences: &Preferences) -> Result<(), Error> {
+        self.write(PREFERENCES_KEY, preferences)
+    }
+
+    /// Saves the preferences on a blocking thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Store::save_preferences`], or an error when
+    /// the save thread is cancelled.
+    pub async fn save_preferences_later(self, preferences: Preferences) -> Result<(), Error> {
+        tokio::task::spawn_blocking(move || self.save_preferences(&preferences))
+            .await
+            .map_err(|join| Error::new(Kind::Cancelled(join.to_string())))?
+    }
+
+    /// Reads the value saved under `key`, or its default when none was saved.
+    fn read<T: serde::de::DeserializeOwned + Default>(&self, key: &str) -> Result<T, Error> {
+        if !self.path.exists() {
+            return Ok(T::default());
+        }
+        let saved: Option<String> = self
+            .connect()?
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Error::database)?;
+        match saved {
+            Some(json) => serde_json::from_str(&json).map_err(Error::format),
+            None => Ok(T::default()),
+        }
+    }
+
+    /// Saves `value` under `key`, creating the file and its folder if needed.
+    fn write(&self, key: &str, value: &impl Serialize) -> Result<(), Error> {
         if let Some(folder) = self.path.parent() {
             std::fs::create_dir_all(folder).map_err(Error::io)?;
         }
-        let json = serde_json::to_string(layout).map_err(Error::format)?;
+        let json = serde_json::to_string(value).map_err(Error::format)?;
         self.connect()?
             .execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
                  ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                params![LAYOUT_KEY, json],
+                params![key, json],
             )
             .map_err(Error::database)?;
         Ok(())
