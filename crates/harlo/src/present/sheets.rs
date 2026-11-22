@@ -318,7 +318,7 @@ fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
 }
 
 /// Light or dark, and what the themes are; the themes themselves show as
-/// cards, the dark ones and then the light ones.
+/// cards, those of the window's mode only.
 fn appearance_rows(app: &App) -> Vec<SheetRow> {
     vec![
         SheetRow {
@@ -333,16 +333,21 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
             ..SheetRow::default()
         },
         note(
-            "Harlo shows your dark theme while the window is dark and your light theme while \
-             it's light. The themes besides Harlo's are Base16 colour schemes from Tinted \
-             Theming. OpenCode's own theme setting stays as it is.",
+            "Harlo keeps a dark and a light theme, and shows the one for the window's mode. \
+             Choose Light or Dark to see and pick that mode's themes. The themes besides \
+             Harlo's are Base16 colour schemes from Tinted Theming. OpenCode's own theme \
+             setting stays as it is.",
         ),
     ]
 }
 
 /// The cards for the `mode` themes Settings shows: all of them in
-/// Appearance, or those a search finds.
+/// Appearance, or those a search finds, and none unless the window is in
+/// `mode`.
 fn theme_cards(app: &App, mode: Mode) -> Vec<ThemeCard> {
+    if mode != app.mode() {
+        return Vec::new();
+    }
     let needle = app.sheets.query.trim().to_lowercase();
     let themes = if needle.is_empty() {
         if app.sheets.section != Section::Appearance {
@@ -376,14 +381,15 @@ fn theme_cards(app: &App, mode: Mode) -> Vec<ThemeCard> {
         .collect()
 }
 
-/// The themes a search for `needle` (lower case) finds: by name, or all of
-/// them for a search for themes or appearance.
+/// The themes of the window's mode a search for `needle` (lower case)
+/// finds: by name, or all of them for a search for themes or appearance.
 fn themes_found<'a>(app: &'a App, needle: &str) -> Vec<&'a Scheme> {
     let all = ["theme", "themes", "appearance", "colours", "colors"]
         .iter()
         .any(|word| word.starts_with(needle) && needle.len() >= 3);
     app.themes
         .iter()
+        .filter(|t| t.mode == app.mode())
         .filter(|t| all || t.name.to_lowercase().contains(needle))
         .collect()
 }

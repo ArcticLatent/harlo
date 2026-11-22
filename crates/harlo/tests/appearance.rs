@@ -57,26 +57,39 @@ fn pick(ui: &Ui, id: &str) {
 }
 
 #[test]
-fn dark_and_light_themes_show_as_cards_with_harlos_chosen() {
+fn only_the_windows_mode_shows_its_themes_with_harlos_chosen() {
     let ui = appearance(demo::app());
     assert!(ui.shows("Light or dark"));
-    assert!(ui.shows("Dark themes"));
+    assert_eq!(ui.button("System").accessible_checked(), Some(true));
     let state = ui.window.global::<State>();
+
+    // The desktop is dark, so only the dark themes show.
+    assert!(ui.shows("Dark themes"));
+    assert!(!ui.shows("Light themes"));
     let dark = names(&state.get_dark_theme_cards());
-    let light = names(&state.get_light_theme_cards());
     assert_eq!(dark[0], "Harlo Dark", "Harlo's own first");
-    assert_eq!(light[0], "Harlo Light", "Harlo's own first");
     for name in ["Dracula", "Nord", "Tokyo Night", "Gruvbox Dark", "One Dark"] {
         assert!(dark.iter().any(|n| n == name), "{name} is dark");
     }
+    assert!(dark.iter().all(|n| !n.contains("Light")), "{dark:?}");
+    assert_eq!(state.get_light_theme_cards().row_count(), 0);
+    assert_eq!(ui.button("Harlo Dark").accessible_checked(), Some(true));
+    assert_eq!(ui.button("Dracula").accessible_checked(), Some(false));
+
+    // Light shows the light themes instead, at the top.
+    ui.press("Light");
+    assert!(ui.shows("Light themes"));
+    assert!(!ui.shows("Dark themes"));
+    assert_eq!(state.get_dark_theme_cards().row_count(), 0);
+    let light = names(&state.get_light_theme_cards());
+    assert_eq!(light[0], "Harlo Light", "Harlo's own first");
     for name in ["GitHub Light", "Solarized Light", "Catppuccin Latte"] {
         assert!(light.iter().any(|n| n == name), "{name} is light");
     }
-    assert!(ui.shows("Dracula"), "on screen");
-    assert_eq!(ui.button("Harlo Dark").accessible_checked(), Some(true));
-    assert_eq!(chosen_light(&ui), ["Harlo Light"], "one for each mode");
-    assert_eq!(ui.button("Dracula").accessible_checked(), Some(false));
-    assert_eq!(ui.button("System").accessible_checked(), Some(true));
+    assert_eq!(ui.button("Harlo Light").accessible_checked(), Some(true));
+    ui.press("Solarized Light");
+    assert_eq!(ui.app().preferences.light_theme, "solarized-light");
+    assert_eq!(chosen_light(&ui), ["Solarized Light"]);
 }
 
 #[test]
@@ -171,16 +184,21 @@ fn search_finds_themes_by_name() {
     ui.send(Message::Sheet(SheetEvent::Open(Section::General)));
     ui.send(Message::Sheet(SheetEvent::Query("gruv".into())));
     assert!(ui.shows("Dark themes"));
-    assert!(ui.shows("Light themes"));
     assert!(ui.shows("Gruvbox Dark"));
-    assert!(ui.shows("Gruvbox Light"));
+    assert!(
+        !ui.shows("Gruvbox Light"),
+        "only the window's mode's themes"
+    );
+    assert!(!ui.shows("Light themes"));
     assert!(!ui.shows("Dracula"), "only the themes found");
     ui.press("Gruvbox Dark");
     assert_eq!(ui.app().preferences.dark_theme, "gruvbox-dark-medium");
 
-    ui.send(Message::Sheet(SheetEvent::Query("dracula".into())));
-    assert!(ui.shows("Dark themes"));
-    assert!(!ui.shows("Light themes"), "no light theme matches");
+    ui.send(Message::Sheet(SheetEvent::Query("latte".into())));
+    assert!(
+        ui.shows("No setting matches “latte”."),
+        "a light theme isn't found while the window is dark"
+    );
 
     ui.send(Message::Sheet(SheetEvent::Query("light or".into())));
     assert!(ui.shows("Light or dark"), "the choice is found too");
