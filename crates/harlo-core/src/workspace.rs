@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[doc(inline)]
 pub use opencode_client::{
     Event, EventKind, Form, InboxItem, Message, ModelRef, Part, Permission,
-    Project as ServerProject, Revert, Session, ToolCall, ToolStatus,
+    Project as ServerProject, Revert, Session, Tokens, ToolCall, ToolStatus,
 };
 
 use crate::sessions::{Project, SessionSummary, Worktree, folder_name};
@@ -211,6 +211,7 @@ impl Workspace {
                 Vec::new()
             }
             EventKind::SessionPermissions { .. }
+            | EventKind::UsageUpdated { .. }
             | EventKind::RevertStaged { .. }
             | EventKind::RevertCleared { .. }
             | EventKind::RevertCommitted { .. } => {
@@ -234,13 +235,17 @@ impl Workspace {
     }
 
     /// Applies an event about what waits for the user: approvals and questions.
-    /// Applies a change to a session's own rules or staged undo.
+    /// Applies a change to a session's own rules, usage or staged undo.
     fn apply_session_state(&mut self, kind: &EventKind) {
         let Some(session) = kind.session_id().and_then(|id| self.sessions.get_mut(id)) else {
             return;
         };
         match kind {
             EventKind::SessionPermissions { rules, .. } => session.permissions.clone_from(rules),
+            EventKind::UsageUpdated { cost, tokens, .. } => {
+                session.cost = *cost;
+                session.tokens = *tokens;
+            }
             EventKind::RevertStaged { revert, .. } => session.revert = Some(revert.clone()),
             EventKind::RevertCleared { .. } | EventKind::RevertCommitted { .. } => {
                 session.revert = None;

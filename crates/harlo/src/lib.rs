@@ -17,7 +17,10 @@ mod view;
 pub mod widget;
 
 #[doc(inline)]
-pub use app::{App, ChangesEvent, ChangesLoaded, GitAction, MenuState, Message, Panel, Status};
+pub use app::{
+    App, ChangesEvent, ChangesLoaded, ContextEvent, ContextLoaded, GitAction, MenuState, Message,
+    Panel, Status,
+};
 #[doc(inline)]
 pub use options::Options;
 #[doc(inline)]

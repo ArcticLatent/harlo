@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use harlo_core::workspace::{Fetch, Fetched, Snapshot, Workspace};
 use opencode_client::{
     Delivery, Effect, EventKind, Form, InboxItem, ModelRef, Permission, Project, Revert, Rule,
-    Session,
+    Session, Tokens,
 };
 
 /// "Now" in the tests: 2026-11-21, in milliseconds.
@@ -45,6 +45,8 @@ fn session(id: &str, project: &str, directory: &str, hours_ago: f64) -> Session 
         updated: NOW_MS - hours_ago * HOUR_MS,
         revert: None,
         permissions: Vec::new(),
+        cost: 0.0,
+        tokens: Tokens::default(),
     }
 }
 

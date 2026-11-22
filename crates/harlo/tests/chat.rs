@@ -52,6 +52,7 @@ fn catalog() -> Catalog {
                 name: "Plain Model".into(),
                 variants: Vec::new(),
                 images: false,
+                context: None,
             },
             Model {
                 provider_id: "fake".into(),
@@ -59,6 +60,7 @@ fn catalog() -> Catalog {
                 name: "Deep Model".into(),
                 variants: vec!["low".into(), "high".into()],
                 images: true,
+                context: None,
             },
         ],
         default_model: None,
@@ -798,6 +800,7 @@ fn a_long_model_list_scrolls_and_filters() {
             name: format!("Model {i}"),
             variants: Vec::new(),
             images: false,
+            context: None,
         })
         .collect();
     let _ = app.update(Message::Catalog(folder_of(PI_UPDATE), Ok(Box::new(many))));

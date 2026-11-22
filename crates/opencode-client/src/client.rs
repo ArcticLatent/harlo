@@ -15,7 +15,7 @@ use crate::generated as g;
 use crate::prompt::Prompt;
 use crate::types::{
     Answer, Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply,
-    Project, Revert, Rule, ServerInfo, Session,
+    Project, Revert, Rule, ServerInfo, Session, SessionContext,
 };
 use crate::{Endpoint, Error, Event};
 
@@ -619,6 +619,19 @@ impl Client {
         decode_list(&v["data"], |item| {
             Ok(serde_json::from_value::<g::FileDiffInfo>(item.clone())?.into())
         })
+    }
+
+    /// Returns what the session's model sees now, since its last compaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist or the server can't be reached.
+    pub async fn context(&self, session_id: &str) -> Result<SessionContext, Error> {
+        let v =
+            Self::json(self.request(Method::GET, &format!("/api/session/{session_id}/context")))
+                .await?;
+        let messages = v["data"].as_array().map(Vec::as_slice).unwrap_or_default();
+        Ok(SessionContext::from_json(messages))
     }
 
     /// Returns the uncommitted changes in `directory`'s repository, as diffs.

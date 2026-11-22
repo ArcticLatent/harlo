@@ -28,6 +28,8 @@ pub struct Model {
     pub variants: Vec<String>,
     /// Whether the model reads images.
     pub images: bool,
+    /// How many tokens its context window holds, if known.
+    pub context: Option<u64>,
 }
 
 impl Model {
@@ -54,6 +56,7 @@ impl Model {
             images: value["capabilities"]["input"]
                 .as_array()
                 .is_some_and(|input| input.iter().any(|i| i == "image")),
+            context: value["limit"]["context"].as_u64().filter(|n| *n > 0),
             provider_id,
             id,
         })

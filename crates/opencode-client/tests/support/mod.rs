@@ -218,7 +218,7 @@ fn prepare(root: &Path, model_port: u16) {
             "name": "Fake",
             "package": "@opencode/ai/providers/openai-compatible",
             "settings": { "baseURL": format!("http://127.0.0.1:{model_port}/v1"), "apiKey": "fake-key" },
-            "models": { "fake-coder": { "name": "Fake Coder" } }
+            "models": { "fake-coder": { "name": "Fake Coder", "limit": { "context": 128_000, "output": 8_192 } } }
         }},
         "permissions": [ { "action": "shell", "resource": "*", "effect": "ask" } ]
     });

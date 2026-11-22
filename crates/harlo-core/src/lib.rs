@@ -9,6 +9,7 @@ pub mod approvals;
 pub mod composer;
 pub mod diff;
 pub mod git;
+pub mod instructions;
 pub mod layout;
 pub mod server;
 pub mod sessions;

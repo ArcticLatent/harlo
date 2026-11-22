@@ -41,7 +41,7 @@ pub use prompt::{Attachment, Mention, Prompt};
 pub use types::{
     Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, InboxItem,
     Message, ModelRef, Part, Permission, PermissionReply, Project, Revert, Rule, ServerInfo,
-    Session, ToolCall, ToolStatus,
+    Session, SessionContext, Tokens, ToolCall, ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

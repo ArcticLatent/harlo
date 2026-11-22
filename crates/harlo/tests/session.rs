@@ -97,7 +97,8 @@ fn opening_a_session_shows_its_history() {
         "build",
         "model",
         "Changes",
-        "Nothing to show for this session yet.",
+        // The Context panel, open from the start.
+        "Context window",
     ] {
         assert!(shows(&app, text), "shows {text:?}");
     }

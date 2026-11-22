@@ -34,10 +34,14 @@ use crate::view::pickers::{self, AgentChoice, Folder, ModelChoice, Picker, Varia
 use crate::widget::{Edge, reveal};
 
 mod changes;
+mod context;
 mod undo;
 
 pub use changes::{
     ChangedFile, Changes, Event as ChangesEvent, GitAction, List, Loaded as ChangesLoaded,
+};
+pub use context::{
+    ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
 pub use undo::StagedUndo;
 mod waiting;
@@ -319,6 +323,8 @@ pub enum Message {
     UndoCancel(String),
     /// The Changes panel reported something, or its load or git action finished.
     Changes(ChangesEvent),
+    /// The Context panel asked to reload, or its load finished.
+    Context(ContextEvent),
     /// A staged undo was kept or cancelled, or couldn't be.
     UndoSettled {
         /// The session.
@@ -458,6 +464,8 @@ pub struct App {
     pub(crate) undos: undo::Undos,
     /// The Changes panel's lists and git actions.
     pub changes: Changes,
+    /// The Context panel's view of the open session.
+    pub context: ContextView,
     /// When to show desktop notifications.
     notices: Notices,
     /// Where the layout is saved; `None` keeps it in memory only.
@@ -548,6 +556,7 @@ impl App {
             new_shield: Shield::Agent,
             undos: undo::Undos::default(),
             changes: Changes::default(),
+            context: ContextView::default(),
             notices: Notices {
                 enabled: false,
                 focused: true,
@@ -619,7 +628,12 @@ impl App {
         }
         let task = self.apply(message);
         self.sync_motion();
-        let task = Task::batch([task, self.follow_folder(), self.follow_changes()]);
+        let task = Task::batch([
+            task,
+            self.follow_folder(),
+            self.follow_changes(),
+            self.follow_context(),
+        ]);
         let layout = self.layout();
         if layout == self.saved {
             return task;
@@ -687,6 +701,7 @@ impl App {
             | Message::PickShield(_)
             | Message::Focused(_)) => return self.waiting_action(message),
             Message::Changes(event) => return self.changes_action(event),
+            Message::Context(event) => self.context_action(event),
             message @ (Message::UndoStaged(..)
             | Message::UndoChecked(..)
             | Message::UndoKeep(_)
@@ -934,6 +949,7 @@ impl App {
                 }
                 self.refresh();
                 self.changes_event(&event.kind);
+                self.context_event(&event.kind);
                 if matches!(event.kind, EventKind::CatalogChanged) {
                     // Reloaded for the current folder once this update ends.
                     self.catalogs.clear();

@@ -6,7 +6,7 @@ use iced::widget::{button, center, column, container, row, rule, space, text};
 use iced::{Center, Element, Fill};
 use lucide_icons::Icon;
 
-use crate::app::{App, ChangesEvent, Message, Panel};
+use crate::app::{App, ChangesEvent, ContextEvent, Message, Panel};
 use crate::ids;
 use crate::style::{self, size};
 use crate::view::icon;
@@ -31,23 +31,26 @@ pub fn view(app: &App, panel: Panel) -> Element<'_, Message> {
     .height(74)
     .padding([0, 18]);
     header = header.push(space().width(Fill));
-    match panel {
-        Panel::Context => header = header.push(icon(Icon::RefreshCw, 15.0, t.icon_base)),
-        Panel::Changes => {
-            header = header.push(
-                button(center(icon(Icon::RefreshCw, 14.0, t.icon_base)))
-                    .width(30)
-                    .height(30)
-                    .padding(0)
-                    .on_press(Message::Changes(ChangesEvent::Refresh))
-                    .style(style::round(t)),
-            );
-        }
-        Panel::Todos | Panel::Files | Panel::Notes => {}
+    let refresh = match panel {
+        Panel::Context if app.active.is_some() => Some(Message::Context(ContextEvent::Refresh)),
+        Panel::Changes => Some(Message::Changes(ChangesEvent::Refresh)),
+        Panel::Context | Panel::Todos | Panel::Files | Panel::Notes => None,
+    };
+    if let Some(refresh) = refresh {
+        header = header.push(
+            button(center(icon(Icon::RefreshCw, 14.0, t.icon_base)))
+                .width(30)
+                .height(30)
+                .padding(0)
+                .on_press(refresh)
+                .style(style::round(t)),
+        );
     }
     let header = header.push(container(close).id(ids::PANEL_CLOSE));
     let body: Element<'_, Message> = if panel == Panel::Changes {
         crate::view::changes::body(app)
+    } else if panel == Panel::Context {
+        crate::view::context::body(app)
     } else {
         container(
             text(if app.active.is_some() {

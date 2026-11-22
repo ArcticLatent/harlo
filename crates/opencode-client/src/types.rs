@@ -74,6 +74,112 @@ impl From<g::ModelRef> for ModelRef {
     }
 }
 
+/// Tokens a model read and wrote, as its provider counted them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Tokens {
+    /// Tokens read fresh.
+    pub input: u64,
+    /// Tokens written as the answer.
+    pub output: u64,
+    /// Tokens spent reasoning, when the provider counts them apart.
+    pub reasoning: u64,
+    /// Tokens read from the provider's cache.
+    pub cache_read: u64,
+    /// Tokens written to the provider's cache.
+    pub cache_write: u64,
+}
+
+impl Tokens {
+    /// Returns every token counted, read or written.
+    ///
+    /// For one step, this is how much of the context window the step filled.
+    #[must_use]
+    pub fn total(self) -> u64 {
+        self.input + self.output + self.reasoning + self.cache_read + self.cache_write
+    }
+}
+
+impl From<g::TokenUsageInfo> for Tokens {
+    fn from(v: g::TokenUsageInfo) -> Self {
+        Self {
+            input: count(v.input),
+            output: count(v.output),
+            reasoning: count(v.reasoning),
+            cache_read: count(v.cache.read),
+            cache_write: count(v.cache.write),
+        }
+    }
+}
+
+/// Turns a count the schema gives as a number into a whole one; nonsense is 0.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "rounded, finite and not negative, so it fits; counts beyond u64 don't occur"
+)]
+pub(crate) fn count(n: f64) -> u64 {
+    if n.is_finite() && n > 0.0 {
+        n.round() as u64
+    } else {
+        0
+    }
+}
+
+/// What a session's model sees now: the messages since the last compaction.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionContext {
+    /// How many messages are in it.
+    pub messages: usize,
+    /// The latest step's tokens: how full its context window was.
+    pub last_step: Option<Tokens>,
+    /// The model the latest step ran on.
+    pub model: Option<ModelRef>,
+    /// The agent the latest step ran as.
+    pub agent: Option<String>,
+    /// Instruction files OpenCode loaded during the session, such as a
+    /// subfolder's `AGENTS.md` once the agent worked there. Absolute paths.
+    pub loaded: Vec<String>,
+}
+
+impl SessionContext {
+    /// Reads the `/context` list of messages, oldest first.
+    pub(crate) fn from_json(messages: &[Value]) -> Self {
+        let mut context = Self {
+            messages: messages.len(),
+            ..Self::default()
+        };
+        for message in messages {
+            match message["type"].as_str() {
+                Some("assistant") => {
+                    if let Ok(tokens) =
+                        serde_json::from_value::<g::TokenUsageInfo>(message["tokens"].clone())
+                    {
+                        context.last_step = Some(tokens.into());
+                    }
+                    if let Ok(model) =
+                        serde_json::from_value::<g::ModelRef>(message["model"].clone())
+                    {
+                        context.model = Some(model.into());
+                    }
+                    if let Some(agent) = message["agent"].as_str() {
+                        context.agent = Some(agent.to_owned());
+                    }
+                }
+                Some("synthetic" | "system") => {
+                    let paths = message["metadata"]["instruction"]["paths"].as_array();
+                    for path in paths.into_iter().flatten().filter_map(Value::as_str) {
+                        if !context.loaded.iter().any(|p| p == path) {
+                            context.loaded.push(path.to_owned());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        context
+    }
+}
+
 /// A session as listed by the server.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
@@ -99,6 +205,10 @@ pub struct Session {
     pub revert: Option<Revert>,
     /// The session's own permission rules, applied after its agent's.
     pub permissions: Vec<Rule>,
+    /// What the session has cost so far, in US dollars.
+    pub cost: f64,
+    /// Every token the session's steps have read and written so far.
+    pub tokens: Tokens,
 }
 
 impl From<g::SessionInfo> for Session {
@@ -118,6 +228,8 @@ impl From<g::SessionInfo> for Session {
                 .permissions
                 .map(|rules| rules.0.into_iter().map(Rule::from).collect())
                 .unwrap_or_default(),
+            cost: *v.cost,
+            tokens: v.tokens.into(),
         }
     }
 }

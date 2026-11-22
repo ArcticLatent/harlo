@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use harlo::{App, Message};
 use harlo_core::layout::Layout;
 use harlo_core::server::{Client, Connected, Endpoint, Location, Update};
-use harlo_core::workspace::{ModelRef, ServerProject, Session, Snapshot};
+use harlo_core::workspace::{ModelRef, ServerProject, Session, Snapshot, Tokens};
 
 const HOUR: u64 = 3_600;
 const DAY: u64 = 24 * HOUR;
@@ -108,6 +108,8 @@ pub fn snapshot() -> Snapshot {
             updated: now_ms - (age as f64) * 1000.0,
             revert: None,
             permissions: Vec::new(),
+            cost: 0.0,
+            tokens: Tokens::default(),
         })
         .collect();
     Snapshot {

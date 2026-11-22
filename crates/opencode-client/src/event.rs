@@ -10,7 +10,9 @@
 use serde_json::Value;
 
 use crate::generated as g;
-use crate::types::{Delivery, FileDiff, Form, InboxItem, ModelRef, Permission, Revert, Rule};
+use crate::types::{
+    Delivery, FileDiff, Form, InboxItem, ModelRef, Permission, Revert, Rule, Tokens,
+};
 
 /// One server event.
 #[derive(Debug, Clone, PartialEq)]
@@ -135,6 +137,16 @@ pub enum Kind {
     StepEnded {
         session_id: String,
         message_id: String,
+        /// What the step read and wrote: how full its context window was.
+        tokens: Tokens,
+    },
+    /// The session's running cost and token totals changed.
+    UsageUpdated {
+        session_id: String,
+        /// The cost so far, in US dollars.
+        cost: f64,
+        /// Every token so far.
+        tokens: Tokens,
     },
     /// An action needs approval.
     PermissionAsked(Permission),
@@ -213,6 +225,7 @@ impl Kind {
             | Self::ToolCalled { session_id, .. }
             | Self::ToolEnded { session_id, .. }
             | Self::StepEnded { session_id, .. }
+            | Self::UsageUpdated { session_id, .. }
             | Self::StepFailed { session_id, .. }
             | Self::RetryScheduled { session_id, .. }
             | Self::InboxDeliveryChanged { session_id, .. }
@@ -458,6 +471,15 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             Kind::StepEnded {
                 session_id: d.session_id.to_string(),
                 message_id: d.assistant_message_id.to_string(),
+                tokens: d.tokens.into(),
+            }
+        }
+        "session.usage.updated" => {
+            let d: g::SessionUsageUpdatedData = from(data)?;
+            Kind::UsageUpdated {
+                session_id: d.session_id.to_string(),
+                cost: *d.cost,
+                tokens: d.tokens.into(),
             }
         }
         "permission.asked" => Kind::PermissionAsked(from::<g::PermissionAskedData>(data)?.into()),

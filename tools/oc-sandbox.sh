@@ -38,7 +38,7 @@ cat > "$dir/config/opencode/opencode.json" <<EOF
       "name": "Fake",
       "package": "@opencode/ai/providers/openai-compatible",
       "settings": { "baseURL": "http://127.0.0.1:$model_port/v1", "apiKey": "fake-key" },
-      "models": { "fake-coder": { "name": "Fake Coder" } }
+      "models": { "fake-coder": { "name": "Fake Coder", "limit": { "context": 128000, "output": 8192 } } }
     }
   },
   "permissions": [
