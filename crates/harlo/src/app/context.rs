@@ -12,10 +12,10 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::task::Task;
 use harlo_core::instructions::{self, Places};
 use harlo_core::server::{SessionContext, Tokens};
 use harlo_core::workspace::EventKind;
-use iced::Task;
 
 use super::{App, Message, Panel};
 

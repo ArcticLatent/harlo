@@ -5,10 +5,10 @@
 
 use std::borrow::Cow;
 
+use crate::task::Task;
 use harlo_core::approvals::{self, Draft, Shield};
 use harlo_core::server::{self, PermissionReply};
 use harlo_core::workspace::{EventKind, Form, Permission};
-use iced::Task;
 
 use super::{App, Message};
 use crate::ids;
@@ -33,7 +33,7 @@ impl App {
             Message::Refuse(request) => {
                 self.refusing = Some((request, String::new()));
                 // Ready to type why.
-                return iced::widget::operation::focus(iced::widget::Id::new(ids::REFUSE_REASON));
+                return Task::effect(crate::task::Effect::Focus(ids::REFUSE_REASON));
             }
             Message::RefuseReason(reason) => {
                 if let Some((_, typed)) = &mut self.refusing {

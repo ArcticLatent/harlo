@@ -11,24 +11,15 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
-use std::time::Duration;
 
 use harlo_core::files::{self, Kind, Tree};
 use harlo_core::git::Repo;
 use harlo_core::server::{FileChange, FileMatch};
 use harlo_core::workspace::EventKind;
-use iced::Task;
-use iced::widget::{image, svg};
-use iced_code_editor::{CodeEditor, Message as EditorMessage};
 
 use super::{App, Message, Panel};
-use crate::style;
-
-/// How often the editor's cursor blinks.
-pub const BLINK: Duration = Duration::from_millis(500);
-
-/// The editor's text size.
-const EDITOR_TEXT: f32 = 13.0;
+use crate::task::{Effect, Task};
+use crate::text::{Edit, TextBox};
 
 /// Something that happened to the Files panel or an open file.
 #[derive(Debug, Clone)]
@@ -66,8 +57,8 @@ pub enum FilesEvent {
     },
     /// Show an open file's tab.
     Show(String),
-    /// Something for a file's editor.
-    Editor(String, EditorMessage),
+    /// A file's text was edited in its editor.
+    Editor(String, Edit),
     /// Save a file.
     Save(String),
     /// A save finished.
@@ -91,8 +82,6 @@ pub enum FilesEvent {
     Reload(String),
     /// Keep the unsaved changes over what's on disk.
     KeepMine(String),
-    /// Time for the cursor to blink.
-    Blink,
 }
 
 /// A file open in a tab.
@@ -133,10 +122,10 @@ pub enum Body {
     Loading,
     /// Text, in an editor.
     Text(Box<TextFile>),
-    /// A picture.
-    Image(image::Handle),
-    /// A vector picture.
-    Svg(svg::Handle),
+    /// A picture, as its file's bytes.
+    Image(std::sync::Arc<Vec<u8>>),
+    /// A vector picture, as its file's bytes.
+    Svg(std::sync::Arc<Vec<u8>>),
     /// Nothing: it isn't text.
     Binary,
     /// Nothing: it's this many bytes, too large to open.
@@ -147,8 +136,10 @@ pub enum Body {
 
 /// A text file being edited.
 pub struct TextFile {
-    /// The editor.
-    pub editor: CodeEditor,
+    /// The text being edited.
+    pub editor: TextBox,
+    /// The syntax its colours follow, such as `rs`.
+    pub syntax: String,
     /// The text as last read or saved.
     pub saved: String,
     /// Whether the editor's text differs from [`TextFile::saved`].
@@ -220,7 +211,7 @@ impl App {
     #[must_use]
     pub fn file_text(&self, key: &str) -> Option<String> {
         match &self.file(key)?.body {
-            Body::Text(text) => Some(text.editor.content()),
+            Body::Text(text) => Some(text.editor.text()),
             _ => None,
         }
     }
@@ -320,7 +311,6 @@ impl App {
     }
 
     /// Handles a [`FilesEvent`].
-    #[expect(clippy::too_many_lines, reason = "one short arm per event")]
     pub(super) fn files_action(&mut self, event: FilesEvent) -> Task<Message> {
         match event {
             FilesEvent::Toggle(path) => {
@@ -345,23 +335,18 @@ impl App {
             FilesEvent::Read { key, bytes } => return self.read(&key, bytes),
             FilesEvent::Reread { key, bytes } => return self.reread(&key, bytes),
             FilesEvent::Show(key) => {
-                if let Some(Body::Text(text)) = self.file(&key).map(|f| &f.body) {
-                    text.editor.request_focus();
-                }
+                let text = matches!(self.file(&key).map(|f| &f.body), Some(Body::Text(_)));
                 self.fs.shown = Some(key);
+                if text {
+                    return Task::effect(Effect::Focus(crate::ids::EDITOR));
+                }
             }
-            FilesEvent::Editor(key, EditorMessage::WriteRequested) => {
-                return self.files_action(FilesEvent::Save(key));
-            }
-            FilesEvent::Editor(key, message) => {
+            FilesEvent::Editor(key, edit) => {
                 let Some(text) = self.text_mut(&key) else {
                     return Task::none();
                 };
-                let task = text.editor.update(&message);
-                if !matches!(message, EditorMessage::Tick) {
-                    text.dirty = text.editor.content() != text.saved;
-                }
-                return task.map(move |m| Message::Files(FilesEvent::Editor(key.clone(), m)));
+                text.editor.edited(edit);
+                text.dirty = text.editor.as_str() != text.saved;
             }
             FilesEvent::Save(key) => return self.save(&key, false),
             FilesEvent::SaveAndClose(key) => return self.save(&key, true),
@@ -372,7 +357,7 @@ impl App {
                 file.saving = false;
                 match result {
                     Ok(()) => {
-                        file.dirty = file.editor.content() != text;
+                        file.dirty = file.editor.as_str() != text;
                         file.saved = text;
                         file.outside = None;
                         file.error = None;
@@ -407,11 +392,9 @@ impl App {
                 };
                 match file.outside.take() {
                     Some(Outside::Changed(text)) => {
-                        let task = file.editor.reset(&text);
+                        file.editor.set(&text);
                         file.saved = text;
                         file.dirty = false;
-                        return task
-                            .map(move |m| Message::Files(FilesEvent::Editor(key.clone(), m)));
                     }
                     Some(Outside::Removed) | None => {}
                 }
@@ -419,16 +402,6 @@ impl App {
             FilesEvent::KeepMine(key) => {
                 if let Some(file) = self.text_mut(&key) {
                     file.outside = None;
-                }
-            }
-            FilesEvent::Blink => {
-                if let Some(key) = self.fs.shown.clone()
-                    && let Some(text) = self.text_mut(&key)
-                {
-                    return text
-                        .editor
-                        .update(&EditorMessage::Tick)
-                        .map(move |m| Message::Files(FilesEvent::Editor(key.clone(), m)));
                 }
             }
         }
@@ -442,12 +415,8 @@ impl App {
             .join(&path)
             .to_string_lossy()
             .into_owned();
-        if let Some(file) = self.file(&key) {
-            if let Body::Text(text) = &file.body {
-                text.editor.request_focus();
-            }
-            self.fs.shown = Some(key);
-            return Task::none();
+        if self.file(&key).is_some() {
+            return self.files_action(FilesEvent::Show(key));
         }
         // There's one editor tab: the file in it makes way.
         let mut closed = Task::none();
@@ -498,32 +467,24 @@ impl App {
 
     /// Fills a tab with the file it opened.
     fn read(&mut self, key: &str, bytes: Result<Vec<u8>, String>) -> Task<Message> {
-        let theme = self.theme.clone();
         let Some(file) = self.file_mut(key) else {
             return Task::none();
         };
         file.body = match bytes {
             Err(error) => Body::Failed(error),
             Ok(bytes) => match files::classify(&file.path, bytes.clone()) {
-                Kind::Text(text) => {
-                    let mut editor = CodeEditor::new(&text, &files::syntax_of(&file.path));
-                    editor.set_theme(iced_code_editor::from_iced_theme(&theme));
-                    editor.set_font(style::MONO);
-                    editor.set_font_size(EDITOR_TEXT, true);
-                    editor.set_reveal_in_file_manager_enabled(false);
-                    editor.request_focus();
-                    Body::Text(Box::new(TextFile {
-                        editor,
-                        saved: text,
-                        dirty: false,
-                        saving: false,
-                        close_after_save: false,
-                        outside: None,
-                        error: None,
-                    }))
-                }
-                Kind::Image => Body::Image(image::Handle::from_bytes(bytes)),
-                Kind::Svg => Body::Svg(svg::Handle::from_memory(bytes)),
+                Kind::Text(text) => Body::Text(Box::new(TextFile {
+                    editor: TextBox::with_text(&text),
+                    syntax: files::syntax_of(&file.path),
+                    saved: text,
+                    dirty: false,
+                    saving: false,
+                    close_after_save: false,
+                    outside: None,
+                    error: None,
+                })),
+                Kind::Image => Body::Image(std::sync::Arc::new(bytes)),
+                Kind::Svg => Body::Svg(std::sync::Arc::new(bytes)),
                 Kind::Binary => Body::Binary,
                 Kind::TooLarge(size) => Body::TooLarge(size),
             },
@@ -556,9 +517,8 @@ impl App {
             // Its own save, coming back.
             Outside::Changed(now) if now == text.saved => {}
             Outside::Changed(now) if !text.dirty => {
-                let task = text.editor.reset(&now);
+                text.editor.set(&now);
                 text.saved = now;
-                return task.map(move |m| Message::Files(FilesEvent::Editor(key.clone(), m)));
             }
             outside => text.outside = Some(outside),
         }
@@ -584,7 +544,7 @@ impl App {
         }
         text.saving = true;
         text.close_after_save = then_close;
-        let content = text.editor.content();
+        let content = text.editor.text();
         let key = key.to_owned();
         Task::perform(
             async move {
@@ -622,9 +582,6 @@ impl App {
         if self.fs.shown.as_deref() == Some(key) {
             let next = index.min(self.fs.open.len().saturating_sub(1));
             self.fs.shown = self.fs.open.get(next).map(|f| f.key.clone());
-            if let Some(Body::Text(text)) = self.shown_file().map(|f| &f.body) {
-                text.editor.request_focus();
-            }
         }
         let Some(client) = self.client.clone() else {
             return Task::none();

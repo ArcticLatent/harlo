@@ -1,6 +1,6 @@
 //! Harlo's domain model: themes, projects and sessions, with no UI code.
 //!
-//! The iced app (`harlo`) depends on this crate only. Everything here is plain
+//! The app (`harlo`) depends on this crate only. Everything here is plain
 //! data and pure functions, so it is tested without a window.
 
 // Rust guideline compliant 2026-10-09

@@ -25,11 +25,11 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::task::Task;
 use harlo_core::diff;
 use harlo_core::git::{self, Repo};
 use harlo_core::server::FileDiff;
 use harlo_core::workspace::EventKind;
-use iced::Task;
 
 use super::{App, Message, Panel};
 
@@ -375,24 +375,12 @@ impl App {
     /// Scrolls the selected file's lit hunk into view: in the maximized
     /// panel's diff, or in the panel's list.
     pub(super) fn scroll_to_hunk(&self) -> Task<Message> {
-        let (id, y) = if self.maximized == Some(Panel::Changes) {
-            (
-                crate::ids::CHANGES_DIFF,
-                crate::view::changes::hunk_top(&self.changes),
-            )
+        let list = if self.maximized == Some(Panel::Changes) {
+            crate::ids::CHANGES_DIFF
         } else {
-            (
-                crate::ids::CHANGES_LIST,
-                crate::view::changes::selected_top(&self.changes),
-            )
+            crate::ids::CHANGES_LIST
         };
-        iced::widget::operation::scroll_to(
-            id,
-            iced::widget::scrollable::AbsoluteOffset {
-                x: None,
-                y: Some(y),
-            },
-        )
+        Task::effect(crate::task::Effect::Reveal(list))
     }
 
     /// Marks the panel stale when `event` may have changed what it shows.

@@ -1,0 +1,162 @@
+// Small parts the window is built from: icons, pressable surfaces, lines,
+// a breathing indicator and a one-line text field.
+
+import { Theme, Size, Fonts } from "theme.slint";
+import { Icons } from "icons.slint";
+
+/// A Lucide icon: set `text` to one of `Icons`' glyphs.
+export component Icon inherits Text {
+    font-family: Icons.font;
+    font-size: 14px;
+    color: Theme.icon-base;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+    accessible-role: none;
+}
+
+/// A file-type icon from the bundled font.
+export component FileIcon inherits Text {
+    font-family: Fonts.file-icons;
+    font-size: 14px;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+    accessible-role: none;
+}
+
+/// A surface that reacts to the pointer and can be pressed; its children
+/// draw on top. `rest` and `hover` are its fills; `selected` holds it lit.
+export component Press inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    in property <brush> rest: transparent;
+    in property <brush> hover: Theme.surface-base-hover;
+    in property <brush> lit: Theme.surface-base-active;
+    out property <bool> hovered: touch.has-hover;
+    callback clicked();
+
+    border-radius: Size.radius;
+    background: root.selected || (touch.pressed && root.enabled) ? root.lit
+        : touch.has-hover && root.enabled ? root.hover : root.rest;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.clicked(); }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+
+    @children
+}
+
+/// A square button holding one icon.
+export component IconButton inherits Press {
+    in property <string> glyph;
+    in property <length> glyph-size: 14px;
+    in property <color> glyph-color: Theme.icon-base;
+
+    width: 26px;
+    height: 26px;
+
+    Icon {
+        text: root.glyph;
+        font-size: root.glyph-size;
+        color: root.glyph-color;
+    }
+}
+
+/// A one pixel line across.
+export component HLine inherits Rectangle {
+    height: 1px;
+    background: Theme.border-weak-base;
+}
+
+/// A one pixel line down.
+export component VLine inherits Rectangle {
+    width: 1px;
+    background: Theme.border-weak-base;
+}
+
+/// A round dot.
+export component Dot inherits Rectangle {
+    in property <length> size: 7px;
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+}
+
+/// Children that fade in and out, slowly, while something works.
+export component Breathing inherits Rectangle {
+    opacity: 0.6 + 0.4 * sin(animation-tick() / 1.4s * 360deg);
+    @children
+}
+
+/// A one-line text field with a placeholder and an optional leading icon.
+export component Field inherits Rectangle {
+    in property <string> placeholder;
+    in property <string> glyph;
+    in property <brush> fill: Theme.surface-inset-base;
+    in property <brush> idle-edge: Theme.surface-inset-base;
+    in property <length> text-size: Size.text;
+    in-out property <string> text <=> input.text;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    callback accepted();
+
+    forward-focus: input;
+
+    border-radius: Size.radius;
+    background: root.fill;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.border-base : root.idle-edge;
+    min-height: 34px;
+    accessible-role: none;
+
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 9px;
+
+        if root.glyph != "": Icon {
+            text: root.glyph;
+            font-size: 15px;
+            color: Theme.icon-weak-base;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+
+            Text {
+                x: 0;
+                width: 100%;
+                text: root.placeholder;
+                visible: input.text == "";
+                color: Theme.text-weaker;
+                font-size: root.text-size;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: none;
+            }
+
+            input := TextInput {
+                width: 100%;
+                single-line: true;
+                vertical-alignment: center;
+                color: Theme.text-strong;
+                font-size: root.text-size;
+                selection-background-color: Theme.selection;
+                accessible-label: root.placeholder;
+                edited => { root.edited(self.text); }
+                accepted => { root.accepted(); }
+            }
+        }
+    }
+}

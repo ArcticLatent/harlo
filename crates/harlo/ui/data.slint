@@ -1,0 +1,526 @@
+// What Rust pushes into the window (`State`), what the window reports back
+// (`Logic`), and the window's own requests between its parts (`Requests`).
+
+/// What the center shows.
+export enum Content {
+    /// A line of quiet text, for a tab with nothing to show yet.
+    quiet,
+    /// The start screen, for a new session.
+    home,
+    /// A session.
+    session,
+    /// The file editor.
+    editor,
+}
+
+/// A tab: a document in the center, or a terminal.
+export struct Tab {
+    /// The tab's key, which Rust maps back to what it shows.
+    key: int,
+    title: string,
+    /// The glyph before the title.
+    glyph: string,
+    /// Whether the glyph is a file-type icon rather than a Lucide one.
+    file-icon: bool,
+    /// The glyph's colour, for file-type icons.
+    glyph-color: color,
+    /// Whether it's the tab shown.
+    active: bool,
+    /// Whether it has a close button.
+    closable: bool,
+    /// Whether what it shows has unsaved changes.
+    modified: bool,
+    /// What hovering it says: a file's path, a session's folder.
+    tooltip: string,
+}
+
+/// What a sidebar row is.
+export enum RowKind {
+    project,
+    worktree,
+    session,
+    child,
+    more,
+}
+
+/// One row of the sidebar's list.
+export struct SidebarRow {
+    kind: RowKind,
+    /// A session's ID, or a folder for headings and "Show more".
+    id: string,
+    title: string,
+    /// A session's age, or a heading's count.
+    detail: string,
+    selected: bool,
+    busy: bool,
+    waiting: bool,
+    /// A session's maker logo: 0 none, 1 Anthropic, 2 OpenAI, 3 Z.ai.
+    maker: int,
+    /// The maker's tone, or a subagent's colour.
+    tone: color,
+    /// A child's agent name.
+    agent: string,
+    /// Whether the title is a placeholder.
+    untitled: bool,
+    /// Whether space follows, closing a project's group.
+    gap: bool,
+}
+
+/// A location in the location picker.
+export struct LocationRow {
+    label: string,
+    detail: string,
+    glyph: string,
+    current: bool,
+}
+
+/// A picker chip: the current choice, which opens the picker's menu.
+export struct Chip {
+    /// The picker, by number.
+    picker: int,
+    glyph: string,
+    glyph-color: color,
+    label: string,
+    /// A weaker note after the label.
+    note: string,
+}
+
+/// One row of a picker's menu.
+export struct MenuItem {
+    label: string,
+    detail: string,
+    dot: color,
+    has-dot: bool,
+    selected: bool,
+}
+
+/// What a timeline row is.
+export enum Shape {
+    /// Quiet text across the column: loading, or why it failed.
+    notice,
+    /// Something the user sent.
+    prompt,
+    /// A paragraph or list of an answer.
+    text,
+    /// A heading in an answer.
+    heading,
+    /// A code block in an answer, or a table.
+    code,
+    /// A quote in an answer.
+    quote,
+    /// A rule across an answer.
+    rule,
+    /// A one-line row: a thought, a tool call, a note, a stop.
+    line,
+    /// The header of a run of tool calls.
+    group,
+    /// Lines of a tool's diff, in a sunken box.
+    diff,
+    /// Work handed to a subagent.
+    subagent,
+    /// What a subagent reported back.
+    report,
+}
+
+/// One line of a diff.
+export struct DiffLine {
+    /// Its number: in the new file, or the old one for a removed line.
+    number: string,
+    /// `+`, `−` or nothing.
+    mark: string,
+    text: string,
+    /// 0 unchanged, 1 added, 2 removed, 3 a gap between hunks.
+    kind: int,
+}
+
+/// One row of a session's timeline.
+export struct TimelineRow {
+    shape: Shape,
+    /// The entry's key, which the row's actions name.
+    key: string,
+    /// Space above the row.
+    gap: length,
+    /// Indented, inside an open group of tool calls.
+    nested: bool,
+    /// A prompt's, an answer block's or a code block's text.
+    text: styled-text,
+    /// A line's label, a group's summary, a subagent's name, a diff's file.
+    label: string,
+    /// What a line acts on, or a subagent's task.
+    detail: string,
+    /// Whether the detail is code, such as a command.
+    mono: bool,
+    /// Words on the right: how long a call took, how a subagent stands.
+    note: string,
+    note-color: color,
+    glyph: string,
+    glyph-color: color,
+    /// Whether it's working, and breathes.
+    working: bool,
+    /// A heading's level, from 1.
+    level: int,
+    /// Whether a group's calls show below it.
+    open: bool,
+    /// Whether a prompt offers Undo, and whether it's still on its way.
+    undo: bool,
+    sending: bool,
+    /// A tool's or a file's added and removed lines.
+    added: int,
+    removed: int,
+    counts: bool,
+    /// A prompt's attachments and skills.
+    chips: [Chip],
+    /// A subagent's child session, to open.
+    child: string,
+    /// Which of a tool's files a diff shows.
+    file: int,
+    lines: [DiffLine],
+    /// The note under a cut-short diff, such as "… 12 more lines".
+    more: string,
+    /// Whether a diff box starts or ends on this row.
+    top: bool,
+    bottom: bool,
+}
+
+/// A line above the session's composer: what the agent does, its todos, a
+/// subagent at work, or a queued prompt.
+export struct InboxRow {
+    /// 0 activity, 1 todos, 2 a subagent, 3 a queued prompt.
+    kind: int,
+    /// The queued prompt's or the subagent session's ID.
+    id: string,
+    glyph: string,
+    glyph-color: color,
+    /// Strong words first, such as a subagent's name or "3 of 5".
+    strong: string,
+    text: string,
+    /// Weak words after, such as a command.
+    detail: string,
+    /// Words on the right, such as "Working" or "Sends before your next message".
+    note: string,
+    note-color: color,
+    /// Whether it breathes.
+    working: bool,
+    /// The action button's words, such as "Steer"; empty for none.
+    action: string,
+    /// Whether it can be cancelled.
+    cancel: bool,
+    /// Todos done and in all, for the bar.
+    done: int,
+    total: int,
+}
+
+/// What Rust shows.
+/// A file's patch on a card: its name and counts, its first lines, how
+/// many more there are, and a warning under it.
+export struct CardFile {
+    name: string,
+    added: int,
+    removed: int,
+    lines: [DiffLine],
+    /// "… 12 more lines", or empty.
+    more: string,
+    warning: string,
+}
+
+/// A staged undo to keep or cancel.
+export struct UndoCard {
+    shown: bool,
+    session: string,
+    title: string,
+    note: string,
+    files: [CardFile],
+    /// Whether the user's own edits couldn't be told from the agent's.
+    unchecked: bool,
+    busy: bool,
+}
+
+/// An action the agent asks to take.
+export struct ApprovalCard {
+    shown: bool,
+    id: string,
+    title: string,
+    /// How many approvals wait, this one included.
+    count: int,
+    /// The command or paths, when no files are shown.
+    detail: string,
+    files: [CardFile],
+    message: string,
+    /// "Always allow", or "Always allow <patterns>".
+    always: string,
+    busy: bool,
+    /// Whether a reason for refusing is being typed.
+    refusing: bool,
+    reason: string,
+    reason-hint: string,
+}
+
+/// An option of a question.
+export struct Choice {
+    label: string,
+    description: string,
+    value: string,
+    chosen: bool,
+}
+
+/// What kind of answer a question takes.
+export enum Answer { one, many, number, yes-no, link }
+
+/// One of the agent's questions.
+export struct Question {
+    form: string,
+    key: string,
+    title: string,
+    description: string,
+    answer: Answer,
+    choices: [Choice],
+    /// Whether it takes typed text too, and what the field says while empty.
+    input: bool,
+    hint: string,
+    typed: string,
+    /// A yes-or-no answer: -1 none yet, 0 no, 1 yes.
+    flag: int,
+    url: string,
+    /// What's wrong with the answer, one per line.
+    problems: string,
+}
+
+/// The agent's questions; the questions themselves are `State.questions`.
+export struct QuestionCard {
+    shown: bool,
+    id: string,
+    title: string,
+    count: int,
+    busy: bool,
+}
+
+/// A label and its value, in a panel.
+export struct Fact {
+    label: string,
+    value: string,
+}
+
+/// An instruction file in the Context panel, and where it applies.
+export struct InstructionFile {
+    path: string,
+    aside: string,
+}
+
+/// The Context panel's words and numbers; its lists are `State.context-facts`
+/// and `State.context-files`.
+export struct ContextCard {
+    /// Shown alone, when no session is open.
+    note: string,
+    /// Why loading failed.
+    error: string,
+    /// What the window section says instead of a count.
+    window-note: string,
+    /// The tokens in the window, short, and what they're out of.
+    used: string,
+    of: string,
+    /// Whether the model's window size is known, so the bar shows.
+    bar: bool,
+    /// How full the bar is, from 0 to 1, and whether that's nearly full.
+    fill: float,
+    warn: bool,
+    percent: string,
+    messages: string,
+    /// What the instructions section says instead of files, or after them.
+    files-note: string,
+}
+
+/// One of the agent's todos: what it is, and where it stands (0 not
+/// started, 1 being worked on, 2 done, 3 dropped).
+export struct TodoRow {
+    text: string,
+    status: int,
+}
+
+/// The Todos panel's words; its items are `State.todo-rows`.
+export struct TodosCard {
+    /// Shown alone, when there's no list.
+    note: string,
+    /// Whether the folder's agents lack the todo tool, and the setting that
+    /// gives it to them.
+    off: bool,
+    setting: string,
+    /// "2 of 5 done", and the counts for the bar.
+    progress: string,
+    done: int,
+    total: int,
+}
+
+export global State {
+    // The shell.
+    in property <bool> sidebar-shown: true;
+    in property <length> sidebar-width: 288px;
+    in property <[bool]> panels-shown: [false, false, false, false, false];
+    /// The tool panel on screen, by number, or -1; with `maximized` it
+    /// covers the space between the rails.
+    in property <int> panel: -1;
+    in property <bool> maximized;
+    in property <length> panel-width: 360px;
+    in property <string> panel-title;
+    in property <bool> panel-refresh;
+    /// The center's tabs, what it shows, and its quiet text.
+    in property <[Tab]> documents;
+    in property <Content> content: Content.home;
+    in property <string> quiet;
+    /// The terminals under the center.
+    in property <bool> terminals-shown;
+    in property <length> terminal-height: 260px;
+    in property <[Tab]> terminals;
+
+    // The tool panels.
+    in property <ContextCard> context-card;
+    in property <[Fact]> context-facts;
+    in property <[InstructionFile]> context-files;
+    in property <TodosCard> todos-card;
+    in property <[TodoRow]> todo-rows;
+
+    // The sidebar.
+    in property <string> location-label;
+    in property <string> location-glyph;
+    in property <color> status-color;
+    in property <string> status-text;
+    in property <bool> picking-location;
+    in property <[LocationRow]> locations;
+    in property <[SidebarRow]> sidebar-rows;
+    /// What the list says when it has nothing to show.
+    in property <string> sidebar-notice;
+
+    // The start screen and composer.
+    in property <bool> starting;
+    in property <string> home-hint;
+    in property <string> composer-text;
+    /// Moves when Rust changes the composer's text; typing doesn't move it.
+    in property <int> composer-revision;
+    in property <int> composer-cursor;
+    in property <int> composer-anchor;
+    in property <string> send-error;
+    in property <bool> sending;
+    in property <bool> pasting;
+    in property <bool> can-send;
+    in property <Chip> folder-chip;
+    in property <[Chip]> chips;
+    in property <string> shield-glyph;
+    in property <color> shield-color;
+
+    // The open session.
+    in property <string> session-id;
+    in property <string> session-title;
+    /// The subagent's parent, for its link back; empty for a session of its own.
+    in property <string> session-parent;
+    in property <string> session-parent-id;
+    in property <string> session-agent;
+    in property <string> session-agent-glyph;
+    in property <color> session-agent-color;
+    in property <bool> session-read-only;
+    in property <string> session-model;
+    in property <bool> session-busy;
+    in property <string> session-placeholder;
+    in property <[TimelineRow]> timeline;
+    in property <[InboxRow]> inbox;
+    // What the open session waits on.
+    in property <UndoCard> undo-card;
+    in property <ApprovalCard> approval-card;
+    in property <QuestionCard> question-card;
+    in property <[Question]> questions;
+
+    // The open picker's menu.
+    in property <int> picker: -1;
+    in property <[MenuItem]> menu-items;
+    in property <int> menu-highlight;
+    in property <string> menu-note;
+    in property <string> menu-filter;
+}
+
+/// What the window reports to Rust.
+export global Logic {
+    callback resized(length, length);
+    /// A key press; returns whether it was a shortcut.
+    callback key(string, bool, bool, bool) -> bool;
+
+    callback toggle-sidebar();
+    callback toggle-panel(int);
+    callback toggle-terminal();
+    callback new-terminal();
+    callback maximize(int);
+    callback restore();
+    callback close-panel();
+    callback refresh(int);
+
+    callback toggle-locations();
+    callback pick-location(int);
+    callback add-project();
+    callback new-session(string);
+    callback filter-edited(string);
+    callback toggle-more(string);
+    callback open-session(string);
+
+    /// A center tab, by key, was clicked or closed.
+    callback tab-selected(int);
+    callback tab-closed(int);
+    /// A terminal tab, by number, was clicked or closed.
+    callback terminal-selected(int);
+    callback terminal-closed(int);
+    /// An edge (0 the sidebar's, 1 the right panel's, 2 the terminals') was
+    /// dragged this far right or down; then let go.
+    callback resize(int, length);
+    callback resize-done();
+
+    /// The composer's text changed or its cursor moved: the text, and the
+    /// cursor's and the selection anchor's byte offsets.
+    callback composer-edited(string, int, int);
+    /// A key press in the composer; returns whether it was taken.
+    callback composer-key(string, bool, bool, bool) -> bool;
+    callback send();
+    callback attach();
+    callback stop();
+
+    callback open-panel(int);
+    callback toggle-group(string);
+    callback toggle-diff(string);
+    callback hover-prompt(string);
+    callback undo(string);
+    callback review(string, int);
+    callback link(string);
+    callback steer-queued(string);
+    callback cancel-queued(string);
+
+    callback undo-keep(string);
+    callback undo-cancel(string);
+    /// An approval's answer: 0 allow once, 1 allow always, 2 deny.
+    callback approve(string, int);
+    callback refuse(string);
+    callback refuse-reason(string);
+    callback refuse-send();
+    callback refuse-cancel();
+    /// A question's form, field and option.
+    callback form-choose(string, string, string);
+    callback form-type(string, string, string);
+    callback form-flag(string, string, bool);
+    callback form-send(string);
+    callback form-dismiss(string);
+
+    callback toggle-picker(int);
+    callback close-picker();
+    callback pick(int);
+    callback menu-filter-edited(string);
+    callback menu-action();
+}
+
+/// Requests from Rust to one part of the window: focus a field, scroll a
+/// list. A request names its target and moves `serial`, so asking twice in
+/// a row works.
+export global Requests {
+    in property <string> focus;
+    in property <int> focus-serial;
+    in property <string> scroll;
+    in property <length> scroll-y;
+    in property <int> scroll-serial;
+    /// Where the open picker's chip is in the window, which the menu hangs from.
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-height;
+}

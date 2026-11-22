@@ -1,11 +1,12 @@
 //! Images pasted from the system clipboard, as PNG bytes.
 //!
-//! iced's clipboard carries text only, so images come through `arboard`.
-//! On Wayland it uses the data-control protocol, falling back to X11.
+//! The window's clipboard carries text only, so images come through
+//! `arboard`. On Wayland it uses the data-control protocol, falling back to X11.
 
 // Rust guideline compliant 2026-10-09
 
-use iced::futures::channel::oneshot;
+use futures_util::future::FutureExt as _;
+use tokio::sync::oneshot;
 
 /// Reads an image from the clipboard and encodes it as PNG.
 ///
@@ -20,7 +21,7 @@ pub async fn image() -> Option<Vec<u8>> {
             let _ = sender.send(read());
         })
         .ok()?;
-    receiver.await.ok().flatten()
+    receiver.map(|read| read.ok().flatten()).await
 }
 
 fn read() -> Option<Vec<u8>> {

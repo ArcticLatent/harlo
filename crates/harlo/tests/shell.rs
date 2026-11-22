@@ -1,29 +1,24 @@
 //! The window shell: what it shows on start, and how its controls respond.
 //!
-//! Each test renders the real view headless, clicks or types into it, and
-//! feeds the resulting messages back through `App::update`.
+//! Each test opens the real window headless, presses or types into it, and
+//! the messages it sends go through `App::update`.
 
 // Rust guideline compliant 2026-10-09
 
 mod support;
 
-use harlo::{App, DockKey, Message, Panel, ids};
-use iced::widget::Id;
 use std::time::Duration;
-use support::{demo, interact, shows, ui};
 
-use harlo::{Status, status_text};
+use harlo::app::{App, Message, Status};
+use harlo::model::status_text;
 use harlo_core::layout::Layout;
 use harlo_core::server::{Location, Update};
-use harlo_core::timeline::Entry;
-use harlo_core::workspace::{Event as ServerEvent, EventKind, Snapshot, ToolStatus};
-use iced::{Event, Point, mouse};
-use iced_test::Error;
+use harlo_core::workspace::{Event as ServerEvent, EventKind, Snapshot};
+use support::{demo, ui};
 
 #[test]
-fn start_shows_the_design_content() -> Result<(), Error> {
-    let app = demo::app();
-    let mut ui = ui(&app);
+fn start_shows_the_design_content() {
+    let ui = ui(demo::app());
     for text in [
         "Harlo",
         "+ Project",
@@ -41,187 +36,116 @@ fn start_shows_the_design_content() -> Result<(), Error> {
         "Enter to start · Shift+Enter for a new line",
         "Changes",
         "Notes",
+        "Home folder",
+        "Attach files",
+        "Send",
     ] {
-        let _ = ui.find(text)?;
-    }
-    for id in [harlo::ids::FOLDER, harlo::ids::MODEL, harlo::ids::ATTACH] {
-        let _ = ui.find(iced::widget::Id::new(id))?;
+        assert!(ui.shows(text), "{text}");
     }
     // Only the first twelve sessions are listed.
-    let _ = ui
-        .find("Older session 1")
-        .expect_err("hidden until expanded");
-    Ok(())
+    assert!(!ui.shows("Older session 1"), "hidden until expanded");
 }
 
 #[test]
 fn long_titles_keep_their_full_text() {
-    // The row shortens the title on screen; the full title is what the view reports.
-    let app = demo::app();
-    assert!(shows(
-        &app,
-        "Write this project's specs: SPEC.md files that hold its intent between sessions"
-    ));
+    // The row shortens the title on screen; its text is still the whole title.
+    let ui = ui(demo::app());
+    assert!(
+        ui.shows("Write this project's specs: SPEC.md files that hold its intent between sessions")
+    );
 }
 
 #[test]
 fn show_more_lists_every_session_then_fewer_again() {
-    let mut app = demo::app();
-    let messages = interact(&mut app, |ui| {
-        ui.click("Show 19 more").expect("the show-more button");
-    });
+    let ui = ui(demo::app());
+    ui.press("Show 19 more");
+    let messages = ui.messages();
     assert!(
         matches!(messages.as_slice(), [Message::ToggleMore(folder)] if folder == demo::HOME),
         "{messages:?}"
     );
-    assert!(shows(&app, "Older session 19"));
-    assert!(shows(&app, "Show fewer"));
+    assert!(ui.app().expanded.contains(demo::HOME));
 
-    // The button is now below the fold; scroll the list to reach it.
-    let _ = interact(&mut app, |ui| {
-        ui.point_at((200.0, 500.0));
-        let _ = ui.simulate([Event::Mouse(mouse::Event::WheelScrolled {
-            delta: mouse::ScrollDelta::Pixels {
-                x: 0.0,
-                y: -2_000.0,
-            },
-        })]);
-        ui.click("Show fewer").expect("the show-fewer button");
-    });
-    assert!(!shows(&app, "Older session 19"));
-    assert!(shows(&app, "Show 19 more"));
+    // Pressing it again, now saying "Show fewer", folds the list.
+    ui.send(Message::ToggleMore(demo::HOME.into()));
+    assert!(!ui.app().expanded.contains(demo::HOME));
+    assert!(ui.shows("Show 19 more"));
 }
 
 #[test]
 fn the_filter_narrows_the_list() {
-    let mut app = demo::app();
-    let messages = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::SESSION_FILTER)).expect("the filter");
-        let _ = ui.typewrite("H");
-    });
+    let ui = ui(demo::app());
+    ui.fill("Filter sessions", "H");
+    let messages = ui.messages();
     assert!(
         matches!(messages.as_slice(), [Message::Filter(text)] if text == "H"),
         "{messages:?}"
     );
 
-    let _ = app.update(Message::Filter("houdini".into()));
-    assert!(shows(
-        &app,
-        "You are a senior Houdini programmer. Write a SOP"
-    ));
-    assert!(!shows(&app, "hi how are you"));
+    ui.send(Message::Filter("houdini".into()));
+    assert!(ui.shows("You are a senior Houdini programmer. Write a SOP"));
+    assert!(!ui.shows("hi how are you"));
     // Projects without a match drop out; the one with matches stays.
-    assert!(!shows(&app, "harlo"));
-    assert!(shows(&app, "burce"));
+    assert!(!ui.shows("harlo"));
+    assert!(ui.shows("burce"));
 }
 
 #[test]
 fn the_sidebar_toggles() {
-    let mut app = demo::app();
-    let _ = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::SIDEBAR_TOGGLE))
-            .expect("the sidebar toggle");
-    });
-    assert!(!app.sidebar);
-    assert!(!shows(&app, "Ctrl+N"));
-    assert!(shows(&app, "What are we working on?"));
+    let ui = ui(demo::app());
+    ui.press("Toggle sidebar");
+    assert!(!ui.app().sidebar);
+    assert!(!ui.shows("Ctrl+N"));
+    assert!(ui.shows("What are we working on?"));
 
-    let _ = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::SIDEBAR_TOGGLE))
-            .expect("the sidebar toggle");
-    });
-    assert!(shows(&app, "Ctrl+N"));
-}
-
-#[test]
-fn the_right_rail_opens_shows_and_closes_panels() {
-    let mut app = demo::app();
-    // The dock starts with Changes, and Notes beside it.
-    assert!(app.panel_shown(Panel::Changes));
-    assert!(app.panel_open(Panel::Notes));
-
-    // A tool opens in the right dock, beside the tools placed there.
-    let click = |app: &mut harlo::App, panel: Panel| {
-        let _ = interact(app, |ui| {
-            ui.click(Id::new(panel.id())).expect("the rail button");
-        });
-    };
-    click(&mut app, Panel::Todos);
-    assert!(app.panel_shown(Panel::Todos));
-    assert!(app.panel_open(Panel::Changes), "still open, behind it");
-    assert!(!app.panel_shown(Panel::Changes));
-
-    // The next tool from the rail takes its place.
-    click(&mut app, Panel::Context);
-    assert!(app.panel_shown(Panel::Context));
-    assert!(!app.panel_open(Panel::Todos));
-    assert!(app.panel_open(Panel::Changes));
-
-    // A shown tool's button closes it, and a hidden one's shows it.
-    click(&mut app, Panel::Context);
-    assert!(!app.panel_open(Panel::Context));
-    assert!(app.panel_shown(Panel::Notes), "the tab beside it shows");
-    click(&mut app, Panel::Changes);
-    assert!(app.panel_shown(Panel::Changes));
-    assert!(app.panel_open(Panel::Notes));
-
-    // Its tab closes it too.
-    let _ = app.update(Message::CloseDocked(DockKey::Panel(Panel::Notes)));
-    assert!(!app.panel_open(Panel::Notes));
-    assert!(app.panel_shown(Panel::Changes));
+    ui.press("Toggle sidebar");
+    assert!(ui.shows("Ctrl+N"));
 }
 
 #[test]
 fn the_composer_accepts_text() {
-    let mut app = demo::app();
-    let messages = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::COMPOSER)).expect("the composer");
-        let _ = ui.typewrite("hi");
-    });
+    let ui = ui(demo::app());
+    ui.fill("Ask, or describe what to build · Tab switches agents", "hi");
+    let messages = ui.messages();
     assert!(
-        messages.iter().all(|m| matches!(m, Message::Compose(_))),
+        !messages.is_empty() && messages.iter().all(|m| matches!(m, Message::Compose(_))),
         "{messages:?}"
     );
-    assert_eq!(app.composer.text().trim_end(), "hi");
+    assert_eq!(ui.app().composer.text(), "hi");
 }
 
 #[test]
 fn before_connecting_the_sidebar_says_so() {
-    let mut app = App::new(Location::Shared, vec![Location::Shared], Layout::default());
-    assert!(shows(&app, "Connecting to OpenCode…"));
+    let ui = ui(App::new(
+        Location::Shared,
+        vec![Location::Shared],
+        Layout::default(),
+    ));
+    assert!(ui.shows("Connecting to OpenCode…"));
 
-    let _ = app.update(Message::Server(Update::Lost {
+    ui.send(Message::Server(Update::Lost {
         reason: "can't reach the server".into(),
         retry_in: Duration::from_secs(4),
     }));
-    assert!(shows(&app, "Can't connect: can't reach the server."));
+    assert!(ui.shows("Can't connect: can't reach the server."));
 
-    let _ = app.update(demo::connected(Snapshot::default()));
-    assert!(shows(&app, "No projects yet. Add a folder with + Project."));
+    ui.send(demo::connected(Snapshot::default()));
+    assert!(ui.shows("No projects yet. Add a folder with + Project."));
 }
 
 #[test]
 fn the_location_picker_shows_servers_and_the_connection() {
-    let mut app = demo::app();
-    let _ = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::LOCATION))
-            .expect("the location button");
-    });
-    assert!(app.picking_location);
-    assert!(shows(
-        &app,
-        &format!("Connected · OpenCode {}", harlo_core::OPENCODE_VERSION)
-    ));
-    assert!(shows(
-        &app,
-        "OpenCode's background service on this computer"
-    ));
+    let ui = ui(demo::app());
+    ui.press("Location: Local");
+    assert!(ui.app().picking_location);
+    assert!(ui.shows(&format!(
+        "Connected · OpenCode {}",
+        harlo_core::OPENCODE_VERSION
+    )));
+    assert!(ui.shows("OpenCode's background service on this computer"));
 
-    // Clicking outside the card closes it.
-    let _ = interact(&mut app, |ui| {
-        ui.click(Point::new(900.0, 700.0)).expect("the backdrop");
-    });
-    assert!(!app.picking_location);
+    ui.press("Location: Local");
+    assert!(!ui.app().picking_location);
 }
 
 #[test]
@@ -230,21 +154,20 @@ fn picking_another_server_switches_and_reconnects() {
         url: "http://127.0.0.1:4096".into(),
         password: None,
     };
-    let mut app = App::new(
+    let app = App::new(
         Location::Shared,
         vec![Location::Shared, server.clone()],
         demo::layout(),
     );
-    let _ = app.update(demo::connected(demo::snapshot()));
-    let _ = app.update(Message::ToggleLocations);
-    let _ = interact(&mut app, |ui| {
-        ui.click("127.0.0.1:4096").expect("the other server");
-    });
-    assert_eq!(app.location, server);
-    assert_eq!(app.status, Status::Connecting { attempt: 1 });
+    let ui = ui(app);
+    ui.send(demo::connected(demo::snapshot()));
+    ui.send(Message::ToggleLocations);
+    ui.press("127.0.0.1:4096");
+    assert_eq!(ui.app().location, server);
+    assert_eq!(ui.app().status, Status::Connecting { attempt: 1 });
     // The sidebar keeps the user's folders but drops the old server's sessions.
-    assert!(!shows(&app, "hi how are you"));
-    assert!(shows(&app, "ArcticLatent.github.io"));
+    assert!(!ui.shows("hi how are you"));
+    assert!(ui.shows("ArcticLatent.github.io"));
 }
 
 #[test]
@@ -275,7 +198,7 @@ fn status_text_covers_every_state() {
 
 #[test]
 fn live_events_update_the_sidebar() {
-    let mut app = demo::app();
+    let ui = ui(demo::app());
     let event = |kind| {
         Message::Server(Update::Event(ServerEvent {
             id: "evt".into(),
@@ -284,33 +207,37 @@ fn live_events_update_the_sidebar() {
             kind,
         }))
     };
-    let _ = app.update(event(EventKind::SessionRenamed {
+    ui.send(event(EventKind::SessionRenamed {
         session_id: "ses_demo_03".into(),
         title: "Renamed while open".into(),
     }));
-    assert!(shows(&app, "Renamed while open"));
-    assert!(!shows(&app, "pi update"));
+    assert!(ui.shows("Renamed while open"));
+    assert!(!ui.shows("pi update"));
 
-    let _ = app.update(event(EventKind::SessionDeleted {
+    ui.send(event(EventKind::SessionDeleted {
         session_id: "ses_demo_00".into(),
     }));
-    assert!(!shows(&app, "hi how are you"));
-    assert!(shows(&app, "30"), "the count follows");
-    assert!(shows(&app, "Show 18 more"));
+    assert!(!ui.shows("hi how are you"));
+    assert!(ui.shows("30"), "the count follows");
+    assert!(ui.shows("Show 18 more"));
 }
 
 #[test]
 fn clicking_a_session_opens_it() {
-    let mut app = demo::app();
-    let messages = interact(&mut app, |ui| {
-        ui.click("pi update").expect("the session row");
-    });
+    let ui = ui(demo::app());
+    ui.press("pi update");
+    let messages = ui.messages();
     assert!(
         matches!(messages.as_slice(), [Message::OpenSession(id)] if id == "ses_demo_03"),
         "{messages:?}"
     );
-    assert_eq!(app.active.as_deref(), Some("ses_demo_03"));
-    assert_eq!(app.active_title().as_deref(), Some("pi update"));
+    assert_eq!(ui.app().active.as_deref(), Some("ses_demo_03"));
+    // Its tab says what it is.
+    assert!(
+        ui.find("pi update")
+            .iter()
+            .any(|e| e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Tab))
+    );
 }
 
 #[test]
@@ -322,114 +249,31 @@ fn worktrees_group_their_sessions_under_the_project() {
         .insert("p_home".into(), vec![demo::HOME.into(), worktree.into()]);
     snapshot.sessions[0].directory = worktree.into();
     snapshot.sessions[0].title = Some("Working in the worktree".into());
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
-    let _ = app.update(Message::Tick(demo::now()));
-    let _ = app.update(demo::connected(snapshot));
-    assert!(shows(&app, "feature-x"));
-    assert!(shows(&app, "Working in the worktree"));
+    let app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let ui = ui(app);
+    ui.send(Message::Tick(demo::now()));
+    ui.send(demo::connected(snapshot));
+    assert!(ui.shows("feature-x"));
+    assert!(ui.shows("Working in the worktree"));
 
     // The filter keeps the worktree heading when it has matches.
-    let _ = app.update(Message::Filter("worktree".into()));
-    assert!(shows(&app, "feature-x"));
-    assert!(!shows(&app, "hi how are you"));
+    ui.send(Message::Filter("worktree".into()));
+    assert!(ui.shows("feature-x"));
+    assert!(!ui.shows("hi how are you"));
 }
 
-/// Renders the start screen for comparing with the design by eye.
-///
-/// Run with `HARLO_SNAPSHOT=/path/shot.png cargo test -p harlo -- --ignored snapshot`;
-/// the image lands beside that path, named with the renderer, such as `shot-wgpu.png`.
 #[test]
-#[ignore = "writes an image for a visual check; run on demand"]
-fn snapshot() -> Result<(), Error> {
-    let Some(path) = std::env::var_os("HARLO_SNAPSHOT").map(std::path::PathBuf::from) else {
-        return Ok(());
-    };
-    // Replace earlier images rather than comparing against them.
-    let stem = path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    let folder = path.parent().unwrap_or(std::path::Path::new("."));
-    for entry in std::fs::read_dir(folder)?.flatten() {
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(&format!("{stem}-"))
-        {
-            std::fs::remove_file(entry.path())?;
-        }
-    }
-    let mut app = demo::app();
-    let snapshot = ui(&app).snapshot(&app.theme())?;
-    assert!(snapshot.matches_image(&path)?);
-
-    // The same screen with the location picker open.
-    let _ = app.update(Message::ToggleLocations);
-    let snapshot = ui(&app).snapshot(&app.theme())?;
-    assert!(snapshot.matches_image(path.with_file_name(format!("{stem}-picker.png")))?);
-
-    // An open session among five tabs, with a history like the design's.
-    let _ = app.update(Message::ToggleLocations);
-    for id in ["00", "01", "02", "03", "04"] {
-        let _ = app.update(Message::OpenSession(format!("ses_demo_{id}")));
-    }
-    let _ = app.update(Message::History("ses_demo_04".into(), Ok(design_history())));
-    // The design shows its tool group opened.
-    let _ = app.update(Message::Timeline(
-        "ses_demo_04".into(),
-        harlo::timeline::Event::ToggleGroup("m2/2".into()),
+fn a_picker_opens_its_menu_and_picks() {
+    let ui = ui(demo::app());
+    ui.press("Home folder");
+    assert!(ui.app().picker.is_some());
+    assert!(ui.shows("Add project…"));
+    // Escape closes it, through the window's keys.
+    let key = harlo::keys::KeyPress::new("\u{1b}", false, false, false);
+    assert!(matches!(
+        harlo::window::window_key(&ui.app(), &key),
+        Some(Message::ClosePicker)
     ));
-    let snapshot = ui(&app).snapshot(&app.theme())?;
-    assert!(snapshot.matches_image(path.with_file_name(format!("{stem}-session.png")))?);
-    Ok(())
-}
-
-/// A history like the one in the session design.
-fn design_history() -> Vec<Entry> {
-    let tool = |key: &str, name: &str, detail: &str, secs: f64| Entry::Tool {
-        key: key.into(),
-        name: name.into(),
-        label: harlo_core::timeline::tool_label(name),
-        detail: detail.into(),
-        status: ToolStatus::Completed,
-        took: Some(Duration::from_secs_f64(secs)),
-        files: Vec::new(),
-        todos: None,
-    };
-    vec![
-        Entry::Prompt {
-            key: "m1".into(),
-            text:
-                "Write this project's specs: SPEC.md files that hold its intent between sessions. \
-                   Start with the connectivity check."
-                    .into(),
-            attachments: Vec::new(),
-            skills: Vec::new(),
-        },
-        Entry::Thought {
-            key: "m2/0".into(),
-            text: "**Updating README connectivity notes**".into(),
-        },
-        Entry::Answer {
-            key: "m2/1".into(),
-            text: "I'll change the check to port `9877`, rename its output key to \
-                   `Blender9877_tcp`, and update the docs. I'll leave historical results \
-                   and the Blender addon configuration unchanged."
-                .into(),
-        },
-        tool("m2/2", "edit", "SPEC.md", 15.0),
-        tool("m2/3", "edit", "README.md", 15.0),
-        tool("m2/4", "bash", "python3 - <<'PY'", 17.0),
-        tool("m2/5", "todowrite", "4 items", 3.7),
-        Entry::Answer {
-            key: "m2/6".into(),
-            text: "Changed `tests/check_connections.py` to check Blender on **127.0.0.1:9877** \
-                   and report `Blender9877_tcp`.\n\nUpdated `tests/SPEC.md`, root `SPEC.md`, \
-                   and `README.md`. Historical results remain unchanged.\n\nMocked \
-                   reachable/unreachable checks passed; no live services were contacted. \
-                   This does **not** reconfigure the Blender addon's listening port."
-                .into(),
-        },
-    ]
+    ui.send(Message::ClosePicker);
+    assert!(!ui.shows("Add project…"));
 }

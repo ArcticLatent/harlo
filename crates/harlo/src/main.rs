@@ -2,23 +2,31 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::process::ExitCode;
+
 use harlo::options::{ArgsError, Options, PASSWORD_VAR, USAGE};
 use mimalloc::MiMalloc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-fn main() -> iced::Result {
+fn main() -> ExitCode {
     let password = std::env::var(PASSWORD_VAR).ok();
     match Options::parse(std::env::args().skip(1), password) {
-        Ok(options) => harlo::run(options),
+        Ok(options) => match harlo::run(&options) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("harlo: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Err(ArgsError::Help) => {
             println!("{USAGE}");
-            Ok(())
+            ExitCode::SUCCESS
         }
         Err(ArgsError::Invalid(message)) => {
             eprintln!("harlo: {message}\n\n{USAGE}");
-            std::process::exit(2);
+            ExitCode::from(2)
         }
     }
 }

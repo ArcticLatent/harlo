@@ -1,18 +1,11 @@
-//! A session's timeline: rows pinned in stack slots, built only near the viewport.
-//!
-//! Long sessions have thousands of rows. Building them all each frame stutters,
-//! so only items near the viewport are built. Item `i` sits in stack slot
-//! `i % SLOTS` at its offset, which keeps its widget state (shaped text) for as
-//! long as it stays near the viewport. A `sensor` reports each built item's
-//! real height, stored by the row's key; until then an estimate stands in.
-//! The scrollable is anchored to the bottom, so the newest rows stay put
-//! while heights above them settle. Once the user scrolls up, the row at the
-//! top of the view is held in place instead: rows streaming in below, or a
-//! group opening in view, don't push what they're reading away.
+//! A session's timeline: its rows, and runs of tool calls folded into groups.
 //!
 //! Runs of two or more tool calls fold into a group with a one-line summary.
 //! A group is open while one of its calls runs, and closed once they're done,
 //! unless the user opened or closed it.
+//!
+//! The window lists [`Timeline::items`] in a virtualized list, so only the
+//! rows near the view are built, however long the session.
 
 // Rust guideline compliant 2026-10-09
 
@@ -20,81 +13,12 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use harlo_core::diff;
-use harlo_core::server::FileDiff;
-use harlo_core::theme::{Rgba, Tokens};
-use harlo_core::timeline::{Change, Compaction, Entry, Live, summarize, tools_summary};
+use harlo_core::timeline::{Change, Entry, Live, tools_summary};
 use harlo_core::workspace::{EventKind, ToolStatus};
-use iced::animation::Animation;
-use iced::time::Instant;
-use iced::widget::scrollable::AbsoluteOffset;
-use iced::widget::{
-    Id, button, center, column, container, markdown, mouse_area, row, scrollable, sensor, space,
-    stack, text,
-};
-use iced::{Center, Element, Fill, Size, Task, padding};
-use lucide_icons::Icon;
-
-use crate::motion::{self, Moment};
-use crate::style::{self, size};
-use crate::view::diff as diff_view;
-use crate::view::icon;
-use crate::view::subagents::{self, Crew};
-
-/// Stack slots for items near the viewport.
-const SLOTS: usize = 64;
-
-/// Pixels above and below the viewport whose items stay built.
-const OVERSCAN: f32 = 900.0;
-
-/// Gap between items.
-const SPACING: f32 = 14.0;
-
-/// Height of one-line rows: thoughts, tools, notes, group headers.
-const LINE: f32 = 24.0;
-
-/// A first guess at a subagent card's height.
-const CARD: f32 = 40.0;
-
-/// A first guess at the height of one line of a subagent's report.
-const REPORT_LINE: f32 = 17.0;
-
-/// The timeline column's widest size; it narrows with the window.
-pub const WIDTH: f32 = 780.0;
-
-/// A guess at the viewport height before the first scroll report.
-const FIRST_VIEWPORT: f32 = 1_000.0;
-
-/// Padding above and below the rows.
-const PAD: f32 = 18.0;
-
-/// Within this distance of the end, the view follows the newest rows.
-const FOLLOW: f32 = 4.0;
-
-/// Diff lines a tool row shows before "N more lines".
-const DIFF_LINES: usize = 12;
-
-/// How far a tool row's diffs are indented: past its marker (14) and gap (9),
-/// so they line up with the tool's name.
-const DIFF_INDENT: f32 = 23.0;
-
-/// Height of one diff line, for estimates before it's measured.
-const DIFF_LINE: f32 = 19.0;
-
-/// Scroll reports that may disagree with a requested offset before it's dropped.
-const STALE_REPORTS: u8 = 4;
 
 /// Something the timeline reports.
 #[derive(Debug, Clone)]
 pub enum Event {
-    /// The view scrolled or resized.
-    Scrolled {
-        /// How far the view's bottom is above the end of the rows.
-        from_bottom: f32,
-        /// The view's height.
-        height: f32,
-    },
-    /// An item was measured: its key and size.
-    Measured(String, Size),
     /// A link in an answer was clicked.
     Link(String),
     /// A tool group was opened or closed, by its key.
@@ -153,35 +77,32 @@ pub enum Activity {
     },
 }
 
-/// One row: its entry, and the parsed Markdown for answers.
+/// One row: its entry, and a tool's diffs parsed once.
 #[derive(Debug)]
 struct Row {
     entry: Entry,
-    markdown: Option<markdown::Content>,
     /// A tool's changed files as diff lines, parsed once.
     diffs: Vec<Vec<diff::Line>>,
     /// Built from live events rather than loaded.
     live: bool,
     /// A prompt Harlo sent that OpenCode's copy hasn't replaced yet; reloads keep it.
     unsaved: bool,
+    /// Changes whenever the entry does, so the window rebuilds only changed rows.
+    stamp: u64,
 }
 
 impl Row {
-    fn new(entry: Entry, live: bool) -> Self {
-        let markdown = match &entry {
-            Entry::Answer { text, .. } => Some(markdown::Content::parse(text)),
-            _ => None,
-        };
+    fn new(entry: Entry, live: bool, stamp: u64) -> Self {
         let diffs = match &entry {
             Entry::Tool { files, .. } => files.iter().map(|f| diff::lines(&f.patch)).collect(),
             _ => Vec::new(),
         };
         Self {
             entry,
-            markdown,
             diffs,
             live,
             unsaved: false,
+            stamp,
         }
     }
 }
@@ -200,35 +121,14 @@ enum Item {
     },
 }
 
-/// The item held in place while the user reads above the end.
-#[derive(Debug, Clone, PartialEq)]
-struct Anchor {
-    /// The item's height key.
-    key: String,
-    /// How far the view's top is below the item's top.
-    offset: f32,
-}
-
-/// An offset the view was asked to scroll to, until the scrollable reports it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Pending {
-    from_bottom: f32,
-    /// Whether the scroll still needs to be sent.
-    unsent: bool,
-    /// Reports that disagreed since it was sent.
-    stale: u8,
-}
-
-/// A session's rows and how far the view is scrolled.
+/// A session's rows and groups.
 #[derive(Debug)]
 pub struct Timeline {
-    scroller: Id,
     /// Where loading stands.
     pub load: Load,
     rows: Vec<Row>,
     index: HashMap<String, usize>,
     items: Vec<Item>,
-    heights: HashMap<String, f32>,
     /// Groups the user opened (`true`) or closed (`false`).
     choices: HashMap<String, bool>,
     /// Tool rows whose diffs are shown whole.
@@ -237,38 +137,29 @@ pub struct Timeline {
     hovered: Option<String>,
     live: Live,
     busy: bool,
-    from_bottom: f32,
-    viewport: f32,
-    anchor: Option<Anchor>,
-    pending: Option<Pending>,
-    /// Prompts fading in, by row key.
-    appear: HashMap<String, Animation<bool>>,
-    /// When the last fade-in ends.
-    settle: Option<Instant>,
+    /// Counts changes to what's shown, so the window rebuilds the list only
+    /// when it changed.
+    revision: u64,
+    /// The last row stamp handed out; stamps are unique within the timeline.
+    stamps: u64,
 }
 
 impl Timeline {
     /// Creates an empty timeline for a session whose history is loading.
     #[must_use]
-    pub fn new(session_id: &str) -> Self {
+    pub fn new(_session_id: &str) -> Self {
         Self {
-            scroller: Id::from(format!("timeline-{session_id}")),
             load: Load::Loading,
             rows: Vec::new(),
             index: HashMap::new(),
             items: Vec::new(),
-            heights: HashMap::new(),
             choices: HashMap::new(),
             whole: HashSet::new(),
             hovered: None,
             live: Live::new(),
             busy: false,
-            from_bottom: 0.0,
-            viewport: FIRST_VIEWPORT,
-            anchor: None,
-            pending: None,
-            appear: HashMap::new(),
-            settle: None,
+            revision: 0,
+            stamps: 0,
         }
     }
 
@@ -312,7 +203,7 @@ impl Timeline {
         for entry in entries {
             let row = match by_key.remove(entry.key()) {
                 Some(row) if row.entry == entry => row,
-                _ => Row::new(entry, false),
+                _ => Row::new(entry, false, self.stamp()),
             };
             self.rows.push(row);
         }
@@ -324,6 +215,7 @@ impl Timeline {
     /// Records a failed load; rows already shown stay.
     pub fn fail(&mut self, reason: String) {
         self.load = Load::Failed(reason);
+        self.revision += 1;
     }
 
     /// Says whether the session is working, which keeps its last tool group open.
@@ -335,9 +227,7 @@ impl Timeline {
     }
 
     /// Applies a live event for this session; returns whether the history should be reloaded.
-    ///
-    /// A prompt that wasn't here before fades in from `at`.
-    pub fn apply(&mut self, kind: &EventKind, time: f64, at: Instant) -> bool {
+    pub fn apply(&mut self, kind: &EventKind, time: f64) -> bool {
         let mut reload = false;
         let mut structure = false;
         for change in self.live.apply(kind, time) {
@@ -347,11 +237,9 @@ impl Timeline {
                         structure |=
                             self.rows[index].entry.is_running_tool() != entry.is_running_tool();
                         // OpenCode's copy replaces a prompt Harlo showed while sending it.
-                        self.rows[index] = Row::new(entry, true);
+                        let stamp = self.stamp();
+                        self.rows[index] = Row::new(entry, true, stamp);
                     } else {
-                        if matches!(entry, Entry::Prompt { .. }) {
-                            self.fade_in(entry.key(), at);
-                        }
                         self.push(entry);
                         structure = true;
                     }
@@ -360,21 +248,22 @@ impl Timeline {
                     key,
                     thought,
                     delta,
-                } => match self.index.get(&key).map(|&at| &mut self.rows[at]) {
-                    Some(Row {
-                        entry: Entry::Answer { text, .. },
-                        markdown,
-                        ..
-                    }) => {
-                        text.push_str(&delta);
-                        if let Some(markdown) = markdown {
-                            markdown.push_str(&delta);
+                } => match self.index.get(&key).copied() {
+                    Some(at)
+                        if matches!(
+                            self.rows[at].entry,
+                            Entry::Answer { .. } | Entry::Thought { .. }
+                        ) =>
+                    {
+                        let stamp = self.stamp();
+                        let row = &mut self.rows[at];
+                        if let Entry::Answer { text, .. } | Entry::Thought { text, .. } =
+                            &mut row.entry
+                        {
+                            text.push_str(&delta);
                         }
+                        row.stamp = stamp;
                     }
-                    Some(Row {
-                        entry: Entry::Thought { text, .. },
-                        ..
-                    }) => text.push_str(&delta),
                     Some(_) => reload = true,
                     None => {
                         let entry = if thought {
@@ -392,22 +281,22 @@ impl Timeline {
         if structure {
             self.regroup();
         }
+        self.revision += 1;
         reload
     }
 
-    /// Shows a prompt that's on its way to OpenCode, fading in from `at`.
+    /// Shows a prompt that's on its way to OpenCode.
     ///
     /// It stays, marked as sending, until OpenCode's copy (with the same key)
     /// replaces it, [`Timeline::sent`] marks it sent, or
     /// [`Timeline::unpend`] takes it away.
-    pub fn pend(&mut self, entry: Entry, at: Instant) {
-        self.fade_in(entry.key(), at);
+    pub fn pend(&mut self, entry: Entry) {
         if self.index.contains_key(entry.key()) {
             // OpenCode's copy is already here.
             return;
         }
         self.index.insert(entry.key().to_owned(), self.rows.len());
-        let mut row = Row::new(entry, true);
+        let mut row = Row::new(entry, true, self.stamp());
         row.unsaved = true;
         self.rows.push(row);
         self.load = Load::Ready;
@@ -420,26 +309,8 @@ impl Timeline {
             && self.rows[index].unsaved
         {
             self.rows.remove(index);
-            self.appear.remove(key);
             self.reindex();
         }
-    }
-
-    /// Scrolls to the newest rows and follows them again.
-    pub fn to_end(&mut self) {
-        self.anchor = None;
-        self.from_bottom = 0.0;
-        self.pending = Some(Pending {
-            from_bottom: 0.0,
-            unsent: true,
-            stale: 0,
-        });
-    }
-
-    /// Returns when the last fade-in ends, if any started.
-    #[must_use]
-    pub fn settles(&self) -> Option<Instant> {
-        self.settle
     }
 
     /// Returns the text of the prompt with this key, if it's shown.
@@ -492,15 +363,16 @@ impl Timeline {
         }
     }
 
-    fn fade_in(&mut self, key: &str, at: Instant) {
-        self.appear.insert(key.to_owned(), motion::appear(at));
-        let end = at + motion::APPEAR;
-        self.settle = Some(self.settle.map_or(end, |settle| settle.max(end)));
-    }
-
     fn push(&mut self, entry: Entry) {
         self.index.insert(entry.key().to_owned(), self.rows.len());
-        self.rows.push(Row::new(entry, true));
+        let stamp = self.stamp();
+        self.rows.push(Row::new(entry, true, stamp));
+    }
+
+    /// A fresh row stamp.
+    fn stamp(&mut self) -> u64 {
+        self.stamps += 1;
+        self.stamps
     }
 
     fn reindex(&mut self) {
@@ -541,7 +413,7 @@ impl Timeline {
             at = run.end;
         }
         self.items = items;
-        self.reanchor();
+        self.revision += 1;
     }
 
     /// The run of rows starting at `at` that folds into a group, if any.
@@ -570,44 +442,11 @@ impl Timeline {
     /// Applies a timeline event.
     pub fn update(&mut self, event: &Event) {
         match event {
-            &Event::Scrolled {
-                from_bottom: reported,
-                height,
-            } => {
-                self.viewport = height;
-                if let Some(pending) = &mut self.pending {
-                    // Reports from before the requested scroll took effect
-                    // are stale; a few in a row mean it never will.
-                    if (reported - pending.from_bottom).abs() < 1.0 {
-                        self.pending = None;
-                        return;
-                    }
-                    if pending.unsent || pending.stale < STALE_REPORTS {
-                        pending.stale += 1;
-                        return;
-                    }
-                    self.pending = None;
-                }
-                self.from_bottom = reported;
-                self.anchor = self.capture();
-            }
-            Event::Measured(key, size) => {
-                self.heights.insert(key.clone(), size.height);
-                self.reanchor();
-            }
             Event::ToggleGroup(key) => {
                 let open = self
                     .items
                     .iter()
                     .any(|item| matches!(item, Item::Group { key: k, open: true, .. } if k == key));
-                // The header the user clicked stays where it is.
-                let header = format!("group:{key}");
-                if let Some(top) = self.top_of(&header) {
-                    self.anchor = Some(Anchor {
-                        key: header,
-                        offset: self.view_top() - top,
-                    });
-                }
                 self.choices.insert(key.clone(), !open);
                 self.regroup();
             }
@@ -615,685 +454,123 @@ impl Timeline {
                 if !self.whole.remove(key) {
                     self.whole.insert(key.clone());
                 }
+                self.revision += 1;
             }
-            Event::Hover(key) => self.hovered.clone_from(key),
+            Event::Hover(key) => {
+                if &self.hovered != key {
+                    self.hovered.clone_from(key);
+                    self.revision += 1;
+                }
+            }
             // The app acts on these.
             Event::Link(_) | Event::Undo(_) | Event::OpenSession(_) | Event::Review { .. } => {}
         }
     }
 
-    /// Returns how far the view's bottom is above the end of the rows.
-    ///
-    /// Zero while the view follows the newest rows.
+    /// Counts changes to what's shown.
     #[must_use]
-    pub fn from_bottom(&self) -> f32 {
-        self.from_bottom
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
-    /// Returns a scroll that keeps the held row in place, if one is due.
-    ///
-    /// Call it after [`Timeline::update`], [`Timeline::set`] and
-    /// [`Timeline::apply`], and run the task it returns.
-    pub fn scroll<T: Send + 'static>(&mut self) -> Task<T> {
-        match &mut self.pending {
-            Some(pending) if pending.unsent => {
-                pending.unsent = false;
-                iced::widget::operation::scroll_to(
-                    self.scroller.clone(),
-                    AbsoluteOffset {
-                        x: None,
-                        y: Some(pending.from_bottom),
-                    },
-                )
-            }
-            _ => Task::none(),
-        }
-    }
-
-    /// The rows' total height, without the padding around them.
-    fn total(&self) -> f32 {
-        let sum: f32 = self
-            .items
-            .iter()
-            .map(|item| self.height(item) + SPACING)
-            .sum();
-        (sum - SPACING).max(0.0)
-    }
-
-    /// Where the view's top is, measured from the first row's top.
-    fn view_top(&self) -> f32 {
-        self.total() + PAD - self.viewport - self.from_bottom
-    }
-
-    /// Where the item with the height key `key` starts, if it's shown.
-    fn top_of(&self, key: &str) -> Option<f32> {
-        let mut top = 0.0;
-        for item in &self.items {
-            if self.item_key(item) == key {
-                return Some(top);
-            }
-            top += self.height(item) + SPACING;
-        }
-        None
-    }
-
-    /// The item at the top of the view, unless the view follows the end.
-    fn capture(&self) -> Option<Anchor> {
-        if self.from_bottom <= FOLLOW {
-            return None;
-        }
-        let view_top = self.view_top();
-        let mut top = 0.0;
-        for item in &self.items {
-            let height = self.height(item);
-            if top + height + SPACING > view_top {
-                return Some(Anchor {
-                    key: self.item_key(item),
-                    offset: view_top - top,
-                });
-            }
-            top += height + SPACING;
-        }
-        None
-    }
-
-    /// Scrolls so the held item is where it was, after heights or rows changed.
-    fn reanchor(&mut self) {
-        let Some(anchor) = &self.anchor else {
-            return;
-        };
-        let Some(top) = self.top_of(&anchor.key) else {
-            self.anchor = None;
-            return;
-        };
-        let wanted = top + anchor.offset;
-        let from_bottom = (self.total() + PAD - self.viewport - wanted).max(0.0);
-        if (from_bottom - self.from_bottom).abs() < 0.5 {
-            return;
-        }
-        self.from_bottom = from_bottom;
-        self.pending = Some(Pending {
-            from_bottom,
-            unsent: true,
-            stale: 0,
-        });
-        if from_bottom <= FOLLOW {
-            // Back at the end: follow the newest rows again.
-            self.anchor = None;
-        }
-    }
-
-    /// The key an item's height is stored under.
-    fn item_key(&self, item: &Item) -> String {
-        match item {
-            Item::Row(at) => self.rows[*at].entry.key().to_owned(),
-            Item::Group { key, .. } => format!("group:{key}"),
-        }
-    }
-
-    fn height(&self, item: &Item) -> f32 {
-        self.heights
-            .get(&self.item_key(item))
-            .copied()
-            .unwrap_or_else(|| match item {
-                Item::Row(at) => estimate(&self.rows[*at]),
-                Item::Group { .. } => LINE,
-            })
-    }
-
-    /// The timeline, scrolled with the newest rows at the bottom.
+    /// What the timeline shows, in order.
     #[must_use]
-    ///
-    /// New prompts fade in as of `moment`.
-    /// `crew` says how the session's subagents stand, for their cards.
-    pub fn view<'a>(&'a self, t: &Tokens, moment: Moment, crew: &Crew) -> Element<'a, Event> {
-        let body: Element<'a, Event> = match (&self.load, self.rows.is_empty()) {
-            (Load::Loading, true) => return note(t, "Loading…"),
-            (Load::Failed(reason), true) => {
-                return note(t, &format!("Couldn't load this session: {reason}"));
-            }
-            (_, true) => return note(t, "No messages yet."),
-            _ => self.slots(t, moment, crew),
-        };
-        let column = container(body)
-            .max_width(WIDTH)
-            .padding(padding::vertical(PAD));
-        scrollable(container(column).center_x(Fill).padding([0, 24]))
-            .id(self.scroller.clone())
-            .anchor_bottom()
-            // Anchored to the bottom, the offset counts up from the end.
-            .on_scroll(|viewport| Event::Scrolled {
-                from_bottom: viewport.absolute_offset().y,
-                height: viewport.bounds().height,
-            })
-            .height(Fill)
-            .style(style::thin_scroll(t))
-            .into()
-    }
-
-    /// Pins the items near the viewport at their offsets, item `i` in slot `i % SLOTS`.
-    fn slots<'a>(&'a self, t: &Tokens, moment: Moment, crew: &Crew) -> Element<'a, Event> {
-        let heights: Vec<f32> = self.items.iter().map(|item| self.height(item)).collect();
-        let total: f32 = heights.iter().map(|h| h + SPACING).sum::<f32>() - SPACING;
-        let bottom = total - self.from_bottom;
-        let (low, high) = (bottom - self.viewport - OVERSCAN, bottom + OVERSCAN);
-        let mut slots: Vec<Option<Element<'a, Event>>> = (0..SLOTS).map(|_| None).collect();
-        let mut top = 0.0;
-        for (i, (item, height)) in self.items.iter().zip(&heights).enumerate() {
-            if top + height >= low && top <= high {
-                slots[i % SLOTS] = Some(self.measured(t, item, top, moment, crew));
-            }
-            top += height + SPACING;
-        }
-        let mut layers: Vec<Element<'a, Event>> = Vec::with_capacity(SLOTS + 1);
-        layers.push(space().width(Fill).height(total.max(0.0)).into());
-        layers.extend(
-            slots
-                .into_iter()
-                .map(|slot| slot.unwrap_or_else(|| space().into())),
-        );
-        stack(layers).width(Fill).into()
-    }
-
-    fn measured<'a>(
-        &'a self,
-        t: &Tokens,
-        item: &'a Item,
-        top: f32,
-        moment: Moment,
-        crew: &Crew,
-    ) -> Element<'a, Event> {
-        let mut rise = 0.0;
-        let (key, content): (&'a str, Element<'a, Event>) = match item {
-            Item::Row(at) => {
-                let row = &self.rows[*at];
-                let shown = self
-                    .appear
-                    .get(row.entry.key())
-                    .map_or(1.0, |appear| motion::shown(appear, moment.now));
-                rise = (1.0 - shown) * motion::RISE;
-                let key = row.entry.key();
-                let look = Look {
-                    shown,
-                    whole: self.whole.contains(key),
-                    // A run must end first, and a prompt must be stored to be undone.
-                    undo: !self.busy && !row.unsaved && self.hovered.as_deref() == Some(key),
-                };
-                let view = row_view(t, row, look, (moment, crew));
-                let view = if self.in_open_group(*at) {
-                    container(view).padding(padding::left(22)).into()
-                } else {
-                    view
-                };
-                (row.entry.key(), view)
-            }
-            Item::Group {
-                key,
-                rows,
-                open,
-                running,
-            } => (
-                key.as_str(),
-                self.group_header(t, key, rows.clone(), *open, *running),
-            ),
-        };
-        let shown = self.item_key(item);
-        let resized = shown.clone();
-        let content = sensor(content)
-            .key_ref(key)
-            .anticipate(OVERSCAN * 2.0)
-            .on_show(move |size| Event::Measured(shown.clone(), size))
-            .on_resize(move |size| Event::Measured(resized.clone(), size));
-        crate::widget::place(container(content).width(Fill), top + rise).into()
-    }
-
-    fn in_open_group(&self, at: usize) -> bool {
+    pub fn items(&self) -> Vec<Shown<'_>> {
+        // The open group the rows that follow belong to, if any.
+        let mut group: Option<Range<usize>> = None;
         self.items
             .iter()
-            .any(|item| matches!(item, Item::Group { rows, open: true, .. } if rows.contains(&at)))
-    }
-
-    fn group_header<'a>(
-        &self,
-        t: &Tokens,
-        key: &str,
-        rows: Range<usize>,
-        open: bool,
-        running: bool,
-    ) -> Element<'a, Event> {
-        let names = self.rows[rows].iter().filter_map(|row| match &row.entry {
-            Entry::Tool { name, .. } => Some(name.as_str()),
-            _ => None,
-        });
-        let summary = tools_summary(names);
-        let marker = if running {
-            icon(Icon::Loader, 13.0, t.text_interactive_base)
-        } else if open {
-            icon(Icon::ChevronDown, 13.0, t.icon_base)
-        } else {
-            icon(Icon::ChevronRight, 13.0, t.icon_base)
-        };
-        let content = row![
-            container(marker).width(14).center_x(14),
-            text(summary)
-                .size(size::SMALL)
-                .color(style::color(t.text_weak)),
-        ]
-        .spacing(9)
-        .align_y(Center)
-        .height(LINE);
-        button(content)
-            .padding(0)
-            .width(Fill)
-            .on_press(Event::ToggleGroup(key.to_owned()))
-            .style(style::ghost(t, false))
-            .into()
-    }
-}
-
-fn note<'a>(t: &Tokens, message: &str) -> Element<'a, Event> {
-    center(
-        text(message.to_owned())
-            .size(size::LABEL)
-            .color(style::color(t.text_weak)),
-    )
-    .into()
-}
-
-/// A first guess at a row's height, before it's measured.
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "line counts fit easily in an f32"
-)]
-fn estimate(row: &Row) -> f32 {
-    let entry = &row.entry;
-    let lines = |text: &str| {
-        text.lines()
-            .map(|line| line.chars().count() / 95 + 1)
-            .sum::<usize>() as f32
-    };
-    match entry {
-        Entry::Prompt {
-            text,
-            attachments,
-            skills,
-            ..
-        } => {
-            let chips = if attachments.is_empty() && skills.is_empty() {
-                0.0
-            } else {
-                32.0
-            };
-            lines(text) * 22.0 + 26.0 + chips
-        }
-        Entry::Answer { text, .. } => lines(text) * 24.0,
-        Entry::Tool { .. } => {
-            let shown: usize = row
-                .diffs
-                .iter()
-                .map(|lines| lines.len().min(DIFF_LINES + 1) + 1)
-                .sum();
-            LINE + shown as f32 * DIFF_LINE
-        }
-        Entry::Subagent { .. } => CARD,
-        Entry::Report { report, .. } => {
-            LINE + subagents::gist(&report.text).lines().count() as f32 * REPORT_LINE
-        }
-        Entry::Thought { .. }
-        | Entry::Stopped { .. }
-        | Entry::Compaction { .. }
-        | Entry::Note { .. } => LINE,
-    }
-}
-
-/// Markdown settings for answers, from the theme tokens.
-fn markdown_settings(t: &Tokens) -> markdown::Settings {
-    let mut settings = markdown::Settings::with_text_size(
-        size::ANSWER,
-        markdown::Style {
-            font: style::SANS,
-            inline_code_highlight: iced::advanced::text::Highlight {
-                background: style::color(t.surface_raised_strong).into(),
-                border: iced::border::rounded(3),
-            },
-            inline_code_padding: padding::left(2).right(2),
-            inline_code_color: style::color(t.icon_success_base.over(t.text_base, 0.7)),
-            inline_code_font: style::MONO,
-            code_block_font: style::MONO,
-            link_color: style::color(t.text_interactive_base),
-        },
-    );
-    settings.code_size = size::CODE.into();
-    settings.h1_size = (size::ANSWER * 1.5).into();
-    settings.h2_size = (size::ANSWER * 1.3).into();
-    settings.h3_size = (size::ANSWER * 1.15).into();
-    settings
-}
-
-/// How a row is drawn right now.
-#[derive(Debug, Clone, Copy)]
-struct Look {
-    /// How far a new prompt has faded in, from 0 to 1.
-    shown: f32,
-    /// Whether a tool's diffs are shown whole rather than cut short.
-    whole: bool,
-    /// Whether a prompt offers Undo, while the pointer is on it.
-    undo: bool,
-}
-
-/// A row's view; subagent cards also need the time and how the crew stands.
-fn row_view<'a>(
-    t: &Tokens,
-    row: &'a Row,
-    look: Look,
-    (moment, crew): (Moment, &Crew),
-) -> Element<'a, Event> {
-    let Look { shown, whole, undo } = look;
-    match &row.entry {
-        Entry::Prompt {
-            text: prompt,
-            attachments,
-            skills,
-            ..
-        } => prompt_view(t, row, (prompt, attachments, skills), (shown, undo)),
-        Entry::Answer { .. } => {
-            let items = row
-                .markdown
-                .as_ref()
-                .map_or(&[][..], markdown::Content::items);
-            markdown::view(items, markdown_settings(t)).map(Event::Link)
-        }
-        Entry::Thought { text, .. } => line(
-            t,
-            icon(Icon::Circle, 8.0, t.icon_weak_base),
-            "Thought".to_owned(),
-            summarize(text),
-            None,
-            false,
-            None,
-        ),
-        Entry::Tool { .. } => tool_view(t, row, whole),
-        Entry::Stopped { outcome, .. } => {
-            let what = if outcome == "interrupted" {
-                "Stopped"
-            } else {
-                "The run failed"
-            };
-            line(
-                t,
-                icon(Icon::CircleAlert, 13.0, t.icon_warning_base),
-                what.to_owned(),
-                String::new(),
-                None,
-                false,
-                None,
-            )
-        }
-        Entry::Note { text, warning, .. } => {
-            let marker = if *warning {
-                icon(Icon::CircleAlert, 13.0, t.icon_warning_base)
-            } else {
-                icon(Icon::Sparkles, 13.0, t.icon_base)
-            };
-            line(t, marker, text.clone(), String::new(), None, false, None)
-        }
-        Entry::Compaction { state, .. } => compaction_row(t, state),
-        Entry::Subagent {
-            agent,
-            task,
-            child,
-            status,
-            ..
-        } => subagents::card(t, crew, moment, (agent, task, child.as_ref(), *status)),
-        Entry::Report { report, .. } => subagents::report(t, crew, report),
-    }
-}
-
-/// A prompt's bubble, with Undo in its corner while the pointer is on it.
-fn prompt_view<'a>(
-    t: &Tokens,
-    row: &'a Row,
-    (prompt, attachments, skills): (&'a str, &'a [String], &'a [String]),
-    (shown, undo): (f32, bool),
-) -> Element<'a, Event> {
-    let fade = |c: Rgba| motion::fade(c, shown);
-    let mut body = column![].spacing(8);
-    // A prompt can be only attachments, such as a pasted screenshot.
-    if !prompt.is_empty() {
-        body = body.push(
-            text(prompt)
-                .size(size::ANSWER)
-                .color(style::color(fade(t.text_strong))),
-        );
-    }
-    if !attachments.is_empty() || !skills.is_empty() {
-        body = body.push(chips(t, attachments, skills, shown));
-    }
-    let bubble = container(body)
-        .width(Fill)
-        .padding([11, 16])
-        .style(style::boxed(
-            fade(t.surface_raised_base),
-            Some(fade(t.border_weak_base)),
-            size::COMPOSER_RADIUS,
-        ));
-    // Undo floats in the corner while the pointer is on the prompt,
-    // so the row's height never changes.
-    let corner: Element<'a, Event> = if undo {
-        let label = row![
-            icon(Icon::Undo2, 12.0, t.icon_base),
-            text("Undo")
-                .size(size::SMALL)
-                .color(style::color(t.text_base)),
-        ]
-        .spacing(5)
-        .align_y(Center);
-        container(
-            button(label)
-                .padding([3, 8])
-                .on_press(Event::Undo(row.entry.key().to_owned()))
-                .style(style::chip(t)),
-        )
-        .align_right(Fill)
-        .padding(6)
-        .into()
-    } else {
-        space().into()
-    };
-    let key = row.entry.key().to_owned();
-    mouse_area(stack![bubble, corner])
-        .on_enter(Event::Hover(Some(key)))
-        .on_exit(Event::Hover(None))
-        .into()
-}
-
-/// A tool row, with the diffs of the files it changed below it.
-fn tool_view<'a>(t: &Tokens, row: &'a Row, whole: bool) -> Element<'a, Event> {
-    let Entry::Tool {
-        key,
-        label,
-        detail,
-        status,
-        took,
-        files,
-        ..
-    } = &row.entry
-    else {
-        return space().into();
-    };
-    let line = tool_row(t, label, detail, *status, *took, files);
-    if files.is_empty() {
-        return line;
-    }
-    // A changed file opens the Changes panel on it, at this edit's turn.
-    let review = |element: Element<'a, Event>, file: usize| -> Element<'a, Event> {
-        mouse_area(element)
-            .on_press(Event::Review {
-                tool: key.clone(),
-                file,
+            .map(|item| match item {
+                Item::Row(at) => {
+                    let row = &self.rows[*at];
+                    let key = row.entry.key();
+                    Shown::Row(RowView {
+                        entry: &row.entry,
+                        stamp: row.stamp,
+                        diffs: &row.diffs,
+                        whole: self.whole.contains(key),
+                        // A run must end first, and a prompt must be stored to be undone.
+                        undo: !self.busy && !row.unsaved && self.hovered.as_deref() == Some(key),
+                        nested: group.as_ref().is_some_and(|rows| rows.contains(at)),
+                        sending: row.unsaved,
+                    })
+                }
+                Item::Group {
+                    key,
+                    rows,
+                    open,
+                    running,
+                } => {
+                    group = open.then(|| rows.clone());
+                    let names = self.rows[rows.clone()]
+                        .iter()
+                        .filter_map(|row| match &row.entry {
+                            Entry::Tool { name, .. } => Some(name.as_str()),
+                            _ => None,
+                        });
+                    Shown::Group {
+                        key,
+                        summary: tools_summary(names),
+                        open: *open,
+                        running: *running,
+                    }
+                }
             })
-            .interaction(iced::mouse::Interaction::Pointer)
-            .into()
-    };
-    let limit = if whole { usize::MAX } else { DIFF_LINES };
-    let mut body = column![review(line, 0)].spacing(6);
-    for (index, (file, lines)) in files.iter().zip(&row.diffs).enumerate() {
-        // A single file is named on the row; several get headers.
-        if files.len() > 1 {
-            body = body.push(review(
-                container(diff_view::header(
-                    t,
-                    &file.file,
-                    file.additions,
-                    file.deletions,
-                ))
-                .padding(padding::left(DIFF_INDENT))
-                .into(),
-                index,
-            ));
-        }
-        let more = Event::ToggleDiff(key.clone());
-        body = body.push(review(
-            container(diff_view::lines(t, lines, limit, Some(more)))
-                .padding(padding::left(DIFF_INDENT))
-                .into(),
-            index,
-        ));
+            .collect()
     }
-    body.into()
+
+    /// The row with this key's changed files as diff lines, if it's a tool's.
+    #[must_use]
+    pub fn diffs(&self, key: &str) -> Option<&[Vec<diff::Line>]> {
+        self.rows
+            .get(*self.index.get(key)?)
+            .map(|row| row.diffs.as_slice())
+    }
+
+    /// The entry with this key, if it's shown.
+    #[must_use]
+    pub fn entry(&self, key: &str) -> Option<&Entry> {
+        self.rows.get(*self.index.get(key)?).map(|row| &row.entry)
+    }
 }
 
-fn tool_row<'a>(
-    t: &Tokens,
-    label: &str,
-    detail: &str,
-    status: ToolStatus,
-    took: Option<std::time::Duration>,
-    files: &[FileDiff],
-) -> Element<'a, Event> {
-    let (glyph, color) = match status {
-        ToolStatus::Completed => (Icon::Dot, t.icon_base),
-        ToolStatus::Failed => (Icon::X, t.icon_critical_base),
-        ToolStatus::Running | ToolStatus::Streaming => (Icon::Loader, t.text_interactive_base),
-    };
-    let counts = (!files.is_empty()).then(|| {
-        let added = files.iter().map(|f| f.additions).sum();
-        let removed = files.iter().map(|f| f.deletions).sum();
-        diff_view::counts(t, added, removed)
-    });
-    line(
-        t,
-        icon(glyph, 14.0, color),
-        label.to_owned(),
-        detail.to_owned(),
-        took.map(crate::view::duration),
-        true,
-        counts,
-    )
+/// An item the timeline shows.
+#[derive(Debug, Clone)]
+pub enum Shown<'a> {
+    /// A row.
+    Row(RowView<'a>),
+    /// The header of a run of tool calls.
+    Group {
+        /// The group's key: its first call's.
+        key: &'a str,
+        /// What its calls did, in a line.
+        summary: String,
+        /// Whether its calls show below it.
+        open: bool,
+        /// Whether one of its calls is running.
+        running: bool,
+    },
 }
 
-fn compaction_row<'a>(t: &Tokens, state: &Compaction) -> Element<'a, Event> {
-    let (marker, label, detail) = match state {
-        Compaction::Running => (
-            icon(Icon::Loader, 13.0, t.text_interactive_base),
-            "Summarizing the conversation…",
-            String::new(),
-        ),
-        Compaction::Failed(error) => (
-            icon(Icon::CircleAlert, 13.0, t.icon_warning_base),
-            "Couldn't summarize the conversation",
-            error.clone(),
-        ),
-        Compaction::Done(_) => (
-            icon(Icon::Archive, 13.0, t.icon_base),
-            "Summarized the conversation to free up context",
-            String::new(),
-        ),
-    };
-    line(t, marker, label.to_owned(), detail, None, false, None)
-}
-
-/// Attachment and skill names as small chips.
-fn chips<'a>(
-    t: &Tokens,
-    attachments: &'a [String],
-    skills: &'a [String],
-    shown: f32,
-) -> Element<'a, Event> {
-    let fade = |c: Rgba| motion::fade(c, shown);
-    let mut list = row![].spacing(6);
-    let named = attachments
-        .iter()
-        .map(|name| (Icon::Paperclip, name))
-        .chain(skills.iter().map(|name| (Icon::Sparkles, name)));
-    for (glyph, name) in named {
-        list = list.push(
-            container(
-                row![
-                    icon(glyph, 11.0, fade(t.icon_base)),
-                    text(name.as_str())
-                        .size(size::SMALL)
-                        .color(style::color(fade(t.text_base))),
-                ]
-                .spacing(5)
-                .align_y(Center),
-            )
-            .padding([3, 8])
-            .style(style::boxed(
-                fade(t.surface_raised_strong),
-                None,
-                size::RADIUS,
-            )),
-        );
-    }
-    list.wrap().into()
-}
-
-/// A one-line row: a marker, a label, its detail and a time on the right.
-fn line<'a, M: Into<Element<'a, Event>>>(
-    t: &Tokens,
-    marker: M,
-    label: String,
-    detail: String,
-    took: Option<String>,
-    mono: bool,
-    counts: Option<Element<'a, Event>>,
-) -> Element<'a, Event> {
-    let mut content = row![container(marker.into()).width(14).center_x(14)]
-        .spacing(9)
-        .align_y(Center);
-    // The row is one line tall: whichever text is last shortens to fit.
-    if detail.is_empty() {
-        content = content.push(
-            crate::widget::ellipsis(label)
-                .size(size::SMALL)
-                .font(style::SANS_MEDIUM)
-                .color(style::color(t.text_base)),
-        );
-    } else {
-        content = content
-            .push(
-                text(label)
-                    .size(size::SMALL)
-                    .font(style::SANS_MEDIUM)
-                    .color(style::color(t.text_base)),
-            )
-            .push(
-                crate::widget::ellipsis(detail)
-                    .size(if mono { size::CODE } else { size::SMALL })
-                    .font(if mono { style::MONO } else { style::SANS })
-                    .color(style::color(t.text_weak)),
-            );
-    }
-    if let Some(counts) = counts {
-        content = content.push(counts);
-    }
-    if let Some(took) = took {
-        content = content.push(
-            text(took)
-                .size(size::SMALL)
-                .color(style::color(t.text_weaker)),
-        );
-    }
-    column![content].height(LINE).into()
+/// A row as the timeline shows it.
+#[derive(Debug, Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts about one row, read by the window"
+)]
+pub struct RowView<'a> {
+    /// What the row is.
+    pub entry: &'a Entry,
+    /// Changes whenever the entry does.
+    pub stamp: u64,
+    /// A tool's changed files as diff lines.
+    pub diffs: &'a [Vec<diff::Line>],
+    /// Whether its diffs show whole rather than cut short.
+    pub whole: bool,
+    /// Whether it offers Undo: a stored prompt under the pointer, with no run going.
+    pub undo: bool,
+    /// Whether it's inside an open group, and indented.
+    pub nested: bool,
+    /// Whether it's a prompt still on its way to OpenCode.
+    pub sending: bool,
 }

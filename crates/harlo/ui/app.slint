@@ -1,0 +1,145 @@
+// The main window: the rails, the sidebar, the center with the terminals
+// under it, the tool panel on the right, and the popovers over them.
+
+import { AboutSlint } from "std-widgets.slint";
+import { Theme, Size, Fonts } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, Requests, Content } from "data.slint";
+import { LeftRail, RightRail } from "rails.slint";
+import { Sidebar, Locations } from "sidebar.slint";
+import { DocumentTabs, TerminalStrip, PanelFrame, Grip } from "frame.slint";
+import { PanelBody } from "panels.slint";
+import { Home } from "home.slint";
+import { PickerMenu } from "composer.slint";
+import { SessionView } from "session.slint";
+
+export { Theme, Size, Fonts, Icons, State, Logic, Requests }
+
+/// A line of quiet text, for a tab with nothing to show yet.
+component Quiet inherits Rectangle {
+    in property <string> text;
+    background: Theme.background-base;
+    VerticalLayout {
+        padding-top: 20px;
+        padding-left: 18px;
+        padding-right: 18px;
+        alignment: start;
+        Text {
+            text: root.text;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-base;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Harlo";
+    preferred-width: 1588px;
+    preferred-height: 947px;
+    min-width: 720px;
+    min-height: 480px;
+    background: Theme.background-base;
+    default-font-family: Fonts.sans;
+    default-font-size: Size.text;
+    // Keys reach the window's shortcuts even before a field is focused.
+    forward-focus: keys;
+
+    changed width => {
+        Logic.resized(self.width, self.height);
+    }
+    changed height => {
+        Logic.resized(self.width, self.height);
+    }
+
+    keys := FocusScope {
+        // Window-wide keys go to Rust first; it takes only its shortcuts.
+        capture-key-pressed(event) => {
+            if (Logic.key(event.text, event.modifiers.control, event.modifiers.shift,
+                    event.modifiers.alt)) {
+                return accept;
+            }
+            reject
+        }
+
+        HorizontalLayout {
+            LeftRail { }
+            if State.sidebar-shown: Sidebar {
+                width: State.sidebar-width;
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.background-base;
+                clip: true;
+
+                VerticalLayout {
+                    DocumentTabs { }
+                    Rectangle {
+                        vertical-stretch: 1;
+                        if State.content == Content.home: Home { }
+                        if State.content == Content.session: SessionView { }
+                        if State.content == Content.quiet: Quiet {
+                            text: State.quiet;
+                        }
+                        if State.content == Content.editor: Quiet {
+                            text: "No file is open.";
+                        }
+                    }
+                    if State.terminals-shown: TerminalStrip {
+                        height: State.terminal-height;
+                        Quiet { text: ""; }
+                    }
+                }
+            }
+            if State.panel >= 0 && !State.maximized: PanelFrame {
+                width: State.panel-width;
+                PanelBody { }
+            }
+            RightRail { }
+        }
+
+        // The edges to drag, over the lines between the parts.
+        if State.sidebar-shown && !State.maximized: Grip {
+            edge: 0;
+            label: "Sidebar width";
+            x: Size.rail + State.sidebar-width - self.width / 2;
+            width: 7px;
+            height: root.height;
+        }
+        if State.panel >= 0 && !State.maximized: Grip {
+            edge: 1;
+            label: "Panel width";
+            x: root.width - Size.rail - State.panel-width - self.width / 2;
+            width: 7px;
+            height: root.height;
+        }
+        if State.terminals-shown && !State.maximized: Grip {
+            edge: 2;
+            across: true;
+            label: "Terminal height";
+            x: Size.rail + (State.sidebar-shown ? State.sidebar-width : 0);
+            y: root.height - State.terminal-height - self.height / 2;
+            width: root.width - 2 * Size.rail - (State.sidebar-shown ? State.sidebar-width : 0)
+                - (State.panel >= 0 ? State.panel-width : 0);
+            height: 7px;
+        }
+
+        // A maximized panel covers the space between the rails.
+        if State.panel >= 0 && State.maximized: PanelFrame {
+            x: Size.rail;
+            width: root.width - 2 * Size.rail;
+            height: root.height;
+            PanelBody { }
+        }
+
+        if State.picking-location: Locations { }
+        if State.picker >= 0: PickerMenu { }
+    }
+}
+
+/// Slint's notice, for the About page.
+export component About inherits Window {
+    title: "About Harlo";
+    background: Theme.background-base;
+    AboutSlint { }
+}

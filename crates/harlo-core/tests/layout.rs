@@ -6,36 +6,22 @@
 
 use std::collections::BTreeMap;
 
-use harlo_core::layout::{DockNode, Layout, Store, Tabs};
+use harlo_core::layout::{Layout, Store, Tabs};
 
 fn sample() -> Layout {
     Layout {
         order: vec!["/home/u/code/harlo".into(), "/home/u".into()],
         sidebar: false,
         expanded: vec!["/home/u".into()],
+        panel: Some("Notes".into()),
+        sidebar_width: Some(320),
+        panel_width: Some(410),
+        terminal_height: Some(240),
         tabs: BTreeMap::from([(
             "Local".to_owned(),
             Tabs {
                 open: vec!["ses_a".into(), "ses_b".into()],
                 active: Some("ses_b".into()),
-                dock: Some(DockNode::Split {
-                    across: true,
-                    shares: vec![700, 300],
-                    parts: vec![
-                        DockNode::Tabs {
-                            name: Some("center".into()),
-                            group: Some("documents".into()),
-                            tabs: vec!["session:ses_a".into(), "session:ses_b".into()],
-                            shown: Some("session:ses_b".into()),
-                        },
-                        DockNode::Tabs {
-                            name: Some("right".into()),
-                            group: Some("tools".into()),
-                            tabs: vec!["panel:notes".into()],
-                            shown: Some("panel:notes".into()),
-                        },
-                    ],
-                }),
             },
         )]),
     }
@@ -66,13 +52,25 @@ fn a_saved_layout_loads_back_and_overwrites() {
 }
 
 #[test]
-fn a_layout_saved_before_the_dock_still_loads() {
-    // Older layouts also named the one open right panel.
+fn an_older_layout_still_loads() {
+    // Before the sizes were saved, the open right panel was already named.
     let json = r#"{"panel":"Context","tabs":{"Local":{"open":["ses_a"],"active":"ses_a"}}}"#;
     let layout: Layout = serde_json::from_str(json).expect("the older layout");
+    assert_eq!(layout.panel.as_deref(), Some("Context"));
+    assert_eq!(layout.sidebar_width, None);
+    assert_eq!(layout.tabs.get("Local").expect("its tabs").open, ["ses_a"]);
+}
+
+#[test]
+fn a_layout_saved_with_panes_keeps_its_tabs() {
+    // While the main area could be split into panes, the arrangement was saved too.
+    let json = r#"{"tabs":{"Local":{"open":["ses_a"],"active":"ses_a",
+        "dock":{"tabs":{"name":"center","group":"documents","tabs":["session:ses_a"],
+        "shown":"session:ses_a"}}}}}"#;
+    let layout: Layout = serde_json::from_str(json).expect("the layout with panes");
     let tabs = layout.tabs.get("Local").expect("its tabs");
     assert_eq!(tabs.open, ["ses_a"]);
-    assert_eq!(tabs.dock, None);
+    assert_eq!(tabs.active.as_deref(), Some("ses_a"));
 }
 
 #[tokio::test]

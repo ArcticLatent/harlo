@@ -1,0 +1,324 @@
+// An open session: its header, the timeline, the lines above the composer
+// (what the agent does, its todos, subagents, queued prompts), and the
+// composer.
+
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, Requests, InboxRow } from "data.slint";
+import { Icon, Press, HLine, Breathing } from "widgets.slint";
+import { Composer, PickerChip } from "composer.slint";
+import { Timeline, Column } from "timeline.slint";
+import { WaitingCards } from "waiting.slint";
+
+/// The Changes panel's number, as Rust's `panel_number` gives it.
+global Panels {
+    out property <int> todos: 1;
+    out property <int> changes: 2;
+}
+
+/// A small text button, in the link colour.
+component Action inherits Press {
+    in property <string> text;
+
+    height: 20px;
+    label: root.text;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-interactive-base;
+        }
+    }
+}
+
+/// A thin bar showing how much of a list is done.
+component Progress inherits Rectangle {
+    in property <int> done;
+    in property <int> total;
+
+    width: 48px;
+    height: 4px;
+    border-radius: 2px;
+    background: Theme.surface-raised-strong;
+    Rectangle {
+        x: 0;
+        width: root.total > 0 ? parent.width * root.done / root.total : 0;
+        border-radius: 2px;
+        background: Theme.icon-success-base;
+    }
+}
+
+/// One line above the composer.
+component InboxLine inherits Rectangle {
+    in property <InboxRow> item;
+
+    height: 30px;
+    // What the agent does is a bare line; the rest are boxed.
+    background: root.item.kind == 0 ? transparent : Theme.surface-raised-base;
+    border-radius: Size.radius;
+
+    HorizontalLayout {
+        padding-left: root.item.kind == 0 ? 4px : 12px;
+        padding-right: root.item.kind == 0 ? 4px : 8px;
+        spacing: 8px;
+
+        if root.item.working && root.item.kind == 0: Breathing {
+            width: 14px;
+            Icon {
+                text: root.item.glyph;
+                font-size: 13px;
+                color: root.item.glyph-color;
+            }
+        }
+        if !root.item.working || root.item.kind != 0: Icon {
+            width: 14px;
+            text: root.item.glyph;
+            font-size: 13px;
+            color: root.item.glyph-color;
+        }
+        if root.item.strong != "": Text {
+            text: root.item.strong;
+            vertical-alignment: center;
+            font-size: Size.small;
+            font-weight: 500;
+            color: Theme.text-strong;
+        }
+        if root.item.kind == 1: VerticalLayout {
+            alignment: center;
+            Progress {
+                done: root.item.done;
+                total: root.item.total;
+            }
+        }
+        Text {
+            text: root.item.text;
+            vertical-alignment: center;
+            horizontal-stretch: root.item.detail == "" ? 1 : 0;
+            overflow: elide;
+            font-size: Size.small;
+            color: Theme.text-base;
+        }
+        if root.item.detail != "": Text {
+            text: root.item.detail;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        if root.item.working && root.item.note != "": Breathing {
+            Text {
+                text: root.item.note;
+                vertical-alignment: center;
+                font-size: Size.small;
+                color: root.item.note-color;
+            }
+        }
+        if !root.item.working && root.item.note != "": Text {
+            text: root.item.note;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: root.item.note-color;
+        }
+        if root.item.action != "": VerticalLayout {
+            alignment: center;
+            Action {
+                text: root.item.action;
+                clicked => {
+                    if root.item.kind == 1 {
+                        Logic.open-panel(Panels.todos);
+                    } else if root.item.kind == 2 {
+                        Logic.open-session(root.item.id);
+                    } else {
+                        Logic.steer-queued(root.item.id);
+                    }
+                }
+            }
+        }
+        if root.item.cancel: VerticalLayout {
+            alignment: center;
+            Press {
+                label: "Cancel";
+                width: 20px;
+                height: 20px;
+                clicked => { Logic.cancel-queued(root.item.id); }
+                Icon {
+                    text: Icons.close;
+                    font-size: 12px;
+                }
+            }
+        }
+    }
+}
+
+/// The session's title, then its agent and model, and a way to its changes.
+component Header inherits Rectangle {
+    in property <length> column;
+
+    height: body.preferred-height;
+
+    body := HorizontalLayout {
+        padding-top: 14px;
+        padding-bottom: 14px;
+        padding-left: (root.width - root.column) / 2;
+        padding-right: (root.width - root.column) / 2;
+        spacing: 16px;
+
+        VerticalLayout {
+            spacing: 6px;
+            horizontal-stretch: 1;
+            alignment: center;
+
+            if State.session-parent != "": HorizontalLayout {
+                alignment: start;
+                Press {
+                    label: "Subagent of \{State.session-parent}";
+                    height: 18px;
+                    clicked => { Logic.open-session(State.session-parent-id); }
+                    HorizontalLayout {
+                        spacing: 5px;
+                        Icon {
+                            text: Icons.arrow-left;
+                            font-size: 12px;
+                            color: Theme.text-interactive-base;
+                        }
+                        Text {
+                            text: "Subagent of \{State.session-parent}";
+                            vertical-alignment: center;
+                            overflow: elide;
+                            font-size: Size.small;
+                            color: Theme.text-interactive-base;
+                        }
+                    }
+                }
+            }
+            Text {
+                text: State.session-title;
+                overflow: elide;
+                font-size: Size.session-title;
+                font-weight: 600;
+                color: Theme.text-strong;
+            }
+            HorizontalLayout {
+                spacing: 7px;
+                alignment: start;
+                Icon {
+                    text: State.session-agent-glyph;
+                    font-size: 13px;
+                    color: State.session-agent-color;
+                }
+                if State.session-agent != "": Text {
+                    text: State.session-agent;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+                if State.session-read-only: Text {
+                    text: "read-only";
+                    font-size: Size.small;
+                    color: Theme.text-weaker;
+                }
+                if State.session-model != "": Text {
+                    text: State.session-model;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+                if State.session-busy: Breathing {
+                    HorizontalLayout {
+                        spacing: 5px;
+                        Icon {
+                            text: Icons.loader;
+                            font-size: 12px;
+                            color: Theme.text-interactive-base;
+                        }
+                        Text {
+                            text: "Working";
+                            font-size: Size.small;
+                            color: Theme.text-interactive-base;
+                        }
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Press {
+                label: "Changes";
+                height: 28px;
+                clicked => { Logic.open-panel(Panels.changes); }
+                HorizontalLayout {
+                    padding-left: 9px;
+                    padding-right: 9px;
+                    Text {
+                        text: "Changes";
+                        vertical-alignment: center;
+                        font-size: Size.label;
+                        color: Theme.text-base;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// An open session.
+export component SessionView inherits Rectangle {
+    property <length> column: min(Column.width, root.width - 48px);
+
+    background: Theme.background-base;
+
+    // Rust asks for the end when a prompt is sent or the session opens.
+    property <int> scroll-serial: Requests.scroll-serial;
+    changed scroll-serial => {
+        if Requests.scroll == "timeline" {
+            timeline.to-end();
+        }
+    }
+
+    VerticalLayout {
+        Header {
+            column: root.column;
+        }
+        HLine { }
+        timeline := Timeline {
+            vertical-stretch: 1;
+        }
+        HorizontalLayout {
+            padding-top: 4px;
+            padding-bottom: 16px;
+            alignment: center;
+            VerticalLayout {
+                width: root.column;
+                spacing: 4px;
+                if State.undo-card.shown || State.approval-card.shown || State.question-card.shown: VerticalLayout {
+                    padding-bottom: 4px;
+                    WaitingCards { }
+                }
+                for row in State.inbox: InboxLine {
+                    item: row;
+                }
+                Rectangle { height: 4px; }
+                Composer {
+                    placeholder: State.session-placeholder;
+                    busy: State.session-busy;
+                    for chip in State.chips: VerticalLayout {
+                        alignment: center;
+                        PickerChip {
+                            chip: chip;
+                            compact: true;
+                        }
+                    }
+                }
+                if State.send-error != "": Text {
+                    text: State.send-error;
+                    wrap: word-wrap;
+                    font-size: Size.small;
+                    color: Theme.icon-critical-base;
+                }
+            }
+        }
+    }
+}

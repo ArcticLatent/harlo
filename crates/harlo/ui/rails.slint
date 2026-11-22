@@ -1,0 +1,128 @@
+// The narrow icon rails on the window's left and right edges.
+
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic } from "data.slint";
+import { Icon, Press, VLine } from "widgets.slint";
+
+/// A square rail button.
+component RailButton inherits Press {
+    in property <string> glyph;
+    width: Size.rail-button;
+    height: Size.rail-button;
+
+    Icon {
+        text: root.glyph;
+        font-size: Size.rail-icon;
+        color: root.selected ? Theme.icon-selected : Theme.icon-base;
+    }
+}
+
+/// The left rail: the sidebar toggle, then the phone link, shortcuts,
+/// stats, settings and the avatar.
+export component LeftRail inherits Rectangle {
+    width: Size.rail;
+    background: Theme.background-stronger;
+
+    HorizontalLayout {
+        VerticalLayout {
+            width: Size.rail - 1px;
+            padding-top: 11px;
+            padding-bottom: 11px;
+            spacing: 8px;
+            alignment: stretch;
+
+            HorizontalLayout {
+                alignment: center;
+                RailButton {
+                    glyph: Icons.sidebar;
+                    label: "Toggle sidebar";
+                    clicked => { Logic.toggle-sidebar(); }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            for item in [
+                { glyph: Icons.phone, label: "Phone", on: true },
+                { glyph: Icons.keyboard, label: "Keyboard shortcuts", on: false },
+                { glyph: Icons.stats, label: "Stats", on: false },
+                { glyph: Icons.settings, label: "Settings", on: false },
+            ]: HorizontalLayout {
+                alignment: center;
+                // The phone link shows as on, as in the design; its
+                // milestone wires it up.
+                RailButton {
+                    glyph: item.glyph;
+                    label: item.label;
+                    selected: item.on;
+                    enabled: false;
+                }
+            }
+
+            Rectangle {
+                height: Size.rail-button + 8px;
+                // Unplaced, it sits in the middle.
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 16px;
+                    clip: true;
+                    accessible-role: image;
+                    accessible-label: "You";
+                    Image {
+                        width: 100%;
+                        height: 100%;
+                        source: @image-url("images/avatar-penguin.png");
+                        image-fit: cover;
+                    }
+                }
+            }
+        }
+        VLine { }
+    }
+}
+
+/// The right rail: one button per tool panel, and the terminal at the bottom.
+export component RightRail inherits Rectangle {
+    width: Size.rail;
+    background: Theme.background-stronger;
+
+    HorizontalLayout {
+        VLine { }
+        VerticalLayout {
+            width: Size.rail - 1px;
+            padding-top: 11px;
+            padding-bottom: 11px;
+            spacing: 8px;
+
+            for panel[index] in [
+                { glyph: Icons.context, label: "Context" },
+                { glyph: Icons.todos, label: "Todos" },
+                { glyph: Icons.changes, label: "Changes" },
+                { glyph: Icons.files, label: "Files" },
+                { glyph: Icons.notes, label: "Notes" },
+            ]: HorizontalLayout {
+                alignment: center;
+                RailButton {
+                    glyph: panel.glyph;
+                    label: panel.label;
+                    selected: State.panels-shown[index];
+                    clicked => { Logic.toggle-panel(index); }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            HorizontalLayout {
+                alignment: center;
+                RailButton {
+                    glyph: Icons.terminal;
+                    label: "Terminal";
+                    selected: State.terminals-shown;
+                    clicked => { Logic.toggle-terminal(); }
+                }
+            }
+        }
+    }
+}

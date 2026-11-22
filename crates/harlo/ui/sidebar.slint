@@ -1,0 +1,506 @@
+// The sidebar: logo, location, new session, filter, then projects and their
+// sessions in one virtualized list.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Size, Fonts } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, SidebarRow, RowKind } from "data.slint";
+import { Icon, Press, Dot, Breathing, Field, VLine } from "widgets.slint";
+
+/// Space between the sidebar's edge and its content.
+global Inset {
+    out property <length> side: 14px;
+}
+
+/// The tile showing who made a session's model.
+component Maker inherits Rectangle {
+    in property <int> maker;
+    in property <color> tone;
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+    background: root.tone.mix(Theme.background-stronger, 0.18);
+
+    if root.maker == 0: Icon {
+        text: Icons.bot;
+        color: root.tone;
+    }
+    if root.maker == 1: Image {
+        width: 15px;
+        height: 15px;
+        source: @image-url("images/providers/anthropic.svg");
+        colorize: root.tone;
+    }
+    if root.maker == 2: Image {
+        width: 15px;
+        height: 15px;
+        source: @image-url("images/providers/openai.svg");
+        colorize: root.tone;
+    }
+    if root.maker == 3: Image {
+        width: 15px;
+        height: 15px;
+        source: @image-url("images/providers/zai-coding-plan.svg");
+        colorize: root.tone;
+    }
+}
+
+/// The working indicator: a loader that breathes.
+component Working inherits Breathing {
+    in property <length> size: 13px;
+    width: root.size + 2px;
+    Icon {
+        text: Icons.loader;
+        font-size: root.size;
+        color: Theme.text-interactive-base;
+    }
+}
+
+/// One row of the list.
+component Item inherits Rectangle {
+    in property <SidebarRow> entry;
+
+    height: entry.kind == RowKind.project ? 36px + (entry.gap ? 13px : 0)
+        : entry.kind == RowKind.worktree ? 32px
+        : entry.kind == RowKind.session ? 42px + (entry.gap ? 13px : 0)
+        : entry.kind == RowKind.child ? 28px + (entry.gap ? 13px : 0)
+        : 30px + (entry.gap ? 13px : 0);
+
+    VerticalLayout {
+        padding-left: Inset.side;
+        padding-right: Inset.side;
+        alignment: start;
+
+        if entry.kind == RowKind.project: HorizontalLayout {
+            height: 36px;
+            padding-left: 4px;
+            padding-right: 4px;
+            spacing: 9px;
+            Icon {
+                text: Icons.folder;
+                color: Theme.icon-base;
+            }
+            Text {
+                text: entry.title;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+                font-size: Size.label;
+                font-weight: 600;
+                color: Theme.text-base;
+            }
+            if entry.busy: Working {
+                size: 12px;
+            }
+            Text {
+                text: entry.detail;
+                vertical-alignment: center;
+                font-size: Size.small;
+                color: Theme.text-weak;
+            }
+            Press {
+                width: 22px;
+                label: "New session in " + entry.title;
+                clicked => { Logic.new-session(entry.id); }
+                Icon {
+                    text: Icons.plus;
+                    font-size: 15px;
+                }
+            }
+        }
+
+        if entry.kind == RowKind.worktree: HorizontalLayout {
+            height: 32px;
+            padding-left: 16px;
+            padding-right: 4px;
+            spacing: 9px;
+            Icon {
+                text: Icons.changes;
+                font-size: 13px;
+                color: Theme.icon-weak-base;
+            }
+            Text {
+                text: entry.title;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+                font-size: Size.label;
+                font-weight: 500;
+                color: Theme.text-base;
+            }
+            Text {
+                text: entry.detail;
+                vertical-alignment: center;
+                font-size: Size.small;
+                color: Theme.text-weak;
+            }
+            Press {
+                width: 22px;
+                label: "New session in " + entry.title;
+                clicked => { Logic.new-session(entry.id); }
+                Icon {
+                    text: Icons.plus;
+                }
+            }
+        }
+
+        if entry.kind == RowKind.session: Press {
+            height: 42px;
+            label: entry.title;
+            selected: entry.selected;
+            clicked => { Logic.open-session(entry.id); }
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 11px;
+                alignment: stretch;
+                VerticalLayout {
+                    alignment: center;
+                    Maker {
+                        maker: entry.maker;
+                        tone: entry.tone;
+                    }
+                }
+                Text {
+                    text: entry.title;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    font-size: Size.text;
+                    color: entry.untitled ? Theme.text-weaker
+                        : entry.selected ? Theme.text-strong : Theme.text-base;
+                }
+                if entry.waiting: Icon {
+                    text: Icons.shield-alert;
+                    color: Theme.icon-warning-base;
+                }
+                if entry.busy && !entry.waiting: Working { }
+                if !entry.busy && !entry.waiting: Text {
+                    text: entry.detail;
+                    vertical-alignment: center;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+            }
+        }
+
+        if entry.kind == RowKind.child: Press {
+            height: 28px;
+            label: entry.agent + ": " + entry.title;
+            selected: entry.selected;
+            clicked => { Logic.open-session(entry.id); }
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 4px;
+                spacing: 7px;
+                Icon {
+                    text: Icons.corner-down-right;
+                    font-size: 12px;
+                    color: Theme.icon-weak-base;
+                }
+                Icon {
+                    text: Icons.bot;
+                    font-size: 12px;
+                    color: entry.tone;
+                }
+                Text {
+                    text: entry.agent;
+                    vertical-alignment: center;
+                    font-size: Size.small;
+                    color: Theme.text-base;
+                }
+                Text {
+                    text: entry.title;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+                if entry.waiting: Icon {
+                    text: Icons.shield-alert;
+                    font-size: 13px;
+                    color: Theme.icon-warning-base;
+                }
+                if entry.busy && !entry.waiting: Working {
+                    size: 12px;
+                }
+            }
+        }
+
+        if entry.kind == RowKind.more: HorizontalLayout {
+            height: 30px;
+            padding-left: 16px;
+            alignment: start;
+            Press {
+                label: entry.title;
+                clicked => { Logic.toggle-more(entry.id); }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    Text {
+                        text: entry.title;
+                        vertical-alignment: center;
+                        font-size: Size.small;
+                        color: Theme.text-weak;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The whole sidebar.
+export component Sidebar inherits Rectangle {
+    width: State.sidebar-width;
+    background: Theme.background-stronger;
+
+    HorizontalLayout {
+        VerticalLayout {
+            // The header.
+            VerticalLayout {
+                padding-top: 10px;
+                padding-left: Inset.side;
+                padding-right: Inset.side;
+                padding-bottom: 7px;
+
+                HorizontalLayout {
+                    height: 40px;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 23px;
+                            height: 24px;
+                            source: @image-url("images/logo-mark.svg");
+                            accessible-role: none;
+                        }
+                    }
+                    Text {
+                        text: "Harlo";
+                        vertical-alignment: center;
+                        font-size: Size.wordmark;
+                        font-weight: 600;
+                        color: Theme.text-strong;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: center;
+                        Press {
+                            label: "Add a project";
+                            rest: Theme.surface-raised-strong;
+                            hover: Theme.chip-hover;
+                            clicked => { Logic.add-project(); }
+                            HorizontalLayout {
+                                padding-left: 9px;
+                                padding-right: 9px;
+                                padding-top: 5px;
+                                padding-bottom: 5px;
+                                Text {
+                                    text: "+ Project";
+                                    font-size: Size.small;
+                                    color: Theme.text-strong;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 6px; }
+
+                // Which server Harlo follows, and how that's going.
+                Press {
+                    height: 31px;
+                    label: "Location: " + State.location-label;
+                    rest: Theme.surface-raised-strong;
+                    hover: Theme.chip-hover;
+                    selected: State.picking-location;
+                    lit: Theme.chip-hover;
+                    clicked => { Logic.toggle-locations(); }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 7px;
+                        VerticalLayout {
+                            alignment: center;
+                            Dot {
+                                background: State.status-color;
+                            }
+                        }
+                        Icon {
+                            text: State.location-glyph;
+                            font-size: 13px;
+                        }
+                        Text {
+                            text: State.location-label;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            font-size: Size.label;
+                            color: Theme.text-strong;
+                        }
+                        Icon {
+                            text: Icons.chevron-down;
+                            font-size: 13px;
+                        }
+                    }
+                }
+
+                Rectangle { height: 14px; }
+
+                Press {
+                    height: 34px;
+                    label: "New session";
+                    clicked => { Logic.new-session(""); }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 10px;
+                        Icon {
+                            text: Icons.new-session;
+                            font-size: 17px;
+                            color: Theme.text-strong;
+                        }
+                        Text {
+                            text: "New session";
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            font-size: Size.text;
+                            font-weight: 500;
+                            color: Theme.text-strong;
+                        }
+                        Text {
+                            text: "Ctrl+N";
+                            vertical-alignment: center;
+                            font-size: Size.small;
+                            color: Theme.text-weak;
+                        }
+                    }
+                }
+
+                Rectangle { height: 12px; }
+
+                Field {
+                    height: 36px;
+                    glyph: Icons.search;
+                    placeholder: "Filter sessions";
+                    edited(text) => { Logic.filter-edited(text); }
+                }
+            }
+
+            if State.sidebar-notice != "": VerticalLayout {
+                padding-top: 12px;
+                padding-left: Inset.side + 4px;
+                padding-right: Inset.side + 4px;
+                vertical-stretch: 1;
+                alignment: start;
+                Text {
+                    text: State.sidebar-notice;
+                    wrap: word-wrap;
+                    font-size: Size.label;
+                    color: Theme.text-weak;
+                }
+            }
+
+            if State.sidebar-notice == "": ListView {
+                vertical-stretch: 1;
+                for row in State.sidebar-rows: Item {
+                    entry: row;
+                }
+            }
+        }
+        VLine { }
+    }
+}
+
+/// The location picker: which OpenCode server Harlo follows, and how the
+/// connection stands. Clicking outside it closes it.
+export component Locations inherits Rectangle {
+    TouchArea {
+        clicked => { Logic.toggle-locations(); }
+    }
+
+    card := Rectangle {
+        x: Size.rail + Inset.side;
+        y: 91px;
+        width: Size.sidebar - 2 * Inset.side;
+        height: content.preferred-height;
+        background: Theme.surface-raised-strong;
+        border-radius: Size.menu-radius;
+        border-width: 1px;
+        border-color: Theme.menu-edge;
+        drop-shadow-color: #00000073;
+        drop-shadow-offset-y: 10px;
+        drop-shadow-blur: 28px;
+
+        // Clicks on the card stay on it.
+        TouchArea { }
+
+        content := VerticalLayout {
+            padding: 6px;
+            spacing: 6px;
+
+            VerticalLayout {
+                spacing: 2px;
+                for location[index] in State.locations: Press {
+                    label: location.label;
+                    clicked => { Logic.pick-location(index); }
+                    HorizontalLayout {
+                        padding: 8px;
+                        padding-top: 7px;
+                        padding-bottom: 7px;
+                        spacing: 9px;
+                        Icon {
+                            width: 14px;
+                            text: location.current ? Icons.check : "";
+                            color: Theme.icon-selected;
+                        }
+                        Icon {
+                            text: location.glyph;
+                        }
+                        VerticalLayout {
+                            spacing: 2px;
+                            Text {
+                                text: location.label;
+                                font-size: Size.label;
+                                color: Theme.text-strong;
+                            }
+                            Text {
+                                text: location.detail;
+                                font-size: 11.5px;
+                                color: Theme.text-weak;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.menu-edge;
+            }
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                spacing: 8px;
+                VerticalLayout {
+                    padding-top: 5px;
+                    alignment: start;
+                    Dot {
+                        background: State.status-color;
+                    }
+                }
+                Text {
+                    text: State.status-text;
+                    horizontal-stretch: 1;
+                    wrap: word-wrap;
+                    font-size: Size.small;
+                    color: Theme.text-base;
+                }
+            }
+        }
+    }
+}

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "vendor/iced_dock", "vendor/iced_term"]
+members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
@@ -13,9 +13,15 @@ publish = false
 # Our crates.
 opencode-client = { path = "crates/opencode-client", version = "0.1.0" }
 harlo-core = { path = "crates/harlo-core", version = "0.1.0" }
-# Docking panes for the main area: Fee0/iced_dock (MIT) at commit 495cbea,
-# vendored with small changes listed in vendor/iced_dock/VENDORED.md.
-iced_dock = { path = "vendor/iced_dock", version = "0.1.0" }
+
+# The UI toolkit for crates/harlo: Slint, under its Royalty-free 2.0
+# licence (GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR
+# LicenseRef-Slint-Software-3.0). Not MIT/Apache: the user chose it on
+# 2026-11-22; the app shows `AboutSlint` in its About. Pinned exactly, as the
+# testing backend must match.
+slint = { version = "=1.19.0", default-features = false }
+slint-build = { version = "=1.19.0", default-features = false }
+i-slint-backend-testing = { version = "=1.19.0", default-features = false }
 
 # OpenCode client.
 reqwest = { version = "0.13.5", default-features = false }
@@ -25,7 +31,6 @@ tokio = { version = "1.50.0", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 sse-stream = { version = "0.3.0", default-features = false }
 tokio-tungstenite = { version = "0.30.0", default-features = false }
-unicode-segmentation = { version = "1.13.3", default-features = false }
 regress = { version = "0.12.0", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
 base64 = { version = "0.23.1", default-features = false }
@@ -35,8 +40,6 @@ gray_matter = { version = "0.3.2", default-features = false, features = ["yaml"]
 ttf-parser = "0.25.1"
 
 # UI.
-iced = { version = "0.14.0", default-features = false }
-iced_test = { version = "0.14.0", default-features = false }
 lucide-icons = { version = "1.77.0", default-features = false }
 mimalloc = { version = "0.1.52", default-features = false }
 # File dialog for attachments (MIT); the XDG portal on Linux, so no GTK.
@@ -47,13 +50,13 @@ arboard = { version = "3.7.0", default-features = false }
 png = { version = "0.18.1", default-features = false }
 # Desktop notifications when a session needs the user (MIT/Apache); D-Bus in pure Rust.
 notify-rust = { version = "4.19.0", default-features = false }
+# Splits answers into blocks (paragraphs, headings, code) for the timeline
+# (MIT); the version Slint itself parses Markdown with.
+pulldown-cmark = { version = "0.13.6", default-features = false }
+# Colours code blocks (MIT); pure-Rust regexes, Sublime syntaxes and themes.
+syntect = { version = "5.3.0", default-features = false }
 # Opens a link a question points to in the user's browser (MIT).
 open = { version = "5.4.5", default-features = false }
-iced-code-editor = { version = "0.7.1", default-features = false }
-# Terminal widget: Harzu/iced_term (MIT) at commit d7c8187, past 0.8.0 for the
-# fix to a UI deadlock under heavy output. Vendored with the changes listed in
-# vendor/iced_term/VENDORED.md (OpenCode PTYs over a WebSocket, no panics).
-iced_term = { path = "vendor/iced_term", version = "0.8.0" }
 
 # Code generation (dev tool only).
 typify = { version = "0.10.1", default-features = false }
@@ -112,10 +115,10 @@ too_long_first_doc_paragraph = "warn"
 literal_string_with_formatting_args = "allow"
 # Private workspace crates are never published, so crates.io metadata adds nothing.
 cargo_common_metadata = "allow"
-# Transitive dependency version splits (iced, wgpu, reqwest) are outside our control.
+# Transitive dependency version splits (Slint, wgpu, reqwest) are outside our control.
 multiple_crate_versions = "allow"
 
-# Debug builds optimise the libraries (iced, its text shaping and renderer,
+# Debug builds optimise the libraries (Slint, its text shaping and renderer,
 # the diff and SQLite code) and leave Harlo's own crates quick to rebuild and
 # debug. Unoptimised, laying out the window takes several times longer.
 [profile.dev.package."*"]

@@ -20,6 +20,12 @@ pub const COMPOSER: &str = "composer";
 /// The composer's text area, inside [`COMPOSER`].
 pub const COMPOSER_TEXT: &str = "composer-text";
 
+/// The open file's editor.
+pub const EDITOR: &str = "editor";
+
+/// The open session's timeline.
+pub const TIMELINE: &str = "timeline";
+
 /// The Notes panel's text area.
 pub const NOTES: &str = "notes";
 

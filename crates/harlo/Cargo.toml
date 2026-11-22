@@ -1,44 +1,53 @@
 [package]
 name = "harlo"
 version = "0.1.0"
-description = "A native desktop app for coding agents run by OpenCode."
+description = "A native desktop app for coding agents run by OpenCode, drawn with Slint."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "harlo"
+path = "src/main.rs"
+
 [dependencies]
 harlo-core = { workspace = true }
-iced_dock = { workspace = true }
-iced = { workspace = true, features = ["wgpu", "tiny-skia", "crisp", "tokio", "x11", "wayland", "svg", "image", "advanced", "markdown", "highlighter"] }
-lucide-icons = { workspace = true, features = ["iced"] }
+# The UI (Royalty-free 2.0 licence, see the workspace Cargo.toml): Skia draws
+# the window through winit, on X11 or Wayland; the software renderer serves
+# headless snapshots. The winit hook reports when the window gains or loses
+# the focus; Slint is pinned exactly, so its unstable API can't shift.
+slint = { workspace = true, features = ["std", "compat-1-18", "accessibility", "backend-winit-x11", "backend-winit-wayland", "renderer-skia", "renderer-software", "unstable-winit-030"] }
 mimalloc = { workspace = true }
 rfd = { workspace = true, features = ["xdg-portal"] }
 arboard = { workspace = true, features = ["image-data", "wayland-data-control"] }
 png = { workspace = true }
 notify-rust = { workspace = true, features = ["z"] }
 open = { workspace = true }
-# Whole characters (grapheme clusters), where shortened text may be cut (MIT/Apache).
-unicode-segmentation = { workspace = true }
-# The editor for files open in tabs (MIT); syntax highlighting through syntect.
-iced-code-editor = { workspace = true }
-# The terminal widget (MIT), vendored; local shells and remote PTYs.
-iced_term = { workspace = true }
-# The channel a remote terminal's input goes through, read as a stream, and
-# parsing large diffs off the window's thread.
-tokio = { workspace = true, features = ["sync", "rt", "time"] }
+# Runs the app's background work (requests to OpenCode, git, disk) off the
+# window's thread.
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
 futures-util = { workspace = true, features = ["std"] }
+# Answers as blocks, and code coloured by language.
+pulldown-cmark = { workspace = true }
+syntect = { workspace = true, features = ["default-fancy"] }
+# Code points of the icons the window shows by kind, such as a tab's.
+lucide-icons = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true, features = ["compat-1-18", "renderer-software"] }
+# The icon font and its code points (ISC), written out for the UI to import.
+lucide-icons = { workspace = true }
 
 [dev-dependencies]
-iced_test = { workspace = true }
 serde_json = { workspace = true }
+# The stress example times frames with Slint's rendering notifier, which the
+# default Skia surface (wgpu) serves only with its graphics API exposed.
+# Dev-only, so the app itself doesn't take the unstable API.
+slint = { workspace = true, features = ["unstable-wgpu-30"] }
 ttf-parser = { workspace = true }
-tempfile = { workspace = true }
-# A private OpenCode server for the tests that need one, and a runtime to drive the app's tasks.
-opencode-client = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
-futures-util = { workspace = true, features = ["std"] }
+i-slint-backend-testing = { workspace = true, features = ["renderer-software"] }
 
 [lints]
 workspace = true

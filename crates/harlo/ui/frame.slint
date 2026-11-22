@@ -1,0 +1,272 @@
+// The window's frame around the content: the center's tab strip, the
+// terminals' strip under it, the right panel's header, and the edges the
+// user drags to resize them.
+
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { Logic, State, Tab } from "data.slint";
+import { Icon, FileIcon, IconButton } from "widgets.slint";
+
+/// One tab: its icon, title and close button, with the shown one lit and
+/// underlined.
+component TabView inherits Rectangle {
+    in property <Tab> tab;
+    callback selected();
+    callback closed();
+
+    background: tab.active ? Theme.surface-raised-base
+        : touch.pressed ? Theme.surface-base-active
+        : touch.has-hover ? Theme.surface-base-hover : transparent;
+    accessible-role: AccessibleRole.tab;
+    accessible-label: tab.title;
+    accessible-item-selected: tab.active;
+    accessible-action-default => { root.selected(); }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.selected(); }
+        pointer-event(event) => {
+            // The middle button closes a tab that can be closed.
+            if (event.kind == PointerEventKind.up && event.button == PointerEventButton.middle
+                    && tab.closable) {
+                root.closed();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: tab.closable ? 6px : 12px;
+        spacing: 7px;
+
+        if tab.file-icon: FileIcon {
+            text: tab.glyph;
+            color: tab.active ? tab.glyph-color : tab.glyph-color.transparentize(0.55);
+            font-size: 13px;
+        }
+        if !tab.file-icon: Icon {
+            text: tab.glyph;
+            font-size: 13px;
+            color: tab.active ? Theme.icon-selected : Theme.icon-weak-base;
+        }
+        Text {
+            text: (tab.modified ? "● " : "") + tab.title;
+            max-width: 220px;
+            overflow: elide;
+            vertical-alignment: center;
+            font-size: Size.label;
+            color: tab.active ? Theme.text-strong
+                : touch.has-hover ? Theme.text-base : Theme.text-weak;
+        }
+        if tab.closable: VerticalLayout {
+            alignment: center;
+            IconButton {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                label: "Close " + tab.title;
+                glyph: Icons.close;
+                glyph-size: 13px;
+                clicked => { root.closed(); }
+            }
+        }
+    }
+
+    // The shown tab's accent along its bottom.
+    if tab.active: Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: Theme.text-interactive-base;
+    }
+}
+
+/// A small round button in a strip's header.
+component HeaderButton inherits VerticalLayout {
+    in property <string> label;
+    in property <string> glyph;
+    callback clicked();
+
+    alignment: center;
+    IconButton {
+        label: root.label;
+        glyph: root.glyph;
+        glyph-size: 13px;
+        rest: Theme.surface-raised-strong;
+        hover: Theme.chip-hover;
+        border-radius: 13px;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// A row of tabs with a line under it; buttons go in as children, at its end.
+component TabStrip inherits Rectangle {
+    in property <[Tab]> tabs;
+    callback selected(int);
+    callback closed(int);
+
+    height: Size.tab-bar;
+    // Tabs past the strip's width are cut off rather than widening the window.
+    min-width: 0;
+    clip: true;
+
+    HorizontalLayout {
+        for tab in root.tabs: HorizontalLayout {
+            horizontal-stretch: 0;
+            TabView {
+                horizontal-stretch: 0;
+                tab: tab;
+                selected => { root.selected(tab.key); }
+                closed => { root.closed(tab.key); }
+            }
+            Rectangle {
+                width: 1px;
+                background: Theme.border-weaker-base;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 6px;
+            spacing: 2px;
+            @children
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border-weaker-base;
+    }
+}
+
+/// The center's tabs: the open sessions, the editor and the start screen.
+export component DocumentTabs inherits TabStrip {
+    tabs: State.documents;
+    selected(key) => { Logic.tab-selected(key); }
+    closed(key) => { Logic.tab-closed(key); }
+}
+
+/// The terminals under the center: their tabs, a new one, hiding them, and
+/// the shown terminal, which goes in as children.
+export component TerminalStrip inherits Rectangle {
+    background: Theme.background-base;
+
+    VerticalLayout {
+        TabStrip {
+            tabs: State.terminals;
+            selected(id) => { Logic.terminal-selected(id); }
+            closed(id) => { Logic.terminal-closed(id); }
+
+            HeaderButton {
+                label: "New terminal";
+                glyph: Icons.plus;
+                clicked => { Logic.new-terminal(); }
+            }
+            HeaderButton {
+                label: "Hide terminals";
+                glyph: Icons.chevron-down;
+                clicked => { Logic.toggle-terminal(); }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            @children
+        }
+    }
+}
+
+/// The tool panel on the right, or covering the space between the rails:
+/// its title and buttons over its content, which goes in as children.
+export component PanelFrame inherits Rectangle {
+    background: Theme.background-base;
+    clip: true;
+
+    VerticalLayout {
+        Rectangle {
+            height: Size.tab-bar;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 6px;
+                spacing: 2px;
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: State.panel-title;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    font-size: Size.label;
+                    font-weight: 600;
+                    color: Theme.text-strong;
+                    accessible-role: AccessibleRole.text;
+                }
+                if State.panel-refresh: HeaderButton {
+                    label: "Refresh";
+                    glyph: Icons.refresh;
+                    clicked => { Logic.refresh(State.panel); }
+                }
+                HeaderButton {
+                    label: State.maximized ? "Restore" : "Maximize";
+                    glyph: State.maximized ? Icons.restore : Icons.maximize;
+                    clicked => {
+                        if (State.maximized) {
+                            Logic.restore();
+                        } else {
+                            Logic.maximize(State.panel);
+                        }
+                    }
+                }
+                HeaderButton {
+                    label: "Close " + State.panel-title;
+                    glyph: Icons.close;
+                    clicked => { Logic.close-panel(); }
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border-weaker-base;
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            @children
+        }
+    }
+}
+
+/// An edge between two parts of the window: a thin line, with a wider grip
+/// around it to drag. `across` lines run left to right and drag up or down.
+export component Grip inherits Rectangle {
+    /// Which edge it is, as `Logic.resize` numbers them.
+    in property <int> edge;
+    in property <bool> across;
+    in property <string> label;
+
+    accessible-role: AccessibleRole.slider;
+    accessible-label: root.label;
+
+    // The line in the middle of the grip.
+    Rectangle {
+        x: root.across ? 0 : (parent.width - 1px) / 2;
+        y: root.across ? (parent.height - 1px) / 2 : 0;
+        width: root.across ? parent.width : 1px;
+        height: root.across ? 1px : parent.height;
+        background: touch.pressed || touch.has-hover ? Theme.text-interactive-base
+            : Theme.border-weak-base;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.across ? MouseCursor.row-resize : MouseCursor.col-resize;
+        moved => {
+            // The grip moves with the edge, so this is how far it went since the last move.
+            if (self.pressed) {
+                Logic.resize(root.edge,
+                    root.across ? self.mouse-y - self.pressed-y : self.mouse-x - self.pressed-x);
+            }
+        }
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                Logic.resize-done();
+            }
+        }
+    }
+}

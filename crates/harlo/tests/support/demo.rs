@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use harlo::{App, Message};
+use harlo::app::{App, Message};
 use harlo_core::layout::Layout;
 use harlo_core::server::{Client, Connected, Endpoint, Location, Update};
 use harlo_core::workspace::{ModelRef, ServerProject, Session, Snapshot, Tokens};

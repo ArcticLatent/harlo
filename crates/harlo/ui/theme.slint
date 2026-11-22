@@ -1,0 +1,107 @@
+// The theme: colours set from the app's theme tokens, and the design's sizes
+// and fonts.
+
+import "fonts/Geist-Regular.ttf";
+import "fonts/Geist-Medium.ttf";
+import "fonts/Geist-SemiBold.ttf";
+import "fonts/Geist-Bold.ttf";
+import "fonts/Geist-Italic.ttf";
+import "fonts/JetBrainsMono-Regular.ttf";
+import "fonts/JetBrainsMono-Bold.ttf";
+import "fonts/FileIcons.ttf";
+
+/// Colours, from the theme's tokens; Rust sets them when the theme loads.
+export global Theme {
+    in property <color> background-base: #101010;
+    in property <color> background-stronger: #0a0a0a;
+    in property <color> surface-inset-base: #161616;
+    in property <color> surface-raised-base: #1c1c1c;
+    in property <color> surface-raised-strong: #242424;
+    in property <color> surface-base-hover: #ffffff10;
+    in property <color> surface-base-active: #ffffff18;
+    in property <color> surface-brand-base: #fab283;
+    in property <color> border-weaker-base: #ffffff0c;
+    in property <color> border-weak-base: #ffffff14;
+    in property <color> border-base: #ffffff20;
+    in property <color> text-strong: #ededed;
+    in property <color> text-base: #c8c8c8;
+    in property <color> text-weak: #8f8f8f;
+    in property <color> text-weaker: #6a6a6a;
+    in property <color> text-interactive-base: #9dbefe;
+    in property <color> icon-base: #c8c8c8;
+    in property <color> icon-weak-base: #8f8f8f;
+    in property <color> icon-selected: #ededed;
+    in property <color> icon-success-base: #12c905;
+    in property <color> icon-warning-base: #fcd53a;
+    in property <color> icon-critical-base: #fc533a;
+    in property <color> icon-info-base: #9dbefe;
+
+    // Mixed from the tokens above.
+    /// A chip's fill under the pointer.
+    in property <color> chip-hover: #2e2e2e;
+    /// The outline of a menu card.
+    in property <color> menu-edge: #393939;
+    /// The outline of the composer.
+    in property <color> composer-edge: #2e3440;
+    /// Selected text's highlight.
+    in property <color> selection: #9dbefe4c;
+    /// The tint under an added diff line, and under a removed one.
+    in property <color> added-line: #172a16;
+    in property <color> removed-line: #3a1b17;
+    /// The main button's fill under the pointer, and while it can't be pressed.
+    in property <color> primary-hover: #c5c5c5;
+    in property <color> primary-off: #5d5d5d;
+    /// The outline of a card asking for approval, and of one asking questions.
+    in property <color> warning-edge: #6b5426;
+    in property <color> question-edge: #4b5a78;
+}
+
+/// Sizes in logical pixels, measured from the design.
+export global Size {
+    /// Width of the left and right rails.
+    out property <length> rail: 56px;
+    /// Width of the sidebar.
+    out property <length> sidebar: 288px;
+    /// A square rail button.
+    out property <length> rail-button: 36px;
+    /// Rail icons.
+    out property <length> rail-icon: 18px;
+    /// Body text.
+    out property <length> text: 14px;
+    /// Prompts and answers in the timeline.
+    out property <length> answer: 14.5px;
+    /// Code, paths and commands.
+    out property <length> code: 12.5px;
+    /// Secondary text.
+    out property <length> small: 12.5px;
+    /// Project names and hints.
+    out property <length> label: 13px;
+    /// The wordmark beside the logo.
+    out property <length> wordmark: 27px;
+    /// Panel titles.
+    out property <length> title: 19px;
+    /// The open session's title.
+    out property <length> session-title: 18.5px;
+    /// Height of a tab strip.
+    out property <length> tab-bar: 34px;
+    /// The empty state's question.
+    out property <length> headline: 26px;
+    /// Corner radius of buttons and fields.
+    out property <length> radius: 6px;
+    /// Corner radius of the composer.
+    out property <length> composer-radius: 8px;
+    /// Corner radius of a menu card.
+    out property <length> menu-radius: 10px;
+    /// Height of a picker menu row.
+    out property <length> menu-row: 32px;
+}
+
+/// Font families.
+export global Fonts {
+    /// The interface font.
+    out property <string> sans: "Geist";
+    /// Code, paths and commands.
+    out property <string> mono: "JetBrains Mono";
+    /// File-type icons.
+    out property <string> file-icons: "Harlo File Icons";
+}

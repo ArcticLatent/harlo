@@ -11,10 +11,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::task::Task;
 use harlo_core::server::FileDiff;
 use harlo_core::workspace::Revert;
-use iced::Task;
-use iced::widget::text_editor;
 
 use super::{App, Message};
 
@@ -92,7 +91,7 @@ impl App {
                     && self.active.as_deref() == Some(session.as_str())
                     && self.composer.text().trim().is_empty()
                 {
-                    self.composer = text_editor::Content::with_text(&text);
+                    self.composer.set(&text);
                 }
                 return self.load_history(session);
             }

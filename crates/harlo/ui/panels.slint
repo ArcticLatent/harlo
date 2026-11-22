@@ -1,0 +1,280 @@
+// The tool panels' bodies: Context (how full the context window is, what the
+// session used and cost, its instructions) and Todos (the agent's list).
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Size, Fonts } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State } from "data.slint";
+import { Icon } from "widgets.slint";
+
+/// The height of the panels' bars.
+global Bar {
+    out property <length> height: 6px;
+}
+
+/// A panel's body: its sections stacked, scrolling up and down once tall.
+component Body inherits ScrollView {
+    content-width: self.visible-width;
+    content-height: sections.preferred-height;
+
+    sections := VerticalLayout {
+        width: root.visible-width;
+        padding-top: 16px;
+        padding-bottom: 16px;
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 22px;
+        @children
+    }
+}
+
+/// Plain text alone in a panel, for an empty state.
+component Note inherits VerticalLayout {
+    in property <string> text;
+    padding-top: 20px;
+    padding-left: 18px;
+    padding-right: 18px;
+    alignment: start;
+    Text {
+        text: root.text;
+        wrap: word-wrap;
+        font-size: Size.label;
+        color: Theme.text-base;
+    }
+}
+
+/// A section's title.
+component Title inherits Text {
+    font-size: Size.label;
+    font-weight: 500;
+    color: Theme.text-strong;
+}
+
+/// Weak words, for explanations.
+component Weak inherits Text {
+    wrap: word-wrap;
+    font-size: Size.small;
+    color: Theme.text-weak;
+}
+
+/// A bar `fill` full, from 0 to 1.
+component FillBar inherits Rectangle {
+    in property <float> fill;
+    in property <brush> tint: Theme.text-interactive-base;
+    in property <brush> track: Theme.surface-inset-base;
+
+    height: Bar.height;
+    border-radius: self.height / 2;
+    background: root.track;
+    if root.fill > 0: Rectangle {
+        x: 0;
+        width: parent.width * min(1, root.fill);
+        border-radius: parent.border-radius;
+        background: root.tint;
+    }
+}
+
+/// The Context panel's body.
+export component ContextPanel inherits Rectangle {
+    property <bool> counted: State.context-card.error == ""
+        && State.context-card.window-note == "";
+
+    if State.context-card.note != "": Note {
+        text: State.context-card.note;
+    }
+    if State.context-card.note == "": Body {
+        // How full the context window is.
+        VerticalLayout {
+            spacing: 8px;
+            Title { text: "Context window"; }
+            if State.context-card.error != "": Text {
+                text: "Couldn't load it: " + State.context-card.error;
+                wrap: word-wrap;
+                font-size: Size.small;
+                color: Theme.icon-critical-base;
+            }
+            if State.context-card.error == "" && State.context-card.window-note != "": Weak {
+                text: State.context-card.window-note;
+            }
+            if root.counted: HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                Text {
+                    text: State.context-card.used;
+                    font-size: 22px;
+                    font-weight: 600;
+                    color: Theme.text-strong;
+                    vertical-alignment: bottom;
+                }
+                Weak {
+                    text: State.context-card.of;
+                    wrap: no-wrap;
+                    vertical-alignment: bottom;
+                }
+            }
+            if root.counted && State.context-card.bar: FillBar {
+                fill: State.context-card.fill;
+                tint: State.context-card.warn ? Theme.icon-warning-base
+                    : Theme.text-interactive-base;
+            }
+            if root.counted && State.context-card.bar: Weak {
+                text: State.context-card.percent;
+            }
+            if root.counted && State.context-card.messages != "": Weak {
+                text: State.context-card.messages;
+            }
+        }
+
+        // The model, agent, and what the session used and cost.
+        VerticalLayout {
+            spacing: 6px;
+            Title { text: "This session"; }
+            for fact in State.context-facts: HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: fact.label;
+                    font-size: Size.label;
+                    color: Theme.text-base;
+                }
+                Text {
+                    text: fact.value;
+                    overflow: elide;
+                    font-size: Size.label;
+                    color: Theme.text-strong;
+                }
+            }
+        }
+
+        // The instruction files: given from the start, then picked up on the way.
+        VerticalLayout {
+            spacing: 6px;
+            Title { text: "Instructions"; }
+            for file in State.context-files: HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: file.path;
+                    overflow: elide;
+                    font-family: Fonts.mono;
+                    font-size: Size.small;
+                    color: Theme.text-strong;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: file.aside;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                    vertical-alignment: center;
+                }
+            }
+            if State.context-card.files-note != "": Weak {
+                text: State.context-card.files-note;
+            }
+        }
+    }
+}
+
+/// One of the agent's todos: a mark for where it stands, and what it is.
+component TodoItem inherits HorizontalLayout {
+    in property <string> text;
+    /// 0 not started, 1 being worked on, 2 done, 3 dropped.
+    in property <int> status;
+
+    spacing: 9px;
+    VerticalLayout {
+        padding-top: 2px;
+        alignment: start;
+        Icon {
+            text: root.status == 1 ? Icons.circle-dot
+                : root.status == 2 ? Icons.circle-check
+                : root.status == 3 ? Icons.circle-x : Icons.circle;
+            font-size: 14px;
+            color: root.status == 1 ? Theme.text-interactive-base
+                : root.status == 2 ? Theme.icon-success-base
+                : root.status == 3 ? Theme.text-weak : Theme.icon-base;
+        }
+    }
+    Text {
+        horizontal-stretch: 1;
+        text: root.text;
+        wrap: word-wrap;
+        font-size: Size.label;
+        font-weight: root.status == 1 ? 500 : 400;
+        color: root.status == 1 ? Theme.text-strong
+            : root.status == 0 ? Theme.text-base : Theme.text-weak;
+    }
+    if root.status == 3: Text {
+        text: "Dropped";
+        font-size: Size.small;
+        color: Theme.text-weak;
+        vertical-alignment: top;
+    }
+}
+
+/// The Todos panel's body.
+export component TodosPanel inherits Rectangle {
+    if State.todos-card.note != "" && !State.todos-card.off: Note {
+        text: State.todos-card.note;
+    }
+    // Without the todo tool, how to turn it on.
+    if State.todos-card.off: VerticalLayout {
+        padding-top: 20px;
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 10px;
+        alignment: start;
+        Text {
+            text: State.todos-card.note;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-base;
+        }
+        Weak {
+            text: "OpenCode's todo tool is off for this folder. To turn it on, add this to opencode.json:";
+        }
+        Rectangle {
+            background: Theme.surface-raised-base;
+            border-width: 1px;
+            border-color: Theme.border-weak-base;
+            border-radius: Size.radius;
+            HorizontalLayout {
+                padding-top: 8px;
+                padding-bottom: 8px;
+                padding-left: 10px;
+                padding-right: 10px;
+                Text {
+                    text: State.todos-card.setting;
+                    font-family: Fonts.mono;
+                    font-size: Size.small;
+                    color: Theme.text-strong;
+                }
+            }
+        }
+    }
+    if State.todos-card.note == "": Body {
+        VerticalLayout {
+            spacing: 12px;
+            Title { text: State.todos-card.progress; }
+            FillBar {
+                fill: State.todos-card.total > 0
+                    ? State.todos-card.done / State.todos-card.total : 0;
+                track: Theme.surface-raised-strong;
+            }
+            VerticalLayout {
+                spacing: 10px;
+                for todo in State.todo-rows: TodoItem {
+                    text: todo.text;
+                    status: todo.status;
+                }
+            }
+        }
+    }
+}
+
+/// The shown tool panel's body, by its number in the rail's order.
+export component PanelBody inherits Rectangle {
+    background: Theme.background-base;
+    if State.panel == 0: ContextPanel { }
+    if State.panel == 1: TodosPanel { }
+}

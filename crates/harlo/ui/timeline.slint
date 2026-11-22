@@ -1,0 +1,585 @@
+// A session's timeline: prompts, answers block by block, thoughts, tool
+// calls and their diffs, and subagents, in one virtualized list.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Size, Fonts } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, Shape, TimelineRow, DiffLine, Chip } from "data.slint";
+import { Icon, Press, HLine, Breathing } from "widgets.slint";
+
+/// The timeline column's widest size.
+export global Column {
+    out property <length> width: 780px;
+    /// How far rows inside an open group are indented.
+    out property <length> indent: 18px;
+    /// A one-line row's height.
+    out property <length> line: 24px;
+    /// A diff line's height.
+    out property <length> diff-line: 19px;
+}
+
+/// Text that breathes while `working`.
+component Glyph inherits Rectangle {
+    in property <string> glyph;
+    in property <color> glyph-color;
+    in property <bool> working;
+    in property <length> size: 13px;
+
+    width: 14px;
+    if root.working: Breathing {
+        Icon {
+            text: root.glyph;
+            font-size: root.size;
+            color: root.glyph-color;
+        }
+    }
+    if !root.working: Icon {
+        text: root.glyph;
+        font-size: root.size;
+        color: root.glyph-color;
+    }
+}
+
+/// "+3 −1", in the added and removed colours.
+export component Counts inherits HorizontalLayout {
+    in property <int> added;
+    in property <int> removed;
+
+    spacing: 4px;
+    if root.added > 0 || root.removed == 0: Text {
+        text: "+\{root.added}";
+        vertical-alignment: center;
+        font-size: Size.small;
+        color: Theme.icon-success-base;
+    }
+    if root.removed > 0: Text {
+        text: "−\{root.removed}";
+        vertical-alignment: center;
+        font-size: Size.small;
+        color: Theme.icon-critical-base;
+    }
+}
+
+/// A small text button, in the link colour.
+component LinkButton inherits Press {
+    in property <string> text;
+    in property <string> glyph;
+
+    height: 20px;
+    label: root.text;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 4px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-interactive-base;
+        }
+        if root.glyph != "": Icon {
+            text: root.glyph;
+            font-size: 12px;
+            color: Theme.text-interactive-base;
+        }
+    }
+}
+
+/// Answer text: Markdown, in the body colour, with links that open.
+component Prose inherits StyledText {
+    default-font-size: Size.answer;
+    default-font-family: Fonts.sans;
+    default-color: Theme.text-base;
+    link-color: Theme.text-interactive-base;
+    selectable: true;
+    selection-background-color: Theme.selection;
+    link-clicked(url) => { Logic.link(url); }
+}
+
+/// A prompt's bubble, with Undo in its corner while the pointer is on it.
+component PromptRow inherits Rectangle {
+    in property <TimelineRow> item;
+
+    height: bubble.preferred-height;
+
+    // The bubble and its Undo sit inside, so the pointer over either
+    // counts as on the prompt.
+    hover := TouchArea {
+        changed has-hover => {
+            Logic.hover-prompt(self.has-hover ? root.item.key : "");
+        }
+
+        bubble := Rectangle {
+            background: Theme.surface-raised-base;
+            border-color: Theme.border-weak-base;
+            border-width: 1px;
+            border-radius: Size.composer-radius;
+            opacity: root.item.sending ? 0.7 : 1;
+
+            VerticalLayout {
+                padding-top: 11px;
+                padding-bottom: 11px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 8px;
+                if root.item.label != "": Prose {
+                    text: root.item.text;
+                    default-color: Theme.text-strong;
+                }
+                if root.item.chips.length > 0: HorizontalLayout {
+                    alignment: start;
+                    spacing: 6px;
+                    for chip in root.item.chips: Rectangle {
+                        background: Theme.surface-raised-strong;
+                        border-radius: Size.radius;
+                        HorizontalLayout {
+                            padding-top: 3px;
+                            padding-bottom: 3px;
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 5px;
+                            Icon {
+                                text: chip.glyph;
+                                font-size: 11px;
+                            }
+                            Text {
+                                text: chip.label;
+                                vertical-alignment: center;
+                                font-size: Size.small;
+                                color: Theme.text-base;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.item.undo: Press {
+            x: parent.width - self.width - 6px;
+            y: 6px;
+            width: undo-label.preferred-width;
+            height: 22px;
+            label: "Undo";
+            rest: Theme.surface-raised-strong;
+            hover: Theme.chip-hover;
+            clicked => { Logic.undo(root.item.key); }
+            undo-label := HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 5px;
+                Icon {
+                    text: Icons.undo;
+                    font-size: 12px;
+                }
+                Text {
+                    text: "Undo";
+                    vertical-alignment: center;
+                    font-size: Size.small;
+                    color: Theme.text-base;
+                }
+            }
+        }
+    }
+}
+
+/// A one-line row: a marker, a label, its detail, counts and a time.
+component LineRow inherits Rectangle {
+    in property <TimelineRow> item;
+
+    height: Column.line;
+    HorizontalLayout {
+        spacing: 9px;
+        Glyph {
+            glyph: root.item.glyph;
+            glyph-color: root.item.glyph-color;
+            working: root.item.working;
+        }
+        Text {
+            text: root.item.label;
+            vertical-alignment: center;
+            horizontal-stretch: root.item.detail == "" ? 1 : 0;
+            overflow: elide;
+            font-size: Size.small;
+            font-weight: 500;
+            color: Theme.text-base;
+        }
+        if root.item.detail != "": Text {
+            text: root.item.detail;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            font-size: root.item.mono ? Size.code : Size.small;
+            font-family: root.item.mono ? Fonts.mono : Fonts.sans;
+            color: Theme.text-weak;
+        }
+        if root.item.counts: Counts {
+            added: root.item.added;
+            removed: root.item.removed;
+        }
+        if root.item.note != "": Text {
+            text: root.item.note;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: root.item.note-color;
+        }
+    }
+}
+
+/// The header of a run of tool calls, which opens or closes it.
+component GroupRow inherits Press {
+    in property <TimelineRow> item;
+
+    height: Column.line;
+    label: root.item.label;
+    accessible-expandable: true;
+    accessible-expanded: root.item.open;
+    clicked => { Logic.toggle-group(root.item.key); }
+
+    HorizontalLayout {
+        spacing: 9px;
+        Glyph {
+            glyph: root.item.working ? Icons.loader
+                : root.item.open ? Icons.chevron-down : Icons.chevron-right;
+            glyph-color: root.item.working ? Theme.text-interactive-base : Theme.icon-weak-base;
+            working: root.item.working;
+        }
+        Text {
+            text: root.item.label;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            font-size: Size.small;
+            font-weight: 500;
+            color: Theme.text-weak;
+        }
+    }
+}
+
+/// One line of a diff: its number, + or −, and its text, tinted.
+export component PatchLine inherits Rectangle {
+    in property <DiffLine> line;
+
+    height: Column.diff-line;
+    background: root.line.kind == 1 ? Theme.added-line
+        : root.line.kind == 2 ? Theme.removed-line : transparent;
+    HorizontalLayout {
+        padding-right: 8px;
+        spacing: 6px;
+        Text {
+            width: 34px;
+            text: root.line.number;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            font-family: Fonts.mono;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        Text {
+            width: 10px;
+            text: root.line.mark;
+            vertical-alignment: center;
+            font-family: Fonts.mono;
+            font-size: Size.code;
+            color: root.line.kind == 1 ? Theme.icon-success-base
+                : root.line.kind == 2 ? Theme.icon-critical-base : Theme.text-weaker;
+        }
+        Text {
+            text: root.line.text;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            overflow: clip;
+            font-family: Fonts.mono;
+            font-size: Size.code;
+            color: root.line.kind == 3 ? Theme.text-weaker
+                : root.line.kind == 0 ? Theme.text-base : Theme.text-strong;
+        }
+    }
+}
+
+/// Lines of a tool's diff, as one piece of its sunken box.
+component DiffRow inherits Rectangle {
+    in property <TimelineRow> item;
+
+    height: body.preferred-height;
+
+    // A changed file opens the Changes panel on it, at this edit's turn.
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { Logic.review(root.item.key, root.item.file); }
+    }
+
+    body := VerticalLayout {
+        if root.item.top && root.item.label != "": HorizontalLayout {
+            padding-bottom: 6px;
+            spacing: 8px;
+            Text {
+                text: root.item.label;
+                horizontal-stretch: 1;
+                overflow: elide;
+                font-family: Fonts.mono;
+                font-size: Size.code;
+                color: Theme.text-strong;
+            }
+            Counts {
+                added: root.item.added;
+                removed: root.item.removed;
+            }
+        }
+        Rectangle {
+            background: Theme.surface-inset-base;
+            border-top-left-radius: root.item.top ? Size.radius : 0;
+            border-top-right-radius: root.item.top ? Size.radius : 0;
+            border-bottom-left-radius: root.item.bottom ? Size.radius : 0;
+            border-bottom-right-radius: root.item.bottom ? Size.radius : 0;
+            clip: true;
+
+            VerticalLayout {
+                padding-top: root.item.top ? 5px : 0;
+                padding-bottom: root.item.bottom ? 5px : 0;
+                for line in root.item.lines: PatchLine {
+                    line: line;
+                }
+                if root.item.more != "": HorizontalLayout {
+                    padding-left: 28px;
+                    padding-top: 4px;
+                    alignment: start;
+                    LinkButton {
+                        text: root.item.more;
+                        clicked => { Logic.toggle-diff(root.item.key); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Work handed to a subagent: who, what, how it stands, and a way to it.
+component SubagentRow inherits Rectangle {
+    in property <TimelineRow> item;
+
+    height: 38px;
+    background: Theme.surface-raised-base;
+    border-color: Theme.border-weak-base;
+    border-width: 1px;
+    border-radius: Size.radius;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 9px;
+        Glyph {
+            glyph: Icons.bot;
+            glyph-color: root.item.glyph-color;
+            size: 14px;
+        }
+        Text {
+            text: root.item.label;
+            vertical-alignment: center;
+            font-size: Size.label;
+            font-weight: 500;
+            color: Theme.text-strong;
+        }
+        Text {
+            text: root.item.detail;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            font-size: Size.label;
+            color: Theme.text-base;
+        }
+        if root.item.working: Breathing {
+            Text {
+                text: root.item.note;
+                vertical-alignment: center;
+                font-size: Size.small;
+                color: root.item.note-color;
+            }
+        }
+        if !root.item.working && root.item.note != "": Text {
+            text: root.item.note;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: root.item.note-color;
+        }
+        if root.item.child != "": VerticalLayout {
+            alignment: center;
+            LinkButton {
+                text: "Open";
+                glyph: Icons.arrow-right;
+                clicked => { Logic.open-session(root.item.child); }
+            }
+        }
+    }
+}
+
+/// What a subagent reported back, with its first lines below.
+component ReportRow inherits VerticalLayout {
+    in property <TimelineRow> item;
+
+    spacing: 2px;
+    HorizontalLayout {
+        height: Column.line;
+        spacing: 9px;
+        Glyph {
+            glyph: root.item.glyph;
+            glyph-color: root.item.glyph-color;
+        }
+        Text {
+            text: root.item.label;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-base;
+        }
+        Text {
+            text: root.item.detail;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        VerticalLayout {
+            alignment: center;
+            LinkButton {
+                text: "Open";
+                glyph: Icons.arrow-right;
+                clicked => { Logic.open-session(root.item.child); }
+            }
+        }
+    }
+    if root.item.note != "": HorizontalLayout {
+        padding-left: 23px;
+        Prose {
+            text: root.item.text;
+            default-font-size: Size.small;
+            default-color: Theme.text-weak;
+        }
+    }
+}
+
+/// One timeline row, of whatever shape, in the column.
+component RowView inherits Rectangle {
+    in property <TimelineRow> item;
+    /// The column's width and its left edge.
+    in property <length> column;
+    in property <length> left;
+
+    height: content.preferred-height;
+    // The list takes its widest row's minimum width; a long unbroken word
+    // must wrap inside the column, not widen the list sideways.
+    min-width: 0;
+
+    content := VerticalLayout {
+        padding-top: root.item.gap;
+        padding-left: root.left + (root.item.nested ? Column.indent : 0);
+        padding-right: root.width - root.left - root.column;
+
+        if root.item.shape == Shape.notice: Text {
+            text: root.item.label;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-weak;
+        }
+        if root.item.shape == Shape.prompt: PromptRow {
+            item: root.item;
+        }
+        if root.item.shape == Shape.text: Prose {
+            text: root.item.text;
+        }
+        if root.item.shape == Shape.heading: Prose {
+            text: root.item.text;
+            default-color: Theme.text-strong;
+            default-font-size: root.item.level == 1 ? Size.answer * 1.5
+                : root.item.level == 2 ? Size.answer * 1.3
+                : root.item.level == 3 ? Size.answer * 1.15 : Size.answer;
+        }
+        if root.item.shape == Shape.code: Rectangle {
+            background: Theme.surface-inset-base;
+            border-radius: Size.radius;
+            height: code.preferred-height;
+            code := VerticalLayout {
+                padding-top: 9px;
+                padding-bottom: 9px;
+                padding-left: 12px;
+                padding-right: 12px;
+                Prose {
+                    text: root.item.text;
+                    default-font-family: Fonts.mono;
+                    default-font-size: Size.code;
+                }
+            }
+        }
+        if root.item.shape == Shape.quote: HorizontalLayout {
+            spacing: 12px;
+            Rectangle {
+                width: 3px;
+                border-radius: 1.5px;
+                background: Theme.border-base;
+            }
+            Prose {
+                text: root.item.text;
+                default-color: Theme.text-weak;
+            }
+        }
+        if root.item.shape == Shape.rule: VerticalLayout {
+            padding-top: 6px;
+            padding-bottom: 6px;
+            HLine { }
+        }
+        if root.item.shape == Shape.line: LineRow {
+            item: root.item;
+        }
+        if root.item.shape == Shape.group: GroupRow {
+            item: root.item;
+        }
+        if root.item.shape == Shape.diff: DiffRow {
+            item: root.item;
+        }
+        if root.item.shape == Shape.subagent: SubagentRow {
+            item: root.item;
+        }
+        if root.item.shape == Shape.report: ReportRow {
+            item: root.item;
+        }
+    }
+}
+
+/// The timeline, which follows the newest row while it's at the end.
+export component Timeline inherits ListView {
+    /// Whether the view is at the end, and keeps there as rows grow.
+    property <bool> following: true;
+    property <length> column: min(Column.width, self.visible-width - 48px);
+    property <length> left: (self.visible-width - self.column) / 2;
+    property <length> end: min(0, self.visible-height - self.content-height);
+
+    accessible-label: "Timeline";
+    // Rows fit the width; the timeline only scrolls up and down.
+    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+
+    scrolled => {
+        root.following = self.content-y <= root.end + 4px;
+    }
+    changed content-height => {
+        if root.following {
+            self.content-y = root.end;
+        }
+    }
+    changed visible-height => {
+        if root.following {
+            self.content-y = root.end;
+        }
+    }
+
+    /// Goes to the end, and follows it from there.
+    public function to-end() {
+        root.following = true;
+        self.content-y = root.end;
+    }
+
+    for row in State.timeline: RowView {
+        item: row;
+        column: root.column;
+        left: root.left;
+    }
+}

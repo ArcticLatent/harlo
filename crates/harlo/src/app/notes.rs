@@ -9,14 +9,13 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 use harlo_core::notes;
-use iced::Task;
-use iced::widget::{Id, text_editor};
 
 use super::{App, Message, Panel};
 use crate::ids;
+use crate::task::{Effect, Task};
+use crate::text::{Cursor, Edit, Position, TextBox};
 
 /// Something that happened to a note.
 #[derive(Debug, Clone)]
@@ -29,7 +28,7 @@ pub enum NotesEvent {
         text: Result<String, String>,
     },
     /// The user edited the note of a folder.
-    Edit(NoteKey, text_editor::Action),
+    Edit(NoteKey, Edit),
     /// Typing paused: save the note if nothing was typed since `edit`.
     SaveDue {
         /// The note's server and folder.
@@ -66,7 +65,7 @@ pub struct NoteKey {
 /// One folder's note.
 pub struct Note {
     /// The text being edited.
-    pub content: text_editor::Content,
+    pub content: TextBox,
     /// Whether it's been read from the database.
     pub loaded: bool,
     /// The text as last saved or read.
@@ -91,7 +90,7 @@ impl fmt::Debug for Note {
 impl Note {
     fn new() -> Self {
         Self {
-            content: text_editor::Content::new(),
+            content: TextBox::new(),
             loaded: false,
             saved: String::new(),
             edits: 0,
@@ -165,13 +164,13 @@ impl App {
                 note.loaded = true;
                 match text {
                     Ok(text) => {
-                        note.content = text_editor::Content::with_text(&text);
+                        note.content = TextBox::with_text(&text);
                         note.saved = text;
                     }
                     Err(error) => note.error = Some(format!("Couldn't read the note: {error}")),
                 }
             }
-            NotesEvent::Edit(key, action) => {
+            NotesEvent::Edit(key, edit) => {
                 let Some(note) = self.notes.by_key.get_mut(&key) else {
                     return Task::none();
                 };
@@ -179,9 +178,9 @@ impl App {
                 if !note.loaded {
                     return Task::none();
                 }
-                let edit = action.is_edit();
-                note.content.perform(action);
-                if edit {
+                let changed = edit.text != note.content.as_str();
+                note.content.edited(edit);
+                if changed {
                     return Self::save_later(key, note);
                 }
             }
@@ -210,12 +209,9 @@ impl App {
                 let Some(note) = self.loaded_note(&key) else {
                     return Task::none();
                 };
-                note.content =
-                    text_editor::Content::with_text(&notes::add_todo(&note.content.text()));
-                note.content
-                    .perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
+                note.content.set(&notes::add_todo(note.content.as_str()));
                 let save = Self::save_later(key, note);
-                return Task::batch([save, iced::widget::operation::focus(Id::new(ids::NOTES))]);
+                return Task::batch([save, Task::effect(Effect::Focus(ids::NOTES))]);
             }
             NotesEvent::Insert => return self.insert_note(),
         }
@@ -284,39 +280,35 @@ impl App {
         self.fs.shown = None;
         let mut insert = text;
         if !self.composer.text().trim().is_empty() {
-            self.composer
-                .perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
+            self.composer.move_to_end();
             insert.insert(0, '\n');
         }
-        self.composer
-            .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
-                Arc::new(insert),
-            )));
-        iced::widget::operation::focus(Id::new(ids::COMPOSER_TEXT))
+        self.composer.paste(&insert);
+        Task::effect(Effect::Focus(ids::COMPOSER_TEXT))
     }
 }
 
 /// Ticks, unticks or makes a todo of the line the cursor is on, keeping the
 /// cursor where it was in the text.
-fn toggle_line(content: &mut text_editor::Content) {
+fn toggle_line(content: &mut TextBox) {
     let cursor = content.cursor();
     let line = cursor.position.line;
-    let Some(old) = content.line(line).map(|l| l.text.to_string()) else {
+    let Some(old) = content.line(line).map(str::to_owned) else {
         return;
     };
     let new = notes::toggle_todo(&old);
-    let column = (cursor.position.column + new.chars().count()).saturating_sub(old.chars().count());
-    let end = old.chars().count();
+    let column = (cursor.position.column + new.len()).saturating_sub(old.len());
     // Select the line and type over it.
-    content.move_to(text_editor::Cursor {
-        position: text_editor::Position { line, column: end },
-        selection: Some(text_editor::Position { line, column: 0 }),
+    content.move_to(Cursor {
+        position: Position {
+            line,
+            column: old.len(),
+        },
+        selection: Some(Position { line, column: 0 }),
     });
-    content.perform(text_editor::Action::Edit(text_editor::Edit::Paste(
-        Arc::new(new),
-    )));
-    content.move_to(text_editor::Cursor {
-        position: text_editor::Position { line, column },
+    content.paste(&new);
+    content.move_to(Cursor {
+        position: Position { line, column },
         selection: None,
     });
 }

@@ -7,7 +7,7 @@ use harlo_core::theme::Rgba;
 use harlo_core::workspace::Session;
 
 use super::App;
-use crate::view::subagents::{ChildState, Crew, CrewAgent};
+use crate::model::{ChildState, Crew, CrewAgent};
 
 /// A child session as the parent's view lists it.
 #[derive(Debug, Clone, PartialEq)]

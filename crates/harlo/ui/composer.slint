@@ -1,0 +1,404 @@
+// The composer, where prompts are written and sent, and the picker chips
+// and menus that choose a session's folder, agent, model and shield.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, Requests, Chip, MenuItem } from "data.slint";
+import { Icon, Press, Dot, Breathing, Field } from "widgets.slint";
+
+/// The picker numbers, as Rust's `Picker::index` gives them.
+export global Pickers {
+    out property <int> folder: 0;
+    out property <int> agent: 1;
+    out property <int> variant: 2;
+    out property <int> model: 3;
+    out property <int> shield: 4;
+}
+
+/// A chip showing a picker's current choice, which opens its menu.
+export component PickerChip inherits Press {
+    in property <Chip> chip;
+    /// Small and flat, for the composer's tool row.
+    in property <bool> compact;
+
+    label: chip.label;
+    rest: root.compact ? transparent : Theme.surface-raised-strong;
+    hover: Theme.chip-hover;
+    lit: Theme.chip-hover;
+    selected: State.picker == chip.picker;
+    clicked => {
+        Requests.anchor-x = self.absolute-position.x;
+        Requests.anchor-y = self.absolute-position.y;
+        Requests.anchor-height = self.height;
+        Logic.toggle-picker(chip.picker);
+    }
+
+    HorizontalLayout {
+        padding-top: root.compact ? 3px : 6px;
+        padding-bottom: root.compact ? 3px : 6px;
+        padding-left: root.compact ? 7px : 12px;
+        padding-right: root.compact ? 6px : 10px;
+        spacing: root.compact ? 6px : 8px;
+        Icon {
+            text: chip.glyph;
+            color: chip.glyph-color;
+            font-size: root.compact ? 13px : 14px;
+        }
+        Text {
+            text: chip.label;
+            vertical-alignment: center;
+            font-size: root.compact ? Size.small : Size.label;
+            color: root.compact ? Theme.text-base : Theme.text-strong;
+        }
+        if chip.note != "": Text {
+            text: chip.note;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        Icon {
+            text: Icons.chevron-down;
+            font-size: root.compact ? 11px : 13px;
+        }
+    }
+}
+
+/// The shield: how much the session may do without asking.
+component ShieldButton inherits Press {
+    label: "Permissions";
+    width: 24px;
+    height: 24px;
+    selected: State.picker == Pickers.shield;
+    clicked => {
+        Requests.anchor-x = self.absolute-position.x;
+        Requests.anchor-y = self.absolute-position.y;
+        Requests.anchor-height = self.height;
+        Logic.toggle-picker(Pickers.shield);
+    }
+    Icon {
+        text: State.shield-glyph;
+        font-size: 17px;
+        color: State.shield-color;
+    }
+}
+
+/// The composer box: the text area, its tools, and send.
+///
+/// Enter sends and Shift+Enter starts a new line; Rust decides what each
+/// key does, through `Logic.composer-key`.
+export component Composer inherits Rectangle {
+    in property <string> placeholder;
+    in property <string> hint;
+    /// Whether the session works, so Stop is offered.
+    in property <bool> busy;
+
+    forward-focus: input;
+
+    // Rust's text replaces the field's when Rust changed it.
+    property <int> revision: State.composer-revision;
+    changed revision => {
+        root.load();
+    }
+    init => {
+        root.load();
+        // A new composer is where typing goes.
+        input.focus();
+    }
+    property <int> focus-serial: Requests.focus-serial;
+    changed focus-serial => {
+        if (Requests.focus == "composer-text") {
+            input.focus();
+        }
+    }
+    function load() {
+        input.text = State.composer-text;
+        input.set-selection-offsets(State.composer-anchor, State.composer-cursor);
+    }
+    function report() {
+        Logic.composer-edited(input.text, input.cursor-position-byte-offset,
+            input.anchor-position-byte-offset);
+    }
+
+    background: Theme.surface-raised-base;
+    border-radius: Size.composer-radius;
+    border-width: 1px;
+    border-color: Theme.composer-edge;
+    drop-shadow-color: #0000004d;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-blur: 22px;
+    height: body.preferred-height;
+
+    body := VerticalLayout {
+        padding-top: 16px;
+        padding-bottom: 12px;
+        padding-left: 18px;
+        padding-right: 14px;
+        spacing: 10px;
+
+        keys := FocusScope {
+            height: 56px;
+            capture-key-pressed(event) => {
+                if (Logic.composer-key(event.text, event.modifiers.control,
+                        event.modifiers.shift, event.modifiers.alt)) {
+                    return accept;
+                }
+                reject
+            }
+
+            Text {
+                x: 0;
+                y: 0;
+                width: 100%;
+                text: root.placeholder;
+                visible: input.text == "";
+                font-size: Size.text;
+                color: Theme.text-weak;
+                overflow: elide;
+                accessible-role: none;
+            }
+
+            input := TextInput {
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                single-line: false;
+                wrap: word-wrap;
+                font-size: Size.text;
+                color: Theme.text-strong;
+                selection-background-color: Theme.selection;
+                accessible-label: root.placeholder;
+                edited => { root.report(); }
+                cursor-position-changed => { root.report(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 14px;
+            height: 26px;
+
+            VerticalLayout {
+                alignment: center;
+                Press {
+                    label: "Attach files";
+                    width: 24px;
+                    height: 24px;
+                    clicked => { Logic.attach(); }
+                    Icon {
+                        text: Icons.circle-plus;
+                        font-size: 17px;
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                ShieldButton { }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if root.hint != "": Text {
+                text: root.hint;
+                vertical-alignment: center;
+                font-size: 11.5px;
+                color: Theme.text-weak;
+            }
+            @children
+            if root.busy: VerticalLayout {
+                alignment: center;
+                Press {
+                    label: "Stop";
+                    width: 24px;
+                    height: 24px;
+                    rest: Theme.surface-raised-strong;
+                    hover: Theme.chip-hover;
+                    clicked => { Logic.stop(); }
+                    Icon {
+                        text: Icons.square;
+                        font-size: 13px;
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Press {
+                    label: "Send";
+                    width: 24px;
+                    height: 24px;
+                    enabled: State.can-send && !State.sending;
+                    clicked => { Logic.send(); }
+                    if State.sending: Breathing {
+                        Icon {
+                            text: Icons.loader;
+                            font-size: 17px;
+                            color: Theme.icon-selected;
+                        }
+                    }
+                    if !State.sending: Icon {
+                        text: Icons.send;
+                        font-size: 17px;
+                        color: State.can-send ? Theme.icon-selected : Theme.text-weaker;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One row of a picker's menu: the name, a note, and a tick on the
+/// current choice.
+component MenuRow inherits Press {
+    in property <MenuItem> item;
+    in property <bool> highlighted;
+
+    height: Size.menu-row;
+    label: item.label;
+    rest: root.highlighted ? Theme.surface-base-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        if item.has-dot: VerticalLayout {
+            alignment: center;
+            Dot {
+                size: 8px;
+                background: item.dot;
+            }
+        }
+        Text {
+            text: item.label;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+            font-size: Size.label;
+            color: Theme.text-strong;
+        }
+        if item.detail != "": Text {
+            text: item.detail;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        Icon {
+            width: 14px;
+            text: item.selected ? Icons.check : "";
+            color: Theme.text-strong;
+        }
+    }
+}
+
+/// The open picker's menu, hanging from its chip (or over it, near the
+/// bottom of the window). Clicking outside it closes it.
+export component PickerMenu inherits Rectangle {
+    /// The rows shown before the list scrolls.
+    property <int> shown: min(State.menu-items.length, 8);
+    property <length> step: Size.menu-row + 2px;
+    property <length> card-width: State.picker == Pickers.variant ? 200px
+        : State.picker == Pickers.agent || State.picker == Pickers.folder ? 260px : 320px;
+
+    TouchArea {
+        clicked => { Logic.close-picker(); }
+    }
+
+    card := Rectangle {
+        property <length> below: Requests.anchor-y + Requests.anchor-height + 6px;
+        x: Requests.anchor-x.clamp(8px, root.width - self.width - 8px);
+        y: self.below + self.height > root.height - 8px
+            ? max(8px, Requests.anchor-y - self.height - 6px) : self.below;
+        width: root.card-width;
+        height: content.preferred-height;
+        background: Theme.surface-raised-strong;
+        border-radius: Size.menu-radius;
+        border-width: 1px;
+        border-color: Theme.menu-edge;
+        drop-shadow-color: #00000073;
+        drop-shadow-offset-y: 10px;
+        drop-shadow-blur: 28px;
+
+        TouchArea { }
+
+        content := VerticalLayout {
+            padding: 6px;
+            spacing: 6px;
+
+            if State.picker == Pickers.model: Field {
+                height: 32px;
+                placeholder: "Filter models";
+                text-size: Size.label;
+                fill: Theme.surface-raised-base;
+                idle-edge: Theme.border-weak-base;
+                text: State.menu-filter;
+                edited(text) => { Logic.menu-filter-edited(text); }
+                init => { self.focus(); }
+            }
+
+            if State.menu-items.length == 0: HorizontalLayout {
+                padding: 8px;
+                padding-left: 10px;
+                Text {
+                    text: "Nothing matches";
+                    font-size: Size.label;
+                    color: Theme.text-weak;
+                }
+            }
+
+            if State.menu-items.length > 0: list := ListView {
+                height: root.shown * root.step;
+                // Keeps the highlighted row in view as it moves.
+                property <int> highlight: State.menu-highlight;
+                changed highlight => {
+                    let top = self.highlight * root.step;
+                    if (top < -self.content-y) {
+                        self.content-y = -top;
+                    } else if (top + root.step > -self.content-y + self.visible-height) {
+                        self.content-y = -(top + root.step - self.visible-height);
+                    }
+                }
+                for item[index] in State.menu-items: VerticalLayout {
+                    padding-bottom: 2px;
+                    MenuRow {
+                        item: item;
+                        highlighted: index == State.menu-highlight;
+                        clicked => { Logic.pick(index); }
+                    }
+                }
+            }
+
+            if State.menu-note != "": Rectangle {
+                height: 1px;
+                background: Theme.menu-edge;
+            }
+            if State.menu-note != "": HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                Text {
+                    text: State.menu-note;
+                    wrap: word-wrap;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+            }
+
+            if State.picker == Pickers.folder: Rectangle {
+                height: 1px;
+                background: Theme.menu-edge;
+            }
+            if State.picker == Pickers.folder: Press {
+                height: Size.menu-row;
+                label: "Add project…";
+                clicked => { Logic.menu-action(); }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    Text {
+                        text: "Add project…";
+                        vertical-alignment: center;
+                        font-size: Size.label;
+                        color: Theme.text-base;
+                    }
+                }
+            }
+        }
+    }
+}

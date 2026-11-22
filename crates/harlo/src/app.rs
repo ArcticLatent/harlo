@@ -1,10 +1,9 @@
-//! The app's state, messages and update, and the window's top-level layout.
+//! The app's state, messages and update.
 
 // Rust guideline compliant 2026-10-09
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use harlo_core::approvals::{self, Shield};
@@ -14,28 +13,21 @@ use harlo_core::server::{
     self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
 };
 use harlo_core::sessions::Project;
-use harlo_core::theme::{self, Mode, Rgba, Tokens};
+use harlo_core::theme::{self, Mode, Tokens};
 use harlo_core::timeline::{Entry, entries};
 use harlo_core::workspace::{EventKind, Fetch, Fetched, InboxItem, ModelRef, Session, Workspace};
-use iced::animation::Animation;
-use iced::keyboard::{self, Key, key::Named};
-use iced::time::Instant;
-use iced::widget::{Id, row, scrollable, space, stack, text_editor};
-use iced::{Element, Fill, Subscription, Task, Theme};
+use std::time::Instant;
 
-use crate::assets::Assets;
-use crate::fit::{self, Shown};
-use crate::motion::{self, Moment};
-use crate::style::size;
+use crate::fit::{self, Side};
+use crate::keys::{Key, KeyPress};
+use crate::model::{self, AgentChoice, Feedback, Folder, ModelChoice, Picker, Variant};
+use crate::task::{Effect, Task};
+use crate::text::{Cursor, Edit, Position, TextBox};
 use crate::timeline::{self, Activity, Timeline};
-use crate::view;
-use crate::view::composer::Feedback;
-use crate::view::pickers::{self, AgentChoice, Folder, ModelChoice, Picker, Variant};
-use crate::widget::{Edge, reveal};
 
+mod arrange;
 mod changes;
 mod context;
-mod dock;
 mod files;
 mod notes;
 mod subagents;
@@ -43,17 +35,17 @@ mod terminal;
 mod todos;
 mod undo;
 
+pub use arrange::{Document, Edge};
 pub use changes::{
     ChangedFile, Changes, Event as ChangesEvent, GitAction, List, Loaded as ChangesLoaded,
 };
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
-pub use dock::{BOTTOM, CENTER, DockKey, DockMove, Docking, RIGHT};
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use subagents::Child;
-pub use terminal::{Event as TerminalEvent, Shell, Terminals, palette as terminal_palette};
+pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;
 mod waiting;
 pub(crate) use waiting::capitalized;
@@ -69,7 +61,7 @@ const MENU_ROW: f32 = 32.0;
 const MENU_ROWS: f32 = 8.0;
 
 /// The scroller inside the composer's menu.
-const MENU_SCROLLER: &str = "composer-menu-list";
+pub const MENU_SCROLLER: &str = "composer-menu-list";
 
 /// The open `/` or `@` menu above the composer.
 #[derive(Debug, Clone)]
@@ -80,11 +72,9 @@ pub struct MenuState {
     pub items: Vec<MenuItem>,
     /// The highlighted row.
     pub selected: usize,
-    /// The list's scroller, moved to keep the highlight in view.
-    pub scroller: Id,
 }
 
-/// Tool panels: the right rail opens them in the dock.
+/// Tool panels: the right rail opens one at a time on the right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     /// Context window use and session facts.
@@ -132,6 +122,34 @@ impl Panel {
             Self::Notes => "Notes",
         }
     }
+
+    /// The panel with `title`, in any case.
+    #[must_use]
+    pub fn named(title: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|p| p.title().eq_ignore_ascii_case(title))
+    }
+}
+
+/// A saved size, or `default` when none was saved, kept within `range`.
+fn size(saved: Option<u32>, default: f32, (least, most): (f32, f32)) -> f32 {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a size in pixels is far below 2^24"
+    )]
+    saved.map_or(default, |n| n as f32).clamp(least, most)
+}
+
+/// A size in whole logical pixels, for saving.
+fn pixels(size: f32) -> u32 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "sizes are positive and far below u32::MAX"
+    )]
+    let whole = size.round().max(0.0) as u32;
+    whole
 }
 
 /// How the connection to the current server stands.
@@ -165,16 +183,25 @@ pub enum Message {
     Filter(String),
     /// Show all of a folder's sessions, or fewer again, by folder.
     ToggleMore(String),
-    /// Show a tool panel, opening it if it isn't open.
+    /// Show a tool panel on the right, in place of the one there.
     OpenPanel(Panel),
-    /// Open a tool panel, show it, or close it when it's shown.
+    /// Show a tool panel on the right, or close it when it's shown.
     TogglePanel(Panel),
-    /// Something the user did in the dock: picked a tab, focused a pane, dragged.
-    Dock(iced_dock::DockEvent<DockKey>),
-    /// The user asked to close a dock tab.
-    CloseDocked(DockKey),
-    /// Move focus, or the current tab, around the dock from the keyboard.
-    DockMove(DockMove),
+    /// Close the tool panel, maximized or on the right.
+    ClosePanel,
+    /// An edge was dragged this far, right or down.
+    Resize {
+        /// The edge.
+        edge: Edge,
+        /// How far, in logical pixels.
+        by: f32,
+    },
+    /// The drag of an edge ended.
+    ResizeEnd,
+    /// Show a tab in the center, as when it's clicked.
+    ShowDocument(Document),
+    /// Close a tab in the center.
+    CloseDocument(Document),
     /// Give a tool panel the whole space between the rails, until [`Message::Restore`].
     Maximize(Panel),
     /// Put the maximized panel back where it was, and the layout with it.
@@ -182,7 +209,7 @@ pub enum Message {
     /// Something happened to the terminals.
     Terminal(TerminalEvent),
     /// The composer was edited.
-    Compose(text_editor::Action),
+    Compose(Edit),
     /// Open or close the location picker.
     ToggleLocations,
     /// Follow another server.
@@ -273,10 +300,8 @@ pub enum Message {
     Fetched(Result<Fetched, String>),
     /// The clock moved on; ages are measured from this time.
     Tick(SystemTime),
-    /// The window was resized, to this size.
-    Resized(iced::Size),
-    /// A frame of motion is due, at this time.
-    Frame(Instant),
+    /// The window was resized, to this width and height.
+    Resized(f32, f32),
     /// Answer an approval request in the open session.
     Approve {
         /// The request's ID.
@@ -386,9 +411,6 @@ struct Sending {
 pub struct App {
     /// Colours for every widget.
     pub tokens: Tokens,
-    /// Bundled images.
-    pub assets: Assets,
-    theme: Theme,
     /// Servers the location picker offers.
     pub locations: Vec<Location>,
     /// The server being followed.
@@ -407,18 +429,27 @@ pub struct App {
     pub filter: String,
     /// Folders whose full session list is open.
     pub expanded: HashSet<String>,
-    /// Whether the sidebar is shown.
+    /// Whether the user has the sidebar open.
     pub sidebar: bool,
-    /// The main area: the documents in the center, the tool panels docked around them.
-    pub dock: Docking,
+    /// The tool panel the user has open on the right, if any.
+    pub panel: Option<Panel>,
     /// The tool panel covering the space between the rails, if one is.
     pub maximized: Option<Panel>,
-    /// The terminals, shown in the dock or hidden.
+    /// The terminals, shown under the center or hidden.
     pub terminals: Terminals,
     /// The window's width, which decides which panels fit.
     width: f32,
-    /// Whether the user opened the sidebar while it didn't fit, so it stays.
-    keep: bool,
+    /// The window's height.
+    height: f32,
+    /// A panel the user opened while it didn't fit, kept on screen.
+    keep: Option<Side>,
+    /// The widths the user dragged the sidebar and right panel to, and the
+    /// terminals' height.
+    sidebar_width: f32,
+    panel_width: f32,
+    terminal_height: f32,
+    /// Whether an edge is being dragged; the layout is saved once it's let go.
+    resizing: bool,
     /// Open sessions, in tab order.
     pub tabs: Vec<String>,
     /// The session shown, if any; `None` shows the start screen.
@@ -427,25 +458,13 @@ pub struct App {
     /// The folder a new session starts in; `None` is the home folder.
     pub new_folder: Option<String>,
     /// The composer's text.
-    pub composer: text_editor::Content,
+    pub composer: TextBox,
     /// Why the last send failed, shown under the composer.
     pub send_error: Option<String>,
     /// The send on its way to OpenCode, if any.
     sending: Option<Sending>,
     /// When reading an image from the clipboard started, while it's going on.
     pasting: Option<Instant>,
-    /// Attachment chips fading in, by name.
-    chips: HashMap<String, Animation<bool>>,
-    /// The send error fading in, and the error it's for.
-    error_shown: (Animation<bool>, Option<String>),
-    /// The time motion is drawn at: the last frame, or the last message.
-    clock: Instant,
-    /// One-off motion runs every frame until this time.
-    settle: Instant,
-    /// When the pulse of work in progress started; indicators keep time with it.
-    since: Instant,
-    /// The sidebar sliding open or closed.
-    sidebar_slide: Animation<bool>,
     /// What the composer brings along with its text.
     pub draft: Draft,
     /// The open `/` or `@` menu.
@@ -475,7 +494,7 @@ pub struct App {
     /// The open menu's highlighted row.
     pub picker_index: usize,
     /// How far the open menu's list is scrolled from its top.
-    picker_scroll: f32,
+    pub picker_scroll: f32,
     /// Answers being filled into questions, by question ID.
     pub drafts: HashMap<String, approvals::Draft>,
     /// Why a question's answers can't be sent yet, by question ID.
@@ -506,6 +525,8 @@ pub struct App {
     other_tabs: BTreeMap<String, Tabs>,
     /// Saved tabs to reopen once the current location connects.
     restore: Option<Tabs>,
+    /// The connection to the current server; dropping it disconnects.
+    following: Option<crate::task::Handle>,
 }
 
 impl App {
@@ -525,11 +546,8 @@ impl App {
     pub fn new(location: Location, locations: Vec<Location>, layout: Layout) -> Self {
         let theme = theme::parse(harlo_core::DEFAULT_THEME).expect("the bundled theme is valid");
         let tokens = theme.tokens(Mode::Dark);
-        let clock = Instant::now();
         let mut app = Self {
-            theme: crate::style::iced_theme(&theme.name, &tokens),
             tokens,
-            assets: Assets::load(),
             locations,
             location,
             status: Status::Connecting { attempt: 1 },
@@ -541,25 +559,28 @@ impl App {
             filter: String::new(),
             expanded: layout.expanded.iter().cloned().collect(),
             sidebar: layout.sidebar,
-            dock: Docking::new(),
+            panel: layout.panel.as_deref().and_then(Panel::named),
             maximized: None,
             terminals: Terminals::default(),
             width: fit::WINDOW.0,
-            keep: false,
+            height: fit::WINDOW.1,
+            keep: None,
+            sidebar_width: size(layout.sidebar_width, fit::SIDEBAR, fit::SIDEBAR_RANGE),
+            panel_width: size(layout.panel_width, fit::PANEL, fit::PANEL_RANGE),
+            terminal_height: size(
+                layout.terminal_height,
+                fit::TERMINAL,
+                (fit::TERMINAL_MIN, f32::MAX),
+            ),
+            resizing: false,
             tabs: Vec::new(),
             active: None,
             timelines: HashMap::new(),
             new_folder: None,
-            composer: text_editor::Content::new(),
+            composer: TextBox::new(),
             send_error: None,
             sending: None,
             pasting: None,
-            chips: HashMap::new(),
-            error_shown: (Animation::new(true), None),
-            clock,
-            settle: clock,
-            since: clock,
-            sidebar_slide: motion::slide(layout.sidebar),
             draft: Draft::default(),
             menu: None,
             dismissed: None,
@@ -593,20 +614,12 @@ impl App {
             store: None,
             other_tabs: layout.tabs.clone(),
             restore: None,
+            following: None,
             saved: layout,
         };
         app.restore = app.other_tabs.remove(&app.location.label());
-        app.dock = app.saved_dock();
         app.refresh();
         app
-    }
-
-    /// The dock as saved for the current server, or the starting one.
-    fn saved_dock(&self) -> Docking {
-        match self.restore.as_ref().and_then(|tabs| tabs.dock.as_ref()) {
-            Some(saved) => Docking::restore(saved),
-            None => Docking::new(),
-        }
     }
 
     /// Saves the layout to `store` after each change.
@@ -631,9 +644,8 @@ impl App {
         let current = self.restore.clone().unwrap_or_else(|| Tabs {
             open: self.tabs.clone(),
             active: self.active.clone(),
-            dock: self.dock.saved(),
         });
-        if !current.open.is_empty() || current.dock.is_some() {
+        if !current.open.is_empty() {
             tabs.insert(self.location.label(), current);
         }
         let mut expanded: Vec<String> = self.expanded.iter().cloned().collect();
@@ -642,18 +654,16 @@ impl App {
             order: self.workspace.order().to_vec(),
             sidebar: self.sidebar,
             expanded,
+            panel: self.panel.map(|p| p.title().to_owned()),
+            sidebar_width: Some(pixels(self.sidebar_width)),
+            panel_width: Some(pixels(self.panel_width)),
+            terminal_height: Some(pixels(self.terminal_height)),
             tabs,
         }
     }
 
     /// Applies a message, then saves the layout if it changed.
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        // Motion is drawn at the latest time seen, so it never runs backwards.
-        let at = match message {
-            Message::Frame(at) => at,
-            _ => Instant::now(),
-        };
-        self.clock = self.clock.max(at);
         if matches!(
             message,
             Message::PickFolder(_)
@@ -665,19 +675,19 @@ impl App {
             self.picker = None;
         }
         let task = self.apply(message);
-        let docked = self.sync_dock();
-        self.sync_motion();
+        let shown = self.follow_document();
         let task = Task::batch([
             task,
-            docked,
+            shown,
             self.follow_folder(),
             self.follow_changes(),
             self.follow_context(),
             self.follow_files(),
             self.follow_notes(),
         ]);
+        // While an edge is dragged, the layout is saved once, when it's let go.
         let layout = self.layout();
-        if layout == self.saved {
+        if layout == self.saved || self.resizing {
             return task;
         }
         self.saved = layout.clone();
@@ -690,14 +700,18 @@ impl App {
 
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
-            message @ (Message::ToggleSidebar | Message::Resized(_)) => self.panels(&message),
-            message @ (Message::OpenPanel(_)
+            message @ (Message::ToggleSidebar
+            | Message::Resized(..)
+            | Message::OpenPanel(_)
             | Message::TogglePanel(_)
-            | Message::Dock(_)
-            | Message::CloseDocked(_)
-            | Message::DockMove(_)
+            | Message::ClosePanel
             | Message::Maximize(_)
-            | Message::Restore) => return self.dock_action(message),
+            | Message::Restore
+            | Message::Resize { .. }
+            | Message::ResizeEnd
+            | Message::ShowDocument(_)
+            | Message::CloseDocument(_)
+            | Message::CycleTab { .. }) => return self.arrange(message),
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => {
@@ -758,19 +772,11 @@ impl App {
             | Message::UndoCancel(_)
             | Message::UndoSettled { .. }) => return self.undo_action(message),
             Message::ToggleLocations => self.picking_location = !self.picking_location,
-            Message::PickLocation(location) => self.pick_location(location),
+            Message::PickLocation(location) => return self.pick_location(location),
             message @ (Message::OpenSession(_)
             | Message::CloseTab(_)
             | Message::CloseActiveTab
-            | Message::CycleTab { .. }) => return self.tab_action(message),
-            Message::NewSession(folder) => {
-                self.fs.shown = None;
-                self.active = None;
-                if folder.is_some() {
-                    self.new_folder = folder;
-                }
-                self.send_error = None;
-            }
+            | Message::NewSession(_)) => return self.tab_action(message),
             Message::PickFolder(folder) => self.new_folder = folder,
             Message::Send => return self.send(None),
             Message::Steer => return self.send(Some(Delivery::Steer)),
@@ -781,10 +787,9 @@ impl App {
                 self.refresh();
                 return self.fetch(fetches);
             }
-            // `update` has moved the clock on, so the next view draws the frame.
             // A failed fetch leaves the row as it was until the next event or
             // resync corrects it.
-            Message::Frame(_) | Message::Fetched(Err(_)) => {}
+            Message::Fetched(Err(_)) => {}
             Message::Tick(now) => {
                 self.now = now;
                 self.refresh();
@@ -808,7 +813,7 @@ impl App {
         match self.timelines.get_mut(&id) {
             Some(timeline) => {
                 timeline.update(&event);
-                timeline.scroll()
+                Task::none()
             }
             None => Task::none(),
         }
@@ -817,8 +822,8 @@ impl App {
     /// Applies a message from the composer: typing, its menu and attachments.
     fn compose(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Compose(action) => {
-                self.composer.perform(action);
+            Message::Compose(edit) => {
+                self.composer.edited(edit);
                 return self.refresh_menu();
             }
             Message::MenuMove(by) => return self.move_menu(by),
@@ -860,8 +865,16 @@ impl App {
                 }
             }
             Message::PasteImage => {
-                self.pasting = Some(self.clock);
-                return Task::perform(crate::clipboard::image(), Message::Pasted);
+                self.pasting = Some(Instant::now());
+                // A tick once the notice is due, so the window shows it.
+                let notice = Task::future(async {
+                    tokio::time::sleep(PASTE_NOTICE).await;
+                    Message::Tick(SystemTime::now())
+                });
+                return Task::batch([
+                    Task::perform(crate::clipboard::image(), Message::Pasted),
+                    notice,
+                ]);
             }
             Message::Pasted(png) => {
                 self.pasting = None;
@@ -882,7 +895,7 @@ impl App {
             Message::Sent(Ok(session)) => {
                 // A new session's first prompt was left in the composer.
                 if let Some(Sending { session: None, .. }) = self.sending.take() {
-                    self.composer = text_editor::Content::new();
+                    self.composer.set("");
                     self.draft = Draft::default();
                     self.menu = None;
                     self.dismissed = None;
@@ -1023,19 +1036,17 @@ impl App {
                     self.catalogs.clear();
                 }
                 let mut reload = Task::none();
-                let mut scroll = Task::none();
                 if let Some(id) = event.kind.session_id() {
                     let busy = self.workspace.is_busy(id);
                     if let Some(timeline) = self.timelines.get_mut(id) {
-                        let stale = timeline.apply(&event.kind, event.time, self.clock);
+                        let stale = timeline.apply(&event.kind, event.time);
                         timeline.set_busy(busy);
-                        scroll = timeline.scroll();
                         if stale {
                             reload = self.load_history(id.to_owned());
                         }
                     }
                 }
-                return Task::batch([self.fetch(fetches), reload, scroll, notice, files]);
+                return Task::batch([self.fetch(fetches), reload, notice, files]);
             }
             Update::Lost { reason, retry_in } => {
                 self.status = Status::Lost { reason, retry_in };
@@ -1101,10 +1112,18 @@ impl App {
         }
     }
 
-    /// Opens, closes and switches tabs.
+    /// Opens, closes and switches tabs, and goes to the start screen.
     fn tab_action(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::OpenSession(id) => return self.open(id),
+            Message::NewSession(folder) => {
+                self.fs.shown = None;
+                self.active = None;
+                if folder.is_some() {
+                    self.new_folder = folder;
+                }
+                self.send_error = None;
+            }
             Message::CloseTab(id) => self.close(&id),
             Message::CloseActiveTab => {
                 if let Some(key) = self.fs.shown.clone() {
@@ -1114,7 +1133,6 @@ impl App {
                     self.close(&id);
                 }
             }
-            Message::CycleTab { back } => return self.cycle_dock(back),
             _ => {}
         }
         Task::none()
@@ -1152,111 +1170,20 @@ impl App {
         )
     }
 
-    /// Opens, closes and fits the sidebar.
-    ///
-    /// Opening the sidebar when it doesn't fit keeps it on screen; see [`fit`].
-    fn panels(&mut self, message: &Message) {
-        match *message {
-            Message::ToggleSidebar => {
-                if self.shown().sidebar {
-                    self.sidebar = false;
-                    self.keep = false;
-                } else {
-                    self.sidebar = true;
-                    self.keep = !self.shown().sidebar;
-                }
-            }
-            Message::Resized(size) => {
-                self.width = size.width;
-                // Once the kept sidebar fits by itself, it no longer needs keeping.
-                if self.keep && fit::shown(self.width, self.sidebar, false).sidebar {
-                    self.keep = false;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Returns whether the sidebar is on screen at the window's width.
-    #[must_use]
-    pub fn shown(&self) -> Shown {
-        fit::shown(self.width, self.sidebar, self.keep)
-    }
-
-    /// Returns the width left for the conversation column.
-    #[must_use]
-    pub fn main_width(&self) -> f32 {
-        self.shown().main_width(self.width)
-    }
-
-    /// Starts motion for what changed: panels sliding, chips and errors fading in.
-    fn sync_motion(&mut self) {
-        let now = self.clock;
-        let shown = self.shown();
-        if self.sidebar_slide.value() != shown.sidebar {
-            self.sidebar_slide.go_mut(shown.sidebar, now);
-            self.settle_after(motion::SLIDE);
-        }
-        let names: Vec<String> = self.draft.attached.iter().map(|a| a.name.clone()).collect();
-        self.chips.retain(|name, _| names.contains(name));
-        for name in names {
-            if let std::collections::hash_map::Entry::Vacant(chip) = self.chips.entry(name) {
-                chip.insert(motion::appear(now));
-                self.settle = self.settle.max(now + motion::APPEAR);
-            }
-        }
-        if self.error_shown.1 != self.send_error {
-            self.error_shown = (motion::appear(now), self.send_error.clone());
-            self.settle_after(motion::APPEAR);
-        }
-        if let Some(settles) = self
-            .active
-            .as_deref()
-            .and_then(|id| self.timelines.get(id)?.settles())
-        {
-            self.settle = self.settle.max(settles);
-        }
-    }
-
-    fn settle_after(&mut self, duration: std::time::Duration) {
-        self.settle = self.settle.max(self.clock + duration);
-    }
-
-    /// Every frame while one-off motion runs, and none once it has settled.
-    ///
-    /// Breathing indicators redraw themselves and need no frames from here.
-    fn motion(&self) -> Subscription<Message> {
-        if self.clock < self.settle {
-            iced::window::frames().map(Message::Frame)
-        } else {
-            Subscription::none()
-        }
-    }
-
-    /// Returns the moment views draw motion at.
-    #[must_use]
-    pub fn moment(&self) -> Moment {
-        Moment {
-            now: self.clock,
-            since: self.since,
-        }
-    }
-
     /// Switches to another server, keeping the tabs of the one left for later.
-    fn pick_location(&mut self, location: Location) {
+    fn pick_location(&mut self, location: Location) -> Task<Message> {
         self.picking_location = false;
         if location != self.location {
-            // The subscription keyed by the old location ends, which detaches from it.
+            // Following the new location drops the old connection, which
+            // detaches from it.
             let left = self.restore.take().unwrap_or_else(|| Tabs {
                 open: std::mem::take(&mut self.tabs),
                 active: self.active.take(),
-                dock: self.dock.saved(),
             });
-            if !left.open.is_empty() || left.dock.is_some() {
+            if !left.open.is_empty() {
                 self.other_tabs.insert(self.location.label(), left);
             }
             self.restore = self.other_tabs.remove(&location.label());
-            self.dock = self.saved_dock();
             self.location = location;
             self.status = Status::Connecting { attempt: 1 };
             self.client = None;
@@ -1268,7 +1195,9 @@ impl App {
             self.forget_catalogs();
             self.workspace = Workspace::new(self.workspace.order().to_vec());
             self.refresh();
+            return self.follow_location();
         }
+        Task::none()
     }
 
     /// Shows a send on its way, and frees the composer for the next one.
@@ -1315,13 +1244,12 @@ impl App {
                     attachments,
                     skills,
                 };
-                timeline.pend(entry, self.clock);
-                timeline.to_end();
-                scroll = timeline.scroll();
+                timeline.pend(entry);
+                scroll = Task::effect(Effect::ToEnd(crate::ids::TIMELINE));
             }
         }
         let draft = if target.is_some() {
-            self.composer = text_editor::Content::new();
+            self.composer.set("");
             std::mem::take(&mut self.draft)
         } else {
             self.draft.clone()
@@ -1351,7 +1279,7 @@ impl App {
             timeline.unpend(key);
         }
         if self.composer.text().trim().is_empty() && self.draft.is_empty() {
-            self.composer = text_editor::Content::with_text(&sent.text);
+            self.composer.set(&sent.text);
             self.draft = sent.draft;
         }
     }
@@ -1406,19 +1334,16 @@ impl App {
         self.sending.is_some()
     }
 
-    /// Returns the composer's feedback: sending, pasting, chips and errors fading in.
+    /// Returns the composer's feedback: a send on its way, a paste being read.
     ///
     /// A paste being read shows only once it takes a moment.
     #[must_use]
-    pub fn feedback(&self) -> Feedback<'_> {
+    pub fn feedback(&self) -> Feedback {
         Feedback {
-            moment: self.moment(),
             sending: self.sending.is_some(),
             pasting: self
                 .pasting
-                .is_some_and(|since| self.clock.saturating_duration_since(since) >= PASTE_NOTICE),
-            error_shown: motion::shown(&self.error_shown.0, self.clock),
-            chips: &self.chips,
+                .is_some_and(|since| since.elapsed() >= PASTE_NOTICE),
         }
     }
 
@@ -1433,8 +1358,7 @@ impl App {
             Ok(rows) => timeline.set(rows),
             Err(reason) => timeline.fail(reason),
         }
-        let scroll = timeline.scroll();
-        Task::batch([scroll, self.check_undo(id)])
+        self.check_undo(id)
     }
 
     /// Sends the composer: to the open session, or as the start of a new one.
@@ -1534,8 +1458,8 @@ impl App {
         let line = self
             .composer
             .line(cursor.line)
-            .map(|line| line.text.into_owned())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .to_owned();
         let Some(trigger) = compose::trigger(&line, cursor.line, cursor.column) else {
             self.menu = None;
             self.dismissed = None;
@@ -1568,7 +1492,6 @@ impl App {
             trigger,
             items,
             selected,
-            scroller: Id::new(MENU_SCROLLER),
         });
         task
     }
@@ -1606,13 +1529,10 @@ impl App {
         )]
         let bottom = (menu.selected + 1) as f32 * MENU_ROW;
         let y = (bottom - MENU_ROWS * MENU_ROW).max(0.0);
-        iced::widget::operation::scroll_to(
-            menu.scroller.clone(),
-            scrollable::AbsoluteOffset {
-                x: None,
-                y: Some(y),
-            },
-        )
+        Task::effect(Effect::ScrollTo {
+            list: MENU_SCROLLER,
+            y,
+        })
     }
 
     /// Applies a message about the pickers' menus, and adding a project.
@@ -1626,16 +1546,13 @@ impl App {
                 self.picker = Some(picker);
                 self.picker_filter.clear();
                 self.picker_scroll = 0.0;
-                self.picker_index = pickers::items(self, picker)
+                self.picker_index = model::items(self, picker)
                     .iter()
                     .position(|item| item.selected)
                     .unwrap_or(0);
                 let reveal = self.reveal_highlight();
                 if picker == Picker::Model {
-                    return Task::batch([
-                        reveal,
-                        iced::widget::operation::focus(Id::new(pickers::MENU_FILTER)),
-                    ]);
+                    return Task::batch([reveal, Task::effect(Effect::Focus(model::MENU_FILTER))]);
                 }
                 return reveal;
             }
@@ -1649,7 +1566,7 @@ impl App {
                 let Some(picker) = self.picker else {
                     return Task::none();
                 };
-                let len = i64::try_from(pickers::items(self, picker).len()).unwrap_or(0);
+                let len = i64::try_from(model::items(self, picker).len()).unwrap_or(0);
                 if len > 0 {
                     let at = i64::try_from(self.picker_index).unwrap_or(0) + i64::from(by);
                     self.picker_index = usize::try_from(at.rem_euclid(len)).unwrap_or(0);
@@ -1658,7 +1575,7 @@ impl App {
             }
             Message::PickerSubmit => {
                 if let Some(item) = self.picker.and_then(|picker| {
-                    pickers::items(self, picker)
+                    model::items(self, picker)
                         .into_iter()
                         .nth(self.picker_index)
                 }) {
@@ -1682,9 +1599,9 @@ impl App {
 
     /// Scrolls the open menu's list so its highlighted row shows.
     fn reveal_highlight(&mut self) -> Task<Message> {
-        let step = pickers::MENU_ROW + pickers::ROW_GAP;
+        let step = model::MENU_ROW + model::ROW_GAP;
         let index = u16::try_from(self.picker_index).unwrap_or(u16::MAX);
-        let rows = u16::try_from(pickers::MENU_ROWS).unwrap_or(u16::MAX);
+        let rows = u16::try_from(model::MENU_ROWS).unwrap_or(u16::MAX);
         let top = f32::from(index) * step;
         let shown = f32::from(rows) * step;
         if top < self.picker_scroll {
@@ -1692,13 +1609,10 @@ impl App {
         } else if top + step > self.picker_scroll + shown {
             self.picker_scroll = top + step - shown;
         }
-        iced::widget::operation::scroll_to(
-            Id::new(pickers::MENU_LIST),
-            scrollable::AbsoluteOffset {
-                x: None,
-                y: Some(self.picker_scroll),
-            },
-        )
+        Task::effect(Effect::ScrollTo {
+            list: model::MENU_LIST,
+            y: self.picker_scroll,
+        })
     }
 
     /// Puts a menu row's text in place of the menu word.
@@ -1725,20 +1639,17 @@ impl App {
             Choice::Compact => self.dismissed = Some((trigger.line, trigger.start)),
             Choice::Command(_) | Choice::Skill(_) => {}
         }
-        self.composer.move_to(text_editor::Cursor {
-            position: text_editor::Position {
+        self.composer.move_to(Cursor {
+            position: Position {
                 line: trigger.line,
                 column: trigger.end,
             },
-            selection: Some(text_editor::Position {
+            selection: Some(Position {
                 line: trigger.line,
                 column: trigger.start,
             }),
         });
-        self.composer
-            .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
-                Arc::new(insert),
-            )));
+        self.composer.paste(&insert);
         self.refresh_menu()
     }
 
@@ -1974,158 +1885,80 @@ impl App {
         self.timelines.get(id).map(Timeline::len)
     }
 
-    /// Lays out the window: rails on both edges, and between them the
-    /// sidebar and the dock, or a maximized tool panel over both.
-    pub fn view(&self) -> Element<'_, Message> {
-        let t = &self.tokens;
-        let shown = self.shown();
-        // The sidebar slides open and closed. It keeps its place in the row
-        // (empty while closed), so the dock's widgets keep their state.
-        let sidebar = size::SIDEBAR * motion::shown(&self.sidebar_slide, self.clock);
-        let sidebar = if sidebar > 0.0 {
-            reveal(
-                view::sidebar::view(self),
-                size::SIDEBAR,
-                sidebar,
-                Edge::Left,
-            )
-            .into()
-        } else {
-            Element::from(space())
-        };
-        // A maximized panel covers the sidebar and the dock, which stay
-        // underneath as they were: the draft, the scroll positions and the
-        // splits come back with them.
-        let cover: Element<'_, Message> = match self.maximized {
-            Some(tool) => iced::widget::opaque(view::panel::maximized(self, tool)),
-            None => space().into(),
-        };
-        let middle = stack![row![sidebar, view::dock::view(self)], cover];
-        let layout = row![view::rails::left(t, &self.assets), middle]
-            .push(view::rails::right(self))
-            .height(Fill);
-        if self.picking_location && shown.sidebar {
-            stack![layout, view::locations::view(self)].into()
-        } else {
-            layout.into()
-        }
+    /// Starts following the current server, and the clock for session
+    /// ages; the window runs this once it opens.
+    pub fn start(&mut self) -> Task<Message> {
+        let ticks = futures_util::stream::unfold((), |()| async {
+            tokio::time::sleep(TICK).await;
+            Some((Message::Tick(SystemTime::now()), ()))
+        });
+        Task::batch([self.follow_location(), Task::stream(ticks)])
     }
 
-    /// Follows the current server, and ticks the clock for session ages.
-    pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            Subscription::run_with(self.location.clone(), |location| {
-                server::follow(location.clone())
-            })
-            .map(Message::Server),
-            iced::time::every(TICK).map(|_| Message::Tick(SystemTime::now())),
-            keyboard::listen().filter_map(shortcut),
-            if self.picker.is_some() {
-                keyboard::listen().filter_map(menu_key)
-            } else {
-                Subscription::none()
-            },
-            if self.maximized.is_some() {
-                keyboard::listen().filter_map(restore_key)
-            } else {
-                Subscription::none()
-            },
-            iced::window::resize_events().map(|(_, size)| Message::Resized(size)),
-            iced::window::events().filter_map(|(_, event)| match event {
-                iced::window::Event::Focused => Some(Message::Focused(true)),
-                iced::window::Event::Unfocused => Some(Message::Focused(false)),
-                _ => None,
-            }),
-            self.motion(),
-            self.terminals.subscription(),
-            // The shown editor's cursor blinks.
-            if matches!(self.shown_file().map(|f| &f.body), Some(FileBody::Text(_))) {
-                iced::time::every(files::BLINK).map(|_| Message::Files(FilesEvent::Blink))
-            } else {
-                Subscription::none()
-            },
-        ])
-    }
-
-    /// The iced theme supplying widget defaults.
-    #[must_use]
-    pub fn theme(&self) -> Theme {
-        self.theme.clone()
+    /// Follows the current server, dropping the connection to any other.
+    fn follow_location(&mut self) -> Task<Message> {
+        let (task, handle) =
+            Task::run(server::follow(self.location.clone()), Message::Server).abortable();
+        self.following = Some(handle.abort_on_drop());
+        task
     }
 }
 
-/// Maps a key press the focused widget didn't use to a shortcut.
-///
-/// Ctrl+N starts a new session, Ctrl+W closes the tab, and Ctrl+Tab,
-/// Ctrl+Shift+Tab, Ctrl+Page Down and Ctrl+Page Up switch tabs.
+/// Maps a key press to a window-wide shortcut: a new session, and closing
+/// or cycling tabs.
 #[must_use]
-pub fn shortcut(event: keyboard::Event) -> Option<Message> {
-    let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
-        return None;
-    };
-    if !modifiers.command() {
+pub fn shortcut(press: &KeyPress) -> Option<Message> {
+    if !press.command {
         return None;
     }
-    match key.as_ref() {
-        Key::Character("n") => Some(Message::NewSession(None)),
-        Key::Character("w") => Some(Message::CloseActiveTab),
-        Key::Named(Named::Tab) => Some(Message::CycleTab {
-            back: modifiers.shift(),
-        }),
-        Key::Named(Named::PageDown) => Some(Message::CycleTab { back: false }),
-        Key::Named(Named::PageUp) => Some(Message::CycleTab { back: true }),
-        Key::Named(arrow) if modifiers.alt() => {
-            let direction = match arrow {
-                Named::ArrowLeft => iced_dock::Direction::Left,
-                Named::ArrowRight => iced_dock::Direction::Right,
-                Named::ArrowUp => iced_dock::Direction::Up,
-                Named::ArrowDown => iced_dock::Direction::Down,
-                _ => return None,
-            };
-            Some(Message::DockMove(if modifiers.shift() {
-                DockMove::Carry(direction)
-            } else {
-                DockMove::Focus(direction)
-            }))
-        }
-        Key::Character("\\") => Some(Message::DockMove(DockMove::Split(if modifiers.shift() {
-            iced_dock::Direction::Down
-        } else {
-            iced_dock::Direction::Right
-        }))),
+    match &press.key {
+        Key::Character('n') => Some(Message::NewSession(None)),
+        Key::Character('w') => Some(Message::CloseActiveTab),
+        Key::Tab => Some(Message::CycleTab { back: press.shift }),
+        Key::PageDown => Some(Message::CycleTab { back: false }),
+        Key::PageUp => Some(Message::CycleTab { back: true }),
         _ => None,
     }
 }
 
 /// Maps Escape, while a panel is maximized, to putting it back.
 #[must_use]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "a keyboard subscription's filter takes its events by value"
-)]
-pub fn restore_key(event: keyboard::Event) -> Option<Message> {
-    match event {
-        keyboard::Event::KeyPressed {
-            key: Key::Named(Named::Escape),
-            ..
-        } => Some(Message::Restore),
-        _ => None,
-    }
+pub fn restore_key(press: &KeyPress) -> Option<Message> {
+    (press.key == Key::Escape).then_some(Message::Restore)
 }
 
 /// Maps a key press to moving through or choosing from an open picker's menu.
 #[must_use]
-pub fn menu_key(event: keyboard::Event) -> Option<Message> {
-    let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
-        return None;
-    };
-    if modifiers.command() || modifiers.alt() {
+pub fn menu_key(press: &KeyPress) -> Option<Message> {
+    if press.command || press.alt {
         return None;
     }
-    match key.as_ref() {
-        Key::Named(Named::ArrowUp) => Some(Message::PickerMove(-1)),
-        Key::Named(Named::ArrowDown) => Some(Message::PickerMove(1)),
-        Key::Named(Named::Enter) => Some(Message::PickerSubmit),
+    match press.key {
+        Key::Up => Some(Message::PickerMove(-1)),
+        Key::Down => Some(Message::PickerMove(1)),
+        Key::Enter => Some(Message::PickerSubmit),
+        _ => None,
+    }
+}
+
+/// Maps a key press in the focused composer to what it does; `None` leaves
+/// it to the text field.
+///
+/// With the `/` or `@` menu open, the arrow keys move through it, Enter or
+/// Tab picks, and Escape closes it. Otherwise Tab switches agents, Enter
+/// sends, Ctrl+Enter steers a working session, and Ctrl+V attaches an image
+/// on the clipboard (the field still pastes any text).
+#[must_use]
+pub fn compose_key(press: &KeyPress, menu_open: bool) -> Option<Message> {
+    match press.key {
+        Key::Up if menu_open => Some(Message::MenuMove(-1)),
+        Key::Down if menu_open => Some(Message::MenuMove(1)),
+        Key::Enter | Key::Tab if menu_open && !press.shift => Some(Message::MenuPick(None)),
+        Key::Escape if menu_open => Some(Message::MenuClose),
+        Key::Tab if !press.command && !press.alt => Some(Message::CycleAgent { back: press.shift }),
+        Key::Enter if press.command => Some(Message::Steer),
+        Key::Enter if !press.shift && !press.alt => Some(Message::Send),
+        Key::Character('v') if press.command && !press.shift => Some(Message::PasteImage),
         _ => None,
     }
 }
@@ -2136,7 +1969,7 @@ fn agent_choice(agent: &server::Agent) -> AgentChoice {
         id: agent.id.clone(),
         name: agent.name.clone(),
         description: agent.description.clone(),
-        color: agent.color.as_deref().and_then(Rgba::parse),
+        color: agent.color.as_deref().and_then(theme::Rgba::parse),
         read_only: agent.read_only,
     }
 }

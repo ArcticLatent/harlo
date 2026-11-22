@@ -1,390 +1,631 @@
-//! Open sessions: tabs, the history timeline, sending, and starting new sessions.
+//! An open session in the window: a run streaming in, the queue, and the
+//! cards asking for approvals, answers and undo.
 //!
-//! Each test renders the real view headless, clicks or types into it, and
-//! feeds the resulting messages back through `App::update`. History and send
-//! results are injected as the messages their tasks would produce.
+//! Each test opens the real window headless; server events go through
+//! `App::update`, and presses in the window send their messages there too.
 
 // Rust guideline compliant 2026-10-09
 
 mod support;
 
-use std::time::Duration;
-
-use harlo::app::shortcut;
-use harlo::{App, Message, Panel, ids};
-use harlo_core::layout::Tabs;
-use harlo_core::server::{Location, Update};
+use harlo::app::Message;
+use harlo::timeline::Event as TimelineEvent;
+use harlo_core::server::{
+    Answer, Choice, Delivery, Field, FieldKind, FileDiff, PermissionReply, Update,
+};
 use harlo_core::timeline::Entry;
-use harlo_core::workspace::{Event as ServerEvent, EventKind, ToolStatus};
-use iced::keyboard::{self, Key, Modifiers, key};
-use iced::widget::Id;
-use iced::widget::text_editor::{Action, Edit};
-use iced::{Point, mouse};
-use support::{demo, interact, shows, ui};
+use harlo_core::workspace::{Event, EventKind, Fetched, Form, InboxItem, Permission, Revert};
+use serde_json::json;
+use support::{Ui, demo, ui};
 
 /// "pi update" in the demo data.
 const PI_UPDATE: &str = "ses_demo_03";
-/// "hi how are you" in the demo data.
-const HI: &str = "ses_demo_00";
 
-fn history() -> Vec<Entry> {
-    vec![
-        Entry::Prompt {
-            key: "msg_1".into(),
-            text: "Fix the port in the README".into(),
-            attachments: Vec::new(),
-            skills: Vec::new(),
-        },
-        Entry::Thought {
-            key: "msg_2/0".into(),
-            text: "**Checking the connectivity notes**\n\nThe README says 8080.".into(),
-        },
-        Entry::Tool {
-            key: "msg_2/1".into(),
-            name: "edit".into(),
-            label: "Edit".into(),
-            detail: "SPEC.md".into(),
-            status: ToolStatus::Completed,
-            took: Some(Duration::from_secs(15)),
-            files: Vec::new(),
-            todos: None,
-        },
-        Entry::Answer {
-            key: "msg_2/2".into(),
-            text: "Changed the **port** to 8080.".into(),
-        },
-        Entry::Stopped {
-            key: "msg_3".into(),
-            outcome: "interrupted".into(),
-        },
-    ]
-}
-
-fn open(app: &mut App, title: &str) {
-    let _ = interact(app, |ui| {
-        ui.click(title).expect("the session row");
-    });
-}
-
-fn server_event(kind: EventKind) -> Message {
-    Message::Server(Update::Event(ServerEvent {
+fn event(kind: EventKind, time: f64) -> Message {
+    Message::Server(Update::Event(Event {
         id: "evt".into(),
         seq: None,
-        time: 1_795_000_000_000.0,
+        time,
         kind,
     }))
 }
 
-#[test]
-fn opening_a_session_shows_its_history() {
+/// The window with "pi update" open and its history empty.
+fn chatting() -> Ui {
     let mut app = demo::app();
-    open(&mut app, "pi update");
-    assert_eq!(app.tabs, [PI_UPDATE]);
-    assert_eq!(app.active.as_deref(), Some(PI_UPDATE));
-    assert!(shows(&app, "Loading…"));
-    assert!(!shows(&app, "What are we working on?"));
-
-    let _ = app.update(Message::History(PI_UPDATE.into(), Ok(history())));
-    assert_eq!(app.timeline_len(PI_UPDATE), Some(5));
-    for text in [
-        "Fix the port in the README",
-        "Thought",
-        "Checking the connectivity notes",
-        "Edit",
-        "SPEC.md",
-        "15s",
-        "Stopped",
-        // The header: title, agent and model.
-        "build",
-        "model",
-        "Changes",
-    ] {
-        assert!(shows(&app, text), "shows {text:?}");
-    }
-    assert!(!shows(&app, "Loading…"));
-}
-
-#[test]
-fn a_failed_or_empty_history_says_so() {
-    let mut app = demo::app();
-    open(&mut app, "pi update");
-    let _ = app.update(Message::History(PI_UPDATE.into(), Err("timed out".into())));
-    assert!(shows(&app, "Couldn't load this session: timed out"));
-
-    let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
-    assert!(shows(&app, "No messages yet."));
-}
-
-#[test]
-fn tabs_switch_cycle_and_close() {
-    let mut app = demo::app();
-    open(&mut app, "pi update");
-    open(&mut app, "hi how are you");
-    assert_eq!(app.tabs, [PI_UPDATE, HI]);
-    assert_eq!(app.active.as_deref(), Some(HI));
-
-    // Reopening an open session switches to its tab.
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
-    assert_eq!(app.tabs, [PI_UPDATE, HI]);
-    assert_eq!(app.active.as_deref(), Some(PI_UPDATE));
-
-    // A new tab opens after the active one.
-    let third = "ses_demo_05";
-    let _ = app.update(Message::OpenSession(third.into()));
-    assert_eq!(app.tabs, [PI_UPDATE, third, HI]);
-
-    // Cycling wraps around both ways.
-    let _ = app.update(Message::CycleTab { back: false });
-    assert_eq!(app.active.as_deref(), Some(HI));
-    let _ = app.update(Message::CycleTab { back: false });
-    assert_eq!(app.active.as_deref(), Some(PI_UPDATE));
-    let _ = app.update(Message::CycleTab { back: true });
-    assert_eq!(app.active.as_deref(), Some(HI));
-
-    // Closing the active tab, its left neighbour takes over at the end.
-    let key = app.dock.session_key(HI);
-    let _ = app.update(Message::CloseDocked(key));
-    assert_eq!(app.tabs, [PI_UPDATE, third]);
-    assert!(!app.dock.has(key), "its dock tab went too");
-    assert_eq!(app.active.as_deref(), Some(third));
-
-    let _ = app.update(Message::CloseActiveTab);
-    let _ = app.update(Message::CloseActiveTab);
-    assert!(app.tabs.is_empty());
-    assert_eq!(app.active, None);
-    assert!(shows(&app, "What are we working on?"));
+    let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
+    let ui = ui(app);
+    let _ = ui.messages();
+    ui
 }
 
-#[test]
-fn deleted_or_archived_sessions_lose_their_tabs() {
-    let mut app = demo::app();
-    open(&mut app, "pi update");
-    open(&mut app, "hi how are you");
-    let _ = app.update(server_event(EventKind::SessionArchived {
-        session_id: HI.into(),
-    }));
-    assert_eq!(app.tabs, [PI_UPDATE]);
-    assert_eq!(app.active.as_deref(), Some(PI_UPDATE));
-    let _ = app.update(server_event(EventKind::SessionDeleted {
-        session_id: PI_UPDATE.into(),
-    }));
-    assert!(app.tabs.is_empty());
-    assert!(shows(&app, "What are we working on?"));
-}
-
-#[test]
-fn enter_sends_and_a_failed_send_explains_why() {
-    let mut app = demo::app();
-    open(&mut app, "pi update");
-    let messages = interact(&mut app, |ui| {
-        ui.click(Id::new(ids::COMPOSER)).expect("the composer");
-        let _ = ui.typewrite("Also update the docs");
-        let _ = ui.tap_key(key::Named::Enter);
-    });
-    assert!(
-        matches!(messages.last(), Some(Message::Send)),
-        "Enter sends: {messages:?}"
-    );
-    assert!(
-        !messages
-            .iter()
-            .any(|m| matches!(m, Message::Compose(Action::Edit(Edit::Enter)))),
-        "Enter doesn't add a new line"
-    );
-
-    let _ = app.update(Message::Sent(Err(
-        "Couldn't send: the server is gone".into()
-    )));
-    assert!(shows(&app, "Couldn't send: the server is gone"));
-    assert_eq!(
-        app.composer.text().trim(),
-        "Also update the docs",
-        "the text stays to retry"
-    );
-}
-
-#[test]
-fn a_new_session_opens_in_a_tab_once_sent() {
-    let mut app = demo::app();
-    let _ = app.update(Message::NewSession(Some("/home/burce/code/harlo".into())));
-    assert_eq!(app.new_folder.as_deref(), Some("/home/burce/code/harlo"));
-
-    let mut session = demo::snapshot().sessions.remove(0);
-    session.id = "ses_new".into();
-    session.title = Some("A brand new session".into());
-    session.directory = "/home/burce/code/harlo".into();
-    session.project_id = "p_harlo".into();
-    let _ = app.update(Message::Sent(Ok(Box::new(session))));
-    assert_eq!(app.tabs, ["ses_new"]);
-    assert_eq!(app.active.as_deref(), Some("ses_new"));
-    assert!(app.composer.text().trim().is_empty(), "the composer clears");
-    assert!(shows(&app, "A brand new session"));
-
-    // Ctrl+N goes back to the start screen, keeping the tab.
-    let _ = app.update(Message::NewSession(None));
-    assert_eq!(app.active, None);
-    assert_eq!(app.tabs, ["ses_new"]);
-    assert_eq!(app.new_folder.as_deref(), Some("/home/burce/code/harlo"));
-}
-
-#[test]
-fn the_folder_picker_lists_projects() {
-    let mut app = demo::app();
-    let first = app.projects[0].directory.clone();
-    let _ = interact(&mut app, |ui| {
-        let _ = ui.click(Id::new(ids::FOLDER));
-    });
-    assert!(app.picker.is_some(), "the chip opens its menu");
-    // The project's name shows in the sidebar too: click the menu's second
-    // row, after the home folder.
-    let messages = interact(&mut app, |ui| {
-        let list = ui
-            .find(Id::new(harlo::MENU_LIST))
-            .expect("the menu's list")
-            .bounds();
-        let at = Point::new(
-            list.center_x(),
-            list.y + harlo::MENU_ROW + harlo::ROW_GAP + harlo::MENU_ROW / 2.0,
-        );
-        ui.point_at(at);
-        let _ = ui.simulate([iced::Event::Mouse(mouse::Event::CursorMoved {
-            position: at,
-        })]);
-        let _ = ui.simulate(iced_test::simulator::click());
-    });
-    assert!(
-        messages
-            .iter()
-            .any(|m| matches!(m, Message::PickFolder(Some(dir)) if *dir == first)),
-        "{messages:?}"
-    );
-    assert_eq!(app.new_folder.as_deref(), Some(first.as_str()));
-}
-
-#[test]
-fn shortcuts_map_to_messages() {
-    let press = |key: Key, modifiers: Modifiers| {
-        shortcut(keyboard::Event::KeyPressed {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
-            location: keyboard::Location::Standard,
-            modifiers,
-            text: None,
-            repeat: false,
-        })
-    };
-    let ctrl = Modifiers::CTRL;
-    assert!(matches!(
-        press(Key::Character("n".into()), ctrl),
-        Some(Message::NewSession(None))
-    ));
-    assert!(matches!(
-        press(Key::Character("w".into()), ctrl),
-        Some(Message::CloseActiveTab)
-    ));
-    assert!(matches!(
-        press(Key::Named(key::Named::Tab), ctrl),
-        Some(Message::CycleTab { back: false })
-    ));
-    assert!(matches!(
-        press(Key::Named(key::Named::Tab), ctrl | Modifiers::SHIFT),
-        Some(Message::CycleTab { back: true })
-    ));
-    assert!(press(Key::Character("n".into()), Modifiers::empty()).is_none());
-    assert!(press(Key::Character("q".into()), ctrl).is_none());
-}
-
-#[test]
-fn the_send_button_waits_for_text() {
-    let mut app = demo::app();
-    let messages = interact(&mut app, |ui| {
-        let _ = ui.click(Id::new(ids::SEND));
-    });
-    assert!(
-        !messages.iter().any(|m| matches!(m, Message::Send)),
-        "{messages:?}"
-    );
-    let _ = ui(&app)
-        .find(Id::new(ids::SEND))
-        .expect("the send button is shown");
-}
-
-#[test]
-fn the_layout_follows_the_window() {
-    let mut app = demo::app();
-    // Projects with sessions join the saved folders after the user's own.
-    let mut order = demo::order();
-    order.push(demo::HOME.into());
-    assert_eq!(app.layout().order, order);
-
-    open(&mut app, "pi update");
-    open(&mut app, "hi how are you");
-    let _ = app.update(Message::ToggleSidebar);
-    let _ = app.update(Message::OpenPanel(Panel::Notes));
-    let _ = app.update(Message::ToggleMore(demo::HOME.into()));
-    let layout = app.layout();
-    assert!(!layout.sidebar);
-    assert_eq!(layout.expanded, [demo::HOME]);
-    let tabs = layout.tabs.get("Local").expect("the server's tabs");
-    assert_eq!(tabs.open, [PI_UPDATE, HI]);
-    assert_eq!(tabs.active.as_deref(), Some(HI));
-    assert!(tabs.dock.is_some(), "and how the dock is arranged");
-    assert_eq!(layout.order, order);
-}
-
-#[test]
-fn saved_tabs_reopen_once_connected() {
-    let mut layout = demo::layout();
-    layout.sidebar = false;
-    layout.tabs.insert(
-        "Local".into(),
-        Tabs {
-            open: vec![PI_UPDATE.into(), "ses_gone".into(), HI.into()],
-            active: Some(PI_UPDATE.into()),
-            dock: None,
+fn busy(ui: &Ui) {
+    ui.send(event(
+        EventKind::Busy {
+            session_id: PI_UPDATE.into(),
         },
-    );
-    let mut app = App::new(Location::Shared, vec![Location::Shared], layout.clone());
-    let _ = app.update(Message::Tick(demo::now()));
-    assert!(!app.sidebar);
-    assert!(app.panel_shown(Panel::Changes), "the starting tools");
-    assert!(app.tabs.is_empty(), "tabs wait for the server");
-    assert_eq!(app.layout(), layout, "waiting tabs are still saved");
+        0.0,
+    ));
+}
 
-    let _ = app.update(demo::connected(demo::snapshot()));
-    assert_eq!(
-        app.tabs,
-        [PI_UPDATE, HI],
-        "sessions that are gone stay closed"
-    );
-    assert_eq!(app.active.as_deref(), Some(PI_UPDATE));
-    assert!(shows(&app, "Loading…"), "the active tab loads its history");
+fn tool_events(ui: &Ui, call: &str, name: &str, input: serde_json::Value, at: f64) {
+    for (kind, time) in [
+        (
+            EventKind::ToolStarted {
+                session_id: PI_UPDATE.into(),
+                message_id: "msg_a".into(),
+                call_id: call.into(),
+                name: name.into(),
+            },
+            at,
+        ),
+        (
+            EventKind::ToolCalled {
+                session_id: PI_UPDATE.into(),
+                message_id: "msg_a".into(),
+                call_id: call.into(),
+                input,
+            },
+            at + 10.0,
+        ),
+    ] {
+        ui.send(event(kind, time));
+    }
+}
+
+fn tool_ended(ui: &Ui, message: &str, call: &str, files: Vec<FileDiff>, time: f64) {
+    ui.send(event(
+        EventKind::ToolEnded {
+            session_id: PI_UPDATE.into(),
+            message_id: message.into(),
+            call_id: call.into(),
+            failed: false,
+            error: None,
+            files,
+            child: None,
+        },
+        time,
+    ));
 }
 
 #[test]
-fn each_server_keeps_its_own_tabs() {
-    let server = Location::Server {
-        url: "http://127.0.0.1:4096".into(),
-        password: None,
-    };
-    let mut app = App::new(
-        Location::Shared,
-        vec![Location::Shared, server.clone()],
-        demo::layout(),
-    );
-    let _ = app.update(demo::connected(demo::snapshot()));
-    open(&mut app, "pi update");
+fn a_run_streams_in_and_its_tools_fold_up_when_done() {
+    let ui = chatting();
+    busy(&ui);
+    ui.send(event(
+        EventKind::InboxAdded {
+            session_id: PI_UPDATE.into(),
+            item: InboxItem {
+                id: "msg_u".into(),
+                kind: "user".into(),
+                text: Some("Look around the docs".into()),
+                attachments: Vec::new(),
+                skills: Vec::new(),
+                delivery: Delivery::Queue,
+            },
+        },
+        1.0,
+    ));
+    ui.send(event(
+        EventKind::InboxRemoved {
+            session_id: PI_UPDATE.into(),
+            item_id: "msg_u".into(),
+            delivered: true,
+        },
+        2.0,
+    ));
+    tool_events(&ui, "c1", "glob", json!({ "pattern": "docs/*.md" }), 100.0);
+    tool_events(&ui, "c2", "read", json!({ "filePath": "docs/a.md" }), 200.0);
+    for text in [
+        "Searched 1 time, read 1 file",
+        "Glob",
+        "docs/*.md",
+        "Stop",
+        "Working",
+    ] {
+        assert!(ui.shows(text), "shows {text:?} while running");
+    }
 
-    let _ = app.update(Message::PickLocation(server));
-    assert!(app.tabs.is_empty());
+    for delta in ["Found ", "**two** files."] {
+        ui.send(event(
+            EventKind::TextDelta {
+                session_id: PI_UPDATE.into(),
+                message_id: "msg_b".into(),
+                ordinal: 0,
+                delta: delta.into(),
+            },
+            300.0,
+        ));
+    }
+    let answer = ui
+        .app()
+        .timeline_entries(PI_UPDATE)
+        .unwrap_or_default()
+        .into_iter()
+        .find_map(|entry| match entry {
+            Entry::Answer { key, text, .. } if key == "msg_b/text/0" => Some(text),
+            _ => None,
+        });
+    assert_eq!(answer.as_deref(), Some("Found **two** files."));
+
+    tool_ended(&ui, "msg_a", "c1", Vec::new(), 1_600.0);
+    tool_ended(&ui, "msg_a", "c2", Vec::new(), 2_400.0);
+    ui.send(event(
+        EventKind::Done {
+            session_id: PI_UPDATE.into(),
+            outcome: "succeeded".into(),
+        },
+        2_500.0,
+    ));
+    assert!(ui.shows("Searched 1 time, read 1 file"));
+    assert!(!ui.shows("Glob"), "the finished group is folded");
+    assert!(!ui.shows("Stop"));
+
+    // Opening the group shows its calls with their times.
+    ui.press("Searched 1 time, read 1 file");
+    for text in ["Glob", "docs/*.md", "1.5s", "Read", "docs/a.md", "2.2s"] {
+        assert!(ui.shows(text), "shows {text:?} once opened");
+    }
+}
+
+#[test]
+fn a_busy_session_queues_steers_and_stops() {
+    let ui = chatting();
+    busy(&ui);
+    ui.send(Message::Fetched(Ok(Fetched::Inbox(
+        PI_UPDATE.into(),
+        vec![InboxItem {
+            id: "msg_q".into(),
+            kind: "user".into(),
+            text: Some("Then update the changelog".into()),
+            attachments: Vec::new(),
+            skills: Vec::new(),
+            delivery: Delivery::Queue,
+        }],
+    ))));
+    assert!(ui.shows("Then update the changelog"));
+
+    ui.press("Steer");
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::SteerQueued(id) if id == "msg_q"))
+    );
+    ui.press("Cancel");
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::CancelQueued(id) if id == "msg_q"))
+    );
+    ui.press("Stop");
+    assert!(ui.messages().iter().any(|m| matches!(m, Message::Stop)));
+
+    // Stopped, OpenCode holds what's waiting until the next prompt.
+    ui.send(event(
+        EventKind::Done {
+            session_id: PI_UPDATE.into(),
+            outcome: "interrupted".into(),
+        },
+        1.0,
+    ));
+    assert!(ui.shows("Then update the changelog"));
+    assert!(ui.shows("Sends before your next message"));
+    assert!(!ui.shows("Steer"), "steering needs a running session");
+}
+
+fn approval(id: &str, action: &str, resources: &[&str]) -> Permission {
+    Permission {
+        id: id.into(),
+        session_id: PI_UPDATE.into(),
+        action: action.into(),
+        resources: resources.iter().map(|r| (*r).to_owned()).collect(),
+        save: vec!["cargo *".into()],
+        message: None,
+        files: Vec::new(),
+    }
+}
+
+/// Whether the sidebar marks "pi update" as waiting for the user.
+fn marked_waiting(ui: &Ui) -> bool {
+    ui.app()
+        .projects
+        .iter()
+        .flat_map(|p| p.sessions.iter())
+        .any(|s| s.id == PI_UPDATE && s.waiting)
+}
+
+#[test]
+fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
+    let ui = chatting();
+    ui.send(event(
+        EventKind::PermissionAsked(approval("per_1", "shell", &["cargo test"])),
+        1.0,
+    ));
+    assert!(ui.shows("Build wants to run a command"));
+    assert!(ui.shows("cargo test"));
+    assert!(ui.shows("Always allow cargo *"));
+    assert!(marked_waiting(&ui), "the sidebar marks the session");
+
+    ui.press("Allow once");
+    assert!(
+        ui.messages().iter().any(|m| matches!(
+            m,
+            Message::Approve { request, reply: PermissionReply::Once } if request == "per_1"
+        )),
+        "allowed once"
+    );
+
+    // While the answer is on its way, the card takes no other.
+    assert_eq!(ui.button("Deny").accessible_enabled(), Some(false));
+    // A failed answer says so, and the card can be answered again.
+    ui.send(Message::Answered(
+        PI_UPDATE.into(),
+        "per_1".into(),
+        Err("Couldn't answer: the server went away".into()),
+    ));
+    assert!(ui.shows("Couldn't answer: the server went away"));
+    ui.press("Always allow cargo *");
+    assert!(ui.messages().iter().any(|m| matches!(
+        m,
+        Message::Approve {
+            reply: PermissionReply::Always,
+            ..
+        }
+    )));
+    ui.send(Message::Answered(
+        PI_UPDATE.into(),
+        "per_1".into(),
+        Err("Still away".into()),
+    ));
+
+    // Refusing with a reason swaps the buttons for a box to say why.
+    ui.press("Deny with a reason…");
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::Refuse(id) if id == "per_1"))
+    );
+    assert!(!ui.shows("Allow once"));
+    ui.fill("Tell Build what to do instead", "run cargo check");
     assert_eq!(
-        app.layout().tabs.get("Local").map(|t| t.open.clone()),
-        Some(vec![PI_UPDATE.to_owned()]),
-        "the local tabs are kept"
+        ui.app()
+            .refusing
+            .as_ref()
+            .map(|(_, reason)| reason.as_str()),
+        Some("run cargo check")
+    );
+    ui.press("Cancel");
+    assert!(ui.shows("Allow once"), "cancelled, the buttons are back");
+
+    // Answered, here or elsewhere, the card goes.
+    ui.send(Message::Answered(PI_UPDATE.into(), "per_1".into(), Ok(())));
+    assert!(!ui.shows("Build wants to run a command"));
+    assert!(!marked_waiting(&ui));
+}
+
+#[test]
+fn an_edit_approval_shows_the_change_and_how_many_wait() {
+    let ui = chatting();
+    let edit = Permission {
+        files: vec![FileDiff {
+            file: "e.txt".into(),
+            patch: "--- e.txt\n+++ e.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n".into(),
+            additions: 1,
+            deletions: 1,
+            status: "modified".into(),
+        }],
+        ..approval("per_1", "edit", &["e.txt"])
+    };
+    ui.send(event(EventKind::PermissionAsked(edit), 1.0));
+    ui.send(event(
+        EventKind::PermissionAsked(approval("per_2", "shell", &["ls"])),
+        2.0,
+    ));
+    assert!(ui.shows("Build wants to edit a file"));
+    assert!(ui.shows("e.txt"));
+    assert!(ui.shows("three"), "the patch's lines");
+    assert!(ui.shows("two"));
+    assert!(ui.shows("1 of 2"));
+
+    // The first answered, the next one shows.
+    ui.send(Message::Answered(PI_UPDATE.into(), "per_1".into(), Ok(())));
+    assert!(ui.shows("Build wants to run a command"));
+    assert!(ui.shows("ls"));
+    assert!(!ui.shows("1 of 2"));
+}
+
+fn colour_question() -> Form {
+    let field = |key: &str, title: &str, kind: FieldKind| Field {
+        key: key.into(),
+        title: Some(title.into()),
+        description: None,
+        required: true,
+        hidden: false,
+        when: Vec::new(),
+        kind,
+    };
+    let choices = |labels: &[&str]| -> Vec<Choice> {
+        labels
+            .iter()
+            .map(|l| Choice {
+                value: (*l).into(),
+                label: (*l).into(),
+                description: None,
+            })
+            .collect()
+    };
+    Form {
+        id: "frm_1".into(),
+        session_id: PI_UPDATE.into(),
+        title: "Questions".into(),
+        fields: vec![
+            field(
+                "colour",
+                "Which colour?",
+                FieldKind::Text {
+                    options: choices(&["Red", "Blue"]),
+                    custom: true,
+                    placeholder: None,
+                    default: None,
+                },
+            ),
+            field(
+                "extras",
+                "Which extras?",
+                FieldKind::Multiselect {
+                    options: choices(&["Tests", "Docs"]),
+                    custom: false,
+                    min_items: None,
+                    max_items: None,
+                    default: Vec::new(),
+                },
+            ),
+            field("ship", "Ship it?", FieldKind::Boolean { default: None }),
+        ],
+    }
+}
+
+#[test]
+fn a_question_card_takes_answers_and_says_what_is_missing() {
+    let ui = chatting();
+    ui.send(event(EventKind::FormCreated(colour_question()), 1.0));
+    assert!(ui.shows("Build has a question"));
+    assert!(ui.shows("Which colour?"));
+    assert!(marked_waiting(&ui));
+
+    ui.press("Blue");
+    assert!(ui.messages().iter().any(|m| matches!(
+        m,
+        Message::FormChoose { key, value, .. } if key == "colour" && value == "Blue"
+    )));
+    ui.press("Yes");
+    assert!(ui.messages().iter().any(|m| matches!(
+        m,
+        Message::FormFlag { key, flag: true, .. } if key == "ship"
+    )));
+
+    // Nothing chosen for the extras yet: sending says so instead.
+    ui.press("Send answer");
+    assert!(ui.shows("Needs an answer"));
+    ui.press("Docs");
+    assert!(!ui.shows("Needs an answer"), "answering clears it");
+    let form = colour_question();
+    let answers = ui
+        .app()
+        .drafts
+        .get("frm_1")
+        .map(|draft| draft.answers(&form));
+    assert_eq!(
+        answers,
+        Some(Ok(vec![
+            ("colour".into(), Answer::Text("Blue".into())),
+            ("extras".into(), Answer::List(vec!["Docs".into()])),
+            ("ship".into(), Answer::Boolean(true)),
+        ]))
     );
 
-    let _ = app.update(Message::PickLocation(Location::Shared));
-    let _ = app.update(demo::connected(demo::snapshot()));
-    assert_eq!(app.tabs, [PI_UPDATE], "and reopen on the way back");
+    // Something else typed replaces the chosen colour.
+    ui.fill("Something else…", "Green");
+    assert!(ui.messages().iter().any(|m| matches!(
+        m,
+        Message::FormType { key, text, .. } if key == "colour" && text == "Green"
+    )));
+
+    ui.send(Message::Answered(PI_UPDATE.into(), "frm_1".into(), Ok(())));
+    assert!(!ui.shows("Build has a question"));
+    assert!(!marked_waiting(&ui));
+}
+
+/// An edit's events, ending with its patch.
+fn edit_events(ui: &Ui, call: &str, patch: &str, (added, removed): (u64, u64)) {
+    let kinds = [
+        EventKind::ToolStarted {
+            session_id: PI_UPDATE.into(),
+            message_id: "msg_e".into(),
+            call_id: call.into(),
+            name: "edit".into(),
+        },
+        EventKind::ToolCalled {
+            session_id: PI_UPDATE.into(),
+            message_id: "msg_e".into(),
+            call_id: call.into(),
+            input: json!({ "path": "README.md" }),
+        },
+    ];
+    for (kind, at) in kinds.into_iter().zip([1.0, 2.0]) {
+        ui.send(event(kind, at));
+    }
+    let file = FileDiff {
+        file: "README.md".into(),
+        patch: patch.into(),
+        additions: added,
+        deletions: removed,
+        status: "modified".into(),
+    };
+    tool_ended(ui, "msg_e", call, vec![file], 3.0);
+}
+
+#[test]
+fn an_edit_shows_its_diff_under_the_row() {
+    let ui = chatting();
+    edit_events(
+        &ui,
+        "call_e",
+        "@@ -11 +11 @@\n-Open Blender; it serves 9876.\n+Open Blender; it serves 9877.\n",
+        (1, 1),
+    );
+    assert!(ui.shows("Edit"));
+    assert!(ui.shows("+1"));
+    assert!(ui.shows("−1"));
+    assert!(ui.shows("11"), "line numbers in the gutter");
+    assert!(ui.shows("Open Blender; it serves 9877."));
+
+    // Clicking a changed file reviews it.
+    let line = ui.find("Open Blender; it serves 9877.");
+    assert!(!line.is_empty());
+
+    // A long one shows its first lines, and the rest on request.
+    let long = (1..=30).fold(String::new(), |all, n| all + &format!("+line {n}\n"));
+    edit_events(&ui, "call_l", &format!("@@ -0,0 +1,30 @@\n{long}"), (30, 0));
+    // Two calls fold into a group, closed once they're done.
+    ui.send(Message::Timeline(
+        PI_UPDATE.into(),
+        TimelineEvent::ToggleGroup("msg_e/tool/call_e".into()),
+    ));
+    assert!(ui.shows("Edited 2 files"));
+    assert!(ui.shows("… 18 more lines"));
+    ui.press("… 18 more lines");
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::Timeline(_, TimelineEvent::ToggleDiff(_)))),
+        "asks for the whole diff"
+    );
+    assert!(!ui.shows("… 18 more lines"), "shown whole");
+}
+
+/// "pi update" with one stored prompt and an answer after it.
+fn with_history() -> Ui {
+    let ui = chatting();
+    let rows = vec![
+        Entry::Prompt {
+            key: "msg_p1".into(),
+            text: "Change the port to 9877".into(),
+            attachments: Vec::new(),
+            skills: Vec::new(),
+        },
+        Entry::Answer {
+            key: "msg_a1/text/0".into(),
+            text: "Done.".into(),
+        },
+    ];
+    ui.send(Message::History(PI_UPDATE.into(), Ok(rows)));
+    let _ = ui.messages();
+    ui
+}
+
+fn patch(file: &str, patch: &str) -> FileDiff {
+    FileDiff {
+        file: file.into(),
+        patch: patch.into(),
+        additions: 1,
+        deletions: 1,
+        status: "modified".into(),
+    }
+}
+
+#[test]
+fn undo_shows_what_goes_back_and_whose_edits_it_overwrites() {
+    let ui = with_history();
+    assert!(!ui.shows("Undo"), "offered only under the pointer");
+    ui.send(Message::Timeline(
+        PI_UPDATE.into(),
+        TimelineEvent::Hover(Some("msg_p1".into())),
+    ));
+    ui.press("Undo");
+    assert!(
+        ui.messages().iter().any(|m| matches!(
+            m,
+            Message::Timeline(_, TimelineEvent::Undo(id)) if id == "msg_p1"
+        )),
+        "undo asked for"
+    );
+
+    // Staged: the agent changed 9876 to 9877, and the user added a line since.
+    let agent = vec![patch("README.md", "@@ -1 +1 @@\n-port 9876\n+port 9877\n")];
+    let revert = Revert {
+        message_id: "msg_p1".into(),
+        files: vec![patch(
+            "README.md",
+            "@@ -1,2 +1 @@\n-port 9877\n-my own note\n+port 9876\n",
+        )],
+    };
+    ui.send(Message::UndoStaged(PI_UPDATE.into(), Ok((agent, revert))));
+    assert!(ui.shows("Undo “Change the port to 9877” and everything after it?"));
+    assert!(ui.shows("README.md"));
+    assert!(ui.shows("This overwrites your own edits to README.md (1 line)."));
+
+    // The card's own Undo, not the prompt's.
+    let card = ui
+        .find("Undo")
+        .into_iter()
+        .rfind(|e| e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Button))
+        .expect("the card's Undo");
+    card.invoke_accessible_default_action();
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::UndoKeep(id) if id == PI_UPDATE)),
+        "kept"
+    );
+    ui.send(Message::UndoSettled {
+        session: PI_UPDATE.into(),
+        kept: true,
+        result: Ok(()),
+    });
+    assert!(!ui.shows("Undo “Change the port to 9877” and everything after it?"));
+    assert_eq!(
+        ui.app().composer.text().trim(),
+        "Change the port to 9877",
+        "the prompt comes back to send again"
+    );
+}
+
+#[test]
+fn a_cancelled_undo_leaves_the_composer_alone() {
+    let ui = with_history();
+    let revert = Revert {
+        message_id: "msg_p1".into(),
+        files: Vec::new(),
+    };
+    ui.send(Message::UndoStaged(
+        PI_UPDATE.into(),
+        Ok((Vec::new(), revert)),
+    ));
+    assert!(ui.shows("No files change; the conversation goes back to before this prompt."));
+    ui.press("Cancel");
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::UndoCancel(id) if id == PI_UPDATE))
+    );
+    ui.send(Message::UndoSettled {
+        session: PI_UPDATE.into(),
+        kept: false,
+        result: Ok(()),
+    });
+    assert!(!ui.shows("No files change; the conversation goes back to before this prompt."));
+    assert!(ui.app().composer.text().trim().is_empty());
+}
+
+#[test]
+fn a_working_session_offers_no_undo() {
+    let ui = with_history();
+    busy(&ui);
+    ui.send(Message::Timeline(
+        PI_UPDATE.into(),
+        TimelineEvent::Hover(Some("msg_p1".into())),
+    ));
+    assert!(!ui.shows("Undo"));
 }

@@ -1,0 +1,64 @@
+// The start screen, before a session is open: "What are we working on?",
+// the pickers and the composer.
+
+import { Theme, Size } from "theme.slint";
+import { State } from "data.slint";
+import { Composer, PickerChip } from "composer.slint";
+
+export component Home inherits Rectangle {
+    background: Theme.background-base;
+
+    /// The composer's widest size; it narrows with the center.
+    property <length> column: min(760px, root.width - 48px);
+
+    VerticalLayout {
+        // Optically centred: a little above the middle.
+        padding-bottom: 82px;
+        alignment: center;
+
+        HorizontalLayout {
+            alignment: center;
+            Text {
+                text: "What are we working on?";
+                font-size: Size.headline;
+                color: Theme.text-strong;
+            }
+        }
+
+        Rectangle { height: 22px; }
+
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            PickerChip {
+                chip: State.folder-chip;
+            }
+            for chip in State.chips: PickerChip {
+                chip: chip;
+            }
+        }
+
+        Rectangle { height: 14px; }
+
+        HorizontalLayout {
+            alignment: center;
+            composer := Composer {
+                width: root.column;
+                placeholder: "Ask, or describe what to build · Tab switches agents";
+                hint: State.home-hint;
+            }
+        }
+
+        if State.send-error != "": HorizontalLayout {
+            alignment: center;
+            padding-top: 8px;
+            Text {
+                width: root.column;
+                text: State.send-error;
+                wrap: word-wrap;
+                font-size: Size.small;
+                color: Theme.icon-critical-base;
+            }
+        }
+    }
+}

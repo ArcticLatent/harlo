@@ -1,7 +1,8 @@
 //! The window's saved layout and the notes, kept in a small SQLite database.
 //!
 //! The layout covers the project folders in the sidebar, which panels and
-//! lists are open, and the open tabs for each server. It's saved after each
+//! lists are open and how big the user made them, and the open tabs for
+//! each server. It's saved after each
 //! change, off the UI thread, and read once at start. Notes are kept one per
 //! folder on each server.
 
@@ -28,6 +29,14 @@ pub struct Layout {
     pub sidebar: bool,
     /// Folders whose session lists show every session.
     pub expanded: Vec<String>,
+    /// The tool panel open on the right, by its title, if one is.
+    pub panel: Option<String>,
+    /// How wide the user made the sidebar, in logical pixels.
+    pub sidebar_width: Option<u32>,
+    /// How wide the user made the right panel, in logical pixels.
+    pub panel_width: Option<u32>,
+    /// How tall the user made the terminals, in logical pixels.
+    pub terminal_height: Option<u32>,
     /// The open tabs for each server, keyed by its location label.
     pub tabs: BTreeMap<String, Tabs>,
 }
@@ -38,12 +47,19 @@ impl Default for Layout {
             order: Vec::new(),
             sidebar: true,
             expanded: Vec::new(),
+            panel: None,
+            sidebar_width: None,
+            panel_width: None,
+            terminal_height: None,
             tabs: BTreeMap::new(),
         }
     }
 }
 
 /// The sessions open on one server.
+///
+/// Layouts saved while the main area could be split into panes also hold
+/// that arrangement; it's ignored when read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Tabs {
@@ -51,38 +67,6 @@ pub struct Tabs {
     pub open: Vec<String>,
     /// The session shown, if any.
     pub active: Option<String>,
-    /// How the main area was split into panes, if it was arranged.
-    pub dock: Option<DockNode>,
-}
-
-/// A part of the main area: panes split side by side or stacked, or one
-/// pane of tabs.
-///
-/// Tabs are named by the window: `session:<id>`, `panel:<name>`, `home` or
-/// `editor`. Names it no longer knows are skipped when the layout is read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DockNode {
-    /// Parts side by side (`across`) or stacked, each with its share of the room.
-    Split {
-        /// Whether the parts sit side by side rather than stacked.
-        across: bool,
-        /// Each part's share of the room, in thousandths.
-        shares: Vec<u32>,
-        /// The parts, left to right or top to bottom.
-        parts: Vec<DockNode>,
-    },
-    /// A pane of tabs.
-    Tabs {
-        /// The pane's name, for the window to find it again.
-        name: Option<String>,
-        /// The kind of tab it takes, so other kinds can't be dropped in.
-        group: Option<String>,
-        /// Its tabs, in order.
-        tabs: Vec<String>,
-        /// The tab it shows.
-        shown: Option<String>,
-    },
 }
 
 /// Where the layout and notes are saved: a SQLite file.

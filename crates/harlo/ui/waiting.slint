@@ -1,0 +1,474 @@
+// Cards above the composer for what the open session waits on: a staged
+// undo to keep or cancel, an approval to allow or refuse, and questions to
+// answer. The oldest of each shows; "1 of 3" says more are waiting.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Size, Fonts } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, CardFile, Question, Answer } from "data.slint";
+import { Icon, Press, Field } from "widgets.slint";
+import { Counts, PatchLine } from "timeline.slint";
+
+/// The tallest the cards get before they scroll.
+global Cards {
+    out property <length> max-height: 420px;
+    out property <length> padding: 14px;
+}
+
+/// A raised card with an outline in its accent.
+component Card inherits Rectangle {
+    in property <color> edge;
+    in property <length> gap: 10px;
+
+    background: Theme.surface-raised-base;
+    border-color: root.edge;
+    border-width: 1px;
+    border-radius: Size.composer-radius;
+    drop-shadow-color: #00000033;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-blur: 14px;
+
+    VerticalLayout {
+        padding: Cards.padding;
+        spacing: root.gap;
+        @children
+    }
+}
+
+/// A card's button: filled when it's the main action, plain otherwise.
+component CardButton inherits Press {
+    in property <string> text;
+    in property <bool> main;
+    /// Whether a long label shortens to fit, such as the patterns "Always
+    /// allow" saves; the others keep their whole label.
+    in property <bool> shrinks;
+
+    height: 30px;
+    label: root.text;
+    rest: !root.main ? Theme.surface-raised-strong
+        : root.enabled ? Theme.surface-brand-base : Theme.primary-off;
+    hover: root.main ? Theme.primary-hover : Theme.chip-hover;
+    lit: root.hover;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            overflow: root.shrinks ? TextOverflow.elide : TextOverflow.clip;
+            font-size: Size.label;
+            font-weight: 500;
+            color: root.main ? Theme.background-base : Theme.text-strong;
+        }
+    }
+}
+
+/// A plain text button, in a weaker colour.
+component GhostButton inherits Press {
+    in property <string> text;
+
+    height: 30px;
+    label: root.text;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+    }
+}
+
+/// A card's heading: an icon, what's asked, and how many wait.
+component Heading inherits HorizontalLayout {
+    in property <string> glyph;
+    in property <color> accent;
+    in property <string> text;
+    in property <int> count: 1;
+
+    spacing: 10px;
+    Icon {
+        width: 16px;
+        text: root.glyph;
+        font-size: 15px;
+        color: root.accent;
+    }
+    Text {
+        text: root.text;
+        horizontal-stretch: 1;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        font-size: Size.text;
+        font-weight: 500;
+        color: Theme.text-strong;
+    }
+    if root.count > 1: Text {
+        text: "1 of \{root.count}";
+        vertical-alignment: center;
+        font-size: Size.small;
+        color: Theme.text-weak;
+    }
+}
+
+/// A file's name and counts over its first patch lines, and a warning.
+component PatchView inherits VerticalLayout {
+    in property <CardFile> file;
+
+    spacing: 6px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: root.file.name;
+            horizontal-stretch: 1;
+            overflow: elide;
+            font-family: Fonts.mono;
+            font-size: Size.code;
+            color: Theme.text-strong;
+        }
+        Counts {
+            added: root.file.added;
+            removed: root.file.removed;
+        }
+    }
+    Rectangle {
+        background: Theme.surface-inset-base;
+        border-radius: Size.radius;
+        clip: true;
+        VerticalLayout {
+            padding-top: 5px;
+            padding-bottom: 5px;
+            for line in root.file.lines: PatchLine {
+                line: line;
+            }
+            if root.file.more != "": HorizontalLayout {
+                padding-left: 28px;
+                padding-top: 4px;
+                Text {
+                    text: root.file.more;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+            }
+        }
+    }
+    if root.file.warning != "": Text {
+        text: root.file.warning;
+        wrap: word-wrap;
+        font-size: Size.small;
+        color: Theme.icon-critical-base;
+    }
+}
+
+/// A staged undo: what it put back, whose edits that overwrote, and Undo or Cancel.
+component UndoView inherits Card {
+    edge: Theme.warning-edge;
+    accessible-role: groupbox;
+    accessible-label: State.undo-card.title;
+
+    Heading {
+        glyph: Icons.undo;
+        accent: Theme.icon-warning-base;
+        text: State.undo-card.title;
+    }
+    Text {
+        text: State.undo-card.note;
+        wrap: word-wrap;
+        font-size: Size.label;
+        color: Theme.text-base;
+    }
+    for file in State.undo-card.files: PatchView {
+        file: file;
+    }
+    if State.undo-card.unchecked: Text {
+        text: "Couldn't check this undo, so your own edits can't be told from the agent's.";
+        wrap: word-wrap;
+        font-size: Size.small;
+        color: Theme.text-weak;
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+        CardButton {
+            text: "Undo";
+            main: true;
+            enabled: !State.undo-card.busy;
+            clicked => { Logic.undo-keep(State.undo-card.session); }
+        }
+        CardButton {
+            text: "Cancel";
+            enabled: !State.undo-card.busy;
+            clicked => { Logic.undo-cancel(State.undo-card.session); }
+        }
+    }
+}
+
+/// An action the agent asks to take: allow it once or always, or refuse.
+component ApprovalView inherits Card {
+    property <bool> busy: State.approval-card.busy;
+    property <string> id: State.approval-card.id;
+
+    edge: Theme.warning-edge;
+    accessible-role: groupbox;
+    accessible-label: State.approval-card.title;
+
+    Heading {
+        glyph: Icons.shield-alert;
+        accent: Theme.icon-warning-base;
+        text: State.approval-card.title;
+        count: State.approval-card.count;
+    }
+    if State.approval-card.detail != "": Rectangle {
+        background: Theme.surface-inset-base;
+        border-radius: Size.radius;
+        HorizontalLayout {
+            padding-top: 8px;
+            padding-bottom: 8px;
+            padding-left: 10px;
+            padding-right: 10px;
+            Text {
+                text: State.approval-card.detail;
+                wrap: word-wrap;
+                font-family: Fonts.mono;
+                font-size: Size.code;
+                color: Theme.text-strong;
+            }
+        }
+    }
+    for file in State.approval-card.files: PatchView {
+        file: file;
+    }
+    if State.approval-card.message != "": Text {
+        text: State.approval-card.message;
+        wrap: word-wrap;
+        font-size: Size.small;
+        color: Theme.text-base;
+    }
+    if !State.approval-card.refusing: HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+        CardButton {
+            text: "Allow once";
+            main: true;
+            enabled: !root.busy;
+            clicked => { Logic.approve(root.id, 0); }
+        }
+        CardButton {
+            text: State.approval-card.always;
+            shrinks: true;
+            enabled: !root.busy;
+            clicked => { Logic.approve(root.id, 1); }
+        }
+        CardButton {
+            text: "Deny";
+            enabled: !root.busy;
+            clicked => { Logic.approve(root.id, 2); }
+        }
+        GhostButton {
+            text: "Deny with a reason…";
+            enabled: !root.busy;
+            clicked => { Logic.refuse(root.id); }
+        }
+    }
+    if State.approval-card.refusing: HorizontalLayout {
+        spacing: 8px;
+        Field {
+            // Refusing starts with the reason to type.
+            init => { self.focus(); }
+            height: 32px;
+            horizontal-stretch: 1;
+            fill: Theme.surface-raised-base;
+            idle-edge: Theme.border-weak-base;
+            text-size: Size.label;
+            placeholder: State.approval-card.reason-hint;
+            text: State.approval-card.reason;
+            edited(text) => { Logic.refuse-reason(text); }
+            accepted => {
+                if !root.busy {
+                    Logic.refuse-send();
+                }
+            }
+        }
+        CardButton {
+            text: "Deny";
+            main: true;
+            enabled: !root.busy;
+            clicked => { Logic.refuse-send(); }
+        }
+        CardButton {
+            text: "Cancel";
+            clicked => { Logic.refuse-cancel(); }
+        }
+    }
+}
+
+/// An option to pick: a mark, its name, and more about it.
+component ChoiceRow inherits Press {
+    in property <string> glyph;
+    in property <string> text;
+    in property <string> description;
+
+    height: 30px;
+    label: root.text;
+    lit: Theme.surface-base-active;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        Icon {
+            width: 15px;
+            text: root.glyph;
+            font-size: 14px;
+            color: root.selected ? Theme.text-interactive-base : Theme.icon-base;
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: Size.label;
+            color: Theme.text-strong;
+        }
+        if root.description != "": Text {
+            text: root.description;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+    }
+}
+
+/// One of the agent's questions and the controls that answer it.
+component QuestionView inherits VerticalLayout {
+    in property <Question> item;
+
+    spacing: 6px;
+    if root.item.title != "": Text {
+        text: root.item.title;
+        wrap: word-wrap;
+        font-size: Size.label;
+        font-weight: 500;
+        color: Theme.text-strong;
+    }
+    if root.item.description != "": Text {
+        text: root.item.description;
+        wrap: word-wrap;
+        font-size: Size.label;
+        color: Theme.text-base;
+    }
+    for choice in root.item.choices: ChoiceRow {
+        glyph: root.item.answer == Answer.many
+            ? (choice.chosen ? Icons.square-check : Icons.square)
+            : (choice.chosen ? Icons.circle-dot : Icons.circle);
+        text: choice.label;
+        description: choice.description;
+        selected: choice.chosen;
+        clicked => { Logic.form-choose(root.item.form, root.item.key, choice.value); }
+    }
+    if root.item.input: HorizontalLayout {
+        alignment: root.item.answer == Answer.number ? start : stretch;
+        Field {
+            width: root.item.answer == Answer.number ? 160px : parent.width;
+            height: 32px;
+            fill: Theme.surface-raised-base;
+            idle-edge: Theme.border-weak-base;
+            text-size: Size.label;
+            placeholder: root.item.hint;
+            text: root.item.typed;
+            edited(text) => { Logic.form-type(root.item.form, root.item.key, text); }
+        }
+    }
+    if root.item.answer == Answer.yes-no: HorizontalLayout {
+        alignment: start;
+        spacing: 6px;
+        ChoiceRow {
+            glyph: root.item.flag == 1 ? Icons.circle-dot : Icons.circle;
+            text: "Yes";
+            selected: root.item.flag == 1;
+            clicked => { Logic.form-flag(root.item.form, root.item.key, true); }
+        }
+        ChoiceRow {
+            glyph: root.item.flag == 0 ? Icons.circle-dot : Icons.circle;
+            text: "No";
+            selected: root.item.flag == 0;
+            clicked => { Logic.form-flag(root.item.form, root.item.key, false); }
+        }
+    }
+    if root.item.answer == Answer.link: HorizontalLayout {
+        alignment: start;
+        spacing: 10px;
+        CardButton {
+            text: "Open link";
+            clicked => { Logic.link(root.item.url); }
+        }
+        Text {
+            text: root.item.url;
+            vertical-alignment: center;
+            overflow: elide;
+            font-family: Fonts.mono;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+    }
+    if root.item.problems != "": Text {
+        text: root.item.problems;
+        wrap: word-wrap;
+        font-size: Size.small;
+        color: Theme.icon-critical-base;
+    }
+}
+
+/// The agent's questions, with Send and Dismiss.
+component QuestionsView inherits Card {
+    property <bool> busy: State.question-card.busy;
+
+    edge: Theme.question-edge;
+    gap: 14px;
+    accessible-role: groupbox;
+    accessible-label: State.question-card.title;
+
+    Heading {
+        glyph: Icons.question;
+        accent: Theme.text-interactive-base;
+        text: State.question-card.title;
+        count: State.question-card.count;
+    }
+    for question in State.questions: QuestionView {
+        item: question;
+    }
+    HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+        CardButton {
+            text: "Send answer";
+            main: true;
+            enabled: !root.busy;
+            clicked => { Logic.form-send(State.question-card.id); }
+        }
+        CardButton {
+            text: "Dismiss";
+            enabled: !root.busy;
+            clicked => { Logic.form-dismiss(State.question-card.id); }
+        }
+    }
+}
+
+/// The cards for what the open session waits on, scrolling once they're tall.
+export component WaitingCards inherits ScrollView {
+    height: min(cards.preferred-height, Cards.max-height);
+    // Only up and down: the cards fit the column's width.
+    content-width: self.visible-width;
+    content-height: cards.preferred-height;
+
+    cards := VerticalLayout {
+        width: root.visible-width;
+        spacing: 8px;
+        if State.undo-card.shown: UndoView { }
+        if State.approval-card.shown: ApprovalView { }
+        if State.question-card.shown: QuestionsView { }
+    }
+}
