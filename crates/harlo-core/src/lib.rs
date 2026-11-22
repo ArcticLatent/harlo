@@ -12,6 +12,7 @@ pub mod files;
 pub mod git;
 pub mod instructions;
 pub mod layout;
+pub mod notes;
 pub mod server;
 pub mod sessions;
 pub mod theme;

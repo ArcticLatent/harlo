@@ -233,7 +233,7 @@ def focus(state):
 def cmd_type(args):
     state = load()
     focus(state)
-    xdotool(state, "type", "--delay", "15", " ".join(args))
+    xdotool(state, "type", "--delay", "15", "--", " ".join(args))
 
 
 def cmd_key(args):

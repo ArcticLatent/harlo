@@ -14,6 +14,12 @@ pub const PANEL_CLOSE: &str = "panel-close";
 /// The composer box.
 pub const COMPOSER: &str = "composer";
 
+/// The composer's text area, inside [`COMPOSER`].
+pub const COMPOSER_TEXT: &str = "composer-text";
+
+/// The Notes panel's text area.
+pub const NOTES: &str = "notes";
+
 /// The location picker's button.
 pub const LOCATION: &str = "location";
 

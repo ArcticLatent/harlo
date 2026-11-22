@@ -52,6 +52,8 @@ pub fn view(app: &App, panel: Panel) -> Element<'_, Message> {
         crate::view::changes::body(app)
     } else if panel == Panel::Context {
         crate::view::context::body(app)
+    } else if panel == Panel::Notes {
+        crate::view::notes::body(app)
     } else if panel == Panel::Files {
         crate::view::files::body(app)
     } else if panel == Panel::Todos {

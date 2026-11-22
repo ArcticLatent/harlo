@@ -378,6 +378,25 @@ pub fn composer(t: &Tokens) -> impl Fn(&Theme, text_editor::Status) -> text_edit
     }
 }
 
+/// The Notes panel's text area: an inset box that lights its edge when focused.
+pub fn notes(t: &Tokens) -> impl Fn(&Theme, text_editor::Status) -> text_editor::Style + use<> {
+    let t = *t;
+    move |_, status| text_editor::Style {
+        background: color(t.surface_inset_base).into(),
+        border: Border {
+            color: color(match status {
+                text_editor::Status::Focused { .. } => t.border_base,
+                _ => t.border_weaker_base,
+            }),
+            width: 1.0,
+            radius: size::RADIUS.into(),
+        },
+        placeholder: color(t.text_weak),
+        value: color(t.text_strong),
+        selection: color(t.text_interactive_base.alpha(0.3)),
+    }
+}
+
 /// A one-pixel divider.
 pub fn divider(c: Rgba) -> impl Fn(&Theme) -> rule::Style {
     move |_| rule::Style {

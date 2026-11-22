@@ -85,6 +85,7 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let menu_open = composer.menu.is_some_and(|m| !m.items.is_empty());
     let editor = text_editor(composer.content)
+        .id(ids::COMPOSER_TEXT)
         .placeholder(composer.placeholder)
         .on_action(Message::Compose)
         .key_binding(move |press| binding(&press, menu_open))

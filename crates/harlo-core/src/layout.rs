@@ -1,8 +1,9 @@
-//! The window's saved layout, kept in a small SQLite database.
+//! The window's saved layout and the notes, kept in a small SQLite database.
 //!
 //! The layout covers the project folders in the sidebar, which panels and
 //! lists are open, and the open tabs for each server. It's saved after each
-//! change, off the UI thread, and read once at start.
+//! change, off the UI thread, and read once at start. Notes are kept one per
+//! folder on each server.
 
 // Rust guideline compliant 2026-10-09
 
@@ -55,7 +56,7 @@ pub struct Tabs {
     pub active: Option<String>,
 }
 
-/// Where the layout is saved: a SQLite file.
+/// Where the layout and notes are saved: a SQLite file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Store {
     path: PathBuf,
@@ -142,6 +143,86 @@ impl Store {
             .map_err(|join| Error::new(Kind::Cancelled(join.to_string())))?
     }
 
+    /// Reads the note for `folder` on the server labelled `location`; empty
+    /// when there's none.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file exists but can't be read.
+    pub fn load_note(&self, location: &str, folder: &str) -> Result<String, Error> {
+        if !self.path.exists() {
+            return Ok(String::new());
+        }
+        let text: Option<String> = self
+            .connect()?
+            .query_row(
+                "SELECT text FROM notes WHERE location = ?1 AND folder = ?2",
+                params![location, folder],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Error::database)?;
+        Ok(text.unwrap_or_default())
+    }
+
+    /// Saves the note for `folder` on the server labelled `location`; an
+    /// empty note is removed.
+    ///
+    /// This blocks on disk I/O; from async code use [`Store::save_note_later`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the folder or file can't be created or written.
+    pub fn save_note(&self, location: &str, folder: &str, text: &str) -> Result<(), Error> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent).map_err(Error::io)?;
+        }
+        let connection = self.connect()?;
+        if text.is_empty() {
+            connection.execute(
+                "DELETE FROM notes WHERE location = ?1 AND folder = ?2",
+                params![location, folder],
+            )
+        } else {
+            connection.execute(
+                "INSERT INTO notes (location, folder, text) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (location, folder) DO UPDATE SET text = excluded.text",
+                params![location, folder, text],
+            )
+        }
+        .map_err(Error::database)?;
+        Ok(())
+    }
+
+    /// Reads a note on a blocking thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Store::load_note`], or an error when the
+    /// thread is cancelled.
+    pub async fn load_note_later(self, location: String, folder: String) -> Result<String, Error> {
+        tokio::task::spawn_blocking(move || self.load_note(&location, &folder))
+            .await
+            .map_err(|join| Error::new(Kind::Cancelled(join.to_string())))?
+    }
+
+    /// Saves a note on a blocking thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Store::save_note`], or an error when the
+    /// thread is cancelled.
+    pub async fn save_note_later(
+        self,
+        location: String,
+        folder: String,
+        text: String,
+    ) -> Result<(), Error> {
+        tokio::task::spawn_blocking(move || self.save_note(&location, &folder, &text))
+            .await
+            .map_err(|join| Error::new(Kind::Cancelled(join.to_string())))?
+    }
+
     fn connect(&self) -> Result<Connection, Error> {
         let connection = Connection::open(&self.path).map_err(Error::database)?;
         connection
@@ -150,6 +231,12 @@ impl Store {
                  CREATE TABLE IF NOT EXISTS settings (
                      key TEXT PRIMARY KEY NOT NULL,
                      value TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS notes (
+                     location TEXT NOT NULL,
+                     folder TEXT NOT NULL,
+                     text TEXT NOT NULL,
+                     PRIMARY KEY (location, folder)
                  );",
             )
             .map_err(Error::database)?;
@@ -157,7 +244,7 @@ impl Store {
     }
 }
 
-/// Why the layout couldn't be loaded or saved.
+/// Why the layout or a note couldn't be loaded or saved.
 #[derive(Debug)]
 pub struct Error {
     kind: Kind,
@@ -201,10 +288,10 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            Kind::Io(e) => write!(f, "can't write the layout's folder: {e}"),
-            Kind::Database(e) => write!(f, "the layout database failed: {e}"),
+            Kind::Io(e) => write!(f, "can't write Harlo's data folder: {e}"),
+            Kind::Database(e) => write!(f, "Harlo's database failed: {e}"),
             Kind::Format(e) => write!(f, "the saved layout can't be read: {e}"),
-            Kind::Cancelled(reason) => write!(f, "saving the layout was cancelled: {reason}"),
+            Kind::Cancelled(reason) => write!(f, "the database work was cancelled: {reason}"),
         }
     }
 }

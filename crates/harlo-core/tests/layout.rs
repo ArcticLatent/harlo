@@ -64,7 +64,7 @@ fn an_unreadable_layout_is_an_error() {
     std::fs::write(&path, b"not a database").expect("a junk file");
     let error = Store::new(&path).load().expect_err("junk can't be read");
     assert!(
-        error.to_string().starts_with("the layout database failed"),
+        error.to_string().starts_with("Harlo's database failed"),
         "{error}"
     );
 }

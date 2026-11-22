@@ -10,6 +10,7 @@ pub mod editor;
 pub mod files;
 pub mod home;
 pub mod locations;
+pub mod notes;
 pub mod panel;
 pub mod pickers;
 pub mod rails;

@@ -36,6 +36,7 @@ use crate::widget::{Edge, reveal};
 mod changes;
 mod context;
 mod files;
+mod notes;
 mod subagents;
 mod todos;
 mod undo;
@@ -47,6 +48,7 @@ pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
+pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use subagents::Child;
 pub use undo::StagedUndo;
 mod waiting;
@@ -345,6 +347,8 @@ pub enum Message {
     Changes(ChangesEvent),
     /// The Files panel or an open file reported something.
     Files(FilesEvent),
+    /// A note was read, edited or saved.
+    Notes(NotesEvent),
     /// The Context panel asked to reload, or its load finished.
     Context(ContextEvent),
     /// A staged undo was kept or cancelled, or couldn't be.
@@ -488,6 +492,8 @@ pub struct App {
     pub changes: Changes,
     /// The Files panel's trees and the open files.
     pub fs: Files,
+    /// The notes opened so far.
+    pub notes: Notes,
     /// The Context panel's view of the open session.
     pub context: ContextView,
     /// When to show desktop notifications.
@@ -581,6 +587,7 @@ impl App {
             undos: undo::Undos::default(),
             changes: Changes::default(),
             fs: Files::default(),
+            notes: Notes::default(),
             context: ContextView::default(),
             notices: Notices {
                 enabled: false,
@@ -659,6 +666,7 @@ impl App {
             self.follow_changes(),
             self.follow_context(),
             self.follow_files(),
+            self.follow_notes(),
         ]);
         let layout = self.layout();
         if layout == self.saved {
@@ -729,6 +737,7 @@ impl App {
             | Message::Focused(_)) => return self.waiting_action(message),
             Message::Changes(event) => return self.changes_action(event),
             Message::Files(event) => return self.files_action(event),
+            Message::Notes(event) => return self.notes_action(event),
             Message::Context(event) => self.context_action(event),
             message @ (Message::UndoStaged(..)
             | Message::UndoChecked(..)
