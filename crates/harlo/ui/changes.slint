@@ -286,7 +286,7 @@ component Foot inherits VerticalLayout {
         // What git said can run long; it scrolls past a few lines.
         if State.changes-foot.outcome != "": Flickable {
             height: min(outcome.preferred-height, 96px);
-            viewport-height: outcome.preferred-height;
+            content-height: outcome.preferred-height;
             outcome := Text {
                 width: parent.width;
                 text: State.changes-foot.outcome;

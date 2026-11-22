@@ -84,17 +84,17 @@ component CodeView inherits Rectangle {
     /// Brings the cursor into view as it moves.
     function follow(at: Point) {
         root.caret = at;
-        let top = at.y + flick.viewport-y;
+        let top = at.y + flick.content-y;
         if top < 0 {
-            flick.viewport-y = -at.y;
+            flick.content-y = -at.y;
         } else if top + input.font-size * 1.6 > flick.height {
-            flick.viewport-y = flick.height - at.y - input.font-size * 1.6;
+            flick.content-y = flick.height - at.y - input.font-size * 1.6;
         }
-        let left = at.x + flick.viewport-x;
+        let left = at.x + flick.content-x;
         if left < 0 {
-            flick.viewport-x = -at.x;
+            flick.content-x = -at.x;
         } else if left + 2px > flick.width {
-            flick.viewport-x = flick.width - at.x - 24px;
+            flick.content-x = flick.width - at.x - 24px;
         }
     }
 
@@ -107,7 +107,7 @@ component CodeView inherits Rectangle {
             clip: true;
             numbers := Text {
                 x: Code.padding;
-                y: flick.viewport-y + Code.padding;
+                y: flick.content-y + Code.padding;
                 text: State.editor-numbers;
                 horizontal-alignment: right;
                 font-family: Fonts.mono;
@@ -119,8 +119,8 @@ component CodeView inherits Rectangle {
         VLine { }
         flick := Flickable {
             horizontal-stretch: 1;
-            viewport-width: max(self.width, input.preferred-width + 2 * Code.padding);
-            viewport-height: max(self.height, input.preferred-height + 2 * Code.padding);
+            content-width: max(self.width, input.preferred-width + 2 * Code.padding);
+            content-height: max(self.height, input.preferred-height + 2 * Code.padding);
 
             TouchArea {
                 mouse-cursor: MouseCursor.text;

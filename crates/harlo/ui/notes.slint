@@ -43,11 +43,11 @@ component NoteField inherits Rectangle {
     }
     /// Keeps the cursor in view as it moves.
     function follow(at: Point) {
-        let top = at.y + flick.viewport-y;
+        let top = at.y + flick.content-y;
         if top < 0 {
-            flick.viewport-y = -at.y;
+            flick.content-y = -at.y;
         } else if top + input.font-size * 1.6 > flick.height {
-            flick.viewport-y = flick.height - at.y - input.font-size * 1.6;
+            flick.content-y = flick.height - at.y - input.font-size * 1.6;
         }
     }
 
@@ -61,7 +61,7 @@ component NoteField inherits Rectangle {
         y: 10px;
         width: parent.width - 24px;
         height: parent.height - 20px;
-        viewport-height: max(self.height, input.preferred-height);
+        content-height: max(self.height, input.preferred-height);
 
         TouchArea {
             mouse-cursor: MouseCursor.text;
