@@ -59,6 +59,10 @@ impl Client {
         let builder = self
             .http
             .request(method, format!("{}{path}", self.endpoint.url()));
+        self.authorized(builder)
+    }
+
+    fn authorized(&self, builder: RequestBuilder) -> RequestBuilder {
         match self.endpoint.password() {
             Some(password) => builder.basic_auth(USER, Some(password)),
             None => builder,
@@ -404,6 +408,100 @@ impl Client {
             )
             .await?;
         Ok(each(&v, FileMatch::from_json))
+    }
+
+    /// Lists a folder's direct children: `path` relative to `directory`,
+    /// or `directory` itself when `path` is empty.
+    ///
+    /// Entry paths are relative to `directory`, folders without a trailing `/`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the folder doesn't exist or the server can't be reached.
+    pub async fn list_dir(&self, directory: &str, path: &str) -> Result<Vec<FileMatch>, Error> {
+        let query: &[(&str, &str)] = if path.is_empty() {
+            &[]
+        } else {
+            &[("path", path)]
+        };
+        let v = self.list("/api/fs/list", directory, query).await?;
+        // OpenCode ends folder paths with "/"; the entry says it's a folder.
+        Ok(each(&v, FileMatch::from_json)
+            .into_iter()
+            .map(|mut entry| {
+                let trimmed = entry.path.trim_end_matches('/').len();
+                entry.path.truncate(trimmed);
+                entry
+            })
+            .collect())
+    }
+
+    /// Reads a file, `path` relative to `directory`, as bytes.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file doesn't exist, lies outside `directory`, or the
+    /// server can't be reached.
+    pub async fn read_file(&self, directory: &str, path: &str) -> Result<Vec<u8>, Error> {
+        let mut url = reqwest::Url::parse(self.endpoint.url())
+            .map_err(|e| Error::other(format!("server address: {e}")))?;
+        url.path_segments_mut()
+            .map_err(|()| Error::other("the server address can't take a path"))?
+            .pop_if_empty()
+            .extend(["api", "fs", "read"])
+            .extend(path.split('/').filter(|part| !part.is_empty()));
+        let req = self
+            .authorized(self.http.get(url))
+            .query(&[("location[directory]", directory)]);
+        Ok(Self::send(req).await?.bytes().await?.to_vec())
+    }
+
+    /// Writes `content` to a file, `path` relative to `directory`, creating
+    /// its folders as needed.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file can't be written or the server can't be reached.
+    pub async fn write_file(
+        &self,
+        directory: &str,
+        path: &str,
+        content: Vec<u8>,
+    ) -> Result<(), Error> {
+        let req = self
+            .request(Method::POST, "/api/experimental/fs/write")
+            .query(&[("location[directory]", directory), ("path", path)])
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(content);
+        Self::send(req).await.map(drop)
+    }
+
+    /// Asks the server to report changes to a file as [`EventKind::FileChanged`](crate::EventKind::FileChanged).
+    ///
+    /// A watch lasts a day; asking again renews it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the file doesn't exist or the server can't be reached.
+    pub async fn watch_file(&self, directory: &str, path: &str) -> Result<(), Error> {
+        let req = self
+            .request(Method::POST, "/api/experimental/fs/watch")
+            .query(&[("location[directory]", directory)])
+            .json(&json!({ "path": path }));
+        Self::send(req).await.map(drop)
+    }
+
+    /// Stops reporting changes to a file this client watched.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn unwatch_file(&self, directory: &str, path: &str) -> Result<(), Error> {
+        let req = self
+            .request(Method::DELETE, "/api/experimental/fs/watch")
+            .query(&[("location[directory]", directory)])
+            .json(&json!({ "path": path }));
+        Self::send(req).await.map(drop)
     }
 
     /// GETs a folder-scoped list and returns its `data`.

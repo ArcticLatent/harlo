@@ -8,6 +8,7 @@
 pub mod approvals;
 pub mod composer;
 pub mod diff;
+pub mod files;
 pub mod git;
 pub mod instructions;
 pub mod layout;

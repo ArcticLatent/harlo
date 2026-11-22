@@ -1753,6 +1753,7 @@ dependencies = [
  "arboard",
  "harlo-core",
  "iced",
+ "iced-code-editor",
  "iced_test",
  "lucide-icons",
  "mimalloc",

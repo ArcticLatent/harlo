@@ -203,6 +203,18 @@ pub enum Kind {
     AgentSelected { session_id: String, agent: String },
     /// The models, agents, commands or skills on offer changed.
     CatalogChanged,
+    /// A file in a folder was added, changed or removed.
+    ///
+    /// OpenCode reports files it watches: ones an agent touched, and ones
+    /// a client asked it to watch with [`Client::watch_file`](crate::Client::watch_file).
+    FileChanged {
+        /// The folder the file was reported in.
+        directory: String,
+        /// The file's path, as OpenCode reported it.
+        file: String,
+        /// What happened to it.
+        change: FileChange,
+    },
     /// An undo was staged.
     RevertStaged { session_id: String, revert: Revert },
     /// A staged undo was cancelled.
@@ -261,6 +273,7 @@ impl Kind {
             | Self::ProjectUpdated { .. }
             | Self::WorktreesChanged { .. }
             | Self::CatalogChanged
+            | Self::FileChanged { .. }
             | Self::Other { .. } => None,
         }
     }
@@ -280,12 +293,44 @@ impl Event {
         let time = raw["created"].as_f64().unwrap_or_default();
         let kind = raw["type"].as_str().unwrap_or_default().to_owned();
         let data = raw["data"].take();
+        let kind = if kind == "filesystem.changed" {
+            file_changed(&raw["location"], &data)
+        } else {
+            decode(&kind, data)?
+        };
         Ok(Self {
             id,
             seq,
             time,
-            kind: decode(&kind, data)?,
+            kind,
         })
+    }
+}
+
+/// What happened to a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileChange {
+    /// It was created.
+    Added,
+    /// Its content changed.
+    Changed,
+    /// It was deleted.
+    Removed,
+}
+
+fn file_changed(location: &Value, data: &Value) -> Kind {
+    let change = match data["event"].as_str() {
+        Some("add") => FileChange::Added,
+        Some("unlink") => FileChange::Removed,
+        _ => FileChange::Changed,
+    };
+    Kind::FileChanged {
+        directory: location["directory"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        file: data["file"].as_str().unwrap_or_default().to_owned(),
+        change,
     }
 }
 

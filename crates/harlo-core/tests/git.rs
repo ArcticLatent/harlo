@@ -244,3 +244,43 @@ fn a_subfolder_stages_by_paths_from_the_root() {
     );
     assert_eq!(status.file("top.txt"), Some(&state("top.txt", true, false)));
 }
+
+#[test]
+fn ignored_paths_follow_the_ignore_files() {
+    let rt = runtime();
+    let scratch = Scratch::new();
+    std::fs::write(scratch.work.join(".gitignore"), "build/\n*.log\n").expect("ignore file");
+    std::fs::create_dir_all(scratch.work.join("build")).expect("build folder");
+    std::fs::create_dir_all(scratch.work.join("src")).expect("src folder");
+    let paths: Vec<String> = ["build", "src", "run.log", "src/main.rs", "odd name.log"]
+        .map(str::to_owned)
+        .to_vec();
+    let ignored = rt
+        .block_on(scratch.repo().ignored(&paths))
+        .expect("checked");
+    let mut ignored: Vec<_> = ignored.into_iter().collect();
+    ignored.sort();
+    assert_eq!(ignored, ["build", "odd name.log", "run.log"]);
+    assert!(
+        rt.block_on(scratch.repo().ignored(&[]))
+            .expect("nothing to check")
+            .is_empty()
+    );
+
+    let outside = tempfile::tempdir().expect("scratch folder");
+    let none = rt
+        .block_on(
+            Repo::new(outside.path())
+                .env(
+                    "GIT_CEILING_DIRECTORIES",
+                    outside
+                        .path()
+                        .parent()
+                        .and_then(Path::to_str)
+                        .unwrap_or("/"),
+                )
+                .ignored(&paths),
+        )
+        .expect("outside a repository");
+    assert!(none.is_empty(), "nothing is ignored outside a repository");
+}

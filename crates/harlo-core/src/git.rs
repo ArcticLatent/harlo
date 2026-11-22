@@ -12,8 +12,10 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
+use std::process::Stdio;
 
 use tokio::process::Command;
 
@@ -188,6 +190,52 @@ impl Repo {
     /// are needed that `git` can't supply without asking, or `git` can't run.
     pub async fn push(&self) -> Result<(), Error> {
         self.git(&["push", "--quiet"]).await.map(drop)
+    }
+
+    /// Returns which of `paths` Git ignores.
+    ///
+    /// Paths are relative to the folder this handle was made for. Outside a
+    /// repository, nothing is ignored.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `git` can't run.
+    pub async fn ignored(&self, paths: &[String]) -> Result<HashSet<String>, Error> {
+        use tokio::io::AsyncWriteExt;
+        if paths.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let cant_run = |e: std::io::Error| Error {
+            message: format!("Couldn't run git: {e}"),
+        };
+        let mut child = Command::new("git")
+            .args(["check-ignore", "-z", "--stdin"])
+            .current_dir(&self.dir)
+            .envs(self.env.iter().map(|(k, v)| (k, v)))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(cant_run)?;
+        let mut input = Vec::new();
+        for path in paths {
+            input.extend_from_slice(path.as_bytes());
+            input.push(0);
+        }
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(&input).await.map_err(cant_run)?;
+        }
+        let output = child.wait_with_output().await.map_err(cant_run)?;
+        // 0: some are ignored; 1: none are; anything else: not a repository.
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return Ok(HashSet::new());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect())
     }
 
     /// Runs `git` with `args` and returns what it printed.

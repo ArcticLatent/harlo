@@ -9,7 +9,7 @@ use iced::widget::{button, center, column, container, row, rule, space, text};
 use iced::{Center, Element, Fill, Length, Padding};
 use lucide_icons::Icon;
 
-use crate::app::{App, Child, Message, Panel};
+use crate::app::{App, Child, FileBody, FilesEvent, Message, OpenFile, Panel};
 use crate::style::{self, size};
 use crate::timeline::{self, Activity, Timeline};
 use crate::view::composer::{self, Composer};
@@ -315,13 +315,18 @@ fn activity_line(app: &App, activity: Activity) -> Element<'_, Message> {
     container(line).padding([4, 4]).into()
 }
 
-/// The tab bar: one tab per open session.
+/// The tab bar: one tab per open session, then one per open file.
 pub fn tabs(app: &App) -> Element<'_, Message> {
     let t = &app.tokens;
     let mut bar = row![].spacing(2).padding([6, 10]).align_y(Center);
+    let file_shown = app.fs.shown.is_some();
     for id in &app.tabs {
-        let active = app.active.as_deref() == Some(id.as_str());
+        let active = !file_shown && app.active.as_deref() == Some(id.as_str());
         bar = bar.push(tab(t, id, &app.title(id), active));
+    }
+    for file in &app.fs.open {
+        let active = app.fs.shown.as_deref() == Some(file.key.as_str());
+        bar = bar.push(file_tab(t, file, active));
     }
     column![
         container(bar).height(size::TAB_BAR).width(Fill),
@@ -380,6 +385,69 @@ fn tab<'a>(t: &Tokens, id: &str, title: &str, active: bool) -> Element<'a, Messa
         });
     container(tab).max_width(size::TAB).into()
 }
+
+/// An open file's tab: its name, and a dot while it has unsaved changes.
+fn file_tab<'a>(t: &Tokens, file: &OpenFile, active: bool) -> Element<'a, Message> {
+    let glyph = match file.body {
+        FileBody::Image(_) | FileBody::Svg(_) => Icon::Image,
+        _ => Icon::FileCode,
+    };
+    let mut content = row![
+        icon(
+            glyph,
+            13.0,
+            if active {
+                t.icon_selected
+            } else {
+                t.icon_weak_base
+            }
+        ),
+        ellipsis(file.name().to_owned())
+            .size(size::LABEL)
+            .font(style::MONO)
+            .color(style::color(if active {
+                t.text_strong
+            } else {
+                t.text_base
+            })),
+    ]
+    .spacing(7)
+    .align_y(Center);
+    if file.is_dirty() {
+        content = content.push(
+            container(space())
+                .width(UNSAVED_DOT)
+                .height(UNSAVED_DOT)
+                .style(style::boxed(t.text_strong, None, UNSAVED_DOT / 2.0)),
+        );
+    }
+    if active {
+        let close = button(center(icon(Icon::X, 12.0, t.icon_base)))
+            .width(20)
+            .height(20)
+            .padding(0)
+            .on_press(Message::Files(FilesEvent::Close(file.key.clone())))
+            .style(style::ghost(t, false));
+        content = content.push(close);
+    }
+    let t = *t;
+    let tab = button(content.height(Fill))
+        .width(Length::Fill)
+        .height(30)
+        .padding([0, 10])
+        .on_press(Message::Files(FilesEvent::Show(file.key.clone())))
+        .style(move |theme, status| {
+            let mut style = style::ghost(&t, false)(theme, status);
+            if active {
+                style.background = Some(style::color(t.surface_raised_base).into());
+            }
+            style
+        });
+    container(tab).max_width(size::TAB).into()
+}
+
+/// The size of the dot on a tab whose file has unsaved changes.
+const UNSAVED_DOT: f32 = 7.0;
 
 /// A link back to the session that handed this one its work, for a subagent's.
 fn parent_link<'a>(app: &'a App, id: &str) -> Option<Element<'a, Message>> {

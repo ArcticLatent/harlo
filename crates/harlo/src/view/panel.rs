@@ -6,7 +6,7 @@ use iced::widget::{button, center, column, container, row, rule, space, text};
 use iced::{Center, Element, Fill};
 use lucide_icons::Icon;
 
-use crate::app::{App, ChangesEvent, ContextEvent, Message, Panel};
+use crate::app::{App, ChangesEvent, ContextEvent, FilesEvent, Message, Panel};
 use crate::ids;
 use crate::style::{self, size};
 use crate::view::icon;
@@ -34,7 +34,8 @@ pub fn view(app: &App, panel: Panel) -> Element<'_, Message> {
     let refresh = match panel {
         Panel::Context if app.active.is_some() => Some(Message::Context(ContextEvent::Refresh)),
         Panel::Changes => Some(Message::Changes(ChangesEvent::Refresh)),
-        Panel::Context | Panel::Todos | Panel::Files | Panel::Notes => None,
+        Panel::Files => Some(Message::Files(FilesEvent::Refresh)),
+        Panel::Context | Panel::Todos | Panel::Notes => None,
     };
     if let Some(refresh) = refresh {
         header = header.push(
@@ -51,6 +52,8 @@ pub fn view(app: &App, panel: Panel) -> Element<'_, Message> {
         crate::view::changes::body(app)
     } else if panel == Panel::Context {
         crate::view::context::body(app)
+    } else if panel == Panel::Files {
+        crate::view::files::body(app)
     } else if panel == Panel::Todos {
         crate::view::todos::body(app)
     } else {

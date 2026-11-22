@@ -33,7 +33,7 @@ pub use endpoint::{Endpoint, SharedService, read_registration, registration_path
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]
-pub use event::{Event, Kind as EventKind};
+pub use event::{Event, FileChange, Kind as EventKind};
 #[doc(inline)]
 pub use id::message_id;
 #[doc(inline)]

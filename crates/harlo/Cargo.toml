@@ -18,6 +18,8 @@ arboard = { workspace = true, features = ["image-data", "wayland-data-control"] 
 png = { workspace = true }
 notify-rust = { workspace = true, features = ["z"] }
 open = { workspace = true }
+# The editor for files open in tabs (MIT); syntax highlighting through syntect.
+iced-code-editor = { workspace = true }
 
 [dev-dependencies]
 iced_test = { workspace = true }

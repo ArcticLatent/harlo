@@ -8,7 +8,9 @@
 
 mod support;
 
-use opencode_client::{CommandSetup, Delivery, EventKind, Message, ModelRef, Part, Prompt, Tokens};
+use opencode_client::{
+    CommandSetup, Delivery, EventKind, FileChange, Message, ModelRef, Part, Prompt, Tokens,
+};
 use support::{Sandbox, WAIT, wait_for, wait_idle};
 
 /// The scripted model reports these for every step.
@@ -315,4 +317,83 @@ async fn a_subagent_runs_in_a_child_session_and_reports_back() {
             .any(|m| matches!(m, Message::Report { id, report: r } if r.child == child && *id == report_id)),
         "the report is in the parent's history, by the same ID"
     );
+}
+
+/// Files through the server: a folder's children, reading and writing a
+/// file, and a watched file's changes reported as events.
+#[tokio::test]
+async fn files_list_read_write_and_report_changes() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let folder = sandbox.project_str();
+    let project = sandbox.project();
+    std::fs::create_dir_all(project.join("src/deep")).expect("folders");
+    std::fs::write(project.join("src/main.rs"), "fn main() {}\n").expect("a file");
+    std::fs::write(project.join("odd name ü.txt"), "héllo\n").expect("a file");
+
+    std::fs::write(project.join(".gitignore"), "build/\n").expect("ignore file");
+    std::fs::create_dir_all(project.join("build")).expect("an ignored folder");
+    let mut root = client.list_dir(&folder, "").await.expect("root");
+    root.sort_by(|a, b| a.path.cmp(&b.path));
+    eprintln!("root: {root:?}");
+    assert!(root.iter().any(|e| e.path == "src" && e.directory));
+    assert!(
+        root.iter()
+            .any(|e| e.path == "odd name ü.txt" && !e.directory)
+    );
+    let src = client.list_dir(&folder, "src").await.expect("src");
+    eprintln!("src: {src:?}");
+    assert!(src.iter().any(|e| e.path == "src/main.rs" && !e.directory));
+    assert!(src.iter().any(|e| e.path == "src/deep" && e.directory));
+
+    let bytes = client
+        .read_file(&folder, "odd name ü.txt")
+        .await
+        .expect("read");
+    assert_eq!(bytes, "héllo\n".as_bytes());
+    let _missing = client
+        .read_file(&folder, "missing.txt")
+        .await
+        .expect_err("a missing file can't be read");
+
+    client
+        .write_file(&folder, "src/new/lib.rs", b"pub fn f() {}\n".to_vec())
+        .await
+        .expect("write");
+    assert_eq!(
+        std::fs::read_to_string(project.join("src/new/lib.rs")).expect("written"),
+        "pub fn f() {}\n"
+    );
+
+    let mut events = client.events().await.expect("events");
+    client
+        .watch_file(&folder, "src/main.rs")
+        .await
+        .expect("watch");
+    // Give the watcher a moment before the change it should see.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    std::fs::write(project.join("src/main.rs"), "fn main() { run(); }\n").expect("change");
+    let (directory, file, change) = tokio::time::timeout(WAIT, async {
+        while let Some(event) = events.next().await {
+            if let EventKind::FileChanged {
+                directory,
+                file,
+                change,
+            } = event.expect("event").kind
+            {
+                return (directory, file, change);
+            }
+        }
+        panic!("event stream ended");
+    })
+    .await
+    .expect("the change was reported");
+    eprintln!("changed: {directory} {file} {change:?}");
+    assert_eq!(directory, folder);
+    assert!(file.ends_with("src/main.rs"), "{file}");
+    assert_eq!(change, FileChange::Changed);
+    client
+        .unwatch_file(&folder, "src/main.rs")
+        .await
+        .expect("unwatch");
 }

@@ -86,6 +86,7 @@ impl App {
                 if focused {
                     // Files may have changed in another app meanwhile.
                     self.changes_stale();
+                    self.files_stale();
                 }
             }
             // Other messages are routed elsewhere by `apply`.

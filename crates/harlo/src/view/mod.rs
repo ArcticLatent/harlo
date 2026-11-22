@@ -6,6 +6,8 @@ pub mod changes;
 pub mod composer;
 pub mod context;
 pub mod diff;
+pub mod editor;
+pub mod files;
 pub mod home;
 pub mod locations;
 pub mod panel;

@@ -18,8 +18,8 @@ pub mod widget;
 
 #[doc(inline)]
 pub use app::{
-    App, ChangesEvent, ChangesLoaded, ContextEvent, ContextLoaded, GitAction, MenuState, Message,
-    Panel, Status,
+    App, ChangesEvent, ChangesLoaded, ContextEvent, ContextLoaded, FilesEvent, GitAction,
+    MenuState, Message, Panel, Status,
 };
 #[doc(inline)]
 pub use options::Options;

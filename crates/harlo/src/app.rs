@@ -35,6 +35,7 @@ use crate::widget::{Edge, reveal};
 
 mod changes;
 mod context;
+mod files;
 mod subagents;
 mod todos;
 mod undo;
@@ -45,6 +46,7 @@ pub use changes::{
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
+pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use subagents::Child;
 pub use undo::StagedUndo;
 mod waiting;
@@ -133,6 +135,15 @@ impl Panel {
             Self::Notes => "Notes",
         }
     }
+}
+
+/// A tab in the tab bar: a session's, or an open file's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TabRef {
+    /// A session, by ID.
+    Session(String),
+    /// An open file, by key.
+    File(String),
 }
 
 /// How the connection to the current server stands.
@@ -332,6 +343,8 @@ pub enum Message {
     UndoCancel(String),
     /// The Changes panel reported something, or its load or git action finished.
     Changes(ChangesEvent),
+    /// The Files panel or an open file reported something.
+    Files(FilesEvent),
     /// The Context panel asked to reload, or its load finished.
     Context(ContextEvent),
     /// A staged undo was kept or cancelled, or couldn't be.
@@ -473,6 +486,8 @@ pub struct App {
     pub(crate) undos: undo::Undos,
     /// The Changes panel's lists and git actions.
     pub changes: Changes,
+    /// The Files panel's trees and the open files.
+    pub fs: Files,
     /// The Context panel's view of the open session.
     pub context: ContextView,
     /// When to show desktop notifications.
@@ -565,6 +580,7 @@ impl App {
             new_shield: Shield::Agent,
             undos: undo::Undos::default(),
             changes: Changes::default(),
+            fs: Files::default(),
             context: ContextView::default(),
             notices: Notices {
                 enabled: false,
@@ -642,6 +658,7 @@ impl App {
             self.follow_folder(),
             self.follow_changes(),
             self.follow_context(),
+            self.follow_files(),
         ]);
         let layout = self.layout();
         if layout == self.saved {
@@ -711,6 +728,7 @@ impl App {
             | Message::PickShield(_)
             | Message::Focused(_)) => return self.waiting_action(message),
             Message::Changes(event) => return self.changes_action(event),
+            Message::Files(event) => return self.files_action(event),
             Message::Context(event) => self.context_action(event),
             message @ (Message::UndoStaged(..)
             | Message::UndoChecked(..)
@@ -719,19 +737,12 @@ impl App {
             | Message::UndoSettled { .. }) => return self.undo_action(message),
             Message::ToggleLocations => self.picking_location = !self.picking_location,
             Message::PickLocation(location) => self.pick_location(location),
-            Message::OpenSession(id) => return self.open(id),
-            Message::CloseTab(id) => self.close(&id),
-            Message::CloseActiveTab => {
-                if let Some(id) = self.active.clone() {
-                    self.close(&id);
-                }
-            }
-            Message::CycleTab { back } => {
-                if let Some(id) = self.neighbour(back) {
-                    return self.open(id);
-                }
-            }
+            message @ (Message::OpenSession(_)
+            | Message::CloseTab(_)
+            | Message::CloseActiveTab
+            | Message::CycleTab { .. }) => return self.tab_action(message),
             Message::NewSession(folder) => {
+                self.fs.shown = None;
                 self.active = None;
                 if folder.is_some() {
                     self.new_folder = folder;
@@ -981,6 +992,7 @@ impl App {
                 self.refresh();
                 self.changes_event(&event.kind);
                 self.context_event(&event.kind);
+                let files = self.files_event(&event.kind);
                 if matches!(event.kind, EventKind::CatalogChanged) {
                     // Reloaded for the current folder once this update ends.
                     self.catalogs.clear();
@@ -998,7 +1010,7 @@ impl App {
                         }
                     }
                 }
-                return Task::batch([self.fetch(fetches), reload, scroll, notice]);
+                return Task::batch([self.fetch(fetches), reload, scroll, notice, files]);
             }
             Update::Lost { reason, retry_in } => {
                 self.status = Status::Lost { reason, retry_in };
@@ -1034,6 +1046,7 @@ impl App {
     /// Shows a session, opening a tab after the current one if it has none.
     fn open(&mut self, id: String) -> Task<Message> {
         self.send_error = None;
+        self.fs.shown = None;
         if !self.tabs.contains(&id) {
             let at = self
                 .active
@@ -1063,19 +1076,52 @@ impl App {
         }
     }
 
-    /// The tab after (or before) the active one, wrapping around.
-    fn neighbour(&self, back: bool) -> Option<String> {
-        let count = self.tabs.len();
-        let current = self
-            .active
-            .as_ref()
-            .and_then(|a| self.tabs.iter().position(|t| t == a))?;
+    /// Opens, closes and switches tabs.
+    fn tab_action(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::OpenSession(id) => return self.open(id),
+            Message::CloseTab(id) => self.close(&id),
+            Message::CloseActiveTab => {
+                if let Some(key) = self.fs.shown.clone() {
+                    return self.files_action(FilesEvent::Close(key));
+                }
+                if let Some(id) = self.active.clone() {
+                    self.close(&id);
+                }
+            }
+            Message::CycleTab { back } => match self.neighbour(back) {
+                Some(TabRef::Session(id)) => return self.open(id),
+                Some(TabRef::File(key)) => return self.files_action(FilesEvent::Show(key)),
+                None => {}
+            },
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// The tab after (or before) the shown one, wrapping around: session
+    /// tabs first, then file tabs, as the tab bar shows them.
+    fn neighbour(&self, back: bool) -> Option<TabRef> {
+        let all: Vec<TabRef> = self
+            .tabs
+            .iter()
+            .cloned()
+            .map(TabRef::Session)
+            .chain(self.fs.open.iter().map(|f| TabRef::File(f.key.clone())))
+            .collect();
+        let shown = match (&self.fs.shown, &self.active) {
+            (Some(key), _) => TabRef::File(key.clone()),
+            (None, Some(id)) => TabRef::Session(id.clone()),
+            (None, None) => return all.first().cloned(),
+        };
+        let count = all.len();
+        let current = all.iter().position(|t| *t == shown)?;
         let next = if back {
             (current + count - 1) % count
         } else {
             (current + 1) % count
         };
-        self.tabs.get(next).cloned()
+        all.get(next).cloned()
     }
 
     /// Loads a session's history into its timeline, its inbox, what it's
@@ -1261,6 +1307,8 @@ impl App {
             self.active = None;
             self.tabs.clear();
             self.timelines.clear();
+            // Files belong to the server they were read from.
+            self.fs = Files::default();
             self.forget_catalogs();
             self.workspace = Workspace::new(self.workspace.order().to_vec());
             self.refresh();
@@ -1977,14 +2025,17 @@ impl App {
         } else {
             Element::from(space())
         });
-        let main = self
-            .active
-            .as_deref()
-            .and_then(|id| Some((id, self.timelines.get(id)?)))
-            .map_or_else(
-                || view::home::view(self),
-                |(id, timeline)| view::session::view(self, id, timeline),
-            );
+        let main = match self.shown_file() {
+            Some(file) => view::editor::view(self, file),
+            None => self
+                .active
+                .as_deref()
+                .and_then(|id| Some((id, self.timelines.get(id)?)))
+                .map_or_else(
+                    || view::home::view(self),
+                    |(id, timeline)| view::session::view(self, id, timeline),
+                ),
+        };
         layout = layout.push(main);
         let panel = self.panel.filter(|_| shown.panel);
         let slide = motion::shown(&self.panel_slide.0, self.clock);
@@ -2028,6 +2079,12 @@ impl App {
                 _ => None,
             }),
             self.motion(),
+            // The shown editor's cursor blinks.
+            if matches!(self.shown_file().map(|f| &f.body), Some(FileBody::Text(_))) {
+                iced::time::every(files::BLINK).map(|_| Message::Files(FilesEvent::Blink))
+            } else {
+                Subscription::none()
+            },
         ])
     }
 

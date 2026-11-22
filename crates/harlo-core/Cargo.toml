@@ -11,7 +11,7 @@ publish.workspace = true
 [dependencies]
 opencode-client = { workspace = true }
 futures-util = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "sync", "time", "process", "macros"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "process", "macros", "io-util"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 # SQLite is built in, so the app needs no system library.
