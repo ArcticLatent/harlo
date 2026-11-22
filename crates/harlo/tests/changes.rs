@@ -207,6 +207,23 @@ fn a_failed_push_says_what_git_said() {
 }
 
 #[test]
+fn a_failed_load_says_why_on_one_line() {
+    let loaded = ChangesLoaded::new(
+        None,
+        Some(Err(
+            "the OpenCode server answered 500:\nno such session".into()
+        )),
+        Ok(Vec::new()),
+        None,
+    );
+    let ui = panel(loaded);
+    assert!(
+        ui.shows("Couldn't load them: the OpenCode server answered 500: no such session"),
+        "a message's lines are joined, so none spills over the rows below"
+    );
+}
+
+#[test]
 fn without_git_here_the_list_is_read_only() {
     let ui = panel(found(None));
     assert!(ui.shows("notes.md"));

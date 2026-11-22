@@ -216,7 +216,7 @@ export component Composer inherits Rectangle {
     background: Theme.surface-raised-base;
     border-radius: Size.composer-radius;
     border-width: 1px;
-    border-color: Theme.composer-edge;
+    border-color: input.has-focus ? Theme.border-interactive-base : Theme.composer-edge;
     drop-shadow-color: #0000004d;
     drop-shadow-offset-y: 6px;
     drop-shadow-blur: 22px;
@@ -315,23 +315,29 @@ export component Composer inherits Rectangle {
             }
             VerticalLayout {
                 alignment: center;
+                // Filled with the brand colour once there's something to send.
                 Press {
+                    property <bool> ready: State.can-send && !State.sending;
                     label: "Send";
-                    width: 24px;
-                    height: 24px;
-                    enabled: State.can-send && !State.sending;
+                    width: 28px;
+                    height: 28px;
+                    border-radius: self.height / 2;
+                    enabled: self.ready;
+                    rest: self.ready ? Theme.surface-brand-base : transparent;
+                    hover: Theme.surface-brand-hover;
+                    lit: Theme.surface-brand-hover;
                     clicked => { Logic.send(); }
                     if State.sending: Breathing {
                         Icon {
                             text: Icons.loader;
-                            font-size: 17px;
+                            font-size: 16px;
                             color: Theme.icon-selected;
                         }
                     }
                     if !State.sending: Icon {
                         text: Icons.send;
-                        font-size: 17px;
-                        color: State.can-send ? Theme.icon-selected : Theme.text-weaker;
+                        font-size: 15px;
+                        color: parent.ready ? Theme.text-on-brand-base : Theme.text-weaker;
                     }
                 }
             }

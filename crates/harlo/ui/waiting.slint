@@ -47,7 +47,7 @@ export component CardButton inherits Press {
     label: root.text;
     rest: !root.main ? Theme.surface-raised-strong
         : root.enabled ? Theme.surface-brand-base : Theme.primary-off;
-    hover: root.main ? Theme.primary-hover : Theme.chip-hover;
+    hover: root.main ? Theme.surface-brand-hover : Theme.chip-hover;
     lit: root.hover;
 
     HorizontalLayout {
@@ -59,7 +59,7 @@ export component CardButton inherits Press {
             overflow: root.shrinks ? TextOverflow.elide : TextOverflow.clip;
             font-size: Size.label;
             font-weight: 500;
-            color: root.main ? Theme.background-base : Theme.text-strong;
+            color: root.main ? Theme.text-on-brand-base : Theme.text-strong;
         }
     }
 }
@@ -313,7 +313,7 @@ component ChoiceRow inherits Press {
 
     height: 30px;
     label: root.text;
-    lit: Theme.surface-base-active;
+    lit: Theme.selected-tint;
 
     HorizontalLayout {
         padding-left: 10px;
@@ -323,7 +323,7 @@ component ChoiceRow inherits Press {
             width: 15px;
             text: root.glyph;
             font-size: 14px;
-            color: root.selected ? Theme.text-interactive-base : Theme.icon-base;
+            color: root.selected ? Theme.accent-ink : Theme.icon-base;
         }
         Text {
             text: root.text;

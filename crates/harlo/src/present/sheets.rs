@@ -14,7 +14,7 @@ use lucide_icons::Icon;
 use super::{glyph, sync};
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::layout::Appearance;
-use harlo_core::theme::Theme;
+use harlo_core::theme::{Mode, Scheme};
 
 use crate::app::{
     App, ClaudeAction, Load, Range, Section, SetUp, Setting, Sheet, Status, epoch_seconds,
@@ -75,7 +75,8 @@ pub struct Sheets {
     rows: Rc<VecModel<SheetRow>>,
     tiles: Rc<VecModel<StatTile>>,
     days: Rc<VecModel<DayBar>>,
-    themes: Rc<VecModel<ThemeCard>>,
+    dark_themes: Rc<VecModel<ThemeCard>>,
+    light_themes: Rc<VecModel<ThemeCard>>,
 }
 
 impl std::fmt::Debug for Sheets {
@@ -91,9 +92,11 @@ impl Sheets {
             rows: Rc::new(VecModel::default()),
             tiles: Rc::new(VecModel::default()),
             days: Rc::new(VecModel::default()),
-            themes: Rc::new(VecModel::default()),
+            dark_themes: Rc::new(VecModel::default()),
+            light_themes: Rc::new(VecModel::default()),
         };
-        state.set_theme_cards(ModelRc::from(Rc::clone(&sheets.themes)));
+        state.set_dark_theme_cards(ModelRc::from(Rc::clone(&sheets.dark_themes)));
+        state.set_light_theme_cards(ModelRc::from(Rc::clone(&sheets.light_themes)));
         state.set_sheet_rows(ModelRc::from(Rc::clone(&sheets.rows)));
         state.set_stat_tiles(ModelRc::from(Rc::clone(&sheets.tiles)));
         state.set_stat_days(ModelRc::from(Rc::clone(&sheets.days)));
@@ -121,15 +124,20 @@ impl Sheets {
     pub fn show(&self, app: &App, state: &State<'_>) {
         let Some(sheet) = app.sheets.open else {
             state.set_sheet(0);
-            sync(&self.themes, Vec::new());
+            sync(&self.dark_themes, Vec::new());
+            sync(&self.light_themes, Vec::new());
             return;
         };
-        let cards = if sheet == Sheet::Settings {
-            theme_cards(app)
-        } else {
-            Vec::new()
+        let shown = sheet == Sheet::Settings;
+        let cards = |mode| {
+            if shown {
+                theme_cards(app, mode)
+            } else {
+                Vec::new()
+            }
         };
-        sync(&self.themes, cards);
+        sync(&self.dark_themes, cards(Mode::Dark));
+        sync(&self.light_themes, cards(Mode::Light));
         let (note, rows) = match sheet {
             Sheet::Stats => {
                 state.set_sheet(1);
@@ -299,11 +307,9 @@ fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
             rows.extend(hits);
         }
     }
-    // The themes found show after the rows, as cards.
-    if !themes_found(app, &needle).is_empty() {
-        rows.push(heading("Themes"));
-    }
-    let note = if rows.is_empty() {
+    // The themes found show after the rows, as cards under their own
+    // headings.
+    let note = if rows.is_empty() && themes_found(app, &needle).is_empty() {
         format!("No setting matches “{}”.", query.trim())
     } else {
         String::new()
@@ -311,7 +317,8 @@ fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
     (note, rows)
 }
 
-/// Light or dark, and the theme; the themes themselves show as cards.
+/// Light or dark, and what the themes are; the themes themselves show as
+/// cards, the dark ones and then the light ones.
 fn appearance_rows(app: &App) -> Vec<SheetRow> {
     vec![
         SheetRow {
@@ -325,17 +332,17 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
             },
             ..SheetRow::default()
         },
-        heading("Theme"),
         note(
-            "Harlo's own theme, then OpenCode's built-in ones. This choice is Harlo's; \
-             OpenCode's own theme setting stays as it is.",
+            "Harlo shows your dark theme while the window is dark and your light theme while \
+             it's light. The themes besides Harlo's are Base16 colour schemes from Tinted \
+             Theming. OpenCode's own theme setting stays as it is.",
         ),
     ]
 }
 
-/// The theme cards Settings shows: all of them in Appearance, or those a
-/// search finds.
-fn theme_cards(app: &App) -> Vec<ThemeCard> {
+/// The cards for the `mode` themes Settings shows: all of them in
+/// Appearance, or those a search finds.
+fn theme_cards(app: &App, mode: Mode) -> Vec<ThemeCard> {
     let needle = app.sheets.query.trim().to_lowercase();
     let themes = if needle.is_empty() {
         if app.sheets.section != Section::Appearance {
@@ -345,12 +352,12 @@ fn theme_cards(app: &App) -> Vec<ThemeCard> {
     } else {
         themes_found(app, &needle)
     };
-    let mode = app.mode();
-    let chosen = &app.theme().id;
+    let chosen = &app.theme_for(mode).id;
     themes
         .into_iter()
+        .filter(|theme| theme.mode == mode)
         .map(|theme| {
-            let t = theme.tokens(mode);
+            let t = theme.tokens();
             ThemeCard {
                 id: theme.id.as_str().into(),
                 name: theme.name.as_str().into(),
@@ -362,7 +369,7 @@ fn theme_cards(app: &App) -> Vec<ThemeCard> {
                 weak: color(t.text_weak),
                 brand: color(t.surface_brand_base),
                 keyword: color(t.syntax_keyword),
-                function: color(t.syntax_primitive),
+                function: color(t.syntax_function),
                 text_string: color(t.syntax_string),
             }
         })
@@ -371,7 +378,7 @@ fn theme_cards(app: &App) -> Vec<ThemeCard> {
 
 /// The themes a search for `needle` (lower case) finds: by name, or all of
 /// them for a search for themes or appearance.
-fn themes_found<'a>(app: &'a App, needle: &str) -> Vec<&'a Theme> {
+fn themes_found<'a>(app: &'a App, needle: &str) -> Vec<&'a Scheme> {
     let all = ["theme", "themes", "appearance", "colours", "colors"]
         .iter()
         .any(|word| word.starts_with(needle) && needle.len() >= 3);
@@ -623,6 +630,19 @@ fn about_rows(app: &App) -> Vec<SheetRow> {
     if let Status::Connected { version } = &app.status {
         rows.push(pair("OpenCode", version, 0));
     }
+    rows.push(heading("Colour themes"));
+    rows.push(note(
+        "The themes besides Harlo's are Base16 colour schemes from Tinted Theming \
+         (github.com/tinted-theming/schemes), each by the author it credits, used under \
+         this licence:",
+    ));
+    rows.extend(
+        harlo_core::theme::TINTED_LICENSE
+            .split("\n\n")
+            .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|paragraph| !paragraph.is_empty())
+            .map(|paragraph| note(&paragraph)),
+    );
     rows
 }
 

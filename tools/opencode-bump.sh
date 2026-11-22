@@ -6,8 +6,7 @@
 #
 # Fetches that tag's OpenAPI schema, prints what changed against the pinned one,
 # installs the release's verified Linux binary as the test server, then updates
-# OPENCODE_VERSION, schema/openapi.json, the generated types and the bundled
-# desktop themes (with OpenCode's licence). It commits
+# OPENCODE_VERSION, schema/openapi.json and the generated types. It commits
 # nothing: review the output, run the tests, and commit the bump on its own.
 set -euo pipefail
 
@@ -60,28 +59,11 @@ reported=${reported#v}
 [[ $reported == "$target" ]] || { echo "binary reports $reported, expected $target" >&2; exit 1; }
 echo "test server: $bin_dir/opencode ($reported)"
 
-# The desktop app's built-in themes, which Harlo bundles; fetched before
-# anything changes, so a failed download leaves the old set in place.
-themes=$root/crates/harlo-core/themes/opencode
-mkdir -p "$work/themes"
-for name in $(gh api "repos/$repo/contents/packages/ui/src/theme/themes?ref=v$target" \
-    --jq '.[] | select(.type == "file") | .name' | grep -E '^[a-z0-9-]+\.json$'); do
-  gh api -H 'Accept: application/vnd.github.raw' \
-    "repos/$repo/contents/packages/ui/src/theme/themes/$name?ref=v$target" > "$work/themes/$name"
-done
-gh api -H 'Accept: application/vnd.github.raw' "repos/$repo/contents/LICENSE?ref=v$target" > "$work/themes/LICENSE"
-echo "themes: $(ls "$work/themes" | grep -c '\.json$')"
-
 cp "$work/openapi.json" "$client/schema/openapi.json"
-rm -f "$themes"/*.json
-cp "$work/themes"/* "$themes/"
 printf '%s\n' "$target" > "$client/OPENCODE_VERSION"
 (cd "$root" && cargo run -q -p opencode-gen -- "$client/schema/openapi.json" "$client/src/generated.rs" \
   && rustfmt --edition 2024 "$client/src/generated.rs")
-# The colours OpenCode's own theme code gives the new themes, which Harlo's
-# port of it is tested against.
-"$root/tools/opencode-theme-reference.sh"
 
 echo
-echo "Next: cargo test --workspace, update the client (and the theme port, if its"
-echo "colours now differ) for any changes above, then commit the bump."
+echo "Next: cargo test --workspace, update the client for any changes above,"
+echo "then commit the bump."

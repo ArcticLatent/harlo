@@ -17,7 +17,7 @@ use harlo_core::timeline::Entry;
 use harlo_core::workspace::{Event, EventKind, Fetched, Form, InboxItem, Permission, Revert};
 use i_slint_backend_testing::AccessibleRole;
 use serde_json::json;
-use support::{Ui, demo, ui};
+use support::{Ui, demo, ui, ui_at};
 
 /// "pi update" in the demo data.
 const PI_UPDATE: &str = "ses_demo_03";
@@ -766,6 +766,24 @@ fn a_prompt_mark_jumps_up_to_its_question() {
     );
     assert!(!in_view(&ui, "Question number 59"), "the end is far below");
     assert!(ui.shows("Jump to the end"), "away from the end");
+}
+
+#[test]
+fn a_narrow_chat_keeps_room_for_the_prompt_rail() {
+    let mut app = demo::app();
+    let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
+    let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
+    // Narrow enough that the widest column would leave no room beside it.
+    let ui = ui_at(app, (1000.0, 800.0));
+    ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
+    settle_at_end(&ui, "Question number 59");
+
+    ui.press("Question number 20");
+    settle(&ui, "Question number 20");
+    assert!(
+        in_view(&ui, "Question number 20"),
+        "the rail is there and works"
+    );
 }
 
 #[test]

@@ -36,6 +36,6 @@ The icon font is embedded through the `lucide-icons` crate. It is licensed under
 
 `crates/harlo/ui/images/providers/*.svg`. These are copied from OpenChamber and licensed under the MIT License; the full text is in `crates/harlo/ui/images/providers/OPENCHAMBER-LICENSE`. The logos are trademarks of their owners and are used only to show which provider a model comes from.
 
-## OpenCode themes (test fixtures)
+## Colour themes
 
-`crates/harlo-core/tests/fixtures/*.json`. These are copied from OpenCode to check that Harlo reads its theme format. They are licensed under the MIT License; the full text is in `crates/harlo-core/tests/fixtures/OPENCODE-LICENSE`.
+`crates/harlo-core/themes/tinted.json`. These colour schemes are converted from Tinted Theming's Base16 collection (https://github.com/tinted-theming/schemes) by `tools/themes-update.sh`, at the commit in `crates/harlo-core/themes/TINTED_COMMIT`. Each scheme credits its own author. They are licensed under the MIT License; the full text is in `crates/harlo-core/themes/TINTED-LICENSE`, and Settings → About shows it.

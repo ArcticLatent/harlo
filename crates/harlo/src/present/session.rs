@@ -55,7 +55,7 @@ pub fn header(app: &App, id: &str, state: &State<'_>) {
         agent
             .as_ref()
             .and_then(|a| a.color)
-            .unwrap_or(t.icon_weak_base),
+            .map_or_else(|| crate::theme::quiet_icon(t), |c| crate::theme::ink(t, c)),
     ));
     let name = agent.map(|a| a.name).or(current).unwrap_or_default();
     state.set_session_agent(name.into());

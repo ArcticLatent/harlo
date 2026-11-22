@@ -30,7 +30,7 @@ component Entry inherits Press {
             width: 12px;
             text: root.entry.open ? Icons.chevron-down : Icons.chevron-right;
             font-size: 12px;
-            color: root.entry.directory ? Theme.icon-weak-base : transparent;
+            color: root.entry.directory ? Theme.icon-quiet : transparent;
         }
         if root.entry.directory: Icon {
             text: root.entry.open ? Icons.folder-open : Icons.folder;

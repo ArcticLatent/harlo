@@ -24,6 +24,3 @@ pub mod workspace;
 
 /// The OpenCode release Harlo is built and tested against.
 pub const OPENCODE_VERSION: &str = opencode_client::OPENCODE_VERSION;
-
-/// Harlo's default theme, in OpenCode's desktop theme format.
-pub const DEFAULT_THEME: &str = include_str!("../themes/harlo.json");

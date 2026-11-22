@@ -220,9 +220,14 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// A line of text in the panel: a note, or why something failed.
+    ///
+    /// A note is one line high, so a text with line breaks, such as a
+    /// server's error message, is joined into one line.
     fn note(&mut self, kind: i32, text: &str) {
+        let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
         self.push(kind, height::NOTE, height::UNDER_TITLE, |row| {
-            row.text = text.into();
+            row.text = line.into();
         });
     }
 

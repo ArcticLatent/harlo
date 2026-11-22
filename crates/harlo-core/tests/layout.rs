@@ -109,7 +109,8 @@ fn preferences_load_back_beside_the_layout() {
     store.save(&sample()).expect("the layout");
     let chosen = Preferences {
         reopen_tabs: false,
-        theme: "dracula".to_owned(),
+        dark_theme: "dracula".to_owned(),
+        light_theme: "github".to_owned(),
         appearance: Appearance::Light,
     };
     store.save_preferences(&chosen).expect("the preferences");

@@ -1,27 +1,46 @@
-//! How Harlo looks: which of the bundled themes, and its light or dark
-//! variant, as chosen in Settings → Appearance.
+//! How Harlo looks: a dark and a light theme, and which of them shows, as
+//! chosen in Settings → Appearance.
 //!
-//! The themes are Harlo's own and OpenCode's built-in desktop themes. The
-//! choice is Harlo's alone; OpenCode's own theme setting is left as it is.
+//! The choice is Harlo's alone; OpenCode's own theme setting is left as it is.
 
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::layout::Appearance;
-use harlo_core::theme::{Mode, Theme};
+use harlo_core::theme::{Mode, Scheme};
 
 use super::App;
 
 impl App {
-    /// The theme chosen, or Harlo's own when it isn't bundled any more.
+    /// The theme showing: the one chosen for the window's mode, or Harlo's
+    /// own for that mode when the chosen one isn't bundled any more.
     #[must_use]
-    pub fn theme(&self) -> &Theme {
-        self.themes
-            .iter()
-            .find(|t| t.id == self.preferences.theme)
-            .unwrap_or(&self.themes[0])
+    pub fn theme(&self) -> &Scheme {
+        self.theme_for(self.mode())
     }
 
-    /// The variant shown: the one chosen, or the desktop's for System.
+    /// The theme chosen for `mode`, or Harlo's own for it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bundled themes lack Harlo's own, which `harlo-core`'s
+    /// tests check they hold.
+    #[must_use]
+    pub fn theme_for(&self, mode: Mode) -> &Scheme {
+        let (chosen, fallback) = match mode {
+            Mode::Dark => (&self.preferences.dark_theme, harlo_core::theme::HARLO_DARK),
+            Mode::Light => (
+                &self.preferences.light_theme,
+                harlo_core::theme::HARLO_LIGHT,
+            ),
+        };
+        let pick = |id: &str| self.themes.iter().find(|t| t.id == id && t.mode == mode);
+        pick(chosen)
+            .or_else(|| pick(fallback))
+            .expect("Harlo's own themes are bundled")
+    }
+
+    /// Whether the window is dark or light: as chosen, or the desktop's for
+    /// System.
     #[must_use]
     pub fn mode(&self) -> Mode {
         match self.preferences.appearance {
@@ -31,9 +50,9 @@ impl App {
         }
     }
 
-    /// Takes the colours from the chosen theme and variant.
+    /// Takes the colours from the theme showing.
     pub(super) fn retheme(&mut self) {
-        self.tokens = self.theme().tokens(self.mode());
+        self.tokens = self.theme().tokens();
     }
 
     /// Notes whether the desktop prefers dark, which System follows.

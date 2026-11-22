@@ -231,7 +231,7 @@ pub fn run(options: &Options) -> Result<(), RunError> {
     let window = AppWindow::new()?;
     let (runtime, mut actions) = Runtime::new().map_err(RunError::Runtime)?;
     let mut app = boot(options);
-    crate::theme::apply(&window, &app.tokens);
+    crate::theme::apply(&window, &app.tokens, &app.theme().id);
     let start = app.start();
     runtime.spawn(start);
     let presenter = Presenter::new(&window);
@@ -292,7 +292,7 @@ impl Driver {
     /// Connects `window` to `app` and shows it at `size`.
     #[must_use]
     pub fn new(window: &AppWindow, app: App, size: (f32, f32)) -> Self {
-        crate::theme::apply(window, &app.tokens);
+        crate::theme::apply(window, &app.tokens, &app.theme().id);
         let presenter = Presenter::new(window);
         let controller = Rc::new(Controller {
             shell: RefCell::new(Shell {

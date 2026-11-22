@@ -52,11 +52,20 @@ component Working inherits Breathing {
     Icon {
         text: Icons.loader;
         font-size: root.size;
-        color: Theme.text-interactive-base;
+        color: Theme.accent-ink;
     }
 }
 
 /// One row of the list.
+/// The accent bar at the left edge of the selected session's row.
+component SelectedBar inherits Rectangle {
+    x: 0;
+    y: 8px;
+    width: 3px;
+    border-radius: 1.5px;
+    background: Theme.accent-ink;
+}
+
 component Item inherits Rectangle {
     in property <SidebarRow> entry;
 
@@ -78,7 +87,7 @@ component Item inherits Rectangle {
             spacing: 9px;
             Icon {
                 text: Icons.folder;
-                color: Theme.icon-base;
+                color: Theme.brand-ink;
             }
             Text {
                 text: entry.title;
@@ -87,7 +96,7 @@ component Item inherits Rectangle {
                 vertical-alignment: center;
                 font-size: Size.label;
                 font-weight: 600;
-                color: Theme.text-base;
+                color: Theme.brand-ink;
             }
             if entry.busy: Working {
                 size: 12px;
@@ -117,7 +126,7 @@ component Item inherits Rectangle {
             Icon {
                 text: Icons.changes;
                 font-size: 13px;
-                color: Theme.icon-weak-base;
+                color: Theme.icon-quiet;
             }
             Text {
                 text: entry.title;
@@ -148,7 +157,11 @@ component Item inherits Rectangle {
             height: 42px;
             label: entry.title;
             selected: entry.selected;
+            lit: Theme.selected-tint;
             clicked => { Logic.open-session(entry.id); }
+            if entry.selected: SelectedBar {
+                height: parent.height - 16px;
+            }
             HorizontalLayout {
                 padding-left: 4px;
                 padding-right: 4px;
@@ -188,7 +201,11 @@ component Item inherits Rectangle {
             height: 28px;
             label: entry.agent + ": " + entry.title;
             selected: entry.selected;
+            lit: Theme.selected-tint;
             clicked => { Logic.open-session(entry.id); }
+            if entry.selected: SelectedBar {
+                height: parent.height - 16px;
+            }
             HorizontalLayout {
                 padding-left: 14px;
                 padding-right: 4px;
@@ -196,7 +213,7 @@ component Item inherits Rectangle {
                 Icon {
                     text: Icons.corner-down-right;
                     font-size: 12px;
-                    color: Theme.icon-weak-base;
+                    color: Theme.icon-quiet;
                 }
                 Icon {
                     text: Icons.bot;
@@ -269,11 +286,32 @@ export component Sidebar inherits Rectangle {
                     spacing: 6px;
                     VerticalLayout {
                         alignment: center;
-                        Image {
+                        // Harlo's theme shows the logo's own colours; any
+                        // other theme tints its halves with its brand and
+                        // interactive colours.
+                        Rectangle {
                             width: 23px;
                             height: 24px;
-                            source: @image-url("images/logo-mark.svg");
-                            accessible-role: none;
+                            if Theme.own-logo: Image {
+                                width: 100%;
+                                height: 100%;
+                                source: @image-url("images/logo-mark.svg");
+                                accessible-role: none;
+                            }
+                            if !Theme.own-logo: Image {
+                                width: 100%;
+                                height: 100%;
+                                source: @image-url("images/logo-mark-left.svg");
+                                colorize: Theme.brand-ink;
+                                accessible-role: none;
+                            }
+                            if !Theme.own-logo: Image {
+                                width: 100%;
+                                height: 100%;
+                                source: @image-url("images/logo-mark-right.svg");
+                                colorize: Theme.accent-ink;
+                                accessible-role: none;
+                            }
                         }
                     }
                     Text {

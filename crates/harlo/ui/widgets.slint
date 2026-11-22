@@ -153,7 +153,7 @@ export component Field inherits Rectangle {
     border-radius: Size.radius;
     background: root.fill;
     border-width: 1px;
-    border-color: input.has-focus ? Theme.border-base : root.idle-edge;
+    border-color: input.has-focus ? Theme.border-interactive-focus : root.idle-edge;
     min-height: 34px;
     accessible-role: none;
 
@@ -170,7 +170,7 @@ export component Field inherits Rectangle {
         if root.glyph != "": Icon {
             text: root.glyph;
             font-size: 15px;
-            color: Theme.icon-weak-base;
+            color: Theme.icon-quiet;
         }
 
         Rectangle {
@@ -212,7 +212,7 @@ export component Switch inherits Rectangle {
     width: 34px;
     height: 20px;
     border-radius: self.height / 2;
-    background: root.on ? Theme.text-interactive-base : Theme.border-base;
+    background: root.on ? Theme.surface-interactive-base : Theme.border-base;
     animate background { duration: Motion.appear; easing: Motion.settle; }
     accessible-role: checkbox;
     accessible-checkable: true;
@@ -227,7 +227,7 @@ export component Switch inherits Rectangle {
         x: root.on ? parent.width - self.width - 2px : 2px;
         animate x { duration: Motion.appear; easing: Motion.settle; }
         border-radius: self.height / 2;
-        background: white;
+        background: root.on ? Theme.text-on-interactive-base : white;
     }
 
     TouchArea {

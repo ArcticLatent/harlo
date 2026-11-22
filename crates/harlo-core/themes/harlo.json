@@ -1,54 +1,50 @@
-{
-  "$schema": "https://opencode.ai/desktop-theme.json",
-  "name": "Harlo",
-  "id": "harlo",
-  "light": {
-    "palette": {
-      "neutral": "#eeeeee",
-      "ink": "#404040",
-      "primary": "#1159e3",
-      "success": "#105223",
-      "warning": "#7a6211",
-      "error": "#980313",
-      "info": "#0c42a8",
-      "interactive": "#1159e3"
-    }
-  },
-  "dark": {
-    "palette": {
-      "neutral": "#292929",
-      "ink": "#d5d5d5",
-      "primary": "#c6dafc",
-      "success": "#6ce78a",
-      "warning": "#f3c30e",
-      "error": "#ffb1b2",
-      "info": "#adcafa",
-      "interactive": "#adcafa"
-    },
-    "overrides": {
-      "background-base": "#292929",
-      "background-stronger": "#252525",
-      "surface-inset-base": "#2d2d2d",
-      "surface-raised-base": "#2f2f2f",
-      "surface-raised-strong": "#353535",
-      "surface-base-active": "#343434",
-      "border-weak-base": "#383838",
-      "text-base": "#a5a6a9",
-      "text-weak": "#8b8c8e",
-      "text-weaker": "#69696b",
-      "icon-base": "var(--text-base)",
-      "icon-weak-base": "#868689",
-      "surface-base-hover": "#d5d5d50d",
-      "surface-brand-base": "#c6dafc",
-      "border-weaker-base": "#323232",
-      "border-base": "#414141",
-      "text-strong": "#d5d5d5",
-      "text-interactive-base": "#adcafa",
-      "icon-selected": "#c6dafc",
-      "icon-success-base": "#6ce78a",
-      "icon-warning-base": "#f3c30e",
-      "icon-critical-base": "#ffb1b2",
-      "icon-info-base": "#adcafa"
-    }
+[
+ {
+  "id": "harlo-dark",
+  "name": "Harlo Dark",
+  "author": "Harlo",
+  "variant": "dark",
+  "palette": {
+   "base00": "#292929",
+   "base01": "#2f2f2f",
+   "base02": "#383838",
+   "base03": "#6e6e71",
+   "base04": "#8b8c8e",
+   "base05": "#a5a6a9",
+   "base06": "#d5d5d5",
+   "base07": "#f2f2f2",
+   "base08": "#ffb1b2",
+   "base09": "#ffcb8b",
+   "base0A": "#f3c30e",
+   "base0B": "#6ce78a",
+   "base0C": "#8fd7e8",
+   "base0D": "#adcafa",
+   "base0E": "#8fb3f0",
+   "base0F": "#d8a47f"
   }
-}
+ },
+ {
+  "id": "harlo-light",
+  "name": "Harlo Light",
+  "author": "Harlo",
+  "variant": "light",
+  "palette": {
+   "base00": "#f0f0f0",
+   "base01": "#e6e6e6",
+   "base02": "#d6d6d6",
+   "base03": "#6d6d6d",
+   "base04": "#515151",
+   "base05": "#343434",
+   "base06": "#232323",
+   "base07": "#111111",
+   "base08": "#a8071a",
+   "base09": "#a34f00",
+   "base0A": "#7a6211",
+   "base0B": "#116c2e",
+   "base0C": "#0e6e8c",
+   "base0D": "#135ae2",
+   "base0E": "#0e4ec4",
+   "base0F": "#8a4b1f"
+  }
+ }
+]

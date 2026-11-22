@@ -43,6 +43,9 @@ enum Kind {
 /// Use the `is_*` helpers to react to specific outcomes: a request that was
 /// already answered elsewhere ([`Error::is_settled`]), a wrong password
 /// ([`Error::is_unauthorized`]) or an unreachable server ([`Error::is_transport`]).
+///
+/// Its text is one sentence, fit to show people: where the error was
+/// created is kept apart, in [`Error::backtrace`].
 #[derive(Debug)]
 pub struct Error {
     kind: Kind,
@@ -76,6 +79,14 @@ impl Error {
 
     pub(crate) fn other(message: impl Into<String>) -> Self {
         Self::new(Kind::Other(message.into()))
+    }
+
+    /// Returns where the error was created, when backtraces are enabled.
+    ///
+    /// `RUST_BACKTRACE` and `RUST_LIB_BACKTRACE` turn them on; otherwise
+    /// it's empty.
+    pub fn backtrace(&self) -> &Backtrace {
+        &self.backtrace
     }
 
     /// Returns the HTTP status when the server answered with an error.
@@ -136,9 +147,6 @@ impl Display for Error {
             Kind::Decode(e) => write!(f, "unexpected answer from the OpenCode server: {e}")?,
             Kind::Io(e) => write!(f, "could not read an OpenCode file: {e}")?,
             Kind::Other(message) => write!(f, "{message}")?,
-        }
-        if self.backtrace.status() == std::backtrace::BacktraceStatus::Captured {
-            write!(f, "\n{}", self.backtrace)?;
         }
         Ok(())
     }

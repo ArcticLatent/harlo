@@ -13,7 +13,7 @@ use harlo_core::server::{
     self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
 };
 use harlo_core::sessions::Project;
-use harlo_core::theme::{self, Mode, Theme, Tokens};
+use harlo_core::theme::{self, Mode, Scheme, Tokens};
 use harlo_core::timeline::{Entry, entries};
 use harlo_core::workspace::{EventKind, Fetch, Fetched, InboxItem, ModelRef, Session, Workspace};
 use std::time::Instant;
@@ -425,9 +425,10 @@ struct Sending {
 pub struct App {
     /// Colours for every widget, from the chosen theme.
     pub tokens: Tokens,
-    /// The bundled themes: Harlo's own first, then OpenCode's.
-    pub themes: Vec<Theme>,
-    /// The variant the desktop prefers, which Appearance's System follows.
+    /// The bundled themes: Harlo's own dark and light first, then the rest
+    /// by name.
+    pub themes: Vec<Scheme>,
+    /// Whether the desktop prefers dark, which Appearance's System follows.
     system_mode: harlo_core::theme::Mode,
     /// Servers the location picker offers.
     pub locations: Vec<Location>,
@@ -559,20 +560,12 @@ impl App {
     /// `locations` are what the location picker offers; `order` is the saved
     /// sidebar order of project folders.
     ///
-    /// # Panics
-    ///
-    /// Panics if the bundled default theme doesn't parse. `harlo-core`'s
-    /// tests check that it does, so this would be a build mistake.
-    #[must_use]
-    ///
     /// `layout` arranges the window as it was last saved; its tabs for
     /// `location` reopen once the server connects.
+    #[must_use]
     pub fn new(location: Location, locations: Vec<Location>, layout: Layout) -> Self {
-        let theme = theme::parse(harlo_core::DEFAULT_THEME).expect("the bundled theme is valid");
-        let tokens = theme.tokens(Mode::Dark);
         let mut app = Self {
-            tokens,
-            // Harlo's own theme parsed above, so the list starts with it.
+            tokens: theme::harlo(Mode::Dark).tokens(),
             themes: theme::bundled(),
             // Until the window says otherwise, as Harlo looked before it
             // followed the desktop.

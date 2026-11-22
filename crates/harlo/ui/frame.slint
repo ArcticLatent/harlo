@@ -47,7 +47,7 @@ component TabView inherits Rectangle {
         if !tab.file-icon: Icon {
             text: tab.glyph;
             font-size: 13px;
-            color: tab.active ? Theme.icon-selected : Theme.icon-weak-base;
+            color: tab.active ? Theme.accent-ink : Theme.icon-quiet;
         }
         Text {
             text: (tab.modified ? "● " : "") + tab.title;
@@ -76,7 +76,7 @@ component TabView inherits Rectangle {
     if tab.active: Rectangle {
         y: parent.height - 2px;
         height: 2px;
-        background: Theme.text-interactive-base;
+        background: Theme.accent-ink;
     }
 }
 

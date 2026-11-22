@@ -14,7 +14,10 @@ component RailButton inherits Press {
     Icon {
         text: root.glyph;
         font-size: Size.rail-icon;
-        color: root.selected ? Theme.icon-selected : Theme.icon-base;
+        // An open panel's button takes the accent; the phone placeholder,
+        // shown as on but not yet working, stays plain.
+        color: root.selected && root.enabled ? Theme.accent-ink
+            : root.selected ? Theme.icon-selected : Theme.icon-base;
     }
 }
 

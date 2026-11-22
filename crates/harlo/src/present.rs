@@ -120,7 +120,7 @@ impl Presenter {
         let state = window.global::<State>();
         let t = &app.tokens;
         if self.applied.as_ref() != Some(t) {
-            crate::theme::apply(window, t);
+            crate::theme::apply(window, t, &app.theme().id);
             self.applied = Some(*t);
         }
         sync(
@@ -550,7 +550,11 @@ fn child_row(app: &App, child: &SessionSummary) -> SidebarRow {
         id: child.id.as_str().into(),
         title: child.title.as_str().into(),
         agent: name.into(),
-        tone: color(agent.and_then(|a| a.color).unwrap_or(t.icon_weak_base)),
+        tone: color(
+            agent
+                .and_then(|a| a.color)
+                .map_or_else(|| crate::theme::quiet_icon(t), |c| crate::theme::ink(t, c)),
+        ),
         selected: app.active.as_deref() == Some(child.id.as_str()),
         busy: child.busy,
         waiting: child.waiting,

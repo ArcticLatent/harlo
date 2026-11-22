@@ -12,6 +12,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use harlo_core::layout::Appearance;
 use harlo_core::server::{McpServer, Plugin, Provider, Stats, WebSearch};
+use harlo_core::theme::Mode;
 
 use super::{App, Message};
 use crate::task::Task;
@@ -156,9 +157,9 @@ pub enum Event {
     Query(String),
     /// Turn one of Harlo's own settings on or off.
     Switch(Setting),
-    /// Use the theme with this id.
+    /// Use the theme with this id while the window is in its mode.
     Theme(String),
-    /// Show the theme's light or dark variant, or follow the desktop.
+    /// Show the dark or the light theme, or follow the desktop.
     Appearance(Appearance),
     /// Show stats for another range.
     Range(Range),
@@ -245,8 +246,19 @@ impl App {
                 return self.save_preferences();
             }
             Event::Theme(id) => {
-                if self.themes.iter().any(|t| t.id == id) {
-                    self.preferences.theme = id;
+                if let Some(mode) = self.themes.iter().find(|t| t.id == id).map(|t| t.mode) {
+                    match mode {
+                        Mode::Dark => self.preferences.dark_theme = id,
+                        Mode::Light => self.preferences.light_theme = id,
+                    }
+                    // A fixed appearance turns to the theme picked, so it
+                    // shows; System keeps following the desktop.
+                    if self.preferences.appearance != Appearance::System {
+                        self.preferences.appearance = match mode {
+                            Mode::Dark => Appearance::Dark,
+                            Mode::Light => Appearance::Light,
+                        };
+                    }
                     self.retheme();
                     return self.save_preferences();
                 }

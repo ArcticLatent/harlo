@@ -5,6 +5,9 @@
 //! itself, but not headings, code blocks, quotes, rules or tables. Splitting
 //! an answer into blocks lets the timeline draw those as rows of their own,
 //! and keeps each row short however long the answer grows.
+//!
+//! Inline text takes the theme's reply colours: [`painted`] wraps code
+//! spans, bold and italic text in colour tags.
 
 // Rust guideline compliant 2026-10-09
 
@@ -264,6 +267,12 @@ impl Highlighter {
         }
     }
 
+    /// The tokens the colours come from.
+    #[must_use]
+    pub fn tokens(&self) -> &Tokens {
+        &self.tokens
+    }
+
     /// Colours code with `tokens` from now on; returns whether that changes
     /// its colours.
     pub fn use_tokens(&mut self, tokens: &Tokens) -> bool {
@@ -325,8 +334,8 @@ impl Highlighter {
 /// Picks one of a theme's code colours.
 type CodeColor = fn(&Tokens) -> Rgba;
 
-/// Which code the theme's code colours go to, as OpenCode assigns them: the
-/// grammar's scopes, and the token for them. A narrower scope wins.
+/// Which code the theme's code colours go to, as Base16's styling guide
+/// assigns them: the grammar's scopes, and the token for them. A narrower scope wins.
 const CODE_SCOPES: &[(&str, CodeColor)] = &[
     ("comment, punctuation.definition.comment", |t| {
         t.syntax_comment
@@ -346,7 +355,7 @@ const CODE_SCOPES: &[(&str, CodeColor)] = &[
     (
         "entity.name.function, support.function, meta.function-call variable.function, \
          variable.function",
-        |t| t.syntax_primitive,
+        |t| t.syntax_function,
     ),
     (
         "entity.name.type, entity.name.class, entity.name.struct, entity.name.enum, \
@@ -362,7 +371,7 @@ const CODE_SCOPES: &[(&str, CodeColor)] = &[
         t.syntax_variable
     }),
     ("punctuation", |t| t.syntax_punctuation),
-    ("markup.heading, entity.name.section", |t| t.syntax_keyword),
+    ("markup.heading, entity.name.section", |t| t.syntax_function),
 ];
 
 /// A highlighting theme whose colours are `t`'s code colours.
@@ -445,6 +454,56 @@ fn escape_into(out: &mut String, text: &str, leading: &mut bool) {
     }
 }
 
+/// Inline Markdown with its code spans, bold and italic text in the theme's
+/// reply colours, and the rest as it was.
+///
+/// The colours are wrapped around each span's own Markdown, so the window
+/// still draws code spans in its code font and bold text bold.
+#[must_use]
+pub fn painted(t: &Tokens, source: &str) -> String {
+    // Each tag's place in the text, and its rank among tags at one place:
+    // closing tags before opening ones, an inner span closing first and an
+    // outer one opening first.
+    let mut tags: Vec<(usize, (u8, usize), String)> = Vec::new();
+    let mut span = |start: usize, end: usize, color: Rgba| {
+        let length = end - start;
+        tags.push((start, (1, usize::MAX - length), font(t, color)));
+        tags.push((end, (0, length), "</font>".to_owned()));
+    };
+    let mut open: Vec<(usize, Rgba)> = Vec::new();
+    for (event, range) in Parser::new(source).into_offset_iter() {
+        match event {
+            Event::Code(_) => span(range.start, range.end, t.markdown_code),
+            Event::Start(Tag::Strong) => open.push((range.start, t.markdown_strong)),
+            Event::Start(Tag::Emphasis) => open.push((range.start, t.markdown_emph)),
+            Event::End(TagEnd::Strong | TagEnd::Emphasis) => {
+                if let Some((start, color)) = open.pop() {
+                    span(start, range.end, color);
+                }
+            }
+            _ => {}
+        }
+    }
+    if tags.is_empty() {
+        return source.to_owned();
+    }
+    tags.sort_by_key(|(at, rank, _)| (*at, *rank));
+    let mut out = source.to_owned();
+    // From the end, so the places still ahead stay right.
+    for (at, _, tag) in tags.into_iter().rev() {
+        out.insert_str(at, &tag);
+    }
+    out
+}
+
+/// The opening colour tag for `color`, made readable.
+fn font(t: &Tokens, color: Rgba) -> String {
+    format!(
+        "<font color=\"{}\">",
+        hex(code_color(crate::theme::ink(t, color)))
+    )
+}
+
 /// `text` escaped so Markdown shows it as written, on one paragraph per line.
 #[must_use]
 pub fn escaped(text: &str) -> String {
@@ -523,7 +582,7 @@ mod tests {
             .into_iter()
             .find(|t| t.id == "dracula")
             .expect("dracula")
-            .tokens(harlo_core::theme::Mode::Dark);
+            .tokens();
         let mut highlighter = Highlighter::new(&crate::theme::default_tokens());
         assert!(highlighter.use_tokens(&dracula), "another theme");
         assert!(!highlighter.use_tokens(&dracula), "the same theme");
@@ -532,11 +591,38 @@ mod tests {
             ("keyword", dracula.syntax_keyword),
             ("string", dracula.syntax_string),
             ("comment", dracula.syntax_comment),
-            ("function", dracula.syntax_primitive),
+            ("function", dracula.syntax_function),
         ] {
             let colour = format!("<font color=\"{colour}\">");
             assert!(markup.contains(&colour), "{what} in {colour}: {markup}");
         }
+    }
+
+    #[test]
+    fn reply_text_takes_the_themes_colours() {
+        let t = crate::theme::default_tokens();
+        let tag = |c: Rgba| font(&t, c);
+        let source = "Plain, `code`, **bold with `code`**, *italic* and ***both***.";
+        let markup = painted(&t, source);
+        let code = tag(t.markdown_code);
+        let strong = tag(t.markdown_strong);
+        let emph = tag(t.markdown_emph);
+        assert!(markup.contains(&format!("{code}`code`</font>")), "{markup}");
+        assert!(
+            markup.contains(&format!("{strong}**bold with {code}`code`</font>**</font>")),
+            "a span inside another: {markup}"
+        );
+        assert!(
+            markup.contains(&format!("{emph}*italic*</font>")),
+            "{markup}"
+        );
+        let styled = slint::StyledText::from_markdown(&markup).expect("valid markup");
+        let shown = format!("{styled:?}");
+        assert!(
+            shown.contains("bold with code"),
+            "the text is kept: {shown}"
+        );
+        assert_eq!(painted(&t, "no spans here"), "no spans here");
     }
 
     #[test]

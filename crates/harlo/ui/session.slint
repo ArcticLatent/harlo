@@ -7,7 +7,7 @@ import { Icons } from "icons.slint";
 import { State, Logic, Requests, InboxRow } from "data.slint";
 import { Icon, Press, HLine, Breathing, ErrorLine } from "widgets.slint";
 import { Composer, PickerChip } from "composer.slint";
-import { Timeline, Column, TimelineScrollbar, PromptRail } from "timeline.slint";
+import { Timeline, TimelineScrollbar, PromptRail } from "timeline.slint";
 import { WaitingCards } from "waiting.slint";
 
 /// The Changes panel's number, as Rust's `panel_number` gives it.
@@ -283,12 +283,12 @@ component JumpToEnd inherits Press {
     Icon {
         text: Icons.arrow-down;
         font-size: 16px;
-        color: Theme.icon-selected;
+        color: Theme.accent-ink;
     }
 }
 
 export component SessionView inherits Rectangle {
-    property <length> column: min(Column.width, root.width - 48px);
+    property <length> column: timeline.column;
 
     background: Theme.background-base;
 
@@ -358,9 +358,14 @@ export component SessionView inherits Rectangle {
         }
     }
 
-    // The rail sits in the space right of the column, when there's room.
-    if State.prompt-marks.length >= 2 && timeline.shown < 1
-        && (timeline.width - root.column) / 2 >= 56px: PromptRail {
+    // The overlays below are always there and only shown or hidden: they
+    // depend on the timeline's height, which settles over several rounds
+    // as the list measures its rows, and creating or removing an element
+    // in each round would make Slint lay out again and again.
+
+    // The rail sits in the space right of the column, which narrows for it.
+    PromptRail {
+        visible: timeline.railed && timeline.shown < 1;
         x: timeline.x + (timeline.width + root.column) / 2
             + ((timeline.width - root.column) / 2 - 16px - self.width) / 2;
         y: timeline.y + 24px;
@@ -370,7 +375,8 @@ export component SessionView inherits Rectangle {
         jump(row) => { timeline.jump-to(row); }
     }
 
-    if timeline.shown < 1: TimelineScrollbar {
+    TimelineScrollbar {
+        visible: timeline.shown < 1;
         x: timeline.x + timeline.width - self.width;
         y: timeline.y;
         height: timeline.height;
@@ -381,7 +387,8 @@ export component SessionView inherits Rectangle {
     }
 
     // Shown once the reader has scrolled away from the end.
-    if !timeline.following && timeline.content-height > timeline.visible-height: JumpToEnd {
+    JumpToEnd {
+        visible: !timeline.following && timeline.content-height > timeline.visible-height;
         x: (root.width - self.width) / 2;
         y: timeline.y + timeline.height - self.height - 12px;
         clicked => { timeline.to-end(); }

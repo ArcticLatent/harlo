@@ -510,7 +510,7 @@ fn entry_rows(t: &Tokens, view: &RowView<'_>, gap: f32, crew: &Crew) -> Vec<Time
         // The caller builds answers, block by block.
         Entry::Answer { .. } => Vec::new(),
         Entry::Thought { text, .. } => {
-            let mut row = line(t, key, gap, Icon::Circle, t.icon_weak_base);
+            let mut row = line(t, key, gap, Icon::Circle, crate::theme::quiet_icon(t));
             row.label = "Thought".into();
             row.detail = summarize(text).into();
             vec![with(row)]
@@ -636,10 +636,11 @@ fn block_row(
     gap: f32,
     highlighter: &Highlighter,
 ) -> TimelineRow {
+    let t = highlighter.tokens();
     let mut row = match block {
         Block::Text(source) => {
             let mut row = blank(Shape::Text, key, gap);
-            row.text = styled(source);
+            row.text = styled(&markdown::painted(t, source));
             row
         }
         Block::Heading { level, text } => {
@@ -660,7 +661,7 @@ fn block_row(
         }
         Block::Quote(source) => {
             let mut row = blank(Shape::Quote, key, gap);
-            row.text = styled(source);
+            row.text = styled(&markdown::painted(t, source));
             row
         }
         Block::Rule => blank(Shape::Rule, key, gap),

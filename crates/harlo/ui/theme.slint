@@ -29,12 +29,36 @@ export global Theme {
     in property <color> text-weaker: #6a6a6a;
     in property <color> text-interactive-base: #9dbefe;
     in property <color> icon-base: #c8c8c8;
-    in property <color> icon-weak-base: #8f8f8f;
+    /// Secondary icons, faint but readable; see `quiet_icon` in Rust.
+    in property <color> icon-quiet: #8f8f8f;
     in property <color> icon-selected: #ededed;
     in property <color> icon-success-base: #12c905;
     in property <color> icon-warning-base: #fcd53a;
     in property <color> icon-critical-base: #fc533a;
     in property <color> icon-info-base: #9dbefe;
+    in property <color> surface-brand-hover: #f9a46d;
+    in property <color> surface-interactive-base: #3a5a9e;
+    in property <color> surface-interactive-hover: #4568b0;
+    in property <color> surface-interactive-weak: #22324f;
+    in property <color> text-on-brand-base: #000000;
+    in property <color> text-on-interactive-base: #ffffff;
+    in property <color> border-interactive-base: #3a5a9e;
+    in property <color> border-interactive-hover: #4568b0;
+    in property <color> border-interactive-focus: #5b80cf;
+    /// The brand colour as text and icons, such as a project's name, and
+    /// the accent as icons and accent lines, such as the open tab's
+    /// underline; see `ink` in Rust.
+    in property <color> brand-ink: #fab283;
+    in property <color> accent-ink: #5b80cf;
+    /// Links in answers.
+    in property <color> link-ink: #9dbefe;
+    /// Headings in answers.
+    in property <color> heading-ink: #adcafa;
+    /// Quotes in answers, and their bar.
+    in property <color> quote-ink: #8fd7e8;
+    /// Whether the logo shows its own colours (Harlo's themes), rather than
+    /// the theme's brand and accent colours.
+    in property <bool> own-logo: true;
 
     // Mixed from the tokens above.
     /// A chip's fill under the pointer.
@@ -48,8 +72,10 @@ export global Theme {
     /// The tint under an added diff line, and under a removed one.
     in property <color> added-line: #172a16;
     in property <color> removed-line: #3a1b17;
-    /// The main button's fill under the pointer, and while it can't be pressed.
-    in property <color> primary-hover: #c5c5c5;
+    /// Behind the selected item, such as the open session: a soft wash of
+    /// the interactive colour.
+    in property <color> selected-tint: #2a3550;
+    /// The main button's fill while it can't be pressed.
     in property <color> primary-off: #5d5d5d;
     /// The outline of a card asking for approval, and of one asking questions.
     in property <color> warning-edge: #6b5426;

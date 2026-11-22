@@ -34,9 +34,9 @@ component ChoiceButton inherits Press {
     height: 24px;
     label: root.text;
     rest: transparent;
-    lit: Theme.background-base;
+    lit: Theme.selected-tint;
     border-width: root.selected ? 1px : 0px;
-    border-color: Theme.border-base;
+    border-color: Theme.border-interactive-base;
     accessible-checkable: true;
     accessible-checked: root.selected;
 
@@ -182,7 +182,7 @@ component ThemeTile inherits Press {
         border-radius: 6px;
         background: root.card.background;
         border-width: root.card.chosen ? 2px : 1px;
-        border-color: root.card.chosen ? Theme.text-interactive-base
+        border-color: root.card.chosen ? Theme.border-interactive-focus
             : root.hovered ? Theme.border-base : Theme.border-weak-base;
         clip: true;
 
@@ -264,19 +264,30 @@ component ThemeTile inherits Press {
 
 /// The themes as cards, as many to a row as fit.
 component ThemeGrid inherits Rectangle {
+    in property <[ThemeCard]> cards;
     property <length> gap: 12px;
     property <int> columns: max(1, floor((root.width + root.gap) / (150px + root.gap)));
     property <length> tile-width: (root.width - (root.columns - 1) * root.gap) / root.columns;
-    property <int> rows: ceil(State.theme-cards.length / root.columns);
+    property <int> rows: ceil(root.cards.length / root.columns);
     height: root.rows * (96px + root.gap);
 
-    for card[index] in State.theme-cards: ThemeTile {
+    for card[index] in root.cards: ThemeTile {
         x: mod(index, root.columns) * (root.tile-width + root.gap);
         y: floor(index / root.columns) * (96px + root.gap);
         width: root.tile-width;
         card: card;
         clicked => { Logic.pick-theme(card.id); }
     }
+}
+
+/// The heading over a group of theme cards, styled as the rows' headings.
+component ThemeHeading inherits Text {
+    height: 40px;
+    font-size: Size.label;
+    font-weight: 600;
+    color: Theme.text-strong;
+    vertical-alignment: bottom;
+    accessible-role: AccessibleRole.text;
 }
 
 /// A section in Settings' list.
@@ -293,7 +304,7 @@ component SectionButton inherits Press {
         Icon {
             text: root.glyph;
             font-size: 14px;
-            color: root.selected ? Theme.icon-selected : Theme.icon-base;
+            color: root.selected ? Theme.accent-ink : Theme.icon-base;
         }
         Text {
             horizontal-stretch: 1;
@@ -408,6 +419,7 @@ component RangeButton inherits Press {
     height: 26px;
     label: root.text;
     rest: Theme.surface-inset-base;
+    lit: Theme.selected-tint;
 
     Text {
         text: root.text;
@@ -552,7 +564,18 @@ export component SheetLayer inherits Rectangle {
                         padding-top: 4px;
                         spacing: 6px;
                         SheetRows { }
-                        if State.theme-cards.length > 0: ThemeGrid { }
+                        if State.dark-theme-cards.length > 0: ThemeHeading {
+                            text: "Dark themes";
+                        }
+                        if State.dark-theme-cards.length > 0: ThemeGrid {
+                            cards: State.dark-theme-cards;
+                        }
+                        if State.light-theme-cards.length > 0: ThemeHeading {
+                            text: "Light themes";
+                        }
+                        if State.light-theme-cards.length > 0: ThemeGrid {
+                            cards: State.light-theme-cards;
+                        }
                         // The last section, About, ends with Slint's notice.
                         if State.settings-section == State.settings-sections.length - 1
                             && State.settings-query == "": HorizontalLayout {

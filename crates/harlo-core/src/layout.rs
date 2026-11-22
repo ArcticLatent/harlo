@@ -33,9 +33,12 @@ const PREFERENCES_KEY: &str = "preferences";
 pub struct Preferences {
     /// Whether the sessions open when Harlo last closed open again.
     pub reopen_tabs: bool,
-    /// The colour theme, by its id, such as `harlo` or `dracula`.
-    pub theme: String,
-    /// Whether the theme's light or dark variant shows.
+    /// The theme shown while the window is dark, by its id, such as
+    /// `harlo-dark` or `gruvbox-dark-medium`.
+    pub dark_theme: String,
+    /// The theme shown while the window is light, by its id.
+    pub light_theme: String,
+    /// Whether the dark or the light theme shows.
     pub appearance: Appearance,
 }
 
@@ -43,22 +46,23 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             reopen_tabs: true,
-            theme: "harlo".to_owned(),
+            dark_theme: crate::theme::HARLO_DARK.to_owned(),
+            light_theme: crate::theme::HARLO_LIGHT.to_owned(),
             appearance: Appearance::System,
         }
     }
 }
 
-/// Which of a theme's variants shows.
+/// Whether the dark or the light theme shows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Appearance {
     /// Light or dark as the desktop is.
     #[default]
     System,
-    /// Always the light variant.
+    /// Always the light theme.
     Light,
-    /// Always the dark variant.
+    /// Always the dark theme.
     Dark,
 }
 

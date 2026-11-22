@@ -601,8 +601,10 @@ export global State {
     in property <[SettingsSection]> settings-sections;
     /// Which of them is Shortcuts, which the rail's keyboard button opens.
     in property <int> shortcuts-section;
-    /// The themes Settings → Appearance lists, or those a search found.
-    in property <[ThemeCard]> theme-cards;
+    /// The dark and the light themes Settings → Appearance lists, or those
+    /// a search found.
+    in property <[ThemeCard]> dark-theme-cards;
+    in property <[ThemeCard]> light-theme-cards;
     in property <int> settings-section;
     in-out property <string> settings-query;
 
