@@ -22,6 +22,7 @@ mod generated;
 mod id;
 mod prompt;
 mod pty;
+mod settings;
 mod setup;
 mod types;
 
@@ -41,6 +42,10 @@ pub use id::message_id;
 pub use prompt::{Attachment, Mention, Prompt};
 #[doc(inline)]
 pub use pty::{Pty, PtyInput, PtyOutput};
+#[doc(inline)]
+pub use settings::{
+    Day, McpServer, McpStatus, ModelUsage, Plugin, PluginSource, Provider, Stats, WebSearch,
+};
 #[doc(inline)]
 pub use setup::{CommandSetup, Setup};
 #[doc(inline)]

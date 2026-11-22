@@ -1,0 +1,247 @@
+// The pages that open over the window from the left rail: the keyboard
+// shortcuts, the stats across sessions, and the server's set-up with
+// About. A click outside the card or Esc closes them.
+
+import { AboutSlint, ScrollView } from "std-widgets.slint";
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, SheetRow } from "data.slint";
+import { IconButton, Press, HLine } from "widgets.slint";
+
+/// One row: a heading, a name with its value, or a note.
+component Row inherits VerticalLayout {
+    in property <SheetRow> entry;
+
+    if root.entry.kind == 0: Text {
+        height: 40px;
+        text: root.entry.name;
+        font-size: Size.label;
+        font-weight: 600;
+        color: Theme.text-strong;
+        vertical-alignment: bottom;
+        accessible-role: AccessibleRole.text;
+    }
+    if root.entry.kind == 1: HorizontalLayout {
+        height: 30px;
+        spacing: 16px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.name;
+            font-size: Size.small;
+            color: Theme.text-base;
+            overflow: elide;
+            vertical-alignment: center;
+            accessible-role: AccessibleRole.text;
+        }
+        Text {
+            horizontal-stretch: 2;
+            text: root.entry.value;
+            font-size: Size.small;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+            color: root.entry.tone == 1 ? Theme.icon-success-base
+                : root.entry.tone == 2 ? Theme.icon-critical-base
+                : root.entry.tone == 3 ? Theme.text-weak : Theme.text-base;
+            accessible-role: AccessibleRole.text;
+        }
+    }
+    if root.entry.kind == 2: Text {
+        text: root.entry.name;
+        font-size: Size.small;
+        color: Theme.text-weak;
+        wrap: word-wrap;
+        accessible-role: AccessibleRole.text;
+    }
+}
+
+/// A range button on the stats page.
+component RangeButton inherits Press {
+    in property <string> text;
+    height: 26px;
+    label: root.text;
+    rest: Theme.surface-inset-base;
+
+    Text {
+        text: root.text;
+        font-size: Size.small;
+        color: root.selected ? Theme.text-strong : Theme.text-weak;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+/// The stats' range buttons, numbers and day bars.
+component StatsHead inherits VerticalLayout {
+    alignment: start;
+    spacing: 16px;
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 4px;
+        for range[index] in ["Last 7 days", "Last 30 days", "All time"]: RangeButton {
+            width: 96px;
+            text: range;
+            selected: State.stat-range == index;
+            clicked => { Logic.stats-range(index); }
+        }
+    }
+
+    if State.stat-tiles.length > 0: Rectangle {
+        height: 2 * 58px + 8px;
+        for tile[index] in State.stat-tiles: Rectangle {
+            property <int> per-row: 4;
+            x: mod(index, self.per-row) * (parent.width + 8px) / self.per-row;
+            y: floor(index / self.per-row) * (58px + 8px);
+            width: (parent.width + 8px) / self.per-row - 8px;
+            height: 58px;
+            border-radius: Size.radius;
+            background: Theme.surface-inset-base;
+
+            VerticalLayout {
+                padding: 10px;
+                spacing: 2px;
+                Text {
+                    text: tile.value;
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: Theme.text-strong;
+                    accessible-role: AccessibleRole.text;
+                }
+                Text {
+                    text: tile.label;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                    accessible-role: AccessibleRole.text;
+                }
+            }
+        }
+    }
+
+    if State.stat-days.length > 0: VerticalLayout {
+        spacing: 6px;
+        Text {
+            text: "Model steps a day";
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        Rectangle {
+            height: 56px;
+            // A slot for each of the last 30 days, the newest at the right.
+            for day in State.stat-days: Rectangle {
+                property <length> slot: parent.width / 30;
+                x: day.slot * self.slot;
+                width: max(2px, self.slot - 3px);
+                y: parent.height - self.height;
+                height: max(2px, day.share * parent.height);
+                border-radius: 2px;
+                background: Theme.text-interactive-base;
+                accessible-role: AccessibleRole.text;
+                accessible-label: day.label;
+            }
+        }
+    }
+}
+
+/// The card over the window.
+export component SheetLayer inherits Rectangle {
+    background: #00000066;
+
+    // A click outside the card closes it.
+    TouchArea {
+        clicked => { Logic.close-sheet(); }
+    }
+
+    card := Rectangle {
+        width: min(720px, root.width - 64px);
+        height: min(680px, root.height - 96px);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        background: Theme.surface-raised-strong;
+        border-radius: Size.menu-radius;
+        border-width: 1px;
+        border-color: Theme.menu-edge;
+        drop-shadow-color: #00000073;
+        drop-shadow-offset-y: 10px;
+        drop-shadow-blur: 28px;
+        clip: true;
+
+        // Clicks on the card stay on it.
+        TouchArea { }
+
+        VerticalLayout {
+            HorizontalLayout {
+                height: 52px;
+                padding-left: 20px;
+                padding-right: 12px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: State.sheet-title;
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: Theme.text-strong;
+                    vertical-alignment: center;
+                    accessible-role: AccessibleRole.text;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        label: "Close";
+                        glyph: Icons.close;
+                        clicked => { Logic.close-sheet(); }
+                    }
+                }
+            }
+            HLine { }
+
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    alignment: start;
+                    padding: 20px;
+                    padding-top: 4px;
+                    spacing: 6px;
+
+                    if State.sheet == 2: StatsHead { }
+                    if State.sheet-note != "": Text {
+                        text: State.sheet-note;
+                        font-size: Size.small;
+                        color: Theme.text-weak;
+                        wrap: word-wrap;
+                        accessible-role: AccessibleRole.text;
+                    }
+                    VerticalLayout {
+                        spacing: 0;
+                        for entry in State.sheet-rows: Row {
+                            entry: entry;
+                        }
+                    }
+
+                    if State.sheet == 3: VerticalLayout {
+                        spacing: 6px;
+                        padding-top: 14px;
+                        Text {
+                            text: "About";
+                            font-size: Size.label;
+                            font-weight: 600;
+                            color: Theme.text-strong;
+                            accessible-role: AccessibleRole.text;
+                        }
+                        Text {
+                            text: "Harlo " + State.harlo-version
+                                + ". A desktop window for coding agents run by OpenCode.";
+                            font-size: Size.small;
+                            color: Theme.text-base;
+                            wrap: word-wrap;
+                            accessible-role: AccessibleRole.text;
+                        }
+                        HorizontalLayout {
+                            alignment: start;
+                            AboutSlint { }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

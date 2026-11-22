@@ -20,7 +20,7 @@ use slint::winit_030::{EventResult, WinitWindowAccessor as _, winit::event::Wind
 
 use crate::app::{
     self, App, ChangesEvent, ContextEvent, Edge, FilesEvent, Message, NotesEvent, Panel,
-    TerminalEvent,
+    SheetEvent, TerminalEvent,
 };
 use crate::keys::KeyPress;
 use crate::model::{self, Picker};
@@ -349,6 +349,26 @@ fn document(app: &App, index: i32) -> Option<app::Document> {
         .nth(usize::try_from(index).ok()?)
 }
 
+/// The page over the window the UI numbers `number`.
+fn sheet_of(number: i32) -> Option<app::Sheet> {
+    match number {
+        1 => Some(app::Sheet::Shortcuts),
+        2 => Some(app::Sheet::Stats),
+        3 => Some(app::Sheet::Settings),
+        _ => None,
+    }
+}
+
+/// The stats' range the UI numbers `number`.
+fn range_of(number: i32) -> Option<app::Range> {
+    match number {
+        0 => Some(app::Range::Week),
+        1 => Some(app::Range::Month),
+        2 => Some(app::Range::All),
+        _ => None,
+    }
+}
+
 /// The edge the UI numbers `number`.
 fn edge_of(number: i32) -> Option<Edge> {
     match number {
@@ -453,6 +473,11 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         TerminalEvent::Toggle
     ));
     send!(on_new_terminal, || Message::Terminal(TerminalEvent::New));
+    send_with!(on_toggle_sheet, |_app, number| sheet_of(number)
+        .map(|sheet| Message::Sheet(SheetEvent::Toggle(sheet))));
+    send!(on_close_sheet, || Message::Sheet(SheetEvent::Close));
+    send_with!(on_stats_range, |_app, number| range_of(number)
+        .map(|range| Message::Sheet(SheetEvent::Range(range))));
     send_with!(on_maximize, |_app, number| present::panel_of(number)
         .map(Message::Maximize));
     send!(on_restore, || Message::Restore);
@@ -680,6 +705,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
 #[must_use]
 pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
     use crate::keys::Key;
+    if app.sheets.open.is_some() && press.key == Key::Escape {
+        return Some(Message::Sheet(app::SheetEvent::Close));
+    }
     if app.picking_location && press.key == Key::Escape {
         return Some(Message::ToggleLocations);
     }

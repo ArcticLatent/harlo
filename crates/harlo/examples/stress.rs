@@ -12,7 +12,7 @@
 //! long each update and present takes, and how long a key waits for the next
 //! frame, writes them to `results.json`, and exits.
 //!
-//! The conditions match the M0 test of the iced timeline, so the numbers
+//! The conditions match the M0 test of the first timeline, so the numbers
 //! compare.
 
 // Rust guideline compliant 2026-10-09
@@ -191,7 +191,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         stream_ms: Vec::new(),
     }));
 
-    // Starts at the top, as the iced test did, and reads down.
+    // Starts at the top, as the M0 test did, and reads down.
     let weak = window.as_weak();
     Timer::single_shot(Duration::from_millis(500), move || {
         if let Some(window) = weak.upgrade() {

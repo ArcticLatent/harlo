@@ -43,20 +43,28 @@ export component LeftRail inherits Rectangle {
 
             Rectangle { vertical-stretch: 1; }
 
-            for item in [
-                { glyph: Icons.phone, label: "Phone", on: true },
-                { glyph: Icons.keyboard, label: "Keyboard shortcuts", on: false },
-                { glyph: Icons.stats, label: "Stats", on: false },
-                { glyph: Icons.settings, label: "Settings", on: false },
-            ]: HorizontalLayout {
+            HorizontalLayout {
                 alignment: center;
                 // The phone link shows as on, as in the design; its
                 // milestone wires it up.
                 RailButton {
+                    glyph: Icons.phone;
+                    label: "Phone";
+                    selected: true;
+                    enabled: false;
+                }
+            }
+            for item[index] in [
+                { glyph: Icons.keyboard, label: "Keyboard shortcuts" },
+                { glyph: Icons.stats, label: "Stats" },
+                { glyph: Icons.settings, label: "Settings" },
+            ]: HorizontalLayout {
+                alignment: center;
+                RailButton {
                     glyph: item.glyph;
                     label: item.label;
-                    selected: item.on;
-                    enabled: false;
+                    selected: State.sheet == index + 1;
+                    clicked => { Logic.toggle-sheet(index + 1); }
                 }
             }
 

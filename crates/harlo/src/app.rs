@@ -30,6 +30,7 @@ mod changes;
 mod context;
 mod files;
 mod notes;
+mod sheets;
 mod subagents;
 mod terminal;
 mod todos;
@@ -44,6 +45,7 @@ pub use context::{
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
+pub use sheets::{Event as SheetEvent, Load, Range, SetUp, Sheet, Sheets};
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;
@@ -208,6 +210,8 @@ pub enum Message {
     Restore,
     /// Something happened to the terminals.
     Terminal(TerminalEvent),
+    /// Something happened to the pages over the window.
+    Sheet(SheetEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -437,6 +441,8 @@ pub struct App {
     pub maximized: Option<Panel>,
     /// The terminals, shown under the center or hidden.
     pub terminals: Terminals,
+    /// The pages over the window: shortcuts, stats and settings.
+    pub sheets: Sheets,
     /// The window's width, which decides which panels fit.
     width: f32,
     /// The window's height.
@@ -562,6 +568,7 @@ impl App {
             panel: layout.panel.as_deref().and_then(Panel::named),
             maximized: None,
             terminals: Terminals::default(),
+            sheets: Sheets::default(),
             width: fit::WINDOW.0,
             height: fit::WINDOW.1,
             keep: None,
@@ -713,6 +720,7 @@ impl App {
             | Message::CloseDocument(_)
             | Message::CycleTab { .. }) => return self.arrange(message),
             Message::Terminal(event) => return self.terminal_event(event),
+            Message::Sheet(event) => return self.sheet_event(event),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => {
                 if !self.expanded.remove(&folder) {

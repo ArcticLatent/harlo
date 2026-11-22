@@ -1,5 +1,0 @@
-# The UI tests' simulator draws on the CPU. With the GPU renderer, the Vulkan
-# loader can crash when several tests start a renderer at the same moment,
-# and nothing in the tests depends on how pixels are drawn.
-[env]
-ICED_TEST_BACKEND = "tiny-skia"

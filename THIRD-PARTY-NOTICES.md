@@ -16,7 +16,7 @@ Harlo bundles the following assets. Rust crates are listed in `Cargo.lock`, and 
 
 ## Slint (UI toolkit)
 
-The window is drawn with [Slint](https://slint.dev), used under the Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0 rather than an MIT/Apache licence. The app credits Slint in its About.
+The window is drawn with [Slint](https://slint.dev), used under the Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0 rather than an MIT/Apache licence. The app credits Slint in Settings, under About.
 
 ## SQLite
 

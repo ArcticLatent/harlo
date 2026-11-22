@@ -150,6 +150,24 @@ fn control_c_interrupts_and_exit_closes_the_tab() {
 }
 
 #[test]
+fn control_keys_go_to_the_shell_not_the_window() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let (ui, mut tasks) = started(scratch.path());
+    let documents = ui.app().documents().len();
+    // Ctrl+W deletes the word before the cursor; it doesn't close a tab.
+    type_text(&ui, "echo kept gone");
+    control(&ui, "w");
+    type_text(&ui, "\n");
+    assert!(
+        tasks.until(&ui, ANSWER, |ui| has_line(ui, "kept")),
+        "{:?}",
+        lines(&ui)
+    );
+    assert_eq!(ui.app().documents().len(), documents);
+    assert_eq!(ui.app().terminals.shells().len(), 1);
+}
+
+#[test]
 fn the_view_scrolls_back_and_typing_returns_to_the_end() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let (ui, mut tasks) = started(scratch.path());

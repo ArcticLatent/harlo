@@ -13,6 +13,7 @@ mod files;
 mod notes;
 mod panels;
 mod session;
+mod sheets;
 mod terminal;
 mod timeline;
 mod waiting;
@@ -55,6 +56,7 @@ pub struct Presenter {
     files: files::Files,
     notes: notes::Notes,
     terminal: terminal::Terminal,
+    sheets: sheets::Sheets,
 }
 
 impl std::fmt::Debug for Presenter {
@@ -87,6 +89,7 @@ impl Presenter {
             files: files::Files::new(&state),
             notes: notes::Notes::default(),
             terminal: terminal::Terminal::new(&state),
+            sheets: sheets::Sheets::new(&state),
         };
         state.set_sidebar_rows(ModelRc::from(Rc::clone(&presenter.sidebar)));
         state.set_locations(ModelRc::from(Rc::clone(&presenter.locations)));
@@ -121,6 +124,7 @@ impl Presenter {
         self.files.editor(app, &state, &mut self.timeline);
         self.notes.show(app, &state);
         self.terminal.show(app, &state);
+        self.sheets.show(app, &state);
     }
 
     /// The open session: its header, timeline, inbox and waiting cards.

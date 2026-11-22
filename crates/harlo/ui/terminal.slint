@@ -6,7 +6,7 @@
 // pushes text out of its column.
 
 import { Theme, Size, Fonts } from "theme.slint";
-import { State, Logic, Requests, TermLine } from "data.slint";
+import { State, Logic, Requests, Keyboard, TermLine } from "data.slint";
 
 /// The terminal's text size.
 global Cells {
@@ -161,6 +161,9 @@ export component TerminalView inherits Rectangle {
     keys := FocusScope {
         accessible-role: AccessibleRole.text-input;
         accessible-label: "Terminal screen";
+        changed has-focus => {
+            Keyboard.in-terminal = self.has-focus;
+        }
         key-pressed(event) => {
             if event.modifiers.control && event.modifiers.shift {
                 if event.text.to-lowercase() == "c" {

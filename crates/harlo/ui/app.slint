@@ -3,10 +3,10 @@
 
 import { TerminalView } from "terminal.slint";
 import { EditorView } from "editor.slint";
-import { AboutSlint } from "std-widgets.slint";
+import { SheetLayer } from "sheets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, Requests, Content } from "data.slint";
+import { State, Logic, Requests, Keyboard, Content } from "data.slint";
 import { LeftRail, RightRail } from "rails.slint";
 import { Sidebar, Locations } from "sidebar.slint";
 import { DocumentTabs, TerminalStrip, PanelFrame, Grip } from "frame.slint";
@@ -57,6 +57,13 @@ export component AppWindow inherits Window {
     keys := FocusScope {
         // Window-wide keys go to Rust first; it takes only its shortcuts.
         capture-key-pressed(event) => {
+            // A terminal with the keyboard gets Ctrl keys for its shell,
+            // except the ones that switch tabs.
+            if Keyboard.in-terminal && State.terminals-shown && event.modifiers.control
+                    && event.text != Key.Tab && event.text != Key.Backtab
+                    && event.text != Key.PageUp && event.text != Key.PageDown {
+                return reject;
+            }
             if (Logic.key(event.text, event.modifiers.control, event.modifiers.shift,
                     event.modifiers.alt)) {
                 return accept;
@@ -134,12 +141,12 @@ export component AppWindow inherits Window {
 
         if State.picking-location: Locations { }
         if State.picker >= 0: PickerMenu { }
+        // Over everything between the rails, so the rail buttons still
+        // switch pages.
+        if State.sheet > 0: SheetLayer {
+            x: Size.rail;
+            width: root.width - 2 * Size.rail;
+        }
     }
 }
 
-/// Slint's notice, for the About page.
-export component About inherits Window {
-    title: "About Harlo";
-    background: Theme.background-base;
-    AboutSlint { }
-}

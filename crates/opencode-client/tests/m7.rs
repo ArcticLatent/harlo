@@ -77,3 +77,50 @@ async fn a_shell_on_the_server_answers_and_ends() {
     .await;
     assert!(ended.is_ok(), "the output ends with the shell");
 }
+
+/// The server's set-up reads as names and states, never a provider's
+/// settings.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_set_up_lists_providers_search_mcp_and_plugins() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let project = sandbox.project_str();
+
+    let providers = client.providers(&project).await.expect("providers");
+    let fake = providers
+        .iter()
+        .find(|p| p.id == "fake")
+        .expect("the scripted model's provider");
+    assert_eq!(fake.name, "Fake");
+    assert!(fake.enabled);
+
+    let search = client.web_search(&project).await.expect("web search");
+    assert!(!search.is_empty(), "OpenCode offers search services");
+    assert!(search.iter().all(|s| !s.name.is_empty()));
+
+    let mcp = client.mcp_servers(&project).await.expect("MCP servers");
+    assert!(mcp.is_empty(), "none configured in the sandbox");
+
+    let plugins = client.plugins(&project).await.expect("plugins");
+    assert!(
+        plugins
+            .iter()
+            .any(|p| p.source == opencode_client::PluginSource::Builtin && p.failed.is_none()),
+        "OpenCode's own plugins load"
+    );
+}
+
+/// Stats count nothing on a new server, and take a start.
+#[tokio::test(flavor = "multi_thread")]
+async fn stats_count_sessions_from_a_start() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let all = client.stats(None).await.expect("stats");
+    assert_eq!(all.sessions, 0);
+    assert_eq!(all.steps, 0);
+    let since = client
+        .stats(Some(1_700_000_000_000))
+        .await
+        .expect("stats since a start");
+    assert_eq!(since.from, 1_700_000_000_000);
+}

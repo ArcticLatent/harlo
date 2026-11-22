@@ -13,6 +13,7 @@ use sse_stream::SseByteStream;
 use crate::catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 use crate::generated as g;
 use crate::prompt::Prompt;
+use crate::settings::{McpServer, Plugin, Provider, Stats, WebSearch};
 use crate::setup::Setup;
 use crate::types::{
     Answer, Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply,
@@ -374,6 +375,61 @@ impl Client {
         tokio::task::spawn_blocking(move || Setup::from_entries(&entries))
             .await
             .map_err(|e| Error::other(format!("reading command files: {e}")))
+    }
+
+    /// Lists the model providers `directory` can use, by name.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn providers(&self, directory: &str) -> Result<Vec<Provider>, Error> {
+        let v = self.list("/api/provider", directory, &[]).await?;
+        Ok(each(&v, Provider::from_json))
+    }
+
+    /// Lists the web search services `directory` can use.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn web_search(&self, directory: &str) -> Result<Vec<WebSearch>, Error> {
+        let v = self.list("/api/websearch/provider", directory, &[]).await?;
+        Ok(each(&v, WebSearch::from_json))
+    }
+
+    /// Lists the MCP servers `directory` connects to, and how each stands.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn mcp_servers(&self, directory: &str) -> Result<Vec<McpServer>, Error> {
+        let v = self.list("/api/mcp", directory, &[]).await?;
+        Ok(each(&v, McpServer::from_json))
+    }
+
+    /// Lists the plugins loaded for `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn plugins(&self, directory: &str) -> Result<Vec<Plugin>, Error> {
+        let v = self.list("/api/plugin", directory, &[]).await?;
+        Ok(each(&v, Plugin::from_json))
+    }
+
+    /// Returns usage across every session since `from`, in milliseconds
+    /// since the Unix epoch, or since the first session.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or can't count.
+    pub async fn stats(&self, from: Option<u64>) -> Result<Stats, Error> {
+        let mut req = self.request(Method::GET, "/api/experimental/session/stats");
+        if let Some(from) = from {
+            req = req.query(&[("from", from.to_string())]);
+        }
+        let v = Self::json(req).await?;
+        Ok(Stats::from_json(&v["data"]))
     }
 
     /// Lists the skills in `directory`.

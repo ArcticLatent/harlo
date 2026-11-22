@@ -481,6 +481,29 @@ export struct TermCursor {
     text: string,
 }
 
+/// A row on a page over the window: 0 a heading, 1 a name and its value,
+/// 2 a note. Tone 1 is good, 2 bad and 3 quiet.
+export struct SheetRow {
+    kind: int,
+    name: string,
+    value: string,
+    tone: int,
+}
+
+/// A number on the stats page and what it counts.
+export struct StatTile {
+    value: string,
+    label: string,
+}
+
+/// A day's bar on the stats page, as a share of the busiest day; slot 29
+/// is the range's last day, 0 the day 29 days before it.
+export struct DayBar {
+    label: string,
+    slot: int,
+    share: float,
+}
+
 export global State {
     // The shell.
     in property <bool> sidebar-shown: true;
@@ -509,6 +532,17 @@ export global State {
     in property <color> term-foreground;
     in property <color> term-cursor-color;
     in property <bool> term-scrolled;
+    /// The page over the window: 0 none, 1 shortcuts, 2 stats, 3 settings;
+    /// its title, rows and a note on how its loading stands.
+    in property <int> sheet;
+    in property <string> sheet-title;
+    in property <[SheetRow]> sheet-rows;
+    in property <string> sheet-note;
+    /// The stats' numbers, day bars and range: 0 a week, 1 a month, 2 all.
+    in property <[StatTile]> stat-tiles;
+    in property <[DayBar]> stat-days;
+    in property <int> stat-range: 1;
+    in property <string> harlo-version;
 
     // The tool panels.
     in property <ContextCard> context-card;
@@ -623,6 +657,11 @@ export global Logic {
     callback toggle-panel(int);
     callback toggle-terminal();
     callback new-terminal();
+    /// Open a page over the window by its number, or close it if open.
+    callback toggle-sheet(int);
+    callback close-sheet();
+    /// Show the stats for a range by its number.
+    callback stats-range(int);
     /// A key pressed in the shown terminal, with Control, Alt and Shift;
     /// true when the terminal took it.
     callback terminal-key(string, bool, bool, bool) -> bool;
@@ -733,6 +772,12 @@ export global Logic {
 /// Requests from Rust to one part of the window: focus a field, scroll a
 /// list. A request names its target and moves `serial`, so asking twice in
 /// a row works.
+/// Where the keyboard is, as the window's own elements report it.
+export global Keyboard {
+    /// Whether the shown terminal has the keyboard.
+    in-out property <bool> in-terminal;
+}
+
 export global Requests {
     in property <string> focus;
     in property <int> focus-serial;
