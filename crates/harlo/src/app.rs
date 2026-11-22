@@ -27,6 +27,7 @@ use crate::timeline::{self, Activity, Timeline};
 
 mod arrange;
 mod changes;
+mod claude;
 mod context;
 mod files;
 mod notes;
@@ -40,6 +41,7 @@ pub use arrange::{Document, Edge};
 pub use changes::{
     ChangedFile, Changes, Event as ChangesEvent, GitAction, List, Loaded as ChangesLoaded,
 };
+pub use claude::{Action as ClaudeAction, Claude, Event as ClaudeEvent};
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
@@ -212,6 +214,8 @@ pub enum Message {
     Terminal(TerminalEvent),
     /// Something happened to the pages over the window.
     Sheet(SheetEvent),
+    /// Something happened to the Claude subscription.
+    Claude(ClaudeEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -529,6 +533,8 @@ pub struct App {
     store: Option<Store>,
     /// Harlo's own settings.
     pub preferences: Preferences,
+    /// How the Claude subscription stands.
+    pub claude: Claude,
     /// The layout as last saved.
     saved: Layout,
     /// Tabs saved for the other locations.
@@ -626,6 +632,7 @@ impl App {
             other_tabs: layout.tabs.clone(),
             restore: None,
             preferences: Preferences::default(),
+            claude: Claude::default(),
             following: None,
             saved: layout,
         };
@@ -733,6 +740,7 @@ impl App {
             | Message::CycleTab { .. }) => return self.arrange(message),
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Sheet(event) => return self.sheet_event(event),
+            Message::Claude(event) => return self.claude_event(event),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => {
                 if !self.expanded.remove(&folder) {

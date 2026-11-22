@@ -44,7 +44,8 @@ pub use prompt::{Attachment, Mention, Prompt};
 pub use pty::{Pty, PtyInput, PtyOutput};
 #[doc(inline)]
 pub use settings::{
-    Day, McpServer, McpStatus, ModelUsage, Plugin, PluginSource, Provider, Stats, WebSearch,
+    Connection, Day, Integration, McpServer, McpStatus, ModelUsage, Plugin, PluginSource, Provider,
+    Stats, WebSearch,
 };
 #[doc(inline)]
 pub use setup::{CommandSetup, Setup};

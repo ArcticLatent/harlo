@@ -8,6 +8,26 @@ import { Icons } from "icons.slint";
 import { State, Logic, SheetRow } from "data.slint";
 import { Field, Icon, IconButton, Press, HLine, VLine, Switch } from "widgets.slint";
 
+/// A small button with a word on it, at the end of a row.
+component ActionButton inherits Press {
+    in property <string> text;
+    height: 24px;
+    width: label-text.preferred-width + 20px;
+    label: root.text;
+    rest: Theme.surface-inset-base;
+    border-width: 1px;
+    border-color: Theme.border-weak-base;
+
+    label-text := Text {
+        text: root.text;
+        font-size: Size.small;
+        color: Theme.text-strong;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
 /// One row: a heading, a name with its value, a note, or a switch with
 /// what it does.
 component Row inherits VerticalLayout {
@@ -45,6 +65,13 @@ component Row inherits VerticalLayout {
                 : root.entry.tone == 2 ? Theme.icon-critical-base
                 : root.entry.tone == 3 ? Theme.text-weak : Theme.text-base;
             accessible-role: AccessibleRole.text;
+        }
+        if root.entry.action != "": VerticalLayout {
+            alignment: center;
+            ActionButton {
+                text: root.entry.action;
+                clicked => { Logic.settings-action(root.entry.setting); }
+            }
         }
     }
     if root.entry.kind == 2: Text {

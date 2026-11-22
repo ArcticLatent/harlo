@@ -499,8 +499,11 @@ export struct SheetRow {
     value: string,
     tone: int,
     /// For a switch (kind 3): whether it's on, and the setting it turns.
+    /// For a name and value (kind 1) with a button: the button's label,
+    /// and `setting` numbers its step.
     on: bool,
     setting: int,
+    action: string,
 }
 
 /// A section in Settings' list: its title, the group it's listed under
@@ -700,6 +703,8 @@ export global Logic {
     callback settings-search(string);
     /// Turn a setting, by its number, on or off.
     callback switch-setting(int);
+    /// Take a step a row's button offers, by its number.
+    callback settings-action(int);
     /// Show the stats for a range by its number.
     callback stats-range(int);
     /// A key pressed in the shown terminal, with Control, Alt and Shift;

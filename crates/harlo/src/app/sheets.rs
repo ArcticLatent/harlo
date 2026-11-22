@@ -179,8 +179,21 @@ pub struct Sheets {
 }
 
 impl App {
-    /// Applies something that happened to the pages.
+    /// Applies something that happened to the pages, and checks the Claude
+    /// subscription when Models comes into view.
     pub(super) fn sheet_event(&mut self, event: Event) -> Task<Message> {
+        let models_shown = |app: &Self| {
+            app.sheets.open == Some(Sheet::Settings) && app.sheets.section == Section::Models
+        };
+        let before = models_shown(self);
+        let task = self.apply_sheet(event);
+        if models_shown(self) && !before {
+            return Task::batch([task, self.check_claude()]);
+        }
+        task
+    }
+
+    fn apply_sheet(&mut self, event: Event) -> Task<Message> {
         match event {
             Event::Toggle(sheet) if self.sheets.open == Some(sheet) => self.sheets.open = None,
             Event::Toggle(sheet) => {
@@ -277,7 +290,7 @@ impl App {
     }
 
     /// Asks for the server's set-up in the current folder.
-    fn load_setup(&mut self) -> Task<Message> {
+    pub(super) fn load_setup(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             self.sheets.setup = Load::Failed("Not connected to OpenCode yet.".to_owned());
             return Task::none();

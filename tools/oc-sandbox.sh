@@ -55,8 +55,14 @@ setsid python3 -I "$TOOLS/fake-model.py" "$model_port" "$dir/model.jsonl" > "$di
 echo $! > "$dir/model.pid"
 
 cd "$dir/project"
-env HOME="$dir/home" XDG_CONFIG_HOME="$dir/config" XDG_DATA_HOME="$dir/data" \
+# A Claude Code session's own variables stay out of the sandbox.
+unset_claude=()
+while IFS='=' read -r name _; do
+  [[ $name == CLAUDE* ]] && unset_claude+=(-u "$name")
+done < <(env)
+env "${unset_claude[@]}" HOME="$dir/home" XDG_CONFIG_HOME="$dir/config" XDG_DATA_HOME="$dir/data" \
   XDG_STATE_HOME="$dir/state" XDG_CACHE_HOME="$dir/cache" OPENCODE_PASSWORD="$password" \
+  OPENCODE_CLAUDE_PATH="$dir/bin/claude" \
   setsid "$BIN" serve --hostname 127.0.0.1 --port "$port" > "$dir/opencode.log" 2>&1 < /dev/null &
 echo $! > "$dir/opencode.pid"
 cd - > /dev/null

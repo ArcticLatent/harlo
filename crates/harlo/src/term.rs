@@ -169,8 +169,8 @@ fn screen() -> (
 }
 
 impl Screen {
-    /// Starts `program` in `folder` on this computer, `id` naming its
-    /// window to it.
+    /// Starts `program` with `args` in `folder` on this computer, `id`
+    /// naming its window to it.
     ///
     /// # Errors
     ///
@@ -178,11 +178,12 @@ impl Screen {
     /// start.
     pub fn local(
         program: &str,
+        args: Vec<String>,
         folder: &str,
         id: u32,
     ) -> std::io::Result<(Self, UnboundedReceiver<Signal>)> {
         let options = tty::Options {
-            shell: Some(tty::Shell::new(program.to_owned(), Vec::new())),
+            shell: Some(tty::Shell::new(program.to_owned(), args)),
             working_directory: Some(PathBuf::from(folder)),
             env: HashMap::from([
                 ("TERM".to_owned(), "xterm-256color".to_owned()),

@@ -69,8 +69,10 @@ impl Tasks {
             let next = self
                 .runtime
                 .block_on(async { tokio::time::timeout(STEP, running.next()).await });
-            if let Ok(Some(Action::Output(message))) = next {
-                ui.send(message);
+            match next {
+                Ok(Some(Action::Output(message))) => ui.send(message),
+                Ok(Some(Action::Effect(effect))) => ui.driver.perform(effect),
+                _ => {}
             }
         }
     }

@@ -13,7 +13,7 @@ use sse_stream::SseByteStream;
 use crate::catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 use crate::generated as g;
 use crate::prompt::Prompt;
-use crate::settings::{McpServer, Plugin, Provider, Stats, WebSearch};
+use crate::settings::{Integration, McpServer, Plugin, Provider, Stats, WebSearch};
 use crate::setup::Setup;
 use crate::types::{
     Answer, Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply,
@@ -415,6 +415,48 @@ impl Client {
     pub async fn plugins(&self, directory: &str) -> Result<Vec<Plugin>, Error> {
         let v = self.list("/api/plugin", directory, &[]).await?;
         Ok(each(&v, Plugin::from_json))
+    }
+
+    /// Returns the integration `id` and its connections, or `None` when
+    /// this server has no such integration.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn integration(&self, id: &str) -> Result<Option<Integration>, Error> {
+        let path = format!("/api/integration/{id}");
+        match Self::json(self.request(Method::GET, &path)).await {
+            Ok(mut v) => Ok(Integration::from_json(&v["data"].take())),
+            Err(error) if error.http_status() == Some(404) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Connects the server to integration `id` with credentials kept
+    /// outside OpenCode, such as a program's own sign-in, by the method
+    /// `method` the integration lists.
+    ///
+    /// The connection applies to every client of the server.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server has no such integration or method, or can't
+    /// be reached.
+    pub async fn connect_external(&self, id: &str, method: &str) -> Result<(), Error> {
+        let path = format!("/api/integration/{id}/connect/external");
+        self.post(&path, &json!({ "methodID": method })).await
+    }
+
+    /// Removes the stored credential `id`, disconnecting its integration
+    /// for every client of the server.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn remove_credential(&self, id: &str) -> Result<(), Error> {
+        let path = format!("/api/credential/{id}");
+        Self::send(self.request(Method::DELETE, &path)).await?;
+        Ok(())
     }
 
     /// Returns usage across every session since `from`, in milliseconds

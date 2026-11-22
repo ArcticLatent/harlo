@@ -12,7 +12,9 @@ use slint::{ModelRc, VecModel};
 use lucide_icons::Icon;
 
 use super::{glyph, sync};
-use crate::app::{App, Load, Range, Section, SetUp, Setting, Sheet, Status};
+use harlo_core::claude::{ClaudeCode, Login};
+
+use crate::app::{App, ClaudeAction, Load, Range, Section, SetUp, Setting, Sheet, Status};
 use crate::model::{compact as tokens_text, dollars as money};
 use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State};
 
@@ -222,7 +224,14 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
     match section {
         Section::General => general_rows(app),
         Section::Shortcuts => shortcuts(),
-        Section::Models | Section::Tools => match &app.sheets.setup {
+        Section::Models => {
+            let mut rows = claude_rows(app);
+            if let Load::Loaded(setup) = &app.sheets.setup {
+                rows.extend(setup_rows(setup, section));
+            }
+            rows
+        }
+        Section::Tools => match &app.sheets.setup {
             Load::Loaded(setup) => setup_rows(setup, section),
             Load::Idle | Load::Loading | Load::Failed(_) => Vec::new(),
         },
@@ -284,6 +293,148 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
             app.preferences.reopen_tabs,
         ),
     ]
+}
+
+/// The Claude subscription: Claude Code on this computer, its account, and
+/// OpenCode's connection, each with the next step.
+fn claude_rows(app: &App) -> Vec<SheetRow> {
+    let claude = &app.claude;
+    let mut rows = vec![
+        heading("Claude subscription"),
+        note(
+            "Use a Claude Pro or Max plan for Claude models in OpenCode. Claude Code keeps the \
+             sign-in; OpenCode runs it.",
+        ),
+    ];
+    let local = app.location.is_local();
+    if local {
+        match &claude.code {
+            Load::Idle | Load::Loading => rows.push(pair("Claude Code", "Checking…", 3)),
+            Load::Failed(why) | Load::Loaded(ClaudeCode::Failed(why)) => {
+                rows.push(acting(pair("Claude Code", why, 2), ClaudeAction::Check));
+            }
+            Load::Loaded(ClaudeCode::Missing) => {
+                rows.push(acting(
+                    pair("Claude Code", "Not installed", 2),
+                    ClaudeAction::Install,
+                ));
+            }
+            Load::Loaded(ClaudeCode::Installed { version, login }) => {
+                rows.push(acting(pair("Claude Code", version, 0), ClaudeAction::Check));
+                rows.push(account_row(login));
+            }
+        }
+    }
+    rows.push(connection_row(app));
+    if let Some(error) = &claude.error {
+        rows.push(note(&format!("That didn't work: {error}")));
+    }
+    if !local {
+        rows.push(note(
+            "This server runs on another computer, which uses its own Claude Code. Sign in \
+             there with `claude auth login`.",
+        ));
+    }
+    rows.push(note(
+        "Connecting applies to every app that uses this OpenCode server.",
+    ));
+    rows
+}
+
+/// Who Claude Code is signed in as.
+fn account_row(login: &Login) -> SheetRow {
+    match login {
+        Login::SignedOut => acting(pair("Account", "Not signed in", 3), ClaudeAction::SignIn),
+        Login::Other { method } => acting(
+            pair(
+                "Account",
+                &format!("Signed in with {method}, not a subscription"),
+                2,
+            ),
+            ClaudeAction::SignIn,
+        ),
+        Login::Subscription(account) => {
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(email) = &account.email {
+                parts.push(email.clone());
+            }
+            if let Some(plan) = &account.plan {
+                parts.push(plan_name(plan));
+            }
+            if parts.is_empty() {
+                parts.push("Signed in".to_owned());
+            }
+            let mut row = acting(pair("Account", &parts.join(" · "), 1), ClaudeAction::SignIn);
+            row.action = "Switch account".into();
+            row
+        }
+    }
+}
+
+/// A plan's name as Claude Code reports it (`max`), for people (`Max plan`).
+fn plan_name(plan: &str) -> String {
+    let mut chars = plan.chars();
+    let first: String = chars
+        .next()
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_default();
+    format!("{first}{} plan", chars.as_str())
+}
+
+/// Whether OpenCode is connected to Claude Code's sign-in.
+fn connection_row(app: &App) -> SheetRow {
+    let claude = &app.claude;
+    match claude.busy {
+        Some(ClaudeAction::Connect) => return pair("OpenCode", "Connecting…", 3),
+        Some(ClaudeAction::Disconnect) => return pair("OpenCode", "Disconnecting…", 3),
+        _ => {}
+    }
+    match &claude.agent {
+        Load::Idle | Load::Loading => pair("OpenCode", "Checking…", 3),
+        Load::Failed(why) => acting(pair("OpenCode", why, 2), ClaudeAction::Check),
+        // A server that just started may not have loaded it yet.
+        Load::Loaded(None) => acting(
+            pair("OpenCode", "Claude Agent isn't available on this server", 2),
+            ClaudeAction::Check,
+        ),
+        Load::Loaded(Some(agent)) => {
+            let stored = agent.connections.iter().any(|c| c.credential.is_some());
+            if let Some(why) = agent
+                .connections
+                .iter()
+                .find_map(|c| c.needs_sign_in.as_ref())
+            {
+                let row = pair("OpenCode", &format!("Needs sign-in: {why}"), 2);
+                if app.location.is_local() {
+                    acting(row, ClaudeAction::SignIn)
+                } else {
+                    row
+                }
+            } else if stored {
+                acting(pair("OpenCode", "Connected", 1), ClaudeAction::Disconnect)
+            } else if agent.connections.is_empty() {
+                acting(pair("OpenCode", "Not connected", 3), ClaudeAction::Connect)
+            } else {
+                // Connected through an environment variable, which only
+                // the server's own set-up can remove.
+                pair("OpenCode", "Connected", 1)
+            }
+        }
+    }
+}
+
+/// `row` with a button for `action`.
+fn acting(mut row: SheetRow, action: ClaudeAction) -> SheetRow {
+    let (label, number) = match action {
+        ClaudeAction::Install => ("Install", 0),
+        ClaudeAction::SignIn => ("Sign in", 1),
+        ClaudeAction::Connect => ("Connect", 2),
+        ClaudeAction::Disconnect => ("Disconnect", 3),
+        ClaudeAction::Check => ("Check again", 4),
+    };
+    row.action = label.into();
+    row.setting = number;
+    row
 }
 
 /// The shortcuts, by section.

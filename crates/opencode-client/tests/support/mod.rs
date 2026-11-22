@@ -255,12 +255,21 @@ fn prepare(root: &Path, model_port: u16) {
 }
 
 fn scratch_env(cmd: &mut Command, root: &Path, password: &str) {
+    // A Claude Code session's own variables stay out of the sandbox.
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("CLAUDE") {
+            cmd.env_remove(name);
+        }
+    }
     cmd.env("HOME", root.join("home"))
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("XDG_DATA_HOME", root.join("data"))
         .env("XDG_STATE_HOME", root.join("state"))
         .env("XDG_CACHE_HOME", root.join("cache"))
-        .env("OPENCODE_PASSWORD", password);
+        .env("OPENCODE_PASSWORD", password)
+        // Claude Agent runs this instead of the real `claude`; nothing is
+        // there unless a test puts a stand-in in its place.
+        .env("OPENCODE_CLAUDE_PATH", root.join("bin/claude"));
 }
 
 impl Drop for Sandbox {

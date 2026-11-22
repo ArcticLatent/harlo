@@ -132,7 +132,16 @@ fn control_c_interrupts_and_exit_closes_the_tab() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let (ui, mut tasks) = started(scratch.path());
     type_text(&ui, "sleep 30\n");
-    control(&ui, "c");
+    // An interrupt that comes before `sleep` has started reaches only the
+    // shell, so it's pressed again until the prompt comes back. It also
+    // throws away typing the shell hasn't read yet, so the next command
+    // waits for that prompt.
+    let prompt_back = |ui: &Ui| lines(ui).iter().filter(|l| l.contains('$')).count() >= 2;
+    let interrupted = (0..5).any(|_| {
+        control(&ui, "c");
+        tasks.until(&ui, std::time::Duration::from_secs(1), prompt_back)
+    });
+    assert!(interrupted, "the prompt comes back: {:?}", lines(&ui));
     type_text(&ui, "echo do''ne\n");
     assert!(
         tasks.until(&ui, ANSWER, |ui| has_line(ui, "done")),
@@ -143,10 +152,20 @@ fn control_c_interrupts_and_exit_closes_the_tab() {
     type_text(&ui, "exit\n");
     assert!(
         tasks.until(&ui, ANSWER, |ui| ui.app().terminals.shells().is_empty()),
-        "the tab closes with the shell"
+        "the tab closes with the shell: {:?}",
+        lines(&ui)
     );
     assert!(!ui.app().terminals_shown());
     assert_eq!(ui.app().send_error, None, "an exit isn't an error");
+
+    // The keyboard goes back to the message, so window keys work again.
+    // What the shell's end queued runs first.
+    tasks.until(&ui, std::time::Duration::from_millis(300), |_| false);
+    control(&ui, ",");
+    assert!(
+        tasks.until(&ui, ANSWER, |ui| ui.app().sheets.open.is_some()),
+        "Ctrl+, opens Settings once the terminal is gone"
+    );
 }
 
 #[test]

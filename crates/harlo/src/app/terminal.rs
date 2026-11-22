@@ -80,6 +80,8 @@ pub struct Shell {
     pub screen: Screen,
     /// The shell on the server, when it runs there.
     remote: Option<Remote>,
+    /// What to do once it ends, for a terminal that runs a task.
+    then: Option<Box<Message>>,
 }
 
 impl Shell {
@@ -324,7 +326,7 @@ impl App {
         };
         let folder = self.terminal_folder();
         let id = self.terminals.next;
-        let (screen, receiver) = match Screen::local(&program, &folder, id) {
+        let (screen, receiver) = match Screen::local(&program, Vec::new(), &folder, id) {
             Ok(started) => started,
             Err(error) => {
                 self.send_error = Some(format!("Couldn't start a terminal: {error}"));
@@ -338,6 +340,39 @@ impl App {
             folder,
             screen,
             remote: None,
+            then: None,
+        });
+        Task::batch([signals(id, receiver), Task::effect(Effect::Focus(VIEW))])
+    }
+
+    /// Runs `program` with `args` in a new terminal on this computer, titled
+    /// `title`, shows it, and sends `then` once it ends.
+    ///
+    /// For tasks the user starts from Settings, such as signing in.
+    pub(crate) fn run_in_terminal(
+        &mut self,
+        title: &str,
+        program: &str,
+        args: Vec<String>,
+        then: Message,
+    ) -> Task<Message> {
+        let folder = super::home_folder();
+        let id = self.terminals.next;
+        let (screen, receiver) = match Screen::local(program, args, &folder, id) {
+            Ok(started) => started,
+            Err(error) => {
+                self.send_error = Some(format!("Couldn't start a terminal: {error}"));
+                return Task::none();
+            }
+        };
+        self.terminals.next += 1;
+        self.terminals.add(Shell {
+            id,
+            title: title.to_owned(),
+            folder,
+            screen,
+            remote: None,
+            then: Some(Box::new(then)),
         });
         Task::batch([signals(id, receiver), Task::effect(Effect::Focus(VIEW))])
     }
@@ -359,6 +394,7 @@ impl App {
             title: folder_name(&directory),
             folder: directory.clone(),
             screen,
+            then: None,
             remote: Some(Remote {
                 directory: directory.clone(),
                 pty: None,
@@ -427,11 +463,26 @@ impl App {
         let Some(index) = self.terminals.shells.iter().position(|s| s.id == id) else {
             return Task::none();
         };
-        let shell = self.terminals.shells.remove(index);
+        let mut shell = self.terminals.shells.remove(index);
+        let then = shell
+            .then
+            .take()
+            .map_or_else(Task::none, |m| Task::done(*m));
+        let mut focus = Task::none();
         if self.terminals.active == Some(id) {
             // The neighbour takes its place.
             let next = index.min(self.terminals.shells.len().saturating_sub(1));
             self.terminals.active = self.terminals.shells.get(next).map(|s| s.id);
+            // The keyboard doesn't go with the terminal: it moves to the
+            // neighbour, or back to the message, so window keys still work.
+            if self.terminals.shown {
+                let target = if self.terminals.active.is_some() {
+                    VIEW
+                } else {
+                    crate::ids::COMPOSER_TEXT
+                };
+                focus = Task::effect(Effect::Focus(target));
+            }
         }
         if self.terminals.shells.is_empty() {
             self.terminals.shown = false;
@@ -440,10 +491,11 @@ impl App {
             .remote
             .as_ref()
             .and_then(|state| Some((state.directory.clone(), state.pty.clone()?)));
-        match (ended, self.client.clone()) {
+        let removed = match (ended, self.client.clone()) {
             (Some((directory, pty)), Some(client)) => remove(client, directory, pty),
             _ => Task::none(),
-        }
+        };
+        Task::batch([removed, then, focus])
     }
 }
 

@@ -6,6 +6,7 @@
 // Rust guideline compliant 2026-10-09
 
 pub mod approvals;
+pub mod claude;
 pub mod composer;
 pub mod diff;
 pub mod files;

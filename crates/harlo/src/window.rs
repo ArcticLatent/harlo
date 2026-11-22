@@ -330,6 +330,15 @@ impl Driver {
         self.controller.dispatch(message);
     }
 
+    /// Carries out `effect` on the window, as the window's runtime does
+    /// when a task asks for it.
+    pub fn perform(&self, effect: Effect) {
+        let window = self.controller.shell.borrow().window.upgrade();
+        if let Some(window) = window {
+            perform(&window, effect);
+        }
+    }
+
     /// The tasks the app started since the last call, oldest first, for
     /// the test to run.
     #[must_use]
@@ -369,6 +378,18 @@ fn section_of(number: i32) -> Option<app::Section> {
     app::Section::ALL
         .get(usize::try_from(number).ok()?)
         .copied()
+}
+
+/// The Claude subscription step the UI numbers `number`.
+fn claude_action_of(number: i32) -> Option<app::ClaudeAction> {
+    match number {
+        0 => Some(app::ClaudeAction::Install),
+        1 => Some(app::ClaudeAction::SignIn),
+        2 => Some(app::ClaudeAction::Connect),
+        3 => Some(app::ClaudeAction::Disconnect),
+        4 => Some(app::ClaudeAction::Check),
+        _ => None,
+    }
 }
 
 /// The setting the UI numbers `number`.
@@ -505,6 +526,8 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     ));
     send_with!(on_switch_setting, |_app, number| setting_of(number)
         .map(|setting| Message::Sheet(SheetEvent::Switch(setting))));
+    send_with!(on_settings_action, |_app, number| claude_action_of(number)
+        .map(|action| Message::Claude(app::ClaudeEvent::Act(action))));
     send_with!(on_stats_range, |_app, number| range_of(number)
         .map(|range| Message::Sheet(SheetEvent::Range(range))));
     send_with!(on_maximize, |_app, number| present::panel_of(number)

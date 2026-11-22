@@ -104,7 +104,13 @@ def harlo_env(state):
     for key in list(env):
         if key.startswith("XDG_") and key != "XDG_RUNTIME_DIR":
             del env[key]
+        # A Claude Code session's own variables stay out of the sandbox.
+        elif key.startswith("CLAUDE"):
+            del env[key]
     env.update(
+        # Harlo checks and runs the sandbox's Claude Code, as the sandbox
+        # server does: nothing is there unless a stand-in is put in place.
+        OPENCODE_CLAUDE_PATH=f"{state['sandbox']}/bin/claude",
         HOME=f"{root}/home",
         XDG_CONFIG_HOME=f"{root}/config",
         XDG_DATA_HOME=f"{root}/data",

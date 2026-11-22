@@ -1,8 +1,9 @@
-//! What the server is set up with, shown read-only: providers, web search,
-//! MCP servers and plugins; and the usage statistics across sessions.
+//! What the server is set up with: providers, web search, MCP servers,
+//! plugins and integrations (the services it signs in to); and the usage
+//! statistics across sessions.
 //!
-//! Only names and states are read. A provider's settings, which hold its
-//! API key, are never decoded.
+//! Only names and states are read. A provider's settings and a credential's
+//! value, which hold keys and tokens, are never decoded.
 
 // Rust guideline compliant 2026-10-09
 
@@ -319,5 +320,63 @@ mod tests {
         });
         let provider = Provider::from_json(&answer).expect("a provider");
         assert!(!format!("{provider:?}").contains("secret"));
+    }
+}
+
+/// A service the server can sign in to, such as a model provider, and the
+/// connections it has to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Integration {
+    /// Its ID, such as `claude-agent`.
+    pub id: String,
+    /// Its name.
+    pub name: String,
+    /// Its connections: stored credentials and environment variables.
+    pub connections: Vec<Connection>,
+}
+
+/// One way the server is connected to an integration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Connection {
+    /// The stored credential's ID; `None` for an environment variable.
+    pub credential: Option<String>,
+    /// The credential's label, or the variable's name.
+    pub label: String,
+    /// Why it needs signing in again, when it does.
+    pub needs_sign_in: Option<String>,
+}
+
+impl Integration {
+    pub(crate) fn from_json(value: &Value) -> Option<Self> {
+        let id = value["id"].as_str().filter(|s| !s.is_empty())?.to_owned();
+        let connections = value["connections"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Connection::from_json)
+            .collect();
+        Some(Self {
+            name: optional(value, "name").unwrap_or_else(|| id.clone()),
+            id,
+            connections,
+        })
+    }
+}
+
+impl Connection {
+    fn from_json(value: &Value) -> Option<Self> {
+        let (credential, label) = match value["type"].as_str()? {
+            "credential" => (Some(text(value, "id")), text(value, "label")),
+            "env" => (None, text(value, "name")),
+            _ => return None,
+        };
+        let status = &value["status"];
+        let needs_sign_in =
+            (status["status"].as_str() == Some("needs_auth")).then(|| text(status, "message"));
+        Some(Self {
+            credential,
+            label,
+            needs_sign_in,
+        })
     }
 }
