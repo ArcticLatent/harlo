@@ -206,7 +206,14 @@ impl App {
 
     /// A desktop notification for each alert.
     fn limit_notices(&self, alerts: &[Alert]) -> Task<Message> {
-        if !self.notices.enabled || alerts.is_empty() {
+        let settings = &self.preferences.notifications;
+        let minute = harlo_core::notifications::local_minute(self.now);
+        if !self.notices.enabled
+            || alerts.is_empty()
+            || !settings.enabled
+            || !settings.limits
+            || settings.hushed(minute, false)
+        {
             return Task::none();
         }
         let now = epoch_seconds(self.now);

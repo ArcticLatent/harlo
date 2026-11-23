@@ -6,18 +6,12 @@
 use std::borrow::Cow;
 
 use crate::task::Task;
-use harlo_core::approvals::{self, Draft, Shield};
+use harlo_core::approvals::{Draft, Shield};
 use harlo_core::server::{self, PermissionReply};
-use harlo_core::workspace::{EventKind, Form, Permission};
+use harlo_core::workspace::{Form, Permission};
 
 use super::{App, Message};
 use crate::ids;
-
-/// The name notifications are sent under.
-const APP_NAME: &str = "Harlo";
-
-/// The freedesktop icon shown with a notification.
-const NOTICE_ICON: &str = "dialog-question";
 
 impl App {
     /// Applies a message about approvals, questions, the shield or window focus.
@@ -261,67 +255,6 @@ impl App {
             return Task::none();
         }
         self.act(|client, id| async move { client.set_permissions(&id, &rules).await })
-    }
-
-    /// A desktop notification for an event, when a session needs the user
-    /// and they're looking elsewhere.
-    pub(super) fn notice(&self, kind: &EventKind) -> Task<Message> {
-        if !self.notices.enabled {
-            return Task::none();
-        }
-        let (session, wants, detail) = match kind {
-            EventKind::PermissionAsked(asked) => {
-                let said = approvals::describe(asked);
-                (
-                    &asked.session_id,
-                    format!("wants to {}", said.wants),
-                    said.detail,
-                )
-            }
-            EventKind::FormCreated(form) => {
-                let question = form
-                    .fields
-                    .iter()
-                    .find(|f| !f.hidden)
-                    .and_then(|f| f.description.clone().or_else(|| f.title.clone()))
-                    .unwrap_or_default();
-                (&form.session_id, "has a question".to_owned(), question)
-            }
-            _ => return Task::none(),
-        };
-        if self.notices.focused && self.active.as_deref() == Some(session.as_str()) {
-            return Task::none();
-        }
-        let found = self.workspace.session(session);
-        // Without an agent of its own, a session runs its folder's default one.
-        let agent = found
-            .and_then(|s| {
-                s.agent.clone().or_else(|| {
-                    let catalog = self.catalogs.get(&s.directory)?;
-                    Some(catalog.primary_agents().next()?.id.clone())
-                })
-            })
-            .map_or_else(|| "The agent".to_owned(), |name| capitalized(&name));
-        let summary = format!("{agent} {wants}");
-        let mut body = detail.lines().next().unwrap_or_default().to_owned();
-        if let Some(title) = found.and_then(|s| s.title.as_deref()) {
-            if !body.is_empty() {
-                body.push('\n');
-            }
-            body.push_str(title);
-        }
-        Task::future(async move {
-            // Without a notification service there's nothing to show it on;
-            // the session still shows that it waits.
-            let _ = notify_rust::Notification::new()
-                .appname(APP_NAME)
-                .summary(&summary)
-                .body(&body)
-                .icon(NOTICE_ICON)
-                .show_async()
-                .await;
-        })
-        .discard()
     }
 }
 

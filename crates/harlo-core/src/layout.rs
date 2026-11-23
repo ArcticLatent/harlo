@@ -45,6 +45,8 @@ pub struct Preferences {
     /// Whether the setup guide was finished or skipped, so it no longer
     /// opens on its own at start.
     pub setup_done: bool,
+    /// Desktop notifications.
+    pub notifications: crate::notifications::Notifications,
     /// The theme shown while the window is dark, by its id, such as
     /// `harlo-dark` or `gruvbox-dark-medium`.
     pub dark_theme: String,
@@ -74,6 +76,7 @@ impl Default for Preferences {
             reopen_tabs: true,
             keep_in_tray: true,
             setup_done: false,
+            notifications: crate::notifications::Notifications::default(),
             dark_theme: crate::theme::HARLO_DARK.to_owned(),
             light_theme: crate::theme::HARLO_LIGHT.to_owned(),
             appearance: Appearance::System,

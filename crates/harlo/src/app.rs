@@ -32,6 +32,7 @@ mod claude;
 mod context;
 mod files;
 mod notes;
+mod notices;
 mod sheets;
 mod subagents;
 mod terminal;
@@ -48,8 +49,9 @@ pub use context::{
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
+pub use notices::Notice;
 pub use sheets::{
-    Autostart, Event as SheetEvent, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
+    Autostart, Event as SheetEvent, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
     SettingChoice, Sheet, Sheets, Step,
 };
 pub use subagents::Child;
@@ -229,6 +231,8 @@ pub enum Message {
     PickLocation(Location),
     /// Open a session in a tab, or switch to its tab.
     OpenSession(String),
+    /// A notification about this session was clicked.
+    NoticeOpened(String),
     /// Close a session's tab.
     CloseTab(String),
     /// Close the active tab, if a session is shown.
@@ -555,7 +559,9 @@ pub struct App {
     /// The Context panel's view of the open session.
     pub context: ContextView,
     /// When to show desktop notifications.
-    notices: Notices,
+    notices: notices::Notices,
+    /// The last notification Harlo meant to show, whether or not it could.
+    pub last_notice: Option<Notice>,
     /// Where the layout is saved; `None` keeps it in memory only.
     store: Option<Store>,
     /// Harlo's own settings.
@@ -651,10 +657,8 @@ impl App {
             fs: Files::default(),
             notes: Notes::default(),
             context: ContextView::default(),
-            notices: Notices {
-                enabled: false,
-                focused: true,
-            },
+            notices: notices::Notices::new(false),
+            last_notice: None,
             store: None,
             other_tabs: layout.tabs.clone(),
             restore: None,
@@ -753,6 +757,13 @@ impl App {
         }
     }
 
+    /// Shows all of a folder's sessions in the sidebar, or only the newest.
+    fn toggle_more(&mut self, folder: String) {
+        if !self.expanded.remove(&folder) {
+            self.expanded.insert(folder);
+        }
+    }
+
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Quit => return Task::effect(Effect::Quit),
@@ -773,11 +784,7 @@ impl App {
             Message::Claude(event) => return self.claude_event(event),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
-            Message::ToggleMore(folder) => {
-                if !self.expanded.remove(&folder) {
-                    self.expanded.insert(folder);
-                }
-            }
+            Message::ToggleMore(folder) => self.toggle_more(folder),
             message @ (Message::Compose(_)
             | Message::MenuMove(_)
             | Message::MenuPick(_)
@@ -833,6 +840,7 @@ impl App {
             Message::ToggleLocations => self.picking_location = !self.picking_location,
             Message::PickLocation(location) => return self.pick_location(location),
             message @ (Message::OpenSession(_)
+            | Message::NoticeOpened(_)
             | Message::CloseTab(_)
             | Message::CloseActiveTab
             | Message::NewSession(_)) => return self.tab_action(message),
@@ -1185,6 +1193,7 @@ impl App {
     fn tab_action(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::OpenSession(id) => return self.open(id),
+            Message::NoticeOpened(id) => return self.notice_opened(id),
             Message::NewSession(folder) => {
                 self.fs.shown = None;
                 self.active = None;
@@ -2097,15 +2106,6 @@ async fn pick_files() -> Vec<PathBuf> {
         .into_iter()
         .map(|file| file.path().to_path_buf())
         .collect()
-}
-
-/// When a session that needs the user gets a desktop notification.
-#[derive(Debug, Clone, Copy)]
-struct Notices {
-    /// Whether notifications are shown at all; tests leave them off.
-    enabled: bool,
-    /// Whether the window has focus; the open session needs none while it does.
-    focused: bool,
 }
 
 /// What a new session gets before its first prompt, as chosen on the start screen.

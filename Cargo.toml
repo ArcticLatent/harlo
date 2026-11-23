@@ -72,8 +72,9 @@ prettyplease = { version = "0.3.0", default-features = false }
 # Shared.
 # Word-level highlights inside changed diff lines (Apache-2.0).
 similar = { version = "3.2.1", default-features = false }
-# Reads the reset times of Claude plan limits (MIT/Apache).
-jiff = { version = "1.0.2", default-features = false, features = ["std"] }
+# Reads the reset times of Claude plan limits, and the local time for quiet
+# hours from the system's time zone (MIT/Unlicense).
+jiff = { version = "1.0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 rusqlite = { version = "0.43.0", default-features = false }
 dirs = { version = "7.0.0", default-features = false }
 # The tray icon over D-Bus, on the zbus 5 that Slint already runs on async-io

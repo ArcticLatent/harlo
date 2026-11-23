@@ -16,13 +16,14 @@ use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::theme::{Mode, Scheme};
 
 use crate::app::{
-    App, ClaudeAction, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting, SettingChoice,
-    Sheet, Status, Step, epoch_seconds, resets_in,
+    App, ClaudeAction, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
+    SettingChoice, Sheet, Status, Step, epoch_seconds, resets_in,
 };
 use crate::model::{compact as tokens_text, dollars as money};
 use crate::theme::color;
 use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State, ThemeCard};
 use harlo_core::git::Identity;
+use harlo_core::notifications::{Kind, VARIABLES, clock};
 
 /// How many days of activity the bars show.
 const DAYS: usize = 30;
@@ -257,6 +258,7 @@ fn section_icon(section: Section) -> Icon {
     match section {
         Section::General => Icon::Settings,
         Section::Appearance => Icon::Palette,
+        Section::Notifications => Icon::Bell,
         Section::Shortcuts => Icon::Keyboard,
         Section::Models => Icon::Bot,
         Section::Tools => Icon::Plug,
@@ -270,6 +272,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
     match section {
         Section::General => general_rows(app),
         Section::Appearance => appearance_rows(app),
+        Section::Notifications => notification_rows(app),
         Section::Shortcuts => shortcuts(),
         Section::Models => {
             let mut rows = claude_rows(app);
@@ -862,8 +865,18 @@ fn git_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         pair("Git", version, 1),
         heading("Your name on commits"),
-        field(Identity::Name, "Name", &setup.name, "Your name"),
-        field(Identity::Email, "Email", &setup.email, "you@example.com"),
+        field(
+            Field::Identity(Identity::Name),
+            "Name",
+            &setup.name,
+            "Your name",
+        ),
+        field(
+            Field::Identity(Identity::Email),
+            "Email",
+            &setup.email,
+            "you@example.com",
+        ),
     ];
     if let Some(why) = &app.sheets.git_error {
         rows.push(pair("Not saved", why, 2));
@@ -874,19 +887,126 @@ fn git_rows(app: &App) -> Vec<SheetRow> {
     rows
 }
 
-/// A field for the name or email on commits, holding `value`.
-fn field(identity: Identity, name: &str, value: &str, hint: &str) -> SheetRow {
+/// A text field named `name` holding `value`, with `hint` while empty.
+fn field(field: Field, name: &str, value: &str, hint: &str) -> SheetRow {
     SheetRow {
         kind: FIELD,
         name: name.into(),
         value: value.into(),
         hint: hint.into(),
         action: "Save".into(),
-        setting: match identity {
-            Identity::Name => 0,
-            Identity::Email => 1,
-        },
+        setting: int(Field::ALL
+            .iter()
+            .position(|f| *f == field)
+            .unwrap_or_default()),
         ..SheetRow::default()
+    }
+}
+
+/// Settings → Notifications: delivery, events, quiet hours and templates.
+fn notification_rows(app: &App) -> Vec<SheetRow> {
+    let notices = &app.preferences.notifications;
+    let mut rows = vec![
+        note("Clicking a notification opens its session."),
+        switch(
+            Setting::Notify,
+            "Notifications",
+            "When a run ends or an agent needs you.",
+            notices.enabled,
+        ),
+    ];
+    if !notices.enabled {
+        return rows;
+    }
+    let mut test = pair("Test notification", "See how one looks on this desktop", 3);
+    test.action = "Try it".into();
+    test.setting = crate::window::TEST_NOTICE;
+    rows.extend([
+        switch(
+            Setting::NotifyFocused,
+            "While Harlo is focused",
+            "Never for the session you're looking at.",
+            notices.while_focused,
+        ),
+        switch(
+            Setting::NotifySound,
+            "Sound",
+            "The desktop's message sound.",
+            notices.sound,
+        ),
+        test,
+        heading("Events"),
+    ]);
+    for kind in Kind::ALL {
+        let (name, what) = event_name(kind);
+        rows.push(switch(
+            Setting::NotifyOn(kind),
+            name,
+            what,
+            notices.template(kind).on,
+        ));
+    }
+    rows.extend([
+        switch(
+            Setting::NotifyLimits,
+            "Plan limits",
+            "A Claude plan limit is used up, or one you'd nearly used resets.",
+            notices.limits,
+        ),
+        heading("Quiet hours"),
+        switch(
+            Setting::Quiet,
+            "Quiet hours",
+            "No notifications between these times.",
+            notices.quiet.on,
+        ),
+    ]);
+    if notices.quiet.on {
+        rows.extend([
+            field(
+                Field::QuietFrom,
+                "From",
+                &clock(notices.quiet.from),
+                "22:00",
+            ),
+            field(Field::QuietTo, "To", &clock(notices.quiet.to), "08:00"),
+        ]);
+        if let Some(why) = &app.sheets.notice_error {
+            rows.push(pair("Not changed", why, 2));
+        }
+        rows.push(switch(
+            Setting::QuietQuestions,
+            "Let questions through",
+            "Questions and approvals still notify.",
+            notices.quiet.questions,
+        ));
+    }
+    let variables: Vec<String> = VARIABLES.iter().map(|v| format!("{{{v}}}")).collect();
+    rows.extend([
+        heading("Templates"),
+        note(&format!(
+            "Leave a field empty for the default, shown faded. Variables: {}.",
+            variables.join(" ")
+        )),
+    ]);
+    for kind in Kind::ALL {
+        let template = notices.template(kind);
+        let (title, message) = kind.defaults();
+        rows.extend([
+            heading(event_name(kind).0),
+            field(Field::Title(kind), "Title", &template.title, title),
+            field(Field::Message(kind), "Message", &template.message, message),
+        ]);
+    }
+    rows
+}
+
+/// An event's name in Settings, and when it happens.
+fn event_name(kind: Kind) -> (&'static str, &'static str) {
+    match kind {
+        Kind::Finished => ("Run finished", "An agent finished what you asked."),
+        Kind::Failed => ("Run failed", "A run stopped with an error."),
+        Kind::Asks => ("Agent needs you", "A question, or an action to approve."),
     }
 }
 
@@ -1095,12 +1215,10 @@ fn switch(setting: Setting, name: &str, what: &str, on: bool) -> SheetRow {
         name: name.into(),
         value: what.into(),
         on,
-        setting: match setting {
-            Setting::ReopenTabs => 0,
-            Setting::Glass => 1,
-            Setting::StartAtLogin => 2,
-            Setting::KeepInTray => 3,
-        },
+        setting: int(Setting::ALL
+            .iter()
+            .position(|s| *s == setting)
+            .unwrap_or_default()),
         ..SheetRow::default()
     }
 }

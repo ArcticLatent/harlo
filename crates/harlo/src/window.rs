@@ -502,15 +502,14 @@ pub const OPEN_SETUP: i32 = 11;
 /// The setup guide's button that installs OpenCode.
 pub const INSTALL_OPENCODE: i32 = 12;
 
+/// The Settings button that sends a test notification.
+pub const TEST_NOTICE: i32 = 13;
+
 /// The setting the UI numbers `number`.
 fn setting_of(number: i32) -> Option<app::Setting> {
-    match number {
-        0 => Some(app::Setting::ReopenTabs),
-        1 => Some(app::Setting::Glass),
-        2 => Some(app::Setting::StartAtLogin),
-        3 => Some(app::Setting::KeepInTray),
-        _ => None,
-    }
+    app::Setting::ALL
+        .get(usize::try_from(number).ok()?)
+        .copied()
 }
 
 /// The stats' range the UI numbers `number`.
@@ -644,6 +643,7 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
             CHOOSE_DEFAULT_MODEL => return Some(Message::TogglePicker(Picker::DefaultModel)),
             OPEN_SETUP => return Some(Message::Sheet(SheetEvent::OpenSetup)),
             INSTALL_OPENCODE => return Some(Message::Sheet(SheetEvent::InstallOpenCode)),
+            TEST_NOTICE => return Some(Message::Sheet(SheetEvent::TestNotice)),
             _ => {}
         }
         claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action)))
@@ -654,17 +654,12 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         .map(|step| Message::Sheet(SheetEvent::Step(step))));
     send!(on_setup_next, || Message::Sheet(SheetEvent::Next));
     send!(on_setup_back, || Message::Sheet(SheetEvent::Back));
-    send_with!(on_settings_text, |_app, number, text| {
-        let identity = match number {
-            0 => harlo_core::git::Identity::Name,
-            1 => harlo_core::git::Identity::Email,
-            _ => return None,
-        };
-        Some(Message::Sheet(SheetEvent::Identity(
-            identity,
-            text.to_string(),
-        )))
-    });
+    send_with!(on_settings_text, |_app, number, text| usize::try_from(
+        number
+    )
+    .ok()
+    .and_then(|i| app::Field::ALL.get(i).copied())
+    .map(|field| Message::Sheet(SheetEvent::Text(field, text.to_string()))));
     send!(on_pick_theme, |id| Message::Sheet(SheetEvent::Theme(
         id.to_string()
     )));

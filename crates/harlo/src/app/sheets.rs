@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use harlo_core::git::{self, Identity};
+use harlo_core::notifications::{self as notify, Kind};
 use harlo_core::{autostart, config};
 
 use harlo_core::layout::Appearance;
@@ -104,6 +105,8 @@ pub enum Section {
     General,
     /// The colour theme, light or dark.
     Appearance,
+    /// Desktop notifications.
+    Notifications,
     /// The keyboard shortcuts.
     Shortcuts,
     /// The server's model providers.
@@ -118,9 +121,10 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::General,
         Self::Appearance,
+        Self::Notifications,
         Self::Shortcuts,
         Self::Models,
         Self::Tools,
@@ -134,6 +138,7 @@ impl Section {
         match self {
             Self::General => "General",
             Self::Appearance => "Appearance",
+            Self::Notifications => "Notifications",
             Self::Shortcuts => "Shortcuts",
             Self::Models => "Models",
             Self::Tools => "Tools for agents",
@@ -146,7 +151,11 @@ impl Section {
     #[must_use]
     pub fn group(self) -> Option<&'static str> {
         match self {
-            Self::General | Self::Appearance | Self::Shortcuts | Self::About => None,
+            Self::General
+            | Self::Appearance
+            | Self::Notifications
+            | Self::Shortcuts
+            | Self::About => None,
             Self::Models | Self::Tools => Some("Agents and models"),
             Self::Server => Some("Connections"),
         }
@@ -165,6 +174,70 @@ pub enum Setting {
     StartAtLogin,
     /// [`Preferences::keep_in_tray`].
     KeepInTray,
+    /// Whether Harlo notifies at all.
+    Notify,
+    /// Whether it notifies while its window has focus.
+    NotifyFocused,
+    /// Whether notifications play a sound.
+    NotifySound,
+    /// Whether an event notifies.
+    NotifyOn(Kind),
+    /// Whether Claude plan limits notify.
+    NotifyLimits,
+    /// Whether quiet hours apply.
+    Quiet,
+    /// Whether questions get through quiet hours.
+    QuietQuestions,
+}
+
+impl Setting {
+    /// Every setting, in the order the UI numbers them.
+    pub const ALL: [Self; 13] = [
+        Self::ReopenTabs,
+        Self::Glass,
+        Self::StartAtLogin,
+        Self::KeepInTray,
+        Self::Notify,
+        Self::NotifyFocused,
+        Self::NotifySound,
+        Self::NotifyOn(Kind::Finished),
+        Self::NotifyOn(Kind::Failed),
+        Self::NotifyOn(Kind::Asks),
+        Self::NotifyLimits,
+        Self::Quiet,
+        Self::QuietQuestions,
+    ];
+}
+
+/// A text field in Settings or the guide, saved by its button or Enter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    /// The name or email on commits.
+    Identity(Identity),
+    /// When quiet hours start.
+    QuietFrom,
+    /// When they end.
+    QuietTo,
+    /// A notification's title template.
+    Title(Kind),
+    /// A notification's message template.
+    Message(Kind),
+}
+
+impl Field {
+    /// Every field, in the order the UI numbers them.
+    pub const ALL: [Self; 10] = [
+        Self::Identity(Identity::Name),
+        Self::Identity(Identity::Email),
+        Self::QuietFrom,
+        Self::QuietTo,
+        Self::Title(Kind::Finished),
+        Self::Message(Kind::Finished),
+        Self::Title(Kind::Failed),
+        Self::Message(Kind::Failed),
+        Self::Title(Kind::Asks),
+        Self::Message(Kind::Asks),
+    ];
 }
 
 /// Starting Harlo at login, through the desktop's autostart folder.
@@ -313,8 +386,10 @@ pub enum Event {
     InstallOpenCode,
     /// Git's setup on this computer arrived.
     Git(git::Setup),
-    /// Save this as the name or email on commits.
-    Identity(Identity, String),
+    /// Save this text from a field.
+    Text(Field, String),
+    /// Send a test notification.
+    TestNotice,
     /// The name or email was saved as this, or why it couldn't be.
     IdentitySet(Identity, Result<String, String>),
     /// Show stats for another range.
@@ -350,6 +425,8 @@ pub struct Sheets {
     pub git: Load<git::Setup>,
     /// Why the name or email on commits couldn't be saved, if it couldn't.
     pub git_error: Option<String>,
+    /// Why a notification setting couldn't be taken, if it couldn't.
+    pub notice_error: Option<String>,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -431,6 +508,7 @@ impl App {
                         self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
                     }
                     Setting::Glass => self.preferences.glass = !self.preferences.glass,
+                    setting => self.switch_notice(setting),
                 }
                 return self.save_preferences();
             }
@@ -449,8 +527,12 @@ impl App {
             | Event::Back
             | Event::InstallOpenCode
             | Event::Git(_)
-            | Event::Identity(..)
             | Event::IdentitySet(..)) => return self.apply_guide(event),
+            Event::Text(Field::Identity(identity), value) => {
+                return self.set_identity(identity, &value);
+            }
+            Event::Text(field, value) => return self.set_notice_text(field, &value),
+            Event::TestNotice => return self.test_notice(),
             Event::Range(range) => {
                 self.sheets.range = range;
                 return self.load_stats();
@@ -494,6 +576,54 @@ impl App {
         })
     }
 
+    /// Turns a notification setting on or off.
+    fn switch_notice(&mut self, setting: Setting) {
+        let notices = &mut self.preferences.notifications;
+        let flag = match setting {
+            Setting::Notify => &mut notices.enabled,
+            Setting::NotifyFocused => &mut notices.while_focused,
+            Setting::NotifySound => &mut notices.sound,
+            Setting::NotifyOn(kind) => &mut notices.template_mut(kind).on,
+            Setting::NotifyLimits => &mut notices.limits,
+            Setting::Quiet => &mut notices.quiet.on,
+            Setting::QuietQuestions => &mut notices.quiet.questions,
+            Setting::ReopenTabs | Setting::Glass | Setting::StartAtLogin | Setting::KeepInTray => {
+                return;
+            }
+        };
+        *flag = !*flag;
+    }
+
+    /// Takes a quiet hour's time or a template from its field.
+    fn set_notice_text(&mut self, field: Field, value: &str) -> Task<Message> {
+        let notices = &mut self.preferences.notifications;
+        self.sheets.notice_error = None;
+        match field {
+            Field::QuietFrom | Field::QuietTo => {
+                let Some(minute) = notify::parse_clock(value) else {
+                    self.sheets.notice_error = Some(format!(
+                        "“{}” isn't a time; use one like 22:00.",
+                        value.trim()
+                    ));
+                    return Task::none();
+                };
+                if field == Field::QuietFrom {
+                    notices.quiet.from = minute;
+                } else {
+                    notices.quiet.to = minute;
+                }
+            }
+            Field::Title(kind) => value
+                .trim()
+                .clone_into(&mut notices.template_mut(kind).title),
+            Field::Message(kind) => value
+                .trim()
+                .clone_into(&mut notices.template_mut(kind).message),
+            Field::Identity(_) => return Task::none(),
+        }
+        self.save_preferences()
+    }
+
     /// Uses the theme `id` while the window is in its mode.
     fn pick_theme(&mut self, id: String) -> Task<Message> {
         let Some(mode) = self.themes.iter().find(|t| t.id == id).map(|t| t.mode) else {
@@ -531,7 +661,6 @@ impl App {
             }
             Event::InstallOpenCode => return self.install_opencode(),
             Event::Git(setup) => self.sheets.git = Load::Loaded(setup),
-            Event::Identity(identity, value) => return self.set_identity(identity, &value),
             Event::IdentitySet(identity, result) => match result {
                 Ok(value) => {
                     self.sheets.git_error = None;

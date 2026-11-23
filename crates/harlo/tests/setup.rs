@@ -12,7 +12,7 @@ mod support;
 
 use std::time::Duration;
 
-use harlo::app::{Message, Sheet, SheetEvent, Step};
+use harlo::app::{Field, Message, Sheet, SheetEvent, Step};
 use harlo_core::git::{Identity, Setup};
 use harlo_core::server::Update;
 
@@ -103,7 +103,8 @@ fn the_name_and_email_on_commits_are_saved() {
     assert!(
         asked.iter().any(|m| matches!(
             m,
-            Message::Sheet(SheetEvent::Identity(Identity::Name, name)) if name == "Ada Lovelace"
+            Message::Sheet(SheetEvent::Text(Field::Identity(Identity::Name), name))
+                if name == "Ada Lovelace"
         )),
         "{asked:?}"
     );
@@ -121,8 +122,8 @@ fn the_name_and_email_on_commits_are_saved() {
     assert_eq!(saved, "Ada Lovelace");
 
     // Saving what's there already does nothing.
-    ui.send(Message::Sheet(SheetEvent::Identity(
-        Identity::Name,
+    ui.send(Message::Sheet(SheetEvent::Text(
+        Field::Identity(Identity::Name),
         " Ada Lovelace ".to_owned(),
     )));
     assert!(ui.driver.take_tasks().is_empty(), "nothing to save");

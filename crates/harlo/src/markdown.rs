@@ -161,6 +161,32 @@ fn finish(
     }
 }
 
+/// `markdown` as plain text, such as for a notification: the words of its
+/// paragraphs, headings, lists and code, with the markup gone.
+#[must_use]
+pub fn plain(markdown: &str) -> String {
+    let mut out = String::with_capacity(markdown.len());
+    for event in Parser::new_ext(markdown, Options::all()) {
+        match event {
+            Event::Text(text) | Event::Code(text) => out.push_str(&text),
+            // Breaks, and the ends of blocks, so words don't run together.
+            Event::SoftBreak
+            | Event::HardBreak
+            | Event::Rule
+            | Event::End(
+                TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::Item
+                | TagEnd::CodeBlock
+                | TagEnd::TableCell
+                | TagEnd::BlockQuote(_),
+            ) => out.push(' '),
+            _ => {}
+        }
+    }
+    out
+}
+
 fn heading_level(level: pulldown_cmark::HeadingLevel) -> u8 {
     use pulldown_cmark::HeadingLevel as H;
     match level {
