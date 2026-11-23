@@ -135,6 +135,9 @@ fn preferences_load_back_beside_the_layout() {
         own_tools: false,
         voice_model: "small".to_owned(),
         voice_language: "de".to_owned(),
+        local_engine: "llamacpp".to_owned(),
+        local_servers: vec!["llamacpp".to_owned()],
+        llamacpp_model: "/models/tiny.gguf".to_owned(),
         appearance: Appearance::Light,
         project_models: [(
             "/home/u/code/harlo".to_owned(),

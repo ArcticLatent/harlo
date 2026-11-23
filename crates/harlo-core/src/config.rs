@@ -34,6 +34,10 @@ const AUTOMATIONS: &str = "automations";
 const MCP: &str = "mcp";
 /// The servers inside [`MCP`].
 const SERVERS: &str = "servers";
+/// The object of providers OpenCode adds to its catalog, by ID.
+const PROVIDERS: &str = "providers";
+/// The package OpenCode's docs give for a server with the `OpenAI` API.
+pub const OPENAI_COMPATIBLE: &str = "@opencode/ai/providers/openai-compatible";
 /// What a new global file starts with: the schema OpenCode's docs give.
 const NEW_FILE: &str = "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n";
 
@@ -448,6 +452,109 @@ pub async fn set_mcp_disabled_later(
         set_mcp_disabled(folder, &name, disabled)
     })
     .await
+}
+
+/// A model server on this computer, added to OpenCode as a provider that
+/// speaks the `OpenAI` API: `providers.<id>`, with its models listed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalProvider {
+    /// Its ID, which goes before its models' IDs.
+    pub id: String,
+    /// Its name for people.
+    pub name: String,
+    /// Its address, ending in `/v1`.
+    pub base_url: String,
+    /// Its models: ID, name, and context in tokens.
+    pub models: Vec<(String, String, u32)>,
+}
+
+impl LocalProvider {
+    /// The entry as the file holds it.
+    fn input(&self) -> CstInputValue {
+        let text = |s: &str| CstInputValue::String(s.to_owned());
+        let models = self
+            .models
+            .iter()
+            .map(|(id, name, context)| {
+                let mut fields = vec![("name".to_owned(), text(name))];
+                if *context > 0 {
+                    fields.push((
+                        "limit".to_owned(),
+                        CstInputValue::Object(vec![(
+                            "context".to_owned(),
+                            CstInputValue::Number(context.to_string()),
+                        )]),
+                    ));
+                }
+                (id.clone(), CstInputValue::Object(fields))
+            })
+            .collect();
+        CstInputValue::Object(vec![
+            ("name".to_owned(), text(&self.name)),
+            ("package".to_owned(), text(OPENAI_COMPATIBLE)),
+            (
+                "settings".to_owned(),
+                CstInputValue::Object(vec![("baseURL".to_owned(), text(&self.base_url))]),
+            ),
+            ("models".to_owned(), CstInputValue::Object(models)),
+        ])
+    }
+}
+
+/// Whether the global file in `folder` has provider `id`.
+///
+/// # Errors
+///
+/// Fails when the file exists but can't be read or isn't valid JSONC.
+pub fn has_provider(folder: &Path, id: &str) -> Result<bool, Error> {
+    let Some(root) = parse(&file(folder))? else {
+        return Ok(false);
+    };
+    Ok(root
+        .object_value()
+        .and_then(|object| object.object_value(PROVIDERS))
+        .and_then(|providers| providers.get(id))
+        .is_some())
+}
+
+/// Adds `provider` to the global file in `folder`, or replaces the one with
+/// its ID. OpenCode lists its models when it reloads the file.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does, or when `providers` isn't an object.
+pub fn set_provider(folder: &Path, provider: &LocalProvider) -> Result<(), Error> {
+    set_at(folder, &[PROVIDERS, &provider.id], Some(provider.input()))
+}
+
+/// Removes provider `id` from the global file in `folder`.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does.
+pub fn remove_provider(folder: &Path, id: &str) -> Result<(), Error> {
+    set_at(folder, &[PROVIDERS, id], None)
+}
+
+/// Adds or replaces a provider as [`set_provider`] does, on a blocking
+/// thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_provider`], or an error when the thread is
+/// cancelled.
+pub async fn set_provider_later(folder: PathBuf, provider: LocalProvider) -> Result<(), Error> {
+    later(folder, move |folder| set_provider(folder, &provider)).await
+}
+
+/// Removes a provider as [`remove_provider`] does, on a blocking thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`remove_provider`], or an error when the thread is
+/// cancelled.
+pub async fn remove_provider_later(folder: PathBuf, id: String) -> Result<(), Error> {
+    later(folder, move |folder| remove_provider(folder, &id)).await
 }
 
 /// Sets `key` to `value` at the top of the global file in `folder`, or

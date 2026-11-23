@@ -118,6 +118,8 @@ pub enum Section {
     Git,
     /// The server's model providers.
     Models,
+    /// Engines and models on this computer.
+    LocalModels,
     /// OpenCode's agents and the approvals it saved.
     Agents,
     /// Web search, MCP servers and plugins.
@@ -132,7 +134,7 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -141,6 +143,7 @@ impl Section {
         Self::Projects,
         Self::Git,
         Self::Models,
+        Self::LocalModels,
         Self::Agents,
         Self::Tools,
         Self::Schedules,
@@ -160,6 +163,7 @@ impl Section {
             Self::Projects => "Projects",
             Self::Git => "Git",
             Self::Models => "Models",
+            Self::LocalModels => "Local models",
             Self::Agents => "Agents",
             Self::Tools => "Tools for agents",
             Self::Schedules => "Schedules",
@@ -179,7 +183,9 @@ impl Section {
             | Self::Voice
             | Self::About => None,
             Self::Projects | Self::Git => Some("Your projects"),
-            Self::Models | Self::Agents | Self::Tools => Some("Agents and models"),
+            Self::Models | Self::LocalModels | Self::Agents | Self::Tools => {
+                Some("Agents and models")
+            }
             Self::Schedules => Some("Automation"),
             Self::Server => Some("Connections"),
         }
@@ -370,11 +376,13 @@ pub enum SettingChoice {
     VoiceModel,
     /// [`Preferences::voice_language`].
     VoiceLanguage,
+    /// [`Preferences::local_engine`].
+    LocalEngine,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -396,6 +404,7 @@ impl SettingChoice {
         Self::McpKind,
         Self::VoiceModel,
         Self::VoiceLanguage,
+        Self::LocalEngine,
     ];
 
     /// The options, as Settings names them, in order.
@@ -421,6 +430,7 @@ impl SettingChoice {
             Self::McpKind => &["A program", "An address"],
             Self::VoiceModel => &["Base", "Small"],
             Self::VoiceLanguage => &harlo_core::voice::LANGUAGE_NAMES,
+            Self::LocalEngine => &["Ollama", "llama.cpp"],
         }
     }
 }
@@ -645,12 +655,13 @@ impl App {
                 self.sheets.open = None;
             }
             Event::Open(section) => {
-                self.sheets.section = section;
-                self.sheets.query.clear();
+                // Loads what the section shows, as picking it does.
+                let load = self.show_section(section);
                 if self.sheets.open != Some(Sheet::Settings) {
                     self.sheets.open = Some(Sheet::Settings);
-                    return self.open_settings();
+                    return Task::batch([self.open_settings(), load]);
                 }
+                return load;
             }
             Event::Close => {
                 self.sheets.open = None;
@@ -724,6 +735,7 @@ impl App {
         match section {
             Section::Schedules => self.load_schedules(),
             Section::Agents => self.load_approvals(),
+            Section::LocalModels => self.look(),
             Section::Tools => {
                 self.sheets.mcp.view = super::McpView::List;
                 self.sheets.plugins.checked = None;

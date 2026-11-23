@@ -15,6 +15,7 @@ use super::marks::{Marks, project_color};
 use super::{glyph, sync};
 
 mod agents;
+mod local_models;
 mod mcp;
 mod plugins;
 mod providers;
@@ -285,6 +286,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Projects => Icon::FolderGit2,
         Section::Git => Icon::GitBranch,
         Section::Models => Icon::Bot,
+        Section::LocalModels => Icon::Cpu,
         Section::Agents => Icon::UsersRound,
         Section::Tools => Icon::Plug,
         Section::Schedules => Icon::CalendarClock,
@@ -301,6 +303,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         Section::Notifications => notification_rows(app),
         Section::Shortcuts => shortcuts(),
         Section::Voice => voice::voice_rows(app),
+        Section::LocalModels => local_models::local_rows(app),
         // Searched without their icons.
         Section::Projects => project_rows(app, &Marks::default()),
         Section::Git => git_settings_rows(app),

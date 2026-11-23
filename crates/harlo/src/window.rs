@@ -669,6 +669,50 @@ pub const STOP_VOICE_DOWNLOAD: i32 = 60;
 /// The Settings button that opens the menu of dictation's languages.
 pub const CHOOSE_VOICE_LANGUAGE: i32 = 61;
 
+/// The Settings button that installs or updates the engine numbered by
+/// its item.
+pub const INSTALL_ENGINE: i32 = 62;
+
+/// The Settings button that stops installing the engine numbered by its
+/// item.
+pub const STOP_ENGINE_INSTALL: i32 = 63;
+
+/// The Settings button that starts or stops the server of the engine
+/// numbered by its item.
+pub const ENGINE_SERVER: i32 = 64;
+
+/// The Settings button that gets the suggested model numbered by its item.
+pub const GET_LOCAL_MODEL: i32 = 65;
+
+/// The Settings button that stops getting a model.
+pub const STOP_LOCAL_MODEL: i32 = 66;
+
+/// The Settings button that has llama.cpp serve the model numbered by its
+/// item.
+pub const SERVE_LOCAL_MODEL: i32 = 67;
+
+/// The Settings button that adds llama.cpp's server to OpenCode's config
+/// (item 1) or takes it out (item 0).
+pub const LOCAL_PROVIDER: i32 = 68;
+
+/// The step a local models Settings button numbered `number` takes for
+/// item `item`.
+fn local_action(number: i32, item: i32) -> Option<Message> {
+    let index = usize::try_from(item).ok();
+    let engine = || index.and_then(|i| harlo_core::local_models::Engine::ALL.get(i).copied());
+    let event = match number {
+        INSTALL_ENGINE => app::LocalEvent::Install(engine()?),
+        STOP_ENGINE_INSTALL => app::LocalEvent::StopInstall(engine()?),
+        ENGINE_SERVER => app::LocalEvent::Server(engine()?),
+        GET_LOCAL_MODEL => app::LocalEvent::Get(index?),
+        STOP_LOCAL_MODEL => app::LocalEvent::StopGet,
+        SERVE_LOCAL_MODEL => app::LocalEvent::Serve(index?),
+        LOCAL_PROVIDER => app::LocalEvent::Provider(item == 1),
+        _ => return None,
+    };
+    Some(Message::Local(event))
+}
+
 /// The step an MCP server's Settings button numbered `number` takes for
 /// item `item`.
 fn mcp_action(app: &App, number: i32, item: i32) -> Option<Message> {
@@ -827,6 +871,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
+        INSTALL_ENGINE..=LOCAL_PROVIDER => local_action(number, item),
         CHECK_PLUGINS => Some(Message::Sheet(SheetEvent::Plugin(app::PluginEvent::Check))),
         UPDATE_PLUGIN => Some(Message::Sheet(SheetEvent::Plugin(
             app::PluginEvent::Update(usize::try_from(item).ok()),

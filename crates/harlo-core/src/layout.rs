@@ -89,6 +89,14 @@ pub struct Preferences {
     pub voice_model: String,
     /// The language dictation listens for, as Whisper's code, or "auto".
     pub voice_language: String,
+    /// The engine Settings → Local models gets models for: "ollama" or
+    /// "llamacpp".
+    pub local_engine: String,
+    /// The engines whose servers Harlo starts when it opens, by ID: the
+    /// ones left running when it last closed.
+    pub local_servers: Vec<String>,
+    /// The model file llama.cpp's server serves.
+    pub llamacpp_model: String,
 }
 
 impl Default for Preferences {
@@ -116,6 +124,9 @@ impl Default for Preferences {
             own_tools: true,
             voice_model: crate::voice::Model::Base.name().to_owned(),
             voice_language: "auto".to_owned(),
+            local_engine: crate::local_models::Engine::Ollama.id().to_owned(),
+            local_servers: Vec::new(),
+            llamacpp_model: String::new(),
         }
     }
 }

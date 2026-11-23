@@ -93,6 +93,13 @@ rmcp = { version = "3.11.0", default-features = false, features = ["server"] }
 # Splitting a typed command line, quotes included, as a shell would (MIT/Apache).
 shell-words = { version = "1.1.1", default-features = false, features = ["std"] }
 tempfile = { version = "3.27.0", default-features = false }
+sha2 = { version = "0.11.1", default-features = false }
+hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
+llmfit-core = { version = "1.1.20", default-features = false }
+which = { version = "8.0.6", default-features = false, features = ["real-sys"] }
+flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4.46", default-features = false }
+ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
 transcribe-rs = { version = "0.3.12", default-features = false }
 cpal = { version = "0.18.2", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }

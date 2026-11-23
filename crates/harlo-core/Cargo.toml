@@ -22,6 +22,16 @@ jiff = { workspace = true }
 similar = { workspace = true, features = ["std", "text"] }
 # Forgejo's API, over the system's TLS and certificates (company CAs included).
 reqwest = { workspace = true, features = ["native-tls", "json"] }
+# Downloads are checked against their published SHA-256.
+sha2 = { workspace = true }
+hex = { workspace = true }
+# Local models: what fits this computer (llmfit), and installing engines
+# from their release archives.
+llmfit-core = { workspace = true }
+which = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+ruzstd = { workspace = true }
 # Dictation: whisper.cpp, built in, behind one API for speech models.
 transcribe-rs = { workspace = true, features = ["whisper-cpp"] }
 
@@ -29,6 +39,12 @@ transcribe-rs = { workspace = true, features = ["whisper-cpp"] }
 workspace = true
 
 [dev-dependencies]
+ruzstd = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+llmfit-core = { workspace = true }
 tempfile = { workspace = true }
 futures-util = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }

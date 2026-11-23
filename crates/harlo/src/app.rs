@@ -36,6 +36,7 @@ mod files;
 mod git_settings;
 mod hosting;
 mod line_comments;
+mod local_models;
 mod mcp;
 mod notes;
 mod notices;
@@ -65,6 +66,7 @@ pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile
 pub use git_settings::{GitEvent, GitSettings};
 pub use hosting::{HostingEvent, HostingState, SigningIn};
 pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
+pub use local_models::{EngineState, Getting, LocalEvent, LocalModels, ServerState};
 pub use mcp::{McpEvent, McpServers, McpView};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
@@ -251,6 +253,8 @@ pub enum Message {
     OwnTools(OwnToolsEvent),
     /// Something happened to dictation.
     Voice(VoiceEvent),
+    /// Something happened to local models.
+    Local(LocalEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -624,6 +628,8 @@ pub struct App {
     pub own_tools_error: Option<String>,
     /// Dictation into the composer.
     pub voice: Voice,
+    /// Local models: engines, their servers and downloads.
+    pub local: LocalModels,
 }
 
 impl App {
@@ -727,6 +733,7 @@ impl App {
             own_tools_paused: false,
             own_tools_error: None,
             voice: Voice::default(),
+            local: LocalModels::default(),
             saved: layout,
         };
         app.restore = app.other_tabs.remove(&app.location.label());
@@ -852,6 +859,7 @@ impl App {
             Message::Claude(event) => return self.claude_event(event),
             Message::OwnTools(event) => return self.own_tools_event(event),
             Message::Voice(event) => return self.voice_event(event),
+            Message::Local(event) => return self.local_event(event),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => self.toggle_more(folder),
@@ -2077,6 +2085,7 @@ impl App {
             self.follow_location(),
             Task::stream(ticks),
             claude::watch_usage(),
+            self.start_local_servers(),
         ])
     }
 

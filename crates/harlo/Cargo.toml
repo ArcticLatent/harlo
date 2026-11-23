@@ -54,6 +54,11 @@ lucide-icons = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+llmfit-core = { workspace = true }
 # A private OpenCode server for the tests that need one.
 opencode-client = { workspace = true }
 # The stress example times frames with Slint's rendering notifier, which the

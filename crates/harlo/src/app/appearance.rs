@@ -6,6 +6,7 @@
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::layout::{Appearance, ChatWidth, Speed, TextSize};
+use harlo_core::local_models::Engine;
 use harlo_core::theme::{Contrast, DiffColors, Look, Mode, Scheme};
 use harlo_core::voice::{LANGUAGE_CODES, Model};
 
@@ -117,6 +118,10 @@ impl App {
                 .iter()
                 .position(|code| *code == p.voice_language)
                 .unwrap_or_default(),
+            SettingChoice::LocalEngine => Engine::ALL
+                .iter()
+                .position(|e| e.id() == p.local_engine)
+                .unwrap_or_default(),
             SettingChoice::ScheduleWhen => harlo_core::schedules::When::ALL
                 .iter()
                 .position(|w| *w == self.sheets.schedules.draft.when)
@@ -141,6 +146,10 @@ impl App {
             }),
             SettingChoice::VoiceLanguage => LANGUAGE_CODES.get(option).is_some_and(|code| {
                 (*code).clone_into(&mut p.voice_language);
+                true
+            }),
+            SettingChoice::LocalEngine => Engine::ALL.get(option).is_some_and(|engine| {
+                engine.id().clone_into(&mut p.local_engine);
                 true
             }),
             // Not Harlo's look: Settings → Projects takes them.
