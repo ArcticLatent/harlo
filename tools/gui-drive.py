@@ -188,11 +188,18 @@ def cmd_start(args):
             break
         time.sleep(0.1)
     # A private session bus: notifications and portals never reach the desktop.
+    # It starts no services, so asking for one (a portal, the keyring) fails
+    # instead of starting the desktop's own with the real home and screen.
     socket = f"{gui_root}/bus"
     state["bus"] = f"unix:path={socket}"
+    config = f"{gui_root}/bus.conf"
+    with open(config, "w") as f:
+        f.write(BUS_CONFIG.format(socket=socket))
+    bus_env = dict(os.environ, HOME=f"{gui_root}/home", DISPLAY=state["display"])
+    bus_env.pop("WAYLAND_DISPLAY", None)
     state["bus_pid"] = spawn(
-        ["dbus-daemon", "--session", "--nofork", "--nopidfile", f"--address={state['bus']}"],
-        dict(os.environ), f"{gui_root}/bus.log",
+        ["dbus-daemon", f"--config-file={config}", "--nofork", "--nopidfile"],
+        bus_env, f"{gui_root}/bus.log",
     )
     for _ in range(50):
         if os.path.exists(socket):
@@ -209,6 +216,23 @@ def cmd_start(args):
     xdotool(state, "windowsize", state["window"], width, height)
     save(state)
     print(f"started: display {state['display']}, server {state['url']}, project {state['project']}")
+
+
+# The private bus's config: a session bus that anyone on it may use, with no
+# service folders, so it never starts a program of its own.
+BUS_CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:path={socket}</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+"""
 
 
 def cmd_shot(args):
