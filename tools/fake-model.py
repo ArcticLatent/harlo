@@ -19,6 +19,12 @@ by " | " and run in order:
 A subagent's prompt starts with OpenCode's line telling it it's one; the
 script is what follows.
 
+A prompt can also be plain words, with its script in scripts.json beside
+the log: {"<prompt>": <script>}, the script either a string as above or a
+list of steps, each a list of [word, text] parts (so " | " and ";;" can be
+part of an answer). The transcript then shows the prompt a person would
+type.
+
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
 gets a filled-in summary in OpenCode's template. Every request body is appended to the log, so a
@@ -26,6 +32,7 @@ test can see which tools OpenCode offered and what it sent back.
 """
 
 import json
+import os
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -80,12 +87,30 @@ SUMMARY = """## Objective
 """
 
 
+def stored_scripts():
+    """The scripts kept by prompt in scripts.json beside the log."""
+    path = os.path.join(os.path.dirname(os.path.abspath(LOG)), "scripts.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def plan(messages):
     """Returns the parts of the step to run for this request."""
     last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
     if last_user < 0:
         return [("say", "ok.")]
     script = text_of(messages[last_user].get("content")).strip()
+    known_scripts = stored_scripts()
+    if script in known_scripts:
+        script = known_scripts[script]
+        if isinstance(script, list):
+            done = sum(1 for m in messages[last_user + 1 :] if m.get("role") == "tool")
+            if done >= len(script):
+                return [("say", "done.")]
+            return [(word, text) for word, text in script[done]]
     if script.startswith(SUBAGENT_PREAMBLE):
         script = script[len(SUBAGENT_PREAMBLE) :].strip()
     if script.startswith("You MUST summarize the conversation") or script.startswith(

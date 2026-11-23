@@ -147,6 +147,9 @@ class Harlo:
             if time.time() > deadline:
                 raise Failed("Harlo didn't come back")
             time.sleep(0.2)
+        # It comes back at its own size; the run's size stays.
+        if getattr(self, "size", None):
+            self.resize(*self.size)
         self.wait("Settings", role="Button", timeout=30)
 
     # ---- the MCP server --------------------------------------------------
@@ -339,6 +342,9 @@ class Harlo:
             if not reveal or not e.scroller or not self.clipped(e):
                 return e
             f = e.scroller
+            # Bigger than its scroll view (a long editor): shown is enough.
+            if self.visible(e) and (e.w > f.w or e.h > f.h):
+                return e
             if e.y < f.y:
                 dy = min(f.y - e.y + 8, f.h * 0.8)
             else:

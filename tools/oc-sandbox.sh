@@ -31,10 +31,17 @@ model_port=$(free_port)
 port=$(free_port)
 password=$(python3 -I -c 'import secrets; print(secrets.token_hex(16))')
 
+# OC_SANDBOX_TODO=1 turns on OpenCode's todo tool (experimental.todo).
+experimental=""
+if [ "${OC_SANDBOX_TODO:-}" = 1 ]; then
+  experimental='"experimental": { "todo": true },'
+fi
+
 cat > "$dir/config/opencode/opencode.json" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
   "model": "fake/fake-coder",
+  $experimental
   "providers": {
     "fake": {
       "name": "Fake",
