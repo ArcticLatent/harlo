@@ -83,7 +83,7 @@ impl Default for PhoneState {
     fn default() -> Self {
         Self {
             folder: phone::folder(),
-            port: phone::DEFAULT_PORT,
+            port: phone::port(),
             running: None,
             starting: false,
             error: None,

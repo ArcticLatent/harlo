@@ -1193,6 +1193,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         ChangesEvent::DiscardComments
     ));
 
+    send!(on_composer_menu_pick, |index| Message::MenuPick(
+        usize::try_from(index).ok()
+    ));
     send!(on_composer_edited, |text, cursor, anchor| Message::Compose(
         Edit {
             text: text.to_string(),

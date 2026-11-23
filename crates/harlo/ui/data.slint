@@ -722,6 +722,10 @@ export global State {
     in property <int> composer-revision;
     in property <int> composer-cursor;
     in property <int> composer-anchor;
+    /// The `/` or `@` menu over the composer: what it offers, and the
+    /// highlighted row.
+    in property <[MenuItem]> composer-menu;
+    in property <int> composer-menu-highlight;
     in property <string> send-error;
     in property <bool> sending;
     /// The files and images attached to the message, and whether a pasted
@@ -895,6 +899,8 @@ export global Logic {
     callback composer-edited(string, int, int);
     /// A key press in the composer; returns whether it was taken.
     callback composer-key(string, bool, bool, bool) -> bool;
+    /// Row `index` of the `/` or `@` menu was clicked.
+    callback composer-menu-pick(int);
     callback send();
     callback attach();
     /// Starts dictation, or stops it and puts the words in.

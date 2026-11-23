@@ -182,6 +182,95 @@ component ShieldButton inherits Press {
 ///
 /// Enter sends and Shift+Enter starts a new line; Rust decides what each
 /// key does, through `Logic.composer-key`.
+/// One row of a picker's menu: the name, a note, and a tick on the
+/// current choice.
+component MenuRow inherits Press {
+    in property <MenuItem> item;
+    in property <bool> highlighted;
+
+    height: Size.menu-row;
+    label: item.label;
+    rest: root.highlighted ? Theme.surface-base-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        if item.has-dot: VerticalLayout {
+            alignment: center;
+            Dot {
+                size: 8px;
+                background: item.dot;
+            }
+        }
+        Text {
+            text: item.label;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+            font-size: Size.label;
+            color: Theme.text-strong;
+        }
+        if item.detail != "": Text {
+            text: item.detail;
+            max-width: root.width * 0.55;
+            overflow: elide;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        Icon {
+            width: 14px;
+            text: item.selected ? Icons.check : "";
+            color: Theme.text-strong;
+        }
+    }
+}
+
+/// The `/` or `@` menu: what the word at the cursor can become. Up, Down
+/// and Enter or Tab work from the field; a click picks a row.
+component ComposerMenu inherits Rectangle {
+    property <int> shown: min(State.composer-menu.length, 8);
+    property <length> step: Size.menu-row + 2px;
+
+    height: content.preferred-height;
+    background: Theme.card;
+    backdrop-blur: Theme.card-blur;
+    border-radius: Size.menu-radius;
+    border-width: 1px;
+    border-color: Theme.menu-edge;
+    drop-shadow-color: #00000073;
+    drop-shadow-offset-y: 10px;
+    drop-shadow-blur: 28px;
+
+    TouchArea { }
+
+    content := VerticalLayout {
+        padding: 6px;
+        list := ListView {
+            height: root.shown * root.step;
+            // Keeps the highlighted row in view as it moves.
+            property <int> highlight: State.composer-menu-highlight;
+            changed highlight => {
+                let top = self.highlight * root.step;
+                if (top < -self.content-y) {
+                    self.content-y = -top;
+                } else if (top + root.step > -self.content-y + self.visible-height) {
+                    self.content-y = -(top + root.step - self.visible-height);
+                }
+            }
+            for item[index] in State.composer-menu: VerticalLayout {
+                padding-bottom: 2px;
+                MenuRow {
+                    item: item;
+                    highlighted: index == State.composer-menu-highlight;
+                    clicked => { Logic.composer-menu-pick(index); }
+                }
+            }
+        }
+    }
+}
+
 export component Composer inherits Rectangle {
     in property <string> placeholder;
     in property <string> hint;
@@ -379,48 +468,12 @@ export component Composer inherits Rectangle {
             }
         }
     }
-}
 
-/// One row of a picker's menu: the name, a note, and a tick on the
-/// current choice.
-component MenuRow inherits Press {
-    in property <MenuItem> item;
-    in property <bool> highlighted;
-
-    height: Size.menu-row;
-    label: item.label;
-    rest: root.highlighted ? Theme.surface-base-hover : transparent;
-
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: 8px;
-        if item.has-dot: VerticalLayout {
-            alignment: center;
-            Dot {
-                size: 8px;
-                background: item.dot;
-            }
-        }
-        Text {
-            text: item.label;
-            horizontal-stretch: 1;
-            overflow: elide;
-            vertical-alignment: center;
-            font-size: Size.label;
-            color: Theme.text-strong;
-        }
-        if item.detail != "": Text {
-            text: item.detail;
-            vertical-alignment: center;
-            font-size: Size.small;
-            color: Theme.text-weak;
-        }
-        Icon {
-            width: 14px;
-            text: item.selected ? Icons.check : "";
-            color: Theme.text-strong;
-        }
+    // Over the field, above the card: the `/` or `@` menu.
+    if State.composer-menu.length > 0: ComposerMenu {
+        x: 0;
+        y: -self.height - 8px;
+        width: min(root.width, 520px);
     }
 }
 

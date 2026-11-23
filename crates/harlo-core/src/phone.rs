@@ -76,6 +76,16 @@ pub fn relay_url() -> String {
         .unwrap_or_else(|| DEFAULT_RELAY.to_owned())
 }
 
+/// Returns the port phones connect to directly: [`DEFAULT_PORT`], unless
+/// `HARLO_PHONE_PORT` names another; 0 picks a free one, as in tests.
+#[must_use]
+pub fn port() -> u16 {
+    std::env::var("HARLO_PHONE_PORT")
+        .ok()
+        .and_then(|port| port.trim().parse().ok())
+        .unwrap_or(DEFAULT_PORT)
+}
+
 /// Returns the folder Harlo keeps its phone key and paired phones in.
 #[must_use]
 pub fn folder() -> Option<PathBuf> {

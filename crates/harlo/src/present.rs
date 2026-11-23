@@ -50,6 +50,8 @@ pub struct Presenter {
     attached: Rc<VecModel<AttachedChip>>,
     attached_names: Option<Vec<String>>,
     menu: Rc<VecModel<MenuItem>>,
+    /// The `/` or `@` menu's rows.
+    composer_menu: Rc<VecModel<MenuItem>>,
     panels: Rc<VecModel<bool>>,
     /// The open session's timeline.
     timeline: timeline::Rows,
@@ -95,6 +97,7 @@ impl Presenter {
             attached: Rc::new(VecModel::default()),
             attached_names: None,
             menu: Rc::new(VecModel::default()),
+            composer_menu: Rc::new(VecModel::default()),
             panels: Rc::new(VecModel::from(vec![false; Panel::ALL.len()])),
             timeline: timeline::Rows::new(),
             inbox: Rc::new(VecModel::default()),
@@ -116,6 +119,7 @@ impl Presenter {
         state.set_chips(ModelRc::from(Rc::clone(&presenter.chips)));
         state.set_attached(ModelRc::from(Rc::clone(&presenter.attached)));
         state.set_menu_items(ModelRc::from(Rc::clone(&presenter.menu)));
+        state.set_composer_menu(ModelRc::from(Rc::clone(&presenter.composer_menu)));
         state.set_panels_shown(ModelRc::from(Rc::clone(&presenter.panels)));
         state.set_timeline(presenter.timeline.model());
         state.set_prompt_marks(presenter.timeline.marks());
@@ -144,6 +148,7 @@ impl Presenter {
         self.sidebar(app, &state);
         self.center(app, &state);
         Self::composer(app, &state, t);
+        self.composer_menu(app, &state);
         self.attachments(app);
         self.pickers(app, &state, t);
         self.session(app, &state);
@@ -325,6 +330,39 @@ impl Presenter {
         };
         state.set_shield_glyph(glyph(shield));
         state.set_shield_color(color(shield_color));
+    }
+
+    /// The `/` or `@` menu over the composer, while one is open.
+    fn composer_menu(&self, app: &App, state: &State<'_>) {
+        let Some(menu) = &app.menu else {
+            sync(&self.composer_menu, Vec::new());
+            return;
+        };
+        sync(
+            &self.composer_menu,
+            menu.items
+                .iter()
+                .map(|item| {
+                    let runner = item.runner.as_ref();
+                    let dot = runner
+                        .and_then(|r| r.color.as_deref())
+                        .and_then(Rgba::parse);
+                    let detail = match runner {
+                        Some(r) if r.subagent && item.detail.is_empty() => "subagent".to_owned(),
+                        Some(r) if r.subagent => format!("{} · subagent", item.detail),
+                        _ => item.detail.clone(),
+                    };
+                    MenuItem {
+                        label: item.label.as_str().into(),
+                        detail: detail.into(),
+                        dot: dot.map(color).unwrap_or_default(),
+                        has_dot: dot.is_some(),
+                        selected: false,
+                    }
+                })
+                .collect(),
+        );
+        state.set_composer_menu_highlight(offset(menu.selected));
     }
 
     /// The picker chips, and the open picker's menu.
