@@ -2,7 +2,7 @@
 // across sessions, Settings with its list of sections and search, and the
 // setup guide with its steps. A click outside the card or Esc closes them.
 
-import { AboutSlint } from "std-widgets.slint";
+import { AboutSlint, Palette } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, SheetRow, ThemeCard } from "data.slint";
@@ -228,6 +228,114 @@ component RowBody inherits VerticalLayout {
         accessible-role: AccessibleRole.text;
     }
     if root.entry.kind == 0: Rectangle { height: 6px; }
+    // About's head: Harlo's mark, its name, the versions and what it is.
+    if root.entry.kind == 12: HorizontalLayout {
+        padding-top: 6px;
+        padding-bottom: 18px;
+        spacing: 16px;
+        alignment: start;
+        Rectangle {
+            width: 60px;
+            height: 60px;
+            border-radius: 14px;
+            background: Theme.control-fill;
+            border-width: 1px;
+            border-color: Theme.border-weak-base;
+            Rectangle {
+                width: 31px;
+                height: 32px;
+                if Theme.own-logo: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: @image-url("images/logo-mark.svg");
+                    accessible-role: none;
+                }
+                if !Theme.own-logo: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: @image-url("images/logo-mark-left.svg");
+                    colorize: Theme.brand-ink;
+                    accessible-role: none;
+                }
+                if !Theme.own-logo: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: @image-url("images/logo-mark-right.svg");
+                    colorize: Theme.accent-ink;
+                    accessible-role: none;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            Text {
+                text: root.entry.name;
+                font-size: Size.text * 1.5;
+                font-weight: 600;
+                color: Theme.text-strong;
+                accessible-role: AccessibleRole.text;
+            }
+            Text {
+                text: root.entry.value;
+                font-size: Size.small;
+                color: Theme.text-weak;
+                accessible-role: AccessibleRole.text;
+            }
+            Text {
+                text: root.entry.hint;
+                font-size: Size.small;
+                color: Theme.text-base;
+                accessible-role: AccessibleRole.text;
+            }
+        }
+    }
+    // An icon in a tile, a name with a line under it, and a button.
+    if root.entry.kind == 13: HorizontalLayout {
+        padding-top: 3px;
+        padding-bottom: 3px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 6px;
+                background: Theme.control-fill;
+                Icon {
+                    text: root.entry.glyph;
+                    font-size: 14px;
+                    color: Theme.icon-base;
+                }
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.entry.name;
+                font-size: Size.small;
+                color: Theme.text-strong;
+                accessible-role: AccessibleRole.text;
+            }
+            Text {
+                text: root.entry.value;
+                font-size: Size.small;
+                color: Theme.text-weak;
+                wrap: word-wrap;
+                accessible-role: AccessibleRole.text;
+            }
+        }
+        if root.entry.action != "": VerticalLayout {
+            alignment: center;
+            ActionButton {
+                text: root.entry.action;
+                label: root.entry.action + ": " + root.entry.name;
+                clicked => { Logic.settings-action(root.entry.setting, root.entry.choice); }
+            }
+        }
+    }
     // A shortcut: what it does, then its keys as keycaps, "or" between
     // ways of doing the same ("|" in `options`). Words that aren't keys,
     // such as a double click, are its `hint`. The keys as written are its
@@ -1126,9 +1234,21 @@ export component SheetLayer inherits Rectangle {
                         // The last section, About, ends with Slint's notice.
                         if State.settings-section == State.settings-sections.length - 1
                             && State.settings-query == "": HorizontalLayout {
-                            padding-top: 14px;
+                            padding-top: 20px;
                             alignment: start;
-                            AboutSlint { }
+                            // Slint's badge, small: it credits the toolkit. It draws
+                            // in the desktop's scheme, so its tile does too, and
+                            // its words show in either of Harlo's.
+                            Rectangle {
+                                width: 130px;
+                                height: 100px;
+                                border-radius: 10px;
+                                background: Palette.background;
+                                AboutSlint {
+                                    width: 100%;
+                                    height: 100%;
+                                }
+                            }
                         }
                     }
                 }

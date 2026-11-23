@@ -344,8 +344,26 @@ fn settings_show_the_servers_set_up_and_about() {
     // The last section, at the end of the list.
     ui.wheel("Models", -10);
     ui.press("About");
-    assert!(ui.shows(env!("CARGO_PKG_VERSION")));
-    assert!(ui.shows("2.3.2"), "the server's version");
+    assert!(
+        ui.shows(concat!(
+            "Version ",
+            env!("CARGO_PKG_VERSION"),
+            " · OpenCode 2.3.2"
+        )),
+        "Harlo's version and the server's"
+    );
+    assert!(ui.shows("New issue: Report a problem"));
+    // The colour themes' licence shows when asked for, and hides again.
+    let permission = harlo_core::theme::TINTED_LICENSE
+        .split("\n\n")
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .find(|paragraph| paragraph.starts_with("Permission is hereby granted"))
+        .expect("the licence's grant");
+    assert!(!ui.shows(&permission));
+    ui.press("Licence: Colour themes");
+    assert!(ui.shows(&permission), "the licence shows");
+    ui.press("Hide licence: Colour themes");
+    assert!(!ui.shows(&permission), "and hides");
 }
 
 #[test]

@@ -720,6 +720,20 @@ pub const CHOOSE_INTERFACE_FONT: i32 = 73;
 /// The Settings button that opens the menu of code fonts.
 pub const CHOOSE_CODE_FONT: i32 = 74;
 
+/// The About button that opens the page numbered by its item in
+/// [`ABOUT_LINKS`].
+pub const OPEN_ABOUT_LINK: i32 = 75;
+
+/// The About button that shows or hides the colour themes' licence.
+pub const THEME_LICENCE: i32 = 76;
+
+/// The pages About links to: the source, its releases and a new issue.
+pub const ABOUT_LINKS: [&str; 3] = [
+    env!("CARGO_PKG_REPOSITORY"),
+    concat!(env!("CARGO_PKG_REPOSITORY"), "/releases"),
+    concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"),
+];
+
 /// The step a Settings button for this computer's models or other
 /// computers, numbered `number`, takes for item `item`.
 fn local_action(number: i32, item: i32) -> Option<Message> {
@@ -812,6 +826,20 @@ fn provider_action(app: &App, number: i32, item: i32) -> Option<Message> {
     Some(Message::Sheet(SheetEvent::Provider(event)))
 }
 
+/// The step a button of Appearance or About numbered `number` takes for
+/// item `item`: a font menu, a link, or the themes' licence.
+fn look_action(number: i32, item: i32) -> Option<Message> {
+    match number {
+        CHOOSE_INTERFACE_FONT => Some(Message::TogglePicker(Picker::InterfaceFont)),
+        CHOOSE_CODE_FONT => Some(Message::TogglePicker(Picker::CodeFont)),
+        OPEN_ABOUT_LINK => ABOUT_LINKS
+            .get(usize::try_from(item).ok()?)
+            .map(|url| Message::OpenLink((*url).to_owned())),
+        THEME_LICENCE => Some(Message::Sheet(SheetEvent::ThemeLicence)),
+        _ => None,
+    }
+}
+
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
@@ -829,8 +857,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     };
     match number {
         CHOOSE_DEFAULT_MODEL => Some(Message::TogglePicker(Picker::DefaultModel)),
-        CHOOSE_INTERFACE_FONT => Some(Message::TogglePicker(Picker::InterfaceFont)),
-        CHOOSE_CODE_FONT => Some(Message::TogglePicker(Picker::CodeFont)),
+        CHOOSE_INTERFACE_FONT..=THEME_LICENCE => look_action(number, item),
         OPEN_SETUP => Some(Message::Sheet(SheetEvent::OpenSetup)),
         INSTALL_OPENCODE => Some(Message::Sheet(SheetEvent::InstallOpenCode)),
         TEST_NOTICE => Some(Message::Sheet(SheetEvent::TestNotice)),

@@ -373,7 +373,7 @@ fn setup_note(app: &App, section: Section) -> String {
 fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
     let needle = query.trim().to_lowercase();
     let matches = |row: &SheetRow| {
-        matches!(row.kind, 1 | 3 | 4 | SHORTCUT)
+        matches!(row.kind, 1 | 3 | 4 | SHORTCUT | LINK)
             && (row.name.to_lowercase().contains(&needle)
                 || row.value.to_lowercase().contains(&needle))
     };
@@ -1583,26 +1583,90 @@ fn event_name(kind: Kind) -> (&'static str, &'static str) {
 
 /// Harlo's version and the server's.
 fn about_rows(app: &App) -> Vec<SheetRow> {
+    let version = match &app.status {
+        Status::Connected { version } => {
+            format!("Version {} · OpenCode {version}", env!("CARGO_PKG_VERSION"))
+        }
+        _ => format!("Version {}", env!("CARGO_PKG_VERSION")),
+    };
+    let repository = env!("CARGO_PKG_REPOSITORY").trim_start_matches("https://");
     let mut rows = vec![
-        heading("Harlo"),
-        code_pair("Version", env!("CARGO_PKG_VERSION"), 0),
+        SheetRow {
+            kind: ABOUT,
+            name: "Harlo".into(),
+            value: version.into(),
+            hint: "Your coding agents, in a truly native app.".into(),
+            ..SheetRow::default()
+        },
+        link(Icon::Code, "Source code", repository, "Open", 0),
+        link(
+            Icon::History,
+            "What's new",
+            "What changed in each release.",
+            "Releases",
+            1,
+        ),
+        link(
+            Icon::Bug,
+            "Report a problem",
+            "Open an issue on GitHub.",
+            "New issue",
+            2,
+        ),
+        link(
+            Icon::Scale,
+            "Licence",
+            "Harlo is free and open source, under the MIT licence.",
+            "",
+            0,
+        ),
     ];
-    if let Status::Connected { version } = &app.status {
-        rows.push(code_pair("OpenCode", version, 0));
-    }
-    rows.push(heading("Colour themes"));
-    rows.push(note(
-        "Additional Base16 themes come from Tinted Theming (github.com/tinted-theming/schemes).\nEach scheme credits its author and is used under the following licence.",
-    ));
-    rows.extend(
-        harlo_core::theme::TINTED_LICENSE
-            .split("\n\n")
-            .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
-            .filter(|paragraph| !paragraph.is_empty())
-            .map(|paragraph| note(&paragraph)),
+    let mut themes = link(
+        Icon::Palette,
+        "Colour themes",
+        "Base16 schemes from Tinted Theming, each crediting its author.",
+        if app.sheets.theme_licence {
+            "Hide licence"
+        } else {
+            "Licence"
+        },
+        0,
     );
+    themes.setting = crate::window::THEME_LICENCE;
+    rows.push(themes);
+    if app.sheets.theme_licence {
+        rows.extend(
+            harlo_core::theme::TINTED_LICENSE
+                .split("\n\n")
+                .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|paragraph| !paragraph.is_empty())
+                .map(|paragraph| note(&paragraph)),
+        );
+    }
     rows
 }
+
+/// A row of About: an icon, a name, a line under it, and a button that
+/// opens [`crate::window::ABOUT_LINKS`]'s page numbered `page`, when
+/// `action` names one.
+fn link(icon: Icon, name: &str, what: &str, action: &str, page: i32) -> SheetRow {
+    SheetRow {
+        kind: LINK,
+        name: name.into(),
+        value: what.into(),
+        glyph: glyph(icon),
+        action: action.into(),
+        setting: crate::window::OPEN_ABOUT_LINK,
+        choice: page,
+        ..SheetRow::default()
+    }
+}
+
+/// The kind of row that heads About: Harlo's mark, name and version.
+const ABOUT: i32 = 12;
+
+/// The kind of row with an icon, a name, a line under it and a button.
+const LINK: i32 = 13;
 
 /// The server's web search, MCP servers and plugins, for Tools.
 fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
@@ -1761,7 +1825,7 @@ fn carded(mut rows: Vec<SheetRow>) -> Vec<SheetRow> {
         .iter()
         .map(|row| match row.kind {
             // A heading, theme cards or a picture: a note may follow.
-            0 | THEMES | 10 => {
+            0 | THEMES | 10 | ABOUT => {
                 under_heading = true;
                 false
             }

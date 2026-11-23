@@ -213,6 +213,7 @@ fn about_credits_the_schemes_and_their_licence() {
     let ui = ui(demo::app());
     ui.send(Message::Sheet(SheetEvent::Open(Section::About)));
     assert!(ui.shows("Colour themes"));
+    ui.press("Licence: Colour themes");
     assert!(
         ui.shows("Copyright (c) 2022 Tinted Theming (https://github.com/tinted-theming)"),
         "the licence's notice"
