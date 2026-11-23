@@ -208,7 +208,7 @@ async fn phone_for(sandbox: &Sandbox, folder: &std::path::Path) -> Phone {
 /// Starts phone access and pairs a stand-in phone with it.
 async fn paired(sandbox: &Sandbox, folder: &std::path::Path) -> (Phone, TestPhone) {
     let phone = phone_for(sandbox, folder).await;
-    let code = phone.offer(None).code;
+    let code = phone.offer().code;
     let p = connect(
         phone.address(),
         &Identity::generate(),
@@ -252,7 +252,7 @@ async fn a_phone_pairs_once_and_is_turned_away_when_removed() {
     assert_eq!(denied["type"], "denied");
 
     // With the offer's code it pairs, and pings through the sealed channel.
-    let offer = phone.offer(None);
+    let offer = phone.offer();
     let mut paired = connect(phone.address(), &key, &harlo, &offer.code)
         .await
         .expect("pairs");

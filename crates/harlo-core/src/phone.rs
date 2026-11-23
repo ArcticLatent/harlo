@@ -20,6 +20,8 @@
 mod conn;
 mod crypto;
 mod devices;
+mod push;
+mod relay;
 mod requests;
 mod rows;
 
@@ -39,6 +41,10 @@ pub use conn::Link;
 pub use crypto::{Channel, Identity, Sealed, b64, fingerprint, key_bytes, random_id, unb64};
 #[doc(inline)]
 pub use devices::{Device, Devices, Offer, PushTarget, http_base, relay_id, ws_base};
+#[doc(inline)]
+pub use push::{Alert, What, payload};
+#[doc(inline)]
+pub use relay::{Relay, RelayStatus};
 #[doc(inline)]
 pub use requests::{ALLOW_ALWAYS, ALLOW_ONCE, DENY};
 #[doc(inline)]
@@ -92,12 +98,18 @@ pub(crate) struct Server {
 
 /// What every phone connection shares.
 pub(crate) struct Hub {
+    folder: PathBuf,
     pub(crate) identity: Identity,
     pub(crate) devices: Mutex<Devices>,
     codes: Mutex<Vec<(String, Instant)>>,
     online: Mutex<HashMap<String, usize>>,
     pub(crate) name: String,
     endpoints: Mutex<Vec<String>>,
+    /// The relay phones reach Harlo through, as its WebSocket base and
+    /// Harlo's ID there, while Harlo is on one.
+    relay: Mutex<Option<(String, String)>>,
+    /// Where notifications are handed in: the relay's web address.
+    push: Mutex<Option<String>>,
     hidden: Vec<String>,
     pub(crate) server: watch::Sender<Option<Arc<Server>>>,
     pub(crate) events: broadcast::Sender<Arc<Event>>,
@@ -134,6 +146,10 @@ impl Hub {
         *lock(&self.online).entry(device.to_owned()).or_default() += 1;
         self.bump_devices();
         Online(Arc::clone(self), device.to_owned())
+    }
+
+    pub(crate) fn online_ids(&self) -> Vec<String> {
+        lock(&self.online).keys().cloned().collect()
     }
 
     pub(crate) fn current(&self) -> Option<Arc<Server>> {
@@ -201,12 +217,15 @@ impl Phone {
         let identity = Identity::load_or_create(&settings.folder.join("identity.json"))?;
         let devices = Devices::load(&settings.folder.join("devices.json"));
         let hub = Arc::new(Hub {
+            folder: settings.folder,
             identity,
             devices: Mutex::new(devices),
             codes: Mutex::new(Vec::new()),
             online: Mutex::new(HashMap::new()),
             name: settings.name,
             endpoints: Mutex::new(Vec::new()),
+            relay: Mutex::new(None),
+            push: Mutex::new(None),
             hidden: settings.hidden,
             server: watch::Sender::new(None),
             events: broadcast::Sender::new(EVENT_BACKLOG),
@@ -259,17 +278,16 @@ impl Phone {
 
     /// Makes a pairing offer with a new one-time code.
     ///
-    /// `relay` is the relay's WebSocket base and Harlo's ID there, when
-    /// phones can reach Harlo through one.
+    /// It names the relay too while Harlo is on one.
     #[must_use]
-    pub fn offer(&self, relay: Option<(String, String)>) -> Offer {
+    pub fn offer(&self) -> Offer {
         let code = random_id(9);
         {
             let mut codes = lock(&self.hub.codes);
             codes.retain(|(_, made)| made.elapsed() < CODE_LIFETIME);
             codes.push((code.clone(), Instant::now()));
         };
-        let (relay, relay_id) = relay.unwrap_or_default();
+        let (relay, relay_id) = lock(&self.hub.relay).clone().unwrap_or_default();
         Offer {
             key: self.public_key(),
             code,
@@ -278,6 +296,51 @@ impl Phone {
             relay_id,
             endpoints: self.hub.endpoints(),
         }
+    }
+
+    /// Connects to the relay at `url`, so phones reach Harlo from anywhere
+    /// and get notifications; Harlo stays on it until the [`Relay`] is dropped
+    /// and [`leave_relay`](Self::leave_relay) is called.
+    ///
+    /// Must be called inside a Tokio runtime.
+    ///
+    /// # Errors
+    ///
+    /// When `url` isn't an address, or the relay's secret can't be saved.
+    pub fn relay(&self, url: &str) -> Result<Relay, String> {
+        let (Some(ws), Some(http)) = (ws_base(url), http_base(url)) else {
+            return Err(format!("“{url}” isn't a relay's address."));
+        };
+        let secret = relay_secret(&self.hub.folder.join("relay.json"))
+            .map_err(|e| format!("Couldn't save the relay's secret: {e}"))?;
+        *lock(&self.hub.relay) = Some((ws.clone(), relay_id(&secret)));
+        *lock(&self.hub.push) = Some(http);
+        Ok(relay::start(Arc::clone(&self.hub), ws, secret))
+    }
+
+    /// Stops naming the relay in offers and sending notifications through it.
+    pub fn leave_relay(&self) {
+        *lock(&self.hub.relay) = None;
+        *lock(&self.hub.push) = None;
+    }
+
+    /// Sends a test notification to every phone that takes them.
+    ///
+    /// # Errors
+    ///
+    /// When Harlo isn't on a relay, or no phone got it.
+    pub async fn test_notification(&self) -> Result<usize, String> {
+        let base = lock(&self.hub.push)
+            .clone()
+            .ok_or_else(|| "Notifications go through the relay: turn it on first.".to_owned())?;
+        let alert = Alert {
+            what: What::Test,
+            key: String::new(),
+            title: "Test".to_owned(),
+            body: "Notifications from Harlo arrive on this phone.".to_owned(),
+            badge: 0,
+        };
+        push::deliver(&self.hub, &base, &alert, true).await
     }
 
     /// Returns the paired phones.
@@ -318,6 +381,23 @@ impl Phone {
     }
 }
 
+/// The secret that proves Harlo owns its relay ID, made the first time.
+fn relay_secret(path: &Path) -> std::io::Result<String> {
+    let saved: serde_json::Value = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    if let Some(secret) = saved["secret"].as_str().filter(|s| s.len() >= 32) {
+        return Ok(secret.to_owned());
+    }
+    let secret = random_id(32);
+    crypto::write_private(
+        path,
+        &serde_json::json!({ "v": 1, "secret": secret }).to_string(),
+    )?;
+    Ok(secret)
+}
+
 /// Loads the paired phones saved in `folder`, without starting anything.
 #[must_use]
 pub fn saved_devices(folder: &Path) -> Vec<Device> {
@@ -344,6 +424,15 @@ async fn follow(hub: Arc<Hub>, location: Location) {
             Update::Event(event) => {
                 if let Some(server) = hub.current() {
                     let fetches = lock(&server.workspace).apply(&event.kind, event.time);
+                    if let (Some(alert), Some(base)) =
+                        (alert(&server, &event.kind), lock(&hub.push).clone())
+                    {
+                        let hub = Arc::clone(&hub);
+                        // A notification that doesn't arrive is only missed.
+                        tokio::spawn(async move {
+                            let _ = push::deliver(&hub, &base, &alert, false).await;
+                        });
+                    }
                     if !fetches.is_empty() {
                         tokio::spawn(fetch(Arc::clone(&hub), server, fetches));
                     }
@@ -361,6 +450,74 @@ async fn follow(hub: Arc<Hub>, location: Location) {
             Update::Connecting { .. } => {}
         }
     }
+}
+
+/// The notification an event makes, if any: a question or an approval
+/// asked, or a top-level session's run finished or failed.
+fn alert(server: &Server, kind: &crate::workspace::EventKind) -> Option<Alert> {
+    use crate::workspace::EventKind as K;
+    let (what, key, body) = match kind {
+        K::PermissionAsked(p) => {
+            let body = match p.resources.first() {
+                Some(r) => format!("{}: {r}", p.action),
+                None => p.action.clone(),
+            };
+            (
+                What::Ask(requests::permission(p)),
+                p.session_id.clone(),
+                body,
+            )
+        }
+        K::FormCreated(f) => (
+            What::Ask(requests::form(f)),
+            f.session_id.clone(),
+            f.title.clone(),
+        ),
+        K::Done {
+            session_id,
+            outcome,
+        } => {
+            let what = match outcome.as_str() {
+                "succeeded" => What::Done,
+                "failed" => What::Failed,
+                _ => return None,
+            };
+            let body = if matches!(what, What::Done) {
+                "Finished."
+            } else {
+                "Stopped with an error."
+            };
+            (what, session_id.clone(), body.to_owned())
+        }
+        _ => return None,
+    };
+    let workspace = lock(&server.workspace);
+    let session = workspace.session(&key)?;
+    if session.parent_id.is_some() && !matches!(what, What::Ask(_)) {
+        // A subagent's run ending is part of its parent's run.
+        return None;
+    }
+    let title = session
+        .title
+        .clone()
+        .unwrap_or_else(|| "New session".to_owned());
+    let badge = workspace
+        .sidebar(SystemTime::now())
+        .iter()
+        .flat_map(|p| {
+            p.sessions
+                .iter()
+                .chain(p.worktrees.iter().flat_map(|w| &w.sessions))
+        })
+        .filter(|s| s.waiting)
+        .count();
+    Some(Alert {
+        what,
+        key,
+        title,
+        body,
+        badge,
+    })
 }
 
 /// Whether an event leaves the session list as it is: streamed text.
