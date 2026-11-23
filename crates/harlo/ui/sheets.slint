@@ -1041,7 +1041,7 @@ export component SheetLayer inherits Rectangle {
     card := Rectangle {
         width: min(State.sheet == 2 ? 900px : State.sheet == 3 ? 820px : 720px,
             root.width - 2 * Size.rail - 64px);
-        height: min(State.sheet == 2 ? 640px : State.sheet == 3 ? 600px : 680px,
+        height: min(State.sheet == 2 ? 760px : State.sheet == 3 ? 600px : 680px,
             root.height - 96px);
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;

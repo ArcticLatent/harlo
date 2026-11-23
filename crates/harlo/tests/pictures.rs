@@ -209,12 +209,15 @@ fn the_pictures_link_lists_every_picture_and_escape_closes_in_turn() {
 }
 
 #[test]
-fn an_empty_session_says_it_has_no_pictures() {
+fn an_empty_session_offers_no_pictures_and_its_grid_says_why() {
     let mut app = demo::app();
     let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
     let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
     let ui = ui(app);
-    ui.press("Pictures");
+    // The header offers pictures only once there are some.
+    assert!(ui.find("Pictures").is_empty());
+    // Opened all the same, the grid says why it's empty.
+    ui.send(Message::Pictures(PictureEvent::ToggleGrid));
     assert!(ui.shows("0 in this session"));
     assert!(ui.shows(
         "No pictures in this session yet. Paste one into your message, or ask the agent for one."

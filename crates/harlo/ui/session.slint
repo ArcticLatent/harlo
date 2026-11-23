@@ -262,11 +262,8 @@ component Header inherits Rectangle {
                     }
                 }
                 // Only the icon moves: the word stays readable throughout.
+                // Words only: the line above the composer turns while it works.
                 if State.session-busy: HorizontalLayout {
-                    spacing: 5px;
-                    Spinner {
-                        size: 12px;
-                    }
                     Text {
                         text: "Working";
                         font-size: Size.small;
@@ -280,9 +277,11 @@ component Header inherits Rectangle {
             alignment: center;
             HorizontalLayout {
                 spacing: 2px;
-                HeaderLink {
+                // Only once the session has pictures to show.
+                if State.pictures-count > 0 || State.pictures-grid: HeaderLink {
                     text: "Pictures";
-                    about: State.pictures-count == 0 ? "None yet" : "\{State.pictures-count}";
+                    glyph: Icons.image;
+                    about: "\{State.pictures-count}";
                     selected: State.pictures-grid;
                     clicked => { Logic.toggle-pictures(); }
                 }
@@ -358,7 +357,9 @@ export component SessionView inherits Rectangle {
             }
         }
         HorizontalLayout {
-            padding-top: 4px;
+            // Room between the timeline's last words and what sits above
+            // the composer.
+            padding-top: 10px;
             padding-bottom: 16px;
             alignment: center;
             VerticalLayout {

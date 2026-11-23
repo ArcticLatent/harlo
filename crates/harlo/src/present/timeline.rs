@@ -36,6 +36,10 @@ const SPACING: f32 = 14.0;
 /// Space above the next block of the same answer.
 const BLOCK_SPACING: f32 = 10.0;
 
+/// Space above a heading inside an answer: twice the space below it, so it
+/// belongs to what follows.
+const HEADING_SPACING: f32 = 20.0;
+
 /// Space above the first row.
 const PAD: f32 = 18.0;
 
@@ -772,7 +776,11 @@ fn answer_rows(
     let last = fresh.len().saturating_sub(1);
     let mut kept = Vec::with_capacity(fresh.len());
     for (index, block) in fresh.into_iter().enumerate() {
-        let gap = if index == 0 { gap } else { BLOCK_SPACING };
+        let gap = match (index, &block) {
+            (0, _) => gap,
+            (_, Block::Heading { .. }) => HEADING_SPACING,
+            _ => BLOCK_SPACING,
+        };
         // Only a paragraph being written takes the caret, after its words.
         let caret = caret && index == last && matches!(block, Block::Text(_));
         let row = match blocks.get(index) {
