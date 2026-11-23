@@ -17,6 +17,7 @@ use super::{glyph, sync};
 mod agents;
 mod local_models;
 mod mcp;
+mod phone;
 mod plugins;
 mod providers;
 mod schedules;
@@ -291,6 +292,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Tools => Icon::Plug,
         Section::Schedules => Icon::CalendarClock,
         Section::Server => Icon::Server,
+        Section::Phone => Icon::Smartphone,
         Section::About => Icon::Info,
     }
 }
@@ -328,6 +330,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         Section::Agents => agents::agent_rows(app),
         Section::Schedules => schedules::schedule_rows(app),
         Section::Server => server_rows(app),
+        Section::Phone => phone::phone_rows(app),
         Section::About => about_rows(app),
     }
 }

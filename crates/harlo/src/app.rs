@@ -42,6 +42,7 @@ mod mcp;
 mod notes;
 mod notices;
 mod own_tools;
+mod phone;
 mod plugins;
 mod projects;
 mod providers;
@@ -73,6 +74,7 @@ pub use mcp::{McpEvent, McpServers, McpView};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use own_tools::OwnToolsEvent;
+pub use phone::{PhoneEvent, PhoneState, Shown};
 pub use plugins::{PluginEvent, Plugins, is_outdated};
 pub use projects::{ProjectEvent, Projects, icon_url};
 pub use providers::{Attempt as SignInAttempt, FORM_FIELDS, ProviderEvent, Providers};
@@ -257,6 +259,8 @@ pub enum Message {
     Voice(VoiceEvent),
     /// Something happened to local models.
     Local(LocalEvent),
+    /// Something that happened to phone access.
+    Phone(PhoneEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -632,6 +636,8 @@ pub struct App {
     pub voice: Voice,
     /// Local models: engines, their servers and downloads.
     pub local: LocalModels,
+    /// Phone access: paired phones, the relay, the pairing code.
+    pub phone: PhoneState,
 }
 
 impl App {
@@ -736,6 +742,7 @@ impl App {
             own_tools_error: None,
             voice: Voice::default(),
             local: LocalModels::default(),
+            phone: PhoneState::default(),
             saved: layout,
         };
         app.restore = app.other_tabs.remove(&app.location.label());
@@ -829,6 +836,7 @@ impl App {
             self.follow_files(),
             self.follow_notes(),
             self.follow_own_tools(),
+            self.follow_phone(),
         ]);
         // While an edge is dragged, the layout is saved once, when it's let go.
         let layout = self.layout();
@@ -850,6 +858,25 @@ impl App {
         }
     }
 
+    /// Takes what a fetch loaded, and runs what that asks for.
+    fn fetched(&mut self, result: Fetched) -> Task<Message> {
+        let fetches = self.workspace.fetched(result);
+        self.refresh();
+        self.fetch(fetches)
+    }
+
+    /// Handles a message for one of the features Settings looks after.
+    fn feature_event(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Claude(event) => self.claude_event(event),
+            Message::OwnTools(event) => self.own_tools_event(event),
+            Message::Voice(event) => self.voice_event(event),
+            Message::Local(event) => self.local_event(event),
+            Message::Phone(event) => self.phone_event(event),
+            _ => Task::none(),
+        }
+    }
+
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Quit => return Task::effect(Effect::Quit),
@@ -867,10 +894,11 @@ impl App {
             | Message::CycleTab { .. }) => return self.arrange(message),
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Sheet(event) => return self.sheet_event(event),
-            Message::Claude(event) => return self.claude_event(event),
-            Message::OwnTools(event) => return self.own_tools_event(event),
-            Message::Voice(event) => return self.voice_event(event),
-            Message::Local(event) => return self.local_event(event),
+            message @ (Message::Claude(_)
+            | Message::OwnTools(_)
+            | Message::Voice(_)
+            | Message::Local(_)
+            | Message::Phone(_)) => return self.feature_event(message),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => self.toggle_more(folder),
@@ -938,11 +966,7 @@ impl App {
             Message::Steer => return self.send(Some(Delivery::Steer)),
             Message::Timeline(id, event) => return self.timeline_event(id, event),
             Message::Server(update) => return self.server(update),
-            Message::Fetched(Ok(result)) => {
-                let fetches = self.workspace.fetched(result);
-                self.refresh();
-                return self.fetch(fetches);
-            }
+            Message::Fetched(Ok(result)) => return self.fetched(result),
             // A failed fetch leaves the row as it was until the next event or
             // resync corrects it; after a fade, only the window's next showing
             // changes.

@@ -62,6 +62,55 @@ const EVENT_BACKLOG: usize = 4096;
 /// The port phones connect to directly when nothing else is chosen.
 pub const DEFAULT_PORT: u16 = 7676;
 
+/// Harlo's relay: phones reach Harlo through it from anywhere, and it sends
+/// the phone app's notifications.
+pub const DEFAULT_RELAY: &str = "https://relay.harlo.run";
+
+/// Returns the relay Harlo uses: [`DEFAULT_RELAY`], unless `HARLO_RELAY`
+/// names another (a stand-in in tests).
+#[must_use]
+pub fn relay_url() -> String {
+    std::env::var("HARLO_RELAY")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_RELAY.to_owned())
+}
+
+/// Returns the folder Harlo keeps its phone key and paired phones in.
+#[must_use]
+pub fn folder() -> Option<PathBuf> {
+    Some(
+        dirs::state_dir()
+            .or_else(dirs::data_local_dir)?
+            .join("harlo")
+            .join("phone"),
+    )
+}
+
+/// Returns where phones on this computer's networks reach Harlo's port:
+/// `ws://address:port/ws` for each address that isn't this computer's own
+/// loopback, IPv4 first.
+#[must_use]
+pub fn local_endpoints(port: u16) -> Vec<String> {
+    let mut addresses: Vec<std::net::IpAddr> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| i.ip())
+        .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        .filter(|ip| match ip {
+            std::net::IpAddr::V4(v4) => !v4.is_link_local(),
+            // Only addresses a phone can be given: not link-local ones.
+            std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) != 0xfe80,
+        })
+        .collect();
+    addresses.sort_by_key(std::net::IpAddr::is_ipv6);
+    addresses.dedup();
+    addresses
+        .into_iter()
+        .map(|ip| format!("ws://{}/ws", SocketAddr::new(ip, port)))
+        .collect()
+}
+
 /// Locks a mutex, carrying on with the data when another thread panicked.
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)

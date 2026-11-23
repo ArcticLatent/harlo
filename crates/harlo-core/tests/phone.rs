@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
-use harlo_core::phone::{Identity, Phone, Sealed, Settings, key_bytes};
+use harlo_core::phone::{Identity, Offer, Phone, Sealed, Settings, key_bytes};
 use harlo_core::server::Location;
 use opencode_client::{Effect, Rule};
 use serde_json::{Value, json};
@@ -251,8 +251,22 @@ async fn a_phone_pairs_once_and_is_turned_away_when_removed() {
         .expect("denied");
     assert_eq!(denied["type"], "denied");
 
-    // With the offer's code it pairs, and pings through the sealed channel.
+    // The QR code's link leads to Harlo's own page, with the offer after `#p=`.
+    let address = phone.address();
+    phone.set_endpoints(vec![format!("ws://{address}/ws")]);
     let offer = phone.offer();
+    let link = offer.link();
+    assert!(link.starts_with(&format!("http://{address}/#p=")), "{link}");
+    assert_eq!(Offer::decode(&link).expect("the link reads"), offer);
+    let page = reqwest::get(format!("http://{address}/"))
+        .await
+        .expect("the page")
+        .text()
+        .await
+        .expect("its text");
+    assert!(page.contains("Harlo app"), "{page}");
+
+    // With the offer's code it pairs, and pings through the sealed channel.
     let mut paired = connect(phone.address(), &key, &harlo, &offer.code)
         .await
         .expect("pairs");

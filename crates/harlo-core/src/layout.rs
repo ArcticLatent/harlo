@@ -100,6 +100,11 @@ pub struct Preferences {
     /// Other computers whose shared OpenCode service Harlo follows over
     /// SSH, each as what follows `ssh` to reach it.
     pub computers: Vec<String>,
+    /// Whether paired phones can reach Harlo while it runs.
+    pub phone: bool,
+    /// Whether Harlo is on the relay too, so phones reach it from anywhere
+    /// and get notifications.
+    pub phone_relay: bool,
 }
 
 impl Default for Preferences {
@@ -131,6 +136,8 @@ impl Default for Preferences {
             local_servers: Vec::new(),
             llamacpp_model: String::new(),
             computers: Vec::new(),
+            phone: false,
+            phone_relay: false,
         }
     }
 }

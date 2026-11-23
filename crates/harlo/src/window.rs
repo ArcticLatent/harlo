@@ -699,6 +699,15 @@ pub const LOCAL_PROVIDER: i32 = 68;
 /// item.
 pub const REMOVE_COMPUTER: i32 = 69;
 
+/// The step of Settings → Phone's button that shows a new pairing code.
+pub const PAIR_PHONE: i32 = 70;
+
+/// The step of a paired phone's Remove button; the item numbers the phone.
+pub const REMOVE_PHONE: i32 = 71;
+
+/// The step of the button that sends a test notification.
+pub const TEST_PHONE: i32 = 72;
+
 /// The step a Settings button for this computer's models or other
 /// computers, numbered `number`, takes for item `item`.
 fn local_action(number: i32, item: i32) -> Option<Message> {
@@ -717,6 +726,9 @@ fn local_action(number: i32, item: i32) -> Option<Message> {
                 app::ComputerEvent::Remove(index?),
             )));
         }
+        PAIR_PHONE => return Some(Message::Phone(app::PhoneEvent::Pair)),
+        REMOVE_PHONE => return Some(Message::Phone(app::PhoneEvent::Remove(index?))),
+        TEST_PHONE => return Some(Message::Phone(app::PhoneEvent::Test)),
         _ => return None,
     };
     Some(Message::Local(event))
@@ -880,7 +892,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
-        INSTALL_ENGINE..=REMOVE_COMPUTER => local_action(number, item),
+        INSTALL_ENGINE..=TEST_PHONE => local_action(number, item),
         CHECK_PLUGINS => Some(Message::Sheet(SheetEvent::Plugin(app::PluginEvent::Check))),
         UPDATE_PLUGIN => Some(Message::Sheet(SheetEvent::Plugin(
             app::PluginEvent::Update(usize::try_from(item).ok()),

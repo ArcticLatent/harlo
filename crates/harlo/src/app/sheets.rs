@@ -128,13 +128,15 @@ pub enum Section {
     Schedules,
     /// The server Harlo follows.
     Server,
+    /// Paired phones and the relay.
+    Phone,
     /// Harlo's version and Slint's notice.
     About,
 }
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -148,6 +150,7 @@ impl Section {
         Self::Tools,
         Self::Schedules,
         Self::Server,
+        Self::Phone,
         Self::About,
     ];
 
@@ -168,6 +171,7 @@ impl Section {
             Self::Tools => "Tools for agents",
             Self::Schedules => "Schedules",
             Self::Server => "Server",
+            Self::Phone => "Phone",
             Self::About => "About",
         }
     }
@@ -187,7 +191,7 @@ impl Section {
                 Some("Agents and models")
             }
             Self::Schedules => Some("Automation"),
-            Self::Server => Some("Connections"),
+            Self::Server | Self::Phone => Some("Connections"),
         }
     }
 }
@@ -226,11 +230,15 @@ pub enum Setting {
     Automations,
     /// [`Preferences::own_tools`].
     OwnTools,
+    /// [`Preferences::phone`].
+    Phone,
+    /// [`Preferences::phone_relay`].
+    PhoneRelay,
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 18] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -247,6 +255,8 @@ impl Setting {
         Self::Snapshots,
         Self::Automations,
         Self::OwnTools,
+        Self::Phone,
+        Self::PhoneRelay,
     ];
 }
 
@@ -744,6 +754,7 @@ impl App {
             Section::Schedules => self.load_schedules(),
             Section::Agents => self.load_approvals(),
             Section::LocalModels => self.look(),
+            Section::Phone => self.phone_event(super::PhoneEvent::Changed),
             Section::Tools => {
                 self.sheets.mcp.view = super::McpView::List;
                 self.sheets.plugins.checked = None;
@@ -773,6 +784,12 @@ impl App {
                 // Attached or detached after this update.
                 self.preferences.own_tools = !self.preferences.own_tools;
             }
+            // Phone access and the relay start or stop after this update.
+            Setting::Phone => {
+                self.preferences.phone = !self.preferences.phone;
+                self.retry_phone();
+            }
+            Setting::PhoneRelay => self.preferences.phone_relay = !self.preferences.phone_relay,
             setting => self.switch_notice(setting),
         }
         self.save_preferences()
@@ -844,7 +861,9 @@ impl App {
             | Setting::KeepInTray
             | Setting::Snapshots
             | Setting::Automations
-            | Setting::OwnTools => {
+            | Setting::OwnTools
+            | Setting::Phone
+            | Setting::PhoneRelay => {
                 return;
             }
         };

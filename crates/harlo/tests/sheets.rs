@@ -157,7 +157,12 @@ fn settings_list_their_sections_and_open_with_ctrl_comma() {
     key(&ui, ',', true);
     assert_eq!(ui.app().sheets.open, Some(Sheet::Settings));
     assert_eq!(ui.app().sheets.section, Section::General);
-    for section in Section::ALL {
+    // The list scrolls: the first sections show, then the last ones.
+    for section in &Section::ALL[..6] {
+        assert!(ui.shows(section.title()), "{} is listed", section.title());
+    }
+    ui.wheel("Models", -10);
+    for section in &Section::ALL[Section::ALL.len() - 4..] {
         assert!(ui.shows(section.title()), "{} is listed", section.title());
     }
     assert!(ui.shows("Agents and models"), "a group heading");
@@ -302,6 +307,8 @@ fn settings_show_the_servers_set_up_and_about() {
         "an MCP server's failure"
     );
     assert!(ui.shows("Couldn't list them: server went away"));
+    // The last section, at the end of the list.
+    ui.wheel("Models", -10);
     ui.press("About");
     assert!(ui.shows(env!("CARGO_PKG_VERSION")));
     assert!(ui.shows("2.3.2"), "the server's version");

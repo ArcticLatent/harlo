@@ -2371,6 +2371,7 @@ dependencies = [
  "opencode-client",
  "png",
  "pulldown-cmark",
+ "qrcode",
  "resvg",
  "rfd",
  "serde_json",
@@ -2382,6 +2383,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
+ "tokio-tungstenite 0.30.0",
  "ttf-parser",
  "zbus 5.19.0",
 ]
@@ -2397,6 +2399,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "if-addrs",
  "jiff",
  "jsonc-parser",
  "llmfit-core",
@@ -3158,6 +3161,16 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4964,6 +4977,12 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"

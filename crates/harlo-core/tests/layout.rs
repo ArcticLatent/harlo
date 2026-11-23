@@ -139,6 +139,8 @@ fn preferences_load_back_beside_the_layout() {
         local_servers: vec!["llamacpp".to_owned()],
         llamacpp_model: "/models/tiny.gguf".to_owned(),
         computers: vec!["-p 2222 me@buildbox".to_owned()],
+        phone: true,
+        phone_relay: true,
         appearance: Appearance::Light,
         project_models: [(
             "/home/u/code/harlo".to_owned(),

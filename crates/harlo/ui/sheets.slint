@@ -390,6 +390,27 @@ component Row inherits VerticalLayout {
             }
         }
     }
+    if root.entry.kind == 10: HorizontalLayout {
+        alignment: start;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        // White in either theme: a QR code needs it to be read.
+        Rectangle {
+            width: 256px;
+            height: 256px;
+            background: white;
+            border-radius: 8px;
+            // Smooth scaling keeps the modules even; the code has its own
+            // white margin.
+            Image {
+                width: 248px;
+                height: 248px;
+                source: root.entry.picture;
+                accessible-role: AccessibleRole.image;
+                accessible-label: root.entry.name;
+            }
+        }
+    }
     if root.entry.kind == 5: VerticalLayout {
         ThemeHeading {
             text: root.entry.name;
@@ -610,28 +631,36 @@ component SectionList inherits Rectangle {
         }
         Rectangle { height: 8px; }
 
-        for section[index] in State.settings-sections: VerticalLayout {
-            if section.group != ""
-                && (index == 0 || State.settings-sections[index - 1].group != section.group): Text {
-                height: 28px;
-                text: section.group;
-                font-size: Size.small;
-                color: Theme.text-weak;
-                vertical-alignment: bottom;
-                accessible-role: AccessibleRole.text;
-            }
-            if section.group == "" && index > 0
-                && State.settings-sections[index - 1].group != "": Rectangle {
-                height: 10px;
-            }
-            SectionButton {
-                text: section.title;
-                glyph: section.glyph;
-                selected: State.settings-section == index && State.settings-query == "";
-                clicked => { Logic.pick-section(index); }
+        // The sections scroll when the card is too short for them all.
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                alignment: start;
+                spacing: 2px;
+
+                for section[index] in State.settings-sections: VerticalLayout {
+                    if section.group != ""
+                        && (index == 0 || State.settings-sections[index - 1].group != section.group): Text {
+                        height: 28px;
+                        text: section.group;
+                        font-size: Size.small;
+                        color: Theme.text-weak;
+                        vertical-alignment: bottom;
+                        accessible-role: AccessibleRole.text;
+                    }
+                    if section.group == "" && index > 0
+                        && State.settings-sections[index - 1].group != "": Rectangle {
+                        height: 10px;
+                    }
+                    SectionButton {
+                        text: section.title;
+                        glyph: section.glyph;
+                        selected: State.settings-section == index && State.settings-query == "";
+                        clicked => { Logic.pick-section(index); }
+                    }
+                }
             }
         }
-        Rectangle { vertical-stretch: 1; }
     }
 }
 

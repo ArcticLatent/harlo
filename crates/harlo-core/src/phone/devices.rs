@@ -249,15 +249,40 @@ impl Offer {
         URL_SAFE_NO_PAD.encode(v.to_string())
     }
 
-    /// Reads an offer from a QR code's text.
+    /// Returns the link a pairing QR code carries: the offer in the fragment
+    /// of the page the phone first tries.
+    ///
+    /// That's the relay's page when the offer names a relay, otherwise Harlo
+    /// at its first direct address (`http://192.168.1.5:7676/#p=…`). An offer
+    /// with neither is the offer alone.
+    #[must_use]
+    pub fn link(&self) -> String {
+        let page = if self.relay.is_empty() {
+            self.endpoints
+                .first()
+                .and_then(|e| http_base(e))
+                .map(|base| base.trim_end_matches("/ws").to_owned())
+        } else {
+            http_base(&self.relay)
+        };
+        match page {
+            Some(page) => format!("{page}/#p={}", self.encode()),
+            None => self.encode(),
+        }
+    }
+
+    /// Reads an offer from a QR code's text: its link, or the offer alone.
     ///
     /// # Errors
     ///
     /// When `text` isn't an offer: not base64 JSON, another version, or no key.
     pub fn decode(text: &str) -> Result<Self, String> {
-        let bytes = URL_SAFE_NO_PAD
-            .decode(text.trim())
-            .map_err(|e| e.to_string())?;
+        let text = text.trim();
+        let text = text
+            .split_once('#')
+            .and_then(|(_, fragment)| fragment.split('&').find_map(|p| p.strip_prefix("p=")))
+            .unwrap_or(text);
+        let bytes = URL_SAFE_NO_PAD.decode(text).map_err(|e| e.to_string())?;
         let v: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
         if v["v"] != 1 {
             return Err("an offer of another version".to_owned());

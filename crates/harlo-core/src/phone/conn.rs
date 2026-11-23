@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
-use axum::response::Response;
+use axum::response::{Html, Response};
 use axum::routing::get;
 use futures_util::{SinkExt as _, StreamExt as _};
 use opencode_client::{Attachment, Delivery, ModelRef, Prompt};
@@ -42,7 +42,20 @@ pub struct Link {
 
 /// The direct server's routes: `/ws` for phones.
 pub(crate) fn router(hub: Arc<Hub>) -> Router {
-    Router::new().route("/ws", get(upgrade)).with_state(hub)
+    Router::new()
+        .route("/", get(page))
+        .route("/ws", get(upgrade))
+        .with_state(hub)
+}
+
+/// What a browser shows at a pairing link: the code is for the Harlo app.
+async fn page() -> Html<&'static str> {
+    Html(
+        "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\">\
+         <title>Harlo</title><body style=\"font:17px system-ui;margin:2em;max-width:30em\">\
+         <h1>Harlo</h1><p>This code pairs a phone with Harlo. Scan it with the Harlo app instead \
+         of the camera.</p>",
+    )
 }
 
 async fn upgrade(ws: WebSocketUpgrade, State(hub): State<Arc<Hub>>) -> Response {

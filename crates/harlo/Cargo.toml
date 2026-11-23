@@ -21,6 +21,8 @@ shell-words = { workspace = true }
 cpal = { workspace = true }
 resvg = { workspace = true }
 harlo-core = { workspace = true }
+# The pairing QR code in Settings → Phone.
+qrcode = { workspace = true }
 # The UI (Royalty-free 2.0 licence, see the workspace Cargo.toml): Skia draws
 # the window through winit, on X11 or Wayland; the software renderer serves
 # headless snapshots. The winit hook reports when the window gains or loses
@@ -70,6 +72,9 @@ ttf-parser = { workspace = true }
 i-slint-backend-testing = { workspace = true, features = ["renderer-software"] }
 # A desktop's side of the tray, on a private bus.
 zbus = { workspace = true }
+# A stand-in phone for Settings → Phone.
+tokio-tungstenite = { workspace = true, features = ["connect"] }
+futures-util = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true
