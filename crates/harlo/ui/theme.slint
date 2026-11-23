@@ -49,7 +49,9 @@ export global Theme {
     /// the accent as icons and accent lines, such as the open tab's
     /// underline; see `ink` in Rust.
     in property <color> brand-ink: #fab283;
-    in property <color> accent-ink: #5b80cf;
+    in property <color> accent-ink: #a1c4fc;
+    /// Agents' names and icons, in the scheme's second accent.
+    in property <color> agent-ink: #c4adf4;
     /// Links in answers.
     in property <color> link-ink: #9dbefe;
     /// Whether the logo shows its own colours (Harlo's themes), rather than
@@ -59,8 +61,9 @@ export global Theme {
     // Mixed from the tokens above.
     /// A chip's fill under the pointer.
     in property <color> chip-hover: #2e2e2e;
-    /// The outline of a menu card.
-    in property <color> menu-edge: #393939;
+    /// The fill of a menu card, and its outline.
+    in property <color> menu-fill: #252628;
+    in property <color> menu-edge: #414449;
     /// The outline of the composer.
     in property <color> composer-edge: #2e3440;
     /// Selected text's highlight.
@@ -70,7 +73,9 @@ export global Theme {
     in property <color> removed-line: #3a1b17;
     /// Behind the selected item, such as the open session: a soft wash of
     /// the interactive colour.
-    in property <color> selected-tint: #2a3550;
+    in property <color> selected-tint: #2a3341;
+    /// Behind the user's own prompts: a fainter wash of the same colour.
+    in property <color> prompt-fill: #252a31;
     /// The main button's fill while it can't be pressed.
     in property <color> primary-off: #5d5d5d;
     /// The outline of a card asking for approval, and of one asking questions.
@@ -91,8 +96,8 @@ export global Theme {
     /// under them (Skia only; elsewhere they're just translucent).
     in property <bool> glass: false;
     /// A menu's or dialog's fill, and how much it blurs what's under it.
-    out property <color> card: root.glass ? root.surface-raised-strong.with-alpha(0.7)
-        : root.surface-raised-strong;
+    out property <color> card: root.glass ? root.menu-fill.with-alpha(0.7)
+        : root.menu-fill;
     out property <length> card-blur: root.glass ? 24px : 0px;
 }
 

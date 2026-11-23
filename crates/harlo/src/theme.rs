@@ -67,7 +67,8 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
     g.set_border_interactive_hover(color(t.border_interactive_hover));
     g.set_border_interactive_focus(color(t.border_interactive_focus));
     g.set_brand_ink(color(ink(t, t.surface_brand_base)));
-    g.set_accent_ink(color(ink(t, t.accent_base)));
+    g.set_accent_ink(color(ink(t, t.surface_interactive_base)));
+    g.set_agent_ink(color(ink(t, t.accent_base)));
     g.set_link_ink(color(ink(t, t.markdown_link)));
     g.set_added_ink(color(ink(t, t.diff_added)));
     g.set_removed_ink(color(ink(t, t.diff_removed)));
@@ -75,14 +76,17 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
         t.surface_base_hover
             .over(t.surface_raised_strong, t.surface_base_hover.a),
     ));
-    g.set_menu_edge(color(edge(t, t.surface_raised_strong)));
+    let menu = menu_fill(t);
+    g.set_menu_fill(color(menu));
+    g.set_menu_edge(color(edge(t, menu)));
     g.set_composer_edge(color(
         t.text_interactive_base.over(t.surface_raised_base, EDGE),
     ));
     g.set_selection(color(t.text_interactive_base.alpha(SELECTION)));
-    g.set_selected_tint(color(
-        t.surface_interactive_weak
-            .over(t.background_stronger, SELECTED_TINT),
+    g.set_selected_tint(color(selected_tint(t)));
+    g.set_prompt_fill(color(
+        t.surface_interactive_base
+            .over(t.background_base, PROMPT_TINT),
     ));
     g.set_added_line(color(t.diff_added.over(t.surface_inset_base, PATCH_TINT)));
     g.set_removed_line(color(t.diff_removed.over(t.surface_inset_base, PATCH_TINT)));
@@ -192,12 +196,19 @@ pub fn scrim(t: &Tokens) -> Rgba {
     }
 }
 
-/// How dark the shade behind a dialog is on a dark theme.
-const SCRIM_DARK: f32 = 0.4;
+/// How dark the shade behind a dialog is on a dark theme: enough that the
+/// dialog's own dark surfaces stand clear of the window behind.
+const SCRIM_DARK: f32 = 0.55;
 
-/// How much of the interactive colour's weak fill tints the selected item:
-/// the fill itself is loud as a row's background on dark themes.
-const SELECTED_TINT: f32 = 0.5;
+/// How much of the interactive colour tints the selected item, such as the
+/// open session, over the sidebar: a wash that reads without shouting.
+const SELECTED_TINT: f32 = 0.14;
+
+/// How much of the interactive colour tints the user's own prompts.
+const PROMPT_TINT: f32 = 0.075;
+
+/// How much of the outline colour lifts a menu above the raised surface.
+const MENU_LIFT: f32 = 0.2;
 
 /// The contrast against the background a theme's weak icon colour needs
 /// to be used as is: WCAG's minimum for graphics people must see.
@@ -299,6 +310,21 @@ pub fn text_on(t: &Tokens, accent: Rgba, surface: Rgba) -> Rgba {
         .chain(steps(accent.over(t.text_strong, 0.5), far))
         .find(|c| c.contrast(surface) >= TEXT_CONTRAST)
         .unwrap_or(far)
+}
+
+/// Behind the selected item, such as the open session or the chosen
+/// option: a wash of the interactive colour over the sidebar.
+#[must_use]
+pub fn selected_tint(t: &Tokens) -> Rgba {
+    t.surface_interactive_base
+        .over(t.background_stronger, SELECTED_TINT)
+}
+
+/// A menu's or dialog card's fill: the raised surface, lifted a little
+/// towards the outline colour so it stands off what's under it.
+#[must_use]
+pub fn menu_fill(t: &Tokens) -> Rgba {
+    t.border_weak_base.over(t.surface_raised_base, MENU_LIFT)
 }
 
 /// An outline for a card of colour `surface`.

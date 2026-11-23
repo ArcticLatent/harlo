@@ -54,16 +54,17 @@ fn harlos_schemes_are_its_default_dark_and_light() {
 fn harlo_dark_matches_the_mockup() {
     let t = theme::harlo(Mode::Dark).tokens();
     let expected = [
-        ("background-base", t.background_base, "#292929"),
-        ("background-stronger", t.background_stronger, "#252525"),
-        ("surface-raised-base", t.surface_raised_base, "#2f2f2f"),
-        ("border-weak-base", t.border_weak_base, "#383838"),
-        ("text-strong", t.text_strong, "#d5d5d5"),
-        ("text-base", t.text_base, "#b8b9bb"),
-        ("text-weak", t.text_weak, "#a2a3a5"),
-        ("text-weaker", t.text_weaker, "#97989a"),
-        ("surface-raised-strong", t.surface_raised_strong, "#383838"),
-        ("text-interactive-base", t.text_interactive_base, "#adcafa"),
+        ("background-base", t.background_base, "#1c1d1f"),
+        ("background-stronger", t.background_stronger, "#191a1c"),
+        ("surface-raised-base", t.surface_raised_base, "#232426"),
+        ("border-weak-base", t.border_weak_base, "#303134"),
+        ("text-strong", t.text_strong, "#e5e5e5"),
+        ("text-base", t.text_base, "#d2d3d5"),
+        ("text-weak", t.text_weak, "#a5a7ab"),
+        ("text-weaker", t.text_weaker, "#8a8c90"),
+        ("surface-raised-strong", t.surface_raised_strong, "#303134"),
+        ("text-interactive-base", t.text_interactive_base, "#a1c4fc"),
+        ("keywords, agents", t.accent_base, "#c4adf4"),
     ];
     for (name, actual, want) in expected {
         assert_eq!(actual.to_string(), want, "{name}");
