@@ -6,7 +6,7 @@
 
 use std::rc::Rc;
 
-use harlo_core::server::{Day, Location, PluginSource, Stats, Tokens};
+use harlo_core::server::{Day, Location, Stats, Tokens};
 use slint::{ModelRc, SharedString, VecModel};
 
 use lucide_icons::Icon;
@@ -16,6 +16,7 @@ use super::{glyph, sync};
 
 mod agents;
 mod mcp;
+mod plugins;
 mod providers;
 mod schedules;
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
@@ -1505,31 +1506,7 @@ fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     });
     mcp::list_rows(app, setup, &mut rows);
     mcp::own_tools_rows(app, &mut rows);
-    section(&mut rows, "Plugins", &setup.plugins, |p| {
-        let source = match &p.source {
-            PluginSource::Builtin => "built in".to_owned(),
-            PluginSource::Package {
-                target,
-                version,
-                outdated,
-            } => {
-                let mut text = version
-                    .as_ref()
-                    .map_or_else(|| target.clone(), |v| format!("{target} {v}"));
-                if *outdated {
-                    text.push_str(" · update available");
-                }
-                text
-            }
-            PluginSource::Local(path) => path.clone(),
-            PluginSource::Sdk => "added by a program".to_owned(),
-            PluginSource::Other(what) => what.clone(),
-        };
-        match &p.failed {
-            Some(why) => pair(&p.id, &format!("failed: {why}"), 2),
-            None => pair(&p.id, &source, 3),
-        }
-    });
+    plugins::plugin_rows(app, &setup.plugins, &mut rows);
     rows.push(shared_note());
     rows
 }

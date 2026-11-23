@@ -653,6 +653,13 @@ pub const SAVE_MCP: i32 = 55;
 /// The Settings button that opens the sign-in of the shown MCP server.
 pub const SIGN_IN_MCP: i32 = 56;
 
+/// The Settings button that checks the package plugins for updates.
+pub const CHECK_PLUGINS: i32 = 57;
+
+/// The Settings button that updates the plugin numbered by its item, or
+/// every outdated one for item -1.
+pub const UPDATE_PLUGIN: i32 = 58;
+
 /// The step an MCP server's Settings button numbered `number` takes for
 /// item `item`.
 fn mcp_action(app: &App, number: i32, item: i32) -> Option<Message> {
@@ -808,6 +815,10 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
             app::ApprovalEvent::Remove(usize::try_from(item).ok()?),
         ))),
         OPEN_MCP..=SIGN_IN_MCP => mcp_action(app, number, item),
+        CHECK_PLUGINS => Some(Message::Sheet(SheetEvent::Plugin(app::PluginEvent::Check))),
+        UPDATE_PLUGIN => Some(Message::Sheet(SheetEvent::Plugin(
+            app::PluginEvent::Update(usize::try_from(item).ok()),
+        ))),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }

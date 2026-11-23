@@ -134,6 +134,8 @@ pub enum PluginSource {
         version: Option<String>,
         /// Whether a newer version is out.
         outdated: bool,
+        /// Whether it's being updated now.
+        updating: bool,
     },
     /// A file on the server's computer.
     Local(String),
@@ -164,6 +166,7 @@ impl Plugin {
                 target: text(source, "target"),
                 version: optional(source, "version"),
                 outdated: source["outdated"].as_bool().unwrap_or(false),
+                updating: source["updating"].as_bool().unwrap_or(false),
             },
             "local" => PluginSource::Local(text(source, "path")),
             "sdk" => PluginSource::Sdk,

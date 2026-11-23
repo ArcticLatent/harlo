@@ -590,6 +590,36 @@ impl Client {
         Ok(each(&v, Plugin::from_json))
     }
 
+    /// Asks the package registries whether the package plugins have newer
+    /// versions, and returns them with `outdated` set on those that do.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or can't check.
+    pub async fn check_plugins(&self, directory: &str) -> Result<Vec<Plugin>, Error> {
+        let req = self
+            .request(Method::POST, "/api/plugin/check")
+            .query(&[("location[directory]", directory)])
+            .json(&json!({}));
+        let mut v = Self::json(req).await?;
+        Ok(each(&v["data"].take(), Plugin::from_json))
+    }
+
+    /// Updates the package plugins configured as `targets`, and has the
+    /// server reload them everywhere; returns once all are done.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or any update fails.
+    pub async fn update_plugins(&self, directory: &str, targets: &[String]) -> Result<(), Error> {
+        let req = self
+            .request(Method::POST, "/api/plugin/update")
+            .query(&[("location[directory]", directory)])
+            .json(&json!({ "targets": targets }));
+        Self::send(req).await?;
+        Ok(())
+    }
+
     /// Returns the integration `id` and its connections, or `None` when
     /// this server has no such integration.
     ///

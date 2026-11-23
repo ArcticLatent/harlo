@@ -499,6 +499,8 @@ pub enum Event {
     Approval(super::ApprovalEvent),
     /// Something about the MCP servers.
     Mcp(super::McpEvent),
+    /// Something about the plugins.
+    Plugin(super::PluginEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -570,6 +572,8 @@ pub struct Sheets {
     pub approvals: super::Approvals,
     /// The MCP servers' pages.
     pub mcp: super::McpServers,
+    /// Checking and updating plugins.
+    pub plugins: super::Plugins,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -640,21 +644,7 @@ impl App {
                 // A menu opened from the sheet goes with it.
                 self.picker = None;
             }
-            Event::Section(section) => {
-                self.sheets.section = section;
-                self.sheets.query.clear();
-                // The server runs them: what they did may have changed.
-                if section == Section::Schedules {
-                    return self.load_schedules();
-                }
-                if section == Section::Agents {
-                    return self.load_approvals();
-                }
-                if section == Section::Tools {
-                    self.sheets.mcp.view = super::McpView::List;
-                    return Task::batch([self.load_mcp(), self.load_setup()]);
-                }
-            }
+            Event::Section(section) => return self.show_section(section),
             Event::Query(query) => self.sheets.query = query,
             Event::Switch(setting) => return self.flip(setting),
             Event::GitSettings(event) => return self.git_event(event),
@@ -663,6 +653,7 @@ impl App {
             Event::Provider(event) => return self.provider_event(event),
             Event::Approval(event) => return self.approval_event(event),
             Event::Mcp(event) => return self.mcp_event(event),
+            Event::Plugin(event) => return self.plugin_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;
@@ -710,6 +701,23 @@ impl App {
             Event::Stats(..) | Event::SetUp(..) => {}
         }
         Task::none()
+    }
+
+    /// Shows Settings' `section`, loading what the server keeps for it.
+    fn show_section(&mut self, section: Section) -> Task<Message> {
+        self.sheets.section = section;
+        self.sheets.query.clear();
+        // The server keeps them: they may have changed since.
+        match section {
+            Section::Schedules => self.load_schedules(),
+            Section::Agents => self.load_approvals(),
+            Section::Tools => {
+                self.sheets.mcp.view = super::McpView::List;
+                self.sheets.plugins.checked = None;
+                Task::batch([self.load_mcp(), self.load_setup()])
+            }
+            _ => Task::none(),
+        }
     }
 
     /// Flips a switch: Harlo's own preference, starting at login, or

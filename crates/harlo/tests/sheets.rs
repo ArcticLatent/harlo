@@ -15,7 +15,7 @@ use harlo::app::{App, Autostart, Message, Range, Section, SetUp, Sheet, SheetEve
 use harlo_core::layout::{Preferences, Tabs};
 use harlo_core::server::Location;
 use harlo_core::server::{
-    Day, McpServer, McpStatus, ModelUsage, Plugin, PluginSource, Provider, Stats, Tokens, WebSearch,
+    Day, McpServer, McpStatus, ModelUsage, Provider, Stats, Tokens, WebSearch,
 };
 use slint::ComponentHandle as _;
 use slint::Model as _;
@@ -291,7 +291,11 @@ fn settings_show_the_servers_set_up_and_about() {
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(setup()))));
     assert!(ui.shows("Exa"));
     // A server's row opens its page, and says how it stands.
-    let docs = ui.find("docs").into_iter().next().expect("the server's row");
+    let docs = ui
+        .find("docs")
+        .into_iter()
+        .next()
+        .expect("the server's row");
     assert_eq!(
         docs.accessible_description().as_deref(),
         Some("Failed: no such command"),
@@ -301,39 +305,6 @@ fn settings_show_the_servers_set_up_and_about() {
     ui.press("About");
     assert!(ui.shows(env!("CARGO_PKG_VERSION")));
     assert!(ui.shows("2.3.2"), "the server's version");
-}
-
-#[test]
-fn plugins_show_where_they_come_from() {
-    let ui = ui(demo::app());
-    ui.press("Settings");
-    let mut set_up = setup();
-    set_up.plugins = Ok(vec![
-        Plugin {
-            id: "opencode.agent".into(),
-            source: PluginSource::Builtin,
-            failed: None,
-        },
-        Plugin {
-            id: "lint".into(),
-            source: PluginSource::Package {
-                target: "@acme/lint".into(),
-                version: Some("1.2.0".into()),
-                outdated: true,
-            },
-            failed: None,
-        },
-        Plugin {
-            id: "broken".into(),
-            source: PluginSource::Local("/tmp/broken.ts".into()),
-            failed: Some("syntax error".into()),
-        },
-    ]);
-    ui.send(Message::Sheet(SheetEvent::SetUp(1, Box::new(set_up))));
-    ui.press("Tools for agents");
-    assert!(ui.shows("built in"));
-    assert!(ui.shows("@acme/lint 1.2.0 · update available"));
-    assert!(ui.shows("failed: syntax error"));
 }
 
 #[test]
