@@ -7,13 +7,23 @@ import { Icon, Press, VLine } from "widgets.slint";
 
 /// The avatars to pick from, in the order of `AVATARS` in Rust.
 export global Avatars {
+    /// For the picker; twice the size they're drawn at, for dense screens.
     out property <[image]> pictures: [
-        @image-url("images/avatars/penguin-classic.png"),
-        @image-url("images/avatars/penguin-beanie.png"),
-        @image-url("images/avatars/penguin-glasses.png"),
-        @image-url("images/avatars/penguin-headphones.png"),
-        @image-url("images/avatars/penguin-jacket.png"),
-        @image-url("images/avatars/penguin-scarf.png"),
+        @image-url("images/avatars/penguin-classic-128.png"),
+        @image-url("images/avatars/penguin-beanie-128.png"),
+        @image-url("images/avatars/penguin-glasses-128.png"),
+        @image-url("images/avatars/penguin-headphones-128.png"),
+        @image-url("images/avatars/penguin-jacket-128.png"),
+        @image-url("images/avatars/penguin-scarf-128.png"),
+    ];
+    /// For the rail, likewise.
+    out property <[image]> small: [
+        @image-url("images/avatars/penguin-classic-64.png"),
+        @image-url("images/avatars/penguin-beanie-64.png"),
+        @image-url("images/avatars/penguin-glasses-64.png"),
+        @image-url("images/avatars/penguin-headphones-64.png"),
+        @image-url("images/avatars/penguin-jacket-64.png"),
+        @image-url("images/avatars/penguin-scarf-64.png"),
     ];
     out property <[string]> names: ["Classic", "Beanie", "Glasses", "Headphones", "Jacket", "Scarf"];
 }
@@ -29,19 +39,17 @@ component AvatarFace inherits Rectangle {
     border-width: root.ringed ? 2px : 0;
     border-color: Theme.border-interactive-focus;
 
-    Rectangle {
-        x: root.ringed ? 4px : 0;
-        y: self.x;
-        width: root.width - 2 * self.x;
+    // The pictures are round already, with soft edges, inside a margin of
+    // 6 of every 256 pixels; drawn a little larger, their circle fills the
+    // face. A rounded clip would cut a hard, stepped edge instead.
+    property <length> face: root.width - (root.ringed ? 8px : 0);
+    Image {
+        width: root.face * 256 / 244;
         height: self.width;
-        border-radius: self.width / 2;
-        clip: true;
-        Image {
-            width: 100%;
-            height: 100%;
-            source: root.picture;
-            image-fit: cover;
-        }
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        source: root.picture;
+        image-fit: contain;
     }
 }
 
@@ -212,7 +220,7 @@ export component LeftRail inherits Rectangle {
                     about: Avatars.names[State.avatar];
                     clicked => { picker.show(); }
                     AvatarFace {
-                        picture: Avatars.pictures[State.avatar];
+                        picture: Avatars.small[State.avatar];
                     }
                 }
             }
