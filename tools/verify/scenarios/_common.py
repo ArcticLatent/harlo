@@ -6,6 +6,7 @@ separated by ";;", parts by " | ", such as `say hi`, `think …`,
 `tool edit {…}`, `long 3` or `pace 40`.
 """
 
+from driver import Failed
 COMPOSER_NEW = "Ask, or describe what to build · Tab switches agents"
 COMPOSER = "Send a message to continue this session…"
 
@@ -21,8 +22,19 @@ def open_project_session(h, title=None):
     created = h.api("POST", "/api/session", {"location": {"directory": h.project}})["data"]
     if title:
         h.api("PATCH", f"/api/session/{created['id']}", {"title": title})
-    h.click(title or "Untitled session", role=None, where=sidebar)
-    h.wait(None, role="TextInput", where=composer)
+    name = title or "Untitled session"
+    # The row can still be changing as the new session arrives, which can
+    # swallow a click; a second one opens it.
+    h.wait(name, role=None, where=sidebar, timeout=15)
+    h.settle(0.5)
+    for attempt in range(2):
+        h.click(name, role=None, where=sidebar)
+        try:
+            h.wait(None, role="TextInput", where=composer, timeout=8 if attempt == 0 else 15)
+            break
+        except Failed:
+            if attempt == 1:
+                raise
     return created["id"]
 
 

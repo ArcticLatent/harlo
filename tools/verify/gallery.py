@@ -448,7 +448,8 @@ def scene_phone(g):
     key = base64.b64encode(os.urandom(32)).decode()
     with open(devices, "w") as f:
         json.dump({"devices": [{"id": "gallery", "name": "Test phone", "publicKey": key,
-                                "pairedAt": 1, "lastSeen": 1}]}, f)
+                                "pairedAt": int(time.time()) - 86400,
+                                "lastSeen": int(time.time()) - 7200}]}, f)
     h.click("Phone access", role="Checkbox")
     h.wait("Phone notifications", role="Button", timeout=15)
     h.key("Escape")

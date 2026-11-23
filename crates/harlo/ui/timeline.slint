@@ -165,7 +165,9 @@ component PromptRow inherits Rectangle {
                 padding-top: 11px;
                 padding-bottom: 11px;
                 padding-left: 14px;
-                padding-right: 16px;
+                // Room for Undo, so it never covers the words and they don't
+                // move when it shows.
+                padding-right: root.item.undo ? 76px : 16px;
                 spacing: 8px;
                 if root.item.label != "": HorizontalLayout {
                     spacing: 12px;
