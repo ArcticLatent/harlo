@@ -152,6 +152,16 @@ fn control_c_interrupts_and_exit_closes_the_tab() {
         "not waiting 30 seconds: {:?}",
         lines(&ui)
     );
+    // Typing before the shell reads again could be thrown away too.
+    assert!(
+        tasks.until(&ui, ANSWER, |ui| lines(ui)
+            .iter()
+            .filter(|l| l.contains('$'))
+            .count()
+            >= 3),
+        "the prompt after it: {:?}",
+        lines(&ui)
+    );
 
     type_text(&ui, "exit\n");
     assert!(
