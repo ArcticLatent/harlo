@@ -118,6 +118,8 @@ pub enum Kind {
         files: Vec<FileDiff>,
         /// The child session it started, for a call handing work to a subagent.
         child: Option<String>,
+        /// The pictures it returned, such as a picture it read.
+        pictures: Vec<crate::types::Picture>,
     },
     /// A subagent the session started reported back.
     ///
@@ -525,6 +527,7 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             child: data["metadata"]
                 .as_object()
                 .and_then(crate::types::child_session),
+            pictures: crate::types::Picture::from_tool_json(&data["content"]),
         },
         "session.step.ended" => {
             let d: g::SessionStepEndedData = from(data)?;

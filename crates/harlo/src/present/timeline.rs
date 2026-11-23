@@ -8,6 +8,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
@@ -20,11 +21,12 @@ use lucide_icons::Icon;
 use slint::{Model, ModelRc, SharedString, StyledText, VecModel};
 
 use super::glyph;
+use super::pictures::Slots;
 use crate::markdown::{self, Block, Highlighter};
 use crate::model::{ChildState, Crew, duration, gist};
 use crate::theme::color;
 use crate::timeline::{Load, RowView, Shown, Timeline};
-use crate::ui::{Chip, DiffLine, PromptMark, Shape, TimelineRow};
+use crate::ui::{Chip, DiffLine, PromptMark, Shape, Thumb, TimelineRow};
 
 /// Space above a row that starts an entry.
 const SPACING: f32 = 14.0;
@@ -73,6 +75,10 @@ pub struct Rows {
     highlighter: Option<Highlighter>,
     /// The theme's tokens the rows were built with.
     tokens: Option<Tokens>,
+    /// The thumbnails' list, shared with the rest of the window.
+    slots: Rc<RefCell<Slots>>,
+    /// The list's fresh start the rows were built in.
+    generation: u64,
 }
 
 impl std::fmt::Debug for Rows {
@@ -102,7 +108,15 @@ impl Rows {
             answers: HashMap::new(),
             highlighter: None,
             tokens: None,
+            slots: Rc::new(RefCell::new(Slots::default())),
+            generation: 0,
         }
+    }
+
+    /// The thumbnails' list the rows point into.
+    #[must_use]
+    pub fn slots(&self) -> Rc<RefCell<Slots>> {
+        Rc::clone(&self.slots)
     }
 
     /// The model the window lists.
@@ -142,9 +156,16 @@ impl Rows {
             }
             self.clear();
         }
-        if self.session.as_deref() != Some(id) {
+        // A fresh thumbnails' list leaves the rows pointing at nothing.
+        let generation = {
+            let mut slots = self.slots.borrow_mut();
+            slots.trim();
+            slots.generation()
+        };
+        if self.session.as_deref() != Some(id) || self.generation != generation {
             self.clear();
             self.session = Some(id.to_owned());
+            self.generation = generation;
         }
         let next = next_items(timeline);
         let looks: Vec<u64> = next.iter().map(|item| item_look(item, crew)).collect();
@@ -268,7 +289,7 @@ impl Rows {
                     let blocks = self.answers.entry(key.to_owned()).or_default();
                     answer_rows(key, text, gap, highlighter, blocks)
                 } else {
-                    entry_rows(t, &view, gap, crew)
+                    entry_rows(t, &view, gap, crew, &mut self.slots.borrow_mut())
                 };
                 rows.into_iter()
                     .map(|row| built(with_nesting(row, view.nested)))
@@ -418,6 +439,9 @@ fn built(row: TimelineRow) -> Built {
     (row.added, row.removed, row.file, row.level).hash(&mut hasher);
     raw(&row.text).hash(&mut hasher);
     row.lines.row_count().hash(&mut hasher);
+    for thumb in row.pictures.iter() {
+        (thumb.key.as_str(), thumb.slot).hash(&mut hasher);
+    }
     Built {
         id: hasher.finish(),
         row,
@@ -458,6 +482,16 @@ fn state_number(state: ChildState) -> u8 {
 }
 
 /// A row of `shape` for the entry `key`, with nothing else set.
+/// `pictures` as thumbnails, sent by the user or not.
+fn thumbs(
+    slots: &mut Slots,
+    pictures: &[harlo_core::server::Picture],
+    mine: bool,
+) -> ModelRc<Thumb> {
+    let thumbs: Vec<Thumb> = pictures.iter().map(|p| slots.thumb(p, mine)).collect();
+    ModelRc::new(VecModel::from(thumbs))
+}
+
 fn blank(shape: Shape, key: &str, gap: f32) -> TimelineRow {
     TimelineRow {
         shape,
@@ -473,7 +507,13 @@ fn styled(markup: &str) -> StyledText {
 }
 
 /// An entry's rows.
-fn entry_rows(t: &Tokens, view: &RowView<'_>, gap: f32, crew: &Crew) -> Vec<TimelineRow> {
+fn entry_rows(
+    t: &Tokens,
+    view: &RowView<'_>,
+    gap: f32,
+    crew: &Crew,
+    slots: &mut Slots,
+) -> Vec<TimelineRow> {
     let key = view.entry.key();
     let nested = view.nested;
     let with = |mut row: TimelineRow| {
@@ -484,6 +524,7 @@ fn entry_rows(t: &Tokens, view: &RowView<'_>, gap: f32, crew: &Crew) -> Vec<Time
         Entry::Prompt {
             text,
             attachments,
+            pictures,
             skills,
             ..
         } => {
@@ -493,8 +534,11 @@ fn entry_rows(t: &Tokens, view: &RowView<'_>, gap: f32, crew: &Crew) -> Vec<Time
             row.undo = view.undo;
             row.sending = view.sending;
             row.fresh = view.fresh;
+            row.pictures = thumbs(slots, pictures, true);
+            // Pictures show as themselves; other files by name.
             let chips: Vec<Chip> = attachments
                 .iter()
+                .filter(|name| !pictures.iter().any(|p| &p.name == *name))
                 .map(|name| (Icon::Paperclip, name))
                 .chain(skills.iter().map(|name| (Icon::Sparkles, name)))
                 .map(|(icon, name)| Chip {
@@ -515,7 +559,10 @@ fn entry_rows(t: &Tokens, view: &RowView<'_>, gap: f32, crew: &Crew) -> Vec<Time
             row.detail = summarize(text).into();
             vec![with(row)]
         }
-        Entry::Tool { .. } => tool_rows(t, view, gap).into_iter().map(with).collect(),
+        Entry::Tool { .. } => tool_rows(t, view, gap, slots)
+            .into_iter()
+            .map(with)
+            .collect(),
         Entry::Stopped { outcome, .. } => {
             let mut row = line(t, key, gap, Icon::CircleAlert, t.icon_warning_base);
             row.label = if outcome == "interrupted" {
@@ -679,7 +726,7 @@ fn block_row(
 }
 
 /// A tool's row, then its diffs.
-fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32) -> Vec<TimelineRow> {
+fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec<TimelineRow> {
     let Entry::Tool {
         key,
         label,
@@ -687,6 +734,7 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32) -> Vec<TimelineRow> {
         status,
         took,
         files,
+        pictures,
         ..
     } = view.entry
     else {
@@ -711,6 +759,12 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32) -> Vec<TimelineRow> {
         head.removed = count(files.iter().map(|f| f.deletions).sum());
     }
     let mut rows = vec![head];
+    if !pictures.is_empty() {
+        let mut row = blank(Shape::Pictures, key, 6.0);
+        row.label = label.as_str().into();
+        row.pictures = thumbs(slots, pictures, false);
+        rows.push(row);
+    }
     let limit = if view.whole { usize::MAX } else { DIFF_LINES };
     for (index, (file, lines)) in files.iter().zip(view.diffs).enumerate() {
         let hidden = lines.len().saturating_sub(limit);

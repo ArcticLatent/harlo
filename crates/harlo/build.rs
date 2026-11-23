@@ -12,6 +12,9 @@ use lucide_icons::Icon;
 const ICONS: &[(&str, Icon)] = &[
     ("sidebar", Icon::PanelLeft),
     ("plus", Icon::Plus),
+    ("minus", Icon::Minus),
+    ("rotate-left", Icon::RotateCcw),
+    ("rotate-right", Icon::RotateCw),
     ("message-square", Icon::MessageSquare),
     ("message-square-plus", Icon::MessageSquarePlus),
     ("close", Icon::X),

@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use opencode_client::{EventKind, FileDiff, Message, Part, Report, ToolCall, ToolStatus};
+use opencode_client::{EventKind, FileDiff, Message, Part, Picture, Report, ToolCall, ToolStatus};
 use serde_json::Value;
 
 /// The tool that hands work to a subagent in a child session.
@@ -38,6 +38,8 @@ pub enum Entry {
         text: String,
         /// Names of the files and images sent with it.
         attachments: Vec<String>,
+        /// The pictures among them, shown under the prompt.
+        pictures: Vec<Picture>,
         /// Names of the skills loaded with it.
         skills: Vec<String>,
     },
@@ -73,6 +75,8 @@ pub enum Entry {
         files: Vec<FileDiff>,
         /// The list a todo call wrote, once its arguments are known.
         todos: Option<Vec<Todo>>,
+        /// The pictures it returned, such as a picture it read.
+        pictures: Vec<Picture>,
     },
     /// Work handed to a subagent, which runs in a child session.
     Subagent {
@@ -276,11 +280,13 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
                 id,
                 text,
                 attachments,
+                pictures,
                 skills,
             } => rows.push(Entry::Prompt {
                 key: id.clone(),
                 text: text.clone(),
                 attachments: attachments.clone(),
+                pictures: pictures.clone(),
                 skills: skills.clone(),
             }),
             Message::Assistant { id, parts, .. } => {
@@ -375,6 +381,7 @@ fn tool(message: &str, call: &ToolCall) -> Entry {
         took: call.took_ms.map(millis),
         files: changes(&call.name, call.status, &call.input, &call.files),
         todos: todo_list(&call.name, &call.input),
+        pictures: call.pictures.clone(),
     }
 }
 
@@ -448,6 +455,7 @@ struct OpenTool {
 struct Waiting {
     text: String,
     attachments: Vec<String>,
+    pictures: Vec<Picture>,
     skills: Vec<String>,
 }
 
@@ -485,6 +493,7 @@ impl Live {
                         Waiting {
                             text: text.clone(),
                             attachments: item.attachments.clone(),
+                            pictures: item.pictures.clone(),
                             skills: item.skills.clone(),
                         },
                     );
@@ -507,6 +516,7 @@ impl Live {
                     key: item_id.clone(),
                     text: waiting.text,
                     attachments: waiting.attachments,
+                    pictures: waiting.pictures,
                     skills: waiting.skills,
                 })],
                 (None, true) => vec![Change::Reload],
@@ -563,7 +573,7 @@ impl Live {
                     detail: String::new(),
                     input: Value::Null,
                 };
-                let change = Change::Put(open.entry(ToolStatus::Streaming, None, &[]));
+                let change = Change::Put(open.entry(ToolStatus::Streaming, None, &[], &[]));
                 self.tools.insert(call_id.clone(), open);
                 vec![change]
             }
@@ -571,7 +581,7 @@ impl Live {
                 Some(open) => {
                     open.detail = shorten(&tool_detail(&open.name, input));
                     open.input = input.clone();
-                    vec![Change::Put(open.entry(ToolStatus::Running, None, &[]))]
+                    vec![Change::Put(open.entry(ToolStatus::Running, None, &[], &[]))]
                 }
                 None => vec![Change::Reload],
             },
@@ -580,6 +590,7 @@ impl Live {
                 failed,
                 files,
                 child,
+                pictures,
                 ..
             } => match self.tools.remove(call_id) {
                 Some(open) => {
@@ -597,7 +608,7 @@ impl Live {
                         ))];
                     }
                     let took = millis(time - open.started);
-                    vec![Change::Put(open.entry(status, Some(took), files))]
+                    vec![Change::Put(open.entry(status, Some(took), files, pictures))]
                 }
                 None => vec![Change::Reload],
             },
@@ -655,7 +666,13 @@ impl Live {
 }
 
 impl OpenTool {
-    fn entry(&self, status: ToolStatus, took: Option<Duration>, files: &[FileDiff]) -> Entry {
+    fn entry(
+        &self,
+        status: ToolStatus,
+        took: Option<Duration>,
+        files: &[FileDiff],
+        pictures: &[Picture],
+    ) -> Entry {
         if self.name == SUBAGENT {
             return subagent(self.key.clone(), &self.input, None, status);
         }
@@ -668,6 +685,7 @@ impl OpenTool {
             took,
             files: changes(&self.name, status, &self.input, files),
             todos: todo_list(&self.name, &self.input),
+            pictures: pictures.to_vec(),
         }
     }
 }

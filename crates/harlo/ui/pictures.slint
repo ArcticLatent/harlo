@@ -1,0 +1,327 @@
+// Pictures: thumbnails that open the viewer, a strip of them that wraps,
+// the viewer over the session, and the grid of the session's pictures.
+
+import { Theme, Size } from "theme.slint";
+import { Icons } from "icons.slint";
+import { State, Logic, Thumb } from "data.slint";
+import { Icon, IconButton, Press, HLine } from "widgets.slint";
+
+/// A picture's square thumbnail, which opens it in the viewer.
+export component PictureThumb inherits Press {
+    in property <Thumb> thumb;
+    in property <length> side: 110px;
+    /// Whether it says who sent it, in its corner.
+    in property <bool> captioned;
+
+    width: root.side;
+    height: root.side;
+    border-radius: Size.radius;
+    rest: Theme.surface-inset-base;
+    label: "Open " + root.thumb.name;
+    about: root.thumb.mine ? "You sent it" : "The agent sent it";
+    clicked => {
+        Logic.view-picture(root.thumb.key);
+    }
+
+    Rectangle {
+        border-radius: root.border-radius;
+        clip: true;
+        if root.thumb.slot >= 0: Image {
+            width: 100%;
+            height: 100%;
+            source: State.thumbs[root.thumb.slot];
+            image-fit: cover;
+            accessible-role: none;
+        }
+    }
+    Rectangle {
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: root.hovered ? Theme.border-base : Theme.border-weak-base;
+    }
+    if root.captioned: Rectangle {
+        x: 6px;
+        y: root.height - self.height - 6px;
+        width: caption.preferred-width + 12px;
+        height: 20px;
+        border-radius: 10px;
+        background: Theme.card;
+        caption := Text {
+            text: root.thumb.mine ? "You" : "Agent";
+            font-size: Size.small;
+            color: Theme.text-base;
+            accessible-role: none;
+        }
+    }
+}
+
+/// Thumbnails in rows that wrap to the width they're given.
+export component ThumbStrip inherits Rectangle {
+    in property <[Thumb]> pictures;
+    in property <length> side: 110px;
+    in property <length> gap: 8px;
+    in property <bool> captioned;
+    property <int> columns: max(1, Math.floor((root.width + root.gap) / (root.side + root.gap)));
+
+    height: Math.ceil(root.pictures.length / root.columns) * (root.side + root.gap) - root.gap;
+
+    for thumb[i] in root.pictures: PictureThumb {
+        x: Math.mod(i, root.columns) * (root.side + root.gap);
+        y: Math.floor(i / root.columns) * (root.side + root.gap);
+        thumb: thumb;
+        side: root.side;
+        captioned: root.captioned;
+    }
+}
+
+/// A button with a short word on it, such as 1:1.
+component WordButton inherits Press {
+    in property <string> text;
+    height: 26px;
+    width: max(26px, word.preferred-width + 12px);
+    word := Text {
+        text: root.text;
+        font-size: Size.label;
+        color: Theme.text-base;
+        accessible-role: none;
+    }
+}
+
+/// One picture over the session, fitted to the room until zoomed, with
+/// who sent it and its size along the foot.
+export component PictureViewer inherits Rectangle {
+    /// The picture's size at one picture pixel per screen pixel.
+    property <length> natural-width: State.viewer-width * 1phx;
+    property <length> natural-height: State.viewer-height * 1phx;
+    /// The scale that fits the picture in the room, never above 1:1.
+    property <float> fit: State.viewer-width == 0 ? 1 : min(1,
+        (root.width - 48px) / root.natural-width,
+        (root.height - root.bar - 48px) / root.natural-height);
+    /// The foot's height, with its line.
+    property <length> bar: 45px;
+    /// Whether it follows the fit; zooming lets go of it.
+    property <bool> fitted: true;
+    property <float> zoom: 1;
+    property <float> scale: root.fitted ? root.fit : root.zoom;
+
+    function zoom-by(factor: float) {
+        root.zoom = max(0.05, min(16, root.scale * factor));
+        root.fitted = false;
+    }
+
+    background: Theme.background-stronger;
+    accessible-role: groupbox;
+    accessible-label: "Picture viewer";
+
+    VerticalLayout {
+        area := Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            flick := Flickable {
+                content-width: max(self.width, picture.width + 48px);
+                content-height: max(self.height, picture.height + 48px);
+                picture := Image {
+                    x: (flick.content-width - self.width) / 2;
+                    y: (flick.content-height - self.height) / 2;
+                    width: root.natural-width * root.scale;
+                    height: root.natural-height * root.scale;
+                    source: State.viewer-image;
+                    image-fit: fill;
+                    // Zoomed far in, pixels stay crisp squares.
+                    image-rendering: root.scale >= 3 ? pixelated : smooth;
+                    accessible-role: image;
+                    accessible-label: State.viewer-name;
+                }
+            }
+            // Ctrl and the wheel zoom; the wheel alone scrolls.
+            TouchArea {
+                scroll-event(event) => {
+                    if !event.modifiers.control {
+                        return reject;
+                    }
+                    root.zoom-by(event.delta-y > 0 ? 1.25 : 1 / 1.25);
+                    accept
+                }
+            }
+            if State.viewer-note != "": Text {
+                text: State.viewer-note;
+                font-size: Size.label;
+                color: Theme.text-weak;
+            }
+        }
+        HLine { }
+        HorizontalLayout {
+            height: root.bar - 1px;
+            padding-left: 16px;
+            padding-right: 10px;
+            spacing: 4px;
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                spacing: 8px;
+                Text {
+                    text: State.viewer-from;
+                    vertical-alignment: center;
+                    font-size: Size.label;
+                    font-weight: 600;
+                    color: Theme.text-strong;
+                }
+                Text {
+                    text: State.viewer-name;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    font-size: Size.label;
+                    color: Theme.text-weak;
+                }
+            }
+            if State.viewer-width > 0: Text {
+                text: "\{State.viewer-width} × \{State.viewer-height}";
+                vertical-alignment: center;
+                font-size: Size.label;
+                color: Theme.text-weak;
+            }
+            Rectangle { width: 8px; }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    label: "Zoom out";
+                    glyph: Icons.minus;
+                    clicked => { root.zoom-by(1 / 1.25); }
+                }
+            }
+            Text {
+                min-width: 44px;
+                text: "\{Math.round(root.scale * 100)}%";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: Size.label;
+                color: Theme.text-base;
+                accessible-role: text;
+                accessible-label: "Zoom \{Math.round(root.scale * 100)}%";
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    label: "Zoom in";
+                    glyph: Icons.plus;
+                    clicked => { root.zoom-by(1.25); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                WordButton {
+                    text: "1:1";
+                    label: "Actual size";
+                    clicked => {
+                        root.zoom = 1;
+                        root.fitted = false;
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                WordButton {
+                    text: "Fit";
+                    label: "Fit to the window";
+                    selected: root.fitted;
+                    clicked => { root.fitted = true; }
+                }
+            }
+            Rectangle { width: 8px; }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    label: "Turn left";
+                    glyph: Icons.rotate-left;
+                    clicked => { Logic.turn-picture(false); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    label: "Turn right";
+                    glyph: Icons.rotate-right;
+                    clicked => { Logic.turn-picture(true); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    label: "Show in folder";
+                    glyph: Icons.folder-open;
+                    clicked => { Logic.show-picture-in-folder(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    label: "Close the picture";
+                    glyph: Icons.close;
+                    clicked => { Logic.close-pictures(); }
+                }
+            }
+        }
+    }
+}
+
+/// The session's pictures in a grid, each saying who sent it.
+export component PictureGrid inherits Rectangle {
+    background: Theme.background-base;
+    accessible-role: groupbox;
+    accessible-label: "Pictures";
+
+    VerticalLayout {
+        HorizontalLayout {
+            height: 48px;
+            padding-left: 24px;
+            padding-right: 12px;
+            spacing: 8px;
+            Text {
+                text: "Pictures";
+                vertical-alignment: center;
+                font-size: Size.text;
+                font-weight: 600;
+                color: Theme.text-strong;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: State.pictures-count == 1 ? "1 in this session"
+                    : "\{State.pictures-count} in this session";
+                vertical-alignment: center;
+                font-size: Size.label;
+                color: Theme.text-weak;
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    label: "Close pictures";
+                    glyph: Icons.close;
+                    clicked => { Logic.close-pictures(); }
+                }
+            }
+        }
+        HLine { }
+        if State.pictures-count == 0: Text {
+            vertical-stretch: 1;
+            text: "No pictures in this session yet. Paste one into your message, or ask the agent for one.";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-weak;
+        }
+        if State.pictures-count > 0: Flickable {
+            vertical-stretch: 1;
+            content-height: strip.height + 48px;
+            strip := ThumbStrip {
+                x: 24px;
+                y: 24px;
+                width: parent.width - 48px;
+                side: 150px;
+                gap: 12px;
+                captioned: true;
+                pictures: State.session-pictures;
+            }
+        }
+    }
+}

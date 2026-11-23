@@ -237,10 +237,15 @@ fn mentions_and_attachments_go_with_the_prompt() {
             name: "readme".into(),
         },
     );
-    draft.attached.push(Attached {
-        name: "shot.png".into(),
-        attachment: Attachment::inline("image/png", b"png", "shot.png"),
-    });
+    draft.attached.push(Attached::new(
+        "shot.png",
+        Attachment::inline("image/png", b"png", "shot.png"),
+    ));
+    let picture = draft.attached[0].picture.as_ref().expect("a picture");
+    assert_eq!(
+        (picture.name.as_str(), &*picture.data),
+        ("shot.png", &b"png"[..])
+    );
 
     let Outgoing::Prompt(prompt) = outgoing(
         "  ask @explore about é @src/main.rs and @readme ",

@@ -14,7 +14,7 @@ use futures_util::stream::{self, BoxStream};
 use futures_util::{FutureExt as _, Stream, StreamExt as _};
 
 /// A change to the window that only the window can make.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     /// Give the keyboard focus to the field with this name.
     Focus(&'static str),
@@ -32,6 +32,8 @@ pub enum Effect {
     },
     /// Show the window and ask the desktop to focus it.
     Raise,
+    /// Open the folder holding this file in the desktop's file manager.
+    ShowInFolder(std::path::PathBuf),
     /// Quit Harlo, even while the tray keeps it running.
     Quit,
 }

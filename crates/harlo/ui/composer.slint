@@ -6,6 +6,7 @@ import { Theme, Size, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Chip, MenuItem, AttachedChip } from "data.slint";
 import { Icon, IconButton, Press, Dot, Breathing, Field } from "widgets.slint";
+import { PictureThumb } from "pictures.slint";
 
 /// The picker numbers, as Rust's `Picker::index` gives them.
 export global Pickers {
@@ -48,10 +49,17 @@ component AttachedView inherits Rectangle {
     HorizontalLayout {
         padding-top: 3px;
         padding-bottom: 3px;
-        padding-left: 8px;
+        padding-left: root.chip.thumb.slot >= 0 ? 3px : 8px;
         padding-right: 4px;
         spacing: 6px;
-        Icon {
+        if root.chip.thumb.slot >= 0: VerticalLayout {
+            alignment: center;
+            PictureThumb {
+                thumb: root.chip.thumb;
+                side: 30px;
+            }
+        }
+        if root.chip.thumb.slot < 0: Icon {
             text: root.chip.glyph;
             font-size: 12px;
         }

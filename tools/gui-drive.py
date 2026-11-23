@@ -365,7 +365,10 @@ def cmd_key(args):
 
 
 def own_clipboard(state, argv, stdin_data):
-    proc = subprocess.Popen(argv, env=x_env(state), stdin=subprocess.PIPE, start_new_session=True)
+    # It keeps serving the clipboard, so it mustn't hold the caller's output.
+    proc = subprocess.Popen(argv, env=x_env(state), stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True)
     proc.stdin.write(stdin_data)
     proc.stdin.close()
     state["clip_pids"].append(proc.pid)

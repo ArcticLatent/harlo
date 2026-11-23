@@ -69,8 +69,9 @@ pub use tool_host::{ToolHost, ToolOutcome, ToolRun, ToolSpec};
 #[doc(inline)]
 pub use types::{
     Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, InboxItem,
-    Message, ModelRef, PROJECT_COLORS, Part, Permission, PermissionReply, Project, ProjectChange,
-    Report, Revert, Rule, ServerInfo, Session, SessionContext, Tokens, ToolCall, ToolStatus,
+    Message, ModelRef, PROJECT_COLORS, Part, Permission, PermissionReply, Picture, Project,
+    ProjectChange, Report, Revert, Rule, ServerInfo, Session, SessionContext, Tokens, ToolCall,
+    ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

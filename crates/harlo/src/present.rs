@@ -13,6 +13,7 @@ mod files;
 mod marks;
 mod notes;
 mod panels;
+mod pictures;
 mod session;
 mod sheets;
 mod terminal;
@@ -48,7 +49,13 @@ pub struct Presenter {
     /// The message's attachments, and the names shown last, so only new
     /// ones fade in; `None` before the first showing.
     attached: Rc<VecModel<AttachedChip>>,
-    attached_names: Option<Vec<String>>,
+    /// The attachments' names and the thumbnails' fresh start they were
+    /// shown in.
+    attached_names: Option<(Vec<String>, u64)>,
+    /// The thumbnails' list, shared with the timeline's rows.
+    slots: Rc<std::cell::RefCell<pictures::Slots>>,
+    /// The session's pictures and the viewer.
+    pictures: pictures::Pictures,
     menu: Rc<VecModel<MenuItem>>,
     /// The `/` or `@` menu's rows.
     composer_menu: Rc<VecModel<MenuItem>>,
@@ -88,6 +95,7 @@ impl Presenter {
     pub fn new(window: &AppWindow) -> Self {
         let state = window.global::<State>();
         let marks = Rc::new(marks::Marks::default());
+        let timeline = timeline::Rows::new();
         let presenter = Self {
             sidebar: Rc::new(VecModel::default()),
             locations: Rc::new(VecModel::default()),
@@ -96,10 +104,12 @@ impl Presenter {
             chips: Rc::new(VecModel::default()),
             attached: Rc::new(VecModel::default()),
             attached_names: None,
+            slots: timeline.slots(),
+            pictures: pictures::Pictures::default(),
             menu: Rc::new(VecModel::default()),
             composer_menu: Rc::new(VecModel::default()),
             panels: Rc::new(VecModel::from(vec![false; Panel::ALL.len()])),
-            timeline: timeline::Rows::new(),
+            timeline,
             inbox: Rc::new(VecModel::default()),
             questions: Rc::new(VecModel::default()),
             bodies: panels::Lists::new(&state),
@@ -125,6 +135,8 @@ impl Presenter {
         state.set_prompt_marks(presenter.timeline.marks());
         state.set_inbox(ModelRc::from(Rc::clone(&presenter.inbox)));
         state.set_questions(ModelRc::from(Rc::clone(&presenter.questions)));
+        state.set_thumbs(presenter.slots.borrow().model());
+        presenter.pictures.bind(&state);
         presenter
     }
 
@@ -149,9 +161,14 @@ impl Presenter {
         self.center(app, &state);
         Self::composer(app, &state, t);
         self.composer_menu(app, &state);
-        self.attachments(app);
         self.pickers(app, &state, t);
         self.session(app, &state);
+        // After the timeline, which may start the thumbnails' list afresh.
+        self.attachments(app);
+        let mut slots = self.slots.borrow_mut();
+        self.pictures.show(app, &state, &mut slots);
+        slots.fill(&app.pictures.thumbs);
+        drop(slots);
         self.bodies.show(app, &state);
         self.changes.show(app, &state);
         self.files.tree(app, &state);
@@ -270,10 +287,12 @@ impl Presenter {
     /// shown before fade in.
     fn attachments(&mut self, app: &App) {
         let names: Vec<String> = app.draft.attached.iter().map(|a| a.name.clone()).collect();
-        if self.attached_names.as_ref() == Some(&names) {
+        let mut slots = self.slots.borrow_mut();
+        let shown = (names, slots.generation());
+        if self.attached_names.as_ref() == Some(&shown) {
             return;
         }
-        let before = self.attached_names.take();
+        let before = self.attached_names.take().map(|(names, _)| names);
         let chips: Vec<AttachedChip> = app
             .draft
             .attached
@@ -288,10 +307,17 @@ impl Presenter {
                 fresh: before
                     .as_ref()
                     .is_some_and(|shown| !shown.contains(&a.name)),
+                thumb: a.picture.as_ref().map_or(
+                    crate::ui::Thumb {
+                        slot: -1,
+                        ..crate::ui::Thumb::default()
+                    },
+                    |p| slots.thumb(p, true),
+                ),
             })
             .collect();
         self.attached.set_vec(chips);
-        self.attached_names = Some(names);
+        self.attached_names = Some(shown);
     }
 
     /// The composer's text, when the app changed it, and its feedback.

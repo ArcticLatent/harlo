@@ -311,6 +311,7 @@ fn queued(id: &str) -> InboxItem {
         kind: "user".into(),
         text: Some(format!("prompt {id}")),
         attachments: Vec::new(),
+        pictures: Vec::new(),
         skills: Vec::new(),
         delivery: Delivery::Queue,
     }

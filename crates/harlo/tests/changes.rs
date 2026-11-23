@@ -374,6 +374,7 @@ fn an_edit_opens_its_turn_on_the_hunk_it_changed() {
             key: "msg_1".into(),
             text: "Pin the port".into(),
             attachments: Vec::new(),
+            pictures: Vec::new(),
             skills: Vec::new(),
         },
         Entry::Tool {
@@ -385,6 +386,7 @@ fn an_edit_opens_its_turn_on_the_hunk_it_changed() {
             took: None,
             files: vec![edit],
             todos: None,
+            pictures: Vec::new(),
         },
     ];
     ui.send(Message::History(PI_UPDATE.into(), Ok(history)));

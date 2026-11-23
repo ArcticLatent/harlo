@@ -6,6 +6,9 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::sync::Arc;
+
+use base64::Engine as _;
 use serde_json::Value;
 
 use crate::generated as g;
@@ -376,6 +379,8 @@ pub enum Message {
         text: String,
         /// Names of the files and images sent with it.
         attachments: Vec<String>,
+        /// The pictures among them, with their bytes.
+        pictures: Vec<Picture>,
         /// Names of the skills loaded with it.
         skills: Vec<String>,
     },
@@ -459,11 +464,13 @@ impl Message {
                     })
                     .unwrap_or_default();
                 let skills = skill_names(&value["skills"]);
+                let pictures = Picture::from_files(&value["files"]);
                 let m: g::SessionMessageUser = serde_json::from_value(value)?;
                 Self::User {
                     id,
                     text: m.text,
                     attachments,
+                    pictures,
                     skills,
                 }
             }
@@ -561,6 +568,108 @@ fn unwrap_report(text: &str) -> &str {
 }
 
 /// The name an attachment shows: its name, or the last part of its URI.
+/// A picture sent with a prompt or returned by a tool, with its bytes.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Picture {
+    /// The name it was sent or read under, such as `screenshot.png`.
+    pub name: String,
+    /// Its media type, such as `image/png`.
+    pub mime: String,
+    /// The encoded picture, as sent.
+    pub data: Arc<[u8]>,
+    /// A hash of its bytes: the same for the same picture, wherever it's
+    /// read from, so it can stand for it.
+    pub key: u64,
+}
+
+impl std::fmt::Debug for Picture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Picture")
+            .field("name", &self.name)
+            .field("mime", &self.mime)
+            .field("bytes", &self.data.len())
+            .field("key", &self.key)
+            .finish()
+    }
+}
+
+impl Picture {
+    /// The pictures among a prompt's `{data, mime, name}` files.
+    pub(crate) fn from_files(files: &Value) -> Vec<Self> {
+        let decode = |file: &Value| {
+            let mime = file["mime"].as_str()?;
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(file["data"].as_str()?)
+                .ok()?;
+            Self::new(attachment_name(file), mime, data)
+        };
+        files
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(decode)
+            .collect()
+    }
+
+    /// The pictures among a tool's results, given inline as `data:` URIs.
+    pub(crate) fn from_tool(content: &[g::ToolContent]) -> Vec<Self> {
+        content
+            .iter()
+            .filter_map(|item| match item {
+                g::ToolContent::FileContent(file) => Self::from_uri(
+                    file.name.as_deref().unwrap_or("picture"),
+                    &file.mime,
+                    &file.uri,
+                ),
+                g::ToolContent::TextContent(_) => None,
+            })
+            .collect()
+    }
+
+    /// The pictures among a tool event's raw `content` list.
+    pub(crate) fn from_tool_json(content: &Value) -> Vec<Self> {
+        content
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| item["type"] == "file")
+            .filter_map(|item| {
+                Self::from_uri(
+                    item["name"].as_str().unwrap_or("picture"),
+                    item["mime"].as_str()?,
+                    item["uri"].as_str()?,
+                )
+            })
+            .collect()
+    }
+
+    /// A picture from a `data:<mime>;base64,<bytes>` URI; `None` for any
+    /// other URI, such as a file on the server's machine.
+    pub(crate) fn from_uri(name: &str, mime: &str, uri: &str) -> Option<Self> {
+        let (_, data) = uri.strip_prefix("data:")?.split_once(";base64,")?;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .ok()?;
+        Self::new(name.rsplit('/').next().unwrap_or(name), mime, data)
+    }
+
+    /// A picture, when `mime` is a picture's media type.
+    fn new(name: &str, mime: &str, data: Vec<u8>) -> Option<Self> {
+        use std::hash::{Hash as _, Hasher as _};
+        if !mime.starts_with("image/") {
+            return None;
+        }
+        let mut hasher = std::hash::DefaultHasher::new();
+        data.hash(&mut hasher);
+        Some(Self {
+            name: name.to_owned(),
+            mime: mime.to_owned(),
+            data: data.into(),
+            key: hasher.finish(),
+        })
+    }
+}
+
 pub(crate) fn attachment_name(file: &Value) -> &str {
     file["name"]
         .as_str()
@@ -586,6 +695,7 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
             g::SessionMessageAssistantContentItem::Text(t) => Self::Text(t.text),
             g::SessionMessageAssistantContentItem::Reasoning(r) => Self::Reasoning(r.text),
             g::SessionMessageAssistantContentItem::Tool(t) => {
+                let mut pictures = Vec::new();
                 let (status, input, files, child) = match t.state {
                     g::SessionMessageAssistantToolState::Streaming(_) => {
                         (ToolStatus::Streaming, Value::Null, Vec::new(), None)
@@ -599,9 +709,11 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
                     g::SessionMessageAssistantToolState::Completed(s) => {
                         let files = proposed_files(&s.metadata);
                         let child = child_session(&s.metadata);
+                        pictures = Picture::from_tool(&s.content);
                         (ToolStatus::Completed, Value::Object(s.input), files, child)
                     }
                     g::SessionMessageAssistantToolState::Error(s) => {
+                        pictures = Picture::from_tool(&s.content);
                         (ToolStatus::Failed, Value::Object(s.input), Vec::new(), None)
                     }
                 };
@@ -614,6 +726,7 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
                     took_ms,
                     files,
                     child,
+                    pictures,
                 })
             }
         }
@@ -637,6 +750,8 @@ pub struct ToolCall {
     pub files: Vec<FileDiff>,
     /// The child session it started, for a call handing work to a subagent.
     pub child: Option<String>,
+    /// The pictures it returned, such as a picture it read.
+    pub pictures: Vec<Picture>,
 }
 
 /// Where a tool call is.
@@ -1014,6 +1129,8 @@ pub struct InboxItem {
     pub text: Option<String>,
     /// Names of the files and images sent with a queued prompt.
     pub attachments: Vec<String>,
+    /// The pictures among them, with their bytes.
+    pub pictures: Vec<Picture>,
     /// Names of the skills loaded with a queued prompt.
     pub skills: Vec<String>,
     /// How it will be delivered.
@@ -1048,6 +1165,7 @@ impl InboxItem {
                         .collect()
                 })
                 .unwrap_or_default(),
+            pictures: Picture::from_files(&value["payload"]["files"]),
             skills: skill_names(&value["payload"]["skills"]),
             delivery: if value["delivery"] == "queue" {
                 Delivery::Queue

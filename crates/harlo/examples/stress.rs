@@ -467,6 +467,7 @@ fn history() -> Vec<Entry> {
                         status: "modified".into(),
                     }],
                     todos: None,
+                    pictures: Vec::new(),
                 }
             }
         })

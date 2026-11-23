@@ -43,6 +43,7 @@ mod notes;
 mod notices;
 mod own_tools;
 mod phone;
+mod pictures;
 mod plugins;
 mod projects;
 mod providers;
@@ -75,6 +76,7 @@ pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use own_tools::OwnToolsEvent;
 pub use phone::{PhoneEvent, PhoneState, Shown};
+pub use pictures::{PictureEvent, PicturesState, Pixels, Sent, Thumb, Viewing};
 pub use plugins::{PluginEvent, Plugins, is_outdated};
 pub use projects::{ProjectEvent, Projects, icon_url};
 pub use providers::{Attempt as SignInAttempt, FORM_FIELDS, ProviderEvent, Providers};
@@ -295,6 +297,8 @@ pub enum Message {
     Local(LocalEvent),
     /// Something that happened to phone access.
     Phone(PhoneEvent),
+    /// Something happened to pictures: a thumbnail, the viewer, the grid.
+    Pictures(PictureEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -672,6 +676,8 @@ pub struct App {
     pub local: LocalModels,
     /// Phone access: paired phones, the relay, the pairing code.
     pub phone: PhoneState,
+    /// Pictures' thumbnails, the viewer and the grid.
+    pub pictures: PicturesState,
 }
 
 impl App {
@@ -777,6 +783,7 @@ impl App {
             voice: Voice::default(),
             local: LocalModels::default(),
             phone: PhoneState::default(),
+            pictures: PicturesState::default(),
             saved: layout,
         };
         app.restore = app.other_tabs.remove(&app.location.label());
@@ -884,6 +891,7 @@ impl App {
             self.follow_notes(),
             self.follow_own_tools(),
             self.follow_phone(),
+            self.follow_pictures(),
         ]);
         // While an edge is dragged, the layout is saved once, when it's let go.
         let layout = self.layout();
@@ -920,6 +928,7 @@ impl App {
             Message::Voice(event) => self.voice_event(event),
             Message::Local(event) => self.local_event(event),
             Message::Phone(event) => self.phone_event(event),
+            Message::Pictures(event) => self.pictures_event(event),
             _ => Task::none(),
         }
     }
@@ -946,7 +955,8 @@ impl App {
             | Message::OwnTools(_)
             | Message::Voice(_)
             | Message::Local(_)
-            | Message::Phone(_)) => return self.feature_event(message),
+            | Message::Phone(_)
+            | Message::Pictures(_)) => return self.feature_event(message),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => self.toggle_more(folder),
@@ -1083,10 +1093,7 @@ impl App {
                     };
                     let mut attachment = Attachment::file(path);
                     attachment.name = Some(name.to_owned());
-                    self.draft.attached.push(Attached {
-                        name: name.to_owned(),
-                        attachment,
-                    });
+                    self.draft.attached.push(Attached::new(name, attachment));
                 }
             }
             Message::Detach(index) => {
@@ -1468,6 +1475,9 @@ impl App {
             .map(|(_, _, ids)| ids.iter().map(|id| self.skill_name(id)).collect())
             .unwrap_or_default();
         let attachments: Vec<String> = self.draft.attached.iter().map(|a| a.name.clone()).collect();
+        let pictures: Vec<_> = (self.draft.attached.iter())
+            .filter_map(|a| a.picture.clone())
+            .collect();
         let mut queued = None;
         let mut scroll = Task::none();
         if let (Some(session), Some((key, said, _))) = (target, &prompt) {
@@ -1477,6 +1487,7 @@ impl App {
                     kind: "user".to_owned(),
                     text: Some(said.clone()),
                     attachments: attachments.clone(),
+                    pictures: pictures.clone(),
                     skills: skills.clone(),
                     delivery,
                 });
@@ -1485,6 +1496,7 @@ impl App {
                     key: key.clone(),
                     text: said.clone(),
                     attachments,
+                    pictures,
                     skills,
                 };
                 timeline.pend(entry);
@@ -1688,10 +1700,10 @@ impl App {
             .filter(|a| a.attachment.uri.starts_with("data:"))
             .count();
         let name = format!("pasted-image-{}.png", count + 1);
-        self.draft.attached.push(Attached {
-            name: name.clone(),
-            attachment: Attachment::inline("image/png", png, &name),
-        });
+        (self.draft.attached).push(Attached::new(
+            &name,
+            Attachment::inline("image/png", png, &name),
+        ));
         let reads_images = self
             .current_model()
             .and_then(|m| Some(self.catalog()?.model(&m.provider_id, &m.id)?.images));

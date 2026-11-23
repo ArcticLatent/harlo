@@ -91,6 +91,17 @@ export struct Chip {
     note: string,
 }
 
+/// A picture's thumbnail.
+export struct Thumb {
+    /// The picture's key, which the viewer opens it by.
+    key: string,
+    /// Its place in `State.thumbs`.
+    slot: int,
+    name: string,
+    /// Whether the user sent it; otherwise a tool returned it.
+    mine: bool,
+}
+
 /// One row of a picker's menu.
 export struct MenuItem {
     label: string,
@@ -128,6 +139,8 @@ export enum Shape {
     subagent,
     /// What a subagent reported back.
     report,
+    /// The pictures a tool returned, as thumbnails.
+    pictures,
 }
 
 /// One line of a diff.
@@ -161,6 +174,7 @@ export struct TimelineRow {
     /// A prompt's, an answer block's or a code block's text.
     text: styled-text,
     /// A line's label, a group's summary, a subagent's name, a diff's file.
+    /// (For `pictures` rows: the tool that returned them.)
     label: string,
     /// What a line acts on, or a subagent's task.
     detail: string,
@@ -189,6 +203,8 @@ export struct TimelineRow {
     counts: bool,
     /// A prompt's attachments and skills.
     chips: [Chip],
+    /// A prompt's pictures, or the pictures a tool returned.
+    pictures: [Thumb],
     /// A subagent's child session, to open.
     child: string,
     /// Which of a tool's files a diff shows.
@@ -521,6 +537,8 @@ export struct AttachedChip {
     label: string,
     glyph: string,
     fresh: bool,
+    /// A pasted picture's thumbnail; -1 for none.
+    thumb: Thumb,
 }
 
 /// A row on a page over the window: 0 a heading, 1 a name and its value,
@@ -766,6 +784,23 @@ export global State {
     in property <string> session-parent-id;
     /// The user's avatar, as its place in `Avatars.pictures`.
     in property <int> avatar;
+    /// Pictures' thumbnails; rows name theirs by place.
+    in property <[image]> thumbs;
+    /// The open session's pictures, in the order they were sent.
+    in property <[Thumb]> session-pictures;
+    in property <int> pictures-count;
+    /// Whether they show in a grid over the session.
+    in property <bool> pictures-grid;
+    /// The picture viewer over the session: whether it's open, the picture
+    /// and its size (0 while it decodes), its name, who sent it, and a note
+    /// when it can't be shown.
+    in property <bool> viewer-open;
+    in property <image> viewer-image;
+    in property <int> viewer-width;
+    in property <int> viewer-height;
+    in property <string> viewer-name;
+    in property <string> viewer-from;
+    in property <string> viewer-note;
     in property <string> session-agent;
     in property <string> session-agent-glyph;
     in property <color> session-agent-color;
@@ -803,6 +838,16 @@ export global Logic {
     callback toggle-phone-pause();
     /// Use the avatar at this place in the picker as the user's picture.
     callback pick-avatar(int);
+    /// Show the picture with this key in the viewer.
+    callback view-picture(string);
+    /// Close the viewer, or the pictures' grid.
+    callback close-pictures();
+    /// Show the session's pictures in a grid, or hide them.
+    callback toggle-pictures();
+    /// Show the viewer's picture in its folder.
+    callback show-picture-in-folder();
+    /// Turn the viewer's picture a quarter turn, clockwise or not.
+    callback turn-picture(bool);
     callback toggle-panel(int);
     callback toggle-terminal();
     callback new-terminal();

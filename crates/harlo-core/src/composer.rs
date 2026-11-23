@@ -7,7 +7,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use opencode_client::{Attachment, Delivery, Mention, Prompt};
+use opencode_client::{Attachment, Delivery, Mention, Picture, Prompt};
 
 use crate::server::{Catalog, Command, FileMatch};
 
@@ -261,6 +261,20 @@ pub struct Attached {
     pub name: String,
     /// What's sent.
     pub attachment: Attachment,
+    /// The picture it carries inline, for its thumbnail.
+    pub picture: Option<Picture>,
+}
+
+impl Attached {
+    /// An attachment shown as `name`, its picture read out once.
+    #[must_use]
+    pub fn new(name: &str, attachment: Attachment) -> Self {
+        Self {
+            name: name.to_owned(),
+            picture: attachment.picture(),
+            attachment,
+        }
+    }
 }
 
 /// What the composer brings along with its text.

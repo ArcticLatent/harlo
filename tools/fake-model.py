@@ -99,7 +99,10 @@ def stored_scripts():
 
 def plan(messages):
     """Returns the parts of the step to run for this request."""
-    last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
+    # A user message right after a tool's result carries what the tool
+    # returned, such as a picture it read; the prompt is the one before.
+    last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"
+                     and not (i > 0 and messages[i - 1].get("role") == "tool")), default=-1)
     if last_user < 0:
         return [("say", "ok.")]
     script = text_of(messages[last_user].get("content")).strip()

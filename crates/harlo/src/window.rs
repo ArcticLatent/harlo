@@ -202,6 +202,12 @@ fn perform(window: &AppWindow, effect: Effect) {
             requests.set_scroll_serial(requests.get_scroll_serial().wrapping_add(1));
         }
         Effect::Raise => raise(window),
+        Effect::ShowInFolder(path) => {
+            // A folder that can't be opened leaves nothing to show.
+            if let Some(folder) = path.parent() {
+                let _ = open::that_detached(folder);
+            }
+        }
         Effect::Quit => {
             // Fails only once the event loop has ended, which is the aim.
             let _ = slint::quit_event_loop();
@@ -1017,6 +1023,22 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
 
     send!(on_resized, |width, height| Message::Resized(width, height));
     send!(on_toggle_sidebar, || Message::ToggleSidebar);
+    send_with!(on_view_picture, |_app, key| key
+        .parse()
+        .ok()
+        .map(|key| Message::Pictures(crate::app::PictureEvent::View(key))));
+    send!(on_close_pictures, || Message::Pictures(
+        crate::app::PictureEvent::Close
+    ));
+    send!(on_toggle_pictures, || Message::Pictures(
+        crate::app::PictureEvent::ToggleGrid
+    ));
+    send!(on_turn_picture, |clockwise| Message::Pictures(
+        crate::app::PictureEvent::Turn(clockwise)
+    ));
+    send!(on_show_picture_in_folder, || Message::Pictures(
+        crate::app::PictureEvent::ShowInFolder
+    ));
     send!(on_toggle_phone_pause, || Message::Phone(
         crate::app::PhoneEvent::TogglePause
     ));
@@ -1347,6 +1369,9 @@ pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
     }
     if app.sheets.open.is_some() && press.key == Key::Escape {
         return Some(Message::Sheet(app::SheetEvent::Close));
+    }
+    if app.pictures_shown() && press.key == Key::Escape {
+        return Some(Message::Pictures(app::PictureEvent::Close));
     }
     if let Some(message) = app.approval_key(press) {
         return Some(message);

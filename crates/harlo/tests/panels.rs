@@ -252,6 +252,7 @@ fn written(key: &str, todos: Vec<Todo>) -> Entry {
         took: Some(Duration::from_millis(9)),
         files: Vec::new(),
         todos: Some(todos),
+        pictures: Vec::new(),
     }
 }
 

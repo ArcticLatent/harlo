@@ -78,6 +78,14 @@ impl Attachment {
         self
     }
 
+    /// The picture it carries inline, when it's a picture sent as a `data:` URI.
+    #[must_use]
+    pub fn picture(&self) -> Option<crate::Picture> {
+        let name = self.name.as_deref().unwrap_or("picture");
+        let mime = self.uri.strip_prefix("data:")?.split_once(';')?.0;
+        crate::Picture::from_uri(name, mime, &self.uri)
+    }
+
     fn json(&self) -> Value {
         let mut out = json!({ "uri": self.uri });
         if self.uri.starts_with("data:") {

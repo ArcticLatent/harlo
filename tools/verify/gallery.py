@@ -173,6 +173,51 @@ def scene_chat(g):
             h.settle(0.5)
 
 
+def scene_pictures(g):
+    """A pasted picture in the composer, thumbnails under the prompt and the
+    tool that read a picture, the viewer and the session's grid."""
+    h = g.h
+    shots = os.path.join(ROOT, ".impeccable", "critique", "shots")
+    pasted = os.path.join(ROOT, "crates", "harlo", "ui", "images", "avatars", "penguin-glasses.png")
+    for root, _, files in os.walk(shots):
+        found = [f for f in files if f.endswith("home-empty.png")]
+        if found:
+            pasted = os.path.join(root, found[0])
+            break
+    plot = os.path.join(h.project, "plot.png")
+    with open(os.path.join(ROOT, "crates", "harlo", "ui", "images", "avatars",
+                           "penguin-headphones.png"), "rb") as src, open(plot, "wb") as dst:
+        dst.write(src.read())
+    open_project_session(h, title="Pictures")
+    h.gui("clip-image", pasted)
+    h.click(None, role="TextInput", where=composer)
+    h.key("ctrl+v")
+    h.wait("Open pasted-image-1.png", role="Button", timeout=15)
+    h.settle(0.8)
+    g.cap("pasted", "A pasted picture in the composer, as a thumbnail")
+    ask(h, "Here's the empty screen. Read plot.png too and tell me what you see.",
+        [[("tool", 'read {"path":"plot.png"}')],
+         [("say", "Both pictures came through: the empty start screen and a penguin.")]])
+    h.wait_says("Both pictures came through", timeout=40)
+    h.settle(1.2)
+    g.cap("thumbnails", "Thumbnails under the prompt and under the read that returned a picture")
+    h.click("Open pasted-image-1.png", role="Button")
+    h.wait("Picture viewer", role="Groupbox", timeout=10)
+    h.settle(1)
+    g.cap("viewer", "The viewer: who sent it, its size, zoom, 1:1, fit, turn, folder, close")
+    h.click("Zoom in", role="Button")
+    h.click("Zoom in", role="Button")
+    h.settle(0.6)
+    g.cap("viewer-zoomed", "The viewer zoomed in past the fit")
+    h.key("Escape")
+    h.settle(0.5)
+    h.click("Pictures", role="Button")
+    h.settle(1)
+    g.cap("grid", "Every picture in the session, each saying who sent it")
+    h.key("Escape")
+    h.settle(0.5)
+
+
 def scene_approval(g):
     h = g.h
     open_project_session(h, title="Run the tests")
@@ -451,7 +496,7 @@ SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approva
           ("question", scene_question), ("busy", scene_busy), ("menus", scene_menus),
           ("panels", scene_panels), ("terminal", scene_terminal), ("editor", scene_editor),
           ("settings", scene_settings), ("pages", scene_pages), ("phone", scene_phone),
-          ("schedules", scene_schedules), ("window", scene_window)]
+          ("pictures", scene_pictures), ("schedules", scene_schedules), ("window", scene_window)]
 
 # A sitting of its own: the guide shows only before setup is done.
 GUIDE = ["OpenCode", "Models", "Git", "Theme"]

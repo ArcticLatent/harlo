@@ -8,7 +8,7 @@
 
 mod support;
 
-use opencode_client::{Attachment, Delivery, EventKind, Mention, Message, ModelRef, Prompt};
+use opencode_client::{Attachment, Delivery, EventKind, Mention, Message, ModelRef, Part, Prompt};
 use support::{Sandbox, WAIT, wait_for, wait_idle};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -118,23 +118,87 @@ async fn files_and_pasted_images_go_with_a_prompt() {
         ["a.txt", "pasted.png"],
         "the queued prompt names its attachments, so the live row can show them"
     );
+    let queued: Vec<_> = queued.pictures.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(queued, ["pasted.png"], "only the picture is a picture");
     wait_idle(&client, &session.id).await;
 
     let messages = client.messages(&session.id).await.expect("history");
     let attachments = messages
         .iter()
         .find_map(|m| match m {
-            Message::User { attachments, .. } => Some(attachments.clone()),
+            Message::User {
+                attachments,
+                pictures,
+                ..
+            } => Some((attachments.clone(), pictures.clone())),
             _ => None,
         })
         .expect("the prompt");
-    assert_eq!(attachments, ["a.txt", "pasted.png"]);
+    assert_eq!(attachments.0, ["a.txt", "pasted.png"]);
+    let [picture] = attachments.1.as_slice() else {
+        panic!("one picture: {:?}", attachments.1);
+    };
+    assert_eq!(
+        (picture.name.as_str(), picture.mime.as_str()),
+        ("pasted.png", "image/png")
+    );
+    assert_eq!(&*picture.data, tiny_png().as_slice(), "its bytes, as sent");
     let sent = std::fs::read_to_string(sandbox.root().join("model.jsonl")).expect("model log");
     assert!(sent.contains("alpha"), "the file's text reached the model");
     assert!(
         sent.contains("data:image/png;base64,"),
         "the image reached the model"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_picture_a_tool_reads_comes_back_with_its_bytes() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    std::fs::write(sandbox.project().join("pic.png"), tiny_png()).expect("pic.png");
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("session");
+    let mut events = client.events().await.expect("events");
+    let script = r#"tool read {"path":"pic.png"} ;; say seen"#;
+    client
+        .prompt(&session.id, &Prompt::new(script, Delivery::Steer))
+        .await
+        .expect("sent");
+    let live = tokio::time::timeout(WAIT, async {
+        loop {
+            let event = events.next().await.expect("open").expect("decodes");
+            if let EventKind::ToolEnded { pictures, .. } = event.kind {
+                break pictures;
+            }
+        }
+    })
+    .await
+    .expect("the read ends");
+    wait_idle(&client, &session.id).await;
+    let saved = client
+        .messages(&session.id)
+        .await
+        .expect("history")
+        .into_iter()
+        .flat_map(|m| match m {
+            Message::Assistant { parts, .. } => parts,
+            _ => Vec::new(),
+        })
+        .find_map(|part| match part {
+            Part::Tool(call) => Some(call.pictures),
+            _ => None,
+        })
+        .expect("the read");
+    for pictures in [live, saved] {
+        let [picture] = pictures.as_slice() else {
+            panic!("one picture: {pictures:?}");
+        };
+        assert_eq!(picture.name, "pic.png");
+        assert_eq!(picture.mime, "image/png");
+        assert_eq!(&*picture.data, tiny_png().as_slice());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

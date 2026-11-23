@@ -57,6 +57,7 @@ fn a_sent_prompt_fades_in_and_the_history_stays_still() {
             key: "msg_p1".into(),
             text: "Change the port".into(),
             attachments: Vec::new(),
+            pictures: Vec::new(),
             skills: Vec::new(),
         }]),
     ));

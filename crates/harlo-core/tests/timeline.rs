@@ -22,6 +22,7 @@ fn call(name: &str, input: serde_json::Value, took_ms: Option<f64>) -> Part {
         took_ms,
         files: Vec::new(),
         child: None,
+        pictures: Vec::new(),
     })
 }
 
@@ -32,6 +33,7 @@ fn messages_become_rows_in_order() {
             id: "msg_1".into(),
             text: "Fix the port".into(),
             attachments: vec!["a.txt".into()],
+            pictures: Vec::new(),
             skills: vec!["browser".into()],
         },
         Message::Assistant {
@@ -105,6 +107,7 @@ fn messages_become_rows_in_order() {
             took: Some(Duration::from_secs(15)),
             files: Vec::new(),
             todos: None,
+            pictures: Vec::new(),
         }
     );
     assert!(
@@ -249,6 +252,7 @@ fn glob(status: ToolStatus, detail: &str, took_ms: Option<u64>) -> Change {
         took: took_ms.map(Duration::from_millis),
         files: Vec::new(),
         todos: None,
+        pictures: Vec::new(),
     })
 }
 
@@ -264,6 +268,7 @@ fn stream() -> Vec<(EventKind, f64)> {
                 kind: "user".into(),
                 text: Some("Look around".into()),
                 attachments: vec!["shot.png".into()],
+                pictures: Vec::new(),
                 skills: Vec::new(),
                 delivery: Delivery::Queue,
             },
@@ -316,6 +321,7 @@ fn stream() -> Vec<(EventKind, f64)> {
             error: None,
             files: Vec::new(),
             child: None,
+            pictures: Vec::new(),
         }),
         3_500.0,
     );
@@ -353,6 +359,7 @@ fn live_events_build_the_same_rows_as_the_history() {
                 key: "msg_u".into(),
                 text: "Look around".into(),
                 attachments: vec!["shot.png".into()],
+                pictures: Vec::new(),
                 skills: Vec::new(),
             }),
             Change::Extend {
@@ -401,6 +408,7 @@ fn events_it_cannot_place_ask_for_a_reload() {
             error: Some("boom".into()),
             files: Vec::new(),
             child: None,
+            pictures: Vec::new(),
         }),
         0.0,
     );
@@ -538,6 +546,7 @@ fn edits_and_writes_carry_their_changes() {
                 error: None,
                 files,
                 child: None,
+                pictures: Vec::new(),
             }),
             2.0,
         );
@@ -645,6 +654,7 @@ fn a_live_subagent_call_and_report_need_no_reload() {
             error: None,
             files: Vec::new(),
             child: Some("ses_child".into()),
+            pictures: Vec::new(),
         }),
         3.0,
     );

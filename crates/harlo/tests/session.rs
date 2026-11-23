@@ -88,6 +88,7 @@ fn tool_ended(ui: &Ui, message: &str, call: &str, files: Vec<FileDiff>, time: f6
             error: None,
             files,
             child: None,
+            pictures: Vec::new(),
         },
         time,
     ));
@@ -105,6 +106,7 @@ fn a_run_streams_in_and_its_tools_fold_up_when_done() {
                 kind: "user".into(),
                 text: Some("Look around the docs".into()),
                 attachments: Vec::new(),
+                pictures: Vec::new(),
                 skills: Vec::new(),
                 delivery: Delivery::Queue,
             },
@@ -184,6 +186,7 @@ fn a_busy_session_queues_steers_and_stops() {
             kind: "user".into(),
             text: Some("Then update the changelog".into()),
             attachments: Vec::new(),
+            pictures: Vec::new(),
             skills: Vec::new(),
             delivery: Delivery::Queue,
         }],
@@ -632,6 +635,7 @@ fn with_history() -> Ui {
             key: "msg_p1".into(),
             text: "Change the port to 9877".into(),
             attachments: Vec::new(),
+            pictures: Vec::new(),
             skills: Vec::new(),
         },
         Entry::Answer {
@@ -771,6 +775,7 @@ fn long_history(count: usize) -> Vec<Entry> {
                     key: format!("msg_p{i}"),
                     text: format!("Question number {i}"),
                     attachments: Vec::new(),
+                    pictures: Vec::new(),
                     skills: Vec::new(),
                 },
                 Entry::Answer {
@@ -837,11 +842,13 @@ fn another_session_opens_at_its_end_after_scrolling_up() {
                 key,
                 text,
                 attachments,
+                pictures,
                 skills,
             } => Entry::Prompt {
                 key,
                 text: text.replace("Question", "Other question"),
                 attachments,
+                pictures,
                 skills,
             },
             entry => entry,

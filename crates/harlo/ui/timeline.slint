@@ -6,6 +6,7 @@ import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Shape, TimelineRow, DiffLine, Chip, PromptMark } from "data.slint";
 import { Icon, Press, HLine, Breathing } from "widgets.slint";
+import { ThumbStrip } from "pictures.slint";
 
 /// The timeline column's widest size.
 export global Column {
@@ -142,6 +143,9 @@ component PromptRow inherits Rectangle {
                 if root.item.label != "": Prose {
                     text: root.item.text;
                     default-color: Theme.text-strong;
+                }
+                if root.item.pictures.length > 0: ThumbStrip {
+                    pictures: root.item.pictures;
                 }
                 if root.item.chips.length > 0: HorizontalLayout {
                     alignment: start;
@@ -565,6 +569,13 @@ component RowView inherits Rectangle {
         }
         if root.item.shape == Shape.report: ReportRow {
             item: root.item;
+        }
+        // Under the tool's name, past its mark.
+        if root.item.shape == Shape.pictures: HorizontalLayout {
+            padding-left: 22px;
+            ThumbStrip {
+                pictures: root.item.pictures;
+            }
         }
     }
 }

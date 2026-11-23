@@ -9,6 +9,7 @@ import { Icon, Press, HLine, Breathing, ErrorLine } from "widgets.slint";
 import { Composer, PickerChip } from "composer.slint";
 import { Timeline, TimelineScrollbar, PromptRail } from "timeline.slint";
 import { WaitingCards } from "waiting.slint";
+import { PictureViewer, PictureGrid } from "pictures.slint";
 
 /// The Changes panel's number, as Rust's `panel_number` gives it.
 global Panels {
@@ -155,6 +156,23 @@ component InboxLine inherits Rectangle {
 }
 
 /// The session's title, then its agent and model, and a way to its changes.
+/// A word in the session's header that opens something.
+component HeaderLink inherits Press {
+    in property <string> text;
+    height: 28px;
+    label: root.text;
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: Size.label;
+            color: root.selected ? Theme.text-strong : Theme.text-base;
+        }
+    }
+}
+
 component Header inherits Rectangle {
     in property <length> column;
 
@@ -261,19 +279,17 @@ component Header inherits Rectangle {
 
         VerticalLayout {
             alignment: center;
-            Press {
-                label: "Changes";
-                height: 28px;
-                clicked => { Logic.open-panel(Panels.changes); }
-                HorizontalLayout {
-                    padding-left: 9px;
-                    padding-right: 9px;
-                    Text {
-                        text: "Changes";
-                        vertical-alignment: center;
-                        font-size: Size.label;
-                        color: Theme.text-base;
-                    }
+            HorizontalLayout {
+                spacing: 2px;
+                HeaderLink {
+                    text: "Pictures";
+                    about: State.pictures-count == 0 ? "None yet" : "\{State.pictures-count}";
+                    selected: State.pictures-grid;
+                    clicked => { Logic.toggle-pictures(); }
+                }
+                HeaderLink {
+                    text: "Changes";
+                    clicked => { Logic.open-panel(Panels.changes); }
                 }
             }
         }
@@ -416,5 +432,15 @@ export component SessionView inherits Rectangle {
         x: (root.width - self.width) / 2;
         y: timeline.y + timeline.height - self.height - 12px;
         clicked => { timeline.to-end(); }
+    }
+
+    // Pictures cover the timeline and the composer; the header stays.
+    if State.pictures-grid: PictureGrid {
+        y: timeline.y;
+        height: root.height - self.y;
+    }
+    if State.viewer-open: PictureViewer {
+        y: timeline.y;
+        height: root.height - self.y;
     }
 }
