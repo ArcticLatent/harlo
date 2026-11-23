@@ -95,6 +95,8 @@ export struct Chip {
 export struct MenuItem {
     label: string,
     detail: string,
+    /// A line under the label saying what the choice means; empty for none.
+    below: string,
     dot: color,
     has-dot: bool,
     selected: bool,

@@ -245,7 +245,7 @@ def scene_menus(g):
         g.cap("dont-ask", "Don't ask chosen: the mode is named beside the shield")
         h.click("Permissions", where=foot)
         h.settle(0.5)
-        h.click("Ask before commands")
+        h.click("Agent's own rules")
         h.settle(0.5)
 
 

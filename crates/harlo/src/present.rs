@@ -372,6 +372,7 @@ impl Presenter {
                         dot: dot.map(color).unwrap_or_default(),
                         has_dot: dot.is_some(),
                         selected: false,
+                        ..MenuItem::default()
                     }
                 })
                 .collect(),
@@ -411,6 +412,7 @@ impl Presenter {
                 .map(|item| MenuItem {
                     label: item.label.into(),
                     detail: item.detail.unwrap_or_default().into(),
+                    below: item.below.unwrap_or_default().into(),
                     dot: item.dot.map(color).unwrap_or_default(),
                     has_dot: item.dot.is_some(),
                     selected: item.selected,
@@ -426,7 +428,6 @@ impl Presenter {
                 .nth(app.picker_index)
                 .and_then(|agent| agent.description)
                 .unwrap_or_default(),
-            Picker::Shield => app.current_shield().detail().to_owned(),
             Picker::DefaultModel => {
                 "Sets OpenCode's default, for new sessions in every app using this server."
                     .to_owned()
@@ -445,7 +446,9 @@ impl Presenter {
             Picker::ScheduleSession => {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }
-            Picker::Folder
+            // Each mode says what it means on its own row.
+            Picker::Shield
+            | Picker::Folder
             | Picker::Variant
             | Picker::Model
             | Picker::ScheduleFolder

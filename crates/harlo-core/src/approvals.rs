@@ -55,7 +55,7 @@ impl Shield {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Agent => "Ask before commands",
+            Self::Agent => "Agent's own rules",
             Self::Careful => "Ask before edits and commands",
             Self::Trusted => "Don't ask",
             Self::Custom => "Custom rules",
@@ -66,9 +66,9 @@ impl Shield {
     #[must_use]
     pub fn detail(self) -> &'static str {
         match self {
-            Self::Agent => "The agent's own rules decide",
-            Self::Careful => "Every file change waits for you too",
-            Self::Trusted => "Edits and commands run straight away",
+            Self::Agent => "The agent decides; commands usually ask",
+            Self::Careful => "Every edit and command waits for you",
+            Self::Trusted => "Edits and commands run without asking",
             Self::Custom => "This session has rules set elsewhere",
         }
     }

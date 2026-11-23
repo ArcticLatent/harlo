@@ -135,6 +135,8 @@ pub struct Item {
     pub label: String,
     /// A note on the right, such as a model's provider.
     pub detail: Option<String>,
+    /// A line under the name, saying what the choice means.
+    pub below: Option<String>,
     /// A colour dot before the name, such as an agent's.
     pub dot: Option<Rgba>,
     /// Whether it's the current choice.
@@ -239,6 +241,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 selected: folder.directory == app.new_folder,
                 label: folder.label,
                 detail: None,
+                below: None,
                 dot: None,
                 message: Message::PickFolder(folder.directory),
             })
@@ -254,6 +257,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     selected: Some(&agent.id) == current.as_ref(),
                     label: agent.name,
                     detail: agent.read_only.then(|| READ_ONLY.to_owned()),
+                    below: None,
                     dot: agent.color,
                     message: Message::PickAgent(agent.id),
                 })
@@ -267,6 +271,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     selected: variant == current,
                     label: variant.to_string(),
                     detail: None,
+                    below: None,
                     dot: None,
                     message: Message::PickVariant(variant),
                 })
@@ -280,6 +285,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     selected: mode == current,
                     label: mode.label().to_owned(),
                     detail: None,
+                    below: Some(mode.detail().to_owned()),
                     dot: None,
                     message: Message::PickShield(mode),
                 })
@@ -306,6 +312,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                         .is_some_and(|c| c.provider_id == model.provider_id && c.id == model.id),
                     label: model.name.clone(),
                     detail: Some(model.provider_id.clone()),
+                    below: None,
                     dot: None,
                     message: match picker {
                         Picker::DefaultModel => {
@@ -342,6 +349,7 @@ fn provider_items(app: &App) -> Vec<Item> {
                 selected: false,
                 label: integration.name.clone(),
                 detail: signed.then(|| "signed in".to_owned()),
+                below: None,
                 dot: None,
                 message: Message::Sheet(SheetEvent::Provider(ProviderEvent::Open(
                     integration.id.clone(),
@@ -361,6 +369,7 @@ fn language_items(app: &App) -> Vec<Item> {
             selected: index == chosen,
             label: (*name).to_owned(),
             detail: None,
+            below: None,
             dot: None,
             message: Message::Sheet(SheetEvent::Choose(SettingChoice::VoiceLanguage, index)),
         })
@@ -379,6 +388,7 @@ fn schedule_items(app: &App, picker: Picker) -> Vec<Item> {
                     selected: chosen == Some(directory.as_str()),
                     label: folder.label,
                     detail: None,
+                    below: None,
                     dot: None,
                     message: schedule_message(ScheduleEvent::Folder(directory)),
                 })
@@ -390,6 +400,7 @@ fn schedule_items(app: &App, picker: Picker) -> Vec<Item> {
             selected: draft.session.is_none(),
             label: "A new session".to_owned(),
             detail: Some("named after the schedule".to_owned()),
+            below: None,
             dot: None,
             message: schedule_message(ScheduleEvent::Session(None)),
         };
@@ -404,6 +415,7 @@ fn schedule_items(app: &App, picker: Picker) -> Vec<Item> {
                 selected: draft.session.as_deref() == Some(session.id.as_str()),
                 label: session_label(&session.title),
                 detail: None,
+                below: None,
                 dot: None,
                 message: schedule_message(ScheduleEvent::Session(Some(session.id.clone()))),
             });

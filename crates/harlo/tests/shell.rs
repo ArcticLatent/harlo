@@ -326,3 +326,26 @@ fn the_permissions_mode_is_named_beside_the_shield_unless_its_the_agents() {
     ui.send(Message::PickShield(Shield::Careful));
     assert_eq!(shield().as_deref(), Some("Ask before edits"));
 }
+
+#[test]
+fn each_permissions_mode_says_what_it_means_under_its_name() {
+    let mut app = demo::app();
+    app.active = None;
+    let ui = ui(app);
+    ui.press("Permissions");
+    for mode in Shield::CHOICES {
+        let row = ui.button(mode.label());
+        assert_eq!(
+            row.accessible_description().as_deref(),
+            Some(mode.detail()),
+            "{}",
+            mode.label()
+        );
+        assert!(
+            ui.shows(mode.detail()),
+            "{} shows its meaning",
+            mode.label()
+        );
+    }
+    assert!(ui.shows("Agent's own rules"));
+}
