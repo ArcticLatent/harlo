@@ -173,6 +173,26 @@ impl Client {
         }
     }
 
+    /// Lists the top-level sessions whose titles contain `query`, ignoring
+    /// case, newest first, at most `limit` of them.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or answers with an error.
+    pub async fn search_sessions(&self, query: &str, limit: usize) -> Result<Vec<Session>, Error> {
+        let limit = limit.to_string();
+        let req = self.request(Method::GET, "/api/session").query(&[
+            ("search", query),
+            ("parentID", "null"),
+            ("order", "desc"),
+            ("limit", limit.as_str()),
+        ]);
+        let v = Self::json(req).await?;
+        decode_list(&v["data"], |item| {
+            Ok(serde_json::from_value::<g::SessionInfo>(item.clone())?.into())
+        })
+    }
+
     /// Lists the projects OpenCode knows, archived ones left out.
     ///
     /// # Errors

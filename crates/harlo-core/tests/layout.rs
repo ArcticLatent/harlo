@@ -132,6 +132,7 @@ fn preferences_load_back_beside_the_layout() {
         text_size: TextSize::Larger,
         code_size: TextSize::Small,
         glass: true,
+        own_tools: false,
         appearance: Appearance::Light,
         project_models: [(
             "/home/u/code/harlo".to_owned(),

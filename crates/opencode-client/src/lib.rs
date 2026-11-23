@@ -27,6 +27,7 @@ mod prompt;
 mod pty;
 mod settings;
 mod setup;
+mod tool_host;
 mod types;
 
 #[doc(inline)]
@@ -61,6 +62,8 @@ pub use settings::{
 };
 #[doc(inline)]
 pub use setup::{CommandSetup, Setup};
+#[doc(inline)]
+pub use tool_host::{ToolHost, ToolOutcome, ToolRun, ToolSpec};
 #[doc(inline)]
 pub use types::{
     Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, InboxItem,

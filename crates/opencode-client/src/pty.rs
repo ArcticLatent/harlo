@@ -173,12 +173,28 @@ impl Client {
         directory: &str,
         id: &str,
     ) -> Result<(PtyOutput, PtyInput), Error> {
+        let socket = self
+            .open_socket(
+                &format!("/api/pty/{id}/connect"),
+                &[("location[directory]", directory)],
+            )
+            .await?;
+        let (sink, stream) = socket.split();
+        Ok((PtyOutput { socket: stream }, PtyInput { socket: sink }))
+    }
+}
+
+impl Client {
+    /// Opens a WebSocket to `path` on the server, with `params` and the
+    /// server's password.
+    pub(crate) async fn open_socket(
+        &self,
+        path: &str,
+        params: &[(&str, &str)],
+    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Error> {
         let base = self.endpoint().url();
-        let mut url = reqwest::Url::parse_with_params(
-            &format!("{base}/api/pty/{id}/connect"),
-            &[("location[directory]", directory)],
-        )
-        .map_err(|e| Error::other(format!("not a server address: {e}")))?;
+        let mut url = reqwest::Url::parse_with_params(&format!("{base}{path}"), params)
+            .map_err(|e| Error::other(format!("not a server address: {e}")))?;
         let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
         url.set_scheme(scheme)
             .map_err(|()| Error::other("can't make a WebSocket address"))?;
@@ -191,8 +207,7 @@ impl Client {
         let (socket, _) = tokio_tungstenite::connect_async(request)
             .await
             .map_err(Error::socket)?;
-        let (sink, stream) = socket.split();
-        Ok((PtyOutput { socket: stream }, PtyInput { socket: sink }))
+        Ok(socket)
     }
 }
 

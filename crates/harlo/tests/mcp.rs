@@ -12,9 +12,9 @@ mod support;
 
 use std::sync::Arc;
 
-use harlo::app::{App, Load, McpView, Message};
+use harlo::app::{Load, McpView, Message};
 use harlo_core::config;
-use harlo_core::server::{Connected, Location, McpStatus, Update, load};
+use harlo_core::server::{Connected, McpStatus, Update, load};
 use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
@@ -63,7 +63,7 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     std::fs::write(&probe, PROBE).expect("probe.py");
     let folder = sandbox.root().join("config/opencode");
 
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     app.opencode_folder = Some(folder.clone());
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
@@ -168,7 +168,7 @@ fn a_catalog_server_is_added_to_the_config() {
     let mut tasks = Tasks::new();
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let folder = scratch.path().join("opencode");
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     app.opencode_folder = Some(folder.clone());
     let ui = ui(app);
     ui.press("Settings");

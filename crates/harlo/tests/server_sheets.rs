@@ -11,16 +11,16 @@ use std::sync::Arc;
 
 use i_slint_backend_testing::AccessibleRole;
 
-use harlo::app::{App, Load, Message};
+use harlo::app::{Load, Message};
 use harlo::model::Picker;
-use harlo_core::server::{Connected, Location, Update};
+use harlo_core::server::{Connected, Update};
 use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
 
 /// The window connected to `sandbox`.
 fn window(sandbox: &Sandbox) -> Ui {
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
@@ -68,7 +68,7 @@ fn the_model_for_new_sessions_is_set_in_opencodes_config() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
     let folder = sandbox.root().join("config/opencode");
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     // The sandbox's own config folder, never the real one.
     app.opencode_folder = Some(folder.clone());
     let _ = app.update(Message::Tick(demo::now()));
@@ -136,7 +136,7 @@ fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_opencodes_config() 
     let folder = sandbox.root().join("config/opencode");
     let gitconfig = sandbox.root().join("home/.gitconfig");
     std::fs::write(&gitconfig, "[user]\n\tname = Scratch Person\n").expect("a git config");
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     // The sandbox's own configs, never the real ones.
     app.opencode_folder = Some(folder.clone());
     app.git_config = harlo_core::git::Global::new()

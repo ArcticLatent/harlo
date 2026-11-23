@@ -16,8 +16,8 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use harlo::app::{App, Message, TerminalEvent};
-use harlo_core::server::{Connected, Location, Update};
+use harlo::app::{Message, TerminalEvent};
+use harlo_core::server::{Connected, Update};
 use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
@@ -76,8 +76,7 @@ fn stand_in(path: &Path) {
 
 /// The window connected to `sandbox`, with Claude Code at `claude`.
 fn window(sandbox: &Sandbox, claude: &Path) -> Ui {
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout())
-        .with_claude_program(claude);
+    let mut app = demo::new_app().with_claude_program(claude);
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),

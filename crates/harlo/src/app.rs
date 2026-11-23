@@ -39,6 +39,7 @@ mod line_comments;
 mod mcp;
 mod notes;
 mod notices;
+mod own_tools;
 mod projects;
 mod providers;
 mod schedules;
@@ -65,6 +66,7 @@ pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
 pub use mcp::{McpEvent, McpServers, McpView};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
+pub use own_tools::OwnToolsEvent;
 pub use projects::{ProjectEvent, Projects, icon_url};
 pub use providers::{Attempt as SignInAttempt, FORM_FIELDS, ProviderEvent, Providers};
 pub use schedules::{Draft as ScheduleDraft, Page as SchedulePage, ScheduleEvent, Schedules};
@@ -241,6 +243,8 @@ pub enum Message {
     Sheet(SheetEvent),
     /// Something happened to the Claude subscription.
     Claude(ClaudeEvent),
+    /// Something happened to Harlo's own tools for agents.
+    OwnTools(OwnToolsEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -509,6 +513,9 @@ pub struct App {
     timelines: HashMap<String, Timeline>,
     /// The folder a new session starts in; `None` is the home folder.
     pub new_folder: Option<String>,
+    /// The home folder: where sessions outside a project work. Tests set a
+    /// scratch folder.
+    pub home: String,
     /// OpenCode's global config folder on this computer, which Settings may
     /// change for the background service. Only the running app sets it;
     /// tests give a scratch folder or none.
@@ -603,6 +610,12 @@ pub struct App {
     restore: Option<Tabs>,
     /// The connection to the current server; dropping it disconnects.
     following: Option<crate::task::Handle>,
+    /// The connections offering Harlo's own tools to agents, by folder.
+    own_tools: HashMap<String, crate::task::Handle>,
+    /// Whether attaching waits a moment after a connection broke.
+    own_tools_paused: bool,
+    /// Why offering them last failed.
+    pub own_tools_error: Option<String>,
 }
 
 impl App {
@@ -655,6 +668,7 @@ impl App {
             active: None,
             timelines: HashMap::new(),
             new_folder: None,
+            home: home_folder(),
             opencode_folder: None,
             autostart: None,
             git_config: harlo_core::git::Global::new()
@@ -701,6 +715,9 @@ impl App {
             preferences: Preferences::default(),
             claude: Claude::default(),
             following: None,
+            own_tools: HashMap::new(),
+            own_tools_paused: false,
+            own_tools_error: None,
             saved: layout,
         };
         app.restore = app.other_tabs.remove(&app.location.label());
@@ -784,6 +801,7 @@ impl App {
             self.follow_context(),
             self.follow_files(),
             self.follow_notes(),
+            self.follow_own_tools(),
         ]);
         // While an edge is dragged, the layout is saved once, when it's let go.
         let layout = self.layout();
@@ -823,6 +841,7 @@ impl App {
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Sheet(event) => return self.sheet_event(event),
             Message::Claude(event) => return self.claude_event(event),
+            Message::OwnTools(event) => return self.own_tools_event(event),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => self.toggle_more(folder),
@@ -1169,6 +1188,7 @@ impl App {
             Update::Lost { reason, retry_in } => {
                 self.status = Status::Lost { reason, retry_in };
                 self.client = None;
+                self.withdraw_own_tools();
             }
         }
         Task::none()
@@ -1305,6 +1325,7 @@ impl App {
             self.restore = self.other_tabs.remove(&location.label());
             self.location = location;
             self.status = Status::Connecting { attempt: 1 };
+            self.withdraw_own_tools();
             self.client = None;
             self.active = None;
             self.tabs.clear();
@@ -1796,7 +1817,7 @@ impl App {
             .and_then(|id| self.workspace.session(id))
         {
             Some(session) => session.directory.clone(),
-            None => self.new_folder.clone().unwrap_or_else(home_folder),
+            None => self.new_folder.clone().unwrap_or_else(|| self.home.clone()),
         }
     }
 

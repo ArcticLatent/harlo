@@ -11,9 +11,9 @@ mod support;
 
 use std::sync::Arc;
 
-use harlo::app::{App, Load, Message};
+use harlo::app::{Load, Message};
 use harlo_core::server::{
-    Connected, Delivery, Effect, Location, PermissionReply, Prompt, Rule, Update, load,
+    Connected, Delivery, Effect, PermissionReply, Prompt, Rule, Update, load,
 };
 use server::{Sandbox, WAIT, wait_for, wait_idle};
 use support::tasks::Tasks;
@@ -68,7 +68,7 @@ fn agents_and_saved_approvals_are_shown_and_an_approval_removed() {
     tasks.block_on(allow_always(&sandbox));
     let snapshot = tasks.block_on(load(&sandbox.client())).expect("snapshot");
 
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),

@@ -9,7 +9,7 @@ use harlo_core::server::{McpServer, McpStatus};
 use lucide_icons::Icon;
 
 use super::{PROJECT, choice, glyph, heading, int, live_field, note, pair};
-use crate::app::{App, Field, Load, McpView, SetUp, SettingChoice};
+use crate::app::{App, Field, Load, McpView, SetUp, Setting, SettingChoice};
 use crate::ui::SheetRow;
 use crate::window;
 
@@ -56,6 +56,25 @@ pub(super) fn list_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
         rows.push(note(
             "Add MCP servers in OpenCode's config on the server's computer.",
         ));
+    }
+}
+
+/// The switch for Harlo's own tools, with how they stand.
+pub(super) fn own_tools_rows(app: &App, rows: &mut Vec<SheetRow>) {
+    rows.push(heading("Harlo's tools"));
+    rows.push(super::switch(
+        Setting::OwnTools,
+        "Past sessions",
+        "Lets agents find earlier sessions on this server and read them, while Harlo is open. \
+         Every session on the server can use them, from any app.",
+        app.preferences.own_tools,
+    ));
+    if let Some(why) = app
+        .own_tools_error
+        .as_ref()
+        .filter(|_| app.preferences.own_tools)
+    {
+        rows.push(pair("Not offered", why, 2));
     }
 }
 

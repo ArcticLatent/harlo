@@ -13,8 +13,8 @@ mod support;
 
 use std::sync::Arc;
 
-use harlo::app::{App, Message, TerminalEvent};
-use harlo_core::server::{Connected, Location, Update};
+use harlo::app::{Message, TerminalEvent};
+use harlo_core::server::{Connected, Update};
 use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
@@ -22,7 +22,7 @@ use support::{Ui, demo, ui};
 /// The window connected to `sandbox`, with shells on the server.
 fn window(sandbox: &Sandbox) -> Ui {
     let project = sandbox.project_str();
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout())
+    let mut app = demo::new_app()
         .terminal_shell("/bin/sh", project.clone())
         .terminals_on_server();
     let _ = app.update(Message::Tick(demo::now()));

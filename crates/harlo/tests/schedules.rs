@@ -16,16 +16,16 @@ use i_slint_backend_testing::AccessibleRole;
 use slint::ComponentHandle as _;
 use slint::platform::{Key, WindowEvent};
 
-use harlo::app::{App, Load, Message, SchedulePage};
+use harlo::app::{Load, Message, SchedulePage};
 use harlo::model::Picker;
-use harlo_core::server::{AutomationStatus, Connected, Location, Update};
+use harlo_core::server::{AutomationStatus, Connected, Update};
 use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
 
 /// Settings → Schedules, connected to `sandbox` and writing its config.
 fn schedules(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     app.opencode_folder = Some(sandbox.root().join("config/opencode"));
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {

@@ -287,11 +287,14 @@ fn settings_show_the_servers_set_up_and_about() {
     assert!(ui.shows("No sign-in needed"));
     ui.press("Tools for agents");
     // Opening it asks again.
-    let serial = ui.app().sheets.serial;
+    let serial = ui.app().sheets.serial();
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(setup()))));
     assert!(ui.shows("Exa"));
-    assert!(
-        ui.shows("Failed: no such command"),
+    // A server's row opens its page, and says how it stands.
+    let docs = ui.find("docs").into_iter().next().expect("the server's row");
+    assert_eq!(
+        docs.accessible_description().as_deref(),
+        Some("Failed: no such command"),
         "an MCP server's failure"
     );
     assert!(ui.shows("Couldn't list them: server went away"));

@@ -356,7 +356,7 @@ impl App {
         args: Vec<String>,
         then: Message,
     ) -> Task<Message> {
-        let folder = super::home_folder();
+        let folder = self.home.clone();
         let id = self.terminals.next;
         let (screen, receiver) = match Screen::local(program, args, &folder, id) {
             Ok(started) => started,

@@ -15,10 +15,10 @@ use std::sync::Arc;
 
 use i_slint_backend_testing::AccessibleRole;
 
-use harlo::app::{App, Load, Message, ProviderEvent, SheetEvent};
+use harlo::app::{Load, Message, ProviderEvent, SheetEvent};
 use harlo::model::Picker;
 use harlo_core::server::{
-    AttemptStatus, Connected, Integration, Location, OAuthAttempt, SignInMethod, Update,
+    AttemptStatus, Connected, Integration, OAuthAttempt, SignInMethod, Update,
 };
 use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
@@ -42,7 +42,7 @@ fn models(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
         .await
     });
     assert!(listed.is_ok(), "the server lists its integrations");
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = demo::new_app();
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
@@ -188,11 +188,7 @@ fn provider(event: ProviderEvent) -> Message {
 #[test]
 fn a_browser_sign_in_shows_its_page_takes_a_code_and_ends() {
     // No server: the sign-in's steps are fed in, and no page opens.
-    let ui = ui(App::new(
-        Location::Shared,
-        vec![Location::Shared],
-        demo::layout(),
-    ));
+    let ui = ui(demo::new_app());
     ui.press("Settings");
     ui.press("Models");
     let service = Integration {

@@ -213,11 +213,13 @@ pub enum Setting {
     /// Whether OpenCode allows automations, which schedules are: its
     /// config, not a preference.
     Automations,
+    /// [`Preferences::own_tools`].
+    OwnTools,
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -233,6 +235,7 @@ impl Setting {
         Self::QuietQuestions,
         Self::Snapshots,
         Self::Automations,
+        Self::OwnTools,
     ];
 }
 
@@ -571,6 +574,15 @@ pub struct Sheets {
     serial: u64,
 }
 
+impl Sheets {
+    /// The number of the latest load: the stats or setup that answers it
+    /// carries it, and older answers are dropped.
+    #[must_use]
+    pub fn serial(&self) -> u64 {
+        self.serial
+    }
+}
+
 impl App {
     /// Applies something that happened to the pages, and checks the Claude
     /// subscription when Models comes into view.
@@ -716,6 +728,10 @@ impl App {
                 self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
             }
             Setting::Glass => self.preferences.glass = !self.preferences.glass,
+            Setting::OwnTools => {
+                // Attached or detached after this update.
+                self.preferences.own_tools = !self.preferences.own_tools;
+            }
             setting => self.switch_notice(setting),
         }
         self.save_preferences()
@@ -785,7 +801,8 @@ impl App {
             | Setting::StartAtLogin
             | Setting::KeepInTray
             | Setting::Snapshots
-            | Setting::Automations => {
+            | Setting::Automations
+            | Setting::OwnTools => {
                 return;
             }
         };

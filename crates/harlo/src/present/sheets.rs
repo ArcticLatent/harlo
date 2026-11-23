@@ -1504,6 +1504,7 @@ fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
         pair(&s.name, "", 0)
     });
     mcp::list_rows(app, setup, &mut rows);
+    mcp::own_tools_rows(app, &mut rows);
     section(&mut rows, "Plugins", &setup.plugins, |p| {
         let source = match &p.source {
             PluginSource::Builtin => "built in".to_owned(),

@@ -155,9 +155,18 @@ pub fn layout() -> Layout {
     }
 }
 
+/// A new app on the shared service, with the mockup's layout. Harlo's own
+/// tools stay off: offered, they'd attach for the real home folder on the
+/// test's server. Their own test turns them on with a scratch home.
+pub fn new_app() -> App {
+    let mut app = App::new(Location::Shared, vec![Location::Shared], layout());
+    app.preferences.own_tools = false;
+    app
+}
+
 /// An app connected to the mockup's server, with the clock at [`now`].
 pub fn app() -> App {
-    let mut app = App::new(Location::Shared, vec![Location::Shared], layout());
+    let mut app = new_app();
     let _ = app.update(Message::Tick(now()));
     let _ = app.update(connected(snapshot()));
     app
