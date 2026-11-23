@@ -17,7 +17,7 @@ serde_json = { workspace = true, features = ["std"] }
 # SQLite is built in, so the app needs no system library.
 rusqlite = { workspace = true, features = ["bundled"] }
 dirs = { workspace = true }
-jsonc-parser = { workspace = true, features = ["cst"] }
+jsonc-parser = { workspace = true, features = ["cst", "serde_json"] }
 jiff = { workspace = true }
 similar = { workspace = true, features = ["std", "text"] }
 # Forgejo's API, over the system's TLS and certificates (company CAs included).

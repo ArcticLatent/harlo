@@ -36,6 +36,7 @@ mod files;
 mod git_settings;
 mod hosting;
 mod line_comments;
+mod mcp;
 mod notes;
 mod notices;
 mod projects;
@@ -61,6 +62,7 @@ pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile
 pub use git_settings::{GitEvent, GitSettings};
 pub use hosting::{HostingEvent, HostingState, SigningIn};
 pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
+pub use mcp::{McpEvent, McpServers, McpView};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use projects::{ProjectEvent, Projects, icon_url};

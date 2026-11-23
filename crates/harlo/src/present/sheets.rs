@@ -6,7 +6,7 @@
 
 use std::rc::Rc;
 
-use harlo_core::server::{Day, Location, McpStatus, PluginSource, Stats, Tokens};
+use harlo_core::server::{Day, Location, PluginSource, Stats, Tokens};
 use slint::{ModelRc, SharedString, VecModel};
 
 use lucide_icons::Icon;
@@ -15,6 +15,7 @@ use super::marks::{Marks, project_color};
 use super::{glyph, sync};
 
 mod agents;
+mod mcp;
 mod providers;
 mod schedules;
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
@@ -304,10 +305,15 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
             rows.extend(claude_rows(app));
             rows
         }
-        Section::Tools => match &app.sheets.setup {
-            Load::Loaded(setup) => setup_rows(setup),
-            Load::Idle | Load::Loading | Load::Failed(_) => Vec::new(),
-        },
+        Section::Tools => {
+            let setup = match &app.sheets.setup {
+                Load::Loaded(setup) => Some(setup.as_ref()),
+                Load::Idle | Load::Loading | Load::Failed(_) => None,
+            };
+            mcp::page_rows(app, setup)
+                .or_else(|| setup.map(|setup| setup_rows(app, setup)))
+                .unwrap_or_default()
+        }
         Section::Agents => agents::agent_rows(app),
         Section::Schedules => schedules::schedule_rows(app),
         Section::Server => server_rows(app),
@@ -1492,22 +1498,12 @@ fn about_rows(app: &App) -> Vec<SheetRow> {
 }
 
 /// The server's web search, MCP servers and plugins, for Tools.
-fn setup_rows(setup: &SetUp) -> Vec<SheetRow> {
+fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     let mut rows = Vec::new();
     section(&mut rows, "Web search", &setup.search, |s| {
         pair(&s.name, "", 0)
     });
-    section(&mut rows, "MCP servers", &setup.mcp, |m| {
-        let (state, tone) = match &m.status {
-            McpStatus::Connected => ("connected".to_owned(), 1),
-            McpStatus::Pending => ("connecting".to_owned(), 3),
-            McpStatus::Disabled => ("off".to_owned(), 3),
-            McpStatus::Failed(why) => (format!("failed: {why}"), 2),
-            McpStatus::NeedsAuth(why) => (format!("needs sign-in: {why}"), 2),
-            McpStatus::Other(what) => (what.clone(), 3),
-        };
-        pair(m.title.as_deref().unwrap_or(&m.name), &state, tone)
-    });
+    mcp::list_rows(app, setup, &mut rows);
     section(&mut rows, "Plugins", &setup.plugins, |p| {
         let source = match &p.source {
             PluginSource::Builtin => "built in".to_owned(),

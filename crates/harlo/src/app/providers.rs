@@ -34,6 +34,9 @@ pub enum ProviderEvent {
     Pick,
     /// Show the page that signs in to an integration, by ID.
     Open(String),
+    /// Show Models with that page, from elsewhere in Settings, such as an
+    /// MCP server that signs in through an integration.
+    OpenFrom(String),
     /// Back to the list.
     Back,
     /// Use the integration's sign-in method at this place in its list.
@@ -195,6 +198,11 @@ impl App {
                 let open =
                     self.picker_action(Message::TogglePicker(crate::model::Picker::Provider));
                 return Task::batch([reload, open]);
+            }
+            ProviderEvent::OpenFrom(id) => {
+                self.sheets.section = super::Section::Models;
+                self.sheets.query.clear();
+                return self.provider_event(ProviderEvent::Open(id));
             }
             ProviderEvent::Open(id) => {
                 page.shown = Some(id);

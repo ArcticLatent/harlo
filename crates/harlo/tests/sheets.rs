@@ -110,6 +110,7 @@ fn setup() -> SetUp {
             name: "docs".into(),
             title: None,
             status: McpStatus::Failed("no such command".into()),
+            integration: None,
         }]),
         plugins: Err("server went away".into()),
     }
@@ -285,9 +286,12 @@ fn settings_show_the_servers_set_up_and_about() {
     assert!(ui.shows("Fake"));
     assert!(ui.shows("No sign-in needed"));
     ui.press("Tools for agents");
+    // Opening it asks again.
+    let serial = ui.app().sheets.serial;
+    ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(setup()))));
     assert!(ui.shows("Exa"));
     assert!(
-        ui.shows("failed: no such command"),
+        ui.shows("Failed: no such command"),
         "an MCP server's failure"
     );
     assert!(ui.shows("Couldn't list them: server went away"));

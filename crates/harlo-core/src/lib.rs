@@ -16,6 +16,7 @@ pub mod git;
 pub mod hosting;
 pub mod instructions;
 pub mod layout;
+pub mod mcp_catalog;
 pub mod notes;
 pub mod notifications;
 pub mod schedules;

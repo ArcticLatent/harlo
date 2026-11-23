@@ -273,11 +273,17 @@ pub enum Field {
     SignInCode,
     /// The answer to a sign-in form's field, by its place.
     SignInAnswer(u8),
+    /// A new MCP server's name.
+    McpName,
+    /// The program a new MCP server runs, with its arguments.
+    McpCommand,
+    /// A new MCP server's address.
+    McpUrl,
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 32] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -307,6 +313,9 @@ impl Field {
         Self::SignInAnswer(5),
         Self::SignInAnswer(6),
         Self::SignInAnswer(7),
+        Self::McpName,
+        Self::McpCommand,
+        Self::McpUrl,
     ];
 }
 
@@ -347,11 +356,13 @@ pub enum SettingChoice {
     /// The answer to a sign-in form's field with a few options, by the
     /// field's place; the row brings its options.
     SignInAnswer(u8),
+    /// Whether a new MCP server is a program or an address.
+    McpKind,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -370,6 +381,7 @@ impl SettingChoice {
         Self::SignInAnswer(5),
         Self::SignInAnswer(6),
         Self::SignInAnswer(7),
+        Self::McpKind,
     ];
 
     /// The options, as Settings names them, in order.
@@ -392,6 +404,7 @@ impl SettingChoice {
             Self::ScheduleWhen => &["Once", "Every", "Cron"],
             // Each form brings its own.
             Self::SignInAnswer(_) => &[],
+            Self::McpKind => &["A program", "An address"],
         }
     }
 }
@@ -481,6 +494,8 @@ pub enum Event {
     Provider(super::ProviderEvent),
     /// Something about the saved approvals.
     Approval(super::ApprovalEvent),
+    /// Something about the MCP servers.
+    Mcp(super::McpEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -550,6 +565,8 @@ pub struct Sheets {
     pub providers: super::Providers,
     /// The approvals OpenCode saved for "Allow always".
     pub approvals: super::Approvals,
+    /// The MCP servers' pages.
+    pub mcp: super::McpServers,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -621,6 +638,10 @@ impl App {
                 if section == Section::Agents {
                     return self.load_approvals();
                 }
+                if section == Section::Tools {
+                    self.sheets.mcp.view = super::McpView::List;
+                    return Task::batch([self.load_mcp(), self.load_setup()]);
+                }
             }
             Event::Query(query) => self.sheets.query = query,
             Event::Switch(setting) => return self.flip(setting),
@@ -629,6 +650,7 @@ impl App {
             Event::Schedule(event) => return self.schedule_event(event),
             Event::Provider(event) => return self.provider_event(event),
             Event::Approval(event) => return self.approval_event(event),
+            Event::Mcp(event) => return self.mcp_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;
@@ -662,7 +684,16 @@ impl App {
                 };
             }
             Event::SetUp(serial, setup) if serial == self.sheets.serial => {
+                let connecting = setup.mcp.as_ref().is_ok_and(|servers| {
+                    servers
+                        .iter()
+                        .any(|s| s.status == harlo_core::server::McpStatus::Pending)
+                });
                 self.sheets.setup = Load::Loaded(setup);
+                if connecting {
+                    // Shows each server once it has connected or failed.
+                    return super::mcp::settle();
+                }
             }
             Event::Stats(..) | Event::SetUp(..) => {}
         }
@@ -706,6 +737,7 @@ impl App {
             Field::SignInKey | Field::SignInCode | Field::SignInAnswer(_) => {
                 self.provider_text(field, value)
             }
+            Field::McpName | Field::McpCommand | Field::McpUrl => self.mcp_text(field, value),
             Field::QuietFrom | Field::QuietTo | Field::Title(_) | Field::Message(_) => {
                 self.set_notice_text(field, value)
             }
@@ -797,7 +829,10 @@ impl App {
             | Field::SchedulePrompt
             | Field::SignInKey
             | Field::SignInCode
-            | Field::SignInAnswer(_) => {
+            | Field::SignInAnswer(_)
+            | Field::McpName
+            | Field::McpCommand
+            | Field::McpUrl => {
                 return Task::none();
             }
         }
@@ -871,6 +906,10 @@ impl App {
             }
             SettingChoice::SignInAnswer(at) => {
                 self.provider_event(super::ProviderEvent::Choose(usize::from(at), option))
+            }
+            SettingChoice::McpKind => {
+                self.sheets.mcp.local = option == 0;
+                Task::none()
             }
             SettingChoice::ScheduleWhen => {
                 if let Some(&when) = harlo_core::schedules::When::ALL.get(option) {

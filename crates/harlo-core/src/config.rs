@@ -30,6 +30,10 @@ const EXPERIMENTAL: &str = "experimental";
 /// OpenCode's switch for automations, inside `experimental`.
 const AUTOMATIONS: &str = "automations";
 
+/// The object holding MCP settings, and its object of servers by name.
+const MCP: &str = "mcp";
+/// The servers inside [`MCP`].
+const SERVERS: &str = "servers";
 /// What a new global file starts with: the schema OpenCode's docs give.
 const NEW_FILE: &str = "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n";
 
@@ -222,6 +226,228 @@ pub fn set_automations(folder: &Path, on: bool) -> Result<(), Error> {
 /// is cancelled.
 pub async fn set_automations_later(folder: PathBuf, on: bool) -> Result<(), Error> {
     later(folder, move |folder| set_automations(folder, on)).await
+}
+
+/// How OpenCode runs an MCP server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpRun {
+    /// A program on the server's computer, spoken to over its input and
+    /// output.
+    Local {
+        /// The program and its arguments.
+        command: Vec<String>,
+        /// Environment variables it gets, by name.
+        environment: Vec<(String, String)>,
+    },
+    /// A server reached over HTTP.
+    Remote {
+        /// Its address.
+        url: String,
+        /// Headers sent with each request, such as a key.
+        headers: Vec<(String, String)>,
+    },
+}
+
+/// An MCP server in the global file: `mcp.servers.<name>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpEntry {
+    /// Its name, which OpenCode puts before its tools' names.
+    pub name: String,
+    /// How it runs.
+    pub run: McpRun,
+    /// Whether it's turned off, so OpenCode doesn't start it.
+    pub disabled: bool,
+}
+
+impl McpEntry {
+    /// Reads `value`, an entry of `mcp.servers`, named `name`.
+    fn from_json(name: &str, value: &serde_json::Value) -> Option<Self> {
+        let pairs = |key: &str| -> Vec<(String, String)> {
+            value[key]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                .collect()
+        };
+        let run = match value["type"].as_str()? {
+            "local" => McpRun::Local {
+                command: value["command"]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|part| part.as_str().map(str::to_owned))
+                    .collect(),
+                environment: pairs("environment"),
+            },
+            "remote" => McpRun::Remote {
+                url: value["url"].as_str()?.to_owned(),
+                headers: pairs("headers"),
+            },
+            _ => return None,
+        };
+        Some(Self {
+            name: name.to_owned(),
+            run,
+            disabled: value["disabled"].as_bool().unwrap_or(false),
+        })
+    }
+
+    /// The entry as the file holds it.
+    fn input(&self) -> CstInputValue {
+        let text = |s: &str| CstInputValue::String(s.to_owned());
+        let pairs = |list: &[(String, String)]| {
+            CstInputValue::Object(list.iter().map(|(k, v)| (k.clone(), text(v))).collect())
+        };
+        let mut fields = Vec::new();
+        match &self.run {
+            McpRun::Local {
+                command,
+                environment,
+            } => {
+                fields.push(("type".to_owned(), text("local")));
+                fields.push((
+                    "command".to_owned(),
+                    CstInputValue::Array(command.iter().map(|part| text(part)).collect()),
+                ));
+                if !environment.is_empty() {
+                    fields.push(("environment".to_owned(), pairs(environment)));
+                }
+            }
+            McpRun::Remote { url, headers } => {
+                fields.push(("type".to_owned(), text("remote")));
+                fields.push(("url".to_owned(), text(url)));
+                if !headers.is_empty() {
+                    fields.push(("headers".to_owned(), pairs(headers)));
+                }
+            }
+        }
+        if self.disabled {
+            fields.push(("disabled".to_owned(), CstInputValue::Bool(true)));
+        }
+        CstInputValue::Object(fields)
+    }
+}
+
+/// The MCP servers the global file in `folder` sets up, in its order.
+/// Entries OpenCode wouldn't read are left out.
+///
+/// # Errors
+///
+/// Fails when the file exists but can't be read or isn't valid JSONC.
+pub fn mcp_servers(folder: &Path) -> Result<Vec<McpEntry>, Error> {
+    let path = file(folder);
+    let Some(root) = parse(&path)? else {
+        return Ok(Vec::new());
+    };
+    let Some(servers) = root
+        .object_value()
+        .and_then(|object| object.object_value(MCP))
+        .and_then(|object| object.object_value(SERVERS))
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(servers
+        .properties()
+        .into_iter()
+        .filter_map(|prop| {
+            let name = prop.name()?.decoded_value().ok()?;
+            let value = prop.value()?.to_serde_value()?;
+            McpEntry::from_json(&name, &value)
+        })
+        .collect())
+}
+
+/// Adds `entry` to the global file in `folder`, or replaces the server of
+/// that name. OpenCode starts it when it reloads the file.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does, or when `mcp` or its `servers` isn't an
+/// object.
+pub fn set_mcp_server(folder: &Path, entry: &McpEntry) -> Result<(), Error> {
+    set_at(folder, &[MCP, SERVERS, &entry.name], Some(entry.input()))
+}
+
+/// Removes MCP server `name` from the global file in `folder`, and `mcp`
+/// with it when nothing else is left there.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does.
+pub fn remove_mcp_server(folder: &Path, name: &str) -> Result<(), Error> {
+    set_at(folder, &[MCP, SERVERS, name], None)
+}
+
+/// Turns MCP server `name` in the global file in `folder` off, or on again,
+/// which removes `disabled`. A server the file doesn't have is left alone.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does.
+pub fn set_mcp_disabled(folder: &Path, name: &str, disabled: bool) -> Result<(), Error> {
+    if !mcp_servers(folder)?.iter().any(|entry| entry.name == name) {
+        return Ok(());
+    }
+    set_at(
+        folder,
+        &[MCP, SERVERS, name, "disabled"],
+        disabled.then_some(CstInputValue::Bool(true)),
+    )
+}
+
+/// Reads the MCP servers as [`mcp_servers`] does, on a blocking thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`mcp_servers`], or an error when the thread is
+/// cancelled.
+pub async fn mcp_servers_later(folder: PathBuf) -> Result<Vec<McpEntry>, Error> {
+    let path = file(&folder);
+    tokio::task::spawn_blocking(move || mcp_servers(&folder))
+        .await
+        .map_err(|join| Error {
+            path,
+            kind: Kind::Io(io::Error::other(join.to_string())),
+        })?
+}
+
+/// Adds or replaces a server as [`set_mcp_server`] does, on a blocking
+/// thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_mcp_server`], or an error when the thread is
+/// cancelled.
+pub async fn set_mcp_server_later(folder: PathBuf, entry: McpEntry) -> Result<(), Error> {
+    later(folder, move |folder| set_mcp_server(folder, &entry)).await
+}
+
+/// Removes a server as [`remove_mcp_server`] does, on a blocking thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`remove_mcp_server`], or an error when the thread
+/// is cancelled.
+pub async fn remove_mcp_server_later(folder: PathBuf, name: String) -> Result<(), Error> {
+    later(folder, move |folder| remove_mcp_server(folder, &name)).await
+}
+
+/// Turns a server off or on as [`set_mcp_disabled`] does, on a blocking
+/// thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_mcp_disabled`], or an error when the thread
+/// is cancelled.
+pub async fn set_mcp_disabled_later(
+    folder: PathBuf,
+    name: String,
+    disabled: bool,
+) -> Result<(), Error> {
+    later(folder, move |folder| {
+        set_mcp_disabled(folder, &name, disabled)
+    })
+    .await
 }
 
 /// Sets `key` to `value` at the top of the global file in `folder`, or

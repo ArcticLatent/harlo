@@ -158,3 +158,81 @@ fn automations_are_off_until_turned_on_inside_experimental() {
             .expect("JSON");
     assert_eq!(json["experimental"], serde_json::json!({ "todo": true }));
 }
+
+#[test]
+fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
+    use harlo_core::config::{McpEntry, McpRun};
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let folder = scratch.path();
+    let before = "{\n  // mine\n  \"theme\": \"dracula\"\n}\n";
+    fs::write(folder.join("opencode.json"), before).expect("a file");
+    assert!(config::mcp_servers(folder).expect("read").is_empty());
+
+    let remote = McpEntry {
+        name: "docs".into(),
+        run: McpRun::Remote {
+            url: "https://mcp.example.invalid/mcp".into(),
+            headers: vec![("Authorization".into(), "Bearer x".into())],
+        },
+        disabled: false,
+    };
+    let local = McpEntry {
+        name: "browser".into(),
+        run: McpRun::Local {
+            command: vec!["npx".into(), "-y".into(), "some-mcp@1".into()],
+            environment: vec![("TOKEN".into(), "t".into())],
+        },
+        disabled: false,
+    };
+    config::set_mcp_server(folder, &remote).expect("add");
+    config::set_mcp_server(folder, &local).expect("add");
+    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(text.contains("// mine"), "comments stay: {text}");
+    let json: serde_json::Value = serde_json::from_str(&text.replace("// mine", "")).expect("JSON");
+    assert_eq!(json["mcp"]["servers"]["docs"]["type"], "remote");
+    assert_eq!(
+        json["mcp"]["servers"]["browser"]["command"][2],
+        "some-mcp@1"
+    );
+    assert_eq!(json["theme"], "dracula");
+    assert_eq!(
+        config::mcp_servers(folder).expect("read"),
+        vec![remote.clone(), local.clone()]
+    );
+
+    config::set_mcp_disabled(folder, "docs", true).expect("off");
+    let read = config::mcp_servers(folder).expect("read");
+    assert!(read[0].disabled);
+    config::set_mcp_disabled(folder, "docs", false).expect("on");
+    assert!(!config::mcp_servers(folder).expect("read")[0].disabled);
+    assert!(
+        !fs::read_to_string(folder.join("opencode.json"))
+            .expect("read")
+            .contains("disabled")
+    );
+    config::set_mcp_disabled(folder, "missing", true).expect("left alone");
+    assert_eq!(config::mcp_servers(folder).expect("read").len(), 2);
+
+    config::remove_mcp_server(folder, "docs").expect("removed");
+    config::remove_mcp_server(folder, "browser").expect("removed");
+    let after = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(!after.contains("mcp"), "nothing left: {after}");
+    assert!(after.contains("dracula"));
+}
+
+#[test]
+fn the_catalog_entries_are_valid_servers() {
+    for offered in harlo_core::mcp_catalog::OFFERED {
+        let entry = offered.entry();
+        assert_eq!(entry.name, offered.name);
+        assert!(!entry.disabled);
+        match entry.run {
+            harlo_core::config::McpRun::Remote { url, .. } => {
+                assert!(url.starts_with("https://"), "{url}");
+            }
+            harlo_core::config::McpRun::Local { command, .. } => {
+                assert!(!command.is_empty());
+            }
+        }
+    }
+}

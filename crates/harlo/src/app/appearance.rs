@@ -107,6 +107,7 @@ impl App {
                 .map_or(0, |i| i + 1),
             SettingChoice::ProjectSessions => usize::from(self.sheets.projects.archive),
             SettingChoice::SignInAnswer(_) => 0,
+            SettingChoice::McpKind => usize::from(!self.sheets.mcp.local),
             SettingChoice::ScheduleWhen => harlo_core::schedules::When::ALL
                 .iter()
                 .position(|w| *w == self.sheets.schedules.draft.when)
@@ -129,7 +130,8 @@ impl App {
             SettingChoice::ProjectColor
             | SettingChoice::ProjectSessions
             | SettingChoice::ScheduleWhen
-            | SettingChoice::SignInAnswer(_) => false,
+            | SettingChoice::SignInAnswer(_)
+            | SettingChoice::McpKind => false,
         }
     }
 

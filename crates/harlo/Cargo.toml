@@ -16,6 +16,7 @@ path = "src/main.rs"
 # Harlo's state and runtime folders, for the single-instance socket.
 dirs = { workspace = true }
 ksni = { workspace = true, features = ["async-io", "blocking"] }
+shell-words = { workspace = true }
 resvg = { workspace = true }
 harlo-core = { workspace = true }
 # The UI (Royalty-free 2.0 licence, see the workspace Cargo.toml): Skia draws

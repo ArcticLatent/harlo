@@ -530,6 +530,36 @@ impl Client {
         Ok(each(&v, McpServer::from_json))
     }
 
+    /// Connects MCP server `name` as seen from `directory`, without changing
+    /// the config.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server doesn't know it or can't be reached.
+    pub async fn connect_mcp(&self, directory: &str, name: &str) -> Result<(), Error> {
+        self.mcp_step(directory, name, "connect").await
+    }
+
+    /// Disconnects MCP server `name` as seen from `directory` until it's
+    /// connected again or the server restarts, without changing the config.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server doesn't know it or can't be reached.
+    pub async fn disconnect_mcp(&self, directory: &str, name: &str) -> Result<(), Error> {
+        self.mcp_step(directory, name, "disconnect").await
+    }
+
+    /// Sends `step` (`connect` or `disconnect`) for MCP server `name`.
+    async fn mcp_step(&self, directory: &str, name: &str, step: &str) -> Result<(), Error> {
+        let path = format!("/api/experimental/mcp/{}/{step}", segment(name));
+        let req = self
+            .request(Method::POST, &path)
+            .query(&[("location[directory]", directory)]);
+        Self::send(req).await?;
+        Ok(())
+    }
+
     /// Lists the plugins loaded for `directory`.
     ///
     /// # Errors
@@ -1194,4 +1224,17 @@ fn decode_list<T>(
         out.push(decode(item)?);
     }
     Ok(out)
+}
+
+/// The characters a path segment keeps as they are: letters, digits and
+/// `-._~`; anything else is percent-encoded.
+const SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
+/// `name` as one segment of a request path.
+fn segment(name: &str) -> String {
+    percent_encoding::utf8_percent_encode(name, SEGMENT).to_string()
 }

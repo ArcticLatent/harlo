@@ -621,11 +621,108 @@ pub const ADD_PROVIDER: i32 = 46;
 /// The Settings button that removes the saved approval numbered by its item.
 pub const REMOVE_APPROVAL: i32 = 47;
 
+/// The Settings row that shows the MCP server numbered by its item, in the
+/// server's list.
+pub const OPEN_MCP: i32 = 48;
+
+/// The Settings button back from an MCP server's page, or from adding one.
+pub const ALL_MCP: i32 = 49;
+
+/// The Settings button that connects the shown MCP server (item 1) or
+/// disconnects it (item 0).
+pub const CONNECT_MCP: i32 = 50;
+
+/// The Settings button that turns the shown MCP server off (item 1) or on
+/// (item 0) in the config.
+pub const TURN_OFF_MCP: i32 = 51;
+
+/// The Settings button that removes the shown MCP server, asking once.
+pub const REMOVE_MCP: i32 = 52;
+
+/// The Settings button that shows the catalog and the form for a new MCP
+/// server.
+pub const ADD_MCP: i32 = 53;
+
+/// The Settings button that adds the catalog's MCP server numbered by its
+/// item.
+pub const ADD_OFFERED_MCP: i32 = 54;
+
+/// The Settings button that adds the MCP server the form describes.
+pub const SAVE_MCP: i32 = 55;
+
+/// The Settings button that opens the sign-in of the shown MCP server.
+pub const SIGN_IN_MCP: i32 = 56;
+
+/// The step an MCP server's Settings button numbered `number` takes for
+/// item `item`.
+fn mcp_action(app: &App, number: i32, item: i32) -> Option<Message> {
+    use app::McpEvent;
+    let event = match number {
+        OPEN_MCP => {
+            let Load::Loaded(setup) = &app.sheets.setup else {
+                return None;
+            };
+            let server = setup.mcp.as_ref().ok()?.get(usize::try_from(item).ok()?)?;
+            McpEvent::Show(server.name.clone())
+        }
+        ALL_MCP => McpEvent::Back,
+        CONNECT_MCP if item == 1 => McpEvent::Connect,
+        CONNECT_MCP => McpEvent::Disconnect,
+        TURN_OFF_MCP => McpEvent::TurnOff(item == 1),
+        REMOVE_MCP => McpEvent::Remove,
+        ADD_MCP => McpEvent::Add,
+        ADD_OFFERED_MCP => McpEvent::AddOffered(usize::try_from(item).ok()?),
+        SAVE_MCP => McpEvent::Save,
+        SIGN_IN_MCP => {
+            // The server signs in through OpenCode's integration for it,
+            // on Models' sign-in page.
+            let Load::Loaded(setup) = &app.sheets.setup else {
+                return None;
+            };
+            let name = app.sheets.mcp.shown()?;
+            let server = setup.mcp.as_ref().ok()?.iter().find(|s| s.name == name)?;
+            let id = server.integration.clone()?;
+            return Some(Message::Sheet(SheetEvent::Provider(
+                app::ProviderEvent::OpenFrom(id),
+            )));
+        }
+        _ => return None,
+    };
+    Some(Message::Sheet(SheetEvent::Mcp(event)))
+}
+
+/// The step a provider's Settings button numbered `number` takes for item
+/// `item`.
+fn provider_action(app: &App, number: i32, item: i32) -> Option<Message> {
+    let event = match number {
+        OPEN_PROVIDER => {
+            let Load::Loaded(list) = &app.sheets.providers.list else {
+                return None;
+            };
+            let id = list.get(usize::try_from(item).ok()?)?.id.clone();
+            ProviderEvent::Open(id)
+        }
+        ALL_PROVIDERS => ProviderEvent::Back,
+        USE_SIGN_IN_METHOD => ProviderEvent::Method(usize::try_from(item).ok()?),
+        SIGN_IN_PROVIDER => ProviderEvent::SignIn,
+        OPEN_PROVIDER_PAGE => ProviderEvent::OpenPage,
+        FINISH_SIGN_IN => ProviderEvent::Finish,
+        CANCEL_PROVIDER_SIGN_IN => ProviderEvent::Cancel,
+        REMOVE_CREDENTIAL => {
+            let integration = app.sheets.providers.integration()?;
+            let connection = integration.connections.get(usize::try_from(item).ok()?)?;
+            ProviderEvent::Remove(connection.credential.clone()?)
+        }
+        ADD_PROVIDER => ProviderEvent::Pick,
+        _ => return None,
+    };
+    Some(Message::Sheet(SheetEvent::Provider(event)))
+}
+
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
     let schedule = |event| Some(Message::Sheet(SheetEvent::Schedule(event)));
-    let provider = |event| Some(Message::Sheet(SheetEvent::Provider(event)));
     let worktree = || {
         let folder = app.sheets.projects.shown.as_deref()?;
         let project = app.projects.iter().find(|p| p.directory == folder)?;
@@ -698,28 +795,19 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
             })
         }
         CHOOSE_SCHEDULE_FOLDER => Some(Message::TogglePicker(Picker::ScheduleFolder)),
-        OPEN_PROVIDER => {
-            let Load::Loaded(list) = &app.sheets.providers.list else {
-                return None;
-            };
-            let id = list.get(usize::try_from(item).ok()?)?.id.clone();
-            provider(ProviderEvent::Open(id))
-        }
-        ALL_PROVIDERS => provider(ProviderEvent::Back),
-        USE_SIGN_IN_METHOD => provider(ProviderEvent::Method(usize::try_from(item).ok()?)),
-        SIGN_IN_PROVIDER => provider(ProviderEvent::SignIn),
-        OPEN_PROVIDER_PAGE => provider(ProviderEvent::OpenPage),
-        FINISH_SIGN_IN => provider(ProviderEvent::Finish),
-        CANCEL_PROVIDER_SIGN_IN => provider(ProviderEvent::Cancel),
-        REMOVE_CREDENTIAL => {
-            let integration = app.sheets.providers.integration()?;
-            let connection = integration.connections.get(usize::try_from(item).ok()?)?;
-            provider(ProviderEvent::Remove(connection.credential.clone()?))
-        }
-        ADD_PROVIDER => provider(ProviderEvent::Pick),
+        OPEN_PROVIDER
+        | ALL_PROVIDERS
+        | USE_SIGN_IN_METHOD
+        | SIGN_IN_PROVIDER
+        | OPEN_PROVIDER_PAGE
+        | FINISH_SIGN_IN
+        | CANCEL_PROVIDER_SIGN_IN
+        | REMOVE_CREDENTIAL
+        | ADD_PROVIDER => provider_action(app, number, item),
         REMOVE_APPROVAL => Some(Message::Sheet(SheetEvent::Approval(
             app::ApprovalEvent::Remove(usize::try_from(item).ok()?),
         ))),
+        OPEN_MCP..=SIGN_IN_MCP => mcp_action(app, number, item),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }

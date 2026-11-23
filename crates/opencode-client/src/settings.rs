@@ -94,6 +94,9 @@ pub struct McpServer {
     pub title: Option<String>,
     /// How it stands.
     pub status: McpStatus,
+    /// The integration that signs it in, when it signs in through
+    /// OpenCode, as a remote server with OAuth does.
+    pub integration: Option<String>,
 }
 
 impl McpServer {
@@ -111,6 +114,7 @@ impl McpServer {
         };
         (!name.is_empty()).then(|| Self {
             title: optional(value, "title"),
+            integration: optional(value, "integrationID"),
             name,
             status,
         })
