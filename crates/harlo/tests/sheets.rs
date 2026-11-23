@@ -11,7 +11,7 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use harlo::app::{App, Message, Range, Section, SetUp, Sheet, SheetEvent};
+use harlo::app::{App, Autostart, Message, Range, Section, SetUp, Sheet, SheetEvent};
 use harlo_core::layout::{Preferences, Tabs};
 use harlo_core::server::Location;
 use harlo_core::server::{
@@ -20,7 +20,13 @@ use harlo_core::server::{
 use slint::ComponentHandle as _;
 use slint::Model as _;
 use slint::platform::{Key, WindowEvent};
+use std::time::Duration;
+
+use support::tasks::Tasks;
 use support::{Ui, demo, ui};
+
+/// How long a file write off the UI thread may take.
+const WAIT: Duration = Duration::from_secs(5);
 
 /// Presses and lets go of `key`, with Control held when `control` is set.
 fn key(ui: &Ui, key: impl Into<slint::SharedString>, control: bool) {
@@ -319,4 +325,56 @@ fn plugins_show_where_they_come_from() {
     assert!(ui.shows("built in"));
     assert!(ui.shows("@acme/lint 1.2.0 · update available"));
     assert!(ui.shows("failed: syntax error"));
+}
+
+#[test]
+fn start_at_login_writes_and_removes_the_autostart_entry() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let folder = scratch.path().join("autostart");
+    let mut app = demo::app();
+    // A scratch autostart folder, never the real one.
+    app.autostart = Some(Autostart {
+        folder: folder.clone(),
+        program: "/opt/harlo/harlo".into(),
+        on: false,
+    });
+    let ui = ui(app);
+    let mut tasks = Tasks::new();
+    ui.press("Settings");
+    ui.press("General");
+    let checked = |ui: &Ui| {
+        ui.find("Start at login")
+            .iter()
+            .any(|e| e.accessible_checked() == Some(true))
+    };
+    assert!(!checked(&ui));
+
+    let flip = |ui: &Ui| {
+        for switch in ui.find("Start at login") {
+            if switch.accessible_checked().is_some() {
+                switch.invoke_accessible_default_action();
+            }
+        }
+    };
+    flip(&ui);
+    assert!(tasks.until(&ui, WAIT, checked), "on once written");
+    assert!(harlo_core::autostart::enabled(&folder));
+    let entry = std::fs::read_to_string(folder.join("harlo.desktop")).expect("the entry");
+    assert!(entry.contains("Exec=/opt/harlo/harlo\n"), "{entry}");
+
+    flip(&ui);
+    assert!(
+        tasks.until(&ui, WAIT, |ui| !checked(ui)),
+        "off once removed"
+    );
+    assert!(!harlo_core::autostart::enabled(&folder));
+}
+
+#[test]
+fn start_at_login_is_left_out_without_an_autostart_folder() {
+    let ui = ui(demo::app());
+    ui.press("Settings");
+    ui.press("General");
+    assert!(ui.shows("Reopen tabs"));
+    assert!(!ui.shows("Start at login"));
 }

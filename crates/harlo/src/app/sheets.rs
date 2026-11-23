@@ -8,10 +8,10 @@
 
 // Rust guideline compliant 2026-10-09
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-use harlo_core::config;
+use harlo_core::{autostart, config};
 
 use harlo_core::layout::Appearance;
 use harlo_core::server::{Location, McpServer, Plugin, Provider, Stats, WebSearch};
@@ -94,6 +94,20 @@ pub enum Setting {
     ReopenTabs,
     /// [`Preferences::glass`].
     Glass,
+    /// Whether Harlo starts at login: the desktop's autostart entry, not a
+    /// preference.
+    StartAtLogin,
+}
+
+/// Starting Harlo at login, through the desktop's autostart folder.
+#[derive(Debug, Clone)]
+pub struct Autostart {
+    /// The autostart folder, such as `~/.config/autostart`.
+    pub folder: PathBuf,
+    /// The program the entry runs: this one.
+    pub program: PathBuf,
+    /// Whether the entry is there.
+    pub on: bool,
 }
 
 /// One of Harlo's own settings chosen from a few options.
@@ -217,6 +231,8 @@ pub enum Event {
     DefaultModel(ModelChoice),
     /// The model new sessions use was set, or why it couldn't be.
     DefaultModelSet(Result<(), String>),
+    /// Starting at login was turned on (`true`) or off, or why it couldn't be.
+    AutostartSet(Result<bool, String>),
     /// Show stats for another range.
     Range(Range),
     /// Stats arrived for load `serial`.
@@ -242,6 +258,8 @@ pub struct Sheets {
     pub setup: Load<Box<SetUp>>,
     /// Why the model new sessions use couldn't be set, if it couldn't.
     pub model_error: Option<String>,
+    /// Why starting at login couldn't be changed, if it couldn't.
+    pub autostart_error: Option<String>,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -295,8 +313,18 @@ impl App {
                 self.sheets.query.clear();
             }
             Event::Query(query) => self.sheets.query = query,
+            Event::Switch(Setting::StartAtLogin) => return self.toggle_autostart(),
+            Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
+                (Ok(on), Some(autostart)) => {
+                    autostart.on = on;
+                    self.sheets.autostart_error = None;
+                }
+                (Err(why), _) => self.sheets.autostart_error = Some(why),
+                (Ok(_), None) => {}
+            },
             Event::Switch(setting) => {
                 match setting {
+                    Setting::StartAtLogin => {}
                     Setting::ReopenTabs => {
                         self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
                     }
@@ -369,6 +397,25 @@ impl App {
         Task::perform(config::set_model_later(folder, Some(id)), |result| {
             Message::Sheet(Event::DefaultModelSet(
                 result.map_err(|e| format!("Couldn't change OpenCode's config: {e}")),
+            ))
+        })
+    }
+
+    /// Turns starting at login on or off, off the UI thread.
+    fn toggle_autostart(&mut self) -> Task<Message> {
+        let Some(Autostart {
+            folder,
+            program,
+            on,
+        }) = self.autostart.clone()
+        else {
+            return Task::none();
+        };
+        Task::perform(autostart::set_later(folder, program, !on), move |result| {
+            Message::Sheet(Event::AutostartSet(
+                result
+                    .map(|()| !on)
+                    .map_err(|e| format!("Couldn't change the autostart entry: {e}")),
             ))
         })
     }

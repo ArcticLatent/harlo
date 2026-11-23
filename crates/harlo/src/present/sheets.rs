@@ -501,6 +501,17 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
             app.preferences.reopen_tabs,
         ),
     ]);
+    if let Some(autostart) = &app.autostart {
+        rows.push(switch(
+            Setting::StartAtLogin,
+            "Start at login",
+            "Open Harlo when you log in to this computer.",
+            autostart.on,
+        ));
+    }
+    if let Some(why) = &app.sheets.autostart_error {
+        rows.push(pair("Not changed", why, 2));
+    }
     rows
 }
 
@@ -932,6 +943,7 @@ fn switch(setting: Setting, name: &str, what: &str, on: bool) -> SheetRow {
         setting: match setting {
             Setting::ReopenTabs => 0,
             Setting::Glass => 1,
+            Setting::StartAtLogin => 2,
         },
         ..SheetRow::default()
     }

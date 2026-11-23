@@ -216,6 +216,13 @@ fn boot(options: &Options) -> App {
         .with_preferences(preferences)
         .notifying();
     app.opencode_folder = harlo_core::config::folder();
+    app.autostart = harlo_core::autostart::folder()
+        .zip(std::env::current_exe().ok())
+        .map(|(folder, program)| app::Autostart {
+            on: harlo_core::autostart::enabled(&folder),
+            folder,
+            program,
+        });
     match store {
         Some(store) => app.saving_to(store),
         None => app,
@@ -402,6 +409,7 @@ fn setting_of(number: i32) -> Option<app::Setting> {
     match number {
         0 => Some(app::Setting::ReopenTabs),
         1 => Some(app::Setting::Glass),
+        2 => Some(app::Setting::StartAtLogin),
         _ => None,
     }
 }

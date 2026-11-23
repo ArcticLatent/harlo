@@ -49,7 +49,8 @@ pub use context::{
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use sheets::{
-    Event as SheetEvent, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet, Sheets,
+    Autostart, Event as SheetEvent, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet,
+    Sheets,
 };
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
@@ -484,6 +485,9 @@ pub struct App {
     /// change for the background service. Only the running app sets it;
     /// tests give a scratch folder or none.
     pub opencode_folder: Option<std::path::PathBuf>,
+    /// Starting Harlo at login. Only the running app sets it; tests give a
+    /// scratch folder or none.
+    pub autostart: Option<Autostart>,
     /// The composer's text.
     pub composer: TextBox,
     /// Why the last send failed, shown under the composer.
@@ -607,6 +611,7 @@ impl App {
             timelines: HashMap::new(),
             new_folder: None,
             opencode_folder: None,
+            autostart: None,
             composer: TextBox::new(),
             send_error: None,
             sending: None,
