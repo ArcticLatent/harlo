@@ -7,6 +7,7 @@
 
 use harlo_core::layout::{Appearance, ChatWidth, Speed, TextSize};
 use harlo_core::theme::{Contrast, DiffColors, Look, Mode, Scheme};
+use harlo_core::voice::{LANGUAGE_CODES, Model};
 
 use super::{App, SettingChoice};
 
@@ -108,6 +109,14 @@ impl App {
             SettingChoice::ProjectSessions => usize::from(self.sheets.projects.archive),
             SettingChoice::SignInAnswer(_) => 0,
             SettingChoice::McpKind => usize::from(!self.sheets.mcp.local),
+            SettingChoice::VoiceModel => Model::ALL
+                .iter()
+                .position(|m| *m == self.voice_model())
+                .unwrap_or_default(),
+            SettingChoice::VoiceLanguage => LANGUAGE_CODES
+                .iter()
+                .position(|code| *code == p.voice_language)
+                .unwrap_or_default(),
             SettingChoice::ScheduleWhen => harlo_core::schedules::When::ALL
                 .iter()
                 .position(|w| *w == self.sheets.schedules.draft.when)
@@ -126,6 +135,14 @@ impl App {
             SettingChoice::ChatWidth => pick(&CHAT_WIDTHS, option, &mut p.chat_width),
             SettingChoice::TextSize => pick(&TEXT_SIZES, option, &mut p.text_size),
             SettingChoice::CodeSize => pick(&CODE_SIZES, option, &mut p.code_size),
+            SettingChoice::VoiceModel => Model::ALL.get(option).is_some_and(|model| {
+                model.name().clone_into(&mut p.voice_model);
+                true
+            }),
+            SettingChoice::VoiceLanguage => LANGUAGE_CODES.get(option).is_some_and(|code| {
+                (*code).clone_into(&mut p.voice_language);
+                true
+            }),
             // Not Harlo's look: Settings → Projects takes them.
             SettingChoice::ProjectColor
             | SettingChoice::ProjectSessions

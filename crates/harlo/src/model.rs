@@ -5,6 +5,8 @@
 // Rust guideline compliant 2026-10-09
 
 use std::collections::HashMap;
+
+use crate::app::SettingChoice;
 use std::fmt;
 
 use harlo_core::approvals::Shield;
@@ -66,6 +68,8 @@ pub enum Picker {
     ScheduleSession,
     /// A model provider to sign in to, from Settings → Models.
     Provider,
+    /// The language dictation listens for, from Settings → Voice.
+    VoiceLanguage,
 }
 
 impl Picker {
@@ -84,6 +88,7 @@ impl Picker {
             Self::ScheduleFolder => 8,
             Self::ScheduleSession => 9,
             Self::Provider => 10,
+            Self::VoiceLanguage => 11,
         }
     }
 
@@ -117,6 +122,7 @@ impl Picker {
             8 => Self::ScheduleFolder,
             9 => Self::ScheduleSession,
             10 => Self::Provider,
+            11 => Self::VoiceLanguage,
             _ => return None,
         })
     }
@@ -239,6 +245,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
             .collect(),
         Picker::ScheduleFolder | Picker::ScheduleSession => schedule_items(app, picker),
         Picker::Provider => provider_items(app),
+        Picker::VoiceLanguage => language_items(app),
         Picker::Agent => {
             let current = app.current_agent();
             app.agent_choices()
@@ -340,6 +347,22 @@ fn provider_items(app: &App) -> Vec<Item> {
                     integration.id.clone(),
                 ))),
             }
+        })
+        .collect()
+}
+
+/// The languages dictation can listen for.
+fn language_items(app: &App) -> Vec<Item> {
+    let chosen = app.chosen(SettingChoice::VoiceLanguage);
+    harlo_core::voice::LANGUAGE_NAMES
+        .iter()
+        .enumerate()
+        .map(|(index, name)| Item {
+            selected: index == chosen,
+            label: (*name).to_owned(),
+            detail: None,
+            dot: None,
+            message: Message::Sheet(SheetEvent::Choose(SettingChoice::VoiceLanguage, index)),
         })
         .collect()
 }

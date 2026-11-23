@@ -28,7 +28,7 @@ use harlo_core::theme::{Rgba, Tokens};
 use lucide_icons::Icon;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
-use crate::app::{App, Document, FileBody, Panel, Status, capitalized};
+use crate::app::{App, Document, FileBody, Listening, Panel, Status, capitalized};
 use crate::model::{self, Picker, READ_ONLY, Variant};
 use crate::theme::color;
 use crate::ui::{
@@ -305,6 +305,9 @@ impl Presenter {
             !app.composer.as_str().trim().is_empty() || !app.draft.attached.is_empty(),
         );
         state.set_send_error(app.send_error.clone().unwrap_or_default().into());
+        let (voice, note) = voice_state(app);
+        state.set_voice(voice);
+        state.set_voice_note(note.into());
         state.set_starting(app.starting());
         state.set_home_hint(
             if app.starting() {
@@ -390,9 +393,11 @@ impl Presenter {
             Picker::ScheduleSession => {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }
-            Picker::Folder | Picker::Variant | Picker::Model | Picker::ScheduleFolder => {
-                String::new()
-            }
+            Picker::Folder
+            | Picker::Variant
+            | Picker::Model
+            | Picker::ScheduleFolder
+            | Picker::VoiceLanguage => String::new(),
         };
         state.set_menu_note(note.into());
     }
@@ -747,4 +752,18 @@ pub fn panel_of(number: i32) -> Option<Panel> {
     usize::try_from(number)
         .ok()
         .and_then(|i| Panel::ALL.get(i).copied())
+}
+
+/// Dictation for the composer: off, ready, recording or transcribing, and
+/// what it's doing or why it failed.
+fn voice_state(app: &App) -> (i32, String) {
+    let ready = app.voice_ready();
+    match app.voice.listening {
+        Listening::Recording => (2, "Listening… Ctrl+Shift+D to stop, Esc to drop".to_owned()),
+        Listening::Transcribing => (3, "Writing down what you said…".to_owned()),
+        Listening::Idle => (
+            i32::from(ready),
+            app.voice.error.clone().unwrap_or_default(),
+        ),
+    }
 }

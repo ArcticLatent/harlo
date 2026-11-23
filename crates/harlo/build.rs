@@ -74,6 +74,7 @@ const ICONS: &[(&str, Icon)] = &[
     ("dot", Icon::Dot),
     ("question", Icon::MessageCircleQuestionMark),
     ("archive", Icon::Archive),
+    ("mic", Icon::Mic),
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -19,6 +19,7 @@ mod mcp;
 mod plugins;
 mod providers;
 mod schedules;
+mod voice;
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::theme::{Mode, Scheme};
 
@@ -63,6 +64,10 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("/", "Commands and skills"),
             ("@", "Files and MCP resources"),
             ("Ctrl+V", "Paste text, or attach a picture"),
+            (
+                "Ctrl+Shift+D",
+                "Dictate: start, then stop and put in the words",
+            ),
         ],
     ),
     (
@@ -276,6 +281,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Appearance => Icon::Palette,
         Section::Notifications => Icon::Bell,
         Section::Shortcuts => Icon::Keyboard,
+        Section::Voice => Icon::Mic,
         Section::Projects => Icon::FolderGit2,
         Section::Git => Icon::GitBranch,
         Section::Models => Icon::Bot,
@@ -294,6 +300,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         Section::Appearance => appearance_rows(app),
         Section::Notifications => notification_rows(app),
         Section::Shortcuts => shortcuts(),
+        Section::Voice => voice::voice_rows(app),
         // Searched without their icons.
         Section::Projects => project_rows(app, &Marks::default()),
         Section::Git => git_settings_rows(app),

@@ -49,6 +49,7 @@ mod subagents;
 mod terminal;
 mod todos;
 mod undo;
+mod voice;
 
 pub use agents::{ApprovalEvent, Approvals};
 pub use arrange::{Document, Edge};
@@ -79,6 +80,7 @@ pub use sheets::{
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;
+pub use voice::{Listening, Voice, VoiceEvent};
 mod waiting;
 pub(crate) use claude::{epoch_seconds, resets_in};
 pub(crate) use waiting::capitalized;
@@ -247,6 +249,8 @@ pub enum Message {
     Claude(ClaudeEvent),
     /// Something happened to Harlo's own tools for agents.
     OwnTools(OwnToolsEvent),
+    /// Something happened to dictation.
+    Voice(VoiceEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -618,6 +622,8 @@ pub struct App {
     own_tools_paused: bool,
     /// Why offering them last failed.
     pub own_tools_error: Option<String>,
+    /// Dictation into the composer.
+    pub voice: Voice,
 }
 
 impl App {
@@ -720,6 +726,7 @@ impl App {
             own_tools: HashMap::new(),
             own_tools_paused: false,
             own_tools_error: None,
+            voice: Voice::default(),
             saved: layout,
         };
         app.restore = app.other_tabs.remove(&app.location.label());
@@ -844,6 +851,7 @@ impl App {
             Message::Sheet(event) => return self.sheet_event(event),
             Message::Claude(event) => return self.claude_event(event),
             Message::OwnTools(event) => return self.own_tools_event(event),
+            Message::Voice(event) => return self.voice_event(event),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => self.toggle_more(folder),
@@ -2096,6 +2104,7 @@ pub fn shortcut(press: &KeyPress) -> Option<Message> {
         Key::Tab => Some(Message::CycleTab { back: press.shift }),
         Key::PageDown => Some(Message::CycleTab { back: false }),
         Key::PageUp => Some(Message::CycleTab { back: true }),
+        Key::Character('d') if press.shift => Some(Message::Voice(VoiceEvent::Toggle)),
         _ => None,
     }
 }

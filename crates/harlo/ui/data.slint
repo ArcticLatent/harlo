@@ -725,6 +725,11 @@ export global State {
     in property <[AttachedChip]> attached;
     in property <bool> pasting;
     in property <bool> can-send;
+    /// Dictation: 0 off (no speech model yet), 1 ready, 2 recording,
+    /// 3 turning the recording into text.
+    in property <int> voice;
+    /// What dictation is doing, or why it failed; empty otherwise.
+    in property <string> voice-note;
     in property <Chip> folder-chip;
     in property <[Chip]> chips;
     in property <string> shield-glyph;
@@ -888,6 +893,8 @@ export global Logic {
     callback composer-key(string, bool, bool, bool) -> bool;
     callback send();
     callback attach();
+    /// Starts dictation, or stops it and puts the words in.
+    callback dictate();
     callback stop();
 
     callback open-panel(int);

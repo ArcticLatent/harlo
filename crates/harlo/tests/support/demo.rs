@@ -161,6 +161,8 @@ pub fn layout() -> Layout {
 pub fn new_app() -> App {
     let mut app = App::new(Location::Shared, vec![Location::Shared], layout());
     app.preferences.own_tools = false;
+    // Never the real speech models' folder.
+    app.voice.models = None;
     app
 }
 

@@ -660,6 +660,15 @@ pub const CHECK_PLUGINS: i32 = 57;
 /// every outdated one for item -1.
 pub const UPDATE_PLUGIN: i32 = 58;
 
+/// The Settings button that downloads dictation's speech model.
+pub const DOWNLOAD_VOICE: i32 = 59;
+
+/// The Settings button that stops the speech model's download.
+pub const STOP_VOICE_DOWNLOAD: i32 = 60;
+
+/// The Settings button that opens the menu of dictation's languages.
+pub const CHOOSE_VOICE_LANGUAGE: i32 = 61;
+
 /// The step an MCP server's Settings button numbered `number` takes for
 /// item `item`.
 fn mcp_action(app: &App, number: i32, item: i32) -> Option<Message> {
@@ -815,6 +824,9 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
             app::ApprovalEvent::Remove(usize::try_from(item).ok()?),
         ))),
         OPEN_MCP..=SIGN_IN_MCP => mcp_action(app, number, item),
+        DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
+        STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
+        CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
         CHECK_PLUGINS => Some(Message::Sheet(SheetEvent::Plugin(app::PluginEvent::Check))),
         UPDATE_PLUGIN => Some(Message::Sheet(SheetEvent::Plugin(
             app::PluginEvent::Update(usize::try_from(item).ok()),
@@ -1125,6 +1137,7 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_send, || Message::Send);
     send!(on_stop, || Message::Stop);
     send!(on_attach, || Message::Attach);
+    send!(on_dictate, || Message::Voice(app::VoiceEvent::Toggle));
     send_with!(on_detach, |_app, index| usize::try_from(index)
         .ok()
         .map(Message::Detach));
@@ -1269,6 +1282,9 @@ pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
         && let Some(message) = app::restore_key(press)
     {
         return Some(message);
+    }
+    if app.voice.listening == app::Listening::Recording && press.key == Key::Escape {
+        return Some(Message::Voice(app::VoiceEvent::Cancel));
     }
     app::shortcut(press)
 }

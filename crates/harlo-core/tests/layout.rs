@@ -133,6 +133,8 @@ fn preferences_load_back_beside_the_layout() {
         code_size: TextSize::Small,
         glass: true,
         own_tools: false,
+        voice_model: "small".to_owned(),
+        voice_language: "de".to_owned(),
         appearance: Appearance::Light,
         project_models: [(
             "/home/u/code/harlo".to_owned(),

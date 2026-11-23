@@ -93,6 +93,8 @@ rmcp = { version = "3.11.0", default-features = false, features = ["server"] }
 # Splitting a typed command line, quotes included, as a shell would (MIT/Apache).
 shell-words = { version = "1.1.1", default-features = false, features = ["std"] }
 tempfile = { version = "3.27.0", default-features = false }
+transcribe-rs = { version = "0.3.12", default-features = false }
+cpal = { version = "0.18.2", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 

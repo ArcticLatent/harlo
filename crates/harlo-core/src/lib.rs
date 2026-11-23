@@ -27,6 +27,7 @@ pub mod terminal;
 pub mod theme;
 pub mod timeline;
 pub mod undo;
+pub mod voice;
 pub mod workspace;
 
 /// The OpenCode release Harlo is built and tested against.

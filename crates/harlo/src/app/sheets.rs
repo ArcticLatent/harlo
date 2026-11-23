@@ -110,6 +110,8 @@ pub enum Section {
     Notifications,
     /// The keyboard shortcuts.
     Shortcuts,
+    /// Dictation: the speech model and language.
+    Voice,
     /// Each project's settings and worktrees.
     Projects,
     /// Git: the name on commits, undo's snapshots, commit messages.
@@ -130,11 +132,12 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
         Self::Shortcuts,
+        Self::Voice,
         Self::Projects,
         Self::Git,
         Self::Models,
@@ -153,6 +156,7 @@ impl Section {
             Self::Appearance => "Appearance",
             Self::Notifications => "Notifications",
             Self::Shortcuts => "Shortcuts",
+            Self::Voice => "Voice",
             Self::Projects => "Projects",
             Self::Git => "Git",
             Self::Models => "Models",
@@ -172,6 +176,7 @@ impl Section {
             | Self::Appearance
             | Self::Notifications
             | Self::Shortcuts
+            | Self::Voice
             | Self::About => None,
             Self::Projects | Self::Git => Some("Your projects"),
             Self::Models | Self::Agents | Self::Tools => Some("Agents and models"),
@@ -361,11 +366,15 @@ pub enum SettingChoice {
     SignInAnswer(u8),
     /// Whether a new MCP server is a program or an address.
     McpKind,
+    /// [`Preferences::voice_model`].
+    VoiceModel,
+    /// [`Preferences::voice_language`].
+    VoiceLanguage,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 21] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -385,6 +394,8 @@ impl SettingChoice {
         Self::SignInAnswer(6),
         Self::SignInAnswer(7),
         Self::McpKind,
+        Self::VoiceModel,
+        Self::VoiceLanguage,
     ];
 
     /// The options, as Settings names them, in order.
@@ -408,6 +419,8 @@ impl SettingChoice {
             // Each form brings its own.
             Self::SignInAnswer(_) => &[],
             Self::McpKind => &["A program", "An address"],
+            Self::VoiceModel => &["Base", "Small"],
+            Self::VoiceLanguage => &harlo_core::voice::LANGUAGE_NAMES,
         }
     }
 }
@@ -921,6 +934,10 @@ impl App {
     /// Takes option `option` of `choice`: Harlo's look, or a choice on a
     /// project, schedule or sign-in page.
     fn choose_option(&mut self, choice: SettingChoice, option: usize) -> Task<Message> {
+        if choice == SettingChoice::VoiceLanguage {
+            // Chosen from a menu, which closes.
+            self.picker = None;
+        }
         match choice {
             SettingChoice::ProjectColor => {
                 let color = option.checked_sub(1);
