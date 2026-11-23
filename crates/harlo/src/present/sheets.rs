@@ -14,6 +14,7 @@ use lucide_icons::Icon;
 use super::marks::{Marks, project_color};
 use super::{glyph, sync};
 
+mod providers;
 mod schedules;
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::theme::{Mode, Scheme};
@@ -293,14 +294,16 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         Section::Projects => project_rows(app, &Marks::default()),
         Section::Git => git_settings_rows(app),
         Section::Models => {
-            let mut rows = claude_rows(app);
-            if let Load::Loaded(setup) = &app.sheets.setup {
-                rows.extend(setup_rows(setup, section));
+            // A provider's sign-in page shows alone.
+            if app.sheets.providers.shown.is_some() {
+                return providers::sign_in_rows(app);
             }
+            let mut rows = providers::provider_rows(app);
+            rows.extend(claude_rows(app));
             rows
         }
         Section::Tools => match &app.sheets.setup {
-            Load::Loaded(setup) => setup_rows(setup, section),
+            Load::Loaded(setup) => setup_rows(setup),
             Load::Idle | Load::Loading | Load::Failed(_) => Vec::new(),
         },
         Section::Schedules => schedules::schedule_rows(app),
@@ -1120,6 +1123,13 @@ fn field(field: Field, name: &str, value: &str, hint: &str) -> SheetRow {
     }
 }
 
+/// A text field that takes what's typed as it's typed, with no button.
+fn live_field(which: Field, name: &str, value: &str, hint: &str) -> SheetRow {
+    let mut row = field(which, name, value, hint);
+    row.action = "".into();
+    row
+}
+
 /// The kind of row with colour swatches, one per option of its choice.
 const SWATCHES: i32 = 8;
 
@@ -1478,18 +1488,9 @@ fn about_rows(app: &App) -> Vec<SheetRow> {
     rows
 }
 
-/// The server's providers for Models, or its web search, MCP servers and
-/// plugins for Tools.
-fn setup_rows(setup: &SetUp, part: Section) -> Vec<SheetRow> {
+/// The server's web search, MCP servers and plugins, for Tools.
+fn setup_rows(setup: &SetUp) -> Vec<SheetRow> {
     let mut rows = Vec::new();
-    if part == Section::Models {
-        section(&mut rows, "Model providers", &setup.providers, |p| {
-            let (state, tone) = if p.enabled { ("on", 1) } else { ("off", 3) };
-            pair(&p.name, state, tone)
-        });
-        rows.push(shared_note());
-        return rows;
-    }
     section(&mut rows, "Web search", &setup.search, |s| {
         pair(&s.name, "", 0)
     });

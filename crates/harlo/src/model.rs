@@ -10,7 +10,9 @@ use std::fmt;
 use harlo_core::approvals::Shield;
 use harlo_core::theme::Rgba;
 
-use crate::app::{App, Message, ScheduleEvent, SheetEvent, Status, capitalized};
+use crate::app::{
+    App, Load, Message, ProviderEvent, ScheduleEvent, SheetEvent, Status, capitalized,
+};
 
 /// Rows a menu shows before it scrolls.
 pub const MENU_ROWS: usize = 8;
@@ -62,6 +64,8 @@ pub enum Picker {
     ScheduleFolder,
     /// The session a new schedule's prompt goes to.
     ScheduleSession,
+    /// A model provider to sign in to, from Settings → Models.
+    Provider,
 }
 
 impl Picker {
@@ -79,10 +83,17 @@ impl Picker {
             Self::CommitModel => 7,
             Self::ScheduleFolder => 8,
             Self::ScheduleSession => 9,
+            Self::Provider => 10,
         }
     }
 
-    /// Whether it lists models, with a filter field.
+    /// Whether its menu has a filter field: models and providers.
+    #[must_use]
+    pub fn filters(self) -> bool {
+        self.lists_models() || self == Self::Provider
+    }
+
+    /// Whether the menu lists models.
     #[must_use]
     pub fn lists_models(self) -> bool {
         matches!(
@@ -105,6 +116,7 @@ impl Picker {
             7 => Self::CommitModel,
             8 => Self::ScheduleFolder,
             9 => Self::ScheduleSession,
+            10 => Self::Provider,
             _ => return None,
         })
     }
@@ -226,6 +238,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
             })
             .collect(),
         Picker::ScheduleFolder | Picker::ScheduleSession => schedule_items(app, picker),
+        Picker::Provider => provider_items(app),
         Picker::Agent => {
             let current = app.current_agent();
             app.agent_choices()
@@ -303,6 +316,32 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 .collect()
         }
     }
+}
+
+/// Every provider the server can sign in to that matches the filter, with
+/// those already signed in marked.
+fn provider_items(app: &App) -> Vec<Item> {
+    let Load::Loaded(list) = &app.sheets.providers.list else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter(|i| matches(&format!("{} {}", i.name, i.id), &app.picker_filter))
+        .map(|integration| {
+            let signed = integration
+                .connections
+                .iter()
+                .any(|c| c.credential.is_some());
+            Item {
+                selected: false,
+                label: integration.name.clone(),
+                detail: signed.then(|| "signed in".to_owned()),
+                dot: None,
+                message: Message::Sheet(SheetEvent::Provider(ProviderEvent::Open(
+                    integration.id.clone(),
+                ))),
+            }
+        })
+        .collect()
 }
 
 /// The menu of a new schedule's project or session.

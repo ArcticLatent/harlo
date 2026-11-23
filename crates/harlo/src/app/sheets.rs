@@ -263,11 +263,17 @@ pub enum Field {
     ScheduleTime,
     /// The prompt it sends.
     SchedulePrompt,
+    /// The key a provider signs in with.
+    SignInKey,
+    /// The code or address that finishes a browser sign-in.
+    SignInCode,
+    /// The answer to a sign-in form's field, by its place.
+    SignInAnswer(u8),
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 29] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -287,6 +293,16 @@ impl Field {
         Self::ScheduleName,
         Self::ScheduleTime,
         Self::SchedulePrompt,
+        Self::SignInKey,
+        Self::SignInCode,
+        Self::SignInAnswer(0),
+        Self::SignInAnswer(1),
+        Self::SignInAnswer(2),
+        Self::SignInAnswer(3),
+        Self::SignInAnswer(4),
+        Self::SignInAnswer(5),
+        Self::SignInAnswer(6),
+        Self::SignInAnswer(7),
     ];
 }
 
@@ -324,11 +340,14 @@ pub enum SettingChoice {
     ProjectSessions,
     /// How a new schedule's time is given.
     ScheduleWhen,
+    /// The answer to a sign-in form's field with a few options, by the
+    /// field's place; the row brings its options.
+    SignInAnswer(u8),
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 18] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -339,6 +358,14 @@ impl SettingChoice {
         Self::ProjectColor,
         Self::ProjectSessions,
         Self::ScheduleWhen,
+        Self::SignInAnswer(0),
+        Self::SignInAnswer(1),
+        Self::SignInAnswer(2),
+        Self::SignInAnswer(3),
+        Self::SignInAnswer(4),
+        Self::SignInAnswer(5),
+        Self::SignInAnswer(6),
+        Self::SignInAnswer(7),
     ];
 
     /// The options, as Settings names them, in order.
@@ -359,6 +386,8 @@ impl SettingChoice {
             ],
             Self::ProjectSessions => &["Keep them", "Archive them"],
             Self::ScheduleWhen => &["Once", "Every", "Cron"],
+            // Each form brings its own.
+            Self::SignInAnswer(_) => &[],
         }
     }
 }
@@ -444,6 +473,8 @@ pub enum Event {
     Hosting(super::HostingEvent),
     /// Something in Settings → Schedules.
     Schedule(super::ScheduleEvent),
+    /// Something about signing in to a model provider.
+    Provider(super::ProviderEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -509,6 +540,8 @@ pub struct Sheets {
     pub hosting: super::HostingState,
     /// Settings → Schedules.
     pub schedules: super::Schedules,
+    /// The model providers, and signing in to them.
+    pub providers: super::Providers,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -583,6 +616,7 @@ impl App {
             Event::GitSettings(event) => return self.git_event(event),
             Event::Hosting(event) => return self.hosting_event(event),
             Event::Schedule(event) => return self.schedule_event(event),
+            Event::Provider(event) => return self.provider_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;
@@ -594,24 +628,7 @@ impl App {
             Event::Theme(id) => return self.pick_theme(id),
             Event::DefaultModel(model) => return self.set_default_model(&model),
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
-            Event::Choose(SettingChoice::ProjectColor, option) => {
-                let color = option.checked_sub(1);
-                return self.project_event(ProjectEvent::Color(color));
-            }
-            Event::Choose(SettingChoice::ProjectSessions, option) => {
-                return self.project_event(ProjectEvent::Archive(option == 1));
-            }
-            Event::Choose(SettingChoice::ScheduleWhen, option) => {
-                if let Some(&when) = harlo_core::schedules::When::ALL.get(option) {
-                    self.sheets.schedules.draft.when = when;
-                }
-            }
-            Event::Choose(choice, option) => {
-                if self.choose(choice, option) {
-                    self.retheme();
-                    return self.save_preferences();
-                }
-            }
+            Event::Choose(choice, option) => return self.choose_option(choice, option),
             event @ (Event::OpenSetup
             | Event::Step(_)
             | Event::Next
@@ -673,6 +690,9 @@ impl App {
             }
             Field::ScheduleName | Field::ScheduleTime | Field::SchedulePrompt => {
                 self.schedule_text(field, value)
+            }
+            Field::SignInKey | Field::SignInCode | Field::SignInAnswer(_) => {
+                self.provider_text(field, value)
             }
             Field::QuietFrom | Field::QuietTo | Field::Title(_) | Field::Message(_) => {
                 self.set_notice_text(field, value)
@@ -762,7 +782,10 @@ impl App {
             | Field::ForgejoToken
             | Field::ScheduleName
             | Field::ScheduleTime
-            | Field::SchedulePrompt => {
+            | Field::SchedulePrompt
+            | Field::SignInKey
+            | Field::SignInCode
+            | Field::SignInAnswer(_) => {
                 return Task::none();
             }
         }
@@ -821,6 +844,36 @@ impl App {
             _ => {}
         }
         Task::none()
+    }
+
+    /// Takes option `option` of `choice`: Harlo's look, or a choice on a
+    /// project, schedule or sign-in page.
+    fn choose_option(&mut self, choice: SettingChoice, option: usize) -> Task<Message> {
+        match choice {
+            SettingChoice::ProjectColor => {
+                let color = option.checked_sub(1);
+                self.project_event(ProjectEvent::Color(color))
+            }
+            SettingChoice::ProjectSessions => {
+                self.project_event(ProjectEvent::Archive(option == 1))
+            }
+            SettingChoice::SignInAnswer(at) => {
+                self.provider_event(super::ProviderEvent::Choose(usize::from(at), option))
+            }
+            SettingChoice::ScheduleWhen => {
+                if let Some(&when) = harlo_core::schedules::When::ALL.get(option) {
+                    self.sheets.schedules.draft.when = when;
+                }
+                Task::none()
+            }
+            _ => {
+                if self.choose(choice, option) {
+                    self.retheme();
+                    return self.save_preferences();
+                }
+                Task::none()
+            }
+        }
     }
 
     /// Opens the setup guide at its first step, and reads what it shows.
@@ -955,7 +1008,7 @@ impl App {
             self.sheets.setup = Load::Loading;
         }
         let folder = self.folder();
-        Task::future(async move {
+        let setup = Task::future(async move {
             let text = |e: harlo_core::server::Error| e.to_string();
             let (providers, search, mcp, plugins) = futures_util::join!(
                 client.providers(&folder),
@@ -970,6 +1023,7 @@ impl App {
                 plugins: plugins.map_err(text),
             };
             Message::Sheet(Event::SetUp(serial, Box::new(setup)))
-        })
+        });
+        Task::batch([setup, self.load_providers()])
     }
 }

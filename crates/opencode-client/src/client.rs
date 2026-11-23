@@ -437,7 +437,7 @@ impl Client {
         Ok(())
     }
 
-    async fn post(&self, path: &str, body: &Value) -> Result<(), Error> {
+    pub(crate) async fn post(&self, path: &str, body: &Value) -> Result<(), Error> {
         Self::send(self.request(Method::POST, path).json(body)).await?;
         Ok(())
     }

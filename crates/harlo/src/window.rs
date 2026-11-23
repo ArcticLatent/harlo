@@ -22,7 +22,7 @@ use slint::winit_030::{EventResult, WinitWindowAccessor as _, winit::event::Wind
 use crate::app::Load;
 use crate::app::{
     self, App, ChangesEvent, ContextEvent, Edge, FilesEvent, Message, NotesEvent, Panel,
-    ProjectEvent, ScheduleEvent, SchedulePage, SheetEvent, TerminalEvent,
+    ProjectEvent, ProviderEvent, ScheduleEvent, SchedulePage, SheetEvent, TerminalEvent,
 };
 use crate::keys::KeyPress;
 use crate::model::{self, Picker};
@@ -230,6 +230,7 @@ fn boot(options: &Options) -> App {
     app.opencode_folder = harlo_core::config::folder();
     app.git_config = harlo_core::git::Global::new();
     app.hosting = Some(harlo_core::hosting::Hosting::new());
+    app.opens_pages = true;
     app.autostart = harlo_core::autostart::folder()
         .zip(std::env::current_exe().ok())
         .map(|(folder, program)| app::Autostart {
@@ -588,10 +589,40 @@ pub const CHOOSE_SCHEDULE_FOLDER: i32 = 36;
 /// goes to.
 pub const CHOOSE_SCHEDULE_SESSION: i32 = 37;
 
+/// The Settings row that opens the sign-in page of the provider numbered
+/// by its item, in the server's list of integrations.
+pub const OPEN_PROVIDER: i32 = 38;
+
+/// The Settings button that goes back to the list of providers.
+pub const ALL_PROVIDERS: i32 = 39;
+
+/// The Settings button that uses the sign-in method numbered by its item.
+pub const USE_SIGN_IN_METHOD: i32 = 40;
+
+/// The Settings button that signs in with the method in use.
+pub const SIGN_IN_PROVIDER: i32 = 41;
+
+/// The Settings button that opens a browser sign-in's page again.
+pub const OPEN_PROVIDER_PAGE: i32 = 42;
+
+/// The Settings button that finishes a browser sign-in with the code typed.
+pub const FINISH_SIGN_IN: i32 = 43;
+
+/// The Settings button that stops a sign-in that has started.
+pub const CANCEL_PROVIDER_SIGN_IN: i32 = 44;
+
+/// The Settings button that removes the shown provider's connection
+/// numbered by its item, asking once.
+pub const REMOVE_CREDENTIAL: i32 = 45;
+
+/// The Settings button that picks a provider to sign in to.
+pub const ADD_PROVIDER: i32 = 46;
+
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
     let schedule = |event| Some(Message::Sheet(SheetEvent::Schedule(event)));
+    let provider = |event| Some(Message::Sheet(SheetEvent::Provider(event)));
     let worktree = || {
         let folder = app.sheets.projects.shown.as_deref()?;
         let project = app.projects.iter().find(|p| p.directory == folder)?;
@@ -664,6 +695,25 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
             })
         }
         CHOOSE_SCHEDULE_FOLDER => Some(Message::TogglePicker(Picker::ScheduleFolder)),
+        OPEN_PROVIDER => {
+            let Load::Loaded(list) = &app.sheets.providers.list else {
+                return None;
+            };
+            let id = list.get(usize::try_from(item).ok()?)?.id.clone();
+            provider(ProviderEvent::Open(id))
+        }
+        ALL_PROVIDERS => provider(ProviderEvent::Back),
+        USE_SIGN_IN_METHOD => provider(ProviderEvent::Method(usize::try_from(item).ok()?)),
+        SIGN_IN_PROVIDER => provider(ProviderEvent::SignIn),
+        OPEN_PROVIDER_PAGE => provider(ProviderEvent::OpenPage),
+        FINISH_SIGN_IN => provider(ProviderEvent::Finish),
+        CANCEL_PROVIDER_SIGN_IN => provider(ProviderEvent::Cancel),
+        REMOVE_CREDENTIAL => {
+            let integration = app.sheets.providers.integration()?;
+            let connection = integration.connections.get(usize::try_from(item).ok()?)?;
+            provider(ProviderEvent::Remove(connection.credential.clone()?))
+        }
+        ADD_PROVIDER => provider(ProviderEvent::Pick),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }

@@ -127,6 +127,14 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
     assert_eq!(ui.app().picker, Some(Picker::ScheduleFolder));
     escape(&ui);
     assert_eq!(ui.app().picker, None);
+    // Choosing from a menu closes it.
+    ui.press("Change");
+    let first = harlo::model::items(&ui.app(), Picker::ScheduleFolder)
+        .first()
+        .map(|item| item.label.clone())
+        .expect("a project");
+    ui.press(&first);
+    assert_eq!(ui.app().picker, None);
     assert!(ui.app().sheets.open.is_some(), "Settings stays open");
     ui.press("Cancel");
     ui.press("Morning check");

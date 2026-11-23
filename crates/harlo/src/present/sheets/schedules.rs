@@ -7,9 +7,7 @@ use harlo_core::schedules::{describe_now, moment_now};
 use harlo_core::server::{Automation, AutomationAction, AutomationStatus};
 use lucide_icons::Icon;
 
-use super::{
-    FIELD, PROJECT, choice, field, glyph, heading, home_relative, int, note, pair, switch,
-};
+use super::{PROJECT, choice, glyph, heading, home_relative, int, live_field, note, pair, switch};
 use crate::app::{App, Field, Load, SchedulePage, Setting, SettingChoice};
 use crate::model::session_label;
 use crate::ui::SheetRow;
@@ -254,14 +252,6 @@ fn new_rows(app: &App) -> Vec<SheetRow> {
     create.setting = window::CREATE_SCHEDULE;
     rows.push(create);
     rows
-}
-
-/// A text field that takes what's typed as it's typed, with no button.
-fn live_field(which: Field, name: &str, value: &str, hint: &str) -> SheetRow {
-    let mut row = field(which, name, value, hint);
-    row.action = "".into();
-    debug_assert_eq!(row.kind, FIELD);
-    row
 }
 
 /// A schedule in the list: whether it runs, when, and in which project.

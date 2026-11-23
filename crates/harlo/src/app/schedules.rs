@@ -135,6 +135,10 @@ impl Schedules {
 impl App {
     /// Applies something that happened in Settings → Schedules.
     pub(super) fn schedule_event(&mut self, event: ScheduleEvent) -> Task<Message> {
+        if matches!(event, ScheduleEvent::Folder(_) | ScheduleEvent::Session(_)) {
+            // Chosen from a menu, which closes.
+            self.picker = None;
+        }
         let page = &mut self.sheets.schedules;
         match event {
             ScheduleEvent::Allowed(read) => {

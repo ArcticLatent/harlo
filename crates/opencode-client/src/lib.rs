@@ -21,6 +21,7 @@ mod error;
 mod event;
 mod generated;
 mod id;
+mod integration;
 mod prompt;
 mod pty;
 mod settings;
@@ -44,6 +45,8 @@ pub use error::Error;
 pub use event::{Event, FileChange, Kind as EventKind};
 #[doc(inline)]
 pub use id::message_id;
+#[doc(inline)]
+pub use integration::{AttemptStatus, OAuthAttempt, SignInMethod};
 #[doc(inline)]
 pub use prompt::{Attachment, Mention, Prompt};
 #[doc(inline)]

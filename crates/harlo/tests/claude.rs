@@ -17,6 +17,7 @@ fn agent(connections: Vec<Connection>) -> Integration {
     Integration {
         id: "claude-agent".into(),
         name: "Claude Agent".into(),
+        methods: Vec::new(),
         connections,
     }
 }
@@ -58,6 +59,7 @@ fn a_subscription_shows_the_account_and_a_console_sign_in_doesnt_count() {
         agent(vec![Connection {
             credential: Some("crd_1".into()),
             label: "Claude Agent".into(),
+            method: Some("external".into()),
             needs_sign_in: None,
         }]),
     );
@@ -89,6 +91,7 @@ fn a_connection_that_needs_signing_in_says_why() {
         agent(vec![Connection {
             credential: Some("crd_1".into()),
             label: "Claude Agent".into(),
+            method: Some("external".into()),
             needs_sign_in: Some("Claude Code is signed out".into()),
         }]),
     );

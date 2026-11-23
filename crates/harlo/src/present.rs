@@ -383,6 +383,10 @@ impl Presenter {
                 "Writes commit messages in the Changes panel, from Harlo on this computer."
                     .to_owned()
             }
+            Picker::Provider => {
+                "Signing in stores the credential in OpenCode, for every app using this server."
+                    .to_owned()
+            }
             Picker::ScheduleSession => {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }

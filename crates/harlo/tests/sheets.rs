@@ -283,7 +283,7 @@ fn settings_show_the_servers_set_up_and_about() {
     assert!(ui.shows("Loading…"));
     ui.send(Message::Sheet(SheetEvent::SetUp(1, Box::new(setup()))));
     assert!(ui.shows("Fake"));
-    assert!(ui.shows("on"));
+    assert!(ui.shows("No sign-in needed"));
     ui.press("Tools for agents");
     assert!(ui.shows("Exa"));
     assert!(

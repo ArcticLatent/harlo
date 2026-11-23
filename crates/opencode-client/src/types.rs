@@ -903,7 +903,7 @@ impl Answer {
 }
 
 impl Field {
-    fn from_json(value: &Value) -> Option<Self> {
+    pub(crate) fn from_json(value: &Value) -> Option<Self> {
         let text = |key: &str| value[key].as_str().map(str::to_owned);
         let number = |key: &str| value[key].as_f64();
         let choices = || -> Vec<Choice> {

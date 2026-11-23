@@ -1,5 +1,6 @@
 //! Integrations against a private server: connecting Claude Agent through
-//! Claude Code's own sign-in, and removing the connection again.
+//! Claude Code's own sign-in, signing a provider in with a key (and the
+//! answers its form needs), and removing the connections again.
 //!
 //! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
 //! folders and a stand-in path for `claude`, never the shared service or the
@@ -9,7 +10,7 @@
 
 mod support;
 
-use opencode_client::{Client, Integration};
+use opencode_client::{Answer, Client, FieldKind, Integration, SignInMethod};
 use support::{Sandbox, WAIT};
 
 /// OpenCode's integration for Claude subscriptions.
@@ -76,4 +77,90 @@ async fn an_unknown_integration_is_none() {
         .await
         .expect("an answer");
     assert_eq!(missing, None);
+}
+
+/// Every integration, once the server has loaded them.
+async fn integrations(client: &Client) -> Vec<Integration> {
+    tokio::time::timeout(WAIT, async {
+        loop {
+            let list = client.integrations().await.expect("an answer");
+            if list.len() > 100 {
+                return list;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("OpenCode lists its integrations")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_signs_in_with_a_key_and_is_removed() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let all = integrations(&client).await;
+    let ai302 = all.iter().find(|i| i.id == "302ai").expect("302.AI");
+    assert_eq!(ai302.name, "302.AI");
+    assert!(matches!(ai302.methods[0], SignInMethod::Key { .. }));
+    assert!(
+        ai302
+            .methods
+            .iter()
+            .any(|m| matches!(m, SignInMethod::Env { names } if names == &["302AI_API_KEY"]))
+    );
+    let azure = all.iter().find(|i| i.id == "azure").expect("Azure");
+    let form = azure.methods[0].form();
+    assert_eq!(form[0].key, "resourceName");
+    assert!(form[0].required);
+    assert!(matches!(form[0].kind, FieldKind::Text { .. }));
+    assert!(all.iter().any(|i| i.methods.iter().any(
+        |m| matches!(m, SignInMethod::OAuth { label, .. } if label == "Login with GitHub Copilot")
+    )));
+
+    client
+        .connect_key("302ai", "sk-scratch", &[])
+        .await
+        .expect("signed in");
+    let signed = client
+        .integration("302ai")
+        .await
+        .expect("an answer")
+        .expect("302.AI");
+    let connection = &signed.connections[0];
+    assert_eq!(connection.method.as_deref(), Some("key"));
+    let providers = client
+        .providers(&sandbox.project_str())
+        .await
+        .expect("providers");
+    assert!(providers.iter().any(|p| p.id == "302ai"), "{providers:?}");
+
+    // A form answer the server needs, and what it says without it.
+    let refused = client
+        .connect_key("azure", "k", &[])
+        .await
+        .expect_err("needs its resource name");
+    assert_eq!(
+        refused.server_message(),
+        Some("Missing required form field: resourceName")
+    );
+    client
+        .connect_key(
+            "azure",
+            "k",
+            &[("resourceName".into(), Answer::Text("scratch".into()))],
+        )
+        .await
+        .expect("signed in");
+
+    let credential = connection.credential.clone().expect("a credential");
+    client
+        .remove_credential(&credential)
+        .await
+        .expect("removed");
+    let removed = client
+        .integration("302ai")
+        .await
+        .expect("an answer")
+        .expect("302.AI");
+    assert!(removed.connections.is_empty());
 }

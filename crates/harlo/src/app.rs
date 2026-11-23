@@ -38,6 +38,7 @@ mod line_comments;
 mod notes;
 mod notices;
 mod projects;
+mod providers;
 mod schedules;
 mod sheets;
 mod subagents;
@@ -61,6 +62,7 @@ pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use projects::{ProjectEvent, Projects, icon_url};
+pub use providers::{Attempt as SignInAttempt, FORM_FIELDS, ProviderEvent, Providers};
 pub use schedules::{Draft as ScheduleDraft, Page as SchedulePage, ScheduleEvent, Schedules};
 pub use sheets::{
     Autostart, Event as SheetEvent, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
@@ -516,6 +518,9 @@ pub struct App {
     /// The tools that sign git in to hosting sites: only the running app
     /// sets them; tests give scratch ones or none.
     pub hosting: Option<harlo_core::hosting::Hosting>,
+    /// Whether sign-in pages open in the browser: only the running app
+    /// sets it, so tests never open one.
+    pub opens_pages: bool,
     /// Whether the desktop shows Harlo's tray icon.
     pub tray: bool,
     /// The composer's text.
@@ -652,6 +657,7 @@ impl App {
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_NOSYSTEM", "1"),
             hosting: None,
+            opens_pages: false,
             tray: false,
             composer: TextBox::new(),
             send_error: None,
@@ -1669,7 +1675,7 @@ impl App {
                     .position(|item| item.selected)
                     .unwrap_or(0);
                 let reveal = self.reveal_highlight();
-                if picker.lists_models() {
+                if picker.filters() {
                     return Task::batch([reveal, Task::effect(Effect::Focus(model::MENU_FILTER))]);
                 }
                 return reveal;

@@ -343,6 +343,7 @@ component Row inherits VerticalLayout {
     if root.entry.kind == 9: Press {
         height: 44px;
         label: root.entry.name;
+        about: root.entry.value;
         clicked => { Logic.settings-action(root.entry.setting, root.entry.choice); }
         HorizontalLayout {
             padding-left: 8px;
@@ -397,11 +398,19 @@ component Row inherits VerticalLayout {
             cards: root.entry.setting == 0 ? State.dark-theme-cards : State.light-theme-cards;
         }
     }
+    // A long name, such as a sign-in form's question, sits above the field.
+    if root.entry.kind == 6 && root.entry.name.character-count > 12: Text {
+        text: root.entry.name;
+        font-size: Size.small;
+        color: Theme.text-base;
+        wrap: word-wrap;
+        accessible-role: AccessibleRole.text;
+    }
     if root.entry.kind == 6: HorizontalLayout {
         padding-top: 4px;
         padding-bottom: 4px;
         spacing: 12px;
-        Text {
+        if root.entry.name.character-count <= 12: Text {
             width: 72px;
             text: root.entry.name;
             font-size: Size.small;

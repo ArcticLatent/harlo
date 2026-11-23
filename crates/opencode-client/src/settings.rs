@@ -325,12 +325,14 @@ mod tests {
 
 /// A service the server can sign in to, such as a model provider, and the
 /// connections it has to it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Integration {
     /// Its ID, such as `claude-agent`.
     pub id: String,
     /// Its name.
     pub name: String,
+    /// The ways to sign in to it, in the server's order.
+    pub methods: Vec<crate::integration::SignInMethod>,
     /// Its connections: stored credentials and environment variables.
     pub connections: Vec<Connection>,
 }
@@ -342,6 +344,9 @@ pub struct Connection {
     pub credential: Option<String>,
     /// The credential's label, or the variable's name.
     pub label: String,
+    /// How the credential was made: `key`, `oauth` or `external`; `None`
+    /// for an environment variable.
+    pub method: Option<String>,
     /// Why it needs signing in again, when it does.
     pub needs_sign_in: Option<String>,
 }
@@ -355,9 +360,16 @@ impl Integration {
             .flatten()
             .filter_map(Connection::from_json)
             .collect();
+        let methods = value["methods"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(crate::integration::SignInMethod::from_json)
+            .collect();
         Some(Self {
             name: optional(value, "name").unwrap_or_else(|| id.clone()),
             id,
+            methods,
             connections,
         })
     }
@@ -374,6 +386,7 @@ impl Connection {
         let needs_sign_in =
             (status["status"].as_str() == Some("needs_auth")).then(|| text(status, "message"));
         Some(Self {
+            method: optional(value, "method"),
             credential,
             label,
             needs_sign_in,
