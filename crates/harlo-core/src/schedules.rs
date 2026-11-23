@@ -50,7 +50,9 @@ impl When {
     pub fn help(self) -> &'static str {
         match self {
             Self::Once => "A time on the server's clock, or how long from now.",
-            Self::Every => "How far apart, at least a minute. The first run is one interval away.",
+            Self::Every => {
+                "Intervals must be at least one minute. The first run is one interval from now."
+            }
             Self::Cron => {
                 "Minute, hour, day of the month, month and day of the week, on the server's clock: \
                  0 9 * * 1-5 is weekdays at 09:00."

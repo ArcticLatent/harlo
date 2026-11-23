@@ -18,40 +18,49 @@ global Sides {
 }
 
 /// A section's title, with its count or branch, or a close button.
-component TitleRow inherits HorizontalLayout {
+component TitleRow inherits VerticalLayout {
     in property <ChangeRow> entry;
+    /// A section after the first is set apart by a line.
+    property <bool> ruled: root.entry.gap > 16px;
 
-    padding-top: root.entry.gap;
-    spacing: 6px;
-    Text {
-        horizontal-stretch: 1;
-        text: root.entry.text;
-        vertical-alignment: center;
-        font-size: Size.label;
-        font-weight: 500;
-        color: Theme.text-strong;
+    padding-top: root.ruled ? root.entry.gap / 2 : root.entry.gap;
+    spacing: root.ruled ? root.entry.gap / 2 - 1px : 0px;
+    if root.ruled: Rectangle {
+        height: 1px;
+        background: Theme.border-weak-base;
     }
-    if root.entry.branch: Icon {
-        text: Icons.git-branch;
-        font-size: 12px;
-        color: Theme.icon-quiet;
-    }
-    if root.entry.aside != "": Text {
-        text: root.entry.aside;
-        vertical-alignment: center;
-        font-size: Size.small;
-        color: Theme.text-weak;
-    }
-    if root.entry.closes: VerticalLayout {
-        alignment: center;
-        IconButton {
-            width: 20px;
-            height: 20px;
-            label: "End review";
-            glyph: Icons.close;
-            glyph-size: 12px;
-            glyph-color: Theme.icon-quiet;
-            clicked => { Logic.end-review(); }
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.text;
+            vertical-alignment: center;
+            font-size: Size.label;
+            font-weight: 500;
+            color: Theme.text-strong;
+        }
+        if root.entry.branch: Icon {
+            text: Icons.git-branch;
+            font-size: 12px;
+            color: Theme.icon-quiet;
+        }
+        if root.entry.aside != "": Text {
+            text: root.entry.aside;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        if root.entry.closes: VerticalLayout {
+            alignment: center;
+            IconButton {
+                width: 20px;
+                height: 20px;
+                label: "End review";
+                glyph: Icons.close;
+                glyph-size: 12px;
+                glyph-color: Theme.icon-quiet;
+                clicked => { Logic.end-review(); }
+            }
         }
     }
 }
@@ -83,10 +92,15 @@ component FileRow inherits Press {
             font-size: 13px;
             color: root.entry.clickable ? Theme.icon-quiet : transparent;
         }
-        FileIcon {
+        if root.entry.icon != "": FileIcon {
             text: root.entry.icon;
             color: root.entry.icon-color;
             font-size: 13px;
+        }
+        if root.entry.icon == "": Icon {
+            text: Icons.file;
+            font-size: 13px;
+            color: Theme.icon-quiet;
         }
         Text {
             text: root.entry.text;

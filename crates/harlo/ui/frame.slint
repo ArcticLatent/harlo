@@ -5,7 +5,7 @@
 import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
 import { Logic, State, Tab } from "data.slint";
-import { Icon, FileIcon, IconButton } from "widgets.slint";
+import { Icon, FileIcon, IconButton, Dot } from "widgets.slint";
 
 /// One tab: its icon, title and close button, with the shown one lit and
 /// underlined.
@@ -49,8 +49,17 @@ component TabView inherits Rectangle {
             font-size: 13px;
             color: tab.active ? Theme.accent-ink : Theme.icon-quiet;
         }
+        // Unsaved changes: an amber dot before the name.
+        if tab.modified: VerticalLayout {
+            alignment: center;
+            Dot {
+                size: 7px;
+                background: Theme.icon-warning-base;
+            }
+        }
         Text {
-            text: (tab.modified ? "● " : "") + tab.title;
+            text: tab.title;
+            accessible-label: tab.modified ? tab.title + ", unsaved changes" : tab.title;
             // Enough of a title to tell tabs apart; tabs past the strip's
             // end are cut off rather than squeezed to a letter or two.
             min-width: 64px;

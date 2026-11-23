@@ -258,7 +258,12 @@ impl<'a> Builder<'a> {
             row.key = key.as_str().into();
             row.text = name.into();
             row.aside = folder.into();
-            row.icon = icon.glyph.to_string().into();
+            // A plain file shows a plain page.
+            row.icon = if file_icons::plain(name) {
+                SharedString::new()
+            } else {
+                icon.glyph.to_string().into()
+            };
             row.icon_color = icon.slint_color();
             row.added = count(file.additions);
             row.removed = count(file.deletions);

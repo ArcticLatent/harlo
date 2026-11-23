@@ -100,7 +100,7 @@ fn agents_and_saved_approvals_are_shown_and_an_approval_removed() {
     assert!(ui.shows("project"), "its project's name");
     ui.press("Remove");
     assert!(
-        tasks.until(&ui, WAIT, |ui| ui.shows("None saved.")),
+        tasks.until(&ui, WAIT, |ui| ui.shows("No saved approvals.")),
         "removed: {:?}",
         ui.app().sheets.approvals.error
     );

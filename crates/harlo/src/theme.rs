@@ -99,9 +99,9 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
     ));
     g.set_added_line(color(t.diff_added.over(t.surface_inset_base, PATCH_TINT)));
     g.set_removed_line(color(t.diff_removed.over(t.surface_inset_base, PATCH_TINT)));
+    // A main action that can't be taken yet: a quiet fill, barely tinted.
     g.set_primary_off(color(
-        t.surface_brand_base
-            .over(t.surface_raised_strong, PRIMARY_OFF),
+        t.surface_brand_base.over(t.border_weak_base, PRIMARY_OFF),
     ));
     g.set_warning_edge(color(waiting_edge(t, t.icon_warning_base)));
     g.set_question_edge(color(waiting_edge(t, t.text_interactive_base)));
@@ -261,7 +261,7 @@ const INK_STEPS: u8 = 10;
 const SCRIM_LIGHT: f32 = 0.14;
 
 /// How much of its colour a main button keeps while it can't be pressed.
-const PRIMARY_OFF: f32 = 0.4;
+const PRIMARY_OFF: f32 = 0.1;
 
 /// How much of its accent a waiting card's outline takes at least.
 const WAITING_EDGE: f32 = 0.45;

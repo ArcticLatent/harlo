@@ -19,8 +19,7 @@ pub(super) fn provider_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         heading("Providers"),
         note(
-            "Sign in to a provider to use its models. OpenCode keeps the sign-in, so every app \
-             using this server can use it.",
+            "Sign in to use a provider's models. OpenCode shares the sign-in with apps using this server.",
         ),
     ];
     let integrations = match &page.list {
@@ -213,6 +212,7 @@ fn connection_rows(app: &App, integration: &Integration, rows: &mut Vec<SheetRow
         };
         row.action = if asked { "Remove for good" } else { "Remove" }.into();
         row.setting = window::REMOVE_CREDENTIAL;
+        row.risky = true;
         row.choice = int(at);
         rows.push(row);
     }

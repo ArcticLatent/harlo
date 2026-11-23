@@ -12,16 +12,20 @@ import { CardButton, GhostButton } from "waiting.slint";
 /// A small button with a word on it, at the end of a row.
 component ActionButton inherits Press {
     in property <string> text;
+    /// Whether it deletes something, drawn in the danger colours.
+    in property <bool> risky;
     height: 24px;
     width: label-text.preferred-width + 20px;
     label: root.text;
     rest: Theme.control-fill;
     outlined: true;
+    border-color: root.risky ? Theme.risky-edge
+        : root.hovered && root.enabled ? Theme.control-edge-hover : Theme.control-edge;
 
     label-text := Text {
         text: root.text;
         font-size: Size.small;
-        color: Theme.text-strong;
+        color: root.risky ? Theme.risky-ink : Theme.text-strong;
         horizontal-alignment: center;
         vertical-alignment: center;
         accessible-role: none;
@@ -210,24 +214,42 @@ component ThemeHeading inherits Text {
 /// it does, or the light-or-dark choice.
 component Row inherits VerticalLayout {
     in property <SheetRow> entry;
+    /// Whether it's the page's first row, which needs no line above it.
+    in property <bool> first;
 
-    if root.entry.kind == 0: Text {
+    if root.entry.kind == 0: VerticalLayout {
         height: 40px;
-        text: root.entry.name;
-        font-size: Size.label;
-        font-weight: 600;
-        color: Theme.text-strong;
-        vertical-alignment: bottom;
-        accessible-role: AccessibleRole.text;
+        // A line sets each section after the first apart.
+        if !root.first: Rectangle {
+            height: 1px;
+            background: Theme.border-weak-base;
+        }
+        Text {
+            vertical-stretch: 1;
+            text: root.entry.name;
+            font-size: Size.label;
+            font-weight: 600;
+            color: Theme.text-strong;
+            vertical-alignment: bottom;
+            accessible-role: AccessibleRole.text;
+        }
     }
     if root.entry.kind == 1: HorizontalLayout {
         height: 30px;
         spacing: 16px;
+        // An icon before the name, such as an agent's.
+        if root.entry.glyph != "": Icon {
+            width: 14px;
+            text: root.entry.glyph;
+            font-size: 13px;
+            color: Theme.agent-ink;
+        }
         Text {
             horizontal-stretch: 1;
             text: root.entry.name;
-            font-size: Size.small;
-            color: Theme.text-base;
+            font-family: root.entry.mono-name ? Fonts.mono : Fonts.sans;
+            font-size: root.entry.mono-name ? Size.code : Size.small;
+            color: root.entry.mono-name ? Theme.agent-ink : Theme.text-base;
             overflow: elide;
             vertical-alignment: center;
             accessible-role: AccessibleRole.text;
@@ -235,14 +257,16 @@ component Row inherits VerticalLayout {
         Text {
             horizontal-stretch: 2;
             text: root.entry.value;
-            font-size: Size.small;
+            font-family: root.entry.mono-value ? Fonts.mono : Fonts.sans;
+            font-size: root.entry.mono-value ? Size.code : Size.small;
             horizontal-alignment: right;
             vertical-alignment: center;
             overflow: elide;
             color: root.entry.tone == 1 ? Theme.icon-success-base
                 : root.entry.tone == 2 ? Theme.icon-critical-base
                 : root.entry.tone == 3 ? Theme.text-weak
-                : root.entry.tone == 4 ? Theme.icon-warning-base : Theme.text-base;
+                : root.entry.tone == 4 ? Theme.icon-warning-base
+                : root.entry.tone == 5 ? Theme.accent-ink : Theme.text-base;
             accessible-role: AccessibleRole.text;
         }
         if root.entry.action != "": VerticalLayout {
@@ -254,6 +278,7 @@ component Row inherits VerticalLayout {
             }
             ActionButton {
                 text: root.entry.action;
+                risky: root.entry.risky;
                 clicked => {
                     if root.entry.copy != "" {
                         clip.text = root.entry.copy;
@@ -608,8 +633,9 @@ component SheetRows inherits VerticalLayout {
     }
     VerticalLayout {
         spacing: 0;
-        for entry in State.sheet-rows: Row {
+        for entry[index] in State.sheet-rows: Row {
             entry: entry;
+            first: index == 0;
         }
     }
 }
@@ -803,7 +829,7 @@ component RangeButton inherits Press {
     Text {
         text: root.text;
         font-size: Size.small;
-        color: root.selected ? Theme.text-strong : Theme.text-weak;
+        color: root.selected ? Theme.accent-ink : Theme.text-weak;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -842,7 +868,8 @@ component StatsHead inherits VerticalLayout {
             width: (parent.width + 8px) / self.per-row - 8px;
             height: 58px;
             border-radius: Size.radius;
-            background: Theme.surface-inset-base;
+            border-width: 1px;
+            border-color: Theme.control-edge;
 
             VerticalLayout {
                 padding: 10px;
@@ -865,27 +892,80 @@ component StatsHead inherits VerticalLayout {
     }
 
     if State.stat-days.length > 0: VerticalLayout {
-        spacing: 6px;
+        spacing: 8px;
         Text {
-            text: "Model steps a day";
-            font-size: Size.small;
-            color: Theme.text-weak;
+            text: "Model steps per day";
+            font-size: Size.label;
+            font-weight: 600;
+            color: Theme.text-strong;
         }
-        Rectangle {
-            height: 56px;
-            // A slot for each of the last 30 days, the newest at the right.
-            for day in State.stat-days: Rectangle {
-                property <length> slot: parent.width / 30;
-                x: day.slot * self.slot;
-                width: max(2px, self.slot - 3px);
-                y: parent.height - self.height;
-                height: max(2px, day.share * parent.height);
-                border-radius: 2px;
-                background: Theme.text-interactive-base;
-                accessible-role: AccessibleRole.text;
-                accessible-label: day.label;
+        HorizontalLayout {
+            spacing: 8px;
+            // The scale: the busiest day at the top, none at the foot.
+            VerticalLayout {
+                width: 16px;
+                height: 56px;
+                Text {
+                    text: State.stat-peak;
+                    horizontal-alignment: right;
+                    font-size: Size.small * 0.9;
+                    color: Theme.text-weaker;
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text {
+                    text: "0";
+                    horizontal-alignment: right;
+                    font-size: Size.small * 0.9;
+                    color: Theme.text-weaker;
+                }
+            }
+            Rectangle {
+                height: 56px;
+                // Lines at the top and the foot.
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.border-weak-base;
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border-base;
+                }
+                // A slot for each of the last 30 days, the newest at the right.
+                for day in State.stat-days: Rectangle {
+                    property <length> slot: parent.width / 30;
+                    x: day.slot * self.slot;
+                    width: max(2px, self.slot - 3px);
+                    y: parent.height - self.height;
+                    height: max(2px, day.share * parent.height);
+                    border-radius: 2px;
+                    background: Theme.text-interactive-base;
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: day.label;
+                }
             }
         }
+        // How far back the chart goes, under it, past the scale.
+        HorizontalLayout {
+            padding-left: 24px;
+            Text {
+                horizontal-stretch: 1;
+                text: State.stat-from;
+                font-size: Size.small * 0.9;
+                color: Theme.text-weaker;
+            }
+            Text {
+                text: "Today";
+                font-size: Size.small * 0.9;
+                color: Theme.text-weaker;
+            }
+        }
+    }
+    // A line before the rows under the chart.
+    if State.stat-tiles.length > 0: Rectangle {
+        height: 1px;
+        background: Theme.border-weak-base;
     }
 }
 

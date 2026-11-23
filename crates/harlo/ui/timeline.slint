@@ -346,15 +346,15 @@ export component PatchLine inherits Rectangle {
         : root.line.kind == 2 ? Theme.removed-line : transparent;
     HorizontalLayout {
         padding-right: 8px;
-        spacing: 6px;
+        spacing: 10px;
         Text {
-            width: 34px;
+            width: 28px;
             text: root.line.number;
             horizontal-alignment: right;
             vertical-alignment: center;
             font-family: Fonts.mono;
             font-size: Size.small;
-            color: Theme.text-weak;
+            color: Theme.text-weaker;
         }
         Text {
             width: 10px;
@@ -373,7 +373,7 @@ export component PatchLine inherits Rectangle {
             font-family: Fonts.mono;
             font-size: Size.code;
             color: root.line.kind == 3 ? Theme.text-weaker
-                : root.line.kind == 0 ? Theme.text-base : Theme.text-strong;
+                : root.line.kind == 0 ? Theme.text-weak : Theme.text-base;
         }
     }
 }

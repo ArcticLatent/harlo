@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use harlo_core::files::{Listing, name_of};
 use harlo_core::theme::Tokens;
-use slint::{Image, Rgba8Pixel, SharedPixelBuffer, StyledText, VecModel};
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString, StyledText, VecModel};
 
 use super::{sync, timeline};
 use crate::app::{App, FileBody, OpenFile, Outside, Panel};
@@ -96,7 +96,12 @@ impl Files {
                     open: line.open,
                     loading: line.loading,
                     ignored: node.ignored,
-                    icon: icon.glyph.to_string().into(),
+                    // A plain file shows a plain page.
+                    icon: if file_icons::plain(&node.name) {
+                        SharedString::new()
+                    } else {
+                        icon.glyph.to_string().into()
+                    },
                     icon_color: icon.slint_color(),
                     path: node.path.into(),
                 }

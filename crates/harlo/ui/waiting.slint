@@ -62,7 +62,8 @@ export component CardButton inherits Press {
             text: root.text;
             vertical-alignment: center;
             font-size: Size.label;
-            color: root.main ? Theme.text-on-brand-base
+            color: root.main && !root.enabled ? Theme.text-weak
+                : root.main ? Theme.text-on-brand-base
                 : root.risky ? Theme.risky-ink : Theme.text-strong;
         }
         if root.keys != "": Text {

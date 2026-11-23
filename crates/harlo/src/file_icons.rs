@@ -292,6 +292,13 @@ pub fn kind_of(path: &str) -> &'static str {
         .unwrap_or(FALLBACK)
 }
 
+/// Whether a file has no type of its own, such as plain text, and shows a
+/// plain page rather than a type's icon.
+#[must_use]
+pub fn plain(path: &str) -> bool {
+    kind_of(path) == FALLBACK
+}
+
 /// The icon for a file name or path.
 #[must_use]
 pub fn icon(path: &str) -> FileIcon {

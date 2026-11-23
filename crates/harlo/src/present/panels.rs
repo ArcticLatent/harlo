@@ -182,13 +182,20 @@ fn usage(facts: &ContextFacts<'_>) -> Vec<Fact> {
     let fact = |label: &str, value: String| Fact {
         label: label.into(),
         value: value.into(),
+        kind: 1,
     };
     let mut rows = Vec::new();
     if let Some(model) = &facts.model {
-        rows.push(fact("Model", model.clone()));
+        rows.push(Fact {
+            kind: 0,
+            ..fact("Model", model.clone())
+        });
     }
     if let Some(agent) = &facts.agent {
-        rows.push(fact("Agent", agent.clone()));
+        rows.push(Fact {
+            kind: 2,
+            ..fact("Agent", agent.clone())
+        });
     }
     let Tokens {
         input,

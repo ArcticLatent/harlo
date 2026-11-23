@@ -16,15 +16,13 @@ pub(super) fn voice_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         heading("Dictation"),
         note(
-            "Press Ctrl+Shift+D in the message box, or its microphone, and speak; press it again \
-             and the words go in at the cursor. Esc stops without them. Whisper runs on this \
-             computer: nothing you say leaves it.",
+            "Press Ctrl+Shift+D in the message box or click the microphone to dictate. Press it again to insert the words at the cursor. Esc cancels. Whisper processes audio locally on this computer.",
         ),
         choice(
             app,
             SettingChoice::VoiceModel,
             "Speech model",
-            "Small hears better and takes longer",
+            "Small is more accurate and takes longer.",
         ),
     ];
     let model = app.voice_model();

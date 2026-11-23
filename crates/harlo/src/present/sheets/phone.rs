@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use harlo_core::phone::RelayStatus;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
-use super::{heading, int, note, pair, switch};
+use super::{code_pair, heading, int, note, pair, switch};
 use crate::app::{App, Setting};
 use crate::ui::SheetRow;
 use crate::window;
@@ -26,14 +26,12 @@ pub(super) fn phone_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         heading("Access"),
         note(
-            "A paired phone follows your sessions, answers approvals and questions, and sends \
-             messages through Harlo while it runs. It sees the same OpenCode server as this \
-             window, and what passes between them is encrypted end to end.",
+            "A paired phone can follow sessions, answer approvals and questions, and send messages while Harlo runs. It uses the same OpenCode server as this window. Messages are encrypted end to end.",
         ),
         switch(
             Setting::Phone,
             "Phone access",
-            "Paired phones reach Harlo on this computer's networks",
+            "Paired phones can reach Harlo on this computer's networks.",
             on,
         ),
     ];
@@ -46,7 +44,7 @@ pub(super) fn phone_rows(app: &App) -> Vec<SheetRow> {
                     1 => format!("Port {} · 1 phone connected", running.address().port()),
                     n => format!("Port {} · {n} phones connected", running.address().port()),
                 };
-                pair("Listening", &what, 1)
+                code_pair("Listening", &what, 1)
             }
             (None, Some(why)) => pair("Not started", why, 2),
             (None, None) => pair("Status", "Starting…", 3),
@@ -55,8 +53,7 @@ pub(super) fn phone_rows(app: &App) -> Vec<SheetRow> {
     rows.push(switch(
         Setting::PhoneRelay,
         "Reach Harlo from anywhere",
-        "Through Harlo's relay, which passes on encrypted messages it can't read and sends the \
-         phone app's notifications",
+        "Harlo's relay forwards encrypted messages and sends notifications to the phone app.\nThe relay cannot read the messages.",
         app.preferences.phone_relay,
     ));
     if on && app.preferences.phone_relay {
@@ -96,8 +93,7 @@ fn pairing_rows(app: &App, rows: &mut Vec<SheetRow>) {
         ..SheetRow::default()
     });
     rows.push(note(
-        "Scan it with the Harlo app on your phone. The code works once, for ten minutes; \
-         this page says when the phone has paired.",
+        "Scan with the Harlo app on your phone. The code works once and expires in ten minutes.\nThis page confirms when the phone has paired.",
     ));
     let mut copy = pair("Pairing link", "To paste in the app instead", 3);
     copy.action = "Copy".into();

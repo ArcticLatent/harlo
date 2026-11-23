@@ -30,15 +30,13 @@ pub(super) fn schedule_rows(app: &App) -> Vec<SheetRow> {
 fn list_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.schedules;
     let mut rows = vec![note(
-        "Schedules send a prompt to a session at a time, every so often, or on a cron schedule. \
-         The OpenCode server runs them, so they run while Harlo is closed.",
+        "Schedules send a prompt once, at an interval, or on a cron schedule. The OpenCode server runs them even when Harlo is closed.",
     )];
     match &page.allowed {
         Load::Loaded(on) => rows.push(switch(
             Setting::Automations,
             "Allow schedules",
-            "OpenCode keeps them behind its experimental automations switch. This changes \
-             OpenCode's config for every app using this server.",
+            "This updates OpenCode's experimental automations setting for every app using this server.",
             *on,
         )),
         Load::Failed(why) => rows.push(pair("OpenCode's config", why, 2)),
@@ -98,12 +96,12 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
     rows.push(match (automation.status, automation.next_due_at) {
         (AutomationStatus::Paused, _) => pair("Next", "Paused", 4),
         (AutomationStatus::Done, _) => pair("Next", "It won't run again", 3),
-        (AutomationStatus::Active, Some(next)) => pair("Next", &moment_now(next), 0),
+        (AutomationStatus::Active, Some(next)) => pair("Next", &capitalised(&moment_now(next)), 5),
         (AutomationStatus::Active, None) => pair("Next", "Not set", 3),
     });
     rows.push(pair(
         "Time zone",
-        &format!("{}, the server's", automation.time_zone),
+        &format!("{} · server time", automation.time_zone),
         3,
     ));
 
@@ -152,7 +150,7 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
     rows.push(heading("Change"));
     match automation.status {
         AutomationStatus::Active => {
-            let mut pause = pair("Pause", "It waits until it's resumed.", 3);
+            let mut pause = pair("Pause", "Runs stop until you resume the schedule.", 3);
             pause.action = if page.busy { "Pausing…" } else { "Pause" }.into();
             pause.setting = window::PAUSE_SCHEDULE;
             rows.push(pause);
@@ -175,12 +173,13 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
         if asked {
             "Delete it for every app using this server?"
         } else {
-            "The session and what it did stay."
+            "The session and its history are kept."
         },
         if asked { 4 } else { 3 },
     );
     delete.action = if asked { "Delete for good" } else { "Delete" }.into();
     delete.setting = window::DELETE_SCHEDULE;
+    delete.risky = true;
     rows.push(delete);
     rows
 }
@@ -229,7 +228,7 @@ fn new_rows(app: &App) -> Vec<SheetRow> {
         rows.push(project);
     }
     let to = draft.session.as_deref().map_or_else(
-        || "A new session, named after the schedule".to_owned(),
+        || "A new session named after the schedule".to_owned(),
         |id| session_name(app, id),
     );
     let mut session = pair("Goes to", &to, 0);
@@ -256,6 +255,15 @@ fn new_rows(app: &App) -> Vec<SheetRow> {
     create.setting = window::CREATE_SCHEDULE;
     rows.push(create);
     rows
+}
+
+/// `text` starting with a capital, as a value in a row reads.
+fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
 /// A schedule in the list: whether it runs, when, and in which project.

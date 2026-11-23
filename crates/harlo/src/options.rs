@@ -35,7 +35,7 @@ Usage: harlo [--server <url>] [--setup]
   --server <url>  Follow the OpenCode server at <url> instead of the shared
                   background service. Its password is read from
                   HARLO_OPENCODE_PASSWORD.
-  --setup         Open the setup guide: OpenCode, models, git and the theme.
+  --setup         Open the setup guide: OpenCode, models, Git, and the theme.
                   A Harlo already running opens it in its window.
   -h, --help      Show this help.";
 

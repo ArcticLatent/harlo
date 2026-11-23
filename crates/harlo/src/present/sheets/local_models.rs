@@ -38,8 +38,7 @@ pub(super) fn local_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("Not done", why, 2));
     }
     rows.push(note(&format!(
-        "Engines and models go in {}; their servers run while Harlo is open and listen only \
-         on this computer.",
+        "Engines and models are stored in {}. Their servers run while Harlo is open and listen only on this computer.",
         engines
             .folder()
             .parent()
@@ -49,15 +48,13 @@ pub(super) fn local_rows(app: &App) -> Vec<SheetRow> {
 
     rows.push(heading("Ollama"));
     rows.push(note(
-        "Gets models by name and serves all of them. OpenCode finds it on this computer by \
-         itself, and its models show in the model menu.",
+        "Downloads models by name and serves them locally. OpenCode discovers Ollama automatically and lists its models in the model menu.",
     ));
     engine_rows(app, Engine::Ollama, &mut rows);
 
     rows.push(heading("llama.cpp"));
     rows.push(note(
-        "Serves one model file, the quickest way to run it on this computer. OpenCode uses it \
-         once it's added to OpenCode's config.",
+        "Serves a single model file. This is the quickest way to run it on this computer. Add it to OpenCode's config to use it there.",
     ));
     engine_rows(app, Engine::LlamaCpp, &mut rows);
     provider_rows(app, &mut rows);
@@ -110,7 +107,7 @@ fn engine_rows(app: &App, engine: Engine, rows: &mut Vec<SheetRow>) {
             }
         }
         (None, None) => {
-            let mut row = pair("Program", "Not installed", 3);
+            let mut row = pair("Program", "Not installed", 4);
             match &state.latest {
                 Some(Ok(latest)) => {
                     let size: u64 = latest.assets.iter().map(|a| a.size).sum();
@@ -216,7 +213,7 @@ fn model_rows(app: &App, rows: &mut Vec<SheetRow>) {
         app,
         SettingChoice::LocalEngine,
         "Get them for",
-        "The engine that downloads and serves them",
+        "Choose the engine that downloads and serves the models.",
     ));
     if local.computer.is_none() {
         return;
@@ -228,8 +225,7 @@ fn model_rows(app: &App, rows: &mut Vec<SheetRow>) {
         return;
     }
     rows.push(note(
-        "Models suited to agents' tools that fit this computer, the most capable first, each \
-         at the largest quantization that fits. Tight ones leave little room for context.",
+        "Models suited to agent tools, most capable first. Each uses the largest quantization that fits.\nA tight fit leaves little room for context.",
     ));
     let engine = app.local_engine();
     for (index, suggestion) in local.suggestions.iter().enumerate() {

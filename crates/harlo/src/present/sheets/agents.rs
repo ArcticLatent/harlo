@@ -1,13 +1,14 @@
 //! Settings → Agents' rows: OpenCode's agents in the open project, and the
-//! approvals it saved when someone chose "Allow always".
+//! approvals it saved when someone chose "Always allow".
 
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::server::{Agent, Catalog};
+use lucide_icons::Icon;
 
-use super::schedules::project_name;
 use super::{heading, int, note, pair};
 use crate::app::{App, Load, Status};
+use crate::present::glyph;
 use crate::ui::SheetRow;
 use crate::window;
 
@@ -21,22 +22,27 @@ pub(super) fn agent_rows(app: &App) -> Vec<SheetRow> {
 
 /// The open project's agents, as OpenCode defines them.
 fn agents(app: &App, rows: &mut Vec<SheetRow>) {
-    let folder = match project_name(app, &app.folder()) {
-        home if home == "~" => "your home folder".to_owned(),
-        name => name,
-    };
     rows.push(heading("Agents"));
-    rows.push(note(&format!(
-        "OpenCode's agents in {folder}. Tab in the composer switches between the primary ones; \
-         other agents hand work to subagents. Add agents under agents in opencode.json, or as \
-         Markdown files in a project's .opencode/agents folder, or in ~/.config/opencode/agents \
-         for every project."
-    )));
+    rows.push(note(
+        "Tab in the composer switches between primary agents. Agents can delegate to \
+         subagents.\nDefine agents in opencode.json, in the project's .opencode/agents folder, \
+         or in ~/.config/opencode/agents for all projects. Markdown files work in either agents \
+         folder.",
+    ));
     match app.catalog() {
         Some(catalog) if catalog.agents.is_empty() => rows.push(note("No agents.")),
         Some(catalog) => {
             for agent in &catalog.agents {
-                rows.push(pair(&agent.name, &agent_words(agent, catalog), 3));
+                // A primary agent's kind stands out; a subagent's stays quiet.
+                let tone = if agent.primary { 5 } else { 3 };
+                rows.push(SheetRow {
+                    glyph: glyph(if agent.read_only {
+                        Icon::Eye
+                    } else {
+                        Icon::Bot
+                    }),
+                    ..pair(&agent.name, &agent_words(agent, catalog), tone)
+                });
                 if let Some(what) = agent.description.as_deref().and_then(first_sentence) {
                     rows.push(note(what));
                 }
@@ -71,25 +77,23 @@ fn agent_words(agent: &Agent, catalog: &Catalog) -> String {
         );
     }
     if agent.read_only {
-        words.push("Doesn't edit files".to_owned());
+        words.push("Read-only".to_owned());
     }
     words.join(" · ")
 }
 
-/// What "Allow always" saved, each with its project and Remove.
+/// What "Always allow" saved, each with its project and Remove.
 fn approvals(app: &App, rows: &mut Vec<SheetRow>) {
     let page = &app.sheets.approvals;
     rows.push(heading("Saved approvals"));
     rows.push(note(
-        "What \u{201c}Allow always\u{201d} saved. OpenCode allows these in their project without \
-         asking; a deny in its config still wins. Removing one makes it ask again, in every app \
-         using this server.",
+        "\u{201c}Always allow\u{201d} saves a project approval. A deny rule in OpenCode's config takes precedence.\nRemove an approval to ask again in every app using this server.",
     ));
     if let Some(why) = &page.error {
         rows.push(pair("Not removed", why, 2));
     }
     match &page.list {
-        Load::Loaded(list) if list.is_empty() => rows.push(note("None saved.")),
+        Load::Loaded(list) if list.is_empty() => rows.push(note("No saved approvals.")),
         Load::Loaded(list) => {
             for (index, approval) in list.iter().enumerate() {
                 let project = app

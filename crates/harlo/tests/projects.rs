@@ -54,7 +54,7 @@ fn the_sidebar_opens_a_projects_settings() {
     // Back to the list, and into another.
     ui.press("All projects");
     assert_eq!(ui.app().sheets.projects.shown, None);
-    assert!(ui.shows("Choose a project to change it."));
+    assert!(ui.shows("Choose a project to change its settings."));
     ui.press("ArcticLatent.github.io");
     assert_eq!(
         ui.app().sheets.projects.shown.as_deref(),

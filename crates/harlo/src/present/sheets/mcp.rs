@@ -27,7 +27,7 @@ pub(super) fn page_rows(app: &App, setup: Option<&SetUp>) -> Option<Vec<SheetRow
 pub(super) fn list_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
     rows.push(heading("MCP servers"));
     rows.push(note(
-        "Tools agents can use, from programs and services OpenCode connects to.",
+        "Agents can use tools from programs and services connected to OpenCode.",
     ));
     outcome(app, rows);
     match &setup.mcp {
@@ -65,8 +65,7 @@ pub(super) fn own_tools_rows(app: &App, rows: &mut Vec<SheetRow>) {
     rows.push(super::switch(
         Setting::OwnTools,
         "Past sessions",
-        "Lets agents find earlier sessions on this server and read them, while Harlo is open. \
-         Every session on the server can use them, from any app.",
+        "Let agents find and read earlier sessions on this server while Harlo is open.\nThis applies to all sessions and apps using the server.",
         app.preferences.own_tools,
     ));
     if let Some(why) = app
@@ -159,6 +158,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
             "Remove"
         }
         .into();
+        remove.risky = true;
         remove.setting = window::REMOVE_MCP;
         rows.push(remove);
         rows.push(note(

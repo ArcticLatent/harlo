@@ -36,7 +36,12 @@ component Entry inherits Press {
             text: root.entry.open ? Icons.folder-open : Icons.folder;
             color: root.entry.ignored ? Theme.text-weaker : Theme.icon-base;
         }
-        if !root.entry.directory: FileIcon {
+        if !root.entry.directory && root.entry.icon == "": Icon {
+            text: Icons.file;
+            color: Theme.icon-quiet;
+            opacity: root.entry.ignored ? 0.5 : 1;
+        }
+        if !root.entry.directory && root.entry.icon != "": FileIcon {
             text: root.entry.icon;
             color: root.entry.icon-color;
             opacity: root.entry.ignored ? 0.5 : 1;
@@ -75,8 +80,7 @@ export component FilesPanel inherits VerticalLayout {
             vertical-alignment: center;
             overflow: elide;
             font-size: Size.label;
-            font-weight: 500;
-            color: Theme.text-strong;
+            color: Theme.text-base;
         }
     }
     if State.files-note != "": VerticalLayout {

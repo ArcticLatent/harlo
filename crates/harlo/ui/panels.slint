@@ -12,7 +12,7 @@ import { NotesPanel } from "notes.slint";
 
 /// The height of the panels' bars.
 global Bar {
-    out property <length> height: 6px;
+    out property <length> height: 4px;
 }
 
 /// A panel's body: its sections stacked, scrolling up and down once tall.
@@ -26,7 +26,7 @@ component Body inherits ScrollView {
         padding-bottom: 16px;
         padding-left: 18px;
         padding-right: 18px;
-        spacing: 22px;
+        spacing: 16px;
         @children
     }
 }
@@ -44,6 +44,12 @@ component Note inherits VerticalLayout {
         font-size: Size.label;
         color: Theme.text-base;
     }
+}
+
+/// A thin line between a panel's sections.
+component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border-weak-base;
 }
 
 /// A section's title.
@@ -64,14 +70,15 @@ component Weak inherits Text {
 component FillBar inherits Rectangle {
     in property <float> fill;
     in property <brush> tint: Theme.text-interactive-base;
-    in property <brush> track: Theme.surface-inset-base;
+    in property <brush> track: Theme.border-weak-base;
 
     height: Bar.height;
     border-radius: self.height / 2;
     background: root.track;
     if root.fill > 0: Rectangle {
         x: 0;
-        width: parent.width * min(1, root.fill);
+        // Even a sliver shows, so a little reads as more than none.
+        width: max(parent.height, parent.width * min(1, root.fill));
         border-radius: parent.border-radius;
         background: root.tint;
     }
@@ -120,14 +127,17 @@ export component ContextPanel inherits Rectangle {
                 tint: State.context-card.warn ? Theme.icon-warning-base
                     : Theme.text-interactive-base;
             }
-            if root.counted && State.context-card.bar: Weak {
+            if root.counted && State.context-card.bar: Text {
                 text: State.context-card.percent;
+                font-size: Size.small;
+                color: State.context-card.warn ? Theme.icon-warning-base : Theme.accent-ink;
             }
             if root.counted && State.context-card.messages != "": Weak {
                 text: State.context-card.messages;
             }
         }
 
+        Divider { }
         // The model, agent, and what the session used and cost.
         VerticalLayout {
             spacing: 6px;
@@ -143,12 +153,14 @@ export component ContextPanel inherits Rectangle {
                 Text {
                     text: fact.value;
                     overflow: elide;
-                    font-size: Size.label;
-                    color: Theme.text-strong;
+                    font-family: fact.kind == 1 ? Fonts.mono : Fonts.sans;
+                    font-size: fact.kind == 1 ? Size.code : Size.label;
+                    color: fact.kind == 2 ? Theme.agent-ink : Theme.text-strong;
                 }
             }
         }
 
+        Divider { }
         // The instruction files: given from the start, then picked up on the way.
         VerticalLayout {
             spacing: 6px;
@@ -193,9 +205,9 @@ component TodoItem inherits HorizontalLayout {
                 : root.status == 2 ? Icons.circle-check
                 : root.status == 3 ? Icons.circle-x : Icons.circle;
             font-size: 14px;
-            color: root.status == 1 ? Theme.text-interactive-base
+            color: root.status == 1 ? Theme.accent-ink
                 : root.status == 2 ? Theme.icon-success-base
-                : root.status == 3 ? Theme.text-weak : Theme.icon-base;
+                : root.status == 3 ? Theme.text-weak : Theme.icon-quiet;
         }
     }
     Text {
@@ -204,8 +216,7 @@ component TodoItem inherits HorizontalLayout {
         wrap: word-wrap;
         font-size: Size.label;
         font-weight: root.status == 1 ? 500 : 400;
-        color: root.status == 1 ? Theme.text-strong
-            : root.status == 0 ? Theme.text-base : Theme.text-weak;
+        color: root.status == 1 ? Theme.text-strong : Theme.text-weak;
     }
     if root.status == 3: Text {
         text: "Dropped";

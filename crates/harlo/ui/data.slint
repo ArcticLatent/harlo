@@ -378,6 +378,8 @@ export struct QuestionCard {
 export struct Fact {
     label: string,
     value: string,
+    /// 0 for words, 1 for a number, set in the code font, 2 for an agent.
+    kind: int,
 }
 
 /// An instruction file in the Context panel, and where it applies.
@@ -600,7 +602,7 @@ export struct SheetRow {
     /// `setting`, or 7 the command `value`, run by its `action` button as
     /// step `setting`, or 9 a project, opened by step `setting`, or 10 the
     /// picture `picture` on white, such as a QR code, named by `name`.
-    /// A value's tone: 0 plain, 1 good, 2 bad, 3 quiet, 4 a warning.
+    /// A value's tone: 0 plain, 1 good, 2 bad, 3 quiet, 4 a warning, 5 the accent.
     /// For a switch (kind 3): whether it's on, and the setting it turns.
     /// For a name and value (kind 1) with a button: the button's label,
     /// and `setting` numbers its step.
@@ -628,6 +630,13 @@ export struct SheetRow {
     /// For a text field (kind 6): what screen readers call it, where its
     /// name alone doesn't say, as for one of several "Title" fields.
     label: string,
+    /// For a name and value (kind 1): whether the name, or the value, is
+    /// code, such as a model's id or a version, set in the code font.
+    mono-name: bool,
+    mono-value: bool,
+    /// For a row with a button: whether the button deletes something, and
+    /// is drawn in the danger colours.
+    risky: bool,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one
@@ -707,6 +716,9 @@ export global State {
     /// The stats' numbers, day bars and range: 0 a week, 1 a month, 2 all.
     in property <[StatTile]> stat-tiles;
     in property <[DayBar]> stat-days;
+    /// The chart's top, its busiest day's steps, and its left end, in words.
+    in property <string> stat-peak;
+    in property <string> stat-from;
     in property <int> stat-range: 1;
     in property <string> harlo-version;
     /// Settings' sections, the one shown by its place, and what Settings

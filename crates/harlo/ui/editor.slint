@@ -5,7 +5,7 @@
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests } from "data.slint";
-import { Icon, HLine, VLine } from "widgets.slint";
+import { Icon, HLine, VLine, Dot } from "widgets.slint";
 import { CardButton } from "waiting.slint";
 
 /// The editor's text size.
@@ -187,13 +187,22 @@ export component EditorView inherits Rectangle {
                 font-size: Size.small;
                 color: Theme.text-base;
             }
+            // Unsaved changes stand out in amber, after a dot.
+            if State.editor-card.can-save && !State.editor-card.failed: VerticalLayout {
+                alignment: center;
+                Dot {
+                    size: 6px;
+                    background: Theme.icon-warning-base;
+                }
+            }
             Text {
                 horizontal-stretch: 1;
                 text: State.editor-card.status;
                 vertical-alignment: center;
                 overflow: elide;
                 font-size: Size.small;
-                color: State.editor-card.failed ? Theme.icon-critical-base : Theme.text-weak;
+                color: State.editor-card.failed ? Theme.icon-critical-base
+                    : State.editor-card.can-save ? Theme.icon-warning-base : Theme.text-weak;
             }
             if State.editor-card.text: VerticalLayout {
                 alignment: center;

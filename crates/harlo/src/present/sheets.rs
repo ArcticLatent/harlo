@@ -53,7 +53,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ),
             ("Ctrl+Tab, Ctrl+Page Down", "Next tab"),
             ("Ctrl+Shift+Tab, Ctrl+Page Up", "Previous tab"),
-            ("Esc", "Close a page or menu, or put a maximized panel back"),
+            ("Esc", "Close a page or menu, or restore a maximized panel"),
         ],
     ),
     (
@@ -65,10 +65,10 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Tab, Shift+Tab", "Next or previous agent"),
             ("/", "Commands and skills"),
             ("@", "Files and MCP resources"),
-            ("Ctrl+V", "Paste text, or attach a picture"),
+            ("Ctrl+V", "Paste text or attach a picture"),
             (
                 "Ctrl+Shift+D",
-                "Dictate: start, then stop and put in the words",
+                "Start or stop dictation and insert the words",
             ),
         ],
     ),
@@ -184,6 +184,9 @@ impl Sheets {
                     Load::Idle | Load::Loading => ("Counting…".to_owned(), self.stats(None)),
                     Load::Failed(error) => (format!("Couldn't count: {error}"), self.stats(None)),
                     Load::Loaded(counted) => {
+                        // The chart's scale: its busiest day, and how far back it goes.
+                        state.set_stat_peak(peak(counted).to_string().into());
+                        state.set_stat_from(format!("{} days ago", DAYS - 1).into());
                         let note = if counted.sessions == 0 {
                             "No sessions in this time."
                         } else {
@@ -252,7 +255,14 @@ impl Sheets {
                 tile(stats.steps.to_string(), "model steps"),
                 tile(tokens_text(stats.tokens.total()), "tokens"),
                 tile(money(stats.cost), "cost"),
-                tile(stats.active_days.to_string(), "active days"),
+                tile(
+                    stats.active_days.to_string(),
+                    if stats.active_days == 1 {
+                        "active day"
+                    } else {
+                        "active days"
+                    },
+                ),
                 tile(stats.streak.to_string(), "day streak"),
             ],
         );
@@ -261,16 +271,19 @@ impl Sheets {
         if !stats.models.is_empty() {
             rows.push(heading("Models"));
             for model in &stats.models {
-                rows.push(pair(
-                    &format!("{}/{}", model.provider, model.model),
-                    &format!(
-                        "{} · {} · {}",
-                        steps(model.steps),
-                        tokens_summary(model.tokens),
-                        money(model.cost)
-                    ),
-                    0,
-                ));
+                rows.push(SheetRow {
+                    mono_name: true,
+                    ..pair(
+                        &format!("{}/{}", model.provider, model.model),
+                        &format!(
+                            "{} · {} · {}",
+                            steps(model.steps),
+                            tokens_summary(model.tokens),
+                            money(model.cost)
+                        ),
+                        0,
+                    )
+                });
             }
         }
         if stats.subagents > 0 {
@@ -405,7 +418,7 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
             app,
             SettingChoice::Appearance,
             "Light or dark",
-            "Harlo keeps a dark and a light theme; System follows the desktop.",
+            "Harlo has a light and a dark theme. System follows the desktop.",
         ),
         themes_row(app.mode()),
         heading("Colours"),
@@ -583,7 +596,7 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
             app.preferences.keep_in_tray,
         ));
     }
-    let mut guide = pair("Setup guide", "OpenCode, models, git and the theme", 3);
+    let mut guide = pair("Setup guide", "OpenCode, models, Git, and the theme", 3);
     guide.action = "Open".into();
     guide.setting = crate::window::OPEN_SETUP;
     rows.extend([heading("Help"), guide]);
@@ -607,8 +620,7 @@ fn model_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("Not changed", why, 2));
     }
     rows.push(note(if app.global_config().is_some() {
-        "Set in OpenCode's own config, so it applies to every app using this server. A \
-         project's opencode.json can choose another; the model picked in a session wins."
+        "Set in OpenCode's config for all apps using this server. A project's opencode.json can override it.\nThe model selected for a session takes precedence."
     } else {
         "This server keeps its default model in its own opencode.json, on the computer it \
          runs on."
@@ -623,8 +635,7 @@ fn claude_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         heading("Claude subscription"),
         note(
-            "Use a Claude Pro or Max plan for Claude models in OpenCode. Claude Code keeps the \
-             sign-in; OpenCode runs it.",
+            "Use a Claude Pro or Max plan for Claude models in OpenCode. Claude Code keeps the sign-in.\nOpenCode runs the session.",
         ),
     ];
     let local = app.location.is_local();
@@ -828,8 +839,7 @@ fn server_rows(app: &App) -> Vec<SheetRow> {
     };
     let mut rows = vec![pair("Address", &address, 0), status_row(app)];
     rows.push(note(
-        "Harlo attaches to this shared OpenCode server and leaves it running when it closes. \
-         Its settings apply to every app that uses it.",
+        "Harlo connects to this shared OpenCode server and leaves it running when the window closes.\nIts settings apply to every app that uses it.",
     ));
     computer_rows(app, &mut rows);
     rows
@@ -839,10 +849,7 @@ fn server_rows(app: &App) -> Vec<SheetRow> {
 fn computer_rows(app: &App, rows: &mut Vec<SheetRow>) {
     rows.push(heading("Other computers"));
     rows.push(note(
-        "Harlo follows OpenCode's shared service on another computer over SSH, with your SSH \
-         config, keys and agent; it can't answer a password prompt. If no service runs there, \
-         Harlo starts it, as it does here, and never stops it. Pick a computer in the list at \
-         the top of the sidebar.",
+        "Harlo connects over SSH using your SSH config, keys, and agent. Password prompts are unsupported.\nIf the remote service is stopped, Harlo starts it and leaves it running.\nSelect a computer from the list at the top of the sidebar.",
     ));
     for (index, target) in app.preferences.computers.iter().enumerate() {
         let location = Location::Ssh {
@@ -958,8 +965,7 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
         Load::Loaded(on) => rows.push(switch(
             Setting::Snapshots,
             "Keep snapshots",
-            "Before each turn, OpenCode keeps a snapshot of the project's files, so Undo can put \
-             them back. Off, Undo takes back the conversation only.",
+            "OpenCode saves a project snapshot before each turn so Undo can restore files.\nWith snapshots off, Undo restores only the conversation.",
             *on,
         )),
         Load::Failed(why) => rows.push(pair("Snapshots", why, 2)),
@@ -1010,8 +1016,7 @@ fn hosting_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         heading("Git hosting"),
         note(
-            "Sign in so git can push and pull over HTTPS; SSH remotes keep using your SSH \
-             keys. The GitHub CLI, glab or git keeps the sign-in: Harlo keeps no token.",
+            "Sign in to push and pull over HTTPS. SSH remotes use your SSH keys. The GitHub CLI, glab, or Git stores the sign-in. Harlo does not store the token.",
         ),
     ];
     rows.extend(service_rows(app, Service::GitHub));
@@ -1047,14 +1052,13 @@ fn hosting_rows(app: &App) -> Vec<SheetRow> {
             Field::ForgejoToken,
             "Token",
             "",
-            "An access token, from the server's settings",
+            "An access token from the server's settings",
         );
         token.action = "Sign in".into();
         token.on = true;
         rows.push(token);
         rows.push(note(
-            "Forgejo and Gitea sign in with an access token. git keeps it for that server, in \
-             the desktop keyring when git has its helper.",
+            "Forgejo and Gitea use an access token. Git stores it for that server in the desktop keyring when a credential helper is available.",
         ));
     }
     rows
@@ -1154,7 +1158,7 @@ fn git_rows(app: &App) -> Vec<SheetRow> {
         ];
     };
     let mut rows = vec![
-        pair("Git", version, 1),
+        code_pair("Git", version, 1),
         heading("Your name on commits"),
         field(
             Field::Identity(Identity::Name),
@@ -1173,7 +1177,7 @@ fn git_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("Not saved", why, 2));
     }
     rows.push(note(
-        "Saved in git's global config, for every repository on this computer.",
+        "Saved in your global Git config for every repository on this computer.",
     ));
     rows
 }
@@ -1325,6 +1329,7 @@ fn worktree_rows(app: &App, project: &harlo_core::sessions::Project) -> Vec<Shee
         let mut row = pair(&worktree.name, &home_relative(&worktree.directory), 3);
         row.action = "Remove".into();
         row.setting = crate::window::REMOVE_WORKTREE;
+        row.risky = true;
         row.choice = int(index);
         rows.push(row);
         if page.needs_force.as_deref() == Some(worktree.directory.as_str()) {
@@ -1377,7 +1382,7 @@ fn project_list(app: &App, marks: &Marks) -> Vec<SheetRow> {
         }
         return rows;
     }
-    let mut rows = vec![note("Choose a project to change it.")];
+    let mut rows = vec![note("Choose a project to change its settings.")];
     for (index, project) in app.projects.iter().enumerate() {
         rows.push(SheetRow {
             kind: PROJECT,
@@ -1442,20 +1447,24 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
     if !notices.enabled {
         return rows;
     }
-    let mut test = pair("Test notification", "See how one looks on this desktop", 3);
+    let mut test = pair(
+        "Test notification",
+        "Preview a notification on this desktop",
+        3,
+    );
     test.action = "Try it".into();
     test.setting = crate::window::TEST_NOTICE;
     rows.extend([
         switch(
             Setting::NotifyFocused,
             "While Harlo is focused",
-            "Never for the session you're looking at.",
+            "Skip the session you're currently viewing.",
             notices.while_focused,
         ),
         switch(
             Setting::NotifySound,
             "Sound",
-            "The desktop's message sound.",
+            "Play the desktop's message sound.",
             notices.sound,
         ),
         test,
@@ -1474,14 +1483,14 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
         switch(
             Setting::NotifyLimits,
             "Plan limits",
-            "A Claude plan limit is used up, or one you'd nearly used resets.",
+            "A Claude plan limit is reached, or a nearly used limit resets.",
             notices.limits,
         ),
         heading("Quiet hours"),
         switch(
             Setting::Quiet,
             "Quiet hours",
-            "No notifications between these times.",
+            "Pause notifications between these times.",
             notices.quiet.on,
         ),
     ]);
@@ -1509,7 +1518,7 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
     rows.extend([
         heading("Templates"),
         note(&format!(
-            "Leave a field empty for the default, shown faded. Variables: {}.",
+            "Leave a field empty to use its default. Variables: {}.",
             variables.join(" ")
         )),
     ]);
@@ -1531,7 +1540,7 @@ fn event_name(kind: Kind) -> (&'static str, &'static str) {
     match kind {
         Kind::Finished => ("Run finished", "An agent finished what you asked."),
         Kind::Failed => ("Run failed", "A run stopped with an error."),
-        Kind::Asks => ("Agent needs you", "A question, or an action to approve."),
+        Kind::Asks => ("Agent needs you", "A question or an action to approve."),
     }
 }
 
@@ -1539,16 +1548,14 @@ fn event_name(kind: Kind) -> (&'static str, &'static str) {
 fn about_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         heading("Harlo"),
-        pair("Version", env!("CARGO_PKG_VERSION"), 0),
+        code_pair("Version", env!("CARGO_PKG_VERSION"), 0),
     ];
     if let Status::Connected { version } = &app.status {
-        rows.push(pair("OpenCode", version, 0));
+        rows.push(code_pair("OpenCode", version, 0));
     }
     rows.push(heading("Colour themes"));
     rows.push(note(
-        "The themes besides Harlo's are Base16 colour schemes from Tinted Theming \
-         (github.com/tinted-theming/schemes), each by the author it credits, used under \
-         this licence:",
+        "Additional Base16 themes come from Tinted Theming (github.com/tinted-theming/schemes).\nEach scheme credits its author and is used under the following licence.",
     ));
     rows.extend(
         harlo_core::theme::TINTED_LICENSE
@@ -1577,14 +1584,18 @@ fn search_rows(setup: &SetUp, rows: &mut Vec<SheetRow>) {
     section(rows, "Web search", &setup.search, |s| {
         let key = match s.id.as_str() {
             "claude-agent" => "Through Claude Agent".to_owned(),
-            id => format!("Key: {}_API_KEY", id.to_uppercase().replace('-', "_")),
+            id => format!("{}_API_KEY", id.to_uppercase().replace('-', "_")),
         };
         let value = if choice == Some(s.id.as_str()) {
             format!("In use · {key}")
         } else {
             key
         };
-        pair(&s.name, &value, 0)
+        if s.id == "claude-agent" {
+            pair(&s.name, &value, 0)
+        } else {
+            code_pair(&s.name, &value, 0)
+        }
     });
     if matches!(setup.search, Ok(ref list) if !list.is_empty()) {
         let how = match choice {
@@ -1592,11 +1603,10 @@ fn search_rows(setup: &SetUp, rows: &mut Vec<SheetRow>) {
                 "OpenCode picks one that has a key, and moves on when one is rate limited."
             }
             Some(_) => "OpenCode's config chooses the one in use.",
-            None => "The first web search asks which to use, and OpenCode remembers it.",
+            None => "Choose a provider on your first web search. OpenCode remembers your choice.",
         };
         rows.push(note(&format!(
-            "{how} Each needs a key: connect one with /\u{2060}connect in OpenCode's terminal \
-             app, or set its variable before OpenCode starts."
+            "{how} Each needs an API key.\nUse /\u{2060}connect in OpenCode's terminal app or set the environment variable before OpenCode starts."
         )));
     }
 }
@@ -1621,9 +1631,9 @@ fn section<T>(
     }
 }
 
-/// The steps of the [`DAYS`] days up to the range's end, each placed by
-/// its date, as shares of the busiest.
-fn days(stats: &Stats) -> Vec<DayBar> {
+/// The chart's last day, and the days it shows up to it, the last 30 at
+/// most, each with its day number.
+fn shown_days(stats: &Stats) -> (i64, Vec<(i64, &Day)>) {
     /// Milliseconds in a day.
     const DAY_MS: u64 = 24 * 60 * 60 * 1000;
     let dated: Vec<(i64, &Day)> = stats
@@ -1640,10 +1650,23 @@ fn days(stats: &Stats) -> Vec<DayBar> {
         .max()
         .unwrap_or(end_utc)
         .max(end_utc);
-    let shown: Vec<(i64, &Day)> = dated
+    let shown = dated
         .into_iter()
         .filter(|(n, _)| end - n < i64::try_from(DAYS).unwrap_or(i64::MAX))
         .collect();
+    (end, shown)
+}
+
+/// The most steps on a day the chart shows, its top.
+fn peak(stats: &Stats) -> u64 {
+    let (_, shown) = shown_days(stats);
+    shown.iter().map(|(_, d)| d.steps).max().unwrap_or(0)
+}
+
+/// The steps of the [`DAYS`] days up to the range's end, each placed by
+/// its date, as shares of the busiest.
+fn days(stats: &Stats) -> Vec<DayBar> {
+    let (end, shown) = shown_days(stats);
     let most = shown.iter().map(|(_, d)| d.steps).max().unwrap_or(0).max(1);
     shown
         .iter()
@@ -1716,6 +1739,14 @@ fn pair(name: &str, value: &str, tone: i32) -> SheetRow {
         value: value.into(),
         tone,
         ..SheetRow::default()
+    }
+}
+
+/// A name and a value that's code, such as a version, in the code font.
+fn code_pair(name: &str, value: &str, tone: i32) -> SheetRow {
+    SheetRow {
+        mono_value: true,
+        ..pair(name, value, tone)
     }
 }
 
