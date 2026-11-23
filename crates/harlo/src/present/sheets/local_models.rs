@@ -107,7 +107,7 @@ fn engine_rows(app: &App, engine: Engine, rows: &mut Vec<SheetRow>) {
             }
         }
         (None, None) => {
-            let mut row = pair("Program", "Not installed", 4);
+            let mut row = pair("Program", "Not installed", 3);
             match &state.latest {
                 Some(Ok(latest)) => {
                     let size: u64 = latest.assets.iter().map(|a| a.size).sum();

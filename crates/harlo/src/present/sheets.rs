@@ -647,7 +647,7 @@ fn claude_rows(app: &App) -> Vec<SheetRow> {
             }
             Load::Loaded(ClaudeCode::Missing) => {
                 rows.push(acting(
-                    pair("Claude Code", "Not installed", 2),
+                    pair("Claude Code", "Not installed", 3),
                     ClaudeAction::Install,
                 ));
             }

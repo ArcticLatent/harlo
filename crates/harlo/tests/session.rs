@@ -221,6 +221,62 @@ fn a_busy_session_queues_steers_and_stops() {
     assert!(!ui.shows("Steer"), "steering needs a running session");
 }
 
+#[test]
+fn a_stopped_run_offers_to_continue_and_keeps_the_draft() {
+    let ui = chatting();
+    busy(&ui);
+    ui.send(event(
+        EventKind::Done {
+            session_id: PI_UPDATE.into(),
+            outcome: "interrupted".into(),
+        },
+        1.0,
+    ));
+    // The finished run reloads, and the server's history ends at the stop.
+    ui.send(Message::History(
+        PI_UPDATE.into(),
+        Ok(vec![
+            Entry::Prompt {
+                key: "msg_p".into(),
+                text: "Write a long answer".into(),
+                attachments: Vec::new(),
+                pictures: Vec::new(),
+                skills: Vec::new(),
+                agent: None,
+            },
+            Entry::Stopped {
+                key: "msg_s".into(),
+                outcome: "interrupted".into(),
+            },
+        ]),
+    ));
+    // The stop is the session's last word, so it offers a way on.
+    assert!(ui.shows("Stopped"));
+    ui.send(Message::Compose(harlo::text::Edit::at(
+        "half a thought",
+        14,
+    )));
+    ui.press("Continue");
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::ContinueRun))
+    );
+    // What was being written stays in the composer.
+    assert_eq!(ui.app().composer.text(), "half a thought");
+
+    // The prompt went out as "Continue".
+    assert!(ui.shows("Continue"));
+    // Once the session works again, the stop is history and offers nothing.
+    busy(&ui);
+    assert!(
+        !ui.find("Continue")
+            .iter()
+            .any(|e| e.accessible_role() == Some(AccessibleRole::Button)),
+        "no Continue button while the session works"
+    );
+}
+
 fn approval(id: &str, action: &str, resources: &[&str]) -> Permission {
     Permission {
         id: id.into(),

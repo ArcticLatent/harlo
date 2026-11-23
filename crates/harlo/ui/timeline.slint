@@ -269,7 +269,7 @@ component LineRow inherits Rectangle {
         Text {
             text: root.item.label;
             vertical-alignment: center;
-            horizontal-stretch: root.item.detail == "" ? 1 : 0;
+            horizontal-stretch: root.item.detail == "" && root.item.action == "" ? 1 : 0;
             overflow: elide;
             font-size: root.item.nested ? Size.label : Size.small;
             color: root.item.nested ? Theme.text-base : Theme.text-weak;
@@ -294,6 +294,28 @@ component LineRow inherits Rectangle {
             font-size: Size.small;
             color: root.item.note-color;
         }
+        // A way on from here, such as Continue after a stop.
+        if root.item.action != "": VerticalLayout {
+            alignment: center;
+            Press {
+                height: 24px;
+                width: action-text.preferred-width + 20px;
+                label: root.item.action;
+                rest: Theme.control-fill;
+                outlined: true;
+                clicked => { Logic.continue-run(); }
+                action-text := Text {
+                    text: root.item.action;
+                    font-size: Size.small;
+                    color: Theme.text-strong;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+            }
+        }
+        // The rest of the row stays empty, so the button sits after the words.
+        if root.item.action != "": Rectangle { horizontal-stretch: 1; }
     }
 }
 

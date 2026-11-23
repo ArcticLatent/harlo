@@ -1275,6 +1275,7 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
             file: usize::try_from(file).unwrap_or_default(),
         }
     ));
+    send!(on_continue_run, || Message::ContinueRun);
     send!(on_link, |url| Message::OpenLink(url.to_string()));
     send!(on_steer_queued, |id| Message::SteerQueued(id.to_string()));
     send!(on_cancel_queued, |id| Message::CancelQueued(id.to_string()));

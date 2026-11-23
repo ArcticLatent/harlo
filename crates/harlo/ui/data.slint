@@ -246,6 +246,9 @@ export struct TimelineRow {
     pictures: [Thumb],
     /// A subagent's child session, to open.
     child: string,
+    /// The words of a line's button, such as "Continue" after a stop;
+    /// empty for none.
+    action: string,
     /// Which of a tool's files a diff shows.
     file: int,
     lines: [DiffLine],
@@ -1034,6 +1037,8 @@ export global Logic {
     callback toggle-group(string);
     callback toggle-diff(string);
     callback undo(string);
+    /// Asks the open session's agent to go on after a stop.
+    callback continue-run();
     callback review(string, int);
     callback link(string);
     callback steer-queued(string);

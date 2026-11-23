@@ -174,16 +174,11 @@ impl Rows {
         }
         let next = next_items(timeline);
         let turns = turns(&next, crew);
-        // An answer still being written ends with a caret.
-        let writing = timeline.busy()
-            && next.last().is_some_and(|item| {
-                matches!(item, Next::Shown(Shown::Row(view), _)
-                    if matches!(view.entry, Entry::Answer { .. }))
-            });
+        let live = live_end(timeline, &next);
         let last = next.len().saturating_sub(1);
         let looks: Vec<u64> = (next.iter().zip(&turns).enumerate())
             .map(|(at, (item, turn))| {
-                let caret = writing && at == last;
+                let caret = live && at == last;
                 item_look(item, turn.as_deref(), caret, crew)
             })
             .collect();
@@ -223,7 +218,7 @@ impl Rows {
             .take(end)
             .skip(prefix)
         {
-            let caret = writing && at == last;
+            let caret = live && at == last;
             let key = match &item {
                 Next::Shown(Shown::Row(view), _) => view.entry.key(),
                 Next::Shown(Shown::Group { key, .. }, _) => key,
@@ -339,7 +334,14 @@ impl Rows {
                     let blocks = self.answers.entry(key.to_owned()).or_default();
                     answer_rows(key, text, gap, caret, highlighter, blocks)
                 } else {
-                    entry_rows(t, &view, gap, crew, &mut self.slots.borrow_mut())
+                    let mut rows = entry_rows(t, &view, gap, crew, &mut self.slots.borrow_mut());
+                    // The session's last stop offers to go on.
+                    if caret && matches!(view.entry, Entry::Stopped { .. }) {
+                        for row in &mut rows {
+                            row.action = "Continue".into();
+                        }
+                    }
+                    rows
                 };
                 rows.into_iter()
                     .map(|row| with_nesting(row, view.nested))
@@ -470,6 +472,20 @@ fn start_turn(t: &Tokens, rows: &mut Vec<TimelineRow>, agent: &str, crew: &Crew)
 }
 
 /// What an item's rows depend on, as one number.
+/// Whether the last item is the session's live end: an answer still being
+/// written, which ends with a caret, or a run that stopped or failed, which
+/// offers to go on.
+fn live_end(timeline: &Timeline, next: &[Next<'_>]) -> bool {
+    let Some(Next::Shown(Shown::Row(view), _)) = next.last() else {
+        return false;
+    };
+    match view.entry {
+        Entry::Answer { .. } => timeline.busy(),
+        Entry::Stopped { .. } => !timeline.busy(),
+        _ => false,
+    }
+}
+
 fn item_look(item: &Next<'_>, turn: Option<&str>, caret: bool, crew: &Crew) -> u64 {
     let mut hasher = DefaultHasher::new();
     (turn, caret).hash(&mut hasher);
@@ -521,6 +537,7 @@ fn built(row: TimelineRow) -> Built {
     row.more.as_str().hash(&mut hasher);
     row.gap.to_bits().hash(&mut hasher);
     row.turn.as_str().hash(&mut hasher);
+    row.action.as_str().hash(&mut hasher);
     (
         row.open,
         row.working,

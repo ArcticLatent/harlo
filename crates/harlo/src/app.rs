@@ -128,6 +128,9 @@ impl App {
     }
 }
 
+/// What the button after a stopped run sends.
+const CONTINUE: &str = "Continue";
+
 /// How many files the `@` menu asks the server for.
 const FILE_MATCHES: usize = 20;
 
@@ -326,6 +329,9 @@ pub enum Message {
     PickFolder(Option<String>),
     /// Send the composer's text; a working session gets it queued.
     Send,
+    /// Ask the open session's agent to go on after a stop, leaving the
+    /// composer as it is.
+    ContinueRun,
     /// Send the composer's text to steer the working session.
     Steer,
     /// Stop the open session's run.
@@ -1021,6 +1027,7 @@ impl App {
             | Message::NewSession(_)) => return self.tab_action(message),
             Message::PickFolder(folder) => self.new_folder = folder,
             Message::Send => return self.send(None),
+            Message::ContinueRun => return self.continue_run(),
             Message::Steer => return self.send(Some(Delivery::Steer)),
             Message::Timeline(id, event) => return self.timeline_event(id, event),
             Message::Server(update) => return self.server(update),
@@ -1665,6 +1672,21 @@ impl App {
             ),
             scroll,
         ])
+    }
+
+    /// Sends "Continue" to the open session, keeping what the composer
+    /// holds: sending empties the composer, so it's put back after.
+    fn continue_run(&mut self) -> Task<Message> {
+        if self.active.is_none() || self.sending.is_some() {
+            return Task::none();
+        }
+        let kept = self.composer.clone();
+        let draft = std::mem::take(&mut self.draft);
+        self.composer.set(CONTINUE);
+        let task = self.send(None);
+        self.composer = kept;
+        self.draft = draft;
+        task
     }
 
     /// Runs `action` on the server for the open session; a failure shows under the composer.
