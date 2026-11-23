@@ -444,6 +444,7 @@ component Row inherits VerticalLayout {
             height: 32px;
             text-size: Size.small;
             placeholder: root.entry.hint;
+            label: root.entry.label != "" ? root.entry.label : root.entry.name;
             text: root.entry.value;
             secret: root.entry.on;
             accepted => { Logic.settings-text(root.entry.setting, self.text); }

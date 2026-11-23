@@ -76,6 +76,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         "Notes",
         &[("Ctrl+Enter", "Tick the todo on the cursor's line")],
     ),
+    ("Editor", &[("Ctrl+S", "Save the file")]),
     (
         "Terminal",
         &[
@@ -1509,11 +1510,12 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
     for kind in Kind::ALL {
         let template = notices.template(kind);
         let (title, message) = kind.defaults();
-        rows.extend([
-            heading(event_name(kind).0),
-            field(Field::Title(kind), "Title", &template.title, title),
-            field(Field::Message(kind), "Message", &template.message, message),
-        ]);
+        let event = event_name(kind).0;
+        let mut title_row = field(Field::Title(kind), "Title", &template.title, title);
+        title_row.label = format!("{event} title").into();
+        let mut message_row = field(Field::Message(kind), "Message", &template.message, message);
+        message_row.label = format!("{event} message").into();
+        rows.extend([heading(event), title_row, message_row]);
     }
     rows
 }

@@ -202,12 +202,16 @@ fn new_rows(app: &App) -> Vec<SheetRow> {
         ),
         heading("When"),
         choice(app, SettingChoice::ScheduleWhen, "Runs", ""),
-        live_field(
-            Field::ScheduleTime,
-            draft.when.label(),
-            &draft.time,
-            draft.when.hint(),
-        ),
+        {
+            let mut time = live_field(
+                Field::ScheduleTime,
+                draft.when.label(),
+                &draft.time,
+                draft.when.hint(),
+            );
+            time.label = "Time".into();
+            time
+        },
         note(draft.when.help()),
         heading("What it sends"),
     ];

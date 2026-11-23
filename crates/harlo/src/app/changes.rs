@@ -580,7 +580,15 @@ impl App {
                         None => "Pushed".to_owned(),
                     }),
                 };
-                result.map_err(|e| e.message)
+                result.map_err(|e| {
+                    if e.needs_identity() {
+                        "Git needs your name and email for commits. Set them in \
+                         Settings → Git, then commit again."
+                            .to_owned()
+                    } else {
+                        e.message
+                    }
+                })
             },
             move |result| Message::Changes(Event::Ran(action, result)),
         )

@@ -88,13 +88,10 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     ui.wheel("Ready to add", -40);
     ui.press("Add server");
     assert!(ui.shows("Give it a name first."));
-    ui.fill("e.g. docs", "probe");
+    ui.fill("Name", "probe");
     ui.press("Add server");
     assert!(ui.shows("Type the command that starts it first."));
-    ui.fill(
-        "e.g. npx -y some-mcp-server",
-        &format!("python3 '{}'", probe.display()),
-    );
+    ui.fill("Command", &format!("python3 '{}'", probe.display()));
     ui.press("Add server");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Added probe.")),

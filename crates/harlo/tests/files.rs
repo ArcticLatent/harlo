@@ -152,6 +152,50 @@ fn a_file_is_edited_and_saved() {
 }
 
 #[test]
+fn ctrl_s_saves_the_file_in_the_editor() {
+    let (ui, root) = with_tree();
+    let key = open(&ui, &root, "README.md", "# Demo\n");
+    type_text(&ui, "README.md", "# Demo\nHi\n");
+    assert!(ui.shows("Unsaved changes"));
+
+    // The keys go where the caret is, in the editor.
+    let editor = ui
+        .find("README.md")
+        .into_iter()
+        .find(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
+        .expect("the editor");
+    let at = editor.absolute_position();
+    let size = editor.size();
+    let position = LogicalPosition::new(at.x + size.width / 2.0, at.y + 8.0);
+    let window = ui.window.window();
+    for event in [
+        WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        },
+        WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        },
+    ] {
+        window.dispatch_event(event);
+    }
+    let control = slint::SharedString::from(slint::platform::Key::Control);
+    window.dispatch_event(WindowEvent::KeyPressed {
+        text: control.clone(),
+    });
+    window.dispatch_event(WindowEvent::KeyPressed { text: "s".into() });
+    window.dispatch_event(WindowEvent::KeyReleased { text: "s".into() });
+    window.dispatch_event(WindowEvent::KeyReleased { text: control });
+    assert!(ui.shows("Saving…"), "Ctrl+S saves");
+    assert!(
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::Files(FilesEvent::Save(k)) if *k == key))
+    );
+}
+
+#[test]
 fn closing_with_unsaved_changes_asks_first() {
     let (ui, root) = with_tree();
     let _ = open(&ui, &root, "README.md", "# Demo\n");

@@ -225,6 +225,7 @@ fn failures_carry_what_git_said() {
         .block_on(scratch.repo().commit("Nothing"))
         .expect_err("nothing staged");
     assert!(!err.message.is_empty());
+    assert!(!err.needs_identity(), "{err}");
     // No upstream to push to.
     let err = rt.block_on(scratch.repo().push()).expect_err("no upstream");
     assert!(!err.message.is_empty());
@@ -245,6 +246,23 @@ fn failures_carry_what_git_said() {
         )
         .expect_err("not a repository");
     assert!(err.message.contains("not a git repository"), "{err}");
+}
+
+#[test]
+fn a_commit_without_a_name_says_so() {
+    let scratch = Scratch::new();
+    scratch.write("a.txt", "a\n");
+    // Git would otherwise guess a name from the computer's.
+    scratch.run(&scratch.work, &["config", "user.useConfigOnly", "true"]);
+    let home = scratch.home.to_str().expect("utf-8 path");
+    let repo = Repo::new(&scratch.work)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home)
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let err = runtime()
+        .block_on(repo.commit_all(&["a.txt".to_owned()], "First"))
+        .expect_err("no name to commit with");
+    assert!(err.needs_identity(), "{err}");
 }
 
 #[test]

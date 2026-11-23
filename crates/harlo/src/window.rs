@@ -1323,7 +1323,8 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
 }
 
 /// What a key press means anywhere in the window: closing or moving
-/// through an open menu, restoring a maximized panel, or a shortcut.
+/// through an open menu, restoring a maximized panel, saving the file in
+/// the editor, or a shortcut.
 #[must_use]
 pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
     use crate::keys::Key;
@@ -1351,6 +1352,14 @@ pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
     }
     if app.voice.listening == app::Listening::Recording && press.key == Key::Escape {
         return Some(Message::Voice(app::VoiceEvent::Cancel));
+    }
+    // Ctrl+S saves the file whose editor is showing.
+    if press.command
+        && !press.shift
+        && press.key == Key::Character('s')
+        && let Some(key) = app.fs.shown.clone()
+    {
+        return Some(Message::Files(FilesEvent::Save(key)));
     }
     app::shortcut(press)
 }

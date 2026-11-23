@@ -22,7 +22,7 @@ use support::tasks::Tasks;
 use support::{demo, ui};
 
 /// The field for a computer, by its hint.
-const HINT: &str = "me@host, or a name from ~/.ssh/config";
+const HINT: &str = "Computer";
 
 /// How long connecting may take.
 const WAIT: Duration = Duration::from_secs(60);

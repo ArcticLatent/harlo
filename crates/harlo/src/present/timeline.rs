@@ -666,6 +666,13 @@ fn block_row(
         }
         Block::Rule => blank(Shape::Rule, key, gap),
     };
+    // What assistive technology reads out, as the text reads on screen.
+    row.label = match block {
+        Block::Text(source) | Block::Quote(source) => markdown::plain(source).trim().into(),
+        Block::Heading { text, .. } => text.trim_matches('*').into(),
+        Block::Code { text, .. } | Block::Table(text) => text.as_str().into(),
+        Block::Rule => "".into(),
+    };
     // Blocks of one answer differ by their place.
     row.file = i32::try_from(index).unwrap_or(i32::MAX);
     row

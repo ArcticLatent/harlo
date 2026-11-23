@@ -91,7 +91,7 @@ fn a_provider_signs_in_with_a_key_and_is_removed() {
     assert!(ui.shows("Or set 302AI_API_KEY where the OpenCode server runs."));
     ui.press("Sign in");
     assert!(ui.shows("Paste the key first."));
-    ui.fill("Paste the key", "sk-scratch");
+    ui.fill("API key", "sk-scratch");
     ui.press("Sign in");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Signed in with a key")),
@@ -130,14 +130,14 @@ fn a_form_is_answered_before_signing_in() {
     let ui = models(&sandbox, &mut tasks);
 
     add(&ui, "azure", "Azure");
-    ui.fill("Paste the key", "k");
+    ui.fill("API key", "k");
     ui.press("Sign in");
     assert!(
         ui.shows("Enter Azure Resource Name: Needs an answer"),
         "{:?}",
         ui.app().sheets.providers.error
     );
-    ui.fill("e.g. my-models", "scratch");
+    ui.fill("Enter Azure Resource Name", "scratch");
     ui.press("Sign in");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Signed in with a key")),
@@ -169,14 +169,19 @@ fn a_provider_with_several_ways_lets_one_be_chosen() {
     add(&ui, "openai", "OpenAI");
     assert!(ui.shows("Ways to sign in"));
     assert!(ui.shows("Sign in with ChatGPT"));
-    assert!(!ui.find("Paste the key").is_empty(), "a key first");
+    assert!(!ui.find("API key").is_empty(), "a key first");
     ui.press("Use this");
     let page = &ui.app().sheets.providers;
     assert!(matches!(
         page.chosen(),
         Some(SignInMethod::OAuth { label, .. }) if label == "Sign in with ChatGPT"
     ));
-    assert!(ui.find("Paste the key").is_empty());
+    assert!(
+        ui.find("API key")
+            .iter()
+            .all(|e| e.accessible_role() != Some(AccessibleRole::TextInput)),
+        "no key field"
+    );
     assert!(ui.shows("Open the sign-in page"));
 }
 
@@ -226,7 +231,7 @@ fn a_browser_sign_in_shows_its_page_takes_a_code_and_ends() {
     assert!(ui.shows("Waiting for the sign-in…"));
     ui.press("Finish");
     assert!(ui.shows("Paste what the page gave you first."));
-    ui.fill("Paste the code the page shows", "1234");
+    ui.fill("Code", "1234");
     assert_eq!(ui.app().sheets.providers.code, "1234");
 
     ui.send(provider(ProviderEvent::Status(AttemptStatus::Failed(

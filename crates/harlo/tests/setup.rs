@@ -97,7 +97,7 @@ fn the_name_and_email_on_commits_are_saved() {
     assert!(ui.shows("2.47.1"));
     assert!(ui.shows("Your name on commits"));
 
-    ui.fill("Your name", "Ada Lovelace");
+    ui.fill("Name", "Ada Lovelace");
     ui.press("Save Name");
     let asked = ui.messages();
     assert!(

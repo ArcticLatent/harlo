@@ -232,7 +232,7 @@ fn settings_change_templates_times_and_send_a_test() {
 
     // A template, saved from its field further down.
     ui.wheel("Run finished", -20);
-    ui.fill("{agent_name} finished", "{model_name} is done");
+    ui.fill("Run finished title", "{model_name} is done");
     ui.press("Save Title");
     assert_eq!(
         ui.app().preferences.notifications.finished.title,

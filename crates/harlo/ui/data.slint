@@ -558,6 +558,9 @@ export struct SheetRow {
     /// of a project's mark. A text field (kind 6) with no `action` saves
     /// each edit as it's typed.
     glyph: string,
+    /// For a text field (kind 6): what screen readers call it, where its
+    /// name alone doesn't say, as for one of several "Title" fields.
+    label: string,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one

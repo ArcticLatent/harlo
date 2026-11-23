@@ -56,12 +56,12 @@ fn escape(ui: &Ui) {
 }
 
 /// Fills a new schedule's form and creates it.
-fn create(ui: &Ui, name: &str, when: &str, time: &str, hint: &str) {
+fn create(ui: &Ui, name: &str, when: &str, time: &str) {
     ui.press("New schedule");
-    ui.fill("Morning build check", name);
+    ui.fill("Name", name);
     ui.press(&format!("Runs: {when}"));
-    ui.fill(hint, time);
-    ui.fill("What the agent should do each time", "Check the build.");
+    ui.fill("Time", time);
+    ui.fill("Prompt", "Check the build.");
     ui.press("Create schedule");
 }
 
@@ -94,13 +94,7 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
     let folder = sandbox.root().join("config/opencode");
     assert!(harlo_core::config::automations(&folder).expect("read"));
 
-    create(
-        &ui,
-        "Morning check",
-        "Every",
-        "30 minutes",
-        "30 minutes, 2 hours or 1 day",
-    );
+    create(&ui, "Morning check", "Every", "30 minutes");
     assert_eq!(ui.app().sheets.schedules.draft.prompt, "Check the build.");
     assert!(
         tasks.until(&ui, WAIT, |ui| status(ui) == Some(AutomationStatus::Active)),
@@ -176,9 +170,9 @@ fn a_time_the_server_cant_read_says_why_and_leaves_no_session() {
     ui.press("Create schedule");
     assert!(ui.shows("Give it a name."));
 
-    ui.fill("Morning build check", "Bad one");
-    ui.fill("in 20 minutes, or 2026-12-01T09:00", "tomorrow-ish");
-    ui.fill("What the agent should do each time", "Check the build.");
+    ui.fill("Name", "Bad one");
+    ui.fill("Time", "tomorrow-ish");
+    ui.fill("Prompt", "Check the build.");
     ui.press("Create schedule");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Invalid time: tomorrow-ish")),

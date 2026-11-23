@@ -503,9 +503,13 @@ component RowView inherits Rectangle {
         }
         if root.item.shape == Shape.text: Prose {
             text: root.item.text;
+            accessible-role: text;
+            accessible-label: root.item.label;
         }
         if root.item.shape == Shape.heading: Prose {
             text: root.item.text;
+            accessible-role: text;
+            accessible-label: root.item.label;
             default-color: Theme.heading-ink;
             default-font-size: root.item.level == 1 ? Size.answer * 1.5
                 : root.item.level == 2 ? Size.answer * 1.3
@@ -522,6 +526,8 @@ component RowView inherits Rectangle {
                 padding-right: 12px;
                 Prose {
                     text: root.item.text;
+                    accessible-role: text;
+                    accessible-label: root.item.label;
                     default-font-family: Fonts.mono;
                     default-font-size: Size.code;
                 }
@@ -536,6 +542,8 @@ component RowView inherits Rectangle {
             }
             Prose {
                 text: root.item.text;
+                accessible-role: text;
+                accessible-label: root.item.label;
                 default-color: Theme.quote-ink;
             }
         }

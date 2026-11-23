@@ -68,6 +68,23 @@ pub struct Error {
     pub message: String,
 }
 
+impl Error {
+    /// Whether git refused to commit because it doesn't know the author's
+    /// name or email.
+    ///
+    /// Setting `user.name` and `user.email` (see [`Identity`]) fixes it.
+    #[must_use]
+    pub fn needs_identity(&self) -> bool {
+        [
+            "Author identity unknown",
+            "Please tell me who you are",
+            "empty ident name",
+        ]
+        .iter()
+        .any(|said| self.message.contains(said))
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)

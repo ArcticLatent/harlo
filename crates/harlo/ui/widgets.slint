@@ -168,6 +168,8 @@ export component ErrorLine inherits Rectangle {
 /// A one-line text field with a placeholder and an optional leading icon.
 export component Field inherits Rectangle {
     in property <string> placeholder;
+    /// What screen readers call the field; the placeholder when empty.
+    in property <string> label;
     in property <string> glyph;
     in property <brush> fill: Theme.surface-inset-base;
     in property <brush> idle-edge: Theme.surface-inset-base;
@@ -227,7 +229,7 @@ export component Field inherits Rectangle {
                 color: Theme.text-strong;
                 font-size: root.text-size;
                 selection-background-color: Theme.selection;
-                accessible-label: root.placeholder;
+                accessible-label: root.label != "" ? root.label : root.placeholder;
                 edited => { root.edited(self.text); }
                 accepted => { root.accepted(); }
             }
