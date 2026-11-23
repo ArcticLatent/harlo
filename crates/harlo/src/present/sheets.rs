@@ -372,7 +372,7 @@ fn setup_note(app: &App, section: Section) -> String {
 fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
     let needle = query.trim().to_lowercase();
     let matches = |row: &SheetRow| {
-        matches!(row.kind, 1 | 3 | 4)
+        matches!(row.kind, 1 | 3 | 4 | SHORTCUT)
             && (row.name.to_lowercase().contains(&needle)
                 || row.value.to_lowercase().contains(&needle))
     };
@@ -819,16 +819,58 @@ fn acting(mut row: SheetRow, action: ClaudeAction) -> SheetRow {
     row
 }
 
+/// The sheet row kind of a shortcut, with its keys as keycaps.
+const SHORTCUT: i32 = 11;
+
 /// The shortcuts, by section.
 fn shortcuts() -> Vec<SheetRow> {
     let mut rows = Vec::new();
     for (section, keys) in SHORTCUTS {
         rows.push(heading(section));
         for (key, what) in *keys {
-            rows.push(pair(key, what, 0));
+            rows.push(shortcut(key, what));
         }
     }
     rows
+}
+
+/// A shortcut's row: what it does, then its keys as keycaps.
+///
+/// `keys` is written as people say it: "Ctrl+Tab, Ctrl+Page Down" is two
+/// ways, each of keys held together. One with no key, such as "Double
+/// click", shows as words.
+fn shortcut(keys: &str, what: &str) -> SheetRow {
+    let mut row = SheetRow {
+        kind: SHORTCUT,
+        name: keys.into(),
+        value: what.into(),
+        ..SheetRow::default()
+    };
+    if keys.contains("click") {
+        row.hint = keys.into();
+        return row;
+    }
+    let mut caps: Vec<SharedString> = Vec::new();
+    for (at, way) in keys.split(", ").enumerate() {
+        if at > 0 {
+            caps.push("|".into());
+        }
+        caps.extend(key_names(way).map(SharedString::from));
+    }
+    row.options = ModelRc::new(VecModel::from(caps));
+    row
+}
+
+/// The keys held together in `way`, such as "Ctrl", "Shift" and "Tab" for
+/// "Ctrl+Shift+Tab"; a lone "+" is a key of its own.
+fn key_names(way: &str) -> impl Iterator<Item = &str> {
+    let (head, plus) = match way.strip_suffix("++") {
+        Some(head) => (head, true),
+        None => (way, false),
+    };
+    head.split('+')
+        .filter(|key| !key.is_empty())
+        .chain(plus.then_some("+"))
 }
 
 /// The server Harlo follows, and how the connection stands.
@@ -1770,5 +1812,36 @@ fn note(text: &str) -> SheetRow {
         kind: 2,
         name: text.into(),
         ..SheetRow::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use slint::Model as _;
+
+    use super::shortcut;
+
+    /// The keycaps a shortcut's row shows, "|" between ways.
+    fn caps(keys: &str) -> Vec<String> {
+        shortcut(keys, "")
+            .options
+            .iter()
+            .map(|cap| cap.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn shortcut_keys_become_keycaps_with_or_between_ways() {
+        assert_eq!(caps("Ctrl+Shift+Tab"), ["Ctrl", "Shift", "Tab"]);
+        assert_eq!(caps("Ctrl+,"), ["Ctrl", ","]);
+        assert_eq!(
+            caps("Ctrl+Tab, Ctrl+Page Down"),
+            ["Ctrl", "Tab", "|", "Ctrl", "Page Down"]
+        );
+        assert_eq!(caps("Ctrl++"), ["Ctrl", "+"]);
+        // Not keys at all: words, with no keycaps.
+        let row = shortcut("Double click", "Open it");
+        assert_eq!(row.hint.as_str(), "Double click");
+        assert_eq!(row.options.row_count(), 0);
     }
 }

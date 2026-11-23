@@ -234,6 +234,63 @@ component Row inherits VerticalLayout {
             accessible-role: AccessibleRole.text;
         }
     }
+    // A shortcut: what it does, then its keys as keycaps, "or" between
+    // ways of doing the same ("|" in `options`). Words that aren't keys,
+    // such as a double click, are its `hint`. The keys as written are its
+    // name for screen readers and search.
+    if root.entry.kind == 11: HorizontalLayout {
+        height: 30px;
+        spacing: 16px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.value;
+            font-size: Size.small;
+            color: Theme.text-base;
+            overflow: elide;
+            vertical-alignment: center;
+            accessible-role: AccessibleRole.text;
+        }
+        Rectangle {
+            accessible-role: AccessibleRole.text;
+            accessible-label: root.entry.name;
+            HorizontalLayout {
+                spacing: 4px;
+                if root.entry.hint != "": Text {
+                    text: root.entry.hint;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+                for token in root.entry.options: VerticalLayout {
+                    alignment: center;
+                    if token == "|": Text {
+                        text: "or";
+                        font-size: Size.small;
+                        color: Theme.text-weak;
+                        vertical-alignment: center;
+                        accessible-role: none;
+                    }
+                    if token != "|": Rectangle {
+                        height: 22px;
+                        width: max(22px, cap.preferred-width + 14px);
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: Theme.control-edge;
+                        background: Theme.control-fill;
+                        cap := Text {
+                            text: token;
+                            font-size: Size.small;
+                            color: Theme.text-strong;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            accessible-role: none;
+                        }
+                    }
+                }
+            }
+        }
+    }
     if root.entry.kind == 1: HorizontalLayout {
         height: 30px;
         spacing: 16px;
