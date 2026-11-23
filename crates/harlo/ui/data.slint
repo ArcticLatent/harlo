@@ -759,6 +759,8 @@ export global State {
     /// The subagent's parent, for its link back; empty for a session of its own.
     in property <string> session-parent;
     in property <string> session-parent-id;
+    /// The user's avatar, as its place in `Avatars.pictures`.
+    in property <int> avatar;
     in property <string> session-agent;
     in property <string> session-agent-glyph;
     in property <color> session-agent-color;
@@ -792,6 +794,8 @@ export global Logic {
     callback key(string, bool, bool, bool) -> bool;
 
     callback toggle-sidebar();
+    /// Use the avatar at this place in the picker as the user's picture.
+    callback pick-avatar(int);
     callback toggle-panel(int);
     callback toggle-terminal();
     callback new-terminal();

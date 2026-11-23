@@ -141,6 +141,8 @@ fn preferences_load_back_beside_the_layout() {
         computers: vec!["-p 2222 me@buildbox".to_owned()],
         phone: true,
         phone_relay: true,
+        phone_paused: true,
+        avatar: "scarf".to_owned(),
         appearance: Appearance::Light,
         project_models: [(
             "/home/u/code/harlo".to_owned(),

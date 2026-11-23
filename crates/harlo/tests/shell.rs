@@ -375,3 +375,34 @@ fn a_rail_button_shows_its_name_and_keys_when_the_pointer_rests_on_it() {
     ui.wait(50);
     assert_eq!(tip().0, "");
 }
+
+#[test]
+fn the_avatar_picker_shows_six_and_keeps_the_one_chosen() {
+    let ui = ui(demo::app());
+    assert_eq!(
+        ui.button("Your avatar").accessible_description().as_deref(),
+        Some("Classic")
+    );
+    ui.press("Your avatar");
+    assert!(ui.shows("Your avatar"), "the picker's heading");
+    for name in [
+        "Classic",
+        "Beanie",
+        "Glasses",
+        "Headphones",
+        "Jacket",
+        "Scarf",
+    ] {
+        assert!(!ui.find(name).is_empty(), "{name} is offered");
+    }
+    ui.find("Scarf")
+        .into_iter()
+        .next()
+        .expect("the scarf")
+        .invoke_accessible_default_action();
+    assert_eq!(ui.app().preferences.avatar, "scarf");
+    assert_eq!(
+        ui.button("Your avatar").accessible_description().as_deref(),
+        Some("Scarf")
+    );
+}

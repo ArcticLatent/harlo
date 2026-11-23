@@ -94,6 +94,38 @@ pub(crate) use waiting::capitalized;
 /// How often session ages are refreshed.
 const TICK: Duration = Duration::from_secs(30);
 
+/// The avatars the user can pick, by name, in the order the picker shows
+/// them; the rail's `Avatars` list holds the pictures in the same order.
+pub const AVATARS: [&str; 6] = [
+    "classic",
+    "beanie",
+    "glasses",
+    "headphones",
+    "jacket",
+    "scarf",
+];
+
+impl App {
+    /// The user's avatar, as its place in [`AVATARS`]; the first when the
+    /// saved name is unknown.
+    #[must_use]
+    pub fn avatar(&self) -> usize {
+        AVATARS
+            .iter()
+            .position(|name| *name == self.preferences.avatar)
+            .unwrap_or(0)
+    }
+
+    /// Uses the avatar at `index` in [`AVATARS`], and saves the choice.
+    fn pick_avatar(&mut self, index: usize) -> Task<Message> {
+        let Some(name) = AVATARS.get(index) else {
+            return Task::none();
+        };
+        (*name).clone_into(&mut self.preferences.avatar);
+        self.save_preferences()
+    }
+}
+
 /// How many files the `@` menu asks the server for.
 const FILE_MATCHES: usize = 20;
 
@@ -220,6 +252,8 @@ pub enum Status {
 pub enum Message {
     /// Show or hide the sidebar.
     ToggleSidebar,
+    /// Use the avatar at this place in [`AVATARS`] as the user's picture.
+    PickAvatar(usize),
     /// The session filter changed.
     Filter(String),
     /// Show all of a folder's sessions, or fewer again, by folder.
@@ -893,6 +927,7 @@ impl App {
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Quit => return Task::effect(Effect::Quit),
+            Message::PickAvatar(index) => return self.pick_avatar(index),
             message @ (Message::ToggleSidebar
             | Message::Resized(..)
             | Message::OpenPanel(_)

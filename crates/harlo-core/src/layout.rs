@@ -105,6 +105,10 @@ pub struct Preferences {
     /// Whether Harlo is on the relay too, so phones reach it from anywhere
     /// and get notifications.
     pub phone_relay: bool,
+    /// Whether notifications to paired phones are held back for now.
+    pub phone_paused: bool,
+    /// The user's picture on the rail, by name, such as `classic`.
+    pub avatar: String,
 }
 
 impl Default for Preferences {
@@ -138,6 +142,8 @@ impl Default for Preferences {
             computers: Vec::new(),
             phone: false,
             phone_relay: false,
+            phone_paused: false,
+            avatar: "classic".to_owned(),
         }
     }
 }

@@ -116,6 +116,13 @@ def scene_home(g):
     g.cap("rail-tip-keys", "A rail button's name with the keys that do the same")
     h.hover("New session", role="Button")
     h.settle(0.3)
+    # The avatar picker, from the avatar at the rail's foot.
+    if h.find("Your avatar", role="Button"):
+        h.click("Your avatar", role="Button")
+        h.settle(0.6)
+        g.cap("avatar-picker", "The avatar picker: six penguins, the one in use ringed")
+        h.key("Escape")
+        h.settle(0.3)
 
 
 def scene_chat(g):
