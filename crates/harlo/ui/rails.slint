@@ -12,17 +12,31 @@ component RailButton inherits Press {
     in property <string> keys;
     /// Whether the name opens to the left, from the right rail.
     in property <bool> leftward;
+    /// Pressed since the pointer came: its name stays away until it leaves.
+    property <bool> quiet;
     width: Size.rail-button;
     height: Size.rail-button;
 
     changed hovered => {
-        if !self.hovered && Tips.text == root.label {
-            Tips.text = "";
+        if !self.hovered {
+            root.quiet = false;
+            if Tips.text == root.label {
+                Tips.text = "";
+            }
+        }
+    }
+    // Once it's pressed, the panel or page it opens matters more.
+    changed pressed => {
+        if self.pressed {
+            root.quiet = true;
+            if Tips.text == root.label {
+                Tips.text = "";
+            }
         }
     }
     Timer {
         interval: Motion.tip-delay;
-        running: root.hovered && Tips.text != root.label;
+        running: root.hovered && !root.quiet && Tips.text != root.label;
         triggered => {
             Tips.keys = root.keys;
             Tips.leftward = root.leftward;

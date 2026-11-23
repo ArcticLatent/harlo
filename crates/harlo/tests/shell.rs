@@ -365,6 +365,11 @@ fn a_rail_button_shows_its_name_and_keys_when_the_pointer_rests_on_it() {
     assert_eq!(tip().0, "", "not while the pointer only passes");
     ui.wait(500);
     assert_eq!(tip(), ("Settings".to_owned(), "Ctrl+,".to_owned()));
+    // Pressing it puts the name away for as long as the pointer stays.
+    // A click where the pointer rests: pressed and let go on the spot.
+    ui.drag("Settings", (0.0, 0.0));
+    ui.wait(600);
+    assert_eq!(tip().0, "", "gone once pressed, and not back while resting");
     // Off the button, it goes.
     ui.hover("New session");
     ui.wait(50);
