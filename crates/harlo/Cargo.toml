@@ -13,6 +13,8 @@ name = "harlo"
 path = "src/main.rs"
 
 [dependencies]
+# Harlo's state and runtime folders, for the single-instance socket.
+dirs = { workspace = true }
 harlo-core = { workspace = true }
 # The UI (Royalty-free 2.0 licence, see the workspace Cargo.toml): Skia draws
 # the window through winit, on X11 or Wayland; the software renderer serves

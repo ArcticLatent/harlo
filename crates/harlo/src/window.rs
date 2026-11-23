@@ -236,6 +236,14 @@ fn boot(options: &Options) -> App {
 /// Returns an error if the window can't be made, its event loop fails, or
 /// the pool for background work can't start.
 pub fn run(options: &Options) -> Result<(), RunError> {
+    // A Harlo already running shows its window instead.
+    let socket = crate::instance::socket_path();
+    if let Some(path) = &socket
+        && let Ok(Some(pid)) = crate::instance::forward(path, crate::instance::Command::Show)
+    {
+        eprintln!("harlo: already running (process {pid}); showed its window.");
+        return Ok(());
+    }
     let window = AppWindow::new()?;
     let (runtime, mut actions) = Runtime::new().map_err(RunError::Runtime)?;
     let mut app = boot(options);
@@ -273,10 +281,33 @@ pub fn run(options: &Options) -> Result<(), RunError> {
         }
     })
     .map_err(|e| RunError::Window(slint::PlatformError::Other(e.to_string())))?;
+    // Later launches come to this window. Without the socket Harlo still
+    // runs; a later launch then starts another one.
+    let shown = window.as_weak();
+    let _listener = socket.and_then(|path| {
+        crate::instance::listen(&path, move |command| match command {
+            crate::instance::Command::Show => {
+                // The window is gone only as Harlo quits.
+                let _ = shown.upgrade_in_event_loop(|window| raise(&window));
+            }
+        })
+        .ok()
+    });
     // Show the app before the first message arrives.
     controller.dispatch(Message::Resized(crate::fit::WINDOW.0, crate::fit::WINDOW.1));
     window.run()?;
     Ok(())
+}
+
+/// Shows `window` again, out of the taskbar if minimized, and asks the
+/// desktop to focus it (which a desktop may decline, flashing it instead).
+fn raise(window: &AppWindow) {
+    // Showing a shown window does nothing; a failure leaves it as it was.
+    let _ = window.show();
+    window.window().with_winit_window(|winit| {
+        winit.set_minimized(false);
+        winit.focus_window();
+    });
 }
 
 /// Drives a window from an app without running the app's tasks, and keeps

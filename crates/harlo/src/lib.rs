@@ -10,6 +10,8 @@ mod clipboard;
 pub mod file_icons;
 pub mod fit;
 pub mod ids;
+#[cfg(unix)]
+pub mod instance;
 pub mod keys;
 pub mod markdown;
 pub mod model;
