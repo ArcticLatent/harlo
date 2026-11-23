@@ -410,6 +410,7 @@ fn snapshot() -> Snapshot {
             model: None,
             created: now,
             updated: now,
+            archived: None,
             revert: None,
             permissions: Vec::new(),
             cost: 0.0,

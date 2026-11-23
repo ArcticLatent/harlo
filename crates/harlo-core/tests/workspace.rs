@@ -46,6 +46,7 @@ fn session(id: &str, project: &str, directory: &str, hours_ago: f64) -> Session 
         }),
         created: NOW_MS - hours_ago * HOUR_MS,
         updated: NOW_MS - hours_ago * HOUR_MS,
+        archived: None,
         revert: None,
         permissions: Vec::new(),
         cost: 0.0,
@@ -228,6 +229,27 @@ fn new_sessions_are_fetched_and_new_projects_adopted() {
             .map(harlo_core::sessions::Project::total),
         Some(1)
     );
+
+    // Archived just after it was made, its fetch can land after the archive
+    // event: it stays out of the lists.
+    let _ = ws.apply(
+        &EventKind::SessionCreated {
+            session_id: "s10".into(),
+        },
+        NOW_MS,
+    );
+    let _ = ws.apply(
+        &EventKind::SessionArchived {
+            session_id: "s10".into(),
+        },
+        NOW_MS,
+    );
+    let late = Session {
+        archived: Some(NOW_MS),
+        ..session("s10", "p_new", "/code/new", 0.0)
+    };
+    let _ = ws.fetched(Fetched::Session("s10".into(), Some(Box::new(late))));
+    assert!(ws.session("s10").is_none(), "archived, it stays out");
 
     // A deleted session fetches as missing and goes away; replaying is harmless.
     let _ = ws.fetched(Fetched::Session("s9".into(), None));

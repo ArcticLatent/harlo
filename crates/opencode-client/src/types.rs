@@ -260,6 +260,8 @@ pub struct Session {
     pub created: f64,
     /// Last change, in milliseconds since the Unix epoch.
     pub updated: f64,
+    /// When it was archived, in milliseconds since the Unix epoch, if it was.
+    pub archived: Option<f64>,
     /// A staged undo, when one is waiting to be kept or cancelled.
     pub revert: Option<Revert>,
     /// The session's own permission rules, applied after its agent's.
@@ -282,6 +284,7 @@ impl From<g::SessionInfo> for Session {
             model: v.model.map(ModelRef::from),
             created: v.time.created,
             updated: v.time.updated,
+            archived: v.time.archived,
             revert: v.revert.map(Revert::from),
             permissions: v
                 .permissions

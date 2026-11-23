@@ -19,6 +19,20 @@ def run(h, s):
     h.wait("New schedule", timeout=15)
     h.shot("empty")
 
+    s.step("a time the server can't read is refused, and leaves no session")
+    h.click("New schedule")
+    h.fill("Name", "Refused one", where=lambda e: e.role == "TextInput")
+    h.click("Runs: Once")
+    h.fill("Time", "tomorrow-ish")
+    h.fill("Prompt", "Check the build.")
+    h.click("Create schedule")
+    h.wait_says("Invalid time", timeout=15)
+    h.settle(2)
+    s.expect(not h.find("Refused one", where=lambda e: e.x < 340), "no session in the sidebar",
+             h.texts()[:20])
+    h.shot("refused")
+    h.click("Cancel", where=lambda e: e.x > 560)
+
     s.step("made")
     h.click("New schedule")
     h.fill("Name", "Morning check", where=lambda e: e.role == "TextInput")

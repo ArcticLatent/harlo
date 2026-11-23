@@ -109,6 +109,7 @@ pub fn snapshot() -> Snapshot {
             }),
             created: now_ms - (age as f64) * 1000.0,
             updated: now_ms - (age as f64) * 1000.0,
+            archived: None,
             revert: None,
             permissions: Vec::new(),
             cost: 0.0,

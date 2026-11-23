@@ -328,7 +328,16 @@ impl Workspace {
     }
 
     /// Adds or updates a session, a subagent's child session included.
+    ///
+    /// An archived one leaves the lists instead: a session archived just
+    /// after it was made can arrive from its fetch after the archive event.
     pub fn upsert(&mut self, session: Session) -> Vec<Fetch> {
+        if session.archived.is_some() {
+            self.sessions.remove(&session.id);
+            self.busy.remove(&session.id);
+            self.inboxes.remove(&session.id);
+            return Vec::new();
+        }
         let unknown_project = !self.projects.contains_key(&session.project_id);
         self.sessions.insert(session.id.clone(), session);
         if unknown_project {
