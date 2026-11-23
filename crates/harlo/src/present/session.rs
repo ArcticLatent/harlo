@@ -51,12 +51,10 @@ pub fn header(app: &App, id: &str, state: &State<'_>) {
     let agent = current.as_deref().and_then(|id| app.agent(id));
     let read_only = agent.as_ref().is_some_and(|a| a.read_only);
     state.set_session_agent_glyph(glyph(if read_only { Icon::Eye } else { Icon::Bot }));
-    state.set_session_agent_color(color(
-        agent
-            .as_ref()
-            .and_then(|a| a.color)
-            .map_or_else(|| crate::theme::quiet_icon(t), |c| crate::theme::ink(t, c)),
-    ));
+    state.set_session_agent_color(color(agent.as_ref().and_then(|a| a.color).map_or_else(
+        || crate::theme::ink(t, t.accent_base),
+        |c| crate::theme::ink(t, c),
+    )));
     let name = agent.map(|a| a.name).or(current).unwrap_or_default();
     state.set_session_agent(name.into());
     state.set_session_read_only(read_only);

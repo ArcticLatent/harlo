@@ -34,7 +34,7 @@ export component ProjectMark inherits Rectangle {
     if root.picture.width == 0: Icon {
         width: root.size;
         height: root.size;
-        text: Icons.folder;
+        text: Icons.folder-open;
         font-size: root.size * 0.9;
         color: root.colored ? root.tint : Theme.brand-ink;
     }
@@ -142,6 +142,31 @@ export component Breathing inherits Rectangle {
     opacity: Motion.breath-low + (1 - Motion.breath-low)
         * (0.5 - 0.5 * cos(animation-tick() / Motion.breath * 360deg));
     @children
+}
+
+/// The working spinner: an open circle that turns, the one sign of work in
+/// progress everywhere. With motion off it holds still.
+export component Spinner inherits Rectangle {
+    in property <length> size: 13px;
+    in property <color> tint: Theme.accent-ink;
+    /// One turn, at the designed speed.
+    property <float> turn-ms: 900;
+
+    width: root.size + 2px;
+    min-height: root.size + 2px;
+    accessible-role: none;
+
+    Rectangle {
+        width: root.size;
+        height: root.size;
+        transform-rotation: Motion.speed > 0
+            ? Math.mod(animation-tick() / 1ms, root.turn-ms) / root.turn-ms * 360deg : 0deg;
+        Icon {
+            text: Icons.loader;
+            font-size: root.size;
+            color: root.tint;
+        }
+    }
 }
 
 /// A line that fades in, rising a little, when it first shows and again

@@ -68,6 +68,8 @@ component RailButton inherits Press {
     property <bool> quiet;
     width: Size.rail-button;
     height: Size.rail-button;
+    hover: Theme.selected-tint.mix(Theme.background-stronger, 0.6);
+    lit: Theme.selected-tint;
 
     changed hovered => {
         if !self.hovered {
@@ -104,7 +106,7 @@ component RailButton inherits Press {
         font-size: Size.rail-icon;
         // An open panel's button takes the accent; the phone placeholder,
         // shown as on but not yet working, stays plain.
-        color: root.selected && root.enabled ? Theme.accent-ink
+        color: (root.selected || root.hovered) && root.enabled ? Theme.accent-ink
             : root.selected ? Theme.icon-selected : Theme.icon-base;
     }
     if root.paused: Rectangle {

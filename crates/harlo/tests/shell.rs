@@ -136,7 +136,7 @@ fn before_connecting_the_sidebar_says_so() {
     assert!(ui.shows("Can't connect: can't reach the server."));
 
     ui.send(demo::connected(Snapshot::default()));
-    assert!(ui.shows("No projects yet. Add a folder with + Project."));
+    assert!(ui.shows("No projects yet.\nAdd a folder with + Project."));
 }
 
 #[test]

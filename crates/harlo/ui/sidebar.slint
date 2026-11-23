@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SidebarRow, RowKind } from "data.slint";
-import { Icon, Press, Dot, Breathing, Field, VLine, ProjectMark } from "widgets.slint";
+import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark } from "widgets.slint";
 
 /// Space between the sidebar's edge and its content.
 global Inset {
@@ -16,14 +16,13 @@ global Inset {
 component Maker inherits Rectangle {
     in property <int> maker;
     in property <color> tone;
-    width: 26px;
+    width: 18px;
     height: 26px;
-    border-radius: 5px;
-    background: root.tone.mix(Theme.background-stronger, 0.18);
 
     if root.maker == 0: Icon {
-        text: Icons.bot;
-        color: root.tone;
+        text: Icons.message-square;
+        font-size: 15px;
+        color: Theme.icon-quiet;
     }
     if root.maker == 1: Image {
         width: 15px;
@@ -45,16 +44,8 @@ component Maker inherits Rectangle {
     }
 }
 
-/// The working indicator: a loader that breathes.
-component Working inherits Breathing {
-    in property <length> size: 13px;
-    width: root.size + 2px;
-    Icon {
-        text: Icons.loader;
-        font-size: root.size;
-        color: Theme.accent-ink;
-    }
-}
+/// The working indicator.
+component Working inherits Spinner { }
 
 /// One row of the list.
 /// The accent bar at the left edge of the selected session's row.
@@ -102,8 +93,7 @@ component Item inherits Rectangle {
                     overflow: elide;
                     vertical-alignment: center;
                     font-size: Size.label;
-                    font-weight: 600;
-                    color: Theme.brand-ink;
+                    color: Theme.brand-ink.mix(Theme.text-base, 0.55);
                 }
                 if entry.busy: Working {
                     size: 12px;
@@ -112,7 +102,7 @@ component Item inherits Rectangle {
                     text: entry.detail;
                     vertical-alignment: center;
                     font-size: Size.small;
-                    color: Theme.text-weak;
+                    color: Theme.text-weaker;
                 }
                 // Shown while the pointer is over the row.
                 Press {
@@ -154,7 +144,6 @@ component Item inherits Rectangle {
                 overflow: elide;
                 vertical-alignment: center;
                 font-size: Size.label;
-                font-weight: 500;
                 color: Theme.text-base;
             }
             Text {
@@ -185,7 +174,7 @@ component Item inherits Rectangle {
             HorizontalLayout {
                 padding-left: 4px;
                 padding-right: 4px;
-                spacing: 11px;
+                spacing: 10px;
                 alignment: stretch;
                 VerticalLayout {
                     alignment: center;
@@ -201,7 +190,7 @@ component Item inherits Rectangle {
                     vertical-alignment: center;
                     font-size: Size.text;
                     color: entry.untitled ? Theme.text-weaker
-                        : entry.selected ? Theme.text-strong : Theme.text-base;
+                        : entry.selected ? Theme.text-strong : Theme.text-weak;
                 }
                 // Runs without asking: marked beside what it's doing.
                 if entry.trusted: Icon {
@@ -211,15 +200,17 @@ component Item inherits Rectangle {
                     accessible-label: "Don't ask";
                 }
                 if entry.waiting: Icon {
-                    text: Icons.shield-alert;
-                    color: Theme.icon-warning-base;
+                    text: entry.asking ? Icons.circle-question : Icons.shield-alert;
+                    color: entry.asking ? Theme.accent-ink : Theme.icon-warning-base;
+                    accessible-role: image;
+                    accessible-label: entry.asking ? "Asks a question" : "Waits for approval";
                 }
                 if entry.busy && !entry.waiting: Working { }
                 if !entry.busy && !entry.waiting: Text {
                     text: entry.detail;
                     vertical-alignment: center;
-                    font-size: Size.small;
-                    color: Theme.text-weak;
+                    font-size: Size.small * 0.92;
+                    color: Theme.text-weaker;
                 }
             }
         }
@@ -437,14 +428,13 @@ export component Sidebar inherits Rectangle {
                             horizontal-stretch: 1;
                             vertical-alignment: center;
                             font-size: Size.text;
-                            font-weight: 500;
-                            color: Theme.text-strong;
+                            color: Theme.text-base;
                         }
                         Text {
                             text: "Ctrl+N";
                             vertical-alignment: center;
                             font-size: Size.small;
-                            color: Theme.text-weak;
+                            color: Theme.text-weaker;
                         }
                     }
                 }

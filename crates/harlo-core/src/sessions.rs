@@ -53,6 +53,8 @@ pub struct SessionSummary {
     /// Whether it waits for the user: an approval or an answer, its
     /// subagents' included.
     pub waiting: bool,
+    /// Whether all it waits for are answers to questions, no approvals.
+    pub asking: bool,
     /// The sessions it handed work to, oldest first.
     pub children: Vec<SessionSummary>,
 }

@@ -551,7 +551,7 @@ fn empty_text(status: &Status) -> String {
     match status {
         Status::Connecting { .. } => "Connecting to OpenCode…".to_owned(),
         Status::Lost { reason, .. } => format!("Can't connect: {reason}."),
-        Status::Connected { .. } => "No projects yet. Add a folder with + Project.".to_owned(),
+        Status::Connected { .. } => "No projects yet.\nAdd a folder with + Project.".to_owned(),
     }
 }
 
@@ -633,6 +633,7 @@ fn session_rows(
             selected,
             busy: session.busy,
             waiting: session.waiting,
+            asking: session.asking,
             trusted: app.shield_of(&session.id) == Shield::Trusted,
             maker,
             tone: color(tone),
@@ -728,7 +729,7 @@ fn chips(app: &App, t: &Tokens) -> Vec<Chip> {
                 agent
                     .as_ref()
                     .and_then(|a| a.color)
-                    .unwrap_or(t.text_interactive_base),
+                    .unwrap_or(t.accent_base),
             ),
             label: agent
                 .as_ref()
@@ -776,7 +777,7 @@ fn tab(app: &App, document: &Document, index: usize, active: bool) -> Tab {
             (text, true, icon.slint_color())
         }
         Document::Home => (glyph(Icon::Plus), false, color(t.icon_base)),
-        Document::Session(_) => (glyph(Icon::Bot), false, color(t.icon_base)),
+        Document::Session(_) => (glyph(Icon::MessageSquare), false, color(t.icon_base)),
     };
     let (title, tooltip) = match document {
         Document::Home => ("New session".to_owned(), None),

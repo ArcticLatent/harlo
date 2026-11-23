@@ -442,6 +442,13 @@ impl Workspace {
         !self.permissions(id).is_empty() || !self.forms(id).is_empty()
     }
 
+    /// Whether session `id` waits only for answers to questions: some are
+    /// open and no approval is.
+    #[must_use]
+    pub fn only_asks(&self, id: &str) -> bool {
+        self.permissions(id).is_empty() && !self.forms(id).is_empty()
+    }
+
     /// Forgets an approval request, answered here or elsewhere.
     pub fn settle_permission(&mut self, session_id: &str, request_id: &str) {
         if let Some(waiting) = self.permissions.get_mut(session_id) {
@@ -579,6 +586,7 @@ impl Workspace {
             busy: self.busy.contains(&session.id),
             // A subagent asking for the user needs them as much as its parent.
             waiting: self.needs_user(&session.id) || children.iter().any(|c| c.waiting),
+            asking: self.only_asks(&session.id) && children.iter().all(|c| !c.waiting || c.asking),
             children,
         }
     }

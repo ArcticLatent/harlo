@@ -18,6 +18,7 @@ fn rows(titles: &[&str]) -> Vec<SessionSummary> {
             agent: None,
             busy: false,
             waiting: false,
+            asking: false,
             children: Vec::new(),
         })
         .collect()

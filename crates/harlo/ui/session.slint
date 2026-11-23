@@ -5,7 +5,7 @@
 import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, InboxRow } from "data.slint";
-import { Icon, Press, HLine, Breathing, ErrorLine } from "widgets.slint";
+import { Icon, Press, HLine, Breathing, Spinner, ErrorLine } from "widgets.slint";
 import { Composer, PickerChip } from "composer.slint";
 import { Timeline, TimelineScrollbar, PromptRail } from "timeline.slint";
 import { WaitingCards } from "waiting.slint";
@@ -159,11 +159,18 @@ component InboxLine inherits Rectangle {
 /// A word in the session's header that opens something.
 component HeaderLink inherits Press {
     in property <string> text;
+    in property <string> glyph;
     height: 28px;
     label: root.text;
     HorizontalLayout {
         padding-left: 9px;
         padding-right: 9px;
+        spacing: 7px;
+        if root.glyph != "": Icon {
+            text: root.glyph;
+            font-size: 13px;
+            color: Theme.icon-quiet;
+        }
         Text {
             text: root.text;
             vertical-alignment: center;
@@ -231,7 +238,7 @@ component Header inherits Rectangle {
                 if State.session-agent != "": Text {
                     text: State.session-agent;
                     font-size: Size.small;
-                    color: Theme.text-weak;
+                    color: Theme.text-base;
                 }
                 if State.session-read-only: Text {
                     text: "read-only";
@@ -239,7 +246,7 @@ component Header inherits Rectangle {
                     color: Theme.text-weaker;
                 }
                 if State.session-model != "": Text {
-                    text: State.session-model;
+                    text: State.session-agent != "" ? "·  " + State.session-model : State.session-model;
                     font-size: Size.small;
                     color: Theme.text-weak;
                 }
@@ -258,20 +265,16 @@ component Header inherits Rectangle {
                         color: Theme.icon-warning-base;
                     }
                 }
-                // Only the icon breathes: the word stays readable throughout.
+                // Only the icon moves: the word stays readable throughout.
                 if State.session-busy: HorizontalLayout {
                     spacing: 5px;
-                    Breathing {
-                        Icon {
-                            text: Icons.loader;
-                            font-size: 12px;
-                            color: Theme.text-interactive-base;
-                        }
+                    Spinner {
+                        size: 12px;
                     }
                     Text {
                         text: "Working";
                         font-size: Size.small;
-                        color: Theme.text-base;
+                        color: Theme.text-weak;
                     }
                 }
             }
@@ -289,6 +292,7 @@ component Header inherits Rectangle {
                 }
                 HeaderLink {
                     text: "Changes";
+                    glyph: Icons.git-compare;
                     clicked => { Logic.open-panel(Panels.changes); }
                 }
             }

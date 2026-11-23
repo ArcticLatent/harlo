@@ -54,6 +54,8 @@ export struct SidebarRow {
     selected: bool,
     busy: bool,
     waiting: bool,
+    /// Whether all it waits for are answers, no approvals.
+    asking: bool,
     /// Whether the session runs without asking ("Don't ask").
     trusted: bool,
     /// A session's maker logo: 0 none, 1 Anthropic, 2 OpenAI, 3 Z.ai.
