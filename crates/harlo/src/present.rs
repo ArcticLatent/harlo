@@ -344,6 +344,9 @@ impl Presenter {
         state.set_shield_color(color(shield_color));
         state.set_shield_label(shield_label.into());
         state.set_avatar(i32::try_from(app.avatar()).unwrap_or(0));
+        // Pausing means something only once a phone can be told.
+        state.set_phone_paired(app.preferences.phone && !app.phone.devices.is_empty());
+        state.set_phone_paused(app.preferences.phone_paused);
         state.set_session_trusted(app.active.is_some() && shield_label == "Don't ask");
     }
 

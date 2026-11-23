@@ -50,6 +50,10 @@ component AvatarFace inherits Rectangle {
 component RailButton inherits Press {
     in property <string> glyph;
     in property <string> keys;
+    /// What its name beside it says; its label unless set.
+    in property <string> tip: self.label;
+    /// A small amber pause mark on its corner.
+    in property <bool> paused;
     /// Whether the name opens to the left, from the right rail.
     in property <bool> leftward;
     /// Pressed since the pointer came: its name stays away until it leaves.
@@ -60,7 +64,7 @@ component RailButton inherits Press {
     changed hovered => {
         if !self.hovered {
             root.quiet = false;
-            if Tips.text == root.label {
+            if Tips.text == root.tip {
                 Tips.text = "";
             }
         }
@@ -69,21 +73,21 @@ component RailButton inherits Press {
     changed pressed => {
         if self.pressed {
             root.quiet = true;
-            if Tips.text == root.label {
+            if Tips.text == root.tip {
                 Tips.text = "";
             }
         }
     }
     Timer {
         interval: Motion.tip-delay;
-        running: root.hovered && !root.quiet && Tips.text != root.label;
+        running: root.hovered && !root.quiet && Tips.text != root.tip;
         triggered => {
             Tips.keys = root.keys;
             Tips.leftward = root.leftward;
             Tips.x = root.leftward ? root.absolute-position.x - 6px
                 : root.absolute-position.x + root.width + 6px;
             Tips.y = root.absolute-position.y + root.height / 2;
-            Tips.text = root.label;
+            Tips.text = root.tip;
         }
     }
 
@@ -94,6 +98,23 @@ component RailButton inherits Press {
         // shown as on but not yet working, stays plain.
         color: root.selected && root.enabled ? Theme.accent-ink
             : root.selected ? Theme.icon-selected : Theme.icon-base;
+    }
+    if root.paused: Rectangle {
+        x: parent.width - self.width - 3px;
+        y: parent.height - self.height - 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: Theme.icon-warning-base;
+        border-width: 2px;
+        border-color: Theme.background-stronger;
+        for bar in 2: Rectangle {
+            x: (parent.width - 6px) / 2 + bar * 4px;
+            y: (parent.height - 6px) / 2;
+            width: 2px;
+            height: 6px;
+            background: Theme.on-warning;
+        }
     }
 }
 
@@ -129,12 +150,27 @@ export component LeftRail inherits Rectangle {
 
             HorizontalLayout {
                 alignment: center;
-                // Opens Settings → Phone, and shows as on while it's there.
+                // With a phone paired, a click pauses or resumes its
+                // notifications; otherwise, and on a right-click, it opens
+                // Settings → Phone, shown as on while it's there.
                 RailButton {
                     glyph: Icons.phone;
-                    label: "Phone";
+                    label: State.phone-paired ? "Phone notifications" : "Phone";
+                    about: !State.phone-paired ? "" : State.phone-paused ? "Paused" : "On";
+                    tip: !State.phone-paired ? "Phone: pair a device"
+                        : State.phone-paused
+                        ? "Phone notifications paused. Click to resume. Right-click to pair a device."
+                        : "Phone notifications on. Click to pause. Right-click to pair a device.";
+                    paused: State.phone-paired && State.phone-paused;
                     selected: root.phone-shown;
-                    clicked => { Logic.open-section(State.phone-section); }
+                    clicked => {
+                        if State.phone-paired {
+                            Logic.toggle-phone-pause();
+                        } else {
+                            Logic.open-section(State.phone-section);
+                        }
+                    }
+                    right-clicked => { Logic.open-section(State.phone-section); }
                 }
             }
             HorizontalLayout {

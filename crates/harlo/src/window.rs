@@ -1017,6 +1017,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
 
     send!(on_resized, |width, height| Message::Resized(width, height));
     send!(on_toggle_sidebar, || Message::ToggleSidebar);
+    send!(on_toggle_phone_pause, || Message::Phone(
+        crate::app::PhoneEvent::TogglePause
+    ));
     send!(on_pick_avatar, |index| Message::PickAvatar(
         usize::try_from(index).unwrap_or(0)
     ));

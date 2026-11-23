@@ -34,6 +34,8 @@ pub enum PhoneEvent {
     Remove(usize),
     /// Send a test notification.
     Test,
+    /// Hold notifications to phones back, or let them go again.
+    TogglePause,
     /// How the test notification went: how many phones got it, or why none did.
     Tested(Result<usize, String>),
 }
@@ -146,6 +148,7 @@ impl App {
                 location: self.location.clone(),
                 hidden: self.workspace.hidden().to_vec(),
                 listen: std::net::SocketAddr::from(([0, 0, 0, 0], state.port)),
+                paused: self.preferences.phone_paused,
             };
             return Task::perform(
                 async move {
@@ -252,6 +255,13 @@ impl App {
                 }
             }
             PhoneEvent::Tested(result) => state.tested = Some(result),
+            PhoneEvent::TogglePause => {
+                self.preferences.phone_paused = !self.preferences.phone_paused;
+                if let Some(running) = &self.phone.running {
+                    running.set_paused(self.preferences.phone_paused);
+                }
+                return self.save_preferences();
+            }
         }
         Task::none()
     }

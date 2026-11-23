@@ -16,6 +16,7 @@ index.html to browse them. Nothing is sent anywhere: the critique itself is
 run by hand, with these pictures and PRODUCT.md and DESIGN.md as context.
 """
 
+import base64
 import datetime
 import html
 import json
@@ -383,6 +384,33 @@ def scene_phone(g):
     g.cap("pairing", "Settings → Phone: access on and a pairing QR code")
     h.click("Phone access", role="Checkbox")
     h.settle(0.5)
+
+    # A phone saved as paired: the rail's phone button pauses notifications.
+    folder = os.path.join(h.info["gui_root"], "state", "harlo", "phone")
+    os.makedirs(folder, exist_ok=True)
+    devices = os.path.join(folder, "devices.json")
+    key = base64.b64encode(os.urandom(32)).decode()
+    with open(devices, "w") as f:
+        json.dump({"devices": [{"id": "gallery", "name": "Test phone", "publicKey": key,
+                                "pairedAt": 1, "lastSeen": 1}]}, f)
+    h.click("Phone access", role="Checkbox")
+    h.wait("Phone notifications", role="Button", timeout=15)
+    h.key("Escape")
+    h.settle(0.5)
+    h.hover("Phone notifications", role="Button")
+    h.settle(0.9)
+    g.cap("phone-on", "The rail's phone button with a phone paired: notifications on")
+    h.click("Phone notifications", role="Button")
+    h.hover("Toggle sidebar", role="Button")
+    h.settle(0.3)
+    h.hover("Phone notifications", role="Button")
+    h.settle(0.9)
+    g.cap("phone-paused", "Phone notifications paused: the amber pause mark and what a click does")
+    h.click("Phone notifications", role="Button")
+    settings(h, "Phone")
+    h.click("Phone access", role="Checkbox")
+    h.settle(0.5)
+    os.remove(devices)
     g.recover()
 
 

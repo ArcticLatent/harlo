@@ -655,6 +655,11 @@ export global State {
     in property <int> shortcuts-section;
     /// Which of them is Phone, which the rail's phone button opens.
     in property <int> phone-section;
+    /// Whether a phone is paired, so the rail's phone button pauses its
+    /// notifications rather than opening Settings → Phone.
+    in property <bool> phone-paired;
+    /// Whether notifications to phones are held back.
+    in property <bool> phone-paused;
     /// The dark and the light themes Settings → Appearance lists, or those
     /// a search found.
     in property <[ThemeCard]> dark-theme-cards;
@@ -794,6 +799,8 @@ export global Logic {
     callback key(string, bool, bool, bool) -> bool;
 
     callback toggle-sidebar();
+    /// Hold notifications to phones back, or let them go again.
+    callback toggle-phone-pause();
     /// Use the avatar at this place in the picker as the user's picture.
     callback pick-avatar(int);
     callback toggle-panel(int);

@@ -182,6 +182,7 @@ async fn start_phone(sandbox: &Sandbox, folder: &std::path::Path) -> Phone {
         },
         hidden: Vec::new(),
         listen: "127.0.0.1:0".parse().expect("an address"),
+        paused: false,
     })
     .await
     .expect("phone access starts")
@@ -224,6 +225,47 @@ async fn pair_through(offer: &harlo_core::phone::Offer, key: &Identity) -> TestP
         sealed: Sealed::new(channel, ready["conn"].as_str().expect("conn").to_owned()),
         next_id: 0,
     }
+}
+
+/// Runs a prompt in `session` to its end: its answer saved and the session
+/// no longer working.
+async fn run_to_end(client: &opencode_client::Client, session: &str, text: &str) {
+    let before = client.messages(session).await.expect("messages").len();
+    client
+        .prompt(session, &Prompt::new(text, Delivery::Steer))
+        .await
+        .expect("prompt");
+    wait_for("the run to end", || async {
+        let now = client.messages(session).await.ok()?.len();
+        let active = client.active().await.ok()?;
+        (now >= before + 2 && !active.iter().any(|id| id == session)).then_some(())
+    })
+    .await;
+}
+
+/// Paused, a finished run isn't sent but a test notification is; resumed,
+/// the next finished run is sent again.
+async fn paused_phones_hear_only_tests(
+    phone: &Phone,
+    relay: &Relay,
+    client: &opencode_client::Client,
+    session: &str,
+) {
+    let pushes = || relay.pushes.lock().expect("pushes").len();
+    phone.set_paused(true);
+    let before = pushes();
+    run_to_end(client, session, "say again").await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(pushes(), before, "nothing sent while paused");
+    assert_eq!(phone.test_notification().await, Ok(1), "tests still go");
+
+    phone.set_paused(false);
+    let before = pushes();
+    run_to_end(client, session, "say once more").await;
+    wait_for("a notification after resuming", || async {
+        (pushes() > before).then_some(())
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -325,6 +367,8 @@ async fn phones_reach_harlo_through_a_relay_and_get_notifications() {
     // A test notification reaches it even while it's connected.
     assert_eq!(phone.test_notification().await, Ok(1));
     wait_for("the test notification", || async { opened("test") }).await;
+
+    paused_phones_hear_only_tests(&phone, &relay, &client, &session.id).await;
 
     // Off the relay: offers stop naming it.
     drop(hosting);

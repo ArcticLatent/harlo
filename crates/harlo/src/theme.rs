@@ -98,6 +98,32 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
         t.surface_raised_strong,
     )));
     g.set_scrim(color(scrim(t)));
+    g.set_on_warning(color(ink_on(t.icon_warning_base)));
+}
+
+/// Black or white, whichever stands out more on `fill`: marks drawn on a
+/// small badge of that colour.
+#[must_use]
+pub fn ink_on(fill: Rgba) -> Rgba {
+    let (black, white) = (
+        Rgba {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        },
+        Rgba {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        },
+    );
+    if black.contrast(fill) > white.contrast(fill) {
+        black
+    } else {
+        white
+    }
 }
 
 /// Sets how `window` moves and sizes things from Settings → Appearance:

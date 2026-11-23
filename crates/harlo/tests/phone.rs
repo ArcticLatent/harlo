@@ -117,12 +117,29 @@ fn a_phone_pairs_with_the_code_shown_and_is_removed() {
     assert!(ui.app().phone.shown.is_none(), "the spent code goes");
     assert!(ui.find("Pairing QR code").is_empty());
 
+    // With a phone paired, the rail's phone button pauses its notifications.
+    let rail = || ui.button("Phone notifications");
+    assert_eq!(rail().accessible_description().as_deref(), Some("On"));
+    rail().invoke_accessible_default_action();
+    let running = ui.app().phone.running.clone().expect("running");
+    assert!(
+        ui.app().preferences.phone_paused && running.paused(),
+        "paused"
+    );
+    assert_eq!(rail().accessible_description().as_deref(), Some("Paused"));
+    rail().invoke_accessible_default_action();
+    assert!(
+        !ui.app().preferences.phone_paused && !running.paused(),
+        "resumed"
+    );
+
     ui.press("Remove");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.app().phone.devices.is_empty()),
         "the phone is forgotten"
     );
     assert!(ui.shows("No phones yet."));
+    assert!(!ui.find("Phone").is_empty(), "unpaired, it's Phone again");
 
     let (access, _) = switch(&ui, "Phone access");
     access.invoke_accessible_default_action();

@@ -28,6 +28,7 @@ mod rows;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -146,6 +147,8 @@ pub struct Settings {
     pub hidden: Vec<String>,
     /// Where phones connect directly; port 0 picks a free one.
     pub listen: SocketAddr,
+    /// Whether notifications start held back; see [`Phone::set_paused`].
+    pub paused: bool,
 }
 
 /// The server phones see, once connected.
@@ -169,6 +172,8 @@ pub(crate) struct Hub {
     relay: Mutex<Option<(String, String)>>,
     /// Where notifications are handed in: the relay's web address.
     push: Mutex<Option<String>>,
+    /// Whether notifications are held back for now; test ones still go.
+    paused: AtomicBool,
     hidden: Vec<String>,
     pub(crate) server: watch::Sender<Option<Arc<Server>>>,
     pub(crate) events: broadcast::Sender<Arc<Event>>,
@@ -285,6 +290,7 @@ impl Phone {
             endpoints: Mutex::new(Vec::new()),
             relay: Mutex::new(None),
             push: Mutex::new(None),
+            paused: AtomicBool::new(settings.paused),
             hidden: settings.hidden,
             server: watch::Sender::new(None),
             events: broadcast::Sender::new(EVENT_BACKLOG),
@@ -381,6 +387,21 @@ impl Phone {
     pub fn leave_relay(&self) {
         *lock(&self.hub.relay) = None;
         *lock(&self.hub.push) = None;
+    }
+
+    /// Holds notifications back, or lets them go again.
+    ///
+    /// While paused, phones aren't told of approvals, questions or finished
+    /// runs; what happened meanwhile isn't sent later. Test notifications
+    /// still go, and connected phones still see everything live.
+    pub fn set_paused(&self, paused: bool) {
+        self.hub.paused.store(paused, Ordering::Relaxed);
+    }
+
+    /// Whether notifications are held back; see [`Phone::set_paused`].
+    #[must_use]
+    pub fn paused(&self) -> bool {
+        self.hub.paused.load(Ordering::Relaxed)
     }
 
     /// Sends a test notification to every phone that takes them.
@@ -483,8 +504,9 @@ async fn follow(hub: Arc<Hub>, location: Location) {
             Update::Event(event) => {
                 if let Some(server) = hub.current() {
                     let fetches = lock(&server.workspace).apply(&event.kind, event.time);
-                    if let (Some(alert), Some(base)) =
-                        (alert(&server, &event.kind), lock(&hub.push).clone())
+                    let paused = hub.paused.load(Ordering::Relaxed);
+                    if let (false, Some(alert), Some(base)) =
+                        (paused, alert(&server, &event.kind), lock(&hub.push).clone())
                     {
                         let hub = Arc::clone(&hub);
                         // A notification that doesn't arrive is only missed.

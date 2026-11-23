@@ -200,6 +200,7 @@ async fn phone_for(sandbox: &Sandbox, folder: &std::path::Path) -> Phone {
         },
         hidden: Vec::new(),
         listen: "127.0.0.1:0".parse().expect("an address"),
+        paused: false,
     })
     .await
     .expect("phone access starts")

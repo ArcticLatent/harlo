@@ -63,6 +63,8 @@ export component Press inherits Rectangle {
     out property <bool> hovered: touch.has-hover;
     out property <bool> pressed: touch.pressed;
     callback clicked();
+    /// Pressed with the right button, for a second action.
+    callback right-clicked();
 
     border-radius: Size.radius;
     background: root.selected || (touch.pressed && root.enabled) ? root.lit
@@ -81,6 +83,11 @@ export component Press inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
         clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.right-clicked();
+            }
+        }
     }
 
     @children
