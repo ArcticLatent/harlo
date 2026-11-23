@@ -3,6 +3,58 @@
 
 import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
+import { Tips } from "data.slint";
+
+/// A button's name, shown above or below it once the pointer rests on it,
+/// with the keys that do the same. Put it inside the button and pass the
+/// button's state; it takes no room.
+export component HoverTip {
+    in property <string> text;
+    in property <string> keys;
+    in property <bool> hovered;
+    in property <bool> pressed;
+    /// Whether it opens above the button rather than below.
+    in property <bool> above;
+    /// The button's place in the window and its size.
+    in property <length> button-x;
+    in property <length> button-y;
+    in property <length> button-width;
+    in property <length> button-height;
+    /// Pressed since the pointer came: the name stays away until it leaves.
+    property <bool> quiet;
+    width: 0;
+    height: 0;
+
+    changed hovered => {
+        if !self.hovered {
+            root.quiet = false;
+            if Tips.text == root.text {
+                Tips.text = "";
+            }
+        }
+    }
+    changed pressed => {
+        if self.pressed {
+            root.quiet = true;
+            if Tips.text == root.text {
+                Tips.text = "";
+            }
+        }
+    }
+    Timer {
+        interval: Motion.tip-delay;
+        running: root.hovered && !root.quiet && root.text != "" && Tips.text != root.text;
+        triggered => {
+            Tips.keys = root.keys;
+            Tips.leftward = false;
+            Tips.above = root.above;
+            Tips.below = !root.above;
+            Tips.x = root.button-x + root.button-width / 2;
+            Tips.y = root.above ? root.button-y - 6px : root.button-y + root.button-height + 6px;
+            Tips.text = root.text;
+        }
+    }
+}
 
 /// A Lucide icon: set `text` to one of `Icons`' glyphs.
 export component Icon inherits Text {
@@ -103,9 +155,24 @@ export component IconButton inherits Press {
     in property <string> glyph;
     in property <length> glyph-size: 14px;
     in property <color> glyph-color: Theme.icon-base;
+    /// Its name, shown under it when the pointer rests on it; its label
+    /// unless set, and none when empty.
+    in property <string> tip: self.label;
+    in property <string> keys;
 
     width: 26px;
     height: 26px;
+
+    HoverTip {
+        text: root.tip;
+        keys: root.keys;
+        hovered: root.hovered;
+        pressed: root.pressed;
+        button-x: root.absolute-position.x;
+        button-y: root.absolute-position.y;
+        button-width: root.width;
+        button-height: root.height;
+    }
 
     Icon {
         text: root.glyph;

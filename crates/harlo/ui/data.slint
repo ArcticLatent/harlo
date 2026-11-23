@@ -1081,6 +1081,10 @@ export global Tips {
     in-out property <length> y;
     /// Whether it opens to the left of the point, from the right rail.
     in-out property <bool> leftward;
+    /// Whether it opens above or below the point, centred on it, for a
+    /// button in a row; the point is then the button's top or bottom edge.
+    in-out property <bool> above;
+    in-out property <bool> below;
 }
 
 /// Where the keyboard is, as the window's own elements report it.

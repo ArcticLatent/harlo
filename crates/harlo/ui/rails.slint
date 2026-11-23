@@ -94,6 +94,8 @@ component RailButton inherits Press {
         triggered => {
             Tips.keys = root.keys;
             Tips.leftward = root.leftward;
+            Tips.above = false;
+            Tips.below = false;
             Tips.x = root.leftward ? root.absolute-position.x - 6px
                 : root.absolute-position.x + root.width + 6px;
             Tips.y = root.absolute-position.y + root.height / 2;
@@ -283,12 +285,18 @@ export component LeftRail inherits Rectangle {
     }
 }
 
-/// A rail button's name, beside it; see `Tips`.
+/// A button's name, beside a rail button or over or under one in a row;
+/// see `Tips`.
 export component RailTip inherits Rectangle {
+    /// The window's width, which a centred tip stays inside.
+    in property <length> room;
+    property <bool> centred: Tips.above || Tips.below;
     width: row.preferred-width;
     height: row.preferred-height;
-    x: Tips.leftward ? Tips.x - self.width : Tips.x;
-    y: Tips.y - self.height / 2;
+    // Centred over or under a button in a row, kept inside the window.
+    x: root.centred ? clamp(Tips.x - self.width / 2, 4px, root.room - self.width - 4px)
+        : Tips.leftward ? Tips.x - self.width : Tips.x;
+    y: Tips.above ? Tips.y - self.height : Tips.below ? Tips.y : Tips.y - self.height / 2;
     background: Theme.card;
     border-radius: Size.radius;
     border-width: 1px;

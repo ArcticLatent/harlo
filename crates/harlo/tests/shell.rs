@@ -377,6 +377,26 @@ fn a_rail_button_shows_its_name_and_keys_when_the_pointer_rests_on_it() {
 }
 
 #[test]
+fn the_composers_icon_buttons_say_what_they_are_on_hover() {
+    use slint::ComponentHandle as _;
+    let ui = ui(demo::app());
+    let tip = || {
+        let tips = ui.window.global::<harlo::ui::Tips>();
+        (tips.get_text().to_string(), tips.get_above())
+    };
+    ui.hover("Attach files");
+    ui.wait(600);
+    assert_eq!(tip(), ("Attach files or pictures".to_owned(), true));
+    // The shield names the mode it's in when nothing beside it does.
+    ui.hover("Permissions");
+    ui.wait(600);
+    assert_eq!(tip().0, "Permissions: the agent's own rules");
+    ui.hover("New session");
+    ui.wait(50);
+    assert_eq!(tip().0, "");
+}
+
+#[test]
 fn the_avatar_picker_shows_six_and_keeps_the_one_chosen() {
     let ui = ui(demo::app());
     assert_eq!(

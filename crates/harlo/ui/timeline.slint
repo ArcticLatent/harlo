@@ -921,7 +921,7 @@ export component PromptRail inherits Rectangle {
     accessible-role: navigation;
     accessible-label: "Prompts";
 
-    for mark[i] in State.prompt-marks: Rectangle {
+    for mark[i] in State.prompt-marks: mark-box := Rectangle {
         // The last prompt at or above the reader is the one being read.
         property <bool> current: mark.row <= root.reading-row
             && (i == root.count - 1 || State.prompt-marks[i + 1].row > root.reading-row);
@@ -932,8 +932,10 @@ export component PromptRail inherits Rectangle {
         y: root.top + (i - root.first) * root.pitch;
         width: root.width;
         height: root.pitch;
+        // Numbered, so it's plain the marks are the session's prompts.
+        property <string> named: "Prompt " + (i + 1) + " of " + root.count + ": " + mark.text;
         accessible-role: button;
-        accessible-label: mark.text;
+        accessible-label: self.named;
         accessible-action-default => { root.jump(mark.row); }
 
         Rectangle {
@@ -971,7 +973,7 @@ export component PromptRail inherits Rectangle {
             tip := Text {
                 x: 10px;
                 width: parent.width - 20px;
-                text: mark.text;
+                text: mark-box.named;
                 overflow: elide;
                 font-size: Size.small;
                 color: Theme.text-strong;

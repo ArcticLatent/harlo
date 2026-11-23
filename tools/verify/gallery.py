@@ -160,6 +160,17 @@ def scene_chat(g):
         h.settle(0.8)
         g.cap("tools-open", "The tool summary opened: each call with its time")
         h.click(summary[0].label)
+    # An icon button's name, over it, and a prompt mark's, beside it.
+    h.hover("Permissions", role="Button")
+    h.settle(0.8)
+    g.cap("composer-tip", "The pointer resting on the composer's shield: its name and mode above it")
+    marks = h.find(None, role="Button", where=lambda e: e.label.startswith("Prompt 1 of"))
+    if marks:
+        h.hover(marks[0].label, role="Button")
+        h.settle(0.6)
+        g.cap("prompt-mark-tip", "The pointer on a prompt mark: its number and first words")
+    h.hover("New session", role="Button")
+    h.settle(0.3)
     prompt = h.find(None, role="Groupbox")
     if prompt:
         h.hover(prompt[-1].label, role="Groupbox")

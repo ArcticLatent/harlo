@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Chip, MenuItem, AttachedChip } from "data.slint";
-import { Icon, IconButton, Press, Dot, Breathing, Spinner, Field } from "widgets.slint";
+import { Icon, IconButton, Press, Dot, Breathing, Spinner, Field, HoverTip } from "widgets.slint";
 import { PictureThumb } from "pictures.slint";
 
 /// The picker numbers, as Rust's `Picker::index` gives them.
@@ -134,6 +134,17 @@ export component PickerChip inherits Press {
     hover: Theme.chip-hover;
     lit: Theme.chip-hover;
     selected: State.picker == chip.picker;
+    // With only its icon, it says its choice on hover.
+    if root.bare: HoverTip {
+        text: chip.label;
+        above: true;
+        hovered: root.hovered;
+        pressed: root.pressed;
+        button-x: root.absolute-position.x;
+        button-y: root.absolute-position.y;
+        button-width: root.width;
+        button-height: root.height;
+    }
     clicked => {
         Requests.anchor-x = self.absolute-position.x;
         Requests.anchor-y = self.absolute-position.y;
@@ -186,6 +197,17 @@ component ShieldButton inherits Press {
         Requests.anchor-y = self.absolute-position.y;
         Requests.anchor-height = self.height;
         Logic.toggle-picker(Pickers.shield);
+    }
+    // Named on hover, with the mode when it isn't spelled out beside it.
+    HoverTip {
+        text: State.shield-label == "" ? "Permissions: the agent's own rules" : "Permissions";
+        above: true;
+        hovered: root.hovered;
+        pressed: root.pressed;
+        button-x: root.absolute-position.x;
+        button-y: root.absolute-position.y;
+        button-width: root.width;
+        button-height: root.height;
     }
     HorizontalLayout {
         padding-left: State.shield-label == "" ? 0 : 4px;
@@ -449,6 +471,17 @@ export component Composer inherits Rectangle {
                     width: 24px;
                     height: 24px;
                     clicked => { Logic.attach(); }
+                    HoverTip {
+                        text: "Attach files or pictures";
+                        keys: "";
+                        above: true;
+                        hovered: parent.hovered;
+                        pressed: parent.pressed;
+                        button-x: parent.absolute-position.x;
+                        button-y: parent.absolute-position.y;
+                        button-width: parent.width;
+                        button-height: parent.height;
+                    }
                     Icon {
                         text: Icons.circle-plus;
                         font-size: 17px;
@@ -480,6 +513,17 @@ export component Composer inherits Rectangle {
                     width: 24px;
                     height: 24px;
                     clicked => { Logic.dictate(); }
+                    HoverTip {
+                        text: parent.label;
+                        keys: "Ctrl+Shift+D";
+                        above: true;
+                        hovered: parent.hovered;
+                        pressed: parent.pressed;
+                        button-x: parent.absolute-position.x;
+                        button-y: parent.absolute-position.y;
+                        button-width: parent.width;
+                        button-height: parent.height;
+                    }
                     // Breathes while it listens.
                     if State.voice == 2: Breathing {
                         Icon {
@@ -503,6 +547,17 @@ export component Composer inherits Rectangle {
                     rest: Theme.control-fill;
                     outlined: true;
                     clicked => { Logic.stop(); }
+                    HoverTip {
+                        text: "Stop the run";
+                        keys: "";
+                        above: true;
+                        hovered: parent.hovered;
+                        pressed: parent.pressed;
+                        button-x: parent.absolute-position.x;
+                        button-y: parent.absolute-position.y;
+                        button-width: parent.width;
+                        button-height: parent.height;
+                    }
                     Icon {
                         text: Icons.square;
                         font-size: 13px;

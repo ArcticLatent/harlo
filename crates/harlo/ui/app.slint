@@ -220,7 +220,7 @@ export component AppWindow inherits Window {
         // Opened from Settings, so over it.
         if State.picker >= Pickers.first-in-settings: PickerMenu { }
         // A rail button's name, over everything.
-        if Tips.text != "": RailTip { }
+        if Tips.text != "": RailTip { room: root.width; }
     }
 }
 
