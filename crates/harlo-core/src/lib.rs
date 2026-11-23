@@ -22,6 +22,7 @@ pub mod mcp_catalog;
 pub mod notes;
 pub mod notifications;
 pub mod own_tools;
+pub mod phone;
 pub mod schedules;
 pub mod server;
 pub mod sessions;

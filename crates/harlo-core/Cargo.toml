@@ -11,7 +11,7 @@ publish.workspace = true
 [dependencies]
 opencode-client = { workspace = true }
 futures-util = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "sync", "time", "process", "macros", "io-util", "fs"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "process", "macros", "io-util", "fs", "net"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 # SQLite is built in, so the app needs no system library.
@@ -34,6 +34,14 @@ shell-words = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }
 ruzstd = { workspace = true }
+# The phone: a WebSocket server for it, the relay's WebSocket, and the
+# sealed frames between them.
+axum = { workspace = true, features = ["http1", "tokio", "ws"] }
+crypto_box = { workspace = true, features = ["std", "getrandom", "salsa20"] }
+tokio-tungstenite = { workspace = true, features = ["connect", "native-tls"] }
+base64 = { workspace = true, features = ["std"] }
+# Answers as HTML for the phone.
+pulldown-cmark = { workspace = true, features = ["html"] }
 # Dictation: whisper.cpp, built in, behind one API for speech models.
 transcribe-rs = { workspace = true, features = ["whisper-cpp"] }
 
@@ -41,6 +49,9 @@ transcribe-rs = { workspace = true, features = ["whisper-cpp"] }
 workspace = true
 
 [dev-dependencies]
+crypto_box = { workspace = true, features = ["std", "getrandom", "salsa20"] }
+tokio-tungstenite = { workspace = true, features = ["connect"] }
+base64 = { workspace = true, features = ["std"] }
 shell-words = { workspace = true }
 ruzstd = { workspace = true }
 flate2 = { workspace = true }
