@@ -553,6 +553,10 @@ export struct SheetRow {
     /// For a name and value with a button (kind 1): text the button copies
     /// before its step.
     copy: string,
+    /// For a row that opens a page (kind 9): an icon glyph shown in place
+    /// of a project's mark. A text field (kind 6) with no `action` saves
+    /// each edit as it's typed.
+    glyph: string,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one

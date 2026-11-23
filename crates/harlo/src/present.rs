@@ -383,7 +383,12 @@ impl Presenter {
                 "Writes commit messages in the Changes panel, from Harlo on this computer."
                     .to_owned()
             }
-            Picker::Folder | Picker::Variant | Picker::Model => String::new(),
+            Picker::ScheduleSession => {
+                "Each run sends the prompt to this session, as if typed there.".to_owned()
+            }
+            Picker::Folder | Picker::Variant | Picker::Model | Picker::ScheduleFolder => {
+                String::new()
+            }
         };
         state.set_menu_note(note.into());
     }

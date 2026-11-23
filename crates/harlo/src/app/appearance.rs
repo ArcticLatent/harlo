@@ -106,6 +106,10 @@ impl App {
                 })
                 .map_or(0, |i| i + 1),
             SettingChoice::ProjectSessions => usize::from(self.sheets.projects.archive),
+            SettingChoice::ScheduleWhen => harlo_core::schedules::When::ALL
+                .iter()
+                .position(|w| *w == self.sheets.schedules.draft.when)
+                .unwrap_or_default(),
         }
     }
 
@@ -121,7 +125,9 @@ impl App {
             SettingChoice::TextSize => pick(&TEXT_SIZES, option, &mut p.text_size),
             SettingChoice::CodeSize => pick(&CODE_SIZES, option, &mut p.code_size),
             // Not Harlo's look: Settings → Projects takes them.
-            SettingChoice::ProjectColor | SettingChoice::ProjectSessions => false,
+            SettingChoice::ProjectColor
+            | SettingChoice::ProjectSessions
+            | SettingChoice::ScheduleWhen => false,
         }
     }
 

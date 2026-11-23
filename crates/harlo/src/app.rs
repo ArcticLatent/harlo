@@ -38,6 +38,7 @@ mod line_comments;
 mod notes;
 mod notices;
 mod projects;
+mod schedules;
 mod sheets;
 mod subagents;
 mod terminal;
@@ -60,6 +61,7 @@ pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use projects::{ProjectEvent, Projects, icon_url};
+pub use schedules::{Draft as ScheduleDraft, Page as SchedulePage, ScheduleEvent, Schedules};
 pub use sheets::{
     Autostart, Event as SheetEvent, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
     SettingChoice, Sheet, Sheets, Step,

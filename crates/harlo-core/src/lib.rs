@@ -18,6 +18,7 @@ pub mod instructions;
 pub mod layout;
 pub mod notes;
 pub mod notifications;
+pub mod schedules;
 pub mod server;
 pub mod sessions;
 pub mod terminal;

@@ -119,6 +119,16 @@ impl Error {
         }
     }
 
+    /// Returns what the server said when it answered with an error, such as
+    /// `Invalid time: tomorrow-ish`, without the status around it.
+    #[must_use]
+    pub fn server_message(&self) -> Option<&str> {
+        match &self.kind {
+            Kind::Status { message, .. } => Some(message),
+            _ => None,
+        }
+    }
+
     /// Whether the target was already answered, cancelled or removed elsewhere.
     ///
     /// A client that shows a stale approval or question should drop it and not

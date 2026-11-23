@@ -10,7 +10,7 @@ use std::fmt;
 use harlo_core::approvals::Shield;
 use harlo_core::theme::Rgba;
 
-use crate::app::{App, Message, SheetEvent, Status, capitalized};
+use crate::app::{App, Message, ScheduleEvent, SheetEvent, Status, capitalized};
 
 /// Rows a menu shows before it scrolls.
 pub const MENU_ROWS: usize = 8;
@@ -58,6 +58,10 @@ pub enum Picker {
     ProjectModel,
     /// The model that writes commit messages, from Settings → Git.
     CommitModel,
+    /// The project a new schedule runs in, from Settings → Schedules.
+    ScheduleFolder,
+    /// The session a new schedule's prompt goes to.
+    ScheduleSession,
 }
 
 impl Picker {
@@ -73,6 +77,8 @@ impl Picker {
             Self::DefaultModel => 5,
             Self::ProjectModel => 6,
             Self::CommitModel => 7,
+            Self::ScheduleFolder => 8,
+            Self::ScheduleSession => 9,
         }
     }
 
@@ -97,6 +103,8 @@ impl Picker {
             5 => Self::DefaultModel,
             6 => Self::ProjectModel,
             7 => Self::CommitModel,
+            8 => Self::ScheduleFolder,
+            9 => Self::ScheduleSession,
             _ => return None,
         })
     }
@@ -217,6 +225,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 message: Message::PickFolder(folder.directory),
             })
             .collect(),
+        Picker::ScheduleFolder | Picker::ScheduleSession => schedule_items(app, picker),
         Picker::Agent => {
             let current = app.current_agent();
             app.agent_choices()
@@ -293,6 +302,65 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 })
                 .collect()
         }
+    }
+}
+
+/// The menu of a new schedule's project or session.
+fn schedule_items(app: &App, picker: Picker) -> Vec<Item> {
+    if picker == Picker::ScheduleFolder {
+        let chosen = app.sheets.schedules.draft.folder.as_deref();
+        app.folder_choices()
+            .into_iter()
+            .filter_map(|folder| {
+                let directory = folder.directory?;
+                Some(Item {
+                    selected: chosen == Some(directory.as_str()),
+                    label: folder.label,
+                    detail: None,
+                    dot: None,
+                    message: schedule_message(ScheduleEvent::Folder(directory)),
+                })
+            })
+            .collect()
+    } else {
+        let draft = &app.sheets.schedules.draft;
+        let new = Item {
+            selected: draft.session.is_none(),
+            label: "A new session".to_owned(),
+            detail: Some("named after the schedule".to_owned()),
+            dot: None,
+            message: schedule_message(ScheduleEvent::Session(None)),
+        };
+        let sessions = app
+            .projects
+            .iter()
+            .find(|p| Some(p.directory.as_str()) == draft.folder.as_deref())
+            .map(|p| p.sessions.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .map(|session| Item {
+                selected: draft.session.as_deref() == Some(session.id.as_str()),
+                label: session_label(&session.title),
+                detail: None,
+                dot: None,
+                message: schedule_message(ScheduleEvent::Session(Some(session.id.clone()))),
+            });
+        std::iter::once(new).chain(sessions).collect()
+    }
+}
+
+/// `event` as the app's message.
+fn schedule_message(event: ScheduleEvent) -> Message {
+    Message::Sheet(SheetEvent::Schedule(event))
+}
+
+/// A session's title as menus show it, with a stand-in until it has one.
+#[must_use]
+pub fn session_label(title: &str) -> String {
+    if title.trim().is_empty() {
+        "Untitled session".to_owned()
+    } else {
+        title.to_owned()
     }
 }
 

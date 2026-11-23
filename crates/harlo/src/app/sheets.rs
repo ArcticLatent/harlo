@@ -118,6 +118,8 @@ pub enum Section {
     Models,
     /// Web search, MCP servers and plugins.
     Tools,
+    /// Prompts the server sends on a schedule.
+    Schedules,
     /// The server Harlo follows.
     Server,
     /// Harlo's version and Slint's notice.
@@ -126,7 +128,7 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -135,6 +137,7 @@ impl Section {
         Self::Git,
         Self::Models,
         Self::Tools,
+        Self::Schedules,
         Self::Server,
         Self::About,
     ];
@@ -151,6 +154,7 @@ impl Section {
             Self::Git => "Git",
             Self::Models => "Models",
             Self::Tools => "Tools for agents",
+            Self::Schedules => "Schedules",
             Self::Server => "Server",
             Self::About => "About",
         }
@@ -167,6 +171,7 @@ impl Section {
             | Self::About => None,
             Self::Projects | Self::Git => Some("Your projects"),
             Self::Models | Self::Tools => Some("Agents and models"),
+            Self::Schedules => Some("Automation"),
             Self::Server => Some("Connections"),
         }
     }
@@ -201,11 +206,14 @@ pub enum Setting {
     /// Whether OpenCode keeps snapshots for undo: its config, not a
     /// preference.
     Snapshots,
+    /// Whether OpenCode allows automations, which schedules are: its
+    /// config, not a preference.
+    Automations,
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -220,6 +228,7 @@ impl Setting {
         Self::Quiet,
         Self::QuietQuestions,
         Self::Snapshots,
+        Self::Automations,
     ];
 }
 
@@ -248,11 +257,17 @@ pub enum Field {
     ForgejoHost,
     /// A Forgejo access token, to sign in with.
     ForgejoToken,
+    /// A new schedule's name.
+    ScheduleName,
+    /// When it runs, as typed.
+    ScheduleTime,
+    /// The prompt it sends.
+    SchedulePrompt,
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 19] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -269,6 +284,9 @@ impl Field {
         Self::GitLabHost,
         Self::ForgejoHost,
         Self::ForgejoToken,
+        Self::ScheduleName,
+        Self::ScheduleTime,
+        Self::SchedulePrompt,
     ];
 }
 
@@ -304,11 +322,13 @@ pub enum SettingChoice {
     ProjectColor,
     /// Whether removing the shown project keeps or archives its sessions.
     ProjectSessions,
+    /// How a new schedule's time is given.
+    ScheduleWhen,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -318,6 +338,7 @@ impl SettingChoice {
         Self::CodeSize,
         Self::ProjectColor,
         Self::ProjectSessions,
+        Self::ScheduleWhen,
     ];
 
     /// The options, as Settings names them, in order.
@@ -337,6 +358,7 @@ impl SettingChoice {
                 "Gray",
             ],
             Self::ProjectSessions => &["Keep them", "Archive them"],
+            Self::ScheduleWhen => &["Once", "Every", "Cron"],
         }
     }
 }
@@ -420,6 +442,8 @@ pub enum Event {
     GitSettings(super::GitEvent),
     /// Something about a git hosting sign-in.
     Hosting(super::HostingEvent),
+    /// Something in Settings → Schedules.
+    Schedule(super::ScheduleEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -483,6 +507,8 @@ pub struct Sheets {
     pub git_settings: super::GitSettings,
     /// Git hosting sign-ins.
     pub hosting: super::HostingState,
+    /// Settings → Schedules.
+    pub schedules: super::Schedules,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -539,15 +565,24 @@ impl App {
                     return self.open_settings();
                 }
             }
-            Event::Close => self.sheets.open = None,
+            Event::Close => {
+                self.sheets.open = None;
+                // A menu opened from the sheet goes with it.
+                self.picker = None;
+            }
             Event::Section(section) => {
                 self.sheets.section = section;
                 self.sheets.query.clear();
+                // The server runs them: what they did may have changed.
+                if section == Section::Schedules {
+                    return self.load_schedules();
+                }
             }
             Event::Query(query) => self.sheets.query = query,
             Event::Switch(setting) => return self.flip(setting),
             Event::GitSettings(event) => return self.git_event(event),
             Event::Hosting(event) => return self.hosting_event(event),
+            Event::Schedule(event) => return self.schedule_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;
@@ -565,6 +600,11 @@ impl App {
             }
             Event::Choose(SettingChoice::ProjectSessions, option) => {
                 return self.project_event(ProjectEvent::Archive(option == 1));
+            }
+            Event::Choose(SettingChoice::ScheduleWhen, option) => {
+                if let Some(&when) = harlo_core::schedules::When::ALL.get(option) {
+                    self.sheets.schedules.draft.when = when;
+                }
             }
             Event::Choose(choice, option) => {
                 if self.choose(choice, option) {
@@ -606,6 +646,9 @@ impl App {
         match setting {
             Setting::StartAtLogin => return self.toggle_autostart(),
             Setting::Snapshots => return self.git_event(super::GitEvent::ToggleSnapshots),
+            Setting::Automations => {
+                return self.schedule_event(super::ScheduleEvent::ToggleAllowed);
+            }
             Setting::KeepInTray => {
                 self.preferences.keep_in_tray = !self.preferences.keep_in_tray;
             }
@@ -627,6 +670,9 @@ impl App {
             Field::NewWorktree => self.make_worktree(value),
             Field::GitLabHost | Field::ForgejoHost | Field::ForgejoToken => {
                 self.hosting_text(field, value)
+            }
+            Field::ScheduleName | Field::ScheduleTime | Field::SchedulePrompt => {
+                self.schedule_text(field, value)
             }
             Field::QuietFrom | Field::QuietTo | Field::Title(_) | Field::Message(_) => {
                 self.set_notice_text(field, value)
@@ -674,7 +720,8 @@ impl App {
             | Setting::Glass
             | Setting::StartAtLogin
             | Setting::KeepInTray
-            | Setting::Snapshots => {
+            | Setting::Snapshots
+            | Setting::Automations => {
                 return;
             }
         };
@@ -712,7 +759,10 @@ impl App {
             | Field::NewWorktree
             | Field::GitLabHost
             | Field::ForgejoHost
-            | Field::ForgejoToken => {
+            | Field::ForgejoToken
+            | Field::ScheduleName
+            | Field::ScheduleTime
+            | Field::SchedulePrompt => {
                 return Task::none();
             }
         }
@@ -782,7 +832,7 @@ impl App {
 
     /// Reads what Settings shows from the server and this computer.
     fn open_settings(&mut self) -> Task<Message> {
-        Task::batch([self.load_git(), self.load_setup()])
+        Task::batch([self.load_git(), self.load_setup(), self.load_schedules()])
     }
 
     /// Whether the guide offers to install OpenCode: when the background

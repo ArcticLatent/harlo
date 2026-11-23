@@ -1,5 +1,6 @@
-//! Setting the model new sessions use, and whether undo keeps snapshots,
-//! in OpenCode's global config file, each test in its own scratch folder.
+//! Setting the model new sessions use, whether undo keeps snapshots and
+//! whether automations are allowed, in OpenCode's global config file, each
+//! test in its own scratch folder.
 
 // Rust guideline compliant 2026-10-09
 
@@ -123,4 +124,37 @@ fn snapshots_are_on_unless_turned_off() {
     assert!(!text.contains("snapshots"), "{text}");
     assert!(text.contains("\"model\": \"a/one\""));
     assert!(config::snapshots(folder).expect("read"));
+}
+
+#[test]
+fn automations_are_off_until_turned_on_inside_experimental() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let folder = scratch.path();
+    assert!(!config::automations(folder).expect("no file yet"));
+    let before = "{\n  // mine\n  \"model\": \"a/one\"\n}\n";
+    fs::write(folder.join("opencode.json"), before).expect("a file");
+
+    config::set_automations(folder, true).expect("on");
+    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(text.contains("// mine"), "{text}");
+    let json: serde_json::Value = serde_json::from_str(&text.replace("// mine", "")).expect("JSON");
+    assert_eq!(json["experimental"]["automations"], true);
+    assert!(config::automations(folder).expect("read"));
+
+    // Off takes the switch away, and `experimental` with it once empty.
+    config::set_automations(folder, false).expect("off");
+    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(!text.contains("experimental"), "{text}");
+    assert!(text.contains("\"model\": \"a/one\""), "{text}");
+    assert!(!config::automations(folder).expect("read"));
+
+    // Other experimental switches stay.
+    let other = "{\n  \"experimental\": { \"todo\": true, \"automations\": true }\n}\n";
+    fs::write(folder.join("opencode.json"), other).expect("a file");
+    assert!(config::automations(folder).expect("read"));
+    config::set_automations(folder, false).expect("off");
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(folder.join("opencode.json")).expect("read"))
+            .expect("JSON");
+    assert_eq!(json["experimental"], serde_json::json!({ "todo": true }));
 }

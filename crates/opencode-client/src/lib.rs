@@ -13,6 +13,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod automation;
 mod catalog;
 mod client;
 mod endpoint;
@@ -26,6 +27,11 @@ mod settings;
 mod setup;
 mod types;
 
+#[doc(inline)]
+pub use automation::{
+    Action as AutomationAction, Automation, NewAutomation, Status as AutomationStatus,
+    Trigger as AutomationTrigger,
+};
 #[doc(inline)]
 pub use catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 #[doc(inline)]

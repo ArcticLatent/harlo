@@ -283,6 +283,20 @@ impl Client {
         Ok(())
     }
 
+    /// Names a session, for every client of the server.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist or the server can't be reached.
+    pub async fn set_title(&self, session_id: &str, title: &str) -> Result<(), Error> {
+        Self::send(
+            self.request(Method::PATCH, &format!("/api/session/{session_id}"))
+                .json(&json!({ "title": title })),
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Returns one session.
     ///
     /// # Errors

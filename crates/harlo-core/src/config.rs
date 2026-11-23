@@ -24,6 +24,12 @@ const MODEL: &str = "model";
 /// The key that turns off the snapshots undo uses, when `false`.
 const SNAPSHOTS: &str = "snapshots";
 
+/// The object holding OpenCode's experimental switches.
+const EXPERIMENTAL: &str = "experimental";
+
+/// OpenCode's switch for automations, inside `experimental`.
+const AUTOMATIONS: &str = "automations";
+
 /// What a new global file starts with: the schema OpenCode's docs give.
 const NEW_FILE: &str = "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n";
 
@@ -171,10 +177,68 @@ pub async fn set_snapshots_later(folder: PathBuf, on: bool) -> Result<(), Error>
     later(folder, move |folder| set_snapshots(folder, on)).await
 }
 
+/// Whether OpenCode lets clients create automations (Harlo's schedules):
+/// `experimental.automations` in the global file in `folder`, off unless
+/// set.
+///
+/// # Errors
+///
+/// Fails when the file exists but can't be read or isn't valid JSONC.
+pub fn automations(folder: &Path) -> Result<bool, Error> {
+    let path = file(folder);
+    let Some(root) = parse(&path)? else {
+        return Ok(false);
+    };
+    let on = root
+        .object_value()
+        .and_then(|object| object.object_value(EXPERIMENTAL))
+        .and_then(|object| object.get(AUTOMATIONS))
+        .and_then(|prop| prop.value())
+        .and_then(|value| value.as_boolean_lit())
+        .is_some_and(|value| value.value());
+    Ok(on)
+}
+
+/// Turns OpenCode's automations on or off in the global file in `folder`.
+/// Off, the default, removes the setting, and `experimental` with it when
+/// nothing else is left there.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does, or when `experimental` isn't an object.
+pub fn set_automations(folder: &Path, on: bool) -> Result<(), Error> {
+    set_at(
+        folder,
+        &[EXPERIMENTAL, AUTOMATIONS],
+        on.then_some(CstInputValue::from(true)),
+    )
+}
+
+/// Sets the automations as [`set_automations`] does, on a blocking thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_automations`], or an error when the thread
+/// is cancelled.
+pub async fn set_automations_later(folder: PathBuf, on: bool) -> Result<(), Error> {
+    later(folder, move |folder| set_automations(folder, on)).await
+}
+
 /// Sets `key` to `value` at the top of the global file in `folder`, or
 /// removes it for `None`, keeping the rest of the file. A missing file or
 /// folder is created.
 fn set(folder: &Path, key: &str, value: Option<CstInputValue>) -> Result<(), Error> {
+    set_at(folder, &[key], value)
+}
+
+/// Sets the key at `keys`, a path of nested objects, to `value` in the
+/// global file in `folder`, or removes it for `None` along with an object
+/// on the way that it leaves empty. The rest of the file stays as it was;
+/// a missing file, folder or object on the way is created.
+fn set_at(folder: &Path, keys: &[&str], value: Option<CstInputValue>) -> Result<(), Error> {
+    let Some((key, outer)) = keys.split_last() else {
+        return Ok(());
+    };
     let path = file(folder);
     let root = match parse(&path)? {
         Some(root) => root,
@@ -190,6 +254,29 @@ fn set(folder: &Path, key: &str, value: Option<CstInputValue>) -> Result<(), Err
             kind: Kind::NotObject,
         })?,
     };
+    let not_object = || Error {
+        path: path.clone(),
+        kind: Kind::NotObject,
+    };
+    // The objects on the way, outermost first.
+    let mut objects = vec![object];
+    for name in outer {
+        let Some(parent) = objects.last() else {
+            break;
+        };
+        let next = if value.is_some() {
+            parent.object_value_or_create(name).ok_or_else(not_object)?
+        } else {
+            match parent.object_value(name) {
+                Some(next) => next,
+                None => return Ok(()),
+            }
+        };
+        objects.push(next);
+    }
+    let Some(object) = objects.last() else {
+        return Ok(());
+    };
     match (object.get(key), value) {
         (Some(prop), Some(value)) => prop.set_value(value),
         (Some(prop), None) => prop.remove(),
@@ -197,6 +284,19 @@ fn set(folder: &Path, key: &str, value: Option<CstInputValue>) -> Result<(), Err
             object.append(key, value);
         }
         (None, None) => return Ok(()),
+    }
+    // Objects the removal left empty go too, innermost first: each is the
+    // value of a property of the one before it.
+    for (index, name) in outer.iter().enumerate().rev() {
+        let (Some(parent), Some(object)) = (objects.get(index), objects.get(index + 1)) else {
+            break;
+        };
+        if !object.properties().is_empty() {
+            break;
+        }
+        if let Some(prop) = parent.get(name) {
+            prop.remove();
+        }
     }
     write(folder, &path, &root.to_string())
 }

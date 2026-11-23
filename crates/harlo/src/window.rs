@@ -19,9 +19,10 @@ use harlo_core::server::{Location, PermissionReply};
 use slint::ComponentHandle as _;
 use slint::winit_030::{EventResult, WinitWindowAccessor as _, winit::event::WindowEvent};
 
+use crate::app::Load;
 use crate::app::{
     self, App, ChangesEvent, ContextEvent, Edge, FilesEvent, Message, NotesEvent, Panel,
-    ProjectEvent, SheetEvent, TerminalEvent,
+    ProjectEvent, ScheduleEvent, SchedulePage, SheetEvent, TerminalEvent,
 };
 use crate::keys::KeyPress;
 use crate::model::{self, Picker};
@@ -558,9 +559,39 @@ pub const CANCEL_SIGN_IN: i32 = 27;
 /// The Settings button that copies the one-time code and opens its page.
 pub const OPEN_SIGN_IN_PAGE: i32 = 28;
 
+/// The Settings button that starts a new schedule.
+pub const NEW_SCHEDULE: i32 = 29;
+
+/// The Settings button that goes back to the list of schedules.
+pub const ALL_SCHEDULES: i32 = 30;
+
+/// The Settings row that opens the schedule numbered by its item, in the
+/// list's order.
+pub const PICK_SCHEDULE: i32 = 31;
+
+/// The Settings button that pauses the schedule shown.
+pub const PAUSE_SCHEDULE: i32 = 32;
+
+/// The Settings button that resumes the schedule shown.
+pub const RESUME_SCHEDULE: i32 = 33;
+
+/// The Settings button that deletes the schedule shown, asking once.
+pub const DELETE_SCHEDULE: i32 = 34;
+
+/// The Settings button that creates the new schedule.
+pub const CREATE_SCHEDULE: i32 = 35;
+
+/// The Settings button that picks the new schedule's project.
+pub const CHOOSE_SCHEDULE_FOLDER: i32 = 36;
+
+/// The Settings button that picks the session the new schedule's prompt
+/// goes to.
+pub const CHOOSE_SCHEDULE_SESSION: i32 = 37;
+
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
+    let schedule = |event| Some(Message::Sheet(SheetEvent::Schedule(event)));
     let worktree = || {
         let folder = app.sheets.projects.shown.as_deref()?;
         let project = app.projects.iter().find(|p| p.directory == folder)?;
@@ -611,6 +642,29 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         OPEN_SIGN_IN_PAGE => Some(Message::Sheet(SheetEvent::Hosting(
             app::HostingEvent::OpenPage,
         ))),
+        NEW_SCHEDULE => schedule(ScheduleEvent::New),
+        ALL_SCHEDULES => schedule(ScheduleEvent::Back),
+        CREATE_SCHEDULE => schedule(ScheduleEvent::Create),
+        PICK_SCHEDULE => {
+            let Load::Loaded(list) = &app.sheets.schedules.list else {
+                return None;
+            };
+            let id = list.get(usize::try_from(item).ok()?)?.id.clone();
+            schedule(ScheduleEvent::Open(id))
+        }
+        PAUSE_SCHEDULE | RESUME_SCHEDULE | DELETE_SCHEDULE => {
+            let SchedulePage::Shown(id) = &app.sheets.schedules.page else {
+                return None;
+            };
+            let id = id.clone();
+            schedule(match number {
+                PAUSE_SCHEDULE => ScheduleEvent::Pause(id),
+                RESUME_SCHEDULE => ScheduleEvent::Resume(id),
+                _ => ScheduleEvent::Delete(id),
+            })
+        }
+        CHOOSE_SCHEDULE_FOLDER => Some(Message::TogglePicker(Picker::ScheduleFolder)),
+        CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }
 }
@@ -1039,6 +1093,10 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
 #[must_use]
 pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
     use crate::keys::Key;
+    // A menu over a sheet closes before the sheet.
+    if app.picker.is_some() && press.key == Key::Escape {
+        return Some(Message::ClosePicker);
+    }
     if app.sheets.open.is_some() && press.key == Key::Escape {
         return Some(Message::Sheet(app::SheetEvent::Close));
     }

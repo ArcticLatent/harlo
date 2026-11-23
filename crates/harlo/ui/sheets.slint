@@ -350,11 +350,17 @@ component Row inherits VerticalLayout {
             spacing: 12px;
             VerticalLayout {
                 alignment: center;
-                ProjectMark {
+                if root.entry.glyph == "": ProjectMark {
                     size: 18px;
                     picture: root.entry.picture;
                     colored: root.entry.on;
                     tint: root.entry.color;
+                }
+                if root.entry.glyph != "": Icon {
+                    width: 18px;
+                    text: root.entry.glyph;
+                    font-size: 16px;
+                    color: Theme.icon-base;
                 }
             }
             VerticalLayout {
@@ -411,8 +417,14 @@ component Row inherits VerticalLayout {
             text: root.entry.value;
             secret: root.entry.on;
             accepted => { Logic.settings-text(root.entry.setting, self.text); }
+            // Without a button, what's typed is taken as it's typed.
+            edited(text) => {
+                if root.entry.action == "" {
+                    Logic.settings-text(root.entry.setting, text);
+                }
+            }
         }
-        VerticalLayout {
+        if root.entry.action != "": VerticalLayout {
             alignment: center;
             ActionButton {
                 // It says so while the field holds what's saved.
