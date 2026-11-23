@@ -62,9 +62,9 @@ fn found(status: Option<Status>) -> ChangesLoaded {
 fn found_with(turn: Option<Vec<FileDiff>>, status: Option<Status>) -> ChangesLoaded {
     let check = diff(
         "src/check.py",
-        "@@ -1,1 +1,2 @@\n import socket\n+PORT = 9877\n",
+        "@@ -1,1 +1,2 @@\n-import os\n+import socket\n+PORT = 9877\n",
+        2,
         1,
-        0,
     );
     ChangesLoaded::new(
         turn.map(Ok),
@@ -553,4 +553,20 @@ fn the_message_names_each_file_and_line() {
          \nsrc/check.py, line 2:\n```diff\n+PORT = 9877\n```\nRead it from the config\n\
          \nsrc/old.py, line 7 (removed):\n```diff\n-import os\n```\nStill needed\n"
     );
+}
+
+#[test]
+fn only_changed_lines_show_with_a_break_where_unchanged_ones_are_left_out() {
+    let patch =
+        "@@ -1,5 +1,5 @@\n-first old\n+first new\n kept one\n kept two\n-last old\n+last new\n";
+    let loaded = ChangesLoaded::new(
+        None,
+        Some(Ok(vec![diff("src/two.py", patch, 2, 2)])),
+        Ok(vec![]),
+        None,
+    );
+    let ui = panel(loaded);
+    ui.button("src/two.py").invoke_accessible_default_action();
+    assert!(ui.shows("first new") && ui.shows("last old"));
+    assert!(!ui.shows("kept one") && !ui.shows("kept two"));
 }

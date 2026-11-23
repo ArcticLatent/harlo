@@ -22,6 +22,7 @@ import html
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import traceback
@@ -325,8 +326,28 @@ def scene_menus(g):
         h.settle(0.5)
 
 
+def long_change(h):
+    """Commits a long workflow file to the sandbox's project, then changes
+    lines near its top and far down, so Changes has long lines and
+    three-digit line numbers to show."""
+    lines = [f"# step {n}: build, test and package the release for every platform we ship to" for n in range(1, 241)]
+    h.file("release.yml", "\n".join(lines) + "\n")
+    git = ["git", "-C", h.project, "-c", "user.name=Gallery", "-c", "user.email=gallery@example.com",
+           "-c", "commit.gpgsign=false"]
+    env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+    subprocess.run(git + ["add", "release.yml"], check=True, env=env)
+    subprocess.run(git + ["commit", "-q", "-m", "A long workflow"], check=True, env=env)
+    lines[1] = "# step 2: build on the oldest supported system so the binary runs everywhere it can"
+    lines[2] = "# step 3: test the packages on a clean machine before anything is published"
+    lines[118] = "  QT_VERSION: removed"
+    lines[205] = "# step 206: sign the update manifest that the app reads to offer updates"
+    del lines[150:153]
+    h.file("release.yml", "\n".join(lines) + "\n")
+
+
 def scene_panels(g):
     h = g.h
+    long_change(h)
     # The chat's session: it has an edit, todos and context to show.
     h.click("Release notes", role=None, where=lambda e: e.y < 34)
     h.wait(None, role="Text", where=lambda e: e.y < 110 and e.label == "Release notes" and e.y > 34,
@@ -344,6 +365,11 @@ def scene_panels(g):
             h.click("a.txt", role=None, where=lambda e: e.x > h.size[0] / 2 and e.role != "Tab")
             h.settle(0.8)
             g.cap("changes-diff", "The Changes panel with a file's diff open")
+            h.click("Refresh", role="Button", where=lambda e: e.x > h.size[0] / 2)
+            h.wait("release.yml", role=None, where=lambda e: e.x > h.size[0] / 2, timeout=10)
+            h.click("release.yml", role=None, where=lambda e: e.x > h.size[0] / 2 and e.role != "Tab")
+            h.settle(0.8)
+            g.cap("changes-long", "A long file's changes: only the changed lines, with three-digit numbers")
             continue
         if panel == "Notes":
             h.fill("Note", "Release checklist\n- [x] bump the version\n- [ ] tag the release\n- [ ] post the notes\n")
@@ -497,6 +523,25 @@ def scene_schedules(g):
     g.recover()
 
 
+def scene_long_list(g):
+    """Enough sessions that the sidebar scrolls: its thin bar at rest and
+    under the pointer."""
+    h = g.h
+    for n in range(1, 31):
+        created = h.api("POST", "/api/session", {"location": {"directory": h.project}})["data"]
+        h.api("PATCH", f"/api/session/{created['id']}", {"title": f"Session number {n}"})
+    h.wait("Session number 30", timeout=20)
+    h.settle(1)
+    shown = h.find(None, role=None, where=lambda e: e.x < 340 and e.label.startswith("Show ") and e.label.endswith(" more"))
+    if shown:
+        h.click(shown[0].label, role=None, where=lambda e: e.x < 340)
+        h.settle(0.8)
+    g.cap("sessions", "A long session list: the sidebar's thin scrollbar, no track")
+    h.hover("Session number 30", role=None, where=lambda e: e.x < 340)
+    h.settle(0.6)
+    g.cap("sessions-hover", "The sidebar's scrollbar with the pointer over the list")
+
+
 def scene_window(g):
     h = g.h
     h.restart()
@@ -508,7 +553,8 @@ SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approva
           ("question", scene_question), ("busy", scene_busy), ("menus", scene_menus),
           ("panels", scene_panels), ("terminal", scene_terminal), ("editor", scene_editor),
           ("settings", scene_settings), ("pages", scene_pages), ("phone", scene_phone),
-          ("pictures", scene_pictures), ("schedules", scene_schedules), ("window", scene_window)]
+          ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
+          ("window", scene_window)]
 
 # A sitting of its own: the guide shows only before setup is done.
 GUIDE = ["OpenCode", "Models", "Git", "Theme"]

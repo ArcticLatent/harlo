@@ -14,7 +14,7 @@ use slint::{SharedString, VecModel};
 use super::{sync, timeline::diff_line};
 use crate::app::{App, ChangedFile, Changes, GitAction, List, Panel};
 use crate::file_icons;
-use crate::ui::{ChangeRow, ChangesFoot, State};
+use crate::ui::{ChangeRow, ChangesFoot, DiffLine, State};
 
 /// The most lines a file's diff shows under it before "N more lines".
 const DIFF_LINES: usize = 40;
@@ -277,36 +277,51 @@ impl<'a> Builder<'a> {
             return;
         }
         let whole = changes.whole.contains(&key);
-        let shown = if whole {
-            file.lines.len()
-        } else {
-            file.lines.len().min(DIFF_LINES)
-        };
+        let lines = changed_lines(&file.lines);
+        let total = lines
+            .iter()
+            .filter(|l| matches!(l, Shown::Line(..)))
+            .count();
         let lit_hunk = selected
             .then_some(changes.hunk)
             .flatten()
             .filter(|&h| h > 0);
-        let mut hunk = 0;
-        for (at, line) in file.lines[..shown].iter().enumerate() {
-            if line.kind == LineKind::Gap {
-                hunk += 1;
-                if lit_hunk == Some(hunk) {
-                    self.reveal = Some(self.y);
+        let mut shown = 0;
+        for line in lines {
+            if !whole && shown == DIFF_LINES {
+                break;
+            }
+            match line {
+                Shown::Break { hunk, starts } => {
+                    if starts && lit_hunk == Some(hunk) {
+                        self.reveal = Some(self.y);
+                    }
+                    self.push(kind::LINE, height::LINE, 0.0, |row| {
+                        row.key = key.as_str().into();
+                        row.line = DiffLine {
+                            kind: 3,
+                            ..DiffLine::default()
+                        };
+                        row.at = -1;
+                    });
+                }
+                Shown::Line(at, line) => {
+                    shown += 1;
+                    self.push(kind::LINE, height::LINE, 0.0, |row| {
+                        row.key = key.as_str().into();
+                        row.line = diff_line(line);
+                        row.at = int(at);
+                        row.clickable = commentable(line);
+                    });
+                    for row in under_line(changes, &key, &file.path, line) {
+                        self.y += row.height;
+                        self.rows.push(row);
+                    }
                 }
             }
-            self.push(kind::LINE, height::LINE, 0.0, |row| {
-                row.key = key.as_str().into();
-                row.line = diff_line(line);
-                row.at = int(at);
-                row.clickable = commentable(line);
-            });
-            for row in under_line(changes, &key, &file.path, line) {
-                self.y += row.height;
-                self.rows.push(row);
-            }
         }
-        if shown < file.lines.len() {
-            let more = file.lines.len() - shown;
+        if shown < total {
+            let more = total - shown;
             self.push(kind::MORE, height::MORE, 0.0, |row| {
                 row.key = key.as_str().into();
                 row.text = format!("{more} more lines").into();
@@ -325,20 +340,29 @@ fn whole_diff(changes: &Changes, key: &str, file: &ChangedFile) -> (Vec<ChangeRo
     // current one has any yet.
     let mut hunk = 0;
     let mut started = false;
+    // Unchanged lines skipped inside a hunk: a space before the next change.
+    let mut skipped = false;
     for (at, line) in file.lines.iter().enumerate() {
         if line.kind == LineKind::Gap {
             if started {
                 hunk += 1;
                 started = false;
             }
+            skipped = false;
+            continue;
+        }
+        if line.kind == LineKind::Context {
+            skipped = started;
             continue;
         }
         let selected = changes.hunk == Some(hunk);
         let gap = match (started, rows.is_empty()) {
+            (true, _) if skipped => height::HUNK_GAP,
             (true, _) => 0.0,
             (false, true) => height::TOP,
             (false, false) => height::HUNK_GAP,
         };
+        skipped = false;
         if !started && selected {
             reveal = y + gap;
         }
@@ -362,6 +386,46 @@ fn whole_diff(changes: &Changes, key: &str, file: &ChangedFile) -> (Vec<ChangeRo
         }
     }
     (rows, (reveal - height::MARGIN).max(0.0))
+}
+
+/// A row of a file's diff in the list: a changed line, by its place in the
+/// file's lines, or a break where unchanged lines are left out.
+enum Shown<'a> {
+    Line(usize, &'a Line),
+    /// A break; `hunk` counts the gaps before it, and `starts` says it's
+    /// where hunk `hunk` starts rather than unchanged lines inside one.
+    Break {
+        hunk: usize,
+        starts: bool,
+    },
+}
+
+/// The added and removed lines of `lines`, with one break wherever
+/// unchanged lines or a gap between hunks sit between two of them.
+fn changed_lines(lines: &[Line]) -> Vec<Shown<'_>> {
+    let mut shown = Vec::new();
+    let mut hunk = 0;
+    let mut pending = false;
+    let mut starts = false;
+    for (at, line) in lines.iter().enumerate() {
+        match line.kind {
+            LineKind::Gap => {
+                hunk += 1;
+                pending = true;
+                starts = true;
+            }
+            LineKind::Context => pending = true,
+            LineKind::Added | LineKind::Removed => {
+                if pending && !shown.is_empty() {
+                    shown.push(Shown::Break { hunk, starts });
+                }
+                pending = false;
+                starts = false;
+                shown.push(Shown::Line(at, line));
+            }
+        }
+    }
+    shown
 }
 
 /// Whether a comment can go on `line`: one with a number.
