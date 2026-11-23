@@ -382,6 +382,12 @@ impl Workspace {
         self.projects.values().find(|p| p.directory == directory)
     }
 
+    /// Returns the server's project with ID `id`.
+    #[must_use]
+    pub fn project_by_id(&self, id: &str) -> Option<&ServerProject> {
+        self.projects.get(id)
+    }
+
     /// Returns the project folders in sidebar order, for saving.
     #[must_use]
     pub fn order(&self) -> &[String] {

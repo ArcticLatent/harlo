@@ -618,6 +618,9 @@ pub const REMOVE_CREDENTIAL: i32 = 45;
 /// The Settings button that picks a provider to sign in to.
 pub const ADD_PROVIDER: i32 = 46;
 
+/// The Settings button that removes the saved approval numbered by its item.
+pub const REMOVE_APPROVAL: i32 = 47;
+
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
@@ -714,6 +717,9 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
             provider(ProviderEvent::Remove(connection.credential.clone()?))
         }
         ADD_PROVIDER => provider(ProviderEvent::Pick),
+        REMOVE_APPROVAL => Some(Message::Sheet(SheetEvent::Approval(
+            app::ApprovalEvent::Remove(usize::try_from(item).ok()?),
+        ))),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }

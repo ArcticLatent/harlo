@@ -21,6 +21,7 @@ fn catalog() -> Catalog {
                 subagent: false,
                 color: None,
                 read_only: false,
+                model: None,
             },
             Agent {
                 id: "explore".into(),
@@ -30,6 +31,7 @@ fn catalog() -> Catalog {
                 subagent: true,
                 color: None,
                 read_only: false,
+                model: None,
             },
         ],
         commands: vec![

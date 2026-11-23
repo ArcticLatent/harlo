@@ -80,6 +80,9 @@ pub struct Agent {
     pub color: Option<String>,
     /// Whether its rules stop it from editing files, as for planning.
     pub read_only: bool,
+    /// The model it always uses, as provider ID and model ID, when it's
+    /// set to one; otherwise it uses the session's.
+    pub model: Option<(String, String)>,
 }
 
 impl Agent {
@@ -99,6 +102,10 @@ impl Agent {
             subagent: mode != "primary",
             color: optional(value, "color").filter(|c| is_hex_colour(c)),
             read_only: edits_denied(&value["permissions"]),
+            model: value["model"]["providerID"]
+                .as_str()
+                .zip(value["model"]["id"].as_str())
+                .map(|(provider, id)| (provider.to_owned(), id.to_owned())),
             id,
         })
     }

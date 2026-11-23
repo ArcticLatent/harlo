@@ -14,6 +14,7 @@ use lucide_icons::Icon;
 use super::marks::{Marks, project_color};
 use super::{glyph, sync};
 
+mod agents;
 mod providers;
 mod schedules;
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
@@ -276,6 +277,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Projects => Icon::FolderGit2,
         Section::Git => Icon::GitBranch,
         Section::Models => Icon::Bot,
+        Section::Agents => Icon::UsersRound,
         Section::Tools => Icon::Plug,
         Section::Schedules => Icon::CalendarClock,
         Section::Server => Icon::Server,
@@ -306,6 +308,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
             Load::Loaded(setup) => setup_rows(setup),
             Load::Idle | Load::Loading | Load::Failed(_) => Vec::new(),
         },
+        Section::Agents => agents::agent_rows(app),
         Section::Schedules => schedules::schedule_rows(app),
         Section::Server => server_rows(app),
         Section::About => about_rows(app),

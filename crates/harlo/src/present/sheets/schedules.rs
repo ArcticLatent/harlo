@@ -269,7 +269,7 @@ fn summary(app: &App, automation: &Automation) -> String {
 }
 
 /// The sidebar's name for the project in `folder`, or the folder itself.
-fn project_name(app: &App, folder: &str) -> String {
+pub(super) fn project_name(app: &App, folder: &str) -> String {
     app.projects
         .iter()
         .find(|p| p.directory == folder)

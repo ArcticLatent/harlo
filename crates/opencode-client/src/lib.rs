@@ -13,6 +13,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod approval;
 mod automation;
 mod catalog;
 mod client;
@@ -28,6 +29,8 @@ mod settings;
 mod setup;
 mod types;
 
+#[doc(inline)]
+pub use approval::SavedApproval;
 #[doc(inline)]
 pub use automation::{
     Action as AutomationAction, Automation, NewAutomation, Status as AutomationStatus,

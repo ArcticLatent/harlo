@@ -116,6 +116,8 @@ pub enum Section {
     Git,
     /// The server's model providers.
     Models,
+    /// OpenCode's agents and the approvals it saved.
+    Agents,
     /// Web search, MCP servers and plugins.
     Tools,
     /// Prompts the server sends on a schedule.
@@ -128,7 +130,7 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -136,6 +138,7 @@ impl Section {
         Self::Projects,
         Self::Git,
         Self::Models,
+        Self::Agents,
         Self::Tools,
         Self::Schedules,
         Self::Server,
@@ -153,6 +156,7 @@ impl Section {
             Self::Projects => "Projects",
             Self::Git => "Git",
             Self::Models => "Models",
+            Self::Agents => "Agents",
             Self::Tools => "Tools for agents",
             Self::Schedules => "Schedules",
             Self::Server => "Server",
@@ -170,7 +174,7 @@ impl Section {
             | Self::Shortcuts
             | Self::About => None,
             Self::Projects | Self::Git => Some("Your projects"),
-            Self::Models | Self::Tools => Some("Agents and models"),
+            Self::Models | Self::Agents | Self::Tools => Some("Agents and models"),
             Self::Schedules => Some("Automation"),
             Self::Server => Some("Connections"),
         }
@@ -475,6 +479,8 @@ pub enum Event {
     Schedule(super::ScheduleEvent),
     /// Something about signing in to a model provider.
     Provider(super::ProviderEvent),
+    /// Something about the saved approvals.
+    Approval(super::ApprovalEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -542,6 +548,8 @@ pub struct Sheets {
     pub schedules: super::Schedules,
     /// The model providers, and signing in to them.
     pub providers: super::Providers,
+    /// The approvals OpenCode saved for "Allow always".
+    pub approvals: super::Approvals,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -610,6 +618,9 @@ impl App {
                 if section == Section::Schedules {
                     return self.load_schedules();
                 }
+                if section == Section::Agents {
+                    return self.load_approvals();
+                }
             }
             Event::Query(query) => self.sheets.query = query,
             Event::Switch(setting) => return self.flip(setting),
@@ -617,6 +628,7 @@ impl App {
             Event::Hosting(event) => return self.hosting_event(event),
             Event::Schedule(event) => return self.schedule_event(event),
             Event::Provider(event) => return self.provider_event(event),
+            Event::Approval(event) => return self.approval_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;

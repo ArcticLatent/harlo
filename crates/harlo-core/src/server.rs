@@ -30,8 +30,8 @@ pub use opencode_client::{
     Endpoint, Error, Field, FieldKind, FileChange, FileDiff, FileMatch, Form, Integration,
     McpResource, McpServer, McpStatus, Mention, Model, ModelUsage, NewAutomation, OAuthAttempt,
     PROJECT_COLORS, PermissionReply, Plugin, PluginSource, ProjectChange, Prompt, Provider, Pty,
-    PtyInput, PtyOutput, Rule, SessionContext, SignInMethod, Skill, Stats, Tokens, WebSearch,
-    message_id,
+    PtyInput, PtyOutput, Rule, SavedApproval, SessionContext, SignInMethod, Skill, Stats, Tokens,
+    WebSearch, message_id,
 };
 
 /// The longest wait between reconnection attempts.

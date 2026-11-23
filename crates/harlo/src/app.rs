@@ -25,6 +25,7 @@ use crate::task::{Effect, Task};
 use crate::text::{Cursor, Edit, Position, TextBox};
 use crate::timeline::{self, Activity, Timeline};
 
+mod agents;
 mod appearance;
 mod arrange;
 mod changes;
@@ -46,6 +47,7 @@ mod terminal;
 mod todos;
 mod undo;
 
+pub use agents::{ApprovalEvent, Approvals};
 pub use arrange::{Document, Edge};
 pub use changes::{
     ChangedFile, Changes, Event as ChangesEvent, GitAction, List, Loaded as ChangesLoaded,
@@ -1784,7 +1786,8 @@ impl App {
     }
 
     /// The folder the composer works in: the open session's, or the new session's.
-    fn folder(&self) -> String {
+    #[must_use]
+    pub fn folder(&self) -> String {
         match self
             .active
             .as_deref()
