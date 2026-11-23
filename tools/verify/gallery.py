@@ -186,7 +186,7 @@ def scene_pictures(g):
             break
     plot = os.path.join(h.project, "plot.png")
     with open(os.path.join(ROOT, "crates", "harlo", "ui", "images", "avatars",
-                           "penguin-headphones.png"), "rb") as src, open(plot, "wb") as dst:
+                           "penguin-headphones-128.png"), "rb") as src, open(plot, "wb") as dst:
         dst.write(src.read())
     open_project_session(h, title="Pictures")
     h.gui("clip-image", pasted)
