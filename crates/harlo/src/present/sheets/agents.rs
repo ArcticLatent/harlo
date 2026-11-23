@@ -24,10 +24,7 @@ pub(super) fn agent_rows(app: &App) -> Vec<SheetRow> {
 fn agents(app: &App, rows: &mut Vec<SheetRow>) {
     rows.push(heading("Agents"));
     rows.push(note(
-        "Tab in the composer switches between primary agents. Agents can delegate to \
-         subagents.\nDefine agents in opencode.json, in the project's .opencode/agents folder, \
-         or in ~/.config/opencode/agents for all projects. Markdown files work in either agents \
-         folder.",
+        "Tab in the composer switches primary agents. Add your own in an agents folder.",
     ));
     match app.catalog() {
         Some(catalog) if catalog.agents.is_empty() => rows.push(note("No agents.")),
@@ -87,7 +84,7 @@ fn approvals(app: &App, rows: &mut Vec<SheetRow>) {
     let page = &app.sheets.approvals;
     rows.push(heading("Saved approvals"));
     rows.push(note(
-        "\u{201c}Always allow\u{201d} saves a project approval. A deny rule in OpenCode's config takes precedence.\nRemove an approval to ask again in every app using this server.",
+        "From \u{201c}Always allow\u{201d}. Remove one to be asked again.",
     ));
     if let Some(why) = &page.error {
         rows.push(pair("Not removed", why, 2));

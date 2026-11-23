@@ -218,10 +218,11 @@ impl Sheets {
                     } else {
                         section_rows(app, section)
                     };
-                    (setup_note(app, section), rows)
+                    (setup_note(app, section), carded(rows))
                 } else {
                     state.set_sheet_title("Search results".into());
-                    found(app, &app.sheets.query)
+                    let (note, rows) = found(app, &app.sheets.query);
+                    (note, carded(rows))
                 }
             }
             Sheet::Setup => {
@@ -428,7 +429,7 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
             app,
             SettingChoice::Appearance,
             "Light or dark",
-            "Harlo has a light and a dark theme. System follows the desktop.",
+            "System follows the desktop.",
         ),
         themes_row(app.mode()),
         heading("Colours"),
@@ -436,7 +437,7 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
             app,
             SettingChoice::Contrast,
             "Contrast",
-            "More sets text, hints and icons further apart from the background.",
+            "How far text stands out from the background.",
         ),
         choice(
             app,
@@ -447,7 +448,7 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
         switch(
             Setting::Glass,
             "Glass",
-            "Menus and dialogs are translucent, blurring what's under them.",
+            "Translucent menus and dialogs.",
             app.preferences.glass,
         ),
         heading("Text"),
@@ -486,7 +487,7 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
             app,
             SettingChoice::Motion,
             "Animation",
-            "Panels sliding, new things fading in, and work in progress breathing.",
+            "Sliding panels and fades.",
         ),
     ]
 }
@@ -642,10 +643,9 @@ fn model_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("Not changed", why, 2));
     }
     rows.push(note(if app.global_config().is_some() {
-        "Set in OpenCode's config for all apps using this server. A project's opencode.json can override it.\nThe model selected for a session takes precedence."
+        "OpenCode's default, shared by every app on this server."
     } else {
-        "This server keeps its default model in its own opencode.json, on the computer it \
-         runs on."
+        "Set in opencode.json on the server's computer."
     }));
     rows
 }
@@ -656,9 +656,7 @@ fn claude_rows(app: &App) -> Vec<SheetRow> {
     let claude = &app.claude;
     let mut rows = vec![
         heading("Claude subscription"),
-        note(
-            "Use a Claude Pro or Max plan for Claude models in OpenCode. Claude Code keeps the sign-in.\nOpenCode runs the session.",
-        ),
+        note("A Claude Pro or Max plan, through Claude Code, for every app on this server."),
     ];
     let local = app.location.is_local();
     if local {
@@ -690,9 +688,6 @@ fn claude_rows(app: &App) -> Vec<SheetRow> {
              there with `claude auth login`.",
         ));
     }
-    rows.push(note(
-        "Connecting applies to every app that uses this OpenCode server.",
-    ));
     rows
 }
 
@@ -903,7 +898,7 @@ fn server_rows(app: &App) -> Vec<SheetRow> {
     };
     let mut rows = vec![pair("Address", &address, 0), status_row(app)];
     rows.push(note(
-        "Harlo connects to this shared OpenCode server and leaves it running when the window closes.\nIts settings apply to every app that uses it.",
+        "Shared with other apps. It keeps running when Harlo closes.",
     ));
     computer_rows(app, &mut rows);
     rows
@@ -913,7 +908,7 @@ fn server_rows(app: &App) -> Vec<SheetRow> {
 fn computer_rows(app: &App, rows: &mut Vec<SheetRow>) {
     rows.push(heading("Other computers"));
     rows.push(note(
-        "Harlo connects over SSH using your SSH config, keys, and agent. Password prompts are unsupported.\nIf the remote service is stopped, Harlo starts it and leaves it running.\nSelect a computer from the list at the top of the sidebar.",
+        "Over SSH, with your keys and agent. Switch to one at the top of the sidebar.",
     ));
     for (index, target) in app.preferences.computers.iter().enumerate() {
         let location = Location::Ssh {
@@ -1023,13 +1018,12 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
     let shared = app.global_config().is_some();
     match &app.sheets.git_settings.snapshots {
         _ if !shared => rows.push(note(
-            "This server keeps its snapshot setting in its own opencode.json, on the computer \
-             it runs on.",
+            "Set in opencode.json on the server's computer.",
         )),
         Load::Loaded(on) => rows.push(switch(
             Setting::Snapshots,
             "Keep snapshots",
-            "OpenCode saves a project snapshot before each turn so Undo can restore files.\nWith snapshots off, Undo restores only the conversation.",
+            "Undo restores files too, not only the conversation. Shared by every app on this server.",
             *on,
         )),
         Load::Failed(why) => rows.push(pair("Snapshots", why, 2)),
@@ -1037,11 +1031,6 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
     }
     if let Some(why) = &app.sheets.git_settings.error {
         rows.push(pair("Not changed", why, 2));
-    }
-    if shared {
-        rows.push(note(
-            "Set in OpenCode's own config, so it applies to every app using this server.",
-        ));
     }
 
     rows.push(heading("Commit messages"));
@@ -1064,9 +1053,7 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
         rows.push(reset);
     }
     rows.push(note(
-        "The ✦ button in the Changes panel writes the message for every uncommitted file, \
-         from their diffs alone: no tools, and nothing kept in a session. A small, fast model \
-         is enough.",
+        "Writes them from the diffs, with the ✦ button in Changes. A small, fast model is enough.",
     ));
     rows
 }
@@ -1079,9 +1066,7 @@ fn hosting_rows(app: &App) -> Vec<SheetRow> {
     }
     let mut rows = vec![
         heading("Git hosting"),
-        note(
-            "Sign in to push and pull over HTTPS. SSH remotes use your SSH keys. The GitHub CLI, glab, or Git stores the sign-in. Harlo does not store the token.",
-        ),
+        note("For pushing over HTTPS. Harlo never keeps the token."),
     ];
     rows.extend(service_rows(app, Service::GitHub));
     rows.extend(service_rows(app, Service::GitLab));
@@ -1121,9 +1106,6 @@ fn hosting_rows(app: &App) -> Vec<SheetRow> {
         token.action = "Sign in".into();
         token.on = true;
         rows.push(token);
-        rows.push(note(
-            "Forgejo and Gitea use an access token. Git stores it for that server in the desktop keyring when a credential helper is available.",
-        ));
     }
     rows
 }
@@ -1224,6 +1206,7 @@ fn git_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![
         code_pair("Git", version, 1),
         heading("Your name on commits"),
+        note("Saved in your global Git config."),
         field(
             Field::Identity(Identity::Name),
             "Name",
@@ -1240,9 +1223,6 @@ fn git_rows(app: &App) -> Vec<SheetRow> {
     if let Some(why) = &app.sheets.git_error {
         rows.push(pair("Not saved", why, 2));
     }
-    rows.push(note(
-        "Saved in your global Git config for every repository on this computer.",
-    ));
     rows
 }
 
@@ -1327,9 +1307,7 @@ fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
             clear.setting = crate::window::CLEAR_ICON;
             rows.push(clear);
         }
-        rows.push(note(
-            "Kept by the OpenCode server, so every app using it shows the same name, colour and icon.",
-        ));
+        rows.push(note("Shared by every app on this server."));
     }
 
     rows.push(heading("New sessions"));
@@ -1352,7 +1330,7 @@ fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
         rows.push(reset);
     }
     rows.push(note(
-        "Kept by Harlo on this computer. A model picked in the composer still wins.",
+        "Kept by Harlo. A model picked in the composer still wins.",
     ));
 
     if server.is_some_and(|p| p.git) {
@@ -1385,9 +1363,7 @@ fn worktree_rows(app: &App, project: &harlo_core::sessions::Project) -> Vec<Shee
     let page = &app.sheets.projects;
     let mut rows = vec![
         heading("Worktrees"),
-        note(
-            "More checkouts of the project, each on a branch of its own, so agents can work side by side. Each shows in the sidebar under the project.",
-        ),
+        note("Checkouts on their own branches, so agents can work side by side."),
     ];
     for (index, worktree) in project.worktrees.iter().enumerate() {
         let mut row = pair(&worktree.name, &home_relative(&worktree.directory), 3);
@@ -1426,7 +1402,7 @@ fn worktree_rows(app: &App, project: &harlo_core::sessions::Project) -> Vec<Shee
             &start,
             "A command each new worktree runs, such as npm install",
         ),
-        note("Kept by the OpenCode server, which runs it in each new worktree."),
+        note("Runs in each new worktree."),
     ]);
     rows
 }
@@ -1499,15 +1475,12 @@ fn home_relative(folder: &str) -> String {
 /// Settings → Notifications: delivery, events, quiet hours and templates.
 fn notification_rows(app: &App) -> Vec<SheetRow> {
     let notices = &app.preferences.notifications;
-    let mut rows = vec![
-        note("Clicking a notification opens its session."),
-        switch(
-            Setting::Notify,
-            "Notifications",
-            "When a run ends or an agent needs you.",
-            notices.enabled,
-        ),
-    ];
+    let mut rows = vec![switch(
+        Setting::Notify,
+        "Notifications",
+        "When a run ends or an agent needs you.",
+        notices.enabled,
+    )];
     if !notices.enabled {
         return rows;
     }
@@ -1582,7 +1555,7 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
     rows.extend([
         heading("Templates"),
         note(&format!(
-            "Leave a field empty to use its default. Variables: {}.",
+            "Empty uses the default. Variables: {}",
             variables.join(" ")
         )),
     ]);
@@ -1638,7 +1611,6 @@ fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     mcp::list_rows(app, setup, &mut rows);
     mcp::own_tools_rows(app, &mut rows);
     plugins::plugin_rows(app, &setup.plugins, &mut rows);
-    rows.push(shared_note());
     rows
 }
 
@@ -1662,22 +1634,10 @@ fn search_rows(setup: &SetUp, rows: &mut Vec<SheetRow>) {
         }
     });
     if matches!(setup.search, Ok(ref list) if !list.is_empty()) {
-        let how = match choice {
-            Some("random") => {
-                "OpenCode picks one that has a key, and moves on when one is rate limited."
-            }
-            Some(_) => "OpenCode's config chooses the one in use.",
-            None => "Choose a provider on your first web search. OpenCode remembers your choice.",
-        };
-        rows.push(note(&format!(
-            "{how} Each needs an API key.\nUse /\u{2060}connect in OpenCode's terminal app or set the environment variable before OpenCode starts."
-        )));
+        rows.push(note(
+            "Each needs its API key, set with /\u{2060}connect in OpenCode or in the environment.",
+        ));
     }
-}
-
-/// That the server's set-up is shared.
-fn shared_note() -> SheetRow {
-    note("These belong to the shared OpenCode server; every app that uses it sees the same ones.")
 }
 
 /// A heading and a row per item, or why the items couldn't be listed.
@@ -1786,6 +1746,56 @@ fn tokens_summary(tokens: Tokens) -> String {
         tokens_text(tokens.input + tokens.cache_read + tokens.cache_write),
         tokens_text(tokens.output + tokens.reasoning)
     )
+}
+
+/// Gathers each heading's rows into a card: a heading and the note just
+/// under it stay outside, as do lone buttons, theme cards and pictures.
+fn carded(mut rows: Vec<SheetRow>) -> Vec<SheetRow> {
+    /// Places in a card, as `SheetRow::place` numbers them.
+    const ALONE: i32 = 1;
+    const TOP: i32 = 2;
+    const MIDDLE: i32 = 3;
+    const BOTTOM: i32 = 4;
+    let mut under_heading = true;
+    let inside: Vec<bool> = rows
+        .iter()
+        .map(|row| match row.kind {
+            // A heading, theme cards or a picture: a note may follow.
+            0 | THEMES | 10 => {
+                under_heading = true;
+                false
+            }
+            // The note under a heading, or a lone button such as "Add a
+            // provider", which sits under the card.
+            2 if under_heading => {
+                under_heading = false;
+                false
+            }
+            1 if row.name.is_empty() && row.value.is_empty() && !row.action.is_empty() => {
+                under_heading = false;
+                false
+            }
+            _ => {
+                under_heading = false;
+                true
+            }
+        })
+        .collect();
+    for (at, row) in rows.iter_mut().enumerate() {
+        if !inside[at] {
+            row.place = 0;
+            continue;
+        }
+        let before = at > 0 && inside[at - 1];
+        let after = inside.get(at + 1).copied().unwrap_or(false);
+        row.place = match (before, after) {
+            (false, false) => ALONE,
+            (false, true) => TOP,
+            (true, true) => MIDDLE,
+            (true, false) => BOTTOM,
+        };
+    }
+    rows
 }
 
 fn heading(text: &str) -> SheetRow {

@@ -15,9 +15,7 @@ pub(super) fn voice_rows(app: &App) -> Vec<SheetRow> {
     let voice = &app.voice;
     let mut rows = vec![
         heading("Dictation"),
-        note(
-            "Press Ctrl+Shift+D in the message box or click the microphone to dictate. Press it again to insert the words at the cursor. Esc cancels. Whisper processes audio locally on this computer.",
-        ),
+        note("Ctrl+Shift+D or the microphone in the message box. It runs on this computer."),
         choice(
             app,
             SettingChoice::VoiceModel,

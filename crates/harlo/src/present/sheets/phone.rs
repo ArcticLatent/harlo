@@ -25,13 +25,11 @@ pub(super) fn phone_rows(app: &App) -> Vec<SheetRow> {
     let on = app.preferences.phone;
     let mut rows = vec![
         heading("Access"),
-        note(
-            "A paired phone can follow sessions, answer approvals and questions, and send messages while Harlo runs. It uses the same OpenCode server as this window. Messages are encrypted end to end.",
-        ),
+        note("Follow sessions and answer agents from your phone, encrypted end to end."),
         switch(
             Setting::Phone,
             "Phone access",
-            "Paired phones can reach Harlo on this computer's networks.",
+            "On this computer's networks.",
             on,
         ),
     ];
@@ -53,7 +51,7 @@ pub(super) fn phone_rows(app: &App) -> Vec<SheetRow> {
     rows.push(switch(
         Setting::PhoneRelay,
         "Reach Harlo from anywhere",
-        "Harlo's relay forwards encrypted messages and sends notifications to the phone app.\nThe relay cannot read the messages.",
+        "Through Harlo's relay, which can't read the messages.",
         app.preferences.phone_relay,
     ));
     if on && app.preferences.phone_relay {
@@ -93,7 +91,7 @@ fn pairing_rows(app: &App, rows: &mut Vec<SheetRow>) {
         ..SheetRow::default()
     });
     rows.push(note(
-        "Scan with the Harlo app on your phone. The code works once and expires in ten minutes.\nThis page confirms when the phone has paired.",
+        "Scan it with the Harlo app. It works once, for ten minutes.",
     ));
     let mut copy = pair("Pairing link", "To paste in the app instead", 3);
     copy.action = "Copy".into();

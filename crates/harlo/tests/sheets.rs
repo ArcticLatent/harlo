@@ -318,12 +318,10 @@ fn settings_show_the_servers_set_up_and_about() {
     let serial = ui.app().sheets.serial();
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(setup()))));
     assert!(ui.shows("Exa"));
-    // Each web search service says the key it needs, and how one is chosen.
+    // Each web search service says the key it needs, and how it's set.
     assert!(ui.shows("EXA_API_KEY"));
     assert!(ui.shows(
-        "Choose a provider on your first web search. OpenCode remembers your choice. Each \
-         needs an API key.\nUse /\u{2060}connect in OpenCode's terminal app or set the \
-         environment variable before OpenCode starts."
+        "Each needs its API key, set with /\u{2060}connect in OpenCode or in the environment."
     ));
     let chosen = SetUp {
         search_choice: Some("exa".into()),

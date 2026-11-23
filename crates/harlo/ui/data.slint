@@ -642,6 +642,10 @@ export struct SheetRow {
     /// For a row with a button: whether the button deletes something, and
     /// is drawn in the danger colours.
     risky: bool,
+    /// Where it sits in its group's card: 0 outside any card (a heading
+    /// and the line under it), 1 alone in one, 2 at the top, 3 between
+    /// others, 4 at the bottom.
+    place: int,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one

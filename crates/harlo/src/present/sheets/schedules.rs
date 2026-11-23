@@ -30,13 +30,13 @@ pub(super) fn schedule_rows(app: &App) -> Vec<SheetRow> {
 fn list_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.schedules;
     let mut rows = vec![note(
-        "Schedules send a prompt once, at an interval, or on a cron schedule. The OpenCode server runs them even when Harlo is closed.",
+        "The server sends each prompt on time, even with Harlo closed.",
     )];
     match &page.allowed {
         Load::Loaded(on) => rows.push(switch(
             Setting::Automations,
             "Allow schedules",
-            "This updates OpenCode's experimental automations setting for every app using this server.",
+            "Shared by every app on this server.",
             *on,
         )),
         Load::Failed(why) => rows.push(pair("OpenCode's config", why, 2)),

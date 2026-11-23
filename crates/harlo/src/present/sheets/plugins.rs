@@ -18,9 +18,7 @@ pub(super) fn plugin_rows(
 ) {
     let page = &app.sheets.plugins;
     rows.push(heading("Plugins"));
-    rows.push(note(
-        "Plugins add tools, providers, and hooks to OpenCode. Packages pinned to a tag or version range update daily. Check for other updates here.",
-    ));
+    rows.push(note("Add tools, providers and hooks to OpenCode."));
     if let Some(done) = &page.done {
         rows.push(pair("", done, 1));
     }

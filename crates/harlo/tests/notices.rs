@@ -219,7 +219,6 @@ fn a_click_shows_the_window_on_its_session() {
 fn settings_change_templates_times_and_send_a_test() {
     let ui = ui(demo::app());
     ui.send(Message::Sheet(SheetEvent::Open(Section::Notifications)));
-    assert!(ui.shows("Clicking a notification opens its session."));
     assert!(ui.shows("Run finished"));
     assert!(!ui.shows("From"), "quiet hours are off");
 

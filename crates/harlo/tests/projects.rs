@@ -175,6 +175,8 @@ fn removing_a_project_hides_it_and_can_archive_its_sessions() {
     ui.press("Settings for burce");
     drop(ui.driver.take_tasks());
     ui.press("Its sessions: Archive them");
+    // The button ends the page.
+    ui.wheel("Its sessions", -10);
     ui.press("Remove");
 
     let gone = |ui: &Ui| !ui.app().projects.iter().any(|p| p.directory == demo::HOME);

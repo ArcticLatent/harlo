@@ -27,7 +27,7 @@ pub(super) fn page_rows(app: &App, setup: Option<&SetUp>) -> Option<Vec<SheetRow
 pub(super) fn list_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
     rows.push(heading("MCP servers"));
     rows.push(note(
-        "Agents can use tools from programs and services connected to OpenCode.",
+        "Tools from programs and services, shared by every app on this server.",
     ));
     outcome(app, rows);
     match &setup.mcp {
@@ -65,7 +65,7 @@ pub(super) fn own_tools_rows(app: &App, rows: &mut Vec<SheetRow>) {
     rows.push(super::switch(
         Setting::OwnTools,
         "Past sessions",
-        "Let agents find and read earlier sessions on this server while Harlo is open.\nThis applies to all sessions and apps using the server.",
+        "Agents can find and read earlier sessions while Harlo is open.",
         app.preferences.own_tools,
     ));
     if let Some(why) = app

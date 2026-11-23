@@ -38,7 +38,7 @@ pub(super) fn local_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("Not done", why, 2));
     }
     rows.push(note(&format!(
-        "Engines and models are stored in {}. Their servers run while Harlo is open and listen only on this computer.",
+        "Kept in {}. They run only while Harlo is open.",
         engines
             .folder()
             .parent()
@@ -47,14 +47,12 @@ pub(super) fn local_rows(app: &App) -> Vec<SheetRow> {
     )));
 
     rows.push(heading("Ollama"));
-    rows.push(note(
-        "Downloads models by name and serves them locally. OpenCode discovers Ollama automatically and lists its models in the model menu.",
-    ));
+    rows.push(note("Gets models by name. OpenCode finds it by itself."));
     engine_rows(app, Engine::Ollama, &mut rows);
 
     rows.push(heading("llama.cpp"));
     rows.push(note(
-        "Serves a single model file. This is the quickest way to run it on this computer. Add it to OpenCode's config to use it there.",
+        "Runs one model file, the quickest way on this computer.",
     ));
     engine_rows(app, Engine::LlamaCpp, &mut rows);
     provider_rows(app, &mut rows);
@@ -200,9 +198,6 @@ fn provider_rows(app: &App, rows: &mut Vec<SheetRow>) {
     if let Some(done) = &local.done {
         rows.push(pair("", done, 1));
     }
-    rows.push(note(
-        "This changes OpenCode's config, for every app using this server.",
-    ));
 }
 
 /// The models that fit, for the chosen engine.
@@ -213,7 +208,7 @@ fn model_rows(app: &App, rows: &mut Vec<SheetRow>) {
         app,
         SettingChoice::LocalEngine,
         "Get them for",
-        "Choose the engine that downloads and serves the models.",
+        "The engine that runs them.",
     ));
     if local.computer.is_none() {
         return;
@@ -225,9 +220,7 @@ fn model_rows(app: &App, rows: &mut Vec<SheetRow>) {
         return;
     }
     rows.push(note(
-        "Models suited to agent tools, most capable first. Each comes in the largest size that fits; \
-         Q8 keeps more of the model than Q4.\nOne that only just fits leaves little room for a long \
-         conversation.",
+        "Most capable first, each in the largest size that fits.",
     ));
     let engine = app.local_engine();
     for (index, suggestion) in local.suggestions.iter().enumerate() {
@@ -236,9 +229,6 @@ fn model_rows(app: &App, rows: &mut Vec<SheetRow>) {
     if let Some(why) = &local.get_error {
         rows.push(pair("Not downloaded", why, 2));
     }
-    rows.push(note(
-        "Ready models show in the model menu, under the engine's name.",
-    ));
 }
 
 /// A suggested model, with Get, its progress, or Serve.

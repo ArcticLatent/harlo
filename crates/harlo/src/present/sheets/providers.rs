@@ -18,9 +18,7 @@ pub(super) fn provider_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.providers;
     let mut rows = vec![
         heading("Providers"),
-        note(
-            "Sign in to use a provider's models. OpenCode shares the sign-in with apps using this server.",
-        ),
+        note("Sign-ins are shared by every app on this server."),
     ];
     let integrations = match &page.list {
         Load::Loaded(list) => list.as_slice(),

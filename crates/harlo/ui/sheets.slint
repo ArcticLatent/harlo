@@ -212,28 +212,22 @@ component ThemeHeading inherits Text {
 
 /// One row: a heading, a name with its value, a note, a switch with what
 /// it does, or the light-or-dark choice.
-component Row inherits VerticalLayout {
+/// What a row shows, by its kind.
+component RowBody inherits VerticalLayout {
     in property <SheetRow> entry;
-    /// Whether it's the page's first row, which needs no line above it.
     in property <bool> first;
 
-    if root.entry.kind == 0: VerticalLayout {
-        height: 40px;
-        // A line sets each section after the first apart.
-        if !root.first: Rectangle {
-            height: 1px;
-            background: Theme.border-weak-base;
-        }
-        Text {
-            vertical-stretch: 1;
-            text: root.entry.name;
-            font-size: Size.label;
-            font-weight: 600;
-            color: Theme.text-strong;
-            vertical-alignment: bottom;
-            accessible-role: AccessibleRole.text;
-        }
+    if root.entry.kind == 0: Text {
+        // Room above each group after the first.
+        height: root.first ? 26px : 46px;
+        text: root.entry.name;
+        font-size: Size.label;
+        font-weight: 600;
+        color: Theme.text-strong;
+        vertical-alignment: bottom;
+        accessible-role: AccessibleRole.text;
     }
+    if root.entry.kind == 0: Rectangle { height: 6px; }
     // A shortcut: what it does, then its keys as keycaps, "or" between
     // ways of doing the same ("|" in `options`). Words that aren't keys,
     // such as a double click, are its `hint`. The keys as written are its
@@ -611,6 +605,44 @@ component Row inherits VerticalLayout {
                 toggled => { Logic.switch-setting(root.entry.setting); }
             }
         }
+    }
+}
+
+
+/// A row of Settings, or a piece of the card its group sits in: rounded
+/// at the card's top and bottom, with a line between rows.
+component Row inherits Rectangle {
+    in property <SheetRow> entry;
+    /// Whether it's the page's first row, which needs no room above it.
+    in property <bool> first;
+    property <bool> carded: root.entry.place > 0;
+    property <bool> top: root.entry.place == 1 || root.entry.place == 2;
+    property <bool> bottom: root.entry.place == 1 || root.entry.place == 4;
+    property <length> radius: 8px;
+
+    background: root.carded ? Theme.control-fill : transparent;
+    border-top-left-radius: root.top ? root.radius : 0;
+    border-top-right-radius: self.border-top-left-radius;
+    border-bottom-left-radius: root.bottom ? root.radius : 0;
+    border-bottom-right-radius: self.border-bottom-left-radius;
+
+    // A note in a card belongs to the row above it, so no line between.
+    if root.carded && !root.top && root.entry.kind != 2: Rectangle {
+        x: 14px;
+        y: 0;
+        width: parent.width - 28px;
+        height: 1px;
+        background: Theme.border-weak-base;
+    }
+    RowBody {
+        entry: root.entry;
+        first: root.first;
+        padding-left: root.carded ? 14px : 0;
+        padding-right: root.carded ? 10px : 0;
+        padding-top: root.carded ? (root.top ? 7px : root.entry.kind == 2 ? 0 : 5px)
+            : root.entry.kind == 1 ? 6px : 0;
+        padding-bottom: root.carded ? (root.bottom ? 7px : 5px)
+            : root.entry.kind == 2 ? 10px : 0;
     }
 }
 
