@@ -34,6 +34,10 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+N", "Start a new session"),
             ("Ctrl+W", "Close the tab"),
             ("Ctrl+,", "Open or close Settings"),
+            (
+                "Ctrl+Q",
+                "Quit Harlo, even while it keeps running in the tray",
+            ),
             ("Ctrl+Tab, Ctrl+Page Down", "Next tab"),
             ("Ctrl+Shift+Tab, Ctrl+Page Up", "Previous tab"),
             ("Esc", "Close a page or menu, or put a maximized panel back"),
@@ -512,6 +516,15 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
     if let Some(why) = &app.sheets.autostart_error {
         rows.push(pair("Not changed", why, 2));
     }
+    if app.tray {
+        rows.push(switch(
+            Setting::KeepInTray,
+            "Keep running in the tray",
+            "Closing the window leaves Harlo in the tray, still telling you when a \
+             session needs you. Quit from the tray or with Ctrl+Q.",
+            app.preferences.keep_in_tray,
+        ));
+    }
     rows
 }
 
@@ -944,6 +957,7 @@ fn switch(setting: Setting, name: &str, what: &str, on: bool) -> SheetRow {
             Setting::ReopenTabs => 0,
             Setting::Glass => 1,
             Setting::StartAtLogin => 2,
+            Setting::KeepInTray => 3,
         },
         ..SheetRow::default()
     }

@@ -35,6 +35,9 @@ const PREFERENCES_KEY: &str = "preferences";
 pub struct Preferences {
     /// Whether the sessions open when Harlo last closed open again.
     pub reopen_tabs: bool,
+    /// Whether closing the window leaves Harlo running in the tray, when
+    /// the desktop shows one.
+    pub keep_in_tray: bool,
     /// The theme shown while the window is dark, by its id, such as
     /// `harlo-dark` or `gruvbox-dark-medium`.
     pub dark_theme: String,
@@ -62,6 +65,7 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             reopen_tabs: true,
+            keep_in_tray: true,
             dark_theme: crate::theme::HARLO_DARK.to_owned(),
             light_theme: crate::theme::HARLO_LIGHT.to_owned(),
             appearance: Appearance::System,

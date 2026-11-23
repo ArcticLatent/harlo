@@ -75,6 +75,8 @@ struct Shell {
     kept: Vec<crate::task::Task<Message>>,
     presenter: Presenter,
     window: slint::Weak<AppWindow>,
+    /// The tray icon, while the desktop shows one; tests have none.
+    tray: Option<crate::tray::Tray>,
 }
 
 /// The shell, and messages that arrived while it was busy.
@@ -157,6 +159,9 @@ impl Shell {
             if let Some(window) = self.window.upgrade() {
                 self.presenter.present(&self.app, &window);
             }
+            if let Some(tray) = &mut self.tray {
+                tray.show(crate::tray::summary(&self.app));
+            }
             if waiting.borrow().is_empty() {
                 break;
             }
@@ -193,6 +198,11 @@ fn perform(window: &AppWindow, effect: Effect) {
             requests.set_scroll(list.into());
             requests.set_scroll_y(f32::INFINITY);
             requests.set_scroll_serial(requests.get_scroll_serial().wrapping_add(1));
+        }
+        Effect::Raise => raise(window),
+        Effect::Quit => {
+            // Fails only once the event loop has ended, which is the aim.
+            let _ = slint::quit_event_loop();
         }
     }
 }
@@ -246,7 +256,25 @@ pub fn run(options: &Options) -> Result<(), RunError> {
     }
     let window = AppWindow::new()?;
     let (runtime, mut actions) = Runtime::new().map_err(RunError::Runtime)?;
+    // What's chosen in the tray arrives as background work's results do.
+    let sender = runtime.sender();
+    let tray = crate::tray::Tray::start(move |choice| {
+        let actions = match choice {
+            crate::tray::Choice::Show => vec![Action::Effect(Effect::Raise)],
+            crate::tray::Choice::Open(id) => vec![
+                Action::Effect(Effect::Raise),
+                Action::Output(Message::OpenSession(id)),
+            ],
+            crate::tray::Choice::Quit => vec![Action::Effect(Effect::Quit)],
+        };
+        for action in actions {
+            // Fails only once the window has gone.
+            let _ = sender.send(action);
+        }
+    })
+    .ok();
     let mut app = boot(options);
+    app.tray = tray.is_some();
     crate::theme::apply(&window, &app.tokens, &app.theme().id);
     let start = app.start();
     runtime.spawn(start);
@@ -258,6 +286,7 @@ pub fn run(options: &Options) -> Result<(), RunError> {
             kept: Vec::new(),
             presenter,
             window: window.as_weak(),
+            tray,
         }),
         waiting: RefCell::new(VecDeque::new()),
         log: None,
@@ -293,9 +322,24 @@ pub fn run(options: &Options) -> Result<(), RunError> {
         })
         .ok()
     });
+    // Closing the window leaves Harlo in the tray, when there is one and
+    // the user wants it; otherwise it quits.
+    let closing = Rc::clone(&controller);
+    window.window().on_close_requested(move || {
+        let keep = closing
+            .shell
+            .try_borrow()
+            .is_ok_and(|shell| shell.app.tray && shell.app.preferences.keep_in_tray);
+        if !keep {
+            // Fails only once the event loop has ended.
+            let _ = slint::quit_event_loop();
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
     // Show the app before the first message arrives.
     controller.dispatch(Message::Resized(crate::fit::WINDOW.0, crate::fit::WINDOW.1));
-    window.run()?;
+    window.show()?;
+    slint::run_event_loop_until_quit()?;
     Ok(())
 }
 
@@ -340,6 +384,7 @@ impl Driver {
                 kept: Vec::new(),
                 presenter,
                 window: window.as_weak(),
+                tray: None,
             }),
             waiting: RefCell::new(VecDeque::new()),
             log: Some(RefCell::new(Vec::new())),
@@ -441,6 +486,7 @@ fn setting_of(number: i32) -> Option<app::Setting> {
         0 => Some(app::Setting::ReopenTabs),
         1 => Some(app::Setting::Glass),
         2 => Some(app::Setting::StartAtLogin),
+        3 => Some(app::Setting::KeepInTray),
         _ => None,
     }
 }

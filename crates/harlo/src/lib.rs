@@ -23,6 +23,8 @@ pub mod term;
 pub mod text;
 pub mod theme;
 pub mod timeline;
+#[cfg(unix)]
+pub mod tray;
 pub mod window;
 
 /// The UI compiled from `ui/*.slint`: the window and its globals.

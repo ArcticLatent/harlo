@@ -76,6 +76,13 @@ similar = { version = "3.2.1", default-features = false }
 jiff = { version = "1.0.2", default-features = false, features = ["std"] }
 rusqlite = { version = "0.43.0", default-features = false }
 dirs = { version = "7.0.0", default-features = false }
+# The tray icon over D-Bus, on the zbus 5 that Slint already runs on async-io
+# (Unlicense: allowed for this crate by the user's choice, 2026-11-22).
+ksni = { version = "0.3.7", default-features = false }
+# Talks to the tray icon in tests, as a desktop would (MIT); Slint builds it already.
+zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+# Draws Harlo's logo for the tray icon; Slint builds it already (MIT/Apache).
+resvg = { version = "0.49.0", default-features = false }
 # Edits OpenCode's config file and keeps its comments (MIT).
 jsonc-parser = { version = "0.34.0", default-features = false }
 tempfile = { version = "3.27.0", default-features = false }

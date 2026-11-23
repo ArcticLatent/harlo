@@ -97,6 +97,8 @@ pub enum Setting {
     /// Whether Harlo starts at login: the desktop's autostart entry, not a
     /// preference.
     StartAtLogin,
+    /// [`Preferences::keep_in_tray`].
+    KeepInTray,
 }
 
 /// Starting Harlo at login, through the desktop's autostart folder.
@@ -325,6 +327,9 @@ impl App {
             Event::Switch(setting) => {
                 match setting {
                     Setting::StartAtLogin => {}
+                    Setting::KeepInTray => {
+                        self.preferences.keep_in_tray = !self.preferences.keep_in_tray;
+                    }
                     Setting::ReopenTabs => {
                         self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
                     }

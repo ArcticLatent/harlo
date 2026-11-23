@@ -123,6 +123,8 @@ fn the_shortcuts_section_lists_the_keys_and_closes() {
     assert_eq!(ui.app().sheets.section, Section::Shortcuts);
     assert!(ui.shows("Ctrl+N"));
     assert!(ui.shows("Start a new session"));
+    // The terminal's keys are further down.
+    ui.wheel("Start a new session", -10);
     assert!(ui.shows("Ctrl+Shift+C"), "the terminal's keys too");
 
     // Esc closes it.
@@ -377,4 +379,49 @@ fn start_at_login_is_left_out_without_an_autostart_folder() {
     ui.press("General");
     assert!(ui.shows("Reopen tabs"));
     assert!(!ui.shows("Start at login"));
+}
+
+#[test]
+fn control_q_quits() {
+    let ui = ui(demo::app());
+    let tasks = Tasks::new();
+    key(&ui, "q", true);
+    assert!(
+        ui.messages().iter().any(|m| matches!(m, Message::Quit)),
+        "the shortcut"
+    );
+    let effects: Vec<_> = ui
+        .driver
+        .take_tasks()
+        .into_iter()
+        .filter_map(harlo::task::Task::into_stream)
+        .flat_map(|stream| tasks.block_on(futures_util::StreamExt::collect::<Vec<_>>(stream)))
+        .collect();
+    assert!(
+        effects
+            .iter()
+            .any(|a| matches!(a, harlo::task::Action::Effect(harlo::task::Effect::Quit))),
+        "it quits: {effects:?}"
+    );
+}
+
+#[test]
+fn keeping_running_in_the_tray_shows_only_with_a_tray() {
+    let ui = ui(demo::app());
+    ui.press("Settings");
+    ui.press("General");
+    assert!(!ui.shows("Keep running in the tray"), "no tray, no switch");
+
+    let mut app = demo::app();
+    app.tray = true;
+    let ui = support::ui(app);
+    ui.press("Settings");
+    ui.press("General");
+    let (_, on) = switch(&ui, "Keep running in the tray");
+    assert!(on, "on by default");
+    ui.send(Message::Sheet(SheetEvent::Switch(
+        harlo::app::Setting::KeepInTray,
+    )));
+    assert!(!ui.app().preferences.keep_in_tray);
+    assert!(!switch(&ui, "Keep running in the tray").1);
 }

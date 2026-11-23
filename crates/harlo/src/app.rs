@@ -233,6 +233,8 @@ pub enum Message {
     CloseTab(String),
     /// Close the active tab, if a session is shown.
     CloseActiveTab,
+    /// Quit Harlo, even while the tray keeps it running.
+    Quit,
     /// Switch to the next tab, or the previous one.
     CycleTab {
         /// Whether to go backwards.
@@ -425,6 +427,10 @@ struct Sending {
 
 /// Everything the window shows.
 #[derive(Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts about the window, such as whether the tray shows, not one state"
+)]
 pub struct App {
     /// Colours for every widget, from the chosen theme.
     pub tokens: Tokens,
@@ -488,6 +494,8 @@ pub struct App {
     /// Starting Harlo at login. Only the running app sets it; tests give a
     /// scratch folder or none.
     pub autostart: Option<Autostart>,
+    /// Whether the desktop shows Harlo's tray icon.
+    pub tray: bool,
     /// The composer's text.
     pub composer: TextBox,
     /// Why the last send failed, shown under the composer.
@@ -612,6 +620,7 @@ impl App {
             new_folder: None,
             opencode_folder: None,
             autostart: None,
+            tray: false,
             composer: TextBox::new(),
             send_error: None,
             sending: None,
@@ -746,6 +755,7 @@ impl App {
 
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Quit => return Task::effect(Effect::Quit),
             message @ (Message::ToggleSidebar
             | Message::Resized(..)
             | Message::OpenPanel(_)
@@ -1989,6 +1999,7 @@ pub fn shortcut(press: &KeyPress) -> Option<Message> {
     match &press.key {
         Key::Character('n') => Some(Message::NewSession(None)),
         Key::Character('w') => Some(Message::CloseActiveTab),
+        Key::Character('q') => Some(Message::Quit),
         Key::Character(',') => Some(Message::Sheet(SheetEvent::Toggle(Sheet::Settings))),
         Key::Tab => Some(Message::CycleTab { back: press.shift }),
         Key::PageDown => Some(Message::CycleTab { back: false }),

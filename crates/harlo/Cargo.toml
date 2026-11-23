@@ -15,6 +15,8 @@ path = "src/main.rs"
 [dependencies]
 # Harlo's state and runtime folders, for the single-instance socket.
 dirs = { workspace = true }
+ksni = { workspace = true, features = ["async-io", "blocking"] }
+resvg = { workspace = true }
 harlo-core = { workspace = true }
 # The UI (Royalty-free 2.0 licence, see the workspace Cargo.toml): Skia draws
 # the window through winit, on X11 or Wayland; the software renderer serves
@@ -55,6 +57,8 @@ opencode-client = { workspace = true }
 slint = { workspace = true, features = ["unstable-wgpu-30"] }
 ttf-parser = { workspace = true }
 i-slint-backend-testing = { workspace = true, features = ["renderer-software"] }
+# A desktop's side of the tray, on a private bus.
+zbus = { workspace = true }
 
 [lints]
 workspace = true

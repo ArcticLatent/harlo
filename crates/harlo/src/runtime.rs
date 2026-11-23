@@ -46,6 +46,13 @@ impl<M: Send + 'static> Runtime<M> {
         }
     }
 
+    /// Where to send messages and effects from another thread, such as the
+    /// tray's; they arrive as tasks' do.
+    #[must_use]
+    pub fn sender(&self) -> UnboundedSender<Action<M>> {
+        self.sender.clone()
+    }
+
     /// A handle to the thread pool, for work that must run inside it.
     #[must_use]
     pub fn handle(&self) -> tokio::runtime::Handle {

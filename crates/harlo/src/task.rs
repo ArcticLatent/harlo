@@ -30,6 +30,10 @@ pub enum Effect {
         /// How far from its top, in logical pixels.
         y: f32,
     },
+    /// Show the window and ask the desktop to focus it.
+    Raise,
+    /// Quit Harlo, even while the tray keeps it running.
+    Quit,
 }
 
 /// What a task produces: a message for the app, or an effect on the window.
