@@ -193,15 +193,45 @@ fn long_details_are_shortened() {
 
 #[test]
 fn a_run_of_tools_is_summed_up() {
+    let done = |names: &[&'static str]| {
+        names
+            .iter()
+            .map(|n| (*n, ToolStatus::Completed))
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        tools_summary(["edit", "edit", "bash", "write", "edit", "todowrite"]),
+        tools_summary(done(&[
+            "edit",
+            "edit",
+            "bash",
+            "write",
+            "edit",
+            "todowrite"
+        ])),
         "Edited 4 files, ran 1 command, updated the todos"
     );
     assert_eq!(
-        tools_summary(["read", "grep", "glob", "webfetch", "mystery"]),
+        tools_summary(done(&["read", "grep", "glob", "webfetch", "mystery"])),
         "Read 1 file, searched 2 times, looked up 1 page, used 1 tool"
     );
     assert_eq!(tools_summary([]), "");
+}
+
+#[test]
+fn failed_calls_are_counted_as_failed() {
+    assert_eq!(
+        tools_summary([
+            ("read", ToolStatus::Completed),
+            ("edit", ToolStatus::Failed),
+            ("todowrite", ToolStatus::Failed),
+        ]),
+        "Read 1 file, 2 failed"
+    );
+    assert_eq!(
+        tools_summary([("bash", ToolStatus::Failed)]),
+        "1 failed",
+        "nothing described as done"
+    );
 }
 
 fn session(kind: impl FnOnce(String) -> EventKind) -> EventKind {

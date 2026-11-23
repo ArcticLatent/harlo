@@ -674,12 +674,19 @@ impl OpenTool {
 
 /// Describes a run of tool calls in a few words: "Edited 4 files, ran 1 command".
 ///
-/// `names` are the tools' own names, in order. Calls of the same kind are
-/// counted together, in the order each kind first appears.
+/// `calls` are the tools' own names with how each went, in order. Calls of
+/// the same kind are counted together, in the order each kind first appears;
+/// failed ones are counted on their own at the end ("1 failed"), so a call
+/// that didn't happen isn't described as done.
 #[must_use]
-pub fn tools_summary<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+pub fn tools_summary<'a>(calls: impl IntoIterator<Item = (&'a str, ToolStatus)>) -> String {
     let mut kinds: Vec<(&'static str, usize)> = Vec::new();
-    for name in names {
+    let mut failed = 0_usize;
+    for (name, status) in calls {
+        if status == ToolStatus::Failed {
+            failed += 1;
+            continue;
+        }
         let kind = tool_kind(name);
         match kinds.iter_mut().find(|(k, _)| *k == kind) {
             Some((_, count)) => *count += 1,
@@ -707,6 +714,7 @@ pub fn tools_summary<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
                 _ => format!("used {n} {}", plural("tool", "tools")),
             }
         })
+        .chain((failed > 0).then(|| format!("{failed} failed")))
         .collect();
     let mut summary = phrases.join(", ");
     if let Some(first) = summary.get(..1) {

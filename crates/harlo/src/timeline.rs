@@ -527,7 +527,7 @@ impl Timeline {
                     let names = self.rows[rows.clone()]
                         .iter()
                         .filter_map(|row| match &row.entry {
-                            Entry::Tool { name, .. } => Some(name.as_str()),
+                            Entry::Tool { name, status, .. } => Some((name.as_str(), *status)),
                             _ => None,
                         });
                     Shown::Group {
