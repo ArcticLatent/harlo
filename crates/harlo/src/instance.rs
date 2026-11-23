@@ -29,6 +29,8 @@ const PRIVATE: u32 = 0o600;
 pub enum Command {
     /// Show and focus the window.
     Show,
+    /// Show the window with the setup guide open.
+    Setup,
 }
 
 impl Command {
@@ -36,6 +38,7 @@ impl Command {
     fn word(self) -> &'static str {
         match self {
             Self::Show => "show",
+            Self::Setup => "setup",
         }
     }
 
@@ -43,6 +46,7 @@ impl Command {
     fn parse(word: &str) -> Option<Self> {
         match word.trim() {
             "show" => Some(Self::Show),
+            "setup" => Some(Self::Setup),
             _ => None,
         }
     }

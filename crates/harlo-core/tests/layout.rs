@@ -113,6 +113,7 @@ fn preferences_load_back_beside_the_layout() {
     let chosen = Preferences {
         reopen_tabs: false,
         keep_in_tray: false,
+        setup_done: true,
         dark_theme: "dracula".to_owned(),
         light_theme: "github".to_owned(),
         contrast: Contrast::More,

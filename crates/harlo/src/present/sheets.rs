@@ -6,7 +6,7 @@
 
 use std::rc::Rc;
 
-use harlo_core::server::{Day, McpStatus, PluginSource, Stats, Tokens};
+use harlo_core::server::{Day, Location, McpStatus, PluginSource, Stats, Tokens};
 use slint::{ModelRc, SharedString, VecModel};
 
 use lucide_icons::Icon;
@@ -16,12 +16,13 @@ use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::theme::{Mode, Scheme};
 
 use crate::app::{
-    App, ClaudeAction, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet, Status,
-    epoch_seconds, resets_in,
+    App, ClaudeAction, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting, SettingChoice,
+    Sheet, Status, Step, epoch_seconds, resets_in,
 };
 use crate::model::{compact as tokens_text, dollars as money};
 use crate::theme::color;
 use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State, ThemeCard};
+use harlo_core::git::Identity;
 
 /// How many days of activity the bars show.
 const DAYS: usize = 30;
@@ -113,6 +114,8 @@ impl Sheets {
             })
             .collect();
         state.set_settings_sections(ModelRc::from(Rc::new(VecModel::from(sections))));
+        let steps: Vec<SharedString> = Step::ALL.iter().map(|s| s.title().into()).collect();
+        state.set_setup_steps(ModelRc::from(Rc::new(VecModel::from(steps))));
         state.set_shortcuts_section(
             Section::ALL
                 .iter()
@@ -131,7 +134,8 @@ impl Sheets {
             sync(&self.light_themes, Vec::new());
             return;
         };
-        let shown = sheet == Sheet::Settings;
+        let shown =
+            sheet == Sheet::Settings || (sheet == Sheet::Setup && app.sheets.step == Step::Theme);
         let cards = |mode| {
             if shown {
                 theme_cards(app, mode)
@@ -185,6 +189,13 @@ impl Sheets {
                     state.set_sheet_title("Search results".into());
                     found(app, &app.sheets.query)
                 }
+            }
+            Sheet::Setup => {
+                state.set_sheet(3);
+                let step = app.sheets.step;
+                state.set_setup_step(int(step.index()));
+                state.set_sheet_title(step.title().into());
+                (step.about().to_owned(), step_rows(app, step))
             }
         };
         state.set_sheet_note(note.into());
@@ -326,6 +337,12 @@ fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
 /// The kind of row that shows the theme cards.
 const THEMES: i32 = 5;
 
+/// The kind of row with a text field and a button that saves it.
+const FIELD: i32 = 6;
+
+/// The kind of row that shows a command and a button that runs it.
+const COMMAND: i32 = 7;
+
 /// Light or dark and the themes for it, then the colours, text and motion.
 fn appearance_rows(app: &App) -> Vec<SheetRow> {
     vec![
@@ -428,8 +445,14 @@ fn theme_cards(app: &App, mode: Mode) -> Vec<ThemeCard> {
         return Vec::new();
     }
     let needle = app.sheets.query.trim().to_lowercase();
-    let themes = if needle.is_empty() {
-        if app.sheets.section != Section::Appearance {
+    let guided = app.sheets.open == Some(Sheet::Setup);
+    let themes = if needle.is_empty() || guided {
+        let shown = if guided {
+            app.sheets.step == Step::Theme
+        } else {
+            app.sheets.section == Section::Appearance
+        };
+        if !shown {
             return Vec::new();
         }
         app.themes.iter().collect()
@@ -475,27 +498,7 @@ fn themes_found<'a>(app: &'a App, needle: &str) -> Vec<&'a Scheme> {
 
 /// Harlo's own general settings.
 fn general_rows(app: &App) -> Vec<SheetRow> {
-    let mut rows = vec![heading("New sessions")];
-    let model = app.default_model_choice().map_or_else(
-        || "Chosen by OpenCode".to_owned(),
-        |m| format!("{} · {}", m.name, m.provider_id),
-    );
-    let mut row = pair("Model", &model, 0);
-    if app.global_config().is_some() {
-        row.action = "Change".into();
-        row.setting = crate::window::CHOOSE_DEFAULT_MODEL;
-    }
-    rows.push(row);
-    if let Some(why) = &app.sheets.model_error {
-        rows.push(pair("Not changed", why, 2));
-    }
-    rows.push(note(if app.global_config().is_some() {
-        "Set in OpenCode's own config, so it applies to every app using this server. A \
-         project's opencode.json can choose another; the model picked in a session wins."
-    } else {
-        "This server keeps its default model in its own opencode.json, on the computer it \
-         runs on."
-    }));
+    let mut rows = model_rows(app);
     rows.extend([
         heading("Startup"),
         switch(
@@ -525,6 +528,36 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
             app.preferences.keep_in_tray,
         ));
     }
+    let mut guide = pair("Setup guide", "OpenCode, models, git and the theme", 3);
+    guide.action = "Open".into();
+    guide.setting = crate::window::OPEN_SETUP;
+    rows.extend([heading("Help"), guide]);
+    rows
+}
+
+/// The model new sessions use, with a button to change it where Harlo may.
+fn model_rows(app: &App) -> Vec<SheetRow> {
+    let mut rows = vec![heading("New sessions")];
+    let model = app.default_model_choice().map_or_else(
+        || "Chosen by OpenCode".to_owned(),
+        |m| format!("{} · {}", m.name, m.provider_id),
+    );
+    let mut row = pair("Model", &model, 0);
+    if app.global_config().is_some() {
+        row.action = "Change".into();
+        row.setting = crate::window::CHOOSE_DEFAULT_MODEL;
+    }
+    rows.push(row);
+    if let Some(why) = &app.sheets.model_error {
+        rows.push(pair("Not changed", why, 2));
+    }
+    rows.push(note(if app.global_config().is_some() {
+        "Set in OpenCode's own config, so it applies to every app using this server. A \
+         project's opencode.json can choose another; the model picked in a session wins."
+    } else {
+        "This server keeps its default model in its own opencode.json, on the computer it \
+         runs on."
+    }));
     rows
 }
 
@@ -734,18 +767,127 @@ fn shortcuts() -> Vec<SheetRow> {
 
 /// The server Harlo follows, and how the connection stands.
 fn server_rows(app: &App) -> Vec<SheetRow> {
-    let mut rows = vec![pair("Address", &app.location.label(), 0)];
-    let (status, tone) = match &app.status {
-        Status::Connected { version } => (format!("Connected · OpenCode {version}"), 1),
-        Status::Connecting { .. } => ("Connecting…".to_owned(), 3),
-        Status::Lost { reason, .. } => (reason.clone(), 2),
-    };
-    rows.push(pair("Status", &status, tone));
+    let mut rows = vec![pair("Address", &app.location.label(), 0), status_row(app)];
     rows.push(note(
         "Harlo attaches to this shared OpenCode server and leaves it running when it closes. \
          Its settings apply to every app that uses it.",
     ));
     rows
+}
+
+/// How the connection to the server stands.
+fn status_row(app: &App) -> SheetRow {
+    let (status, tone) = match &app.status {
+        Status::Connected { version } => (format!("Connected · OpenCode {version}"), 1),
+        Status::Connecting { .. } => ("Connecting…".to_owned(), 3),
+        Status::Lost { reason, .. } => (reason.clone(), 2),
+    };
+    pair("Status", &status, tone)
+}
+
+/// A step of the setup guide.
+fn step_rows(app: &App, step: Step) -> Vec<SheetRow> {
+    match step {
+        Step::OpenCode => opencode_rows(app),
+        Step::Models => {
+            let mut rows = model_rows(app);
+            rows.extend(section_rows(app, Section::Models));
+            let loading = setup_note(app, Section::Models);
+            if !loading.is_empty() {
+                rows.push(note(&loading));
+            }
+            rows
+        }
+        Step::Git => git_rows(app),
+        Step::Theme => vec![
+            choice(
+                app,
+                SettingChoice::Appearance,
+                "Light or dark",
+                "System follows the desktop.",
+            ),
+            themes_row(app.mode()),
+        ],
+    }
+}
+
+/// The server, how the connection stands, and OpenCode's installer when
+/// the service on this computer can't be reached.
+fn opencode_rows(app: &App) -> Vec<SheetRow> {
+    let mut rows = vec![pair("Server", &app.location.label(), 0), status_row(app)];
+    if app.offers_install() {
+        rows.extend([
+            heading("Install OpenCode"),
+            note(
+                "If OpenCode isn't on this computer yet, its installer sets it up. Harlo then \
+                 starts the background service and connects on its own.",
+            ),
+            SheetRow {
+                kind: COMMAND,
+                value: OPENCODE_INSTALL.into(),
+                action: "Install".into(),
+                setting: crate::window::INSTALL_OPENCODE,
+                ..SheetRow::default()
+            },
+        ]);
+    } else if matches!(app.location, Location::Shared) {
+        rows.push(note(
+            "Harlo attaches to OpenCode's background service and leaves it running when it \
+             closes.",
+        ));
+    } else {
+        rows.push(note(
+            "Harlo follows this server and leaves it running when it closes.",
+        ));
+    }
+    rows
+}
+
+/// Git's version, and fields for the name and email on commits.
+fn git_rows(app: &App) -> Vec<SheetRow> {
+    let setup = match &app.sheets.git {
+        Load::Loaded(setup) => setup,
+        Load::Idle | Load::Loading => return vec![pair("Git", "Checking…", 3)],
+        Load::Failed(why) => return vec![pair("Git", why, 2)],
+    };
+    let Some(version) = &setup.version else {
+        return vec![
+            pair("Git", "Not found", 2),
+            note(
+                "Install git with your system's package manager, then open this guide again \
+                 from Settings → General.",
+            ),
+        ];
+    };
+    let mut rows = vec![
+        pair("Git", version, 1),
+        heading("Your name on commits"),
+        field(Identity::Name, "Name", &setup.name, "Your name"),
+        field(Identity::Email, "Email", &setup.email, "you@example.com"),
+    ];
+    if let Some(why) = &app.sheets.git_error {
+        rows.push(pair("Not saved", why, 2));
+    }
+    rows.push(note(
+        "Saved in git's global config, for every repository on this computer.",
+    ));
+    rows
+}
+
+/// A field for the name or email on commits, holding `value`.
+fn field(identity: Identity, name: &str, value: &str, hint: &str) -> SheetRow {
+    SheetRow {
+        kind: FIELD,
+        name: name.into(),
+        value: value.into(),
+        hint: hint.into(),
+        action: "Save".into(),
+        setting: match identity {
+            Identity::Name => 0,
+            Identity::Email => 1,
+        },
+        ..SheetRow::default()
+    }
 }
 
 /// Harlo's version and the server's.

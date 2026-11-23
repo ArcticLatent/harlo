@@ -49,8 +49,8 @@ pub use context::{
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use sheets::{
-    Autostart, Event as SheetEvent, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet,
-    Sheets,
+    Autostart, Event as SheetEvent, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
+    SettingChoice, Sheet, Sheets, Step,
 };
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
@@ -1073,12 +1073,16 @@ impl App {
                     self.close(id);
                 }
                 self.refresh();
-                let reloads: Vec<Task<Message>> = self
+                let mut reloads: Vec<Task<Message>> = self
                     .tabs
                     .clone()
                     .into_iter()
                     .map(|id| self.load(id))
                     .collect();
+                // A page showing the server's set-up shows the new one's.
+                if matches!(self.sheets.open, Some(Sheet::Settings | Sheet::Setup)) {
+                    reloads.push(self.load_setup());
+                }
                 return Task::batch(reloads);
             }
             Update::Event(event) => {

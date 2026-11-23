@@ -249,15 +249,24 @@ pub fn run(options: &Options) -> Result<(), RunError> {
     // A Harlo already running shows its window instead.
     let socket = crate::instance::socket_path();
     if let Some(path) = &socket
-        && let Ok(Some(pid)) = crate::instance::forward(path, crate::instance::Command::Show)
+        && let Ok(Some(pid)) = crate::instance::forward(
+            path,
+            if options.setup {
+                crate::instance::Command::Setup
+            } else {
+                crate::instance::Command::Show
+            },
+        )
     {
         eprintln!("harlo: already running (process {pid}); showed its window.");
         return Ok(());
     }
     let window = AppWindow::new()?;
     let (runtime, mut actions) = Runtime::new().map_err(RunError::Runtime)?;
-    // What's chosen in the tray arrives as background work's results do.
+    // What's chosen in the tray, or asked by a later launch, arrives as
+    // background work's results do.
     let sender = runtime.sender();
+    let later = runtime.sender();
     let tray = crate::tray::Tray::start(move |choice| {
         let actions = match choice {
             crate::tray::Choice::Show => vec![Action::Effect(Effect::Raise)],
@@ -312,16 +321,23 @@ pub fn run(options: &Options) -> Result<(), RunError> {
     .map_err(|e| RunError::Window(slint::PlatformError::Other(e.to_string())))?;
     // Later launches come to this window. Without the socket Harlo still
     // runs; a later launch then starts another one.
-    let shown = window.as_weak();
     let _listener = socket.and_then(|path| {
-        crate::instance::listen(&path, move |command| match command {
-            crate::instance::Command::Show => {
-                // The window is gone only as Harlo quits.
-                let _ = shown.upgrade_in_event_loop(|window| raise(&window));
+        crate::instance::listen(&path, move |command| {
+            let mut actions = vec![Action::Effect(Effect::Raise)];
+            if command == crate::instance::Command::Setup {
+                actions.push(Action::Output(Message::Sheet(SheetEvent::OpenSetup)));
+            }
+            for action in actions {
+                // Fails only once the window has gone.
+                let _ = later.send(action);
             }
         })
         .ok()
     });
+    // The guide opens on the first start, and for `--setup`.
+    if options.setup || !controller.shell.borrow().app.preferences.setup_done {
+        controller.dispatch(Message::Sheet(SheetEvent::OpenSetup));
+    }
     // Closing the window leaves Harlo in the tray, when there is one and
     // the user wants it; otherwise it quits.
     let closing = Rc::clone(&controller);
@@ -480,6 +496,12 @@ fn claude_action_of(number: i32) -> Option<app::ClaudeAction> {
 /// the Claude actions number from 0.
 pub const CHOOSE_DEFAULT_MODEL: i32 = 10;
 
+/// The Settings button that opens the setup guide.
+pub const OPEN_SETUP: i32 = 11;
+
+/// The setup guide's button that installs OpenCode.
+pub const INSTALL_OPENCODE: i32 = 12;
+
 /// The setting the UI numbers `number`.
 fn setting_of(number: i32) -> Option<app::Setting> {
     match number {
@@ -618,10 +640,30 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send_with!(on_switch_setting, |_app, number| setting_of(number)
         .map(|setting| Message::Sheet(SheetEvent::Switch(setting))));
     send_with!(on_settings_action, |_app, number| {
-        if number == CHOOSE_DEFAULT_MODEL {
-            return Some(Message::TogglePicker(Picker::DefaultModel));
+        match number {
+            CHOOSE_DEFAULT_MODEL => return Some(Message::TogglePicker(Picker::DefaultModel)),
+            OPEN_SETUP => return Some(Message::Sheet(SheetEvent::OpenSetup)),
+            INSTALL_OPENCODE => return Some(Message::Sheet(SheetEvent::InstallOpenCode)),
+            _ => {}
         }
         claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action)))
+    });
+    send_with!(on_setup_step, |_app, number| usize::try_from(number)
+        .ok()
+        .and_then(|i| app::Step::ALL.get(i).copied())
+        .map(|step| Message::Sheet(SheetEvent::Step(step))));
+    send!(on_setup_next, || Message::Sheet(SheetEvent::Next));
+    send!(on_setup_back, || Message::Sheet(SheetEvent::Back));
+    send_with!(on_settings_text, |_app, number, text| {
+        let identity = match number {
+            0 => harlo_core::git::Identity::Name,
+            1 => harlo_core::git::Identity::Email,
+            _ => return None,
+        };
+        Some(Message::Sheet(SheetEvent::Identity(
+            identity,
+            text.to_string(),
+        )))
     });
     send!(on_pick_theme, |id| Message::Sheet(SheetEvent::Theme(
         id.to_string()

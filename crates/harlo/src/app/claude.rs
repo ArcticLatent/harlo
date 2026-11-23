@@ -47,7 +47,7 @@ const AGENT_PAUSE: Duration = Duration::from_secs(1);
 const LIMIT_ICON: &str = "dialog-information";
 
 /// What a terminal task ends with, so its output stays readable.
-const KEEP_OPEN: &str = "printf '\\n%s' 'Press Enter to close this terminal. '; read _";
+pub(super) const KEEP_OPEN: &str = "printf '\\n%s' 'Press Enter to close this terminal. '; read _";
 
 /// How the Claude subscription stands.
 #[derive(Debug, Clone)]

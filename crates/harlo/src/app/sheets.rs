@@ -1,6 +1,7 @@
 //! Pages that open over the window from the left rail: usage stats across
 //! sessions, and Settings, whose sections hold Harlo's own settings, its
-//! appearance, the keyboard shortcuts, the server's set-up and About.
+//! appearance, the keyboard shortcuts, the server's set-up and About. The
+//! setup guide opens on the first start and walks through what Harlo needs.
 //!
 //! Harlo's own settings are saved with the layout. The server's set-up
 //! (providers, web search, MCP servers, plugins) belongs to the shared
@@ -11,6 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+use harlo_core::git::{self, Identity};
 use harlo_core::{autostart, config};
 
 use harlo_core::layout::Appearance;
@@ -28,7 +30,71 @@ pub enum Sheet {
     Stats,
     /// Settings, at [`Sheets::section`].
     Settings,
+    /// The setup guide, at [`Sheets::step`].
+    Setup,
 }
+
+/// A step of the setup guide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Step {
+    /// OpenCode, which runs the agents.
+    #[default]
+    OpenCode,
+    /// The models agents use, and the providers that serve them.
+    Models,
+    /// Git, and the name and email on commits.
+    Git,
+    /// How Harlo looks.
+    Theme,
+}
+
+impl Step {
+    /// Every step, in order.
+    pub const ALL: [Self; 4] = [Self::OpenCode, Self::Models, Self::Git, Self::Theme];
+
+    /// Its title.
+    #[must_use]
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::OpenCode => "OpenCode",
+            Self::Models => "Models",
+            Self::Git => "Git",
+            Self::Theme => "Theme",
+        }
+    }
+
+    /// What it's for, in a sentence.
+    #[must_use]
+    pub fn about(self) -> &'static str {
+        match self {
+            Self::OpenCode => {
+                "OpenCode runs the agents, in a background service on this computer. Harlo \
+                 shows them, the work they do and what they ask you."
+            }
+            Self::Models => {
+                "Agents need a model. OpenCode's own free models work without signing in; \
+                 a provider or a subscription adds more."
+            }
+            Self::Git => {
+                "Harlo shows each project's changes and commits them with git, under your \
+                 name."
+            }
+            Self::Theme => "How Harlo looks. Settings → Appearance has these and more.",
+        }
+    }
+
+    /// Its place, counted from 0.
+    #[must_use]
+    pub fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|s| *s == self)
+            .unwrap_or_default()
+    }
+}
+
+/// The command that installs OpenCode, from its docs.
+pub const OPENCODE_INSTALL: &str = "curl -fsSL https://opencode.ai/v2/install | bash";
 
 /// A section of Settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -235,6 +301,22 @@ pub enum Event {
     DefaultModelSet(Result<(), String>),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
+    /// Open the setup guide at its first step.
+    OpenSetup,
+    /// Show this step of the guide.
+    Step(Step),
+    /// Go to the guide's next step, or finish it after the last.
+    Next,
+    /// Go back a step.
+    Back,
+    /// Install OpenCode on this computer, in a terminal.
+    InstallOpenCode,
+    /// Git's setup on this computer arrived.
+    Git(git::Setup),
+    /// Save this as the name or email on commits.
+    Identity(Identity, String),
+    /// The name or email was saved as this, or why it couldn't be.
+    IdentitySet(Identity, Result<String, String>),
     /// Show stats for another range.
     Range(Range),
     /// Stats arrived for load `serial`.
@@ -262,6 +344,12 @@ pub struct Sheets {
     pub model_error: Option<String>,
     /// Why starting at login couldn't be changed, if it couldn't.
     pub autostart_error: Option<String>,
+    /// The setup guide's step.
+    pub step: Step,
+    /// Git on this computer, for the guide.
+    pub git: Load<git::Setup>,
+    /// Why the name or email on commits couldn't be saved, if it couldn't.
+    pub git_error: Option<String>,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -270,11 +358,19 @@ impl App {
     /// Applies something that happened to the pages, and checks the Claude
     /// subscription when Models comes into view.
     pub(super) fn sheet_event(&mut self, event: Event) -> Task<Message> {
-        let models_shown = |app: &Self| {
-            app.sheets.open == Some(Sheet::Settings) && app.sheets.section == Section::Models
+        let models_shown = |app: &Self| match app.sheets.open {
+            Some(Sheet::Settings) => app.sheets.section == Section::Models,
+            Some(Sheet::Setup) => app.sheets.step == Step::Models,
+            _ => false,
         };
         let before = models_shown(self);
-        let task = self.apply_sheet(event);
+        let guiding = self.sheets.open == Some(Sheet::Setup);
+        let mut task = self.apply_sheet(event);
+        // However the guide closes, it's done with until asked for again.
+        if guiding && self.sheets.open != Some(Sheet::Setup) && !self.preferences.setup_done {
+            self.preferences.setup_done = true;
+            task = Task::batch([task, self.save_preferences()]);
+        }
         if models_shown(self) && !before {
             return Task::batch([task, self.check_claude()]);
         }
@@ -292,6 +388,7 @@ impl App {
                         self.sheets.query.clear();
                         self.load_setup()
                     }
+                    Sheet::Setup => self.open_setup(),
                 };
             }
             Event::Open(section)
@@ -337,24 +434,7 @@ impl App {
                 }
                 return self.save_preferences();
             }
-            Event::Theme(id) => {
-                if let Some(mode) = self.themes.iter().find(|t| t.id == id).map(|t| t.mode) {
-                    match mode {
-                        Mode::Dark => self.preferences.dark_theme = id,
-                        Mode::Light => self.preferences.light_theme = id,
-                    }
-                    // A fixed appearance turns to the theme picked, so it
-                    // shows; System keeps following the desktop.
-                    if self.preferences.appearance != Appearance::System {
-                        self.preferences.appearance = match mode {
-                            Mode::Dark => Appearance::Dark,
-                            Mode::Light => Appearance::Light,
-                        };
-                    }
-                    self.retheme();
-                    return self.save_preferences();
-                }
-            }
+            Event::Theme(id) => return self.pick_theme(id),
             Event::DefaultModel(model) => return self.set_default_model(&model),
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
             Event::Choose(choice, option) => {
@@ -363,6 +443,14 @@ impl App {
                     return self.save_preferences();
                 }
             }
+            event @ (Event::OpenSetup
+            | Event::Step(_)
+            | Event::Next
+            | Event::Back
+            | Event::InstallOpenCode
+            | Event::Git(_)
+            | Event::Identity(..)
+            | Event::IdentitySet(..)) => return self.apply_guide(event),
             Event::Range(range) => {
                 self.sheets.range = range;
                 return self.load_stats();
@@ -404,6 +492,125 @@ impl App {
                 result.map_err(|e| format!("Couldn't change OpenCode's config: {e}")),
             ))
         })
+    }
+
+    /// Uses the theme `id` while the window is in its mode.
+    fn pick_theme(&mut self, id: String) -> Task<Message> {
+        let Some(mode) = self.themes.iter().find(|t| t.id == id).map(|t| t.mode) else {
+            return Task::none();
+        };
+        match mode {
+            Mode::Dark => self.preferences.dark_theme = id,
+            Mode::Light => self.preferences.light_theme = id,
+        }
+        // A fixed appearance turns to the theme picked, so it shows; System
+        // keeps following the desktop.
+        if self.preferences.appearance != Appearance::System {
+            self.preferences.appearance = match mode {
+                Mode::Dark => Appearance::Dark,
+                Mode::Light => Appearance::Light,
+            };
+        }
+        self.retheme();
+        self.save_preferences()
+    }
+
+    /// Applies something that happened in the setup guide.
+    fn apply_guide(&mut self, event: Event) -> Task<Message> {
+        match event {
+            Event::OpenSetup => return self.open_setup(),
+            Event::Step(step) => self.sheets.step = step,
+            Event::Next => match Step::ALL.get(self.sheets.step.index() + 1) {
+                Some(next) => self.sheets.step = *next,
+                None => self.sheets.open = None,
+            },
+            Event::Back => {
+                if let Some(back) = self.sheets.step.index().checked_sub(1) {
+                    self.sheets.step = Step::ALL[back];
+                }
+            }
+            Event::InstallOpenCode => return self.install_opencode(),
+            Event::Git(setup) => self.sheets.git = Load::Loaded(setup),
+            Event::Identity(identity, value) => return self.set_identity(identity, &value),
+            Event::IdentitySet(identity, result) => match result {
+                Ok(value) => {
+                    self.sheets.git_error = None;
+                    if let Load::Loaded(setup) = &mut self.sheets.git {
+                        match identity {
+                            Identity::Name => setup.name = value,
+                            Identity::Email => setup.email = value,
+                        }
+                    }
+                }
+                Err(why) => self.sheets.git_error = Some(why),
+            },
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// Opens the setup guide at its first step, and reads what it shows.
+    fn open_setup(&mut self) -> Task<Message> {
+        self.sheets.open = Some(Sheet::Setup);
+        self.sheets.step = Step::OpenCode;
+        self.sheets.git_error = None;
+        self.sheets.git = Load::Loading;
+        let git = Task::perform(async { git::Global::new().setup().await }, |setup| {
+            Message::Sheet(Event::Git(setup))
+        });
+        Task::batch([git, self.load_setup()])
+    }
+
+    /// Whether the guide offers to install OpenCode: when the background
+    /// service on this computer can't be reached.
+    #[must_use]
+    pub fn offers_install(&self) -> bool {
+        matches!(self.location, Location::Shared)
+            && matches!(self.status, super::Status::Lost { .. })
+    }
+
+    /// Runs OpenCode's installer in a terminal, and opens the guide again
+    /// once it ends. Harlo then starts the service and connects as usual.
+    fn install_opencode(&mut self) -> Task<Message> {
+        if !self.offers_install() {
+            return Task::none();
+        }
+        // The terminal opens under the window, so the guide steps aside.
+        self.sheets.open = None;
+        self.run_in_terminal(
+            "Install OpenCode",
+            "/bin/sh",
+            vec![
+                "-c".to_owned(),
+                format!("{OPENCODE_INSTALL}; {}", super::claude::KEEP_OPEN),
+            ],
+            Message::Sheet(Event::OpenSetup),
+        )
+    }
+
+    /// Saves `value` as the name or email on commits, in git's global
+    /// config, off the UI thread.
+    fn set_identity(&mut self, identity: Identity, value: &str) -> Task<Message> {
+        let value = value.trim().to_owned();
+        if let Load::Loaded(setup) = &self.sheets.git {
+            let current = match identity {
+                Identity::Name => &setup.name,
+                Identity::Email => &setup.email,
+            };
+            if *current == value {
+                return Task::none();
+            }
+        }
+        self.sheets.git_error = None;
+        Task::perform(
+            async move {
+                let result = git::Global::new().set(identity, &value).await;
+                result
+                    .map(|()| value)
+                    .map_err(|e| format!("Couldn't save it: {e}"))
+            },
+            move |result| Message::Sheet(Event::IdentitySet(identity, result)),
+        )
     }
 
     /// Turns starting at login on or off, off the UI thread.

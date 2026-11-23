@@ -353,3 +353,138 @@ fn changed(rest: &str, fields: usize) -> FileState {
         unstaged: tree != '.',
     }
 }
+
+/// Git on this computer: its version, and who it says made commits.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Setup {
+    /// The version, such as `2.47.1`, or `None` when `git` isn't installed.
+    pub version: Option<String>,
+    /// The name on commits, empty when none is set.
+    pub name: String,
+    /// The email on commits, empty when none is set.
+    pub email: String,
+}
+
+/// Who git says made a commit: the name or the email.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Identity {
+    /// `user.name`.
+    Name,
+    /// `user.email`.
+    Email,
+}
+
+impl Identity {
+    /// Its key in git's config.
+    fn key(self) -> &'static str {
+        match self {
+            Self::Name => "user.name",
+            Self::Email => "user.email",
+        }
+    }
+}
+
+/// Git's settings for the user, in their global config (`~/.gitconfig`,
+/// or where `GIT_CONFIG_GLOBAL` points).
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn run() {
+/// let setup = harlo_core::git::Global::new().setup().await;
+/// println!("git {:?}, commits by {}", setup.version, setup.name);
+/// # }
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Global {
+    env: Vec<(String, String)>,
+}
+
+impl Global {
+    /// The user's own global config.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets an environment variable for every `git` command run, such as
+    /// `GIT_CONFIG_GLOBAL` for a scratch config.
+    #[must_use]
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.push((key.into(), value.into()));
+        self
+    }
+
+    /// Reads git's version and the name and email on commits; anything
+    /// that can't be read is left empty.
+    pub async fn setup(&self) -> Setup {
+        let Ok(version) = self.git(&["--version"]).await else {
+            return Setup::default();
+        };
+        // An unset key makes `git config` fail: nothing is set.
+        let read = |identity: Identity| async move {
+            self.git(&["config", "--global", "--get", identity.key()])
+                .await
+                .map(|value| value.trim().to_owned())
+                .unwrap_or_default()
+        };
+        let (name, email) = futures_util::join!(read(Identity::Name), read(Identity::Email));
+        Setup {
+            version: Some(
+                version
+                    .trim()
+                    .trim_start_matches("git version")
+                    .trim()
+                    .to_owned(),
+            ),
+            name,
+            email,
+        }
+    }
+
+    /// Sets the name or email on commits; an empty `value` removes it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `git` can't run or can't write its config.
+    pub async fn set(&self, identity: Identity, value: &str) -> Result<(), Error> {
+        let value = value.trim();
+        if value.is_empty() {
+            // Already unset is fine: git exits 5 for a key it doesn't have.
+            return match self
+                .git(&["config", "--global", "--unset-all", identity.key()])
+                .await
+            {
+                Err(e) if e.message.is_empty() => Ok(()),
+                other => other.map(drop),
+            };
+        }
+        self.git(&["config", "--global", identity.key(), value])
+            .await
+            .map(drop)
+    }
+
+    /// Runs `git` with `args`, outside any repository, and returns what it
+    /// printed.
+    async fn git(&self, args: &[&str]) -> Result<String, Error> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(std::env::temp_dir())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .envs(self.env.iter().map(|(k, v)| (k, v)))
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await
+            .map_err(|e| Error {
+                message: format!("Couldn't run git: {e}"),
+            })?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Err(Error {
+                message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            })
+        }
+    }
+}

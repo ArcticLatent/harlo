@@ -32,12 +32,19 @@ const PREFERENCES_KEY: &str = "preferences";
 /// changes those through the server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent on/off settings, each its own switch, saved as they are"
+)]
 pub struct Preferences {
     /// Whether the sessions open when Harlo last closed open again.
     pub reopen_tabs: bool,
     /// Whether closing the window leaves Harlo running in the tray, when
     /// the desktop shows one.
     pub keep_in_tray: bool,
+    /// Whether the setup guide was finished or skipped, so it no longer
+    /// opens on its own at start.
+    pub setup_done: bool,
     /// The theme shown while the window is dark, by its id, such as
     /// `harlo-dark` or `gruvbox-dark-medium`.
     pub dark_theme: String,
@@ -66,6 +73,7 @@ impl Default for Preferences {
         Self {
             reopen_tabs: true,
             keep_in_tray: true,
+            setup_done: false,
             dark_theme: crate::theme::HARLO_DARK.to_owned(),
             light_theme: crate::theme::HARLO_LIGHT.to_owned(),
             appearance: Appearance::System,

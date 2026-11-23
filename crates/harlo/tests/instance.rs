@@ -27,6 +27,8 @@ fn a_later_launch_hands_its_command_to_the_running_one() {
     let pid = instance::forward(&path, Command::Show).expect("handed over");
     assert_eq!(pid, Some(std::process::id()), "it answers with its process");
     assert_eq!(received.recv_timeout(WAIT), Ok(Command::Show));
+    instance::forward(&path, Command::Setup).expect("handed over");
+    assert_eq!(received.recv_timeout(WAIT), Ok(Command::Setup));
 
     // Quitting removes the socket, so the next launch starts afresh.
     drop(listener);

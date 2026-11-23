@@ -14,6 +14,8 @@ pub struct Options {
     pub server: Option<String>,
     /// The password for `server`, from [`PASSWORD_VAR`].
     pub password: Option<String>,
+    /// Open the setup guide, as `--setup`.
+    pub setup: bool,
 }
 
 impl std::fmt::Debug for Options {
@@ -21,17 +23,20 @@ impl std::fmt::Debug for Options {
         f.debug_struct("Options")
             .field("server", &self.server)
             .field("password", &self.password.as_ref().map(|_| "…"))
+            .field("setup", &self.setup)
             .finish()
     }
 }
 
 /// Usage text for `--help` and argument errors.
 pub const USAGE: &str = "\
-Usage: harlo [--server <url>]
+Usage: harlo [--server <url>] [--setup]
 
   --server <url>  Follow the OpenCode server at <url> instead of the shared
                   background service. Its password is read from
                   HARLO_OPENCODE_PASSWORD.
+  --setup         Open the setup guide: OpenCode, models, git and the theme.
+                  A Harlo already running opens it in its window.
   -h, --help      Show this help.";
 
 /// Why the arguments couldn't be used.
@@ -57,11 +62,13 @@ impl Options {
         let mut options = Self {
             server: None,
             password: password.filter(|p| !p.is_empty()),
+            setup: false,
         };
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Err(ArgsError::Help),
+                "--setup" => options.setup = true,
                 "--server" => {
                     let url = args
                         .next()

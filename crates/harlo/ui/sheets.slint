@@ -1,12 +1,13 @@
 // The pages that open over the window from the left rail: the stats
-// across sessions, and Settings with its list of sections and search. A
-// click outside the card or Esc closes them.
+// across sessions, Settings with its list of sections and search, and the
+// setup guide with its steps. A click outside the card or Esc closes them.
 
 import { AboutSlint, ScrollView } from "std-widgets.slint";
-import { Theme, Size } from "theme.slint";
+import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, SheetRow, ThemeCard } from "data.slint";
 import { Field, Icon, IconButton, Press, HLine, VLine, Switch } from "widgets.slint";
+import { CardButton, GhostButton } from "waiting.slint";
 
 /// A small button with a word on it, at the end of a row.
 component ActionButton inherits Press {
@@ -284,6 +285,71 @@ component Row inherits VerticalLayout {
             cards: root.entry.setting == 0 ? State.dark-theme-cards : State.light-theme-cards;
         }
     }
+    if root.entry.kind == 6: HorizontalLayout {
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 12px;
+        Text {
+            width: 72px;
+            text: root.entry.name;
+            font-size: Size.small;
+            color: Theme.text-base;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        field := Field {
+            horizontal-stretch: 1;
+            height: 32px;
+            text-size: Size.small;
+            placeholder: root.entry.hint;
+            text: root.entry.value;
+            accepted => { Logic.settings-text(root.entry.setting, self.text); }
+        }
+        VerticalLayout {
+            alignment: center;
+            ActionButton {
+                // It says so while the field holds what's saved.
+                text: field.text != "" && field.text == root.entry.value ? "Saved" : root.entry.action;
+                label: root.entry.action + " " + root.entry.name;
+                clicked => { Logic.settings-text(root.entry.setting, field.text); }
+            }
+        }
+    }
+    if root.entry.kind == 7: HorizontalLayout {
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 12px;
+        Rectangle {
+            horizontal-stretch: 1;
+            min-height: 32px;
+            border-radius: Size.radius;
+            background: Theme.surface-inset-base;
+            clip: true;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                // Selectable, so it can be copied to run by hand.
+                TextInput {
+                    text: root.entry.value;
+                    read-only: true;
+                    single-line: true;
+                    font-family: Fonts.mono;
+                    font-size: Size.small;
+                    color: Theme.text-strong;
+                    vertical-alignment: center;
+                    accessible-role: AccessibleRole.text;
+                    accessible-label: root.entry.value;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            ActionButton {
+                text: root.entry.action;
+                clicked => { Logic.settings-action(root.entry.setting); }
+            }
+        }
+    }
     if root.entry.kind == 3: HorizontalLayout {
         padding-top: 6px;
         padding-bottom: 6px;
@@ -441,6 +507,122 @@ component SectionList inherits Rectangle {
     }
 }
 
+/// A step in the setup guide's list: its number, or a tick once passed.
+component StepButton inherits Press {
+    in property <string> text;
+    in property <int> number;
+    in property <bool> done;
+    height: 34px;
+    label: root.text;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: root.selected ? Theme.surface-brand-base
+                    : root.done ? Theme.selected-tint : Theme.surface-raised-strong;
+                if root.done && !root.selected: Icon {
+                    text: Icons.check;
+                    font-size: 12px;
+                    color: Theme.accent-ink;
+                }
+                if !root.done || root.selected: Text {
+                    text: root.number;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: root.selected ? Theme.text-on-brand-base : Theme.text-weak;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-size: Size.small;
+            color: root.selected ? Theme.text-strong : Theme.text-base;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+    }
+}
+
+/// The setup guide's steps.
+component StepList inherits Rectangle {
+    background: Theme.surface-inset-base.with-alpha(Theme.glass ? 0.5 : 1);
+
+    VerticalLayout {
+        padding: 12px;
+        padding-top: 14px;
+        spacing: 2px;
+
+        Text {
+            height: 26px;
+            text: "Set up Harlo";
+            font-size: 16px * Size.text-scale;
+            font-weight: 600;
+            color: Theme.text-strong;
+            accessible-role: AccessibleRole.text;
+        }
+        Rectangle { height: 8px; }
+        for title[index] in State.setup-steps: StepButton {
+            text: title;
+            number: index + 1;
+            done: index < State.setup-step;
+            selected: index == State.setup-step;
+            clicked => { Logic.setup-step(index); }
+        }
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+/// The guide's foot: skip, and back and on.
+component StepFoot inherits HorizontalLayout {
+    height: 56px;
+    padding-left: 12px;
+    padding-right: 16px;
+    spacing: 8px;
+    VerticalLayout {
+        alignment: center;
+        GhostButton {
+            text: "Skip setup";
+            clicked => { Logic.close-sheet(); }
+        }
+    }
+    Text {
+        horizontal-stretch: 1;
+        text: "Settings → General opens this again.";
+        font-size: Size.small;
+        color: Theme.text-weak;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: AccessibleRole.text;
+    }
+    if State.setup-step > 0: VerticalLayout {
+        alignment: center;
+        CardButton {
+            text: "Back";
+            clicked => { Logic.setup-back(); }
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        CardButton {
+            main: true;
+            text: State.setup-step >= State.setup-steps.length - 1 ? "Finish" : "Next";
+            clicked => { Logic.setup-next(); }
+        }
+    }
+}
+
 /// A range button on the stats page.
 component RangeButton inherits Press {
     in property <string> text;
@@ -543,8 +725,10 @@ export component SheetLayer inherits Rectangle {
     }
 
     card := Rectangle {
-        width: min(State.sheet == 2 ? 900px : 720px, root.width - 2 * Size.rail - 64px);
-        height: min(State.sheet == 2 ? 640px : 680px, root.height - 96px);
+        width: min(State.sheet == 2 ? 900px : State.sheet == 3 ? 820px : 720px,
+            root.width - 2 * Size.rail - 64px);
+        height: min(State.sheet == 2 ? 640px : State.sheet == 3 ? 600px : 680px,
+            root.height - 96px);
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
         background: Theme.card;
@@ -602,6 +786,30 @@ export component SheetLayer inherits Rectangle {
                         }
                     }
                 }
+            }
+        }
+
+        if State.sheet == 3: HorizontalLayout {
+            StepList {
+                width: min(200px, card.width * 0.3);
+            }
+            VLine { }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                SheetHead { }
+                HLine { }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        alignment: start;
+                        padding: 20px;
+                        padding-top: 12px;
+                        spacing: 6px;
+                        SheetRows { }
+                    }
+                }
+                HLine { }
+                StepFoot { }
             }
         }
     }

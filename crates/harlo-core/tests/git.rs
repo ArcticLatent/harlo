@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use harlo_core::git::{FileState, Repo, parse_status};
+use harlo_core::git::{FileState, Global, Identity, Repo, parse_status};
 
 /// A repository in its own scratch folder, cut off from the user's settings.
 struct Scratch {
@@ -314,4 +314,56 @@ fn ignored_paths_follow_the_ignore_files() {
         )
         .expect("outside a repository");
     assert!(none.is_empty(), "nothing is ignored outside a repository");
+}
+
+#[tokio::test]
+async fn the_global_name_and_email_are_read_set_and_removed() {
+    let dir = tempfile::tempdir().expect("scratch folder");
+    let config = dir.path().join("gitconfig");
+    let global = Global::new()
+        .env("HOME", dir.path().to_string_lossy())
+        .env("GIT_CONFIG_GLOBAL", config.to_string_lossy())
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+
+    let fresh = global.setup().await;
+    assert!(
+        fresh
+            .version
+            .as_deref()
+            .is_some_and(|v| v.starts_with(char::is_numeric)),
+        "git's version: {:?}",
+        fresh.version
+    );
+    assert_eq!((fresh.name.as_str(), fresh.email.as_str()), ("", ""));
+
+    global
+        .set(Identity::Name, "  Ada Lovelace ")
+        .await
+        .expect("the name");
+    global
+        .set(Identity::Email, "ada@example.com")
+        .await
+        .expect("the email");
+    let set = global.setup().await;
+    assert_eq!(set.name, "Ada Lovelace", "trimmed");
+    assert_eq!(set.email, "ada@example.com");
+    assert!(
+        std::fs::read_to_string(&config)
+            .expect("the config")
+            .contains("Ada Lovelace")
+    );
+
+    // Clearing a field removes it, and clearing it again is fine.
+    global.set(Identity::Email, "").await.expect("removed");
+    global
+        .set(Identity::Email, " ")
+        .await
+        .expect("removed again");
+    assert_eq!(global.setup().await.email, "");
+}
+
+#[tokio::test]
+async fn without_git_nothing_is_set_up() {
+    let global = Global::new().env("PATH", "/nonexistent");
+    assert_eq!(global.setup().await, harlo_core::git::Setup::default());
 }

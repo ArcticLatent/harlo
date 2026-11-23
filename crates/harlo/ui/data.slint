@@ -508,8 +508,11 @@ export struct SheetRow {
     tone: int,
     /// The kind: 0 a heading, 1 a name and value, 2 a note, 3 a switch, 4
     /// a choice among `options`, the one chosen numbered by `setting` and
-    /// the choice by `choice`, with `value` as a line under its name, or 5
-    /// theme cards, dark ones for `setting` 0 and light ones for 1.
+    /// the choice by `choice`, with `value` as a line under its name, 5
+    /// theme cards, dark ones for `setting` 0 and light ones for 1, 6 a
+    /// text field holding `value`, saved by its `action` button as field
+    /// `setting`, or 7 the command `value`, run by its `action` button as
+    /// step `setting`.
     /// A value's tone: 0 plain, 1 good, 2 bad, 3 quiet, 4 a warning.
     /// For a switch (kind 3): whether it's on, and the setting it turns.
     /// For a name and value (kind 1) with a button: the button's label,
@@ -519,6 +522,8 @@ export struct SheetRow {
     action: string,
     options: [string],
     choice: int,
+    /// For a text field (kind 6): what it shows while empty.
+    hint: string,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one
@@ -588,9 +593,9 @@ export global State {
     in property <color> term-foreground;
     in property <color> term-cursor-color;
     in property <bool> term-scrolled;
-    /// The page over the window: 0 none, 1 stats, 2 settings; its title,
-    /// rows (0 heading, 1 name and value, 2 note, 3 switch) and a note on
-    /// how its loading stands.
+    /// The page over the window: 0 none, 1 stats, 2 settings, 3 the setup
+    /// guide; its title, rows (see `SheetRow`) and a note on how its
+    /// loading stands, or what the guide's step is for.
     in property <int> sheet;
     in property <string> sheet-title;
     in property <[SheetRow]> sheet-rows;
@@ -611,6 +616,9 @@ export global State {
     in property <[ThemeCard]> light-theme-cards;
     in property <int> settings-section;
     in-out property <string> settings-query;
+    /// The setup guide's steps' titles, and the one shown by its place.
+    in property <[string]> setup-steps;
+    in property <int> setup-step;
 
     // The tool panels.
     in property <ContextCard> context-card;
@@ -744,6 +752,13 @@ export global Logic {
     callback switch-setting(int);
     /// Take a step a row's button offers, by its number.
     callback settings-action(int);
+    /// Save a row's text field, by its number.
+    callback settings-text(int, string);
+    /// Show the setup guide's step by its place, the next one (finishing
+    /// after the last), or the one before.
+    callback setup-step(int);
+    callback setup-next();
+    callback setup-back();
     /// Use the theme with this id.
     callback pick-theme(string);
     /// Show the theme's variant: 0 as the desktop is, 1 light, 2 dark.
