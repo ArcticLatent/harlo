@@ -146,7 +146,7 @@ def scene_chat(g):
             h.click("Undo")
             h.settle(0.8)
             g.cap("undo-card", "The card asking to undo a turn")
-            h.click("Cancel")
+            h.click("Keep everything")
             h.settle(0.5)
 
 
@@ -231,6 +231,19 @@ def scene_menus(g):
         g.cap(chip.lower().replace(" ", "-"), what)
         h.key("Escape")
         h.settle(0.4)
+    # A mode other than the agent's own is named beside the shield.
+    foot = lambda e: e.y > h.size[1] - 120
+    if h.find("Permissions", role="Button", where=foot):
+        h.click("Permissions", where=foot)
+        h.settle(0.5)
+        h.click("Don't ask")
+        h.wait_says("Don't ask", timeout=10)
+        h.settle(0.5)
+        g.cap("dont-ask", "Don't ask chosen: the mode is named beside the shield")
+        h.click("Permissions", where=foot)
+        h.settle(0.5)
+        h.click("Ask before commands")
+        h.settle(0.5)
 
 
 def scene_panels(g):

@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 
+use crate::keys::{Key, KeyPress};
 use crate::task::Task;
 use harlo_core::approvals::{Draft, Shield};
 use harlo_core::server::{self, PermissionReply};
@@ -87,6 +88,39 @@ impl App {
             _ => {}
         }
         Task::none()
+    }
+
+    /// Maps Alt+A and Alt+D to allowing once or denying the approval on
+    /// screen; `None` for other keys, or when no approval card shows.
+    ///
+    /// The card shows under the open session, so nothing answers while a
+    /// page, a menu or the editor covers it, while a reason is being typed,
+    /// or while the last answer is still on its way.
+    #[must_use]
+    pub fn approval_key(&self, press: &KeyPress) -> Option<Message> {
+        if !press.alt || press.command || press.shift {
+            return None;
+        }
+        let reply = match press.key {
+            Key::Character('a') => PermissionReply::Once,
+            Key::Character('d') => PermissionReply::Reject,
+            _ => return None,
+        };
+        if self.sheets.open.is_some()
+            || self.picker.is_some()
+            || self.fs.shown.is_some()
+            || self.refusing.is_some()
+        {
+            return None;
+        }
+        let asked = self.waiting_approvals().first()?;
+        if self.answering.contains(&asked.id) {
+            return None;
+        }
+        Some(Message::Approve {
+            request: asked.id.clone(),
+            reply,
+        })
     }
 
     /// Returns the open session's requests waiting for approval, oldest first.

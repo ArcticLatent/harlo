@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use harlo::app::{App, Message, Status};
 use harlo::model::status_text;
+use harlo_core::approvals::Shield;
 use harlo_core::layout::Layout;
 use harlo_core::server::{Location, Update};
 use harlo_core::workspace::{Event as ServerEvent, EventKind, Snapshot};
@@ -306,4 +307,22 @@ fn escape_still_closes_menus_after_the_model_menu() {
     window.dispatch_event(WindowEvent::KeyReleased { text: escape });
     ui.wait(50);
     assert!(ui.app().picker.is_none(), "a real Escape closes it");
+}
+
+#[test]
+fn the_permissions_mode_is_named_beside_the_shield_unless_its_the_agents() {
+    let mut app = demo::app();
+    app.active = None;
+    let ui = ui(app);
+    let shield = || ui.button("Permissions").accessible_description();
+    assert_eq!(
+        shield().as_deref(),
+        Some(""),
+        "the agent's own rules go unnamed"
+    );
+    ui.send(Message::PickShield(Shield::Trusted));
+    assert_eq!(shield().as_deref(), Some("Don't ask"));
+    assert!(ui.shows("Don't ask"), "and the words show beside it");
+    ui.send(Message::PickShield(Shield::Careful));
+    assert_eq!(shield().as_deref(), Some("Ask before edits"));
 }

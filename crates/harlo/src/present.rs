@@ -322,14 +322,21 @@ impl Presenter {
             }
             .into(),
         );
-        let (shield, shield_color) = match app.current_shield() {
-            Shield::Agent => (Icon::ShieldUser, t.icon_base),
-            Shield::Careful => (Icon::ShieldCheck, t.text_interactive_base),
-            Shield::Trusted => (Icon::ShieldOff, t.icon_warning_base),
-            Shield::Custom => (Icon::ShieldEllipsis, t.icon_base),
+        // The agent's own rules are the default and go unnamed; any other
+        // mode says itself beside the shield.
+        let (shield, shield_color, shield_label) = match app.current_shield() {
+            Shield::Agent => (Icon::ShieldUser, t.icon_base, ""),
+            Shield::Careful => (
+                Icon::ShieldCheck,
+                t.text_interactive_base,
+                "Ask before edits",
+            ),
+            Shield::Trusted => (Icon::ShieldOff, t.icon_warning_base, "Don't ask"),
+            Shield::Custom => (Icon::ShieldEllipsis, t.icon_base, "Custom rules"),
         };
         state.set_shield_glyph(glyph(shield));
         state.set_shield_color(color(shield_color));
+        state.set_shield_label(shield_label.into());
     }
 
     /// The `/` or `@` menu over the composer, while one is open.

@@ -267,6 +267,29 @@ fn accents_and_secondary_icons_read_in_every_theme() {
 }
 
 #[test]
+fn waiting_cards_outlines_stand_out_from_the_card_in_every_theme() {
+    let mut faint = Vec::new();
+    for theme in harlo_core::theme::bundled() {
+        let t = theme.tokens();
+        for (name, accent) in [
+            ("approval", t.icon_warning_base),
+            ("question", t.text_interactive_base),
+        ] {
+            let edge = harlo::theme::waiting_edge(&t, accent);
+            let contrast = edge.contrast(t.surface_raised_base);
+            if contrast < 3.0 {
+                faint.push(format!("{} {name}: {contrast:.2}", theme.id));
+            }
+        }
+    }
+    assert!(
+        faint.is_empty(),
+        "outlines too faint:\n{}",
+        faint.join("\n")
+    );
+}
+
+#[test]
 fn a_readable_accent_keeps_its_colour() {
     let t = tokens("dracula");
     assert_eq!(

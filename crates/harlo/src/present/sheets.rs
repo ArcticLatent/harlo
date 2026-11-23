@@ -73,6 +73,10 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Approvals",
+        &[("Alt+A", "Allow the action once"), ("Alt+D", "Deny it")],
+    ),
+    (
         "Notes",
         &[("Ctrl+Enter", "Tick the todo on the cursor's line")],
     ),

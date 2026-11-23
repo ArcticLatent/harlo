@@ -92,14 +92,8 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
         t.surface_brand_base
             .over(t.surface_raised_strong, PRIMARY_OFF),
     ));
-    g.set_warning_edge(color(
-        t.icon_warning_base
-            .over(t.surface_raised_base, WAITING_EDGE),
-    ));
-    g.set_question_edge(color(
-        t.text_interactive_base
-            .over(t.surface_raised_base, WAITING_EDGE),
-    ));
+    g.set_warning_edge(color(waiting_edge(t, t.icon_warning_base)));
+    g.set_question_edge(color(waiting_edge(t, t.text_interactive_base)));
     g.set_scrim(color(scrim(t)));
 }
 
@@ -198,8 +192,11 @@ const SCRIM_LIGHT: f32 = 0.14;
 /// How much of its colour a main button keeps while it can't be pressed.
 const PRIMARY_OFF: f32 = 0.4;
 
-/// How much of its accent a waiting card's outline takes.
+/// How much of its accent a waiting card's outline takes at least.
 const WAITING_EDGE: f32 = 0.45;
+
+/// How much more accent each step towards a readable outline adds.
+const WAITING_EDGE_STEP: f32 = 0.05;
 
 /// How much colour an added or removed diff line's background takes.
 const PATCH_TINT: f32 = 0.16;
@@ -209,6 +206,34 @@ const EDGE: f32 = 0.12;
 
 /// How opaque selected text's highlight is.
 pub(crate) const SELECTION: f32 = 0.3;
+
+/// The outline of a card waiting on the user, in `accent`.
+///
+/// It takes as little of the accent as it can while still standing 3:1
+/// from the card (WCAG's minimum for graphics people must see), so it
+/// stays quiet on dark themes and still shows on light ones, where amber
+/// is faint. An accent too faint even at full strength is mixed towards
+/// the strongest text until it stands out, as [`ink`] does.
+#[must_use]
+pub fn waiting_edge(t: &Tokens, accent: Rgba) -> Rgba {
+    let surface = t.surface_raised_base;
+    let stands_out = |c: Rgba| c.contrast(surface) >= INK_CONTRAST;
+    let mut amount = WAITING_EDGE;
+    while amount < 1.0 {
+        let edge = accent.over(surface, amount);
+        if stands_out(edge) {
+            return edge;
+        }
+        amount += WAITING_EDGE_STEP;
+    }
+    (0..=INK_STEPS)
+        .map(|step| {
+            let keep = 1.0 - f32::from(step) / f32::from(INK_STEPS);
+            accent.over(t.text_strong, keep)
+        })
+        .find(|&c| stands_out(c))
+        .unwrap_or(t.text_strong)
+}
 
 /// An outline for a card of colour `surface`.
 fn edge(t: &Tokens, surface: Rgba) -> Rgba {

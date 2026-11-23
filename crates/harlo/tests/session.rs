@@ -8,7 +8,7 @@
 
 mod support;
 
-use harlo::app::Message;
+use harlo::app::{Message, Sheet, SheetEvent};
 use harlo::timeline::Event as TimelineEvent;
 use harlo_core::server::{
     Answer, Choice, Delivery, Field, FieldKind, FileDiff, PermissionReply, Update,
@@ -17,6 +17,8 @@ use harlo_core::timeline::Entry;
 use harlo_core::workspace::{Event, EventKind, Fetched, Form, InboxItem, Permission, Revert};
 use i_slint_backend_testing::AccessibleRole;
 use serde_json::json;
+use slint::ComponentHandle;
+use slint::platform::WindowEvent;
 use support::{Ui, demo, ui, ui_at};
 
 /// "pi update" in the demo data.
@@ -236,6 +238,61 @@ fn marked_waiting(ui: &Ui) -> bool {
         .any(|s| s.id == PI_UPDATE && s.waiting)
 }
 
+/// Presses `key` with Alt held, as a keyboard would.
+fn alt(ui: &Ui, key: char) {
+    let window = ui.window.window();
+    let alt = slint::SharedString::from(slint::platform::Key::Alt);
+    let key = slint::SharedString::from(key);
+    window.dispatch_event(WindowEvent::KeyPressed { text: alt.clone() });
+    window.dispatch_event(WindowEvent::KeyPressed { text: key.clone() });
+    window.dispatch_event(WindowEvent::KeyReleased { text: key });
+    window.dispatch_event(WindowEvent::KeyReleased { text: alt });
+}
+
+#[test]
+fn alt_a_and_alt_d_answer_the_approval_on_screen() {
+    let ui = chatting();
+    ui.send(event(
+        EventKind::PermissionAsked(approval("per_1", "shell", &["cargo test"])),
+        1.0,
+    ));
+    assert!(ui.shows("Alt+A"), "the key shows on Allow once");
+    assert!(ui.shows("Alt+D"), "and on Deny");
+
+    alt(&ui, 'a');
+    assert!(
+        ui.messages().iter().any(|m| matches!(
+            m,
+            Message::Approve { request, reply: PermissionReply::Once } if request == "per_1"
+        )),
+        "Alt+A allows once"
+    );
+    ui.send(Message::Answered(PI_UPDATE.into(), "per_1".into(), Ok(())));
+
+    ui.send(event(
+        EventKind::PermissionAsked(approval("per_2", "shell", &["rm -rf build"])),
+        2.0,
+    ));
+    // Under Settings, the card is out of sight: the keys leave it be.
+    ui.send(Message::Sheet(SheetEvent::Toggle(Sheet::Settings)));
+    alt(&ui, 'd');
+    assert!(
+        !ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::Approve { .. })),
+        "nothing answered behind Settings"
+    );
+    ui.send(Message::Sheet(SheetEvent::Close));
+    alt(&ui, 'd');
+    assert!(
+        ui.messages().iter().any(|m| matches!(
+            m,
+            Message::Approve { request, reply: PermissionReply::Reject } if request == "per_2"
+        )),
+        "Alt+D denies"
+    );
+}
+
 #[test]
 fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
     let ui = chatting();
@@ -243,9 +300,16 @@ fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
         EventKind::PermissionAsked(approval("per_1", "shell", &["cargo test"])),
         1.0,
     ));
-    assert!(ui.shows("Build wants to run a command"));
+    assert!(ui.shows("Allow Build to run a command?"));
     assert!(ui.shows("cargo test"));
     assert!(ui.shows("Always allow cargo *"));
+    assert!(
+        ui.shows(
+            "Always allow saves this for the project, for every session. \
+             Settings → Agents → Saved approvals takes it back."
+        ),
+        "says where an always rule is kept"
+    );
     assert!(marked_waiting(&ui), "the sidebar marks the session");
 
     ui.press("Allow once");
@@ -301,7 +365,7 @@ fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
 
     // Answered, here or elsewhere, the card goes.
     ui.send(Message::Answered(PI_UPDATE.into(), "per_1".into(), Ok(())));
-    assert!(!ui.shows("Build wants to run a command"));
+    assert!(!ui.shows("Allow Build to run a command?"));
     assert!(!marked_waiting(&ui));
 }
 
@@ -323,7 +387,7 @@ fn an_edit_approval_shows_the_change_and_how_many_wait() {
         EventKind::PermissionAsked(approval("per_2", "shell", &["ls"])),
         2.0,
     ));
-    assert!(ui.shows("Build wants to edit a file"));
+    assert!(ui.shows("Allow Build to edit a file?"));
     assert!(ui.shows("e.txt"));
     assert!(ui.shows("three"), "the patch's lines");
     assert!(ui.shows("two"));
@@ -331,7 +395,7 @@ fn an_edit_approval_shows_the_change_and_how_many_wait() {
 
     // The first answered, the next one shows.
     ui.send(Message::Answered(PI_UPDATE.into(), "per_1".into(), Ok(())));
-    assert!(ui.shows("Build wants to run a command"));
+    assert!(ui.shows("Allow Build to run a command?"));
     assert!(ui.shows("ls"));
     assert!(!ui.shows("1 of 2"));
 }
@@ -652,7 +716,7 @@ fn a_cancelled_undo_leaves_the_composer_alone() {
         Ok((Vec::new(), revert)),
     ));
     assert!(ui.shows("No files change; the conversation goes back to before this prompt."));
-    ui.press("Cancel");
+    ui.press("Keep everything");
     assert!(
         ui.messages()
             .iter()

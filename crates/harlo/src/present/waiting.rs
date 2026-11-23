@@ -118,7 +118,8 @@ fn undo_card(app: &App, staged: StagedUndo<'_>) -> UndoCard {
     let note = if restores.is_empty() {
         "No files change; the conversation goes back to before this prompt."
     } else {
-        "These files are back as they were before it. Undo keeps that; Cancel puts them back."
+        "These files are already back as they were before this prompt. Undo also removes \
+         everything after it; Keep everything puts the files back."
     };
     let files: Vec<CardFile> = restores
         .iter()
@@ -174,7 +175,7 @@ fn approval_card(app: &App, asked: &Permission, count: usize) -> ApprovalCard {
     ApprovalCard {
         shown: true,
         id: asked.id.as_str().into(),
-        title: format!("{agent} wants to {}", said.wants).into(),
+        title: format!("Allow {agent} to {}?", said.wants).into(),
         count: number(count),
         detail: if asked.files.is_empty() {
             clipped_detail(&said.detail).into()
@@ -184,6 +185,9 @@ fn approval_card(app: &App, asked: &Permission, count: usize) -> ApprovalCard {
         files: model(files),
         message: asked.message.clone().unwrap_or_default().into(),
         always: always.into(),
+        always_note: "Always allow saves this for the project, for every session. \
+                      Settings → Agents → Saved approvals takes it back."
+            .into(),
         busy: app.answering.contains(&asked.id),
         refusing: refusing.is_some(),
         reason: refusing

@@ -159,10 +159,12 @@ export component PickerChip inherits Press {
     }
 }
 
-/// The shield: how much the session may do without asking.
+/// The shield: how much the session may do without asking, named beside it
+/// when it isn't the agent's own rules.
 component ShieldButton inherits Press {
     label: "Permissions";
-    width: 24px;
+    about: State.shield-label;
+    min-width: 24px;
     height: 24px;
     selected: State.picker == Pickers.shield;
     clicked => {
@@ -171,10 +173,22 @@ component ShieldButton inherits Press {
         Requests.anchor-height = self.height;
         Logic.toggle-picker(Pickers.shield);
     }
-    Icon {
-        text: State.shield-glyph;
-        font-size: 17px;
-        color: State.shield-color;
+    HorizontalLayout {
+        padding-left: State.shield-label == "" ? 0 : 4px;
+        padding-right: State.shield-label == "" ? 0 : 6px;
+        spacing: 4px;
+        Icon {
+            width: State.shield-label == "" ? 24px : 18px;
+            text: State.shield-glyph;
+            font-size: 17px;
+            color: State.shield-color;
+        }
+        if State.shield-label != "": Text {
+            text: State.shield-label;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: State.shield-color;
+        }
     }
 }
 

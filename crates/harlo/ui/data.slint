@@ -263,6 +263,8 @@ export struct ApprovalCard {
     message: string,
     /// "Always allow", or "Always allow <patterns>".
     always: string,
+    /// What "Always allow" keeps, and where to take it back.
+    always-note: string,
     busy: bool,
     /// Whether a reason for refusing is being typed.
     refusing: bool,
@@ -742,6 +744,8 @@ export global State {
     in property <[Chip]> chips;
     in property <string> shield-glyph;
     in property <color> shield-color;
+    /// The permissions mode's short name, when it isn't the agent's own.
+    in property <string> shield-label;
 
     // The open session.
     in property <string> session-id;

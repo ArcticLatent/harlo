@@ -1308,7 +1308,11 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         let press = KeyPress::new(&text, command, shift, alt);
         let message = composer.shell.try_borrow().ok().and_then(|shell| {
             let menu_open = shell.app.menu.as_ref().is_some_and(|m| !m.items.is_empty());
-            app::compose_key(&press, menu_open)
+            // The approval keys work while typing too.
+            shell
+                .app
+                .approval_key(&press)
+                .or_else(|| app::compose_key(&press, menu_open))
         });
         match message {
             // The field still pastes any text that's on the clipboard.
@@ -1337,6 +1341,9 @@ pub fn window_key(app: &App, press: &KeyPress) -> Option<Message> {
     }
     if app.sheets.open.is_some() && press.key == Key::Escape {
         return Some(Message::Sheet(app::SheetEvent::Close));
+    }
+    if let Some(message) = app.approval_key(press) {
+        return Some(message);
     }
     if app.picking_location && press.key == Key::Escape {
         return Some(Message::ToggleLocations);
