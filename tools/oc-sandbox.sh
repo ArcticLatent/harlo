@@ -6,6 +6,8 @@
 #
 # Never touches the real ~/.config/opencode, ~/.local/state/opencode or the shared
 # service: HOME and every XDG folder point inside the scratch folder.
+# The server also gets a session bus that leads nowhere, so it never reaches the
+# desktop keyring (it keeps credentials there when it can).
 set -euo pipefail
 
 VERSION=$(cat "$(dirname "$0")/../crates/opencode-client/OPENCODE_VERSION" 2>/dev/null || echo 2.3.2)
@@ -63,6 +65,7 @@ done < <(env)
 env "${unset_claude[@]}" HOME="$dir/home" XDG_CONFIG_HOME="$dir/config" XDG_DATA_HOME="$dir/data" \
   XDG_STATE_HOME="$dir/state" XDG_CACHE_HOME="$dir/cache" OPENCODE_PASSWORD="$password" \
   OPENCODE_CLAUDE_PATH="$dir/bin/claude" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=$dir/no-bus" \
   setsid "$BIN" serve --hostname 127.0.0.1 --port "$port" > "$dir/opencode.log" 2>&1 < /dev/null &
 echo $! > "$dir/opencode.pid"
 cd - > /dev/null

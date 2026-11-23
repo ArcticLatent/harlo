@@ -267,6 +267,12 @@ fn scratch_env(cmd: &mut Command, root: &Path, password: &str) {
         .env("XDG_STATE_HOME", root.join("state"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         .env("OPENCODE_PASSWORD", password)
+        // A session bus that isn't there: the server keeps credentials in
+        // the desktop's keyring when it can reach one, so it never can.
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}", root.join("no-bus").display()),
+        )
         // Claude Agent runs this instead of the real `claude`; nothing is
         // there unless a test puts a stand-in in its place.
         .env("OPENCODE_CLAUDE_PATH", root.join("bin/claude"));
