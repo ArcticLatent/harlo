@@ -248,9 +248,19 @@ component Row inherits VerticalLayout {
         }
         if root.entry.action != "": VerticalLayout {
             alignment: center;
+            clip := TextInput {
+                visible: false;
+                width: 0;
+                height: 0;
+            }
             ActionButton {
                 text: root.entry.action;
                 clicked => {
+                    if root.entry.copy != "" {
+                        clip.text = root.entry.copy;
+                        clip.select-all();
+                        clip.copy();
+                    }
                     // A menu it opens hangs from it.
                     Requests.anchor-x = self.absolute-position.x;
                     Requests.anchor-y = self.absolute-position.y;
@@ -399,6 +409,7 @@ component Row inherits VerticalLayout {
             text-size: Size.small;
             placeholder: root.entry.hint;
             text: root.entry.value;
+            secret: root.entry.on;
             accepted => { Logic.settings-text(root.entry.setting, self.text); }
         }
         VerticalLayout {

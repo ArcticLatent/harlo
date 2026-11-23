@@ -24,6 +24,7 @@ use crate::model::{compact as tokens_text, dollars as money};
 use crate::theme::color;
 use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State, ThemeCard};
 use harlo_core::git::Identity;
+use harlo_core::hosting::{Account, Service};
 use harlo_core::notifications::{Kind, VARIABLES, clock};
 
 /// How many days of activity the bars show.
@@ -815,7 +816,11 @@ fn step_rows(app: &App, step: Step) -> Vec<SheetRow> {
             }
             rows
         }
-        Step::Git => git_rows(app),
+        Step::Git => {
+            let mut rows = git_rows(app);
+            rows.extend(hosting_rows(app));
+            rows
+        }
         Step::Theme => vec![
             choice(
                 app,
@@ -864,6 +869,7 @@ fn opencode_rows(app: &App) -> Vec<SheetRow> {
 /// the model that writes commit messages.
 fn git_settings_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = git_rows(app);
+    rows.extend(hosting_rows(app));
     rows.push(heading("Undo a turn"));
     let shared = app.global_config().is_some();
     match &app.sheets.git_settings.snapshots {
@@ -915,6 +921,142 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
          is enough.",
     ));
     rows
+}
+
+/// Signing git in to GitHub, GitLab and Forgejo, where Harlo has the tools
+/// to.
+fn hosting_rows(app: &App) -> Vec<SheetRow> {
+    if app.hosting.is_none() {
+        return Vec::new();
+    }
+    let mut rows = vec![
+        heading("Git hosting"),
+        note(
+            "Sign in so git can push and pull over HTTPS; SSH remotes keep using your SSH \
+             keys. The GitHub CLI, glab or git keeps the sign-in: Harlo keeps no token.",
+        ),
+    ];
+    rows.extend(service_rows(app, Service::GitHub));
+    rows.extend(service_rows(app, Service::GitLab));
+    rows.push(field(
+        Field::GitLabHost,
+        "Server",
+        &app.preferences.gitlab_host,
+        "gitlab.com",
+    ));
+
+    let state = &app.sheets.hosting;
+    rows.push(match app.forgejo_account() {
+        Some(account) => {
+            let mut row = pair("Forgejo", &format!("Signed in as {account}"), 1);
+            row.action = "Sign out".into();
+            row.setting = crate::window::SIGN_OUT;
+            row.choice = service_index(Service::Forgejo);
+            row
+        }
+        None if state.checking_token => pair("Forgejo", "Checking the token…", 3),
+        None => pair("Forgejo", "Not signed in", 3),
+    });
+    rows.extend(outcome_row(app, Service::Forgejo));
+    rows.push(field(
+        Field::ForgejoHost,
+        "Server",
+        &app.preferences.forgejo_host,
+        "codeberg.org",
+    ));
+    if app.forgejo_account().is_none() {
+        let mut token = field(
+            Field::ForgejoToken,
+            "Token",
+            "",
+            "An access token, from the server's settings",
+        );
+        token.action = "Sign in".into();
+        token.on = true;
+        rows.push(token);
+        rows.push(note(
+            "Forgejo and Gitea sign in with an access token. git keeps it for that server, in \
+             the desktop keyring when git has its helper.",
+        ));
+    }
+    rows
+}
+
+/// GitHub's or GitLab's row: who is signed in, or the sign-in going on.
+fn service_rows(app: &App, service: Service) -> Vec<SheetRow> {
+    let state = &app.sheets.hosting;
+    let label = service.label();
+    let index = service_index(service);
+    if let Some(going) = state.signing_in.as_ref().filter(|g| g.service == service) {
+        let mut rows = Vec::new();
+        let mut waiting = match &going.code {
+            Some((code, url)) => {
+                let page = url.trim_start_matches("https://");
+                let mut row = pair(label, &format!("Enter {code} at {page}"), 0);
+                row.action = "Copy and open".into();
+                row.setting = crate::window::OPEN_SIGN_IN_PAGE;
+                row.copy = code.as_str().into();
+                rows.push(row);
+                pair("", "Waiting for you to finish on the site…", 3)
+            }
+            None => pair(label, "Starting…", 3),
+        };
+        waiting.action = "Cancel".into();
+        waiting.setting = crate::window::CANCEL_SIGN_IN;
+        rows.push(waiting);
+        return rows;
+    }
+    let mut row = match state.accounts.get(&service) {
+        Some(Load::Loaded(Account::SignedIn(name))) => {
+            let mut row = pair(label, &format!("Signed in as {name}"), 1);
+            row.action = "Sign out".into();
+            row.setting = crate::window::SIGN_OUT;
+            row
+        }
+        Some(Load::Loaded(Account::SignedOut)) => {
+            let mut row = pair(label, "Not signed in", 3);
+            if state.signing_in.is_none() {
+                row.action = "Sign in".into();
+                row.setting = crate::window::SIGN_IN;
+            }
+            row
+        }
+        Some(Load::Loaded(Account::Missing)) => pair(
+            label,
+            match service {
+                Service::GitHub => "Needs gh, the GitHub CLI",
+                Service::GitLab | Service::Forgejo => "Needs glab, GitLab's CLI",
+            },
+            2,
+        ),
+        Some(Load::Loaded(Account::NoAnswer)) => {
+            let tool = service.cli().unwrap_or_default();
+            pair(label, &format!("{tool} didn't say who is signed in"), 4)
+        }
+        Some(Load::Failed(why)) => pair(label, why, 2),
+        Some(Load::Idle | Load::Loading) | None => pair(label, "Checking…", 3),
+    };
+    row.choice = index;
+    let mut rows = vec![row];
+    rows.extend(outcome_row(app, service));
+    rows
+}
+
+/// What the last sign-in or sign-out with `service` did, if it was that one.
+fn outcome_row(app: &App, service: Service) -> Option<SheetRow> {
+    match &app.sheets.hosting.outcome {
+        Some((done, Ok(said))) if *done == service => Some(pair("", said, 1)),
+        Some((done, Err(why))) if *done == service => Some(pair("", why, 2)),
+        _ => None,
+    }
+}
+
+/// A hosting service's number, as Settings buttons carry it.
+fn service_index(service: Service) -> i32 {
+    int(Service::ALL
+        .iter()
+        .position(|s| *s == service)
+        .unwrap_or_default())
 }
 
 /// Git's version, and fields for the name and email on commits.

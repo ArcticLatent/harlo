@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
 
+use harlo_core::hosting::Service;
 use harlo_core::layout::Store;
 use harlo_core::server::{Location, PermissionReply};
 use slint::ComponentHandle as _;
@@ -227,6 +228,7 @@ fn boot(options: &Options) -> App {
         .notifying();
     app.opencode_folder = harlo_core::config::folder();
     app.git_config = harlo_core::git::Global::new();
+    app.hosting = Some(harlo_core::hosting::Hosting::new());
     app.autostart = harlo_core::autostart::folder()
         .zip(std::env::current_exe().ok())
         .map(|(folder, program)| app::Autostart {
@@ -543,6 +545,19 @@ pub const CHOOSE_COMMIT_MODEL: i32 = 23;
 /// The Settings button that lets the server's default write them again.
 pub const DEFAULT_COMMIT_MODEL: i32 = 24;
 
+/// The Settings button that signs in to the hosting service numbered by
+/// its item.
+pub const SIGN_IN: i32 = 25;
+
+/// The Settings button that signs out of the service numbered by its item.
+pub const SIGN_OUT: i32 = 26;
+
+/// The Settings button that stops the sign-in going on.
+pub const CANCEL_SIGN_IN: i32 = 27;
+
+/// The Settings button that copies the one-time code and opens its page.
+pub const OPEN_SIGN_IN_PAGE: i32 = 28;
+
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
@@ -581,6 +596,20 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         CHOOSE_COMMIT_MODEL => Some(Message::TogglePicker(Picker::CommitModel)),
         DEFAULT_COMMIT_MODEL => Some(Message::Sheet(SheetEvent::GitSettings(
             app::GitEvent::CommitModel(None),
+        ))),
+        SIGN_IN | SIGN_OUT => {
+            let service = *Service::ALL.get(usize::try_from(item).ok()?)?;
+            Some(Message::Sheet(SheetEvent::Hosting(if number == SIGN_IN {
+                app::HostingEvent::SignIn(service)
+            } else {
+                app::HostingEvent::SignOut(service)
+            })))
+        }
+        CANCEL_SIGN_IN => Some(Message::Sheet(SheetEvent::Hosting(
+            app::HostingEvent::Cancel,
+        ))),
+        OPEN_SIGN_IN_PAGE => Some(Message::Sheet(SheetEvent::Hosting(
+            app::HostingEvent::OpenPage,
         ))),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }

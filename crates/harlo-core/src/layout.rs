@@ -75,6 +75,13 @@ pub struct Preferences {
     /// The model that writes commit messages, as `provider/model`; `None`
     /// leaves it to the server's default model.
     pub commit_model: Option<String>,
+    /// The GitLab server git signs in to, as typed; empty for gitlab.com.
+    pub gitlab_host: String,
+    /// The Forgejo server, as typed; empty for codeberg.org.
+    pub forgejo_host: String,
+    /// The Forgejo sign-in made here, as `host account`: Forgejo has no
+    /// tool that says who is signed in.
+    pub forgejo_account: Option<String>,
 }
 
 impl Default for Preferences {
@@ -96,6 +103,9 @@ impl Default for Preferences {
             glass: false,
             project_models: BTreeMap::new(),
             commit_model: None,
+            gitlab_host: String::new(),
+            forgejo_host: String::new(),
+            forgejo_account: None,
         }
     }
 }

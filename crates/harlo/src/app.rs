@@ -33,6 +33,7 @@ mod commit_message;
 mod context;
 mod files;
 mod git_settings;
+mod hosting;
 mod notes;
 mod notices;
 mod projects;
@@ -53,6 +54,7 @@ pub use context::{
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use git_settings::{GitEvent, GitSettings};
+pub use hosting::{HostingEvent, HostingState, SigningIn};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use projects::{ProjectEvent, Projects, icon_url};
@@ -507,6 +509,9 @@ pub struct App {
     /// Git's global config: the user's own only in the running app, which
     /// sets it; otherwise none, so nothing reads or changes theirs.
     pub git_config: harlo_core::git::Global,
+    /// The tools that sign git in to hosting sites: only the running app
+    /// sets them; tests give scratch ones or none.
+    pub hosting: Option<harlo_core::hosting::Hosting>,
     /// Whether the desktop shows Harlo's tray icon.
     pub tray: bool,
     /// The composer's text.
@@ -642,6 +647,7 @@ impl App {
             git_config: harlo_core::git::Global::new()
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_NOSYSTEM", "1"),
+            hosting: None,
             tray: false,
             composer: TextBox::new(),
             send_error: None,

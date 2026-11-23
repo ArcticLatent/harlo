@@ -140,6 +140,9 @@ fn preferences_load_back_beside_the_layout() {
         .into_iter()
         .collect(),
         commit_model: Some("fake/fake-small".to_owned()),
+        gitlab_host: "gitlab.example.org".to_owned(),
+        forgejo_host: "http://forgejo:3000".to_owned(),
+        forgejo_account: Some("forgejo:3000 me".to_owned()),
     };
     store.save_preferences(&chosen).expect("the preferences");
     assert_eq!(store.load_preferences().expect("saved"), chosen);

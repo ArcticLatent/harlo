@@ -169,6 +169,8 @@ export component Field inherits Rectangle {
     in property <brush> fill: Theme.surface-inset-base;
     in property <brush> idle-edge: Theme.surface-inset-base;
     in property <length> text-size: Size.text;
+    /// Hides what's typed, as for a token.
+    in property <bool> secret;
     in-out property <string> text <=> input.text;
     out property <bool> has-focus: input.has-focus;
     callback edited(string);
@@ -217,6 +219,7 @@ export component Field inherits Rectangle {
             input := TextInput {
                 width: 100%;
                 single-line: true;
+                input-type: root.secret ? InputType.password : InputType.text;
                 vertical-alignment: center;
                 color: Theme.text-strong;
                 font-size: root.text-size;

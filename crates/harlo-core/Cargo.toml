@@ -20,6 +20,8 @@ dirs = { workspace = true }
 jsonc-parser = { workspace = true, features = ["cst"] }
 jiff = { workspace = true }
 similar = { workspace = true, features = ["std", "text"] }
+# Forgejo's API, over the system's TLS and certificates (company CAs included).
+reqwest = { workspace = true, features = ["native-tls", "json"] }
 
 [lints]
 workspace = true

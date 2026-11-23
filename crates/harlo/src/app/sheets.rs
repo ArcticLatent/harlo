@@ -242,11 +242,17 @@ pub enum Field {
     StartCommand,
     /// A new worktree's name.
     NewWorktree,
+    /// The GitLab server git signs in to.
+    GitLabHost,
+    /// The Forgejo server.
+    ForgejoHost,
+    /// A Forgejo access token, to sign in with.
+    ForgejoToken,
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 16] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -260,6 +266,9 @@ impl Field {
         Self::ProjectName,
         Self::StartCommand,
         Self::NewWorktree,
+        Self::GitLabHost,
+        Self::ForgejoHost,
+        Self::ForgejoToken,
     ];
 }
 
@@ -409,6 +418,8 @@ pub enum Event {
     DefaultModelSet(Result<(), String>),
     /// Something in Settings → Git.
     GitSettings(super::GitEvent),
+    /// Something about a git hosting sign-in.
+    Hosting(super::HostingEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -470,6 +481,8 @@ pub struct Sheets {
     pub projects: Projects,
     /// Settings → Git.
     pub git_settings: super::GitSettings,
+    /// Git hosting sign-ins.
+    pub hosting: super::HostingState,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -534,6 +547,7 @@ impl App {
             Event::Query(query) => self.sheets.query = query,
             Event::Switch(setting) => return self.flip(setting),
             Event::GitSettings(event) => return self.git_event(event),
+            Event::Hosting(event) => return self.hosting_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;
@@ -611,6 +625,9 @@ impl App {
             Field::ProjectName => self.set_project_text(true, value),
             Field::StartCommand => self.set_project_text(false, value),
             Field::NewWorktree => self.make_worktree(value),
+            Field::GitLabHost | Field::ForgejoHost | Field::ForgejoToken => {
+                self.hosting_text(field, value)
+            }
             Field::QuietFrom | Field::QuietTo | Field::Title(_) | Field::Message(_) => {
                 self.set_notice_text(field, value)
             }
@@ -689,7 +706,13 @@ impl App {
             Field::Message(kind) => value
                 .trim()
                 .clone_into(&mut notices.template_mut(kind).message),
-            Field::Identity(_) | Field::ProjectName | Field::StartCommand | Field::NewWorktree => {
+            Field::Identity(_)
+            | Field::ProjectName
+            | Field::StartCommand
+            | Field::NewWorktree
+            | Field::GitLabHost
+            | Field::ForgejoHost
+            | Field::ForgejoToken => {
                 return Task::none();
             }
         }

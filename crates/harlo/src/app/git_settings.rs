@@ -85,6 +85,7 @@ impl App {
         let setup = Task::perform(async move { global.setup().await }, |setup| {
             Message::Sheet(SheetEvent::Git(setup))
         });
+        let setup = Task::batch([setup, self.load_accounts()]);
         let Some(folder) = self.global_config().map(Path::to_path_buf) else {
             self.sheets.git_settings.snapshots = Load::Idle;
             return setup;

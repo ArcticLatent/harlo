@@ -537,8 +537,12 @@ export struct SheetRow {
     colors: [color],
     /// For a project (kind 9): its colour, when `on`, and its icon image,
     /// if it has one; `setting` and `choice` number the step that opens it.
+    /// For a text field (kind 6), `on` hides what's typed.
     color: color,
     picture: image,
+    /// For a name and value with a button (kind 1): text the button copies
+    /// before its step.
+    copy: string,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one
