@@ -116,6 +116,9 @@ export component PickerChip inherits Press {
     in property <Chip> chip;
     /// Small and flat, for the composer's tool row.
     in property <bool> compact;
+    /// Only the icon, for a narrow column; the name stays its label for
+    /// screen readers, and the session's header names the agent and model.
+    in property <bool> bare;
 
     label: chip.label;
     rest: root.compact ? transparent : Theme.surface-raised-strong;
@@ -132,27 +135,29 @@ export component PickerChip inherits Press {
     HorizontalLayout {
         padding-top: root.compact ? 3px : 6px;
         padding-bottom: root.compact ? 3px : 6px;
-        padding-left: root.compact ? 7px : 12px;
-        padding-right: root.compact ? 6px : 10px;
+        padding-left: root.bare ? 5px : root.compact ? 7px : 12px;
+        padding-right: root.bare ? 5px : root.compact ? 6px : 10px;
         spacing: root.compact ? 6px : 8px;
         Icon {
             text: chip.glyph;
             color: chip.glyph-color;
             font-size: root.compact ? 13px : 14px;
         }
-        Text {
+        if !root.bare: Text {
             text: chip.label;
+            // A long model name gives way before Send does.
+            overflow: elide;
             vertical-alignment: center;
             font-size: root.compact ? Size.small : Size.label;
             color: root.compact ? Theme.text-base : Theme.text-strong;
         }
-        if chip.note != "": Text {
+        if chip.note != "" && !root.bare: Text {
             text: chip.note;
             vertical-alignment: center;
             font-size: Size.small;
             color: Theme.text-weak;
         }
-        Icon {
+        if !root.bare: Icon {
             text: Icons.chevron-down;
             font-size: root.compact ? 11px : 13px;
         }

@@ -17,8 +17,8 @@ use harlo_core::timeline::Entry;
 use harlo_core::workspace::{Event, EventKind, Fetched, Form, InboxItem, Permission, Revert};
 use i_slint_backend_testing::AccessibleRole;
 use serde_json::json;
-use slint::ComponentHandle;
 use slint::platform::WindowEvent;
+use slint::{ComponentHandle, Model as _};
 use support::{Ui, demo, ui, ui_at};
 
 /// "pi update" in the demo data.
@@ -919,4 +919,41 @@ fn a_prompt_mark_jumps_down_to_a_later_question() {
         !in_view(&ui, "Question number 12"),
         "the earlier one is gone"
     );
+}
+
+#[test]
+fn a_tight_column_keeps_send_inside_the_composer() {
+    let mut app = demo::app();
+    let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
+    let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
+    let ui = ui_at(app, (1000.0, 760.0));
+    ui.open("Changes");
+
+    let field = ui
+        .find("Send a message to continue this session · Tab switches agents")
+        .into_iter()
+        .find(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
+        .expect("the composer");
+    let field_end = field.absolute_position().x + field.size().width;
+    let send = ui.button("Send");
+    let send_end = send.absolute_position().x + send.size().width;
+    assert!(
+        send_end <= field_end + 1.0,
+        "Send ends at {send_end}, past the composer's text at {field_end}"
+    );
+    // The chips shrink to their icons, still named for screen readers.
+    let chips = ui.window.global::<harlo::ui::State>().get_chips();
+    let labels: Vec<String> = (0..chips.row_count())
+        .filter_map(|i| chips.row_data(i))
+        .map(|chip| chip.label.to_string())
+        .collect();
+    assert!(!labels.is_empty(), "the composer has its chips");
+    for chip in &labels {
+        let button = ui.button(chip);
+        assert!(
+            button.size().width < 40.0,
+            "{chip} is {} wide",
+            button.size().width
+        );
+    }
 }

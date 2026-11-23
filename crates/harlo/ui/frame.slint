@@ -51,6 +51,9 @@ component TabView inherits Rectangle {
         }
         Text {
             text: (tab.modified ? "● " : "") + tab.title;
+            // Enough of a title to tell tabs apart; tabs past the strip's
+            // end are cut off rather than squeezed to a letter or two.
+            min-width: 64px;
             max-width: 220px;
             overflow: elide;
             vertical-alignment: center;

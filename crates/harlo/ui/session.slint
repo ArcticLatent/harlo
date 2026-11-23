@@ -355,6 +355,8 @@ export component SessionView inherits Rectangle {
                         PickerChip {
                             chip: chip;
                             compact: true;
+                            // Below this the names push Send out of the box.
+                            bare: root.column < 500px;
                         }
                     }
                 }
