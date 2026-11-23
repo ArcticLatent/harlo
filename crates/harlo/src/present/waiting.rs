@@ -101,8 +101,8 @@ fn files_eq(a: &ModelRc<CardFile>, b: &ModelRc<CardFile>) -> bool {
         })
 }
 
-/// The card for a staged undo: what it puts back, whose edits that
-/// overwrites, and Undo or Cancel.
+/// The card for a staged undo: what it put back, whose edits that
+/// overwrote, and Undo or Cancel undo.
 fn undo_card(app: &App, staged: StagedUndo<'_>) -> UndoCard {
     let StagedUndo {
         revert,
@@ -110,16 +110,22 @@ fn undo_card(app: &App, staged: StagedUndo<'_>) -> UndoCard {
         agent,
     } = staged;
     let session = app.active.clone().unwrap_or_default();
-    let title = match prompt {
-        Some(prompt) => format!("Undo “{}” and everything after it?", clipped(prompt)),
-        None => "Undo this prompt and everything after it?".to_owned(),
-    };
     let restores = harlo_core::undo::restores(revert, agent);
-    let note = if restores.is_empty() {
-        "No files change; the conversation goes back to before this prompt."
+    let prompt = prompt.map_or_else(|| "this prompt".to_owned(), |p| format!("“{}”", clipped(p)));
+    // OpenCode puts the files back as soon as an undo is staged, so the card
+    // says that first; only the conversation waits for the answer.
+    let (title, note) = if restores.is_empty() {
+        (
+            format!("Undo {prompt} and everything after it?"),
+            "No files change. Undo removes this prompt and everything after it from the \
+             conversation, for good.",
+        )
     } else {
-        "These files are already back as they were before this prompt. Undo also removes \
-         everything after it; Keep everything puts the files back."
+        (
+            format!("Files are back to before {prompt}"),
+            "Undo also removes this prompt and everything after it from the conversation, \
+             for good. Cancel undo puts the files back as they were.",
+        )
     };
     let files: Vec<CardFile> = restores
         .iter()
@@ -153,8 +159,23 @@ fn clipped(text: &str) -> String {
     if line.chars().count() <= PROMPT_CHARS && !text.contains('\n') {
         return line.to_owned();
     }
-    let cut: String = line.chars().take(PROMPT_CHARS).collect();
-    format!("{}…", cut.trim_end())
+    // One character more, to see whether the cut falls at a word's end.
+    let cut: String = line.chars().take(PROMPT_CHARS + 1).collect();
+    let fits = |at: usize| cut[..at].chars().count() <= PROMPT_CHARS;
+    // At the last word that fits, unless that drops more than half of it.
+    let cut = match cut.rfind(char::is_whitespace) {
+        Some(at) if line.chars().count() > PROMPT_CHARS && fits(at) && at >= cut.len() / 2 => {
+            &cut[..at]
+        }
+        _ => {
+            let end = cut
+                .char_indices()
+                .nth(PROMPT_CHARS)
+                .map_or(cut.len(), |(at, _)| at);
+            &cut[..end]
+        }
+    };
+    format!("{}…", cut.trim_end().trim_end_matches([',', ';', ':', '.']))
 }
 
 /// The card asking to allow or refuse an action.
@@ -338,4 +359,25 @@ fn number(n: usize) -> i32 {
 /// A line count as the UI's `int`.
 fn count(n: u64) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clipped;
+
+    #[test]
+    fn a_long_prompt_is_cut_at_a_word() {
+        assert_eq!(
+            clipped("Change the port to 9877"),
+            "Change the port to 9877"
+        );
+        assert_eq!(
+            clipped("Rename the configuration loader and update every caller, then run the tests"),
+            "Rename the configuration loader and update every…"
+        );
+        assert_eq!(clipped("First line\nsecond"), "First line…");
+        // One long word is cut where it must be.
+        let word = "a".repeat(60);
+        assert_eq!(clipped(&word), format!("{}…", "a".repeat(48)));
+    }
 }

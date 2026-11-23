@@ -38,6 +38,9 @@ component Card inherits Rectangle {
 export component CardButton inherits Press {
     in property <string> text;
     in property <bool> main;
+    /// Whether it does something that can't be taken back: plain, with its
+    /// label in the critical colour.
+    in property <bool> risky;
     /// The key that presses it, shown after the label; empty for none.
     in property <string> keys;
 
@@ -57,7 +60,8 @@ export component CardButton inherits Press {
             vertical-alignment: center;
             font-size: Size.label;
             font-weight: 500;
-            color: root.main ? Theme.text-on-brand-base : Theme.text-strong;
+            color: root.main ? Theme.text-on-brand-base
+                : root.risky ? Theme.risky-ink : Theme.text-strong;
         }
         if root.keys != "": Text {
             text: root.keys;
@@ -168,7 +172,8 @@ component PatchView inherits VerticalLayout {
     }
 }
 
-/// A staged undo: what it put back, whose edits that overwrote, and Undo or Cancel.
+/// A staged undo: what it put back, whose edits that overwrote, and Undo or
+/// Cancel undo. Cancel undo is the main action, since Undo can't be taken back.
 component UndoView inherits Card {
     edge: Theme.warning-edge;
     accessible-role: groupbox;
@@ -198,15 +203,16 @@ component UndoView inherits Card {
         alignment: start;
         spacing: 8px;
         CardButton {
-            text: "Undo";
+            text: "Cancel undo";
             main: true;
             enabled: !State.undo-card.busy;
-            clicked => { Logic.undo-keep(State.undo-card.session); }
+            clicked => { Logic.undo-cancel(State.undo-card.session); }
         }
         CardButton {
-            text: "Keep everything";
+            text: "Undo";
+            risky: true;
             enabled: !State.undo-card.busy;
-            clicked => { Logic.undo-cancel(State.undo-card.session); }
+            clicked => { Logic.undo-keep(State.undo-card.session); }
         }
     }
 }

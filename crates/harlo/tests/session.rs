@@ -678,7 +678,12 @@ fn undo_shows_what_goes_back_and_whose_edits_it_overwrites() {
         )],
     };
     ui.send(Message::UndoStaged(PI_UPDATE.into(), Ok((agent, revert))));
-    assert!(ui.shows("Undo “Change the port to 9877” and everything after it?"));
+    // The files are already back, and the card says so first.
+    assert!(ui.shows("Files are back to before “Change the port to 9877”"));
+    assert!(ui.shows(
+        "Undo also removes this prompt and everything after it from the conversation, \
+         for good. Cancel undo puts the files back as they were."
+    ));
     assert!(ui.shows("README.md"));
     assert!(ui.shows("This overwrites your own edits to README.md (1 line)."));
 
@@ -700,7 +705,7 @@ fn undo_shows_what_goes_back_and_whose_edits_it_overwrites() {
         kept: true,
         result: Ok(()),
     });
-    assert!(!ui.shows("Undo “Change the port to 9877” and everything after it?"));
+    assert!(!ui.shows("Files are back to before “Change the port to 9877”"));
     assert_eq!(
         ui.app().composer.text().trim(),
         "Change the port to 9877",
@@ -719,8 +724,11 @@ fn a_cancelled_undo_leaves_the_composer_alone() {
         PI_UPDATE.into(),
         Ok((Vec::new(), revert)),
     ));
-    assert!(ui.shows("No files change; the conversation goes back to before this prompt."));
-    ui.press("Keep everything");
+    assert!(ui.shows(
+        "No files change. Undo removes this prompt and everything after it from the \
+         conversation, for good."
+    ));
+    ui.press("Cancel undo");
     assert!(
         ui.messages()
             .iter()
@@ -731,7 +739,10 @@ fn a_cancelled_undo_leaves_the_composer_alone() {
         kept: false,
         result: Ok(()),
     });
-    assert!(!ui.shows("No files change; the conversation goes back to before this prompt."));
+    assert!(!ui.shows(
+        "No files change. Undo removes this prompt and everything after it from the \
+         conversation, for good."
+    ));
     assert!(ui.app().composer.text().trim().is_empty());
 }
 

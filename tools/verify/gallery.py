@@ -148,8 +148,8 @@ def scene_chat(g):
         if h.find("Undo", role="Button"):
             h.click("Undo")
             h.settle(0.8)
-            g.cap("undo-card", "The card asking to undo a turn")
-            h.click("Keep everything")
+            g.cap("undo-card", "A staged undo: files back, Cancel undo or Undo")
+            h.click("Cancel undo")
             h.settle(0.5)
 
 

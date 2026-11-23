@@ -92,6 +92,11 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
     ));
     g.set_warning_edge(color(waiting_edge(t, t.icon_warning_base)));
     g.set_question_edge(color(waiting_edge(t, t.text_interactive_base)));
+    g.set_risky_ink(color(text_on(
+        t,
+        t.icon_critical_base,
+        t.surface_raised_strong,
+    )));
     g.set_scrim(color(scrim(t)));
 }
 
@@ -180,6 +185,9 @@ const QUIET_ICON: f32 = 0.7;
 /// as ink: WCAG's minimum for icons and large text.
 const INK_CONTRAST: f64 = 3.0;
 
+/// The contrast text needs against its surface: WCAG's minimum for body text.
+const TEXT_CONTRAST: f64 = 4.5;
+
 /// How many steps an accent takes towards the strongest text when it's too
 /// faint to read; each keeps a tenth less of the accent.
 const INK_STEPS: u8 = 10;
@@ -231,6 +239,40 @@ pub fn waiting_edge(t: &Tokens, accent: Rgba) -> Rgba {
         })
         .find(|&c| stands_out(c))
         .unwrap_or(t.text_strong)
+}
+
+/// Text in `accent` that reads on `surface`: the accent itself when it
+/// reaches 4.5:1 there, otherwise mixed towards the strongest text, and
+/// past it towards black or white, until it does.
+#[must_use]
+pub fn text_on(t: &Tokens, accent: Rgba, surface: Rgba) -> Rgba {
+    let black = Rgba {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    };
+    let white = Rgba {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
+    let far = if black.contrast(surface) > white.contrast(surface) {
+        black
+    } else {
+        white
+    };
+    let steps = |from: Rgba, to: Rgba| {
+        (0..=INK_STEPS).map(move |step| {
+            let keep = 1.0 - f32::from(step) / f32::from(INK_STEPS);
+            from.over(to, keep)
+        })
+    };
+    steps(accent, t.text_strong)
+        .chain(steps(accent.over(t.text_strong, 0.5), far))
+        .find(|c| c.contrast(surface) >= TEXT_CONTRAST)
+        .unwrap_or(far)
 }
 
 /// An outline for a card of colour `surface`.
