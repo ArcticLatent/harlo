@@ -5,7 +5,7 @@
 import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, SheetRow, ThemeCard } from "data.slint";
+import { State, Logic, Requests, SheetRow, ThemeCard } from "data.slint";
 import { Field, Icon, IconButton, Press, HLine, VLine, Switch } from "widgets.slint";
 
 /// A small button with a word on it, at the end of a row.
@@ -219,7 +219,13 @@ component Row inherits VerticalLayout {
             alignment: center;
             ActionButton {
                 text: root.entry.action;
-                clicked => { Logic.settings-action(root.entry.setting); }
+                clicked => {
+                    // A menu it opens hangs from it.
+                    Requests.anchor-x = self.absolute-position.x;
+                    Requests.anchor-y = self.absolute-position.y;
+                    Requests.anchor-height = self.height;
+                    Logic.settings-action(root.entry.setting);
+                }
             }
         }
     }

@@ -212,9 +212,10 @@ fn boot(options: &Options) -> App {
         .as_ref()
         .and_then(|store| store.load_preferences().ok())
         .unwrap_or_default();
-    let app = App::new(location, locations, layout)
+    let mut app = App::new(location, locations, layout)
         .with_preferences(preferences)
         .notifying();
+    app.opencode_folder = harlo_core::config::folder();
     match store {
         Some(store) => app.saving_to(store),
         None => app,
@@ -392,6 +393,10 @@ fn claude_action_of(number: i32) -> Option<app::ClaudeAction> {
     }
 }
 
+/// The Settings action that opens the menu of models for new sessions;
+/// the Claude actions number from 0.
+pub const CHOOSE_DEFAULT_MODEL: i32 = 10;
+
 /// The setting the UI numbers `number`.
 fn setting_of(number: i32) -> Option<app::Setting> {
     match number {
@@ -527,8 +532,12 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     ));
     send_with!(on_switch_setting, |_app, number| setting_of(number)
         .map(|setting| Message::Sheet(SheetEvent::Switch(setting))));
-    send_with!(on_settings_action, |_app, number| claude_action_of(number)
-        .map(|action| Message::Claude(app::ClaudeEvent::Act(action))));
+    send_with!(on_settings_action, |_app, number| {
+        if number == CHOOSE_DEFAULT_MODEL {
+            return Some(Message::TogglePicker(Picker::DefaultModel));
+        }
+        claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action)))
+    });
     send!(on_pick_theme, |id| Message::Sheet(SheetEvent::Theme(
         id.to_string()
     )));

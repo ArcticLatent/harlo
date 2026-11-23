@@ -29,6 +29,12 @@ the private bus are logged instead of shown.
     tools/gui-drive.py restart                   restarts Harlo only (its saved layout stays)
     tools/gui-drive.py stop                      stops everything and removes the scratch folders
 
+With HARLO_GUI_SHARED=1 at `start`, Harlo takes the sandbox for the shared
+background service on this computer (a registration in Harlo's scratch state
+folder) and the sandbox's config folder for OpenCode's own, so settings that
+only apply to that service can be driven. Nothing outside the scratch
+folders is touched either way.
+
 State lives in $HARLO_GUI_STATE (default /tmp/harlo-gui.json). Each process
 runs in a systemd user scope capped at 6 GB of memory.
 """
@@ -124,9 +130,19 @@ def harlo_env(state):
 
 
 def start_harlo(state):
-    state["harlo_pid"] = spawn(
-        [state["binary"], "--server", state["url"]], harlo_env(state), f"{state['gui_root']}/harlo.log"
-    )
+    env = harlo_env(state)
+    argv = [state["binary"], "--server", state["url"]]
+    if state.get("shared"):
+        # The sandbox registered as the background service, where Harlo
+        # looks for it, and its config folder as OpenCode's.
+        registry = f"{state['gui_root']}/state/opencode"
+        os.makedirs(registry, exist_ok=True)
+        with open(f"{registry}/service.json", "w") as f:
+            json.dump({"url": state["url"], "password": state["password"]}, f)
+        os.chmod(f"{registry}/service.json", 0o600)
+        env["XDG_CONFIG_HOME"] = f"{state['sandbox']}/config"
+        argv = [state["binary"]]
+    state["harlo_pid"] = spawn(argv, env, f"{state['gui_root']}/harlo.log")
     # Wait for the window to map.
     for _ in range(100):
         found = subprocess.run(
@@ -161,6 +177,7 @@ def cmd_start(args):
         "sandbox": values["DIR"], "url": values["URL"], "password": values["PASSWORD"],
         "project": values["PROJECT"], "gui_root": gui_root, "display": free_display(),
         "binary": f"{REPO}/target/debug/harlo", "shots": 0, "clip_pids": [],
+        "shared": os.environ.get("HARLO_GUI_SHARED") == "1",
     }
     state["xvfb_pid"] = spawn(
         ["Xvfb", state["display"], "-screen", "0", f"{width}x{height}x24", "-nolisten", "tcp"],

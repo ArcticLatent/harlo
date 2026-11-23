@@ -8,6 +8,7 @@
 pub mod approvals;
 pub mod claude;
 pub mod composer;
+pub mod config;
 pub mod diff;
 pub mod files;
 pub mod git;

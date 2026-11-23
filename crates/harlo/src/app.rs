@@ -480,6 +480,10 @@ pub struct App {
     timelines: HashMap<String, Timeline>,
     /// The folder a new session starts in; `None` is the home folder.
     pub new_folder: Option<String>,
+    /// OpenCode's global config folder on this computer, which Settings may
+    /// change for the background service. Only the running app sets it;
+    /// tests give a scratch folder or none.
+    pub opencode_folder: Option<std::path::PathBuf>,
     /// The composer's text.
     pub composer: TextBox,
     /// Why the last send failed, shown under the composer.
@@ -602,6 +606,7 @@ impl App {
             active: None,
             timelines: HashMap::new(),
             new_folder: None,
+            opencode_folder: None,
             composer: TextBox::new(),
             send_error: None,
             sending: None,
@@ -706,6 +711,7 @@ impl App {
                 | Message::PickModel(_)
                 | Message::PickVariant(_)
                 | Message::PickShield(_)
+                | Message::Sheet(SheetEvent::DefaultModel(_))
         ) {
             self.picker = None;
         }
@@ -1599,7 +1605,7 @@ impl App {
                     .position(|item| item.selected)
                     .unwrap_or(0);
                 let reveal = self.reveal_highlight();
-                if picker == Picker::Model {
+                if matches!(picker, Picker::Model | Picker::DefaultModel) {
                     return Task::batch([reveal, Task::effect(Effect::Focus(model::MENU_FILTER))]);
                 }
                 return reveal;
@@ -1815,6 +1821,18 @@ impl App {
                 id: model.id.clone(),
                 variant: None,
             })
+        })
+    }
+
+    /// The model new sessions in the current folder use unless one is
+    /// picked for them: OpenCode's configured default.
+    #[must_use]
+    pub fn default_model_choice(&self) -> Option<ModelChoice> {
+        let model = self.catalog()?.default_model.as_ref()?;
+        Some(ModelChoice {
+            provider_id: model.provider_id.clone(),
+            id: model.id.clone(),
+            name: model.name.clone(),
         })
     }
 

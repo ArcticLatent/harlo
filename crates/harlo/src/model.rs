@@ -10,7 +10,7 @@ use std::fmt;
 use harlo_core::approvals::Shield;
 use harlo_core::theme::Rgba;
 
-use crate::app::{App, Message, Status, capitalized};
+use crate::app::{App, Message, SheetEvent, Status, capitalized};
 
 /// Rows a menu shows before it scrolls.
 pub const MENU_ROWS: usize = 8;
@@ -52,6 +52,8 @@ pub enum Picker {
     Model,
     /// How much the session may do without asking.
     Shield,
+    /// The model new sessions use, set in OpenCode's config from Settings.
+    DefaultModel,
 }
 
 impl Picker {
@@ -64,6 +66,7 @@ impl Picker {
             Self::Variant => 2,
             Self::Model => 3,
             Self::Shield => 4,
+            Self::DefaultModel => 5,
         }
     }
 
@@ -76,6 +79,7 @@ impl Picker {
             2 => Self::Variant,
             3 => Self::Model,
             4 => Self::Shield,
+            5 => Self::DefaultModel,
             _ => return None,
         })
     }
@@ -235,8 +239,13 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 })
                 .collect()
         }
-        Picker::Model => {
-            let current = app.current_model_choice();
+        Picker::Model | Picker::DefaultModel => {
+            let default = picker == Picker::DefaultModel;
+            let current = if default {
+                app.default_model_choice()
+            } else {
+                app.current_model_choice()
+            };
             app.models
                 .iter()
                 .filter(|model| {
@@ -246,11 +255,17 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     )
                 })
                 .map(|model| Item {
-                    selected: Some(model) == current.as_ref(),
+                    selected: current
+                        .as_ref()
+                        .is_some_and(|c| c.provider_id == model.provider_id && c.id == model.id),
                     label: model.name.clone(),
                     detail: Some(model.provider_id.clone()),
                     dot: None,
-                    message: Message::PickModel(model.clone()),
+                    message: if default {
+                        Message::Sheet(SheetEvent::DefaultModel(model.clone()))
+                    } else {
+                        Message::PickModel(model.clone())
+                    },
                 })
                 .collect()
         }

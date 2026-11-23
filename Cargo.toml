@@ -76,6 +76,8 @@ similar = { version = "3.2.1", default-features = false }
 jiff = { version = "1.0.2", default-features = false, features = ["std"] }
 rusqlite = { version = "0.43.0", default-features = false }
 dirs = { version = "7.0.0", default-features = false }
+# Edits OpenCode's config file and keeps its comments (MIT).
+jsonc-parser = { version = "0.34.0", default-features = false }
 tempfile = { version = "3.27.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 tracing = { version = "0.1.41", default-features = false }

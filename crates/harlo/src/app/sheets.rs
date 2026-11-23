@@ -8,13 +8,17 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
+use harlo_core::config;
+
 use harlo_core::layout::Appearance;
-use harlo_core::server::{McpServer, Plugin, Provider, Stats, WebSearch};
+use harlo_core::server::{Location, McpServer, Plugin, Provider, Stats, WebSearch};
 use harlo_core::theme::Mode;
 
 use super::{App, Message};
+use crate::model::ModelChoice;
 use crate::task::Task;
 
 /// A page over the window.
@@ -209,6 +213,10 @@ pub enum Event {
     Theme(String),
     /// Take option `.1` (counted from 0) of a choice.
     Choose(SettingChoice, usize),
+    /// Make this the model new sessions use, in OpenCode's global config.
+    DefaultModel(ModelChoice),
+    /// The model new sessions use was set, or why it couldn't be.
+    DefaultModelSet(Result<(), String>),
     /// Show stats for another range.
     Range(Range),
     /// Stats arrived for load `serial`.
@@ -232,6 +240,8 @@ pub struct Sheets {
     pub stats: Load<Stats>,
     /// The set-up.
     pub setup: Load<Box<SetUp>>,
+    /// Why the model new sessions use couldn't be set, if it couldn't.
+    pub model_error: Option<String>,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -312,6 +322,8 @@ impl App {
                     return self.save_preferences();
                 }
             }
+            Event::DefaultModel(model) => return self.set_default_model(&model),
+            Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
             Event::Choose(choice, option) => {
                 if self.choose(choice, option) {
                     self.retheme();
@@ -334,6 +346,31 @@ impl App {
             Event::Stats(..) | Event::SetUp(..) => {}
         }
         Task::none()
+    }
+
+    /// OpenCode's global config folder, when Harlo may change it: only for
+    /// the background service on this computer, which reads it.
+    #[must_use]
+    pub fn global_config(&self) -> Option<&Path> {
+        matches!(self.location, Location::Shared)
+            .then_some(self.opencode_folder.as_deref())
+            .flatten()
+    }
+
+    /// Sets `model` as the one new sessions use, in OpenCode's global
+    /// config, off the UI thread. The server reloads the file and says so,
+    /// which reloads the models here.
+    fn set_default_model(&mut self, model: &ModelChoice) -> Task<Message> {
+        let Some(folder) = self.global_config().map(Path::to_path_buf) else {
+            return Task::none();
+        };
+        self.sheets.model_error = None;
+        let id = format!("{}/{}", model.provider_id, model.id);
+        Task::perform(config::set_model_later(folder, Some(id)), |result| {
+            Message::Sheet(Event::DefaultModelSet(
+                result.map_err(|e| format!("Couldn't change OpenCode's config: {e}")),
+            ))
+        })
     }
 
     /// Saves Harlo's own settings, off the UI thread; a failed save keeps

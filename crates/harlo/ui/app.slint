@@ -13,7 +13,7 @@ import { Sidebar, Locations } from "sidebar.slint";
 import { DocumentTabs, TerminalStrip, PanelFrame, Grip } from "frame.slint";
 import { PanelBody } from "panels.slint";
 import { Home } from "home.slint";
-import { PickerMenu } from "composer.slint";
+import { PickerMenu, Pickers } from "composer.slint";
 import { SessionView } from "session.slint";
 
 export { Theme, Size, Fonts, Motion, Icons, State, Logic, Requests }
@@ -207,9 +207,11 @@ export component AppWindow inherits Window {
         }
 
         if State.picking-location: Locations { }
-        if State.picker >= 0: PickerMenu { }
+        if State.picker >= 0 && State.picker != Pickers.default-model: PickerMenu { }
         // Over the whole window; the rail buttons still switch pages.
         if State.sheet > 0: SheetLayer { }
+        // Opened from Settings, so over it.
+        if State.picker == Pickers.default-model: PickerMenu { }
     }
 }
 

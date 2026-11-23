@@ -471,7 +471,28 @@ fn themes_found<'a>(app: &'a App, needle: &str) -> Vec<&'a Scheme> {
 
 /// Harlo's own general settings.
 fn general_rows(app: &App) -> Vec<SheetRow> {
-    vec![
+    let mut rows = vec![heading("New sessions")];
+    let model = app.default_model_choice().map_or_else(
+        || "Chosen by OpenCode".to_owned(),
+        |m| format!("{} · {}", m.name, m.provider_id),
+    );
+    let mut row = pair("Model", &model, 0);
+    if app.global_config().is_some() {
+        row.action = "Change".into();
+        row.setting = crate::window::CHOOSE_DEFAULT_MODEL;
+    }
+    rows.push(row);
+    if let Some(why) = &app.sheets.model_error {
+        rows.push(pair("Not changed", why, 2));
+    }
+    rows.push(note(if app.global_config().is_some() {
+        "Set in OpenCode's own config, so it applies to every app using this server. A \
+         project's opencode.json can choose another; the model picked in a session wins."
+    } else {
+        "This server keeps its default model in its own opencode.json, on the computer it \
+         runs on."
+    }));
+    rows.extend([
         heading("Startup"),
         switch(
             Setting::ReopenTabs,
@@ -479,7 +500,8 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
             "Open the sessions that were open when Harlo last closed.",
             app.preferences.reopen_tabs,
         ),
-    ]
+    ]);
+    rows
 }
 
 /// The Claude subscription: Claude Code on this computer, its account, and

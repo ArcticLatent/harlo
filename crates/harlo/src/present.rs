@@ -367,6 +367,10 @@ impl Presenter {
                 .and_then(|agent| agent.description)
                 .unwrap_or_default(),
             Picker::Shield => app.current_shield().detail().to_owned(),
+            Picker::DefaultModel => {
+                "Sets OpenCode's default, for new sessions in every app using this server."
+                    .to_owned()
+            }
             Picker::Folder | Picker::Variant | Picker::Model => String::new(),
         };
         state.set_menu_note(note.into());
