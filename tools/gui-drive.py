@@ -8,7 +8,11 @@ session bus. The desktop session, its notifications and portals, the shared
 OpenCode service and the real config are never touched. Notifications sent on
 the private bus are logged instead of shown.
 
-    tools/gui-drive.py start [--size 1588x947]   build, then start everything
+    tools/gui-drive.py start [--size 1588x947] [--mcp]
+                                                 build, then start everything; with
+                                                 --mcp, Harlo is built with Slint's
+                                                 MCP server (target/mcp) and serves it
+                                                 on a loopback port (`env` prints it)
     tools/gui-drive.py shot [name]               screenshot; prints the PNG path
     tools/gui-drive.py click X Y [--right|--middle] [--double]
     tools/gui-drive.py move X Y
@@ -20,6 +24,7 @@ the private bus are logged instead of shown.
     tools/gui-drive.py key COMBO...              e.g. Return ctrl+Return Escape ctrl+v
     tools/gui-drive.py clip-text TEXT            puts text on the display's clipboard
     tools/gui-drive.py clip-image PNG            puts an image on the display's clipboard
+    tools/gui-drive.py clip-read                 prints the display's clipboard text
     tools/gui-drive.py resize W H                resizes the Harlo window
     tools/gui-drive.py api METHOD PATH [JSON]    calls the private OpenCode API
     tools/gui-drive.py file PATH TEXT            writes a file in the sandbox project
@@ -28,6 +33,9 @@ the private bus are logged instead of shown.
     tools/gui-drive.py notifications             desktop notifications Harlo sent
     tools/gui-drive.py restart                   restarts Harlo only (its saved layout stays)
     tools/gui-drive.py stop                      stops everything and removes the scratch folders
+
+With HARLO_GUI_PREFS='{"setup_done": true}' at `start`, Harlo's saved preferences
+start as that JSON (any field left out keeps its default).
 
 With HARLO_GUI_SHARED=1 at `start`, Harlo takes the sandbox for the shared
 background service on this computer (a registration in Harlo's scratch state
@@ -97,6 +105,13 @@ def xdotool(state, *args):
     subprocess.run(["xdotool", *args], env=x_env(state), check=True)
 
 
+def free_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def free_display():
     for n in range(90, 140):
         if not os.path.exists(f"/tmp/.X11-unix/X{n}") and not os.path.exists(f"/tmp/.X{n}-lock"):
@@ -123,9 +138,15 @@ def harlo_env(state):
         XDG_STATE_HOME=f"{root}/state",
         XDG_CACHE_HOME=f"{root}/cache",
         HARLO_OPENCODE_PASSWORD=state["password"],
+        # Phone access on a free port, and a relay nothing answers at: a
+        # sandbox never takes a real Harlo's port or reaches the real relay.
+        HARLO_PHONE_PORT="0",
+        HARLO_RELAY="http://127.0.0.1:9",
         DBUS_SESSION_BUS_ADDRESS=state["bus"],
         RUST_BACKTRACE="1",
     )
+    if state.get("mcp_port"):
+        env["SLINT_MCP_PORT"] = str(state["mcp_port"])
     return env
 
 
@@ -160,12 +181,18 @@ def cmd_start(args):
     if os.path.exists(STATE):
         fail(f"already started ({STATE}); run `stop` first")
     size = "1588x947"
-    if args[:1] == ["--size"]:
-        size = args[1]
+    if "--size" in args:
+        size = args[args.index("--size") + 1]
     width, height = size.split("x")
-    build = subprocess.run(scoped(["cargo", "build", "-q", "-p", "harlo"]), cwd=REPO)
-    if build.returncode != 0:
-        fail("cargo build failed")
+    mcp = "--mcp" in args
+    cargo = ["cargo", "build", "-q", "-p", "harlo"]
+    if mcp:
+        # Its own target folder: the debug build people run stays as it is.
+        cargo += ["--features", "slint/mcp", "--target-dir", f"{REPO}/target/mcp"]
+    if os.environ.get("HARLO_GUI_NOBUILD") != "1":
+        build = subprocess.run(scoped(cargo), cwd=REPO)
+        if build.returncode != 0:
+            fail("cargo build failed")
     sandbox = subprocess.run(
         [f"{REPO}/tools/oc-sandbox.sh"], capture_output=True, text=True, check=True
     ).stdout
@@ -175,18 +202,25 @@ def cmd_start(args):
         os.makedirs(f"{gui_root}/{sub}")
     state = {
         "sandbox": values["DIR"], "url": values["URL"], "password": values["PASSWORD"],
-        "project": values["PROJECT"], "gui_root": gui_root, "display": free_display(),
-        "binary": f"{REPO}/target/debug/harlo", "shots": 0, "clip_pids": [],
+        "project": values["PROJECT"], "gui_root": gui_root, "display": None,
+        "binary": f"{REPO}/target/{'mcp/' if mcp else ''}debug/harlo", "shots": 0, "clip_pids": [],
+        "mcp_port": free_port() if mcp else None,
         "shared": os.environ.get("HARLO_GUI_SHARED") == "1",
     }
-    state["xvfb_pid"] = spawn(
-        ["Xvfb", state["display"], "-screen", "0", f"{width}x{height}x24", "-nolisten", "tcp"],
-        dict(os.environ), f"{gui_root}/xvfb.log",
-    )
-    for _ in range(50):
-        if os.path.exists(f"/tmp/.X11-unix/X{state['display'][1:]}"):
-            break
-        time.sleep(0.1)
+    # Several drivers may start at once: one at a time picks a free display
+    # and holds it until its Xvfb has taken it.
+    import fcntl
+    with open("/tmp/harlo-gui-display.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state["display"] = free_display()
+        state["xvfb_pid"] = spawn(
+            ["Xvfb", state["display"], "-screen", "0", f"{width}x{height}x24", "-nolisten", "tcp"],
+            dict(os.environ), f"{gui_root}/xvfb.log",
+        )
+        for _ in range(50):
+            if os.path.exists(f"/tmp/.X11-unix/X{state['display'][1:]}"):
+                break
+            time.sleep(0.1)
     # A private session bus: notifications and portals never reach the desktop.
     # It starts no services, so asking for one (a portal, the keyring) fails
     # instead of starting the desktop's own with the real home and screen.
@@ -211,11 +245,27 @@ def cmd_start(args):
         dict(os.environ), f"{gui_root}/notifications.log",
     )
     save(state)
+    if os.environ.get("HARLO_GUI_PREFS"):
+        seed_preferences(gui_root, os.environ["HARLO_GUI_PREFS"])
     start_harlo(state)
     xdotool(state, "windowmove", state["window"], "0", "0")
     xdotool(state, "windowsize", state["window"], width, height)
     save(state)
     print(f"started: display {state['display']}, server {state['url']}, project {state['project']}")
+
+
+def seed_preferences(gui_root, text):
+    """Saves Harlo's preferences where it reads them, before it starts."""
+    import sqlite3
+    json.loads(text)
+    folder = f"{gui_root}/state/harlo"
+    os.makedirs(folder, exist_ok=True)
+    with sqlite3.connect(f"{folder}/harlo.db") as db:
+        db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS notes (location TEXT NOT NULL, folder TEXT NOT NULL, "
+                   "text TEXT NOT NULL, PRIMARY KEY (location, folder))")
+        db.execute("INSERT INTO settings (key, value) VALUES ('preferences', ?) "
+                   "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (text,))
 
 
 # The private bus's config: a session bus that anyone on it may use, with no
@@ -327,6 +377,13 @@ def cmd_clip_text(args):
     own_clipboard(state, ["xclip", "-selection", "clipboard"], " ".join(args).encode())
 
 
+def cmd_clip_read(_args):
+    state = load()
+    out = subprocess.run(["xclip", "-selection", "clipboard", "-o"], env=x_env(state),
+                         capture_output=True, text=True, timeout=10)
+    print(out.stdout, end="")
+
+
 def cmd_clip_image(args):
     state = load()
     with open(args[0], "rb") as f:
@@ -366,8 +423,9 @@ def cmd_file(args):
 
 def cmd_env(_args):
     state = load()
-    for key in ("display", "url", "project", "sandbox", "gui_root"):
-        print(f"{key}={state[key]}")
+    for key in ("display", "url", "password", "project", "sandbox", "gui_root", "mcp_port"):
+        if state.get(key) is not None:
+            print(f"{key}={state[key]}")
 
 
 def cmd_log(args):
@@ -433,7 +491,8 @@ def cmd_stop(_args):
 COMMANDS = {
     "start": cmd_start, "shot": cmd_shot, "click": cmd_click, "move": cmd_move,
     "drag": cmd_drag, "down": cmd_down, "up": cmd_up, "scroll": cmd_scroll, "type": cmd_type, "key": cmd_key,
-    "clip-text": cmd_clip_text, "clip-image": cmd_clip_image, "resize": cmd_resize,
+    "clip-text": cmd_clip_text, "clip-image": cmd_clip_image, "clip-read": cmd_clip_read,
+    "resize": cmd_resize,
     "api": cmd_api, "file": cmd_file, "env": cmd_env, "log": cmd_log,
     "notifications": cmd_notifications,
     "restart": cmd_restart, "stop": cmd_stop,

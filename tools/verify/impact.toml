@@ -1,0 +1,46 @@
+# `verify.sh changed`: which checks a changed path calls for. Every rule
+# whose globs match a changed path adds its checks; a path no rule matches
+# adds `default`. Paths are the repository's, changed since the last green
+# run (target/verify/last-green.json), or since main without one.
+
+default = ["lint:*", "unit:*", "window:*"]
+
+[[rule]]
+paths = ["*.md", "docs/**", "packaging/**", ".github/**", "LICENSE*", "*.txt"]
+checks = []
+
+[[rule]]
+paths = ["crates/opencode-client/**"]
+checks = ["lint:*", "unit:*", "window:*"]
+
+[[rule]]
+paths = ["crates/harlo-core/**"]
+checks = ["lint:*", "unit:harlo-core", "unit:harlo", "window:*"]
+
+[[rule]]
+paths = ["crates/harlo-core/src/phone*", "crates/harlo-core/src/phone/**"]
+checks = ["unit:harlo-core", "unit:harlo", "window:phone"]
+
+[[rule]]
+paths = ["crates/harlo/**"]
+checks = ["lint:*", "unit:harlo", "window:*"]
+
+[[rule]]
+paths = ["Cargo.toml", "Cargo.lock"]
+checks = ["lint:*", "unit:*", "window:*"]
+
+[[rule]]
+paths = ["tools/verify/scenarios/real_*"]
+checks = ["real:*"]
+
+[[rule]]
+paths = ["tools/verify/scenarios/*"]
+checks = ["window:*"]
+
+[[rule]]
+paths = ["tools/verify/*", "tools/gui-drive.py", "tools/oc-sandbox.sh", "tools/fake-model.py"]
+checks = ["window:*"]
+
+[[rule]]
+paths = ["tools/opencode-bump.sh", "crates/opencode-client/OPENCODE_VERSION"]
+checks = ["lint:*", "unit:*", "window:*", "real:*"]

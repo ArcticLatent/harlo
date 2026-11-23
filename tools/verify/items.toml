@@ -1,0 +1,185 @@
+# Every feature of Harlo, as checks verify.sh runs. The report lists these
+# features with what their checks said, so it shows which features are
+# covered, not just which tests passed. `verify.sh list` warns about a test
+# file or scenario no feature names.
+#
+# Check names (see verify.py):
+#   lint:fmt, lint:clippy
+#   unit:<crate>[:<test file>]   e.g. unit:harlo:session, unit:harlo-core:phone
+#   window:<scenario>            tools/verify/scenarios/<scenario>.py
+#   real:<scenario>              tools/verify/scenarios/real_<scenario>.py
+
+[[item]]
+id = "code"
+title = "Code: formatted, and clippy finds nothing (warnings are errors)"
+checks = ["lint:fmt", "lint:clippy"]
+
+[[item]]
+id = "server"
+title = "The OpenCode server: attaching to the shared one, its address and password, following its events, reconnecting"
+checks = ["unit:opencode-client:m0", "unit:opencode-client:endpoint", "unit:harlo-core:follow", "unit:harlo-core:workspace", "unit:harlo:server_sheets", "window:sessions"]
+
+[[item]]
+id = "start"
+title = "First start: the setup guide (OpenCode, models, git, theme), skipped for good"
+checks = ["window:start_guide", "unit:harlo:setup", "unit:harlo-core:autostart"]
+
+[[item]]
+id = "sessions"
+title = "Sessions: a new one from the start screen, a reply, its title in the sidebar and tab; opening, filtering, closing tabs"
+checks = ["window:sessions", "unit:harlo:session", "unit:harlo:shell", "unit:harlo-core:sessions", "unit:harlo-core:history", "real:reply"]
+
+[[item]]
+id = "answers"
+title = "Answers: Markdown, thoughts, tool calls folded into a summary, streaming"
+checks = ["window:answers", "unit:harlo-core:timeline", "unit:opencode-client:m3"]
+
+[[item]]
+id = "approvals"
+title = "Approvals: a command waits for Allow once / Always / Deny with a reason"
+checks = ["window:approvals", "unit:harlo:session", "unit:harlo-core:approvals", "unit:opencode-client:approvals", "real:approval"]
+
+[[item]]
+id = "questions"
+title = "Questions: the agent asks, the card takes the answer"
+checks = ["window:questions", "unit:harlo:session", "real:question"]
+
+[[item]]
+id = "queue"
+title = "A busy session: queue, steer, cancel, Stop"
+checks = ["window:queue", "unit:harlo:session", "unit:opencode-client:m3", "real:stop"]
+
+[[item]]
+id = "composer"
+title = "The composer: / and @ menus, agent, model and shield pickers, attachments, pasted pictures"
+checks = ["window:composer", "unit:harlo:menu", "unit:harlo-core:composer", "unit:harlo-core:catalog"]
+
+[[item]]
+id = "undo"
+title = "Undo a turn: the conversation and files go back"
+checks = ["unit:harlo:session", "unit:harlo-core:undo"]
+
+[[item]]
+id = "panels"
+title = "The right panel: Context, Todos, Changes, Files, Notes; maximize and restore; the sidebar hides"
+checks = ["window:panels", "unit:harlo:panels", "unit:harlo:arrange", "unit:harlo-core:instructions"]
+
+[[item]]
+id = "changes"
+title = "Changes and git: this session's and uncommitted changes, diffs, commit (with a name from Settings → Git), push"
+checks = ["window:changes", "unit:harlo:changes", "unit:harlo-core:git", "unit:harlo-core:diff", "unit:opencode-client:git"]
+
+[[item]]
+id = "files"
+title = "Files and the editor: the project tree, editor tabs, unsaved changes, Ctrl+S, changes on disk"
+checks = ["window:files_editor", "unit:harlo:files", "unit:harlo-core:files"]
+
+[[item]]
+id = "terminal"
+title = "The terminal: a shell in the project, tabs, hide and show, copy and paste"
+checks = ["window:terminal", "unit:harlo:terminal", "unit:harlo:server_terminal", "unit:harlo-core:terminal"]
+
+[[item]]
+id = "notes"
+title = "Notes: a note per project with todos, kept across restarts, inserted into a message"
+checks = ["window:notes", "unit:harlo:notes", "unit:harlo-core:notes"]
+
+[[item]]
+id = "layout"
+title = "The window: layout and tabs kept across restarts, a narrow window, motion"
+checks = ["window:restart", "window:narrow", "unit:harlo:window", "unit:harlo:arrange", "unit:harlo:motion", "unit:harlo-core:layout"]
+
+[[item]]
+id = "settings"
+title = "Settings: every section opens; search finds a setting; Escape closes"
+checks = ["window:settings_sections", "unit:harlo:sheets"]
+
+[[item]]
+id = "appearance"
+title = "Appearance: light and dark, Base16/Base24 colour themes, contrast, sizes, glass"
+checks = ["window:appearance", "unit:harlo:appearance", "unit:harlo-core:theme"]
+
+[[item]]
+id = "pages"
+title = "The Keyboard shortcuts and Stats pages"
+checks = ["window:pages", "unit:harlo:sheets"]
+
+[[item]]
+id = "notifications"
+title = "Notifications: finished runs, approvals and questions; templates, quiet hours, sound"
+checks = ["window:notifications", "unit:harlo:notices", "unit:harlo-core:notifications"]
+
+[[item]]
+id = "tray"
+title = "The tray: Harlo keeps running with its window closed; one instance at a time"
+checks = ["unit:harlo:tray", "unit:harlo:instance"]
+
+[[item]]
+id = "projects"
+title = "Projects and worktrees: add, colour, icon, models per project, remove"
+checks = ["unit:harlo:projects", "unit:opencode-client:projects", "unit:harlo-core:location", "unit:harlo-core:config"]
+
+[[item]]
+id = "providers"
+title = "Providers: sign in with a key, OAuth or a form; remove"
+checks = ["unit:harlo:providers", "unit:opencode-client:integrations"]
+
+[[item]]
+id = "agents"
+title = "Agents and remembered approvals"
+checks = ["unit:harlo:agents"]
+
+[[item]]
+id = "mcp"
+title = "MCP servers: the catalog, one's own server, connect, turn off, remove"
+checks = ["unit:harlo:mcp"]
+
+[[item]]
+id = "own-tools"
+title = "Harlo's own tools for agents, over MCP"
+checks = ["unit:harlo:own_tools", "unit:harlo-core:own_tools"]
+
+[[item]]
+id = "plugins"
+title = "Plugins: check and update"
+checks = ["unit:harlo:plugins"]
+
+[[item]]
+id = "claude"
+title = "Claude Code through OpenCode: found, signed in, used as a model"
+checks = ["unit:harlo:claude", "unit:harlo:server_claude", "unit:harlo-core:claude", "real:reply"]
+
+[[item]]
+id = "hosting"
+title = "Git hosting sign-in: GitHub, GitLab, Forgejo"
+checks = ["unit:harlo:hosting", "unit:harlo-core:hosting"]
+
+[[item]]
+id = "schedules"
+title = "Schedules: allowed, made, paused, resumed, deleted on OpenCode's server"
+checks = ["window:schedules", "unit:harlo:schedules", "unit:harlo-core:schedules", "unit:opencode-client:automations"]
+
+[[item]]
+id = "voice"
+title = "Voice: dictation into the composer with a local model"
+checks = ["unit:harlo:voice", "unit:harlo-core:voice"]
+
+[[item]]
+id = "local-models"
+title = "Local models: Ollama and llama.cpp installed, served, models that fit"
+checks = ["unit:harlo:local_models", "unit:harlo-core:local_models", "unit:harlo-core:local_models_real"]
+
+[[item]]
+id = "computers"
+title = "Other computers over SSH: added, followed, removed"
+checks = ["unit:harlo:computers", "unit:harlo-core:ssh"]
+
+[[item]]
+id = "phone"
+title = "Phone: access on, pairing by QR code or link, devices, relay, test notification"
+checks = ["window:phone", "unit:harlo:phone", "unit:harlo-core:phone", "unit:harlo-core:phone_relay"]
+
+[[item]]
+id = "opencode-api"
+title = "The OpenCode v2 client's other endpoints: sessions, history, files, config"
+checks = ["unit:opencode-client:m4", "unit:opencode-client:m6", "unit:opencode-client:m7"]
