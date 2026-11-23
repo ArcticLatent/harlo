@@ -812,12 +812,53 @@ fn shortcuts() -> Vec<SheetRow> {
 
 /// The server Harlo follows, and how the connection stands.
 fn server_rows(app: &App) -> Vec<SheetRow> {
-    let mut rows = vec![pair("Address", &app.location.label(), 0), status_row(app)];
+    let address = match &app.location {
+        Location::Ssh { target } => format!("ssh {target}"),
+        other => other.label(),
+    };
+    let mut rows = vec![pair("Address", &address, 0), status_row(app)];
     rows.push(note(
         "Harlo attaches to this shared OpenCode server and leaves it running when it closes. \
          Its settings apply to every app that uses it.",
     ));
+    computer_rows(app, &mut rows);
     rows
+}
+
+/// The other computers Harlo follows over SSH, and adding one.
+fn computer_rows(app: &App, rows: &mut Vec<SheetRow>) {
+    rows.push(heading("Other computers"));
+    rows.push(note(
+        "Harlo follows OpenCode's shared service on another computer over SSH, with your SSH \
+         config, keys and agent; it can't answer a password prompt. If no service runs there, \
+         Harlo starts it, as it does here, and never stops it. Pick a computer in the list at \
+         the top of the sidebar.",
+    ));
+    for (index, target) in app.preferences.computers.iter().enumerate() {
+        let location = Location::Ssh {
+            target: target.clone(),
+        };
+        let mut row = if app.location == location {
+            pair(&location.label(), "Following", 1)
+        } else {
+            pair(&location.label(), &format!("ssh {target}"), 3)
+        };
+        row.action = "Remove".into();
+        row.setting = crate::window::REMOVE_COMPUTER;
+        row.choice = int(index);
+        rows.push(row);
+    }
+    let mut add = field(
+        Field::Computer,
+        "Computer",
+        "",
+        "me@host, or a name from ~/.ssh/config",
+    );
+    add.action = "Add and follow".into();
+    rows.push(add);
+    if let Some(why) = &app.sheets.computer_error {
+        rows.push(pair("Not added", why, 2));
+    }
 }
 
 /// How the connection to the server stands.

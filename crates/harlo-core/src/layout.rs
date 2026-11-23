@@ -97,6 +97,9 @@ pub struct Preferences {
     pub local_servers: Vec<String>,
     /// The model file llama.cpp's server serves.
     pub llamacpp_model: String,
+    /// Other computers whose shared OpenCode service Harlo follows over
+    /// SSH, each as what follows `ssh` to reach it.
+    pub computers: Vec<String>,
 }
 
 impl Default for Preferences {
@@ -127,6 +130,7 @@ impl Default for Preferences {
             local_engine: crate::local_models::Engine::Ollama.id().to_owned(),
             local_servers: Vec::new(),
             llamacpp_model: String::new(),
+            computers: Vec::new(),
         }
     }
 }

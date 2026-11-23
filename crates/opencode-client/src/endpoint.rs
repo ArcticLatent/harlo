@@ -36,6 +36,13 @@ impl Endpoint {
         &self.url
     }
 
+    /// The same server, with its password, reached at `url` instead: the
+    /// local end of a tunnel to it.
+    #[must_use]
+    pub fn at(&self, url: impl Into<String>) -> Self {
+        Self::new(url, self.password.clone())
+    }
+
     pub(crate) fn password(&self) -> Option<&str> {
         self.password.as_deref()
     }
@@ -95,9 +102,19 @@ pub fn read_registration(path: &Path) -> Result<Option<SharedService>, Error> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e.into()),
     };
-    let registration: Registration = serde_json::from_str(&text)?;
-    Ok(Some(SharedService {
+    parse_registration(&text).map(Some)
+}
+
+/// Reads a shared service's registration from `text`, the contents of its
+/// `service.json`, such as one read on another computer.
+///
+/// # Errors
+///
+/// Returns an error when `text` isn't a registration.
+pub fn parse_registration(text: &str) -> Result<SharedService, Error> {
+    let registration: Registration = serde_json::from_str(text)?;
+    Ok(SharedService {
         endpoint: Endpoint::new(registration.url, registration.password),
         version: registration.version,
-    }))
+    })
 }

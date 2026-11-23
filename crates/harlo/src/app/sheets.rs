@@ -293,11 +293,13 @@ pub enum Field {
     McpCommand,
     /// A new MCP server's address.
     McpUrl,
+    /// Another computer to follow, as what follows `ssh`.
+    Computer,
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -330,6 +332,7 @@ impl Field {
         Self::McpName,
         Self::McpCommand,
         Self::McpUrl,
+        Self::Computer,
     ];
 }
 
@@ -524,6 +527,8 @@ pub enum Event {
     Mcp(super::McpEvent),
     /// Something about the plugins.
     Plugin(super::PluginEvent),
+    /// Something happened to the other computers Harlo follows.
+    Computer(super::ComputerEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -573,6 +578,8 @@ pub struct Sheets {
     pub model_error: Option<String>,
     /// Why starting at login couldn't be changed, if it couldn't.
     pub autostart_error: Option<String>,
+    /// Why a computer couldn't be added, if it couldn't.
+    pub computer_error: Option<String>,
     /// The setup guide's step.
     pub step: Step,
     /// Git on this computer, for the guide.
@@ -678,6 +685,7 @@ impl App {
             Event::Approval(event) => return self.approval_event(event),
             Event::Mcp(event) => return self.mcp_event(event),
             Event::Plugin(event) => return self.plugin_event(event),
+            Event::Computer(event) => return self.computer_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;
@@ -787,6 +795,7 @@ impl App {
                 self.provider_text(field, value)
             }
             Field::McpName | Field::McpCommand | Field::McpUrl => self.mcp_text(field, value),
+            Field::Computer => self.add_computer(value),
             Field::QuietFrom | Field::QuietTo | Field::Title(_) | Field::Message(_) => {
                 self.set_notice_text(field, value)
             }
@@ -882,7 +891,8 @@ impl App {
             | Field::SignInAnswer(_)
             | Field::McpName
             | Field::McpCommand
-            | Field::McpUrl => {
+            | Field::McpUrl
+            | Field::Computer => {
                 return Task::none();
             }
         }

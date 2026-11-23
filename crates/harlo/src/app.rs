@@ -31,6 +31,7 @@ mod arrange;
 mod changes;
 mod claude;
 mod commit_message;
+mod computers;
 mod context;
 mod files;
 mod git_settings;
@@ -59,6 +60,7 @@ pub use changes::{
 };
 pub use claude::{Action as ClaudeAction, Claude, Event as ClaudeEvent};
 pub use commit_message::{clean_message, commit_prompt};
+pub use computers::ComputerEvent;
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
@@ -753,6 +755,15 @@ impl App {
     pub fn with_preferences(mut self, preferences: Preferences) -> Self {
         self.preferences = preferences;
         self.retheme();
+        // The computers added in Settings → Server join the picker.
+        for target in &self.preferences.computers {
+            let location = Location::Ssh {
+                target: target.clone(),
+            };
+            if !self.locations.contains(&location) {
+                self.locations.push(location);
+            }
+        }
         self
     }
 

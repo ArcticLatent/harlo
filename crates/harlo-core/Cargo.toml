@@ -29,6 +29,8 @@ hex = { workspace = true }
 # from their release archives.
 llmfit-core = { workspace = true }
 which = { workspace = true }
+# What follows `ssh` for another computer, split as a shell would.
+shell-words = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }
 ruzstd = { workspace = true }
@@ -39,6 +41,7 @@ transcribe-rs = { workspace = true, features = ["whisper-cpp"] }
 workspace = true
 
 [dev-dependencies]
+shell-words = { workspace = true }
 ruzstd = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }

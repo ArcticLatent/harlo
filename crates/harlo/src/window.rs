@@ -695,8 +695,12 @@ pub const SERVE_LOCAL_MODEL: i32 = 67;
 /// (item 1) or takes it out (item 0).
 pub const LOCAL_PROVIDER: i32 = 68;
 
-/// The step a local models Settings button numbered `number` takes for
-/// item `item`.
+/// The Settings button that forgets the other computer numbered by its
+/// item.
+pub const REMOVE_COMPUTER: i32 = 69;
+
+/// The step a Settings button for this computer's models or other
+/// computers, numbered `number`, takes for item `item`.
 fn local_action(number: i32, item: i32) -> Option<Message> {
     let index = usize::try_from(item).ok();
     let engine = || index.and_then(|i| harlo_core::local_models::Engine::ALL.get(i).copied());
@@ -708,6 +712,11 @@ fn local_action(number: i32, item: i32) -> Option<Message> {
         STOP_LOCAL_MODEL => app::LocalEvent::StopGet,
         SERVE_LOCAL_MODEL => app::LocalEvent::Serve(index?),
         LOCAL_PROVIDER => app::LocalEvent::Provider(item == 1),
+        REMOVE_COMPUTER => {
+            return Some(Message::Sheet(SheetEvent::Computer(
+                app::ComputerEvent::Remove(index?),
+            )));
+        }
         _ => return None,
     };
     Some(Message::Local(event))
@@ -871,7 +880,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
-        INSTALL_ENGINE..=LOCAL_PROVIDER => local_action(number, item),
+        INSTALL_ENGINE..=REMOVE_COMPUTER => local_action(number, item),
         CHECK_PLUGINS => Some(Message::Sheet(SheetEvent::Plugin(app::PluginEvent::Check))),
         UPDATE_PLUGIN => Some(Message::Sheet(SheetEvent::Plugin(
             app::PluginEvent::Update(usize::try_from(item).ok()),

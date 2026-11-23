@@ -21,6 +21,7 @@ use opencode_client::{Event, read_registration, registration_path};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::ssh;
 use crate::workspace::{Fetch, Fetched, Snapshot};
 
 #[doc(inline)]
@@ -51,6 +52,12 @@ pub enum Location {
         /// The server password, if it has one.
         password: Option<String>,
     },
+    /// The shared service on another computer, reached over SSH: what
+    /// follows `ssh` to reach it, such as `buildbox` or `me@10.0.0.5`.
+    Ssh {
+        /// The computer, as `ssh` takes it.
+        target: String,
+    },
 }
 
 impl std::fmt::Debug for Location {
@@ -62,6 +69,7 @@ impl std::fmt::Debug for Location {
                 .field("url", url)
                 .field("password", &password.as_ref().map(|_| "…"))
                 .finish(),
+            Self::Ssh { target } => f.debug_struct("Ssh").field("target", target).finish(),
         }
     }
 }
@@ -80,6 +88,7 @@ impl Location {
                 };
                 matches!(host, "localhost" | "::1") || host.starts_with("127.")
             }
+            Self::Ssh { .. } => false,
         }
     }
 
@@ -93,6 +102,7 @@ impl Location {
                 .trim_start_matches("https://")
                 .trim_end_matches('/')
                 .to_owned(),
+            Self::Ssh { target } => crate::ssh::destination(target),
         }
     }
 }
@@ -221,8 +231,9 @@ async fn session(
     tx: &mpsc::UnboundedSender<Update>,
     started_service: &mut bool,
 ) -> Result<Result<String, String>, Detached> {
-    let client = match reach(location, started_service).await {
-        Ok(client) => client,
+    // A tunnel to another computer stays open while the connection lasts.
+    let (client, _tunnel) = match reach(location, started_service).await {
+        Ok(reached) => reached,
         Err(reason) => return Ok(Err(reason)),
     };
     let version = match client.info().await {
@@ -262,15 +273,20 @@ async fn session(
     Ok(Ok("the server closed the connection".to_owned()))
 }
 
-/// Finds and checks the server for `location`.
-async fn reach(location: &Location, started_service: &mut bool) -> Result<Client, String> {
+/// Finds and checks the server for `location`, with the tunnel that
+/// reaches it on another computer.
+async fn reach(
+    location: &Location,
+    started_service: &mut bool,
+) -> Result<(Client, Option<ssh::Tunnel>), String> {
     match location {
-        Location::Server { url, password } => {
-            Ok(Client::new(Endpoint::new(url.clone(), password.clone())))
-        }
+        Location::Server { url, password } => Ok((
+            Client::new(Endpoint::new(url.clone(), password.clone())),
+            None,
+        )),
         Location::Shared => {
             if let Some(client) = shared().await? {
-                return Ok(client);
+                return Ok((client, None));
             }
             // Starting the shared service when none runs is what OpenCode's own
             // clients do; Harlo never stops or restarts one.
@@ -278,10 +294,28 @@ async fn reach(location: &Location, started_service: &mut bool) -> Result<Client
                 *started_service = true;
                 start_service().await?;
                 if let Some(client) = shared().await? {
-                    return Ok(client);
+                    return Ok((client, None));
                 }
             }
             Err("OpenCode's background service isn't running".to_owned())
+        }
+        Location::Ssh { target } => {
+            let mut service = ssh::registered(target).await?;
+            // Started there as here, once; never stopped.
+            if service.is_none() && !*started_service {
+                *started_service = true;
+                ssh::start_service(target).await?;
+                service = ssh::registered(target).await?;
+            }
+            let Some(service) = service else {
+                return Err(format!(
+                    "OpenCode's background service isn't running on {}",
+                    ssh::destination(target)
+                ));
+            };
+            let tunnel = ssh::Tunnel::open(target, service.endpoint.url()).await?;
+            let client = Client::new(service.endpoint.at(tunnel.url()));
+            Ok((client, Some(tunnel)))
         }
     }
 }

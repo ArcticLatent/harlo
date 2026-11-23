@@ -42,7 +42,9 @@ pub use catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 #[doc(inline)]
 pub use client::{Client, Events};
 #[doc(inline)]
-pub use endpoint::{Endpoint, SharedService, read_registration, registration_path};
+pub use endpoint::{
+    Endpoint, SharedService, parse_registration, read_registration, registration_path,
+};
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]

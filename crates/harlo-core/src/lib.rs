@@ -25,6 +25,7 @@ pub mod own_tools;
 pub mod schedules;
 pub mod server;
 pub mod sessions;
+pub mod ssh;
 pub mod terminal;
 pub mod theme;
 pub mod timeline;

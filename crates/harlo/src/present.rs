@@ -446,6 +446,7 @@ fn location_icon(location: &Location) -> Icon {
     match location {
         Location::Shared => Icon::Monitor,
         Location::Server { .. } => Icon::Server,
+        Location::Ssh { .. } => Icon::MonitorCloud,
     }
 }
 
@@ -454,6 +455,7 @@ fn location_detail(location: &Location) -> &'static str {
     match location {
         Location::Shared => "OpenCode's background service on this computer",
         Location::Server { .. } => "Server given with --server",
+        Location::Ssh { .. } => "OpenCode's background service there, over SSH",
     }
 }
 

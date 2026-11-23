@@ -52,6 +52,7 @@ slint-build = { workspace = true, features = ["compat-1-18", "renderer-software"
 lucide-icons = { workspace = true }
 
 [dev-dependencies]
+shell-words = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 flate2 = { workspace = true }
