@@ -217,8 +217,6 @@ component CommentField inherits Rectangle {
             min-height: 30px;
             placeholder: "Comment on this line";
             text-size: Size.small;
-            fill: Theme.background-base;
-            idle-edge: Theme.border-weak-base;
             init => { self.focus(); }
             accepted => { Logic.change-comment-add(self.text); }
         }

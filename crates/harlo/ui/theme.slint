@@ -61,6 +61,15 @@ export global Theme {
     // Mixed from the tokens above.
     /// A chip's fill under the pointer.
     in property <color> chip-hover: #2e2e2e;
+    /// A button's, chip's or picker's faint fill, and its outline at rest
+    /// and under the pointer: controls are outlined, not filled.
+    in property <color> control-fill: #d2d3d508;
+    in property <color> control-edge: #3a3b3e;
+    in property <color> control-edge-hover: #46484b;
+    /// A text field's fill: a little sunken into what it sits on.
+    in property <color> field-fill: #1c1d1f8c;
+    /// The outline of a button for something that can't be taken back.
+    in property <color> risky-edge: #584046;
     /// The fill of a menu card, and its outline.
     in property <color> menu-fill: #252628;
     in property <color> menu-edge: #414449;

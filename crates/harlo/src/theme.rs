@@ -76,6 +76,15 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
         t.surface_base_hover
             .over(t.surface_raised_strong, t.surface_base_hover.a),
     ));
+    g.set_control_fill(color(t.text_base.alpha(CONTROL_FILL)));
+    g.set_control_edge(color(t.text_base.over(t.border_weak_base, CONTROL_EDGE)));
+    g.set_control_edge_hover(color(
+        t.text_base.over(t.border_weak_base, CONTROL_EDGE_HOVER),
+    ));
+    g.set_field_fill(color(t.background_base.alpha(FIELD_FILL)));
+    g.set_risky_edge(color(
+        t.icon_critical_base.over(t.surface_raised_base, RISKY_EDGE),
+    ));
     let menu = menu_fill(t);
     g.set_menu_fill(color(menu));
     g.set_menu_edge(color(edge(t, menu)));
@@ -206,6 +215,25 @@ const SELECTED_TINT: f32 = 0.14;
 
 /// How much of the interactive colour tints the user's own prompts.
 const PROMPT_TINT: f32 = 0.075;
+
+/// How opaque the text colour's wash in a button or chip is: just enough
+/// to set it off from what it sits on, its outline doing the rest.
+const CONTROL_FILL: f32 = 0.03;
+
+/// How much of the text colour a control's outline mixes into the outline
+/// colour, at rest and under the pointer.
+const CONTROL_EDGE: f32 = 0.06;
+
+/// See [`CONTROL_EDGE`].
+const CONTROL_EDGE_HOVER: f32 = 0.13;
+
+/// How opaque the background is in a text field, which sinks it a little
+/// into a raised surface such as a dialog.
+const FIELD_FILL: f32 = 0.55;
+
+/// How much of the critical colour outlines a button for something that
+/// can't be taken back.
+const RISKY_EDGE: f32 = 0.3;
 
 /// How much of the outline colour lifts a menu above the raised surface.
 const MENU_LIFT: f32 = 0.2;

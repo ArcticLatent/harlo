@@ -60,6 +60,9 @@ export component Press inherits Rectangle {
     in property <brush> rest: transparent;
     in property <brush> hover: Theme.surface-base-hover;
     in property <brush> lit: Theme.surface-base-active;
+    /// Drawn as an outlined control: a faint fill inside a thin outline
+    /// that brightens under the pointer.
+    in property <bool> outlined;
     out property <bool> hovered: touch.has-hover;
     out property <bool> pressed: touch.pressed;
     callback clicked();
@@ -69,6 +72,8 @@ export component Press inherits Rectangle {
     border-radius: Size.radius;
     background: root.selected || (touch.pressed && root.enabled) ? root.lit
         : touch.has-hover && root.enabled ? root.hover : root.rest;
+    border-width: root.outlined ? 1px : 0px;
+    border-color: touch.has-hover && root.enabled ? Theme.control-edge-hover : Theme.control-edge;
     accessible-role: button;
     accessible-label: root.label;
     accessible-description: root.about;
@@ -179,8 +184,8 @@ export component Field inherits Rectangle {
     /// What screen readers call the field; the placeholder when empty.
     in property <string> label;
     in property <string> glyph;
-    in property <brush> fill: Theme.surface-inset-base;
-    in property <brush> idle-edge: Theme.surface-inset-base;
+    in property <brush> fill: Theme.field-fill;
+    in property <brush> idle-edge: Theme.control-edge;
     in property <length> text-size: Size.text;
     /// Hides what's typed, as for a token.
     in property <bool> secret;
@@ -254,7 +259,7 @@ export component Switch inherits Rectangle {
     width: 34px;
     height: 20px;
     border-radius: self.height / 2;
-    background: root.on ? Theme.surface-interactive-base : Theme.border-base;
+    background: root.on ? Theme.surface-interactive-base : Theme.control-edge-hover;
     animate background { duration: Motion.appear; easing: Curves.settle; }
     accessible-role: checkbox;
     accessible-checkable: true;
@@ -269,7 +274,7 @@ export component Switch inherits Rectangle {
         x: root.on ? parent.width - self.width - 2px : 2px;
         animate x { duration: Motion.appear; easing: Curves.settle; }
         border-radius: self.height / 2;
-        background: root.on ? Theme.text-on-interactive-base : white;
+        background: root.on ? Theme.text-on-interactive-base : Theme.text-weak;
     }
 
     TouchArea {

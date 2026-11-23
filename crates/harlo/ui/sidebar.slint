@@ -353,18 +353,25 @@ export component Sidebar inherits Rectangle {
                         alignment: center;
                         Press {
                             label: "Add a project";
-                            rest: Theme.surface-raised-strong;
-                            hover: Theme.chip-hover;
+                            rest: Theme.control-fill;
+                            outlined: true;
                             clicked => { Logic.add-project(); }
                             HorizontalLayout {
-                                padding-left: 9px;
+                                padding-left: 8px;
                                 padding-right: 9px;
                                 padding-top: 5px;
                                 padding-bottom: 5px;
+                                spacing: 5px;
+                                Icon {
+                                    text: Icons.plus;
+                                    font-size: 11px;
+                                    color: Theme.icon-quiet;
+                                }
                                 Text {
-                                    text: "+ Project";
+                                    text: "Project";
                                     font-size: Size.small;
-                                    color: Theme.text-strong;
+                                    color: Theme.text-base;
+                                    accessible-role: none;
                                 }
                             }
                         }
@@ -377,10 +384,9 @@ export component Sidebar inherits Rectangle {
                 Press {
                     height: 31px;
                     label: "Location: " + State.location-label;
-                    rest: Theme.surface-raised-strong;
-                    hover: Theme.chip-hover;
+                    rest: Theme.control-fill;
+                    outlined: true;
                     selected: State.picking-location;
-                    lit: Theme.chip-hover;
                     clicked => { Logic.toggle-locations(); }
                     HorizontalLayout {
                         padding-left: 10px;

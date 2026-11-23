@@ -15,9 +15,8 @@ component ActionButton inherits Press {
     height: 24px;
     width: label-text.preferred-width + 20px;
     label: root.text;
-    rest: Theme.surface-inset-base;
-    border-width: 1px;
-    border-color: Theme.border-weak-base;
+    rest: Theme.control-fill;
+    outlined: true;
 
     label-text := Text {
         text: root.text;
@@ -302,8 +301,9 @@ component Row inherits VerticalLayout {
         VerticalLayout {
             alignment: center;
             Rectangle {
-                background: Theme.surface-inset-base;
                 border-radius: Size.radius + 2px;
+                border-width: 1px;
+                border-color: Theme.control-edge;
                 HorizontalLayout {
                     padding: 2px;
                     spacing: 2px;
@@ -539,6 +539,16 @@ component SectionButton inherits Press {
     in property <string> glyph;
     height: 30px;
     label: root.text;
+    lit: Theme.selected-tint;
+
+    // The chosen section's mark, at its start.
+    if root.selected: Rectangle {
+        x: 0;
+        width: 2px;
+        height: parent.height - 10px;
+        border-radius: 1px;
+        background: Theme.accent-ink;
+    }
 
     HorizontalLayout {
         padding-left: 10px;
@@ -786,8 +796,9 @@ component RangeButton inherits Press {
     in property <string> text;
     height: 26px;
     label: root.text;
-    rest: Theme.surface-inset-base;
     lit: Theme.selected-tint;
+    border-width: root.selected ? 1px : 0px;
+    border-color: Theme.border-interactive-base;
 
     Text {
         text: root.text;
@@ -805,12 +816,20 @@ component StatsHead inherits VerticalLayout {
 
     HorizontalLayout {
         alignment: start;
-        spacing: 4px;
-        for range[index] in ["Last 7 days", "Last 30 days", "All time"]: RangeButton {
-            width: 96px;
-            text: range;
-            selected: State.stat-range == index;
-            clicked => { Logic.stats-range(index); }
+        Rectangle {
+            border-radius: Size.radius + 2px;
+            border-width: 1px;
+            border-color: Theme.control-edge;
+            HorizontalLayout {
+                padding: 2px;
+                spacing: 2px;
+                for range[index] in ["Last 7 days", "Last 30 days", "All time"]: RangeButton {
+                    width: 96px;
+                    text: range;
+                    selected: State.stat-range == index;
+                    clicked => { Logic.stats-range(index); }
+                }
+            }
         }
     }
 

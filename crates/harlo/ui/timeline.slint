@@ -151,8 +151,10 @@ component PromptRow inherits Rectangle {
                     alignment: start;
                     spacing: 6px;
                     for chip in root.item.chips: Rectangle {
-                        background: Theme.surface-raised-strong;
+                        background: Theme.control-fill;
                         border-radius: Size.radius;
+                        border-width: 1px;
+                        border-color: Theme.control-edge;
                         HorizontalLayout {
                             padding-top: 3px;
                             padding-bottom: 3px;
@@ -181,8 +183,9 @@ component PromptRow inherits Rectangle {
             width: undo-label.preferred-width;
             height: 22px;
             label: "Undo";
-            rest: Theme.surface-raised-strong;
+            rest: Theme.card;
             hover: Theme.chip-hover;
+            outlined: true;
             clicked => { Logic.undo(root.item.key); }
             undo-label := HorizontalLayout {
                 padding-left: 8px;

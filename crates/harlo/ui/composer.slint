@@ -129,7 +129,8 @@ export component PickerChip inherits Press {
     in property <bool> bare;
 
     label: chip.label;
-    rest: root.compact ? transparent : Theme.surface-raised-strong;
+    rest: root.compact ? transparent : Theme.control-fill;
+    outlined: !root.compact;
     hover: Theme.chip-hover;
     lit: Theme.chip-hover;
     selected: State.picker == chip.picker;
@@ -466,8 +467,8 @@ export component Composer inherits Rectangle {
                     label: "Stop";
                     width: 24px;
                     height: 24px;
-                    rest: Theme.surface-raised-strong;
-                    hover: Theme.chip-hover;
+                    rest: Theme.control-fill;
+                    outlined: true;
                     clicked => { Logic.stop(); }
                     Icon {
                         text: Icons.square;
@@ -561,8 +562,6 @@ export component PickerMenu inherits Rectangle {
                 height: 32px;
                 placeholder: State.picker == Pickers.provider ? "Filter providers" : "Filter models";
                 text-size: Size.label;
-                fill: Theme.surface-raised-base;
-                idle-edge: Theme.border-weak-base;
                 text: State.menu-filter;
                 edited(text) => { Logic.menu-filter-edited(text); }
                 init => { self.focus(); }

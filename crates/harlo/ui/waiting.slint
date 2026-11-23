@@ -46,10 +46,13 @@ export component CardButton inherits Press {
 
     height: 30px;
     label: root.text;
-    rest: !root.main ? Theme.surface-raised-strong
+    rest: !root.main ? Theme.control-fill
         : root.enabled ? Theme.surface-brand-base : Theme.primary-off;
     hover: root.main ? Theme.surface-brand-hover : Theme.chip-hover;
     lit: root.hover;
+    border-width: root.main ? 0px : 1px;
+    border-color: root.risky ? Theme.risky-edge
+        : root.hovered && root.enabled ? Theme.control-edge-hover : Theme.control-edge;
 
     HorizontalLayout {
         padding-left: 12px;
@@ -298,8 +301,6 @@ component ApprovalView inherits Card {
             init => { self.focus(); }
             height: 32px;
             horizontal-stretch: 1;
-            fill: Theme.surface-raised-base;
-            idle-edge: Theme.border-weak-base;
             text-size: Size.label;
             placeholder: State.approval-card.reason-hint;
             text: State.approval-card.reason;
@@ -393,8 +394,6 @@ component QuestionView inherits VerticalLayout {
         Field {
             width: root.item.answer == Answer.number ? 160px : parent.width;
             height: 32px;
-            fill: Theme.surface-raised-base;
-            idle-edge: Theme.border-weak-base;
             text-size: Size.label;
             placeholder: root.item.hint;
             text: root.item.typed;

@@ -22,7 +22,7 @@ fn start_shows_the_design_content() {
     let ui = ui(demo::app());
     for text in [
         "Harlo",
-        "+ Project",
+        "Add a project",
         "Local",
         "New session",
         "Ctrl+N",
