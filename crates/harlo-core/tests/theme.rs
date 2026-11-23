@@ -3,7 +3,9 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::theme::{self, HARLO_DARK, HARLO_LIGHT, Mode, Rgba, Scheme};
+use harlo_core::theme::{
+    self, Contrast, DiffColors, HARLO_DARK, HARLO_LIGHT, Look, Mode, Rgba, Scheme,
+};
 
 /// The bundled scheme with this id.
 fn scheme(id: &str) -> Scheme {
@@ -222,4 +224,51 @@ fn every_token_has_a_name() {
     }
     assert_eq!(t.get("text-base"), Some(t.text_base));
     assert_eq!(t.get("nothing"), None);
+}
+
+#[test]
+fn more_contrast_lifts_text_in_every_scheme() {
+    let more = Look {
+        contrast: Contrast::More,
+        ..Look::default()
+    };
+    for scheme in theme::bundled() {
+        let (standard, lifted) = (scheme.tokens(), scheme.tokens_with(more));
+        let back = lifted.background_base;
+        for (what, fore, least) in [
+            ("text", lifted.text_base, 7.0),
+            ("secondary text", lifted.text_weak, 4.5),
+            ("placeholder", lifted.text_weaker, 3.5),
+        ] {
+            let contrast = fore.contrast(back);
+            assert!(
+                contrast >= least,
+                "{}: {what} reads {contrast:.2}",
+                scheme.id
+            );
+        }
+        assert!(
+            lifted.text_weak.contrast(back) >= standard.text_weak.contrast(back),
+            "{}: never fainter",
+            scheme.id
+        );
+        assert_eq!(
+            lifted.background_base, standard.background_base,
+            "same background"
+        );
+    }
+}
+
+#[test]
+fn diffs_take_green_and_red_or_blue_and_orange() {
+    let gruvbox = scheme("gruvbox-dark-medium");
+    let standard = gruvbox.tokens();
+    assert_eq!(standard.diff_added, gruvbox.base(11), "green");
+    assert_eq!(standard.diff_removed, gruvbox.base(8), "red");
+    let blue_orange = gruvbox.tokens_with(Look {
+        diff: DiffColors::BlueOrange,
+        ..Look::default()
+    });
+    assert_eq!(blue_orange.diff_added, gruvbox.base(13), "blue");
+    assert_eq!(blue_orange.diff_removed, gruvbox.base(9), "orange");
 }

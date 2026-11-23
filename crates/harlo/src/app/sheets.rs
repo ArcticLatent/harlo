@@ -88,6 +88,54 @@ impl Section {
 pub enum Setting {
     /// [`Preferences::reopen_tabs`].
     ReopenTabs,
+    /// [`Preferences::glass`].
+    Glass,
+}
+
+/// One of Harlo's own settings chosen from a few options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingChoice {
+    /// [`Preferences::appearance`].
+    Appearance,
+    /// [`Preferences::contrast`].
+    Contrast,
+    /// [`Preferences::diff_colors`].
+    DiffColors,
+    /// [`Preferences::motion`].
+    Motion,
+    /// [`Preferences::chat_width`].
+    ChatWidth,
+    /// [`Preferences::text_size`].
+    TextSize,
+    /// [`Preferences::code_size`].
+    CodeSize,
+}
+
+impl SettingChoice {
+    /// Every choice, in the order the UI numbers them.
+    pub const ALL: [Self; 7] = [
+        Self::Appearance,
+        Self::Contrast,
+        Self::DiffColors,
+        Self::Motion,
+        Self::ChatWidth,
+        Self::TextSize,
+        Self::CodeSize,
+    ];
+
+    /// The options, as Settings names them, in order.
+    #[must_use]
+    pub fn options(self) -> &'static [&'static str] {
+        match self {
+            Self::Appearance => &["System", "Light", "Dark"],
+            Self::Contrast => &["Standard", "More"],
+            Self::DiffColors => &["Green and red", "Blue and orange"],
+            Self::Motion => &["Off", "Fast", "Normal", "Slow"],
+            Self::ChatWidth => &["Narrow", "Normal", "Wide", "Full"],
+            Self::TextSize => &["Small", "Normal", "Large", "Larger"],
+            Self::CodeSize => &["Small", "Normal", "Large"],
+        }
+    }
 }
 
 /// The time the stats cover.
@@ -159,8 +207,8 @@ pub enum Event {
     Switch(Setting),
     /// Use the theme with this id while the window is in its mode.
     Theme(String),
-    /// Show the dark or the light theme, or follow the desktop.
-    Appearance(Appearance),
+    /// Take option `.1` (counted from 0) of a choice.
+    Choose(SettingChoice, usize),
     /// Show stats for another range.
     Range(Range),
     /// Stats arrived for load `serial`.
@@ -242,6 +290,7 @@ impl App {
                     Setting::ReopenTabs => {
                         self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
                     }
+                    Setting::Glass => self.preferences.glass = !self.preferences.glass,
                 }
                 return self.save_preferences();
             }
@@ -263,10 +312,11 @@ impl App {
                     return self.save_preferences();
                 }
             }
-            Event::Appearance(appearance) => {
-                self.preferences.appearance = appearance;
-                self.retheme();
-                return self.save_preferences();
+            Event::Choose(choice, option) => {
+                if self.choose(choice, option) {
+                    self.retheme();
+                    return self.save_preferences();
+                }
             }
             Event::Range(range) => {
                 self.sheets.range = range;

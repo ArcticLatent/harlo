@@ -7,18 +7,17 @@
 use std::rc::Rc;
 
 use harlo_core::server::{Day, McpStatus, PluginSource, Stats, Tokens};
-use slint::{ModelRc, VecModel};
+use slint::{ModelRc, SharedString, VecModel};
 
 use lucide_icons::Icon;
 
 use super::{glyph, sync};
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
-use harlo_core::layout::Appearance;
 use harlo_core::theme::{Mode, Scheme};
 
 use crate::app::{
-    App, ClaudeAction, Load, Range, Section, SetUp, Setting, Sheet, Status, epoch_seconds,
-    resets_in,
+    App, ClaudeAction, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet, Status,
+    epoch_seconds, resets_in,
 };
 use crate::model::{compact as tokens_text, dollars as money};
 use crate::theme::color;
@@ -300,16 +299,19 @@ fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
         let hits: Vec<SheetRow> = section_rows(app, section)
             .into_iter()
             .filter(|row| titled || matches(row))
-            .filter(|row| row.kind != 0)
+            .filter(|row| row.kind != 0 && row.kind != THEMES)
             .collect();
         if !hits.is_empty() {
             rows.push(heading(section.title()));
             rows.extend(hits);
         }
     }
-    // The themes found show after the rows, as cards under their own
-    // headings.
-    let note = if rows.is_empty() && themes_found(app, &needle).is_empty() {
+    // The themes found show after the rows, as cards.
+    let themed = !themes_found(app, &needle).is_empty();
+    if themed {
+        rows.push(themes_row(app.mode()));
+    }
+    let note = if rows.is_empty() {
         format!("No setting matches “{}”.", query.trim())
     } else {
         String::new()
@@ -317,28 +319,101 @@ fn found(app: &App, query: &str) -> (String, Vec<SheetRow>) {
     (note, rows)
 }
 
-/// Light or dark, and what the themes are; the themes themselves show as
-/// cards, those of the window's mode only.
+/// The kind of row that shows the theme cards.
+const THEMES: i32 = 5;
+
+/// Light or dark and the themes for it, then the colours, text and motion.
 fn appearance_rows(app: &App) -> Vec<SheetRow> {
     vec![
-        SheetRow {
-            kind: 4,
-            name: "Light or dark".into(),
-            value: "System follows the desktop".into(),
-            setting: match app.preferences.appearance {
-                Appearance::System => 0,
-                Appearance::Light => 1,
-                Appearance::Dark => 2,
-            },
-            ..SheetRow::default()
-        },
-        note(
-            "Harlo keeps a dark and a light theme, and shows the one for the window's mode. \
-             Choose Light or Dark to see and pick that mode's themes. The themes besides \
-             Harlo's are Base16 colour schemes from Tinted Theming. OpenCode's own theme \
-             setting stays as it is.",
+        choice(
+            app,
+            SettingChoice::Appearance,
+            "Light or dark",
+            "Harlo keeps a dark and a light theme; System follows the desktop.",
+        ),
+        themes_row(app.mode()),
+        heading("Colours"),
+        choice(
+            app,
+            SettingChoice::Contrast,
+            "Contrast",
+            "More sets text, hints and icons further apart from the background.",
+        ),
+        choice(
+            app,
+            SettingChoice::DiffColors,
+            "Diff colours",
+            "Added and removed lines.",
+        ),
+        switch(
+            Setting::Glass,
+            "Glass",
+            "Menus and dialogs are translucent, blurring what's under them.",
+            app.preferences.glass,
+        ),
+        heading("Text"),
+        choice(
+            app,
+            SettingChoice::TextSize,
+            "Text size",
+            "The interface and the chat.",
+        ),
+        choice(
+            app,
+            SettingChoice::CodeSize,
+            "Code size",
+            "Code, diffs and the terminal.",
+        ),
+        choice(
+            app,
+            SettingChoice::ChatWidth,
+            "Chat width",
+            "How long the chat's lines get in a wide window.",
+        ),
+        heading("Motion"),
+        choice(
+            app,
+            SettingChoice::Motion,
+            "Animation",
+            "Panels sliding, new things fading in, and work in progress breathing.",
         ),
     ]
+}
+
+/// The row of theme cards for `mode`.
+fn themes_row(mode: Mode) -> SheetRow {
+    let (name, setting) = match mode {
+        Mode::Dark => ("Dark themes", 0),
+        Mode::Light => ("Light themes", 1),
+    };
+    SheetRow {
+        kind: THEMES,
+        name: name.into(),
+        setting,
+        ..SheetRow::default()
+    }
+}
+
+/// A row choosing one of `choice`'s options, with `what` under its name.
+fn choice(app: &App, choice: SettingChoice, name: &str, what: &str) -> SheetRow {
+    let options: Vec<SharedString> = choice.options().iter().map(|&o| o.into()).collect();
+    SheetRow {
+        kind: 4,
+        name: name.into(),
+        value: what.into(),
+        setting: int(app.chosen(choice)),
+        options: ModelRc::new(VecModel::from(options)),
+        choice: int(SettingChoice::ALL
+            .iter()
+            .position(|&c| c == choice)
+            .unwrap_or_default()),
+        ..SheetRow::default()
+    }
+}
+
+/// `n` as the UI's int, saturating.
+fn int(n: usize) -> i32 {
+    i32::try_from(n).unwrap_or(i32::MAX)
 }
 
 /// The cards for the `mode` themes Settings shows: all of them in
@@ -834,6 +909,7 @@ fn switch(setting: Setting, name: &str, what: &str, on: bool) -> SheetRow {
         on,
         setting: match setting {
             Setting::ReopenTabs => 0,
+            Setting::Glass => 1,
         },
         ..SheetRow::default()
     }

@@ -82,10 +82,29 @@ export global Theme {
     in property <color> question-edge: #4b5a78;
     /// The shade over the window behind a dialog: lighter on a light theme.
     in property <color> scrim: #00000066;
+    /// Added and removed lines and counts in diffs.
+    in property <color> added-ink: #6ce78a;
+    in property <color> removed-ink: #ffb1b2;
+
+    /// Whether menus and dialogs are glass: translucent, blurring what's
+    /// under them (Skia only; elsewhere they're just translucent).
+    in property <bool> glass: false;
+    /// A menu's or dialog's fill, and how much it blurs what's under it.
+    out property <color> card: root.glass ? root.surface-raised-strong.with-alpha(0.7)
+        : root.surface-raised-strong;
+    out property <length> card-blur: root.glass ? 24px : 0px;
 }
 
 /// Sizes in logical pixels, measured from the design.
+///
+/// Text sizes follow the scales chosen in Settings → Appearance: the
+/// interface's and the chat's text, and code's.
 export global Size {
+    /// How much larger or smaller than designed text is, and code.
+    in property <float> text-scale: 1;
+    in property <float> code-scale: 1;
+    /// The widest the chat's column gets.
+    in property <length> chat-width: 780px;
     /// Width of the left and right rails.
     out property <length> rail: 56px;
     /// Width of the sidebar.
@@ -95,25 +114,25 @@ export global Size {
     /// Rail icons.
     out property <length> rail-icon: 18px;
     /// Body text.
-    out property <length> text: 14px;
+    out property <length> text: 14px * root.text-scale;
     /// Prompts and answers in the timeline.
-    out property <length> answer: 14.5px;
+    out property <length> answer: 14.5px * root.text-scale;
     /// Code, paths and commands.
-    out property <length> code: 12.5px;
+    out property <length> code: 12.5px * root.code-scale;
     /// Secondary text.
-    out property <length> small: 12.5px;
+    out property <length> small: 12.5px * root.text-scale;
     /// Project names and hints.
-    out property <length> label: 13px;
+    out property <length> label: 13px * root.text-scale;
     /// The wordmark beside the logo.
     out property <length> wordmark: 27px;
     /// Panel titles.
-    out property <length> title: 19px;
+    out property <length> title: 19px * root.text-scale;
     /// The open session's title.
-    out property <length> session-title: 18.5px;
+    out property <length> session-title: 18.5px * root.text-scale;
     /// Height of a tab strip.
     out property <length> tab-bar: 34px;
     /// The empty state's question.
-    out property <length> headline: 26px;
+    out property <length> headline: 26px * root.text-scale;
     /// Corner radius of buttons and fields.
     out property <length> radius: 6px;
     /// Corner radius of the composer.
@@ -138,18 +157,22 @@ export global Fonts {
 /// went out, a file was attached, the sidebar opened) or that work is going
 /// on, and never delays anything.
 export global Motion {
+    /// How long motion takes as a share of its design, from Settings →
+    /// Appearance; 0 turns it off.
+    in property <float> speed: 1;
     /// How long something new takes to fade in, and how far it rises.
-    out property <duration> appear: 220ms;
+    out property <duration> appear: 220ms * root.speed;
     out property <length> rise: 8px;
     /// Something new slows as it settles: an ease-out cubic.
     out property <easing> settle: cubic-bezier(0.33, 1, 0.68, 1);
     /// How long the sidebar takes to slide open or closed.
-    out property <duration> slide: 200ms;
+    out property <duration> slide: 200ms * root.speed;
     /// A slide speeds up, then slows: an ease-in-out cubic.
     out property <easing> glide: cubic-bezier(0.65, 0, 0.35, 1);
     /// A whole breath of work in progress, dim to bright and back; slow
     /// enough to read as breathing rather than blinking.
     out property <duration> breath: 1800ms;
-    /// The dimmest a breathing indicator gets.
-    out property <float> breath-low: 0.35;
+    /// The dimmest a breathing indicator gets; with motion off it stays
+    /// lit.
+    out property <float> breath-low: root.speed > 0 ? 0.35 : 1;
 }

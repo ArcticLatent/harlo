@@ -294,7 +294,7 @@ export component Composer inherits Rectangle {
             if root.hint != "": Text {
                 text: root.hint;
                 vertical-alignment: center;
-                font-size: 11.5px;
+                font-size: 11.5px * Size.text-scale;
                 color: Theme.text-weak;
             }
             @children
@@ -408,7 +408,8 @@ export component PickerMenu inherits Rectangle {
             ? max(8px, Requests.anchor-y - self.height - 6px) : self.below;
         width: root.card-width;
         height: content.preferred-height;
-        background: Theme.surface-raised-strong;
+        background: Theme.card;
+        backdrop-blur: Theme.card-blur;
         border-radius: Size.menu-radius;
         border-width: 1px;
         border-color: Theme.menu-edge;

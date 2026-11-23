@@ -5,10 +5,10 @@
 
 mod support;
 
-use harlo::app::{App, Message, Section, SheetEvent};
-use harlo::ui::{State, Theme, ThemeCard};
-use harlo_core::layout::{Appearance, Preferences};
-use harlo_core::theme::{HARLO_DARK, HARLO_LIGHT, Tokens};
+use harlo::app::{App, Message, Section, Setting, SettingChoice, SheetEvent};
+use harlo::ui::{Motion, Size, State, Theme, ThemeCard};
+use harlo_core::layout::{Appearance, ChatWidth, Preferences, Speed, TextSize};
+use harlo_core::theme::{Contrast, DiffColors, HARLO_DARK, HARLO_LIGHT, Tokens};
 use slint::ComponentHandle as _;
 use slint::Model as _;
 use support::{Ui, demo, ui};
@@ -60,7 +60,10 @@ fn pick(ui: &Ui, id: &str) {
 fn only_the_windows_mode_shows_its_themes_with_harlos_chosen() {
     let ui = appearance(demo::app());
     assert!(ui.shows("Light or dark"));
-    assert_eq!(ui.button("System").accessible_checked(), Some(true));
+    assert_eq!(
+        ui.button("Light or dark: System").accessible_checked(),
+        Some(true)
+    );
     let state = ui.window.global::<State>();
 
     // The desktop is dark, so only the dark themes show.
@@ -77,7 +80,7 @@ fn only_the_windows_mode_shows_its_themes_with_harlos_chosen() {
     assert_eq!(ui.button("Dracula").accessible_checked(), Some(false));
 
     // Light shows the light themes instead, at the top.
-    ui.press("Light");
+    ui.press("Light or dark: Light");
     assert!(ui.shows("Light themes"));
     assert!(!ui.shows("Dark themes"));
     assert_eq!(state.get_dark_theme_cards().row_count(), 0);
@@ -109,17 +112,17 @@ fn choosing_a_theme_recolours_the_window_and_is_saved() {
     assert_eq!(ui.button("Harlo Dark").accessible_checked(), Some(false));
 
     // Light shows the light theme, and Dark brings Dracula back.
-    ui.press("Light");
+    ui.press("Light or dark: Light");
     assert_eq!(ui.app().preferences.appearance, Appearance::Light);
     assert_eq!(ui.app().tokens, tokens(HARLO_LIGHT));
-    ui.press("Dark");
+    ui.press("Light or dark: Dark");
     assert_eq!(ui.app().tokens, tokens("dracula"));
 }
 
 #[test]
 fn a_fixed_appearance_turns_to_the_theme_picked() {
     let ui = appearance(demo::app());
-    ui.press("Dark");
+    ui.press("Light or dark: Dark");
     pick(&ui, "github");
     assert_eq!(ui.app().preferences.light_theme, "github");
     assert_eq!(chosen_light(&ui), ["GitHub Light"]);
@@ -147,7 +150,7 @@ fn system_shows_the_theme_for_the_desktops_mode() {
     assert_eq!(ui.app().tokens, tokens("nord"));
 
     // A mode chosen outright stays, whatever the desktop does.
-    ui.press("Dark");
+    ui.press("Light or dark: Dark");
     ui.send(Message::SystemDark(false));
     assert_eq!(ui.app().tokens, tokens("nord"));
 }
@@ -225,7 +228,7 @@ fn the_shade_behind_settings_is_fainter_on_a_light_theme() {
         dark,
         harlo::theme::color(harlo::theme::scrim(&tokens(HARLO_DARK)))
     );
-    ui.press("Light");
+    ui.press("Light or dark: Light");
     let light = scrim(&ui);
     assert!(
         light.alpha() < dark.alpha(),
@@ -271,4 +274,122 @@ fn a_readable_accent_keeps_its_colour() {
         t.surface_brand_base,
         "Dracula's blue reads on its dark background as it is"
     );
+}
+
+/// Takes option `option` of `choice`, as its button would.
+fn choose(ui: &Ui, choice: SettingChoice, option: usize) {
+    ui.send(Message::Sheet(SheetEvent::Choose(choice, option)));
+}
+
+#[test]
+fn the_choices_show_under_the_themes() {
+    let ui = appearance(demo::app());
+    let rows: Vec<String> = ui
+        .window
+        .global::<State>()
+        .get_sheet_rows()
+        .iter()
+        .map(|row| row.name.to_string())
+        .collect();
+    let at = |name: &str| {
+        rows.iter()
+            .position(|n| n == name)
+            .unwrap_or_else(|| panic!("{name} in {rows:?}"))
+    };
+    assert_eq!(at("Light or dark"), 0);
+    assert_eq!(at("Dark themes"), 1, "the themes right under it");
+    for name in [
+        "Contrast",
+        "Diff colours",
+        "Glass",
+        "Text size",
+        "Code size",
+        "Chat width",
+        "Animation",
+    ] {
+        assert!(at(name) > 1, "{name} under the themes");
+    }
+}
+
+#[test]
+fn text_code_and_chat_sizes_reach_the_window() {
+    let ui = appearance(demo::app());
+    let size = ui.window.global::<Size>();
+    let text = size.get_text();
+    choose(&ui, SettingChoice::TextSize, 3);
+    assert_eq!(ui.app().preferences.text_size, TextSize::Larger);
+    assert!(size.get_text() > text * 1.15, "larger text");
+    choose(&ui, SettingChoice::CodeSize, 0);
+    assert_eq!(ui.app().preferences.code_size, TextSize::Small);
+    assert!(size.get_code() < 12.5);
+    choose(&ui, SettingChoice::ChatWidth, 2);
+    assert_eq!(ui.app().preferences.chat_width, ChatWidth::Wide);
+    assert!((size.get_chat_width() - 960.0).abs() < 0.5);
+    choose(&ui, SettingChoice::ChatWidth, 3);
+    assert!(size.get_chat_width() > 10_000.0, "no limit");
+}
+
+#[test]
+fn saved_choices_apply_as_the_window_opens() {
+    let ui = ui(demo::app().with_preferences(Preferences {
+        text_size: TextSize::Large,
+        motion: Speed::Off,
+        chat_width: ChatWidth::Narrow,
+        glass: true,
+        ..Preferences::default()
+    }));
+    let size = ui.window.global::<Size>();
+    assert!((size.get_text_scale() - 1.1).abs() < 1e-6);
+    assert!((size.get_chat_width() - 640.0).abs() < 0.5);
+    assert!(ui.window.global::<Motion>().get_speed().abs() < f32::EPSILON);
+    assert!(ui.window.global::<Theme>().get_glass());
+}
+
+#[test]
+fn animation_off_stops_motion_and_breathing() {
+    let ui = appearance(demo::app());
+    let motion = ui.window.global::<Motion>();
+    assert!(motion.get_slide() > 0);
+    choose(&ui, SettingChoice::Motion, 0);
+    assert_eq!(ui.app().preferences.motion, Speed::Off);
+    assert_eq!(motion.get_slide(), 0);
+    assert!(
+        (motion.get_breath_low() - 1.0).abs() < f32::EPSILON,
+        "stays lit"
+    );
+    choose(&ui, SettingChoice::Motion, 3);
+    assert!(motion.get_slide() > 200, "slow");
+}
+
+#[test]
+fn contrast_and_diff_colours_recolour_the_window() {
+    let ui = appearance(demo::app());
+    let theme = ui.window.global::<Theme>();
+    let (weak, added) = (theme.get_text_weak(), theme.get_added_ink());
+    choose(&ui, SettingChoice::Contrast, 1);
+    assert_eq!(ui.app().preferences.contrast, Contrast::More);
+    assert_ne!(theme.get_text_weak(), weak, "secondary text lifted");
+    choose(&ui, SettingChoice::DiffColors, 1);
+    assert_eq!(ui.app().preferences.diff_colors, DiffColors::BlueOrange);
+    assert_ne!(theme.get_added_ink(), added);
+    assert_eq!(
+        theme.get_added_ink(),
+        harlo::theme::color(harlo::theme::ink(
+            &ui.app().tokens,
+            ui.app().tokens.diff_added
+        ))
+    );
+}
+
+#[test]
+fn glass_turns_on_and_off() {
+    let ui = appearance(demo::app());
+    let theme = ui.window.global::<Theme>();
+    assert!(!theme.get_glass());
+    ui.send(Message::Sheet(SheetEvent::Switch(Setting::Glass)));
+    assert!(ui.app().preferences.glass);
+    assert!(theme.get_glass());
+    assert!(theme.get_card().alpha() < 255, "translucent");
+    ui.send(Message::Sheet(SheetEvent::Switch(Setting::Glass)));
+    assert!(!theme.get_glass());
 }

@@ -32,6 +32,7 @@ component ActionButton inherits Press {
 component ChoiceButton inherits Press {
     in property <string> text;
     height: 24px;
+    min-width: max(70px, words.preferred-width + 20px);
     label: root.text;
     rest: transparent;
     lit: Theme.selected-tint;
@@ -40,128 +41,13 @@ component ChoiceButton inherits Press {
     accessible-checkable: true;
     accessible-checked: root.selected;
 
-    Text {
+    words := Text {
         text: root.text;
         font-size: Size.small;
         color: root.selected ? Theme.text-strong : Theme.text-weak;
         horizontal-alignment: center;
         vertical-alignment: center;
         accessible-role: none;
-    }
-}
-
-/// One row: a heading, a name with its value, a note, a switch with what
-/// it does, or the light-or-dark choice.
-component Row inherits VerticalLayout {
-    in property <SheetRow> entry;
-
-    if root.entry.kind == 0: Text {
-        height: 40px;
-        text: root.entry.name;
-        font-size: Size.label;
-        font-weight: 600;
-        color: Theme.text-strong;
-        vertical-alignment: bottom;
-        accessible-role: AccessibleRole.text;
-    }
-    if root.entry.kind == 1: HorizontalLayout {
-        height: 30px;
-        spacing: 16px;
-        Text {
-            horizontal-stretch: 1;
-            text: root.entry.name;
-            font-size: Size.small;
-            color: Theme.text-base;
-            overflow: elide;
-            vertical-alignment: center;
-            accessible-role: AccessibleRole.text;
-        }
-        Text {
-            horizontal-stretch: 2;
-            text: root.entry.value;
-            font-size: Size.small;
-            horizontal-alignment: right;
-            vertical-alignment: center;
-            overflow: elide;
-            color: root.entry.tone == 1 ? Theme.icon-success-base
-                : root.entry.tone == 2 ? Theme.icon-critical-base
-                : root.entry.tone == 3 ? Theme.text-weak
-                : root.entry.tone == 4 ? Theme.icon-warning-base : Theme.text-base;
-            accessible-role: AccessibleRole.text;
-        }
-        if root.entry.action != "": VerticalLayout {
-            alignment: center;
-            ActionButton {
-                text: root.entry.action;
-                clicked => { Logic.settings-action(root.entry.setting); }
-            }
-        }
-    }
-    if root.entry.kind == 2: Text {
-        text: root.entry.name;
-        font-size: Size.small;
-        color: Theme.text-weak;
-        wrap: word-wrap;
-        accessible-role: AccessibleRole.text;
-    }
-    if root.entry.kind == 4: HorizontalLayout {
-        height: 36px;
-        spacing: 16px;
-        Text {
-            horizontal-stretch: 1;
-            text: root.entry.name;
-            font-size: Size.small;
-            color: Theme.text-base;
-            vertical-alignment: center;
-            accessible-role: AccessibleRole.text;
-        }
-        VerticalLayout {
-            alignment: center;
-            Rectangle {
-                background: Theme.surface-inset-base;
-                border-radius: Size.radius + 2px;
-                HorizontalLayout {
-                    padding: 2px;
-                    spacing: 2px;
-                    for option[index] in ["System", "Light", "Dark"]: ChoiceButton {
-                        width: 70px;
-                        text: option;
-                        selected: root.entry.setting == index;
-                        clicked => { Logic.pick-appearance(index); }
-                    }
-                }
-            }
-        }
-    }
-    if root.entry.kind == 3: HorizontalLayout {
-        padding-top: 6px;
-        padding-bottom: 6px;
-        spacing: 16px;
-        VerticalLayout {
-            horizontal-stretch: 1;
-            spacing: 2px;
-            Text {
-                text: root.entry.name;
-                font-size: Size.small;
-                color: Theme.text-base;
-                accessible-role: AccessibleRole.text;
-            }
-            Text {
-                text: root.entry.value;
-                font-size: Size.small;
-                color: Theme.text-weak;
-                wrap: word-wrap;
-                accessible-role: AccessibleRole.text;
-            }
-        }
-        VerticalLayout {
-            alignment: center;
-            Switch {
-                on: root.entry.on;
-                label: root.entry.name;
-                toggled => { Logic.switch-setting(root.entry.setting); }
-            }
-        }
     }
 }
 
@@ -290,6 +176,141 @@ component ThemeHeading inherits Text {
     accessible-role: AccessibleRole.text;
 }
 
+/// One row: a heading, a name with its value, a note, a switch with what
+/// it does, or the light-or-dark choice.
+component Row inherits VerticalLayout {
+    in property <SheetRow> entry;
+
+    if root.entry.kind == 0: Text {
+        height: 40px;
+        text: root.entry.name;
+        font-size: Size.label;
+        font-weight: 600;
+        color: Theme.text-strong;
+        vertical-alignment: bottom;
+        accessible-role: AccessibleRole.text;
+    }
+    if root.entry.kind == 1: HorizontalLayout {
+        height: 30px;
+        spacing: 16px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.name;
+            font-size: Size.small;
+            color: Theme.text-base;
+            overflow: elide;
+            vertical-alignment: center;
+            accessible-role: AccessibleRole.text;
+        }
+        Text {
+            horizontal-stretch: 2;
+            text: root.entry.value;
+            font-size: Size.small;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+            color: root.entry.tone == 1 ? Theme.icon-success-base
+                : root.entry.tone == 2 ? Theme.icon-critical-base
+                : root.entry.tone == 3 ? Theme.text-weak
+                : root.entry.tone == 4 ? Theme.icon-warning-base : Theme.text-base;
+            accessible-role: AccessibleRole.text;
+        }
+        if root.entry.action != "": VerticalLayout {
+            alignment: center;
+            ActionButton {
+                text: root.entry.action;
+                clicked => { Logic.settings-action(root.entry.setting); }
+            }
+        }
+    }
+    if root.entry.kind == 2: Text {
+        text: root.entry.name;
+        font-size: Size.small;
+        color: Theme.text-weak;
+        wrap: word-wrap;
+        accessible-role: AccessibleRole.text;
+    }
+    if root.entry.kind == 4: HorizontalLayout {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 16px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.entry.name;
+                font-size: Size.small;
+                color: Theme.text-base;
+                accessible-role: AccessibleRole.text;
+            }
+            if root.entry.value != "": Text {
+                text: root.entry.value;
+                font-size: Size.small;
+                color: Theme.text-weak;
+                wrap: word-wrap;
+                accessible-role: AccessibleRole.text;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                background: Theme.surface-inset-base;
+                border-radius: Size.radius + 2px;
+                HorizontalLayout {
+                    padding: 2px;
+                    spacing: 2px;
+                    for option[index] in root.entry.options: ChoiceButton {
+                        text: option;
+                        label: root.entry.name + ": " + option;
+                        selected: root.entry.setting == index;
+                        clicked => { Logic.choose(root.entry.choice, index); }
+                    }
+                }
+            }
+        }
+    }
+    if root.entry.kind == 5: VerticalLayout {
+        ThemeHeading {
+            text: root.entry.name;
+        }
+        ThemeGrid {
+            cards: root.entry.setting == 0 ? State.dark-theme-cards : State.light-theme-cards;
+        }
+    }
+    if root.entry.kind == 3: HorizontalLayout {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 16px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: root.entry.name;
+                font-size: Size.small;
+                color: Theme.text-base;
+                accessible-role: AccessibleRole.text;
+            }
+            Text {
+                text: root.entry.value;
+                font-size: Size.small;
+                color: Theme.text-weak;
+                wrap: word-wrap;
+                accessible-role: AccessibleRole.text;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Switch {
+                on: root.entry.on;
+                label: root.entry.name;
+                toggled => { Logic.switch-setting(root.entry.setting); }
+            }
+        }
+    }
+}
+
+
 /// A section in Settings' list.
 component SectionButton inherits Press {
     in property <string> text;
@@ -326,7 +347,7 @@ component SheetHead inherits HorizontalLayout {
     Text {
         horizontal-stretch: 1;
         text: State.sheet-title;
-        font-size: 16px;
+        font-size: 16px * Size.text-scale;
         font-weight: 600;
         color: Theme.text-strong;
         vertical-alignment: center;
@@ -363,7 +384,8 @@ component SheetRows inherits VerticalLayout {
 
 /// Settings' search and its list of sections, under their groups.
 component SectionList inherits Rectangle {
-    background: Theme.surface-inset-base;
+    // Under glass it lets the card's blur through.
+    background: Theme.surface-inset-base.with-alpha(Theme.glass ? 0.5 : 1);
 
     VerticalLayout {
         padding: 12px;
@@ -373,7 +395,7 @@ component SectionList inherits Rectangle {
         Text {
             height: 26px;
             text: "Settings";
-            font-size: 16px;
+            font-size: 16px * Size.text-scale;
             font-weight: 600;
             color: Theme.text-strong;
             accessible-role: AccessibleRole.text;
@@ -462,7 +484,7 @@ component StatsHead inherits VerticalLayout {
                 spacing: 2px;
                 Text {
                     text: tile.value;
-                    font-size: 18px;
+                    font-size: 18px * Size.text-scale;
                     font-weight: 600;
                     color: Theme.text-strong;
                     accessible-role: AccessibleRole.text;
@@ -519,7 +541,8 @@ export component SheetLayer inherits Rectangle {
         height: min(State.sheet == 2 ? 640px : 680px, root.height - 96px);
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
-        background: Theme.surface-raised-strong;
+        background: Theme.card;
+        backdrop-blur: Theme.card-blur;
         border-radius: Size.menu-radius;
         border-width: 1px;
         border-color: Theme.menu-edge;
@@ -564,18 +587,6 @@ export component SheetLayer inherits Rectangle {
                         padding-top: 4px;
                         spacing: 6px;
                         SheetRows { }
-                        if State.dark-theme-cards.length > 0: ThemeHeading {
-                            text: "Dark themes";
-                        }
-                        if State.dark-theme-cards.length > 0: ThemeGrid {
-                            cards: State.dark-theme-cards;
-                        }
-                        if State.light-theme-cards.length > 0: ThemeHeading {
-                            text: "Light themes";
-                        }
-                        if State.light-theme-cards.length > 0: ThemeGrid {
-                            cards: State.light-theme-cards;
-                        }
                         // The last section, About, ends with Slint's notice.
                         if State.settings-section == State.settings-sections.length - 1
                             && State.settings-query == "": HorizontalLayout {

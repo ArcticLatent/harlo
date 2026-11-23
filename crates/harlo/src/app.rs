@@ -48,7 +48,9 @@ pub use context::{
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
-pub use sheets::{Event as SheetEvent, Load, Range, Section, SetUp, Setting, Sheet, Sheets};
+pub use sheets::{
+    Event as SheetEvent, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet, Sheets,
+};
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;

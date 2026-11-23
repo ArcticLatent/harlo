@@ -22,7 +22,7 @@ use std::backtrace::Backtrace;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Harlo's own schemes, a dark and a light one.
 const HARLO_SCHEMES: &str = include_str!("../themes/harlo.json");
@@ -67,16 +67,36 @@ const OUTLINE_REST: f32 = 0.6;
 /// See [`OUTLINE_REST`].
 const OUTLINE_HOVER: f32 = 0.8;
 
-/// The contrast body text needs: WCAG's minimum for text.
+/// The contrast text on a filled button needs: WCAG's minimum for text.
 const BODY_CONTRAST: f64 = 4.5;
 
-/// The contrast secondary text and icons need: WCAG's minimum for large
-/// text and graphics.
-const SECONDARY_CONTRAST: f64 = 3.0;
+/// How much contrast each kind of text needs against the backgrounds.
+#[derive(Debug, Clone, Copy)]
+struct Needs {
+    /// Body text.
+    body: f64,
+    /// Secondary text and icons.
+    secondary: f64,
+    /// Placeholders and code comments: fainter than secondary text on
+    /// purpose, but never lost.
+    faint: f64,
+}
 
-/// The contrast placeholders and code comments need: fainter than
-/// secondary text on purpose, but never lost.
-const FAINT_CONTRAST: f64 = 2.5;
+/// Standard contrast: WCAG AA's minimums for text (4.5) and for large text
+/// and graphics (3).
+const STANDARD: Needs = Needs {
+    body: 4.5,
+    secondary: 3.0,
+    faint: 2.5,
+};
+
+/// More contrast: WCAG AAA's minimum for text (7), and AA's for text for
+/// secondary text (4.5).
+const MORE: Needs = Needs {
+    body: 7.0,
+    secondary: 4.5,
+    faint: 3.5,
+};
 
 /// How many steps a colour takes towards the text colour when it's too
 /// faint; each moves it a tenth of the way.
@@ -215,6 +235,48 @@ impl Display for Rgba {
     }
 }
 
+/// How strongly text stands out from the background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Contrast {
+    /// The scheme's own colours, lifted only where they'd be hard to read.
+    #[default]
+    Standard,
+    /// Text, secondary text and hints lifted further towards black or white.
+    More,
+}
+
+impl Contrast {
+    /// How much contrast each kind of text needs at this level.
+    fn needs(self) -> Needs {
+        match self {
+            Self::Standard => STANDARD,
+            Self::More => MORE,
+        }
+    }
+}
+
+/// The colours added and removed lines take in diffs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiffColors {
+    /// The scheme's green and red.
+    #[default]
+    GreenRed,
+    /// The scheme's blue and orange, which people who can't tell green from
+    /// red can.
+    BlueOrange,
+}
+
+/// Choices that change how a scheme's colours are resolved.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Look {
+    /// How strongly text stands out.
+    pub contrast: Contrast,
+    /// The diff colours.
+    pub diff: DiffColors,
+}
+
 /// Whether a scheme, or the window, is light or dark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mode {
@@ -322,6 +384,10 @@ tokens! {
     icon_warning_base = "icon-warning-base",
     /// Errors.
     icon_critical_base = "icon-critical-base",
+    /// Added lines and counts in diffs.
+    diff_added = "diff-added",
+    /// Removed lines and counts in diffs.
+    diff_removed = "diff-removed",
     /// Information.
     icon_info_base = "icon-info-base",
     /// Headings in replies.
@@ -390,10 +456,18 @@ impl Scheme {
         self.id == HARLO_DARK || self.id == HARLO_LIGHT
     }
 
-    /// Resolves every colour Harlo uses from the scheme's sixteen.
+    /// Resolves every colour Harlo uses from the scheme's sixteen, with
+    /// the standard look.
     #[must_use]
     pub fn tokens(&self) -> Tokens {
-        derive(&self.palette, self.mode)
+        self.tokens_with(Look::default())
+    }
+
+    /// Resolves every colour Harlo uses from the scheme's sixteen, with
+    /// `look`'s contrast and diff colours.
+    #[must_use]
+    pub fn tokens_with(&self, look: Look) -> Tokens {
+        derive(&self.palette, self.mode, look)
     }
 }
 
@@ -483,7 +557,8 @@ fn scheme(file: FileScheme) -> Result<Scheme, ThemeError> {
 }
 
 /// Gives each of Harlo's colours its Base16 role.
-fn derive(p: &[Rgba; 16], mode: Mode) -> Tokens {
+fn derive(p: &[Rgba; 16], mode: Mode, look: Look) -> Tokens {
+    let needs = look.contrast.needs();
     let [
         b0,
         b1,
@@ -520,11 +595,15 @@ fn derive(p: &[Rgba; 16], mode: Mode) -> Tokens {
         Mode::Dark => Rgba::WHITE,
         Mode::Light => Rgba::BLACK,
     };
-    let strong = readable(strong, extreme, BODY_CONTRAST, &backgrounds);
-    let text = readable(b5, strong, BODY_CONTRAST, &backgrounds);
-    let weak = readable(b4, text, SECONDARY_CONTRAST, &backgrounds);
-    let weaker = readable(b3, weak, FAINT_CONTRAST, &backgrounds);
-    let comment = readable(b3, weak, FAINT_CONTRAST, &[b1]);
+    let strong = readable(strong, extreme, needs.body, &backgrounds);
+    let text = readable(b5, strong, needs.body, &backgrounds);
+    let weak = readable(b4, text, needs.secondary, &backgrounds);
+    let weaker = readable(b3, weak, needs.faint, &backgrounds);
+    let comment = readable(b3, weak, needs.faint, &[b1]);
+    let (added, removed) = match look.diff {
+        DiffColors::GreenRed => (green, red),
+        DiffColors::BlueOrange => (blue, orange),
+    };
     let hover = b5.over(blue, FILL_HOVER);
     let fill = subtle(b2, b1, b0);
     let on_blue = on(blue, b0, b7);
@@ -556,12 +635,14 @@ fn derive(p: &[Rgba; 16], mode: Mode) -> Tokens {
         border_interactive_hover: blue.over(b0, OUTLINE_HOVER),
         border_interactive_focus: blue,
         accent_base: purple,
-        icon_base: readable(b4, text, SECONDARY_CONTRAST, &backgrounds),
+        icon_base: readable(b4, text, needs.secondary, &backgrounds),
         icon_weak_base: weaker,
         icon_selected: strong,
         icon_success_base: green,
         icon_warning_base: yellow,
         icon_critical_base: red,
+        diff_added: added,
+        diff_removed: removed,
         icon_info_base: cyan,
         markdown_heading: blue,
         markdown_strong: yellow,

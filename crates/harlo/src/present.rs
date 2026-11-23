@@ -63,6 +63,9 @@ pub struct Presenter {
     sheets: sheets::Sheets,
     /// The theme's tokens the window was last coloured with.
     applied: Option<Tokens>,
+    /// The preferences the window's motion, sizes and glass were last set
+    /// from.
+    looked: Option<harlo_core::layout::Preferences>,
 }
 
 impl std::fmt::Debug for Presenter {
@@ -99,6 +102,7 @@ impl Presenter {
             terminal: terminal::Terminal::new(&state),
             sheets: sheets::Sheets::new(&state),
             applied: None,
+            looked: None,
         };
         state.set_sidebar_rows(ModelRc::from(Rc::clone(&presenter.sidebar)));
         state.set_locations(ModelRc::from(Rc::clone(&presenter.locations)));
@@ -122,6 +126,10 @@ impl Presenter {
         if self.applied.as_ref() != Some(t) {
             crate::theme::apply(window, t, &app.theme().id);
             self.applied = Some(*t);
+        }
+        if self.looked.as_ref() != Some(&app.preferences) {
+            crate::theme::apply_look(window, &app.preferences);
+            self.looked = Some(app.preferences.clone());
         }
         sync(
             &self.panels,

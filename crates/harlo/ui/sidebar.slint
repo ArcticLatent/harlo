@@ -463,7 +463,8 @@ export component Locations inherits Rectangle {
         y: 91px;
         width: Size.sidebar - 2 * Inset.side;
         height: content.preferred-height;
-        background: Theme.surface-raised-strong;
+        background: Theme.card;
+        backdrop-blur: Theme.card-blur;
         border-radius: Size.menu-radius;
         border-width: 1px;
         border-color: Theme.menu-edge;
@@ -505,8 +506,9 @@ export component Locations inherits Rectangle {
                             }
                             Text {
                                 text: location.detail;
-                                font-size: 11.5px;
+                                font-size: 11.5px * Size.text-scale;
                                 color: Theme.text-weak;
+                                wrap: word-wrap;
                             }
                         }
                     }

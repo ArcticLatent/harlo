@@ -9,7 +9,7 @@ import { Icon, Press, HLine, Breathing } from "widgets.slint";
 
 /// The timeline column's widest size.
 export global Column {
-    out property <length> width: 780px;
+    out property <length> width: Size.chat-width;
     /// The room each side of the column keeps for the prompt rail.
     out property <length> rail: 56px;
     /// The narrowest the column gets to make that room; narrower than
@@ -57,13 +57,13 @@ export component Counts inherits HorizontalLayout {
         text: "+\{root.added}";
         vertical-alignment: center;
         font-size: Size.small;
-        color: Theme.icon-success-base;
+        color: Theme.added-ink;
     }
     if root.removed > 0: Text {
         text: "−\{root.removed}";
         vertical-alignment: center;
         font-size: Size.small;
-        color: Theme.icon-critical-base;
+        color: Theme.removed-ink;
     }
 }
 
@@ -297,8 +297,8 @@ export component PatchLine inherits Rectangle {
             vertical-alignment: center;
             font-family: Fonts.mono;
             font-size: Size.code;
-            color: root.line.kind == 1 ? Theme.icon-success-base
-                : root.line.kind == 2 ? Theme.icon-critical-base : Theme.text-weaker;
+            color: root.line.kind == 1 ? Theme.added-ink
+                : root.line.kind == 2 ? Theme.removed-ink : Theme.text-weaker;
         }
         Text {
             text: root.line.text;
@@ -780,7 +780,8 @@ export component PromptRail inherits Rectangle {
             height: tip.preferred-height + 12px;
             x: -self.width - 4px;
             y: (parent.height - self.height) / 2;
-            background: Theme.surface-raised-strong;
+            background: Theme.card;
+            backdrop-blur: Theme.card-blur;
             border-radius: Size.radius;
             border-width: 1px;
             border-color: Theme.menu-edge;

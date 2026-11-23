@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+use crate::theme::{Contrast, DiffColors};
+
 /// The row the layout is stored under.
 const LAYOUT_KEY: &str = "layout";
 
@@ -40,6 +42,20 @@ pub struct Preferences {
     pub light_theme: String,
     /// Whether the dark or the light theme shows.
     pub appearance: Appearance,
+    /// How strongly text stands out from the background.
+    pub contrast: Contrast,
+    /// The colours added and removed lines take in diffs.
+    pub diff_colors: DiffColors,
+    /// How fast panels slide and new things fade in, or not at all.
+    pub motion: Speed,
+    /// How wide the chat's column gets.
+    pub chat_width: ChatWidth,
+    /// The size of the interface's and the chat's text.
+    pub text_size: TextSize,
+    /// The size of code, diffs and the terminal.
+    pub code_size: TextSize,
+    /// Whether menus and dialogs are translucent, blurring what's under them.
+    pub glass: bool,
 }
 
 impl Default for Preferences {
@@ -49,6 +65,13 @@ impl Default for Preferences {
             dark_theme: crate::theme::HARLO_DARK.to_owned(),
             light_theme: crate::theme::HARLO_LIGHT.to_owned(),
             appearance: Appearance::System,
+            contrast: Contrast::Standard,
+            diff_colors: DiffColors::GreenRed,
+            motion: Speed::Normal,
+            chat_width: ChatWidth::Normal,
+            text_size: TextSize::Normal,
+            code_size: TextSize::Normal,
+            glass: false,
         }
     }
 }
@@ -65,6 +88,115 @@ pub enum Appearance {
     /// Always the dark theme.
     Dark,
 }
+
+/// How fast motion runs: panels sliding, new things fading in, work
+/// breathing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Speed {
+    /// No motion: everything changes at once, and nothing breathes.
+    Off,
+    /// Quicker than usual.
+    Fast,
+    /// As designed.
+    #[default]
+    Normal,
+    /// Slower than usual.
+    Slow,
+}
+
+impl Speed {
+    /// How long motion takes, as a share of its designed length.
+    #[must_use]
+    pub fn factor(self) -> f32 {
+        match self {
+            Self::Off => 0.0,
+            Self::Fast => FAST_MOTION,
+            Self::Normal => 1.0,
+            Self::Slow => SLOW_MOTION,
+        }
+    }
+}
+
+/// How long fast motion takes, as a share of its designed length.
+const FAST_MOTION: f32 = 0.6;
+
+/// How long slow motion takes, as a share of its designed length.
+const SLOW_MOTION: f32 = 1.6;
+
+/// How wide the chat's column gets in a wide window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatWidth {
+    /// Short lines, 640 pixels at most.
+    Narrow,
+    /// As designed, 780 pixels at most.
+    #[default]
+    Normal,
+    /// Longer lines, 960 pixels at most.
+    Wide,
+    /// As wide as the window lets it.
+    Full,
+}
+
+impl ChatWidth {
+    /// The column's widest, in logical pixels; `None` for no limit.
+    #[must_use]
+    pub fn pixels(self) -> Option<f32> {
+        match self {
+            Self::Narrow => Some(NARROW_CHAT),
+            Self::Normal => Some(NORMAL_CHAT),
+            Self::Wide => Some(WIDE_CHAT),
+            Self::Full => None,
+        }
+    }
+}
+
+/// The narrow chat column's widest, in logical pixels.
+const NARROW_CHAT: f32 = 640.0;
+
+/// The chat column's designed widest, in logical pixels.
+const NORMAL_CHAT: f32 = 780.0;
+
+/// The wide chat column's widest, in logical pixels.
+const WIDE_CHAT: f32 = 960.0;
+
+/// A size for text, relative to the design.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextSize {
+    /// A step smaller.
+    Small,
+    /// As designed.
+    #[default]
+    Normal,
+    /// A step larger.
+    Large,
+    /// Two steps larger.
+    Larger,
+}
+
+impl TextSize {
+    /// The scale applied to the designed sizes.
+    #[must_use]
+    pub fn scale(self) -> f32 {
+        match self {
+            Self::Small => SMALLER_TEXT,
+            Self::Normal => 1.0,
+            Self::Large => LARGER_TEXT,
+            Self::Larger => LARGEST_TEXT,
+        }
+    }
+}
+
+/// The scale of small text.
+const SMALLER_TEXT: f32 = 0.92;
+
+/// The scale of large text.
+const LARGER_TEXT: f32 = 1.1;
+
+/// The scale of larger text.
+const LARGEST_TEXT: f32 = 1.2;
 
 /// How the window was arranged when it was last changed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

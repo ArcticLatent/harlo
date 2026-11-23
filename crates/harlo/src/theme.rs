@@ -2,10 +2,11 @@
 
 // Rust guideline compliant 2026-10-09
 
+use harlo_core::layout::{Preferences, TextSize};
 use harlo_core::theme::{self, Mode, Rgba, Tokens};
 use slint::{Color, ComponentHandle};
 
-use crate::ui::{AppWindow, Theme};
+use crate::ui::{AppWindow, Motion, Size, Theme};
 
 /// The tokens of Harlo's own dark scheme, the default.
 #[must_use]
@@ -70,6 +71,8 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
     g.set_link_ink(color(ink(t, t.markdown_link)));
     g.set_heading_ink(color(ink(t, t.markdown_heading)));
     g.set_quote_ink(color(ink(t, t.markdown_quote)));
+    g.set_added_ink(color(ink(t, t.diff_added)));
+    g.set_removed_ink(color(ink(t, t.diff_removed)));
     g.set_chip_hover(color(
         t.surface_base_hover
             .over(t.surface_raised_strong, t.surface_base_hover.a),
@@ -83,12 +86,8 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
         t.surface_interactive_weak
             .over(t.background_stronger, SELECTED_TINT),
     ));
-    g.set_added_line(color(
-        t.icon_success_base.over(t.surface_inset_base, PATCH_TINT),
-    ));
-    g.set_removed_line(color(
-        t.icon_critical_base.over(t.surface_inset_base, PATCH_TINT),
-    ));
+    g.set_added_line(color(t.diff_added.over(t.surface_inset_base, PATCH_TINT)));
+    g.set_removed_line(color(t.diff_removed.over(t.surface_inset_base, PATCH_TINT)));
     g.set_primary_off(color(
         t.surface_brand_base
             .over(t.surface_raised_strong, PRIMARY_OFF),
@@ -103,6 +102,24 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
     ));
     g.set_scrim(color(scrim(t)));
 }
+
+/// Sets how `window` moves and sizes things from Settings → Appearance:
+/// motion, text and code sizes, the chat's width and glass.
+pub fn apply_look(window: &AppWindow, preferences: &Preferences) {
+    window
+        .global::<Motion>()
+        .set_speed(preferences.motion.factor());
+    let size = window.global::<Size>();
+    size.set_text_scale(preferences.text_size.scale());
+    // Diff lines are a fixed height, which code up to Large fits.
+    let code = preferences.code_size.scale().min(TextSize::Large.scale());
+    size.set_code_scale(code);
+    size.set_chat_width(preferences.chat_width.pixels().unwrap_or(FULL_CHAT));
+    window.global::<Theme>().set_glass(preferences.glass);
+}
+
+/// The chat column's widest when it has no limit: wider than any window.
+const FULL_CHAT: f32 = 100_000.0;
 
 /// Secondary icons: the theme's weak icon colour when it reads against the
 /// background, else its icon colour faded towards the background.

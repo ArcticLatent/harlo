@@ -6,7 +6,10 @@
 
 use std::collections::BTreeMap;
 
-use harlo_core::layout::{Appearance, Layout, Preferences, Store, Tabs};
+use harlo_core::layout::{
+    Appearance, ChatWidth, Layout, Preferences, Speed, Store, Tabs, TextSize,
+};
+use harlo_core::theme::{Contrast, DiffColors};
 
 fn sample() -> Layout {
     Layout {
@@ -111,6 +114,13 @@ fn preferences_load_back_beside_the_layout() {
         reopen_tabs: false,
         dark_theme: "dracula".to_owned(),
         light_theme: "github".to_owned(),
+        contrast: Contrast::More,
+        diff_colors: DiffColors::BlueOrange,
+        motion: Speed::Off,
+        chat_width: ChatWidth::Full,
+        text_size: TextSize::Larger,
+        code_size: TextSize::Small,
+        glass: true,
         appearance: Appearance::Light,
     };
     store.save_preferences(&chosen).expect("the preferences");
@@ -119,5 +129,21 @@ fn preferences_load_back_beside_the_layout() {
         store.load().expect("the layout"),
         sample(),
         "each keeps its own row"
+    );
+}
+
+/// Preferences saved before a setting existed load with its default, and a
+/// setting since dropped is ignored.
+#[test]
+fn older_preferences_load_with_defaults() {
+    let old = r#"{"reopen_tabs": false, "theme": "dracula", "appearance": "light"}"#;
+    let loaded: Preferences = serde_json::from_str(old).expect("an older save");
+    assert_eq!(
+        loaded,
+        Preferences {
+            reopen_tabs: false,
+            appearance: Appearance::Light,
+            ..Preferences::default()
+        }
     );
 }
