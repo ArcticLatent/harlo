@@ -846,6 +846,11 @@ fn long_history(count: usize) -> Vec<Entry> {
         .collect()
 }
 
+/// The prompt rail's mark for question `n` of [`long_history`]'s 60.
+fn mark(n: usize) -> String {
+    format!("Prompt {} of 60: Question number {n}", n + 1)
+}
+
 /// Lets the timeline catch up with its end, as the event loop's next turns would.
 fn settle_at_end(ui: &Ui, newest: &str) {
     for _ in 0..5 {
@@ -951,7 +956,7 @@ fn a_prompt_mark_jumps_up_to_its_question() {
     ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
     settle_at_end(&ui, "Question number 59");
 
-    ui.press("Question number 20");
+    ui.press(&mark(20));
     settle(&ui, "Question number 20");
     assert!(in_view(&ui, "Question number 20"), "the question shows");
     assert!(
@@ -973,7 +978,7 @@ fn a_narrow_chat_keeps_room_for_the_prompt_rail() {
     ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
     settle_at_end(&ui, "Question number 59");
 
-    ui.press("Question number 20");
+    ui.press(&mark(20));
     settle(&ui, "Question number 20");
     assert!(
         in_view(&ui, "Question number 20"),
@@ -986,10 +991,10 @@ fn a_prompt_mark_jumps_down_to_a_later_question() {
     let ui = chatting();
     ui.send(Message::History(PI_UPDATE.into(), Ok(long_history(60))));
     settle_at_end(&ui, "Question number 59");
-    ui.press("Question number 12");
+    ui.press(&mark(12));
     settle(&ui, "Question number 12");
 
-    ui.press("Question number 40");
+    ui.press(&mark(40));
     settle(&ui, "Question number 40");
     assert!(
         (0.0..60.0).contains(&below_top(&ui, "Question number 40")),
