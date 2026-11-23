@@ -11,6 +11,7 @@ use slint::{ModelRc, SharedString, VecModel};
 
 use lucide_icons::Icon;
 
+use super::marks::{Marks, project_color};
 use super::{glyph, sync};
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::theme::{Mode, Scheme};
@@ -82,6 +83,8 @@ pub struct Sheets {
     days: Rc<VecModel<DayBar>>,
     dark_themes: Rc<VecModel<ThemeCard>>,
     light_themes: Rc<VecModel<ThemeCard>>,
+    /// Project icons, shared with the sidebar.
+    marks: Rc<Marks>,
 }
 
 impl std::fmt::Debug for Sheets {
@@ -92,13 +95,14 @@ impl std::fmt::Debug for Sheets {
 
 impl Sheets {
     /// Gives the window the pages' lists.
-    pub fn new(state: &State<'_>) -> Self {
+    pub fn new(state: &State<'_>, marks: Rc<Marks>) -> Self {
         let sheets = Self {
             rows: Rc::new(VecModel::default()),
             tiles: Rc::new(VecModel::default()),
             days: Rc::new(VecModel::default()),
             dark_themes: Rc::new(VecModel::default()),
             light_themes: Rc::new(VecModel::default()),
+            marks,
         };
         state.set_dark_theme_cards(ModelRc::from(Rc::clone(&sheets.dark_themes)));
         state.set_light_theme_cards(ModelRc::from(Rc::clone(&sheets.light_themes)));
@@ -185,7 +189,12 @@ impl Sheets {
                 }
                 if app.sheets.query.trim().is_empty() {
                     state.set_sheet_title(section.title().into());
-                    (setup_note(app, section), section_rows(app, section))
+                    let rows = if section == Section::Projects {
+                        project_rows(app, &self.marks)
+                    } else {
+                        section_rows(app, section)
+                    };
+                    (setup_note(app, section), rows)
                 } else {
                     state.set_sheet_title("Search results".into());
                     found(app, &app.sheets.query)
@@ -260,6 +269,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Appearance => Icon::Palette,
         Section::Notifications => Icon::Bell,
         Section::Shortcuts => Icon::Keyboard,
+        Section::Projects => Icon::FolderGit2,
         Section::Models => Icon::Bot,
         Section::Tools => Icon::Plug,
         Section::Server => Icon::Server,
@@ -274,6 +284,8 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         Section::Appearance => appearance_rows(app),
         Section::Notifications => notification_rows(app),
         Section::Shortcuts => shortcuts(),
+        // Searched without their icons.
+        Section::Projects => project_rows(app, &Marks::default()),
         Section::Models => {
             let mut rows = claude_rows(app);
             if let Load::Loaded(setup) = &app.sheets.setup {
@@ -900,6 +912,232 @@ fn field(field: Field, name: &str, value: &str, hint: &str) -> SheetRow {
             .position(|f| *f == field)
             .unwrap_or_default()),
         ..SheetRow::default()
+    }
+}
+
+/// The kind of row with colour swatches, one per option of its choice.
+const SWATCHES: i32 = 8;
+
+/// The kind of row that shows a project's mark, name and folder, and opens
+/// its settings.
+const PROJECT: i32 = 9;
+
+/// Settings → Projects: the list of projects, or the one shown.
+fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
+    let page = &app.sheets.projects;
+    let shown = page
+        .shown
+        .as_deref()
+        .and_then(|folder| app.projects.iter().find(|p| p.directory == folder));
+    let Some(project) = shown else {
+        return project_list(app, marks);
+    };
+    let server = app.server_project(&project.directory);
+    let mut back = pair(&project.name, &home_relative(&project.directory), 3);
+    back.action = "All projects".into();
+    back.setting = crate::window::ALL_PROJECTS;
+    let mut rows = vec![back];
+    if let Some(why) = &page.error {
+        rows.push(pair("Not changed", why, 2));
+    }
+
+    rows.push(heading("On every app"));
+    if server.is_none() {
+        rows.push(note(
+            "OpenCode learns about the project with its first session; these wait until then.",
+        ));
+    } else {
+        let name = server.and_then(|p| p.name.clone()).unwrap_or_default();
+        rows.push(field(
+            Field::ProjectName,
+            "Name",
+            &name,
+            harlo_core::sessions::folder_name(&project.directory),
+        ));
+        rows.push(swatches(app));
+        let mut icon = pair(
+            "Icon",
+            if project.icon.is_some() {
+                "An image you chose"
+            } else {
+                "The folder, in the project's colour"
+            },
+            3,
+        );
+        icon.action = "Choose…".into();
+        icon.setting = crate::window::CHOOSE_ICON;
+        rows.push(icon);
+        if project.icon.is_some() {
+            let mut clear = pair("", "Show the folder again", 3);
+            clear.action = "Remove image".into();
+            clear.setting = crate::window::CLEAR_ICON;
+            rows.push(clear);
+        }
+        rows.push(note(
+            "Kept by the OpenCode server, so every app using it shows the same name, colour and icon.",
+        ));
+    }
+
+    rows.push(heading("New sessions"));
+    let chosen = app.shown_project_model();
+    let mut model = pair(
+        "Model",
+        &chosen.as_ref().map_or_else(
+            || "OpenCode's default".to_owned(),
+            |m| format!("{} · {}", m.name, m.provider_id),
+        ),
+        0,
+    );
+    model.action = "Change".into();
+    model.setting = crate::window::CHOOSE_PROJECT_MODEL;
+    rows.push(model);
+    if chosen.is_some() {
+        let mut reset = pair("", "Let OpenCode choose again", 3);
+        reset.action = "Use the default".into();
+        reset.setting = crate::window::DEFAULT_PROJECT_MODEL;
+        rows.push(reset);
+    }
+    rows.push(note(
+        "Kept by Harlo on this computer. A model picked in the composer still wins.",
+    ));
+
+    if server.is_some_and(|p| p.git) {
+        rows.extend(worktree_rows(app, project));
+    }
+
+    rows.extend([
+        heading("Remove from Harlo"),
+        choice(
+            app,
+            SettingChoice::ProjectSessions,
+            "Its sessions",
+            "Archived sessions leave the lists but stay on the server.",
+        ),
+    ]);
+    let mut remove = pair(
+        "Remove from the sidebar",
+        "The folder and its files stay. + Project brings it back.",
+        3,
+    );
+    remove.action = "Remove".into();
+    remove.setting = crate::window::HIDE_PROJECT;
+    rows.push(remove);
+    rows
+}
+
+/// The shown project's worktrees, the button to make one, and the command
+/// a new one runs.
+fn worktree_rows(app: &App, project: &harlo_core::sessions::Project) -> Vec<SheetRow> {
+    let page = &app.sheets.projects;
+    let mut rows = vec![
+        heading("Worktrees"),
+        note(
+            "More checkouts of the project, each on a branch of its own, so agents can work side by side. Each shows in the sidebar under the project.",
+        ),
+    ];
+    for (index, worktree) in project.worktrees.iter().enumerate() {
+        let mut row = pair(&worktree.name, &home_relative(&worktree.directory), 3);
+        row.action = "Remove".into();
+        row.setting = crate::window::REMOVE_WORKTREE;
+        row.choice = int(index);
+        rows.push(row);
+        if page.needs_force.as_deref() == Some(worktree.directory.as_str()) {
+            let mut force = pair("", "It has changes; removing it throws them away.", 4);
+            force.action = "Remove anyway".into();
+            force.setting = crate::window::FORCE_REMOVE_WORKTREE;
+            force.choice = int(index);
+            rows.push(force);
+        }
+    }
+    let mut make = field(
+        Field::NewWorktree,
+        "New",
+        "",
+        "Its name, or empty for one OpenCode picks",
+    );
+    make.action = "Make".into();
+    rows.push(make);
+    if page.making {
+        rows.push(pair("", "Making the worktree…", 3));
+    }
+    let start = app
+        .server_project(&project.directory)
+        .and_then(|p| p.start.clone())
+        .unwrap_or_default();
+    rows.extend([
+        field(
+            Field::StartCommand,
+            "Setup",
+            &start,
+            "A command each new worktree runs, such as npm install",
+        ),
+        note("Kept by the OpenCode server, which runs it in each new worktree."),
+    ]);
+    rows
+}
+
+/// Every project, to choose one.
+fn project_list(app: &App, marks: &Marks) -> Vec<SheetRow> {
+    let hidden = app.hidden_projects().len();
+    let removed = note(&format!(
+        "{hidden} removed from the sidebar; + Project with its folder brings one back."
+    ));
+    if app.projects.is_empty() {
+        let mut rows = vec![note(
+            "No projects yet. Add a folder with + Project in the sidebar.",
+        )];
+        if hidden > 0 {
+            rows.push(removed);
+        }
+        return rows;
+    }
+    let mut rows = vec![note("Choose a project to change it.")];
+    for (index, project) in app.projects.iter().enumerate() {
+        rows.push(SheetRow {
+            kind: PROJECT,
+            name: project.name.as_str().into(),
+            value: home_relative(&project.directory).into(),
+            color: project
+                .color
+                .as_deref()
+                .and_then(project_color)
+                .unwrap_or_default(),
+            on: project.color.is_some(),
+            picture: marks.image(project.icon.as_deref()),
+            setting: crate::window::PICK_PROJECT,
+            choice: int(index),
+            ..SheetRow::default()
+        });
+    }
+    if hidden > 0 {
+        rows.push(removed);
+    }
+    rows
+}
+
+/// The shown project's colour as swatches: none, then OpenCode's colours.
+fn swatches(app: &App) -> SheetRow {
+    let mut row = choice(app, SettingChoice::ProjectColor, "Colour", "");
+    row.kind = SWATCHES;
+    let colors: Vec<slint::Color> = std::iter::once(slint::Color::default())
+        .chain(
+            harlo_core::server::PROJECT_COLORS
+                .iter()
+                .filter_map(|name| project_color(name)),
+        )
+        .collect();
+    row.colors = ModelRc::new(VecModel::from(colors));
+    row
+}
+
+/// `folder` with the home folder as `~`.
+fn home_relative(folder: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() => match folder.strip_prefix(&home) {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("~{rest}"),
+            _ => folder.to_owned(),
+        },
+        _ => folder.to_owned(),
     }
 }
 

@@ -14,6 +14,7 @@ use harlo_core::theme::{Contrast, DiffColors};
 fn sample() -> Layout {
     Layout {
         order: vec!["/home/u/code/harlo".into(), "/home/u".into()],
+        hidden: vec!["/home/u/old".into()],
         sidebar: false,
         expanded: vec!["/home/u".into()],
         panel: Some("Notes".into()),
@@ -132,6 +133,12 @@ fn preferences_load_back_beside_the_layout() {
         code_size: TextSize::Small,
         glass: true,
         appearance: Appearance::Light,
+        project_models: [(
+            "/home/u/code/harlo".to_owned(),
+            "fake/fake-coder".to_owned(),
+        )]
+        .into_iter()
+        .collect(),
     };
     store.save_preferences(&chosen).expect("the preferences");
     assert_eq!(store.load_preferences().expect("saved"), chosen);

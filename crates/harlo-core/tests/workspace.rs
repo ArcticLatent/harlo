@@ -25,6 +25,9 @@ fn project(id: &str, directory: &str) -> Project {
         directory: directory.into(),
         name: None,
         git: true,
+        color: None,
+        icon: None,
+        start: None,
     }
 }
 
@@ -535,4 +538,32 @@ fn children_load_with_their_parent_and_flag_it_when_they_ask() {
     assert!(later.waiting);
     assert_eq!(later.agent.as_deref(), Some("explore"));
     assert!(!ws.needs_user("s1"), "the parent itself asks for nothing");
+}
+
+#[test]
+fn a_hidden_project_stays_hidden_until_added_again() {
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    ws.hide_project("/code/web");
+    assert!(!ws.order().iter().any(|d| d == "/code/web"));
+    assert_eq!(ws.hidden(), ["/code/web".to_owned()]);
+
+    // Its sessions changing, or a fresh snapshot, don't bring it back.
+    ws.resync(snapshot());
+    assert!(!ws.order().iter().any(|d| d == "/code/web"));
+    assert!(
+        !ws.sidebar(now()).iter().any(|p| p.directory == "/code/web"),
+        "not in the sidebar"
+    );
+
+    // As saved and loaded again.
+    let mut loaded = Workspace::new(ws.order().to_vec());
+    loaded.set_hidden(ws.hidden().to_vec());
+    loaded.resync(snapshot());
+    assert!(!loaded.order().iter().any(|d| d == "/code/web"));
+
+    // Adding it again does.
+    ws.add_project("/code/web".into());
+    assert!(ws.hidden().is_empty());
+    assert!(ws.order().iter().any(|d| d == "/code/web"));
 }

@@ -20,7 +20,7 @@ use slint::winit_030::{EventResult, WinitWindowAccessor as _, winit::event::Wind
 
 use crate::app::{
     self, App, ChangesEvent, ContextEvent, Edge, FilesEvent, Message, NotesEvent, Panel,
-    SheetEvent, TerminalEvent,
+    ProjectEvent, SheetEvent, TerminalEvent,
 };
 use crate::keys::KeyPress;
 use crate::model::{self, Picker};
@@ -505,6 +505,76 @@ pub const INSTALL_OPENCODE: i32 = 12;
 /// The Settings button that sends a test notification.
 pub const TEST_NOTICE: i32 = 13;
 
+/// The Settings button that opens the menu of models for the shown
+/// project's new sessions.
+pub const CHOOSE_PROJECT_MODEL: i32 = 14;
+
+/// The Settings button that lets OpenCode choose the shown project's model
+/// again.
+pub const DEFAULT_PROJECT_MODEL: i32 = 15;
+
+/// The Settings button that chooses an image for the shown project's icon.
+pub const CHOOSE_ICON: i32 = 16;
+
+/// The Settings button that removes the shown project's icon image.
+pub const CLEAR_ICON: i32 = 17;
+
+/// The Settings button that removes one of the shown project's worktrees,
+/// by its place.
+pub const REMOVE_WORKTREE: i32 = 18;
+
+/// The Settings button that removes a worktree with changes, by its place.
+pub const FORCE_REMOVE_WORKTREE: i32 = 19;
+
+/// The Settings button that removes the shown project from Harlo.
+pub const HIDE_PROJECT: i32 = 20;
+
+/// A project in Settings → Projects' list, by its place, which shows its
+/// settings.
+pub const PICK_PROJECT: i32 = 21;
+
+/// The Settings button that goes back to the list of projects.
+pub const ALL_PROJECTS: i32 = 22;
+
+/// The step the Settings button numbered `number` takes for item `item`.
+fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
+    let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
+    let worktree = || {
+        let folder = app.sheets.projects.shown.as_deref()?;
+        let project = app.projects.iter().find(|p| p.directory == folder)?;
+        Some(
+            project
+                .worktrees
+                .get(usize::try_from(item).ok()?)?
+                .directory
+                .clone(),
+        )
+    };
+    match number {
+        CHOOSE_DEFAULT_MODEL => Some(Message::TogglePicker(Picker::DefaultModel)),
+        OPEN_SETUP => Some(Message::Sheet(SheetEvent::OpenSetup)),
+        INSTALL_OPENCODE => Some(Message::Sheet(SheetEvent::InstallOpenCode)),
+        TEST_NOTICE => Some(Message::Sheet(SheetEvent::TestNotice)),
+        CHOOSE_PROJECT_MODEL => Some(Message::TogglePicker(Picker::ProjectModel)),
+        DEFAULT_PROJECT_MODEL => project(ProjectEvent::Model(None)),
+        CHOOSE_ICON => project(ProjectEvent::ChooseIcon),
+        CLEAR_ICON => project(ProjectEvent::ClearIcon),
+        REMOVE_WORKTREE | FORCE_REMOVE_WORKTREE => project(ProjectEvent::RemoveWorktree {
+            directory: worktree()?,
+            force: number == FORCE_REMOVE_WORKTREE,
+        }),
+        HIDE_PROJECT => project(ProjectEvent::Hide),
+        PICK_PROJECT => project(ProjectEvent::Pick(Some(
+            app.projects
+                .get(usize::try_from(item).ok()?)?
+                .directory
+                .clone(),
+        ))),
+        ALL_PROJECTS => project(ProjectEvent::Pick(None)),
+        _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
+    }
+}
+
 /// The setting the UI numbers `number`.
 fn setting_of(number: i32) -> Option<app::Setting> {
     app::Setting::ALL
@@ -638,16 +708,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     ));
     send_with!(on_switch_setting, |_app, number| setting_of(number)
         .map(|setting| Message::Sheet(SheetEvent::Switch(setting))));
-    send_with!(on_settings_action, |_app, number| {
-        match number {
-            CHOOSE_DEFAULT_MODEL => return Some(Message::TogglePicker(Picker::DefaultModel)),
-            OPEN_SETUP => return Some(Message::Sheet(SheetEvent::OpenSetup)),
-            INSTALL_OPENCODE => return Some(Message::Sheet(SheetEvent::InstallOpenCode)),
-            TEST_NOTICE => return Some(Message::Sheet(SheetEvent::TestNotice)),
-            _ => {}
-        }
-        claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action)))
-    });
+    send_with!(on_settings_action, |app, number, item| settings_action(
+        app, number, item
+    ));
     send_with!(on_setup_step, |_app, number| usize::try_from(number)
         .ok()
         .and_then(|i| app::Step::ALL.get(i).copied())
@@ -691,6 +754,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         .cloned()
         .map(Message::PickLocation));
     send!(on_add_project, || Message::AddProject);
+    send!(on_project_settings, |folder| Message::Sheet(
+        SheetEvent::Project(ProjectEvent::Open(folder.to_string()))
+    ));
     send!(on_new_session, |folder| Message::NewSession(
         (!folder.is_empty()).then(|| folder.to_string())
     ));

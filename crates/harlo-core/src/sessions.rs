@@ -14,6 +14,10 @@ pub struct Project {
     pub directory: String,
     /// The name people see.
     pub name: String,
+    /// Its mark's colour, one of OpenCode's project colours, if chosen.
+    pub color: Option<String>,
+    /// The URL of an image chosen as its icon, often a `data:` one.
+    pub icon: Option<String>,
     /// Sessions in the main folder, newest first.
     pub sessions: Vec<SessionSummary>,
     /// The project's worktrees, each with its sessions.

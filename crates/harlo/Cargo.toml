@@ -27,6 +27,8 @@ mimalloc = { workspace = true }
 rfd = { workspace = true, features = ["xdg-portal"] }
 arboard = { workspace = true, features = ["image-data", "wayland-data-control"] }
 png = { workspace = true }
+# Project icons kept on the server as `data:` URLs.
+base64 = { workspace = true, features = ["std"] }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 alacritty_terminal = { workspace = true }
 notify-rust = { workspace = true, features = ["z"] }

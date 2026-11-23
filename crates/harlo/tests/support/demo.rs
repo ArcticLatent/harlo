@@ -35,6 +35,9 @@ fn project(id: &str, directory: &str) -> ServerProject {
         directory: directory.to_owned(),
         name: None,
         git: true,
+        color: None,
+        icon: None,
+        start: None,
     }
 }
 

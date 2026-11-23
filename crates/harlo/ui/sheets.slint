@@ -6,7 +6,7 @@ import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, SheetRow, ThemeCard } from "data.slint";
-import { Field, Icon, IconButton, Press, HLine, VLine, Switch } from "widgets.slint";
+import { Field, Icon, IconButton, Press, HLine, VLine, Switch, ProjectMark } from "widgets.slint";
 import { CardButton, GhostButton } from "waiting.slint";
 
 /// A small button with a word on it, at the end of a row.
@@ -49,6 +49,36 @@ component ChoiceButton inherits Press {
         horizontal-alignment: center;
         vertical-alignment: center;
         accessible-role: none;
+    }
+}
+
+/// A colour to choose: a dot, ringed while chosen; the first is none.
+component Swatch inherits Press {
+    in property <color> tint;
+    in property <bool> none;
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    rest: transparent;
+    border-width: root.selected ? 2px : 0px;
+    border-color: Theme.border-interactive-base;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+
+    Rectangle {
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.none ? transparent : root.tint;
+        border-width: root.none ? 1px : 0px;
+        border-color: Theme.border-base;
+        // None: a slash through an empty dot.
+        if root.none: Rectangle {
+            width: 1px;
+            height: 14px;
+            background: Theme.border-base;
+            transform-rotation: 45deg;
+        }
     }
 }
 
@@ -225,7 +255,7 @@ component Row inherits VerticalLayout {
                     Requests.anchor-x = self.absolute-position.x;
                     Requests.anchor-y = self.absolute-position.y;
                     Requests.anchor-height = self.height;
-                    Logic.settings-action(root.entry.setting);
+                    Logic.settings-action(root.entry.setting, root.entry.choice);
                 }
             }
         }
@@ -274,6 +304,72 @@ component Row inherits VerticalLayout {
                         clicked => { Logic.choose(root.entry.choice, index); }
                     }
                 }
+            }
+        }
+    }
+    if root.entry.kind == 8: HorizontalLayout {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 16px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.name;
+            font-size: Size.small;
+            color: Theme.text-base;
+            vertical-alignment: center;
+            accessible-role: AccessibleRole.text;
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            for tint[index] in root.entry.colors: Swatch {
+                tint: tint;
+                none: index == 0;
+                label: root.entry.name + ": " + root.entry.options[index];
+                selected: root.entry.setting == index;
+                clicked => { Logic.choose(root.entry.choice, index); }
+            }
+        }
+    }
+    if root.entry.kind == 9: Press {
+        height: 44px;
+        label: root.entry.name;
+        clicked => { Logic.settings-action(root.entry.setting, root.entry.choice); }
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                ProjectMark {
+                    size: 18px;
+                    picture: root.entry.picture;
+                    colored: root.entry.on;
+                    tint: root.entry.color;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.entry.name;
+                    font-size: Size.small;
+                    font-weight: 600;
+                    color: Theme.text-strong;
+                    overflow: elide;
+                    accessible-role: none;
+                }
+                Text {
+                    text: root.entry.value;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                    overflow: elide;
+                    accessible-role: none;
+                }
+            }
+            Icon {
+                text: Icons.chevron-right;
+                color: Theme.icon-quiet;
             }
         }
     }
@@ -346,7 +442,7 @@ component Row inherits VerticalLayout {
             alignment: center;
             ActionButton {
                 text: root.entry.action;
-                clicked => { Logic.settings-action(root.entry.setting); }
+                clicked => { Logic.settings-action(root.entry.setting, root.entry.choice); }
             }
         }
     }

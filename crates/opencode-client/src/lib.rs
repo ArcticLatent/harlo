@@ -52,8 +52,8 @@ pub use setup::{CommandSetup, Setup};
 #[doc(inline)]
 pub use types::{
     Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, InboxItem,
-    Message, ModelRef, Part, Permission, PermissionReply, Project, Report, Revert, Rule,
-    ServerInfo, Session, SessionContext, Tokens, ToolCall, ToolStatus,
+    Message, ModelRef, PROJECT_COLORS, Part, Permission, PermissionReply, Project, ProjectChange,
+    Report, Revert, Rule, ServerInfo, Session, SessionContext, Tokens, ToolCall, ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

@@ -68,6 +68,10 @@ pub struct Preferences {
     pub code_size: TextSize,
     /// Whether menus and dialogs are translucent, blurring what's under them.
     pub glass: bool,
+    /// The model new sessions in a project start with, as
+    /// `provider/model`, by the project's folder; kept here, not on the
+    /// server.
+    pub project_models: BTreeMap<String, String>,
 }
 
 impl Default for Preferences {
@@ -87,6 +91,7 @@ impl Default for Preferences {
             text_size: TextSize::Normal,
             code_size: TextSize::Normal,
             glass: false,
+            project_models: BTreeMap::new(),
         }
     }
 }
@@ -219,6 +224,8 @@ const LARGEST_TEXT: f32 = 1.2;
 pub struct Layout {
     /// The project folders in the sidebar, in order.
     pub order: Vec<String>,
+    /// Project folders removed from the sidebar.
+    pub hidden: Vec<String>,
     /// Whether the sidebar is shown.
     pub sidebar: bool,
     /// Folders whose session lists show every session.
@@ -239,6 +246,7 @@ impl Default for Layout {
     fn default() -> Self {
         Self {
             order: Vec::new(),
+            hidden: Vec::new(),
             sidebar: true,
             expanded: Vec::new(),
             panel: None,

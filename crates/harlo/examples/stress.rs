@@ -395,6 +395,9 @@ fn snapshot() -> Snapshot {
             directory: FOLDER.into(),
             name: None,
             git: true,
+            color: None,
+            icon: None,
+            start: None,
         }],
         worktrees: HashMap::from([("p_stress".to_owned(), vec![FOLDER.to_owned()])]),
         sessions: vec![Session {

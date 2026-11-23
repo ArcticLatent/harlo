@@ -54,6 +54,8 @@ pub enum Picker {
     Shield,
     /// The model new sessions use, set in OpenCode's config from Settings.
     DefaultModel,
+    /// The model new sessions in the project shown in Settings start with.
+    ProjectModel,
 }
 
 impl Picker {
@@ -67,6 +69,7 @@ impl Picker {
             Self::Model => 3,
             Self::Shield => 4,
             Self::DefaultModel => 5,
+            Self::ProjectModel => 6,
         }
     }
 
@@ -80,6 +83,7 @@ impl Picker {
             3 => Self::Model,
             4 => Self::Shield,
             5 => Self::DefaultModel,
+            6 => Self::ProjectModel,
             _ => return None,
         })
     }
@@ -239,12 +243,11 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 })
                 .collect()
         }
-        Picker::Model | Picker::DefaultModel => {
-            let default = picker == Picker::DefaultModel;
-            let current = if default {
-                app.default_model_choice()
-            } else {
-                app.current_model_choice()
+        Picker::Model | Picker::DefaultModel | Picker::ProjectModel => {
+            let current = match picker {
+                Picker::DefaultModel => app.default_model_choice(),
+                Picker::ProjectModel => app.shown_project_model(),
+                _ => app.current_model_choice(),
             };
             app.models
                 .iter()
@@ -261,10 +264,14 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     label: model.name.clone(),
                     detail: Some(model.provider_id.clone()),
                     dot: None,
-                    message: if default {
-                        Message::Sheet(SheetEvent::DefaultModel(model.clone()))
-                    } else {
-                        Message::PickModel(model.clone())
+                    message: match picker {
+                        Picker::DefaultModel => {
+                            Message::Sheet(SheetEvent::DefaultModel(model.clone()))
+                        }
+                        Picker::ProjectModel => Message::Sheet(SheetEvent::Project(
+                            crate::app::ProjectEvent::Model(Some(model.clone())),
+                        )),
+                        _ => Message::PickModel(model.clone()),
                     },
                 })
                 .collect()

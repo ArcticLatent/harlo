@@ -27,9 +27,9 @@ use crate::workspace::{Fetch, Fetched, Snapshot};
 pub use opencode_client::{
     Agent, Answer, Attachment, Choice, Client, Command, Condition, Connection, Day, Delivery,
     Effect, Endpoint, Error, Field, FieldKind, FileChange, FileDiff, FileMatch, Integration,
-    McpResource, McpServer, McpStatus, Mention, Model, ModelUsage, PermissionReply, Plugin,
-    PluginSource, Prompt, Provider, Pty, PtyInput, PtyOutput, Rule, SessionContext, Skill, Stats,
-    Tokens, WebSearch, message_id,
+    McpResource, McpServer, McpStatus, Mention, Model, ModelUsage, PROJECT_COLORS, PermissionReply,
+    Plugin, PluginSource, ProjectChange, Prompt, Provider, Pty, PtyInput, PtyOutput, Rule,
+    SessionContext, Skill, Stats, Tokens, WebSearch, message_id,
 };
 
 /// The longest wait between reconnection attempts.

@@ -33,6 +33,7 @@ mod context;
 mod files;
 mod notes;
 mod notices;
+mod projects;
 mod sheets;
 mod subagents;
 mod terminal;
@@ -50,6 +51,7 @@ pub use context::{
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
+pub use projects::{ProjectEvent, Projects, icon_url};
 pub use sheets::{
     Autostart, Event as SheetEvent, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
     SettingChoice, Sheet, Sheets, Step,
@@ -599,7 +601,11 @@ impl App {
             status: Status::Connecting { attempt: 1 },
             picking_location: false,
             client: None,
-            workspace: Workspace::new(layout.order.clone()),
+            workspace: {
+                let mut workspace = Workspace::new(layout.order.clone());
+                workspace.set_hidden(layout.hidden.clone());
+                workspace
+            },
             projects: Vec::new(),
             now: SystemTime::now(),
             filter: String::new(),
@@ -710,6 +716,7 @@ impl App {
         expanded.sort();
         Layout {
             order: self.workspace.order().to_vec(),
+            hidden: self.workspace.hidden().to_vec(),
             sidebar: self.sidebar,
             expanded,
             panel: self.panel.map(|p| p.title().to_owned()),
@@ -729,7 +736,9 @@ impl App {
                 | Message::PickModel(_)
                 | Message::PickVariant(_)
                 | Message::PickShield(_)
-                | Message::Sheet(SheetEvent::DefaultModel(_))
+                | Message::Sheet(
+                    SheetEvent::DefaultModel(_) | SheetEvent::Project(ProjectEvent::Model(_))
+                )
         ) {
             self.picker = None;
         }
@@ -1271,7 +1280,9 @@ impl App {
             // Files belong to the server they were read from.
             self.fs = Files::default();
             self.forget_catalogs();
+            let hidden = self.workspace.hidden().to_vec();
             self.workspace = Workspace::new(self.workspace.order().to_vec());
+            self.workspace.set_hidden(hidden);
             self.refresh();
             return self.follow_location();
         }
@@ -1474,7 +1485,10 @@ impl App {
         let scroll = self.show_sending(target.as_deref(), &text, &outgoing, delivery);
         let new = target.is_none().then(|| NewChoices {
             agent: self.new_agent.clone(),
-            model: self.new_model.clone(),
+            model: self
+                .new_model
+                .clone()
+                .or_else(|| self.project_model(&folder)),
             rules: self.new_shield.rules().filter(|rules| !rules.is_empty()),
         });
         Task::batch([
@@ -1633,7 +1647,10 @@ impl App {
                     .position(|item| item.selected)
                     .unwrap_or(0);
                 let reveal = self.reveal_highlight();
-                if matches!(picker, Picker::Model | Picker::DefaultModel) {
+                if matches!(
+                    picker,
+                    Picker::Model | Picker::DefaultModel | Picker::ProjectModel
+                ) {
                     return Task::batch([reveal, Task::effect(Effect::Focus(model::MENU_FILTER))]);
                 }
                 return reveal;
@@ -1670,9 +1687,15 @@ impl App {
                 return Task::perform(pick_folder(), Message::ProjectChosen);
             }
             Message::ProjectChosen(Some(folder)) => {
-                // A new session there makes it a project.
+                // A new session there makes it a project; one removed from
+                // Harlo comes back now.
+                let folder = folder.to_string_lossy().into_owned();
+                if self.workspace.hidden().contains(&folder) {
+                    self.workspace.add_project(folder.clone());
+                    self.refresh();
+                }
                 self.active = None;
-                self.new_folder = Some(folder.to_string_lossy().into_owned());
+                self.new_folder = Some(folder);
             }
             _ => {}
         }
@@ -1840,7 +1863,10 @@ impl App {
     pub fn current_model(&self) -> Option<ModelRef> {
         let chosen = match self.active.as_deref() {
             Some(id) => self.workspace.session(id).and_then(|s| s.model.clone()),
-            None => self.new_model.clone(),
+            None => self
+                .new_model
+                .clone()
+                .or_else(|| self.project_model(&self.folder())),
         };
         chosen.or_else(|| {
             let model = self.catalog()?.default_model.as_ref()?;

@@ -92,6 +92,20 @@ impl App {
             SettingChoice::ChatWidth => place(&CHAT_WIDTHS, &p.chat_width),
             SettingChoice::TextSize => place(&TEXT_SIZES, &p.text_size),
             SettingChoice::CodeSize => place(&CODE_SIZES, &p.code_size),
+            // After "None".
+            SettingChoice::ProjectColor => self
+                .sheets
+                .projects
+                .shown
+                .as_deref()
+                .and_then(|folder| self.workspace.project(folder)?.color.clone())
+                .and_then(|color| {
+                    harlo_core::server::PROJECT_COLORS
+                        .iter()
+                        .position(|c| *c == color)
+                })
+                .map_or(0, |i| i + 1),
+            SettingChoice::ProjectSessions => usize::from(self.sheets.projects.archive),
         }
     }
 
@@ -106,6 +120,8 @@ impl App {
             SettingChoice::ChatWidth => pick(&CHAT_WIDTHS, option, &mut p.chat_width),
             SettingChoice::TextSize => pick(&TEXT_SIZES, option, &mut p.text_size),
             SettingChoice::CodeSize => pick(&CODE_SIZES, option, &mut p.code_size),
+            // Not Harlo's look: Settings → Projects takes them.
+            SettingChoice::ProjectColor | SettingChoice::ProjectSessions => false,
         }
     }
 

@@ -15,6 +15,7 @@ export global Pickers {
     out property <int> model: 3;
     out property <int> shield: 4;
     out property <int> default-model: 5;
+    out property <int> project-model: 6;
 }
 
 /// An attached file or image, with a button to remove it. A new one
@@ -424,7 +425,8 @@ export component PickerMenu inherits Rectangle {
             padding: 6px;
             spacing: 6px;
 
-            if State.picker == Pickers.model || State.picker == Pickers.default-model: Field {
+            if State.picker == Pickers.model || State.picker == Pickers.default-model
+                || State.picker == Pickers.project-model: Field {
                 height: 32px;
                 placeholder: "Filter models";
                 text-size: Size.label;

@@ -14,6 +14,32 @@ export component Icon inherits Text {
     accessible-role: none;
 }
 
+/// A project's mark: the icon image chosen for it, or a folder, in its
+/// colour when it has one.
+export component ProjectMark inherits Rectangle {
+    in property <image> picture;
+    in property <bool> colored;
+    in property <color> tint;
+    in property <length> size: 16px;
+    width: root.size;
+    height: root.size;
+
+    if root.picture.width > 0: Image {
+        width: root.size;
+        height: root.size;
+        source: root.picture;
+        image-fit: contain;
+        accessible-role: none;
+    }
+    if root.picture.width == 0: Icon {
+        width: root.size;
+        height: root.size;
+        text: Icons.folder;
+        font-size: root.size * 0.9;
+        color: root.colored ? root.tint : Theme.brand-ink;
+    }
+}
+
 /// A file-type icon from the bundled font.
 export component FileIcon inherits Text {
     font-family: Fonts.file-icons;

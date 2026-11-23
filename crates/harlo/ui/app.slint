@@ -207,11 +207,12 @@ export component AppWindow inherits Window {
         }
 
         if State.picking-location: Locations { }
-        if State.picker >= 0 && State.picker != Pickers.default-model: PickerMenu { }
+        if State.picker >= 0 && State.picker != Pickers.default-model
+            && State.picker != Pickers.project-model: PickerMenu { }
         // Over the whole window; the rail buttons still switch pages.
         if State.sheet > 0: SheetLayer { }
         // Opened from Settings, so over it.
-        if State.picker == Pickers.default-model: PickerMenu { }
+        if State.picker == Pickers.default-model || State.picker == Pickers.project-model: PickerMenu { }
     }
 }
 

@@ -20,6 +20,7 @@ use harlo_core::layout::Appearance;
 use harlo_core::server::{Location, McpServer, Plugin, Provider, Stats, WebSearch};
 use harlo_core::theme::Mode;
 
+use super::projects::{ProjectEvent, Projects};
 use super::{App, Message};
 use crate::model::ModelChoice;
 use crate::task::Task;
@@ -109,6 +110,8 @@ pub enum Section {
     Notifications,
     /// The keyboard shortcuts.
     Shortcuts,
+    /// Each project's settings and worktrees.
+    Projects,
     /// The server's model providers.
     Models,
     /// Web search, MCP servers and plugins.
@@ -121,11 +124,12 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
         Self::Shortcuts,
+        Self::Projects,
         Self::Models,
         Self::Tools,
         Self::Server,
@@ -140,6 +144,7 @@ impl Section {
             Self::Appearance => "Appearance",
             Self::Notifications => "Notifications",
             Self::Shortcuts => "Shortcuts",
+            Self::Projects => "Projects",
             Self::Models => "Models",
             Self::Tools => "Tools for agents",
             Self::Server => "Server",
@@ -155,6 +160,7 @@ impl Section {
             | Self::Appearance
             | Self::Notifications
             | Self::Shortcuts
+            | Self::Projects
             | Self::About => None,
             Self::Models | Self::Tools => Some("Agents and models"),
             Self::Server => Some("Connections"),
@@ -222,11 +228,17 @@ pub enum Field {
     Title(Kind),
     /// A notification's message template.
     Message(Kind),
+    /// The shown project's name.
+    ProjectName,
+    /// The command a new worktree of the shown project runs.
+    StartCommand,
+    /// A new worktree's name.
+    NewWorktree,
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 13] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -237,6 +249,9 @@ impl Field {
         Self::Message(Kind::Failed),
         Self::Title(Kind::Asks),
         Self::Message(Kind::Asks),
+        Self::ProjectName,
+        Self::StartCommand,
+        Self::NewWorktree,
     ];
 }
 
@@ -268,11 +283,15 @@ pub enum SettingChoice {
     TextSize,
     /// [`Preferences::code_size`].
     CodeSize,
+    /// The shown project's colour, or none.
+    ProjectColor,
+    /// Whether removing the shown project keeps or archives its sessions.
+    ProjectSessions,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -280,6 +299,8 @@ impl SettingChoice {
         Self::ChatWidth,
         Self::TextSize,
         Self::CodeSize,
+        Self::ProjectColor,
+        Self::ProjectSessions,
     ];
 
     /// The options, as Settings names them, in order.
@@ -293,6 +314,12 @@ impl SettingChoice {
             Self::ChatWidth => &["Narrow", "Normal", "Wide", "Full"],
             Self::TextSize => &["Small", "Normal", "Large", "Larger"],
             Self::CodeSize => &["Small", "Normal", "Large"],
+            // None, then OpenCode's colours.
+            Self::ProjectColor => &[
+                "None", "Orange", "Yellow", "Cyan", "Green", "Red", "Pink", "Blue", "Purple",
+                "Gray",
+            ],
+            Self::ProjectSessions => &["Keep them", "Archive them"],
         }
     }
 }
@@ -390,6 +417,8 @@ pub enum Event {
     Text(Field, String),
     /// Send a test notification.
     TestNotice,
+    /// Something done in Settings → Projects.
+    Project(ProjectEvent),
     /// The name or email was saved as this, or why it couldn't be.
     IdentitySet(Identity, Result<String, String>),
     /// Show stats for another range.
@@ -427,6 +456,8 @@ pub struct Sheets {
     pub git_error: Option<String>,
     /// Why a notification setting couldn't be taken, if it couldn't.
     pub notice_error: Option<String>,
+    /// Settings → Projects.
+    pub projects: Projects,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -515,6 +546,13 @@ impl App {
             Event::Theme(id) => return self.pick_theme(id),
             Event::DefaultModel(model) => return self.set_default_model(&model),
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
+            Event::Choose(SettingChoice::ProjectColor, option) => {
+                let color = option.checked_sub(1);
+                return self.project_event(ProjectEvent::Color(color));
+            }
+            Event::Choose(SettingChoice::ProjectSessions, option) => {
+                return self.project_event(ProjectEvent::Archive(option == 1));
+            }
             Event::Choose(choice, option) => {
                 if self.choose(choice, option) {
                     self.retheme();
@@ -528,11 +566,9 @@ impl App {
             | Event::InstallOpenCode
             | Event::Git(_)
             | Event::IdentitySet(..)) => return self.apply_guide(event),
-            Event::Text(Field::Identity(identity), value) => {
-                return self.set_identity(identity, &value);
-            }
-            Event::Text(field, value) => return self.set_notice_text(field, &value),
+            Event::Text(field, value) => return self.take_text(field, &value),
             Event::TestNotice => return self.test_notice(),
+            Event::Project(event) => return self.project_event(event),
             Event::Range(range) => {
                 self.sheets.range = range;
                 return self.load_stats();
@@ -549,6 +585,19 @@ impl App {
             Event::Stats(..) | Event::SetUp(..) => {}
         }
         Task::none()
+    }
+
+    /// Takes the text saved from a field.
+    fn take_text(&mut self, field: Field, value: &str) -> Task<Message> {
+        match field {
+            Field::Identity(identity) => self.set_identity(identity, value),
+            Field::ProjectName => self.set_project_text(true, value),
+            Field::StartCommand => self.set_project_text(false, value),
+            Field::NewWorktree => self.make_worktree(value),
+            Field::QuietFrom | Field::QuietTo | Field::Title(_) | Field::Message(_) => {
+                self.set_notice_text(field, value)
+            }
+        }
     }
 
     /// OpenCode's global config folder, when Harlo may change it: only for
@@ -619,7 +668,9 @@ impl App {
             Field::Message(kind) => value
                 .trim()
                 .clone_into(&mut notices.template_mut(kind).message),
-            Field::Identity(_) => return Task::none(),
+            Field::Identity(_) | Field::ProjectName | Field::StartCommand | Field::NewWorktree => {
+                return Task::none();
+            }
         }
         self.save_preferences()
     }
@@ -763,7 +814,7 @@ impl App {
 
     /// Saves Harlo's own settings, off the UI thread; a failed save keeps
     /// them for this run, and the next change tries again.
-    fn save_preferences(&self) -> Task<Message> {
+    pub(super) fn save_preferences(&self) -> Task<Message> {
         match self.store.clone() {
             Some(store) => {
                 Task::future(store.save_preferences_later(self.preferences.clone())).discard()

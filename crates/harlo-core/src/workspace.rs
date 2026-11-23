@@ -89,6 +89,8 @@ pub struct Workspace {
     forms: HashMap<String, Vec<Form>>,
     /// Project folders in sidebar order; see [`Workspace::order`].
     order: Vec<String>,
+    /// Project folders removed from the sidebar, which stay away.
+    hidden: Vec<String>,
 }
 
 impl Workspace {
@@ -336,8 +338,10 @@ impl Workspace {
         Vec::new()
     }
 
-    /// Adds a project folder to the end of the sidebar, if it isn't listed.
+    /// Adds a project folder to the end of the sidebar, if it isn't listed,
+    /// bringing back one that was hidden.
     pub fn add_project(&mut self, directory: String) {
+        self.hidden.retain(|d| *d != directory);
         if !self.order.contains(&directory) {
             self.order.push(directory);
         }
@@ -348,6 +352,34 @@ impl Workspace {
     /// It comes back when one of its sessions next changes.
     pub fn remove_project(&mut self, directory: &str) {
         self.order.retain(|d| d != directory);
+    }
+
+    /// Removes a project folder from the sidebar for good: unlike
+    /// [`Workspace::remove_project`], its sessions don't bring it back. Only
+    /// adding it again does.
+    pub fn hide_project(&mut self, directory: &str) {
+        self.remove_project(directory);
+        if !self.hidden.iter().any(|d| d == directory) {
+            self.hidden.push(directory.to_owned());
+        }
+    }
+
+    /// Sets the project folders kept out of the sidebar, as saved.
+    pub fn set_hidden(&mut self, hidden: Vec<String>) {
+        self.order.retain(|d| !hidden.contains(d));
+        self.hidden = hidden;
+    }
+
+    /// Returns the project folders kept out of the sidebar, for saving.
+    #[must_use]
+    pub fn hidden(&self) -> &[String] {
+        &self.hidden
+    }
+
+    /// Returns the server's project whose main folder is `directory`.
+    #[must_use]
+    pub fn project(&self, directory: &str) -> Option<&ServerProject> {
+        self.projects.values().find(|p| p.directory == directory)
     }
 
     /// Returns the project folders in sidebar order, for saving.
@@ -467,6 +499,8 @@ impl Workspace {
                     name: server
                         .and_then(|p| p.name.clone())
                         .unwrap_or_else(|| folder_name(directory).to_owned()),
+                    color: server.and_then(|p| p.color.clone()),
+                    icon: server.and_then(|p| p.icon.clone()),
                     sessions: Vec::new(),
                     worktrees: Vec::new(),
                 };
@@ -553,7 +587,7 @@ impl Workspace {
         }
         let mut missing: Vec<(&str, f64)> = newest
             .into_iter()
-            .filter(|(dir, _)| !self.order.iter().any(|d| d == dir))
+            .filter(|(dir, _)| !self.order.iter().chain(&self.hidden).any(|d| d == dir))
             .collect();
         missing.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
         let missing: Vec<String> = missing.into_iter().map(|(d, _)| d.to_owned()).collect();

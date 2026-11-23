@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SidebarRow, RowKind } from "data.slint";
-import { Icon, Press, Dot, Breathing, Field, VLine } from "widgets.slint";
+import { Icon, Press, Dot, Breathing, Field, VLine, ProjectMark } from "widgets.slint";
 
 /// Space between the sidebar's edge and its content.
 global Inset {
@@ -80,40 +80,60 @@ component Item inherits Rectangle {
         padding-right: Inset.side;
         alignment: start;
 
-        if entry.kind == RowKind.project: HorizontalLayout {
+        // Hovering the row shows its settings button.
+        if entry.kind == RowKind.project: project-hover := TouchArea {
             height: 36px;
-            padding-left: 4px;
-            padding-right: 4px;
-            spacing: 9px;
-            Icon {
-                text: Icons.folder;
-                color: Theme.brand-ink;
-            }
-            Text {
-                text: entry.title;
-                horizontal-stretch: 1;
-                overflow: elide;
-                vertical-alignment: center;
-                font-size: Size.label;
-                font-weight: 600;
-                color: Theme.brand-ink;
-            }
-            if entry.busy: Working {
-                size: 12px;
-            }
-            Text {
-                text: entry.detail;
-                vertical-alignment: center;
-                font-size: Size.small;
-                color: Theme.text-weak;
-            }
-            Press {
-                width: 22px;
-                label: "New session in " + entry.title;
-                clicked => { Logic.new-session(entry.id); }
-                Icon {
-                    text: Icons.plus;
-                    font-size: 15px;
+            HorizontalLayout {
+                height: 36px;
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 9px;
+                VerticalLayout {
+                    alignment: center;
+                    ProjectMark {
+                        picture: entry.picture;
+                        colored: entry.colored;
+                        tint: entry.tone;
+                    }
+                }
+                Text {
+                    text: entry.title;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    font-size: Size.label;
+                    font-weight: 600;
+                    color: Theme.brand-ink;
+                }
+                if entry.busy: Working {
+                    size: 12px;
+                }
+                Text {
+                    text: entry.detail;
+                    vertical-alignment: center;
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                }
+                // Shown while the pointer is over the row.
+                Press {
+                    width: 22px;
+                    label: "Settings for " + entry.title;
+                    opacity: project-hover.has-hover ? 1 : 0;
+                    clicked => { Logic.project-settings(entry.id); }
+                    Icon {
+                        text: Icons.settings;
+                        font-size: 13px;
+                        color: Theme.icon-quiet;
+                    }
+                }
+                Press {
+                    width: 22px;
+                    label: "New session in " + entry.title;
+                    clicked => { Logic.new-session(entry.id); }
+                    Icon {
+                        text: Icons.plus;
+                        font-size: 15px;
+                    }
                 }
             }
         }

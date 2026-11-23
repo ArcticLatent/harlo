@@ -10,6 +10,7 @@
 
 mod changes;
 mod files;
+mod marks;
 mod notes;
 mod panels;
 mod session;
@@ -61,6 +62,8 @@ pub struct Presenter {
     notes: notes::Notes,
     terminal: terminal::Terminal,
     sheets: sheets::Sheets,
+    /// Project icons, decoded once.
+    marks: Rc<marks::Marks>,
     /// The theme's tokens the window was last coloured with.
     applied: Option<Tokens>,
     /// The preferences the window's motion, sizes and glass were last set
@@ -82,6 +85,7 @@ impl Presenter {
     #[must_use]
     pub fn new(window: &AppWindow) -> Self {
         let state = window.global::<State>();
+        let marks = Rc::new(marks::Marks::default());
         let presenter = Self {
             sidebar: Rc::new(VecModel::default()),
             locations: Rc::new(VecModel::default()),
@@ -100,7 +104,8 @@ impl Presenter {
             files: files::Files::new(&state),
             notes: notes::Notes::default(),
             terminal: terminal::Terminal::new(&state),
-            sheets: sheets::Sheets::new(&state),
+            sheets: sheets::Sheets::new(&state, Rc::clone(&marks)),
+            marks,
             applied: None,
             looked: None,
         };
@@ -198,7 +203,7 @@ impl Presenter {
             String::new()
         };
         state.set_sidebar_notice(notice.into());
-        sync(&self.sidebar, sidebar_rows(app));
+        sync(&self.sidebar, sidebar_rows(app, &self.marks));
     }
 
     /// The sidebar and the right panel: whether they're shown, and how big.
@@ -371,6 +376,9 @@ impl Presenter {
                 "Sets OpenCode's default, for new sessions in every app using this server."
                     .to_owned()
             }
+            Picker::ProjectModel => {
+                "For new sessions in this project, from Harlo on this computer.".to_owned()
+            }
             Picker::Folder | Picker::Variant | Picker::Model => String::new(),
         };
         state.set_menu_note(note.into());
@@ -442,7 +450,7 @@ fn empty_text(status: &Status) -> String {
 
 /// The sidebar's rows: each project's heading and sessions, then its
 /// worktrees' headings and sessions.
-fn sidebar_rows(app: &App) -> Vec<SidebarRow> {
+fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
     let filtering = !app.filter.trim().is_empty();
     let mut rows = Vec::new();
     for project in &app.projects {
@@ -453,6 +461,13 @@ fn sidebar_rows(app: &App) -> Vec<SidebarRow> {
             title: project.name.as_str().into(),
             detail: project.total().to_string().into(),
             busy: project.working() > 0,
+            tone: project
+                .color
+                .as_deref()
+                .and_then(marks::project_color)
+                .unwrap_or_default(),
+            colored: project.color.is_some(),
+            picture: marks.image(project.icon.as_deref()),
             ..SidebarRow::default()
         });
         let mut any = session_rows(app, &project.directory, &project.sessions, &mut rows);

@@ -64,6 +64,10 @@ export struct SidebarRow {
     untitled: bool,
     /// Whether space follows, closing a project's group.
     gap: bool,
+    /// For a project: whether it has a colour, `tone`, and its icon image,
+    /// if it has one.
+    colored: bool,
+    picture: image,
 }
 
 /// A location in the location picker.
@@ -508,11 +512,12 @@ export struct SheetRow {
     tone: int,
     /// The kind: 0 a heading, 1 a name and value, 2 a note, 3 a switch, 4
     /// a choice among `options`, the one chosen numbered by `setting` and
-    /// the choice by `choice`, with `value` as a line under its name, 5
+    /// the choice by `choice`, with `value` as a line under its name (8
+    /// shows the options as colour swatches), 5
     /// theme cards, dark ones for `setting` 0 and light ones for 1, 6 a
     /// text field holding `value`, saved by its `action` button as field
     /// `setting`, or 7 the command `value`, run by its `action` button as
-    /// step `setting`.
+    /// step `setting`, or 9 a project, opened by step `setting`.
     /// A value's tone: 0 plain, 1 good, 2 bad, 3 quiet, 4 a warning.
     /// For a switch (kind 3): whether it's on, and the setting it turns.
     /// For a name and value (kind 1) with a button: the button's label,
@@ -524,6 +529,12 @@ export struct SheetRow {
     choice: int,
     /// For a text field (kind 6): what it shows while empty.
     hint: string,
+    /// For swatches (kind 8): each option's colour; the first, none.
+    colors: [color],
+    /// For a project (kind 9): its colour, when `on`, and its icon image,
+    /// if it has one; `setting` and `choice` number the step that opens it.
+    color: color,
+    picture: image,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one
@@ -750,8 +761,9 @@ export global Logic {
     callback settings-search(string);
     /// Turn a setting, by its number, on or off.
     callback switch-setting(int);
-    /// Take a step a row's button offers, by its number.
-    callback settings-action(int);
+    /// Take a step a row's button offers, by its number, for the row's
+    /// item (its `choice`), such as which worktree to remove.
+    callback settings-action(int, int);
     /// Save a row's text field, by its number.
     callback settings-text(int, string);
     /// Show the setup guide's step by its place, the next one (finishing
@@ -820,6 +832,8 @@ export global Logic {
     callback pick-location(int);
     callback add-project();
     callback new-session(string);
+    /// Open a project's settings, by its folder.
+    callback project-settings(string);
     callback filter-edited(string);
     callback toggle-more(string);
     callback open-session(string);

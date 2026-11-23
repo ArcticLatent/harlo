@@ -29,6 +29,9 @@ enum Kind {
         status: u16,
         tag: Option<String>,
         message: String,
+        /// Whether retrying with `force` would do it, such as removing a
+        /// worktree with changes.
+        force: bool,
     },
     /// The server's answer did not match the expected shape.
     Decode(serde_json::Error),
@@ -66,14 +69,23 @@ impl Error {
             .as_ref()
             .and_then(|v| v["_tag"].as_str())
             .map(str::to_owned);
+        // Some errors keep their words and details under `data`.
         let message = parsed
             .as_ref()
-            .and_then(|v| v["message"].as_str())
+            .and_then(|v| {
+                v["message"]
+                    .as_str()
+                    .or_else(|| v["data"]["message"].as_str())
+            })
             .map_or_else(|| body.chars().take(300).collect(), str::to_owned);
+        let force = parsed
+            .as_ref()
+            .is_some_and(|v| v["data"]["forceRequired"].as_bool() == Some(true));
         Self::new(Kind::Status {
             status,
             tag,
             message,
+            force,
         })
     }
 
@@ -116,6 +128,13 @@ impl Error {
         matches!(self.http_status(), Some(NOT_FOUND | CONFLICT))
     }
 
+    /// Whether the server would do it with `force`, such as removing a
+    /// worktree that has changes.
+    #[must_use]
+    pub fn needs_force(&self) -> bool {
+        matches!(self.kind, Kind::Status { force: true, .. })
+    }
+
     /// Whether the server rejected the password.
     #[must_use]
     pub fn is_unauthorized(&self) -> bool {
@@ -137,6 +156,7 @@ impl Display for Error {
                 status,
                 tag,
                 message,
+                ..
             } => {
                 write!(f, "the OpenCode server answered {status}")?;
                 if let Some(tag) = tag {

@@ -39,16 +39,75 @@ pub struct Project {
     pub name: Option<String>,
     /// Whether the folder is under git.
     pub git: bool,
+    /// The colour its mark takes, one of [`PROJECT_COLORS`], if chosen.
+    pub color: Option<String>,
+    /// An image the user chose as its icon: a URL, often a `data:` one.
+    pub icon: Option<String>,
+    /// The command a new worktree of it runs once it's made.
+    pub start: Option<String>,
 }
+
+/// The colours a project's mark can take, as OpenCode names them.
+pub const PROJECT_COLORS: [&str; 9] = [
+    "orange", "yellow", "cyan", "green", "red", "pink", "blue", "purple", "gray",
+];
 
 impl From<g::Project> for Project {
     fn from(v: g::Project) -> Self {
+        let filled = |s: Option<String>| s.filter(|s| !s.trim().is_empty());
+        let icon = v.icon.unwrap_or_default();
         Self {
             id: v.id.to_string(),
             directory: v.canonical.to_string(),
-            name: v.name.filter(|n| !n.trim().is_empty()),
+            name: filled(v.name),
             git: v.vcs.is_some_and(|vcs| vcs.as_str() == "git"),
+            // Older names for two of the colours.
+            color: filled(icon.color).map(|c| match c.as_str() {
+                "mint" => "cyan".to_owned(),
+                "lime" => "green".to_owned(),
+                _ => c,
+            }),
+            icon: filled(icon.override_),
+            start: filled(v.commands.and_then(|c| c.start)),
         }
+    }
+}
+
+/// A change to a project's settings; fields left `None` stay as they are,
+/// and an empty string clears one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectChange {
+    /// Its name.
+    pub name: Option<String>,
+    /// Its colour, one of [`PROJECT_COLORS`].
+    pub color: Option<String>,
+    /// Its icon image's URL.
+    pub icon: Option<String>,
+    /// The command a new worktree runs.
+    pub start: Option<String>,
+}
+
+impl ProjectChange {
+    /// The request body: only the fields that change.
+    pub(crate) fn json(&self) -> Value {
+        let mut body = serde_json::Map::new();
+        if let Some(name) = &self.name {
+            body.insert("name".into(), name.as_str().into());
+        }
+        let mut icon = serde_json::Map::new();
+        if let Some(color) = &self.color {
+            icon.insert("color".into(), color.as_str().into());
+        }
+        if let Some(image) = &self.icon {
+            icon.insert("override".into(), image.as_str().into());
+        }
+        if !icon.is_empty() {
+            body.insert("icon".into(), icon.into());
+        }
+        if let Some(start) = &self.start {
+            body.insert("commands".into(), serde_json::json!({ "start": start }));
+        }
+        body.into()
     }
 }
 

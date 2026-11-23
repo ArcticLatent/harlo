@@ -17,7 +17,7 @@ use crate::settings::{Integration, McpServer, Plugin, Provider, Stats, WebSearch
 use crate::setup::Setup;
 use crate::types::{
     Answer, Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply,
-    Project, Revert, Rule, ServerInfo, Session, SessionContext,
+    Project, ProjectChange, Revert, Rule, ServerInfo, Session, SessionContext,
 };
 use crate::{Endpoint, Error, Event};
 
@@ -202,6 +202,85 @@ impl Client {
                     .to_string(),
             )
         })
+    }
+
+    /// Changes a project's name, colour, icon or worktree command, for
+    /// every client of the server.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the project doesn't exist, the change isn't valid, or the
+    /// server can't be reached.
+    pub async fn update_project(
+        &self,
+        project_id: &str,
+        change: &ProjectChange,
+    ) -> Result<Project, Error> {
+        let req = self
+            .request(Method::PATCH, &format!("/api/project/{project_id}"))
+            .json(&change.json());
+        let v = Self::json(req).await?;
+        Ok(serde_json::from_value::<g::Project>(v)?.into())
+    }
+
+    /// Makes a worktree of a project, named `name` on a new branch, or
+    /// checking out `branch` when given, and runs the project's worktree
+    /// command in it. Returns its folder.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git can't make it (a name or branch already in use, say),
+    /// or the server can't be reached.
+    pub async fn create_worktree(
+        &self,
+        project_id: &str,
+        name: Option<&str>,
+        branch: Option<&str>,
+    ) -> Result<String, Error> {
+        let mut body = json!({ "projectID": project_id });
+        if let Some(name) = name {
+            body["name"] = name.into();
+        }
+        if let Some(branch) = branch {
+            body["branch"] = branch.into();
+        }
+        let v = Self::json(self.request(Method::POST, "/api/worktree").json(&body)).await?;
+        Ok(serde_json::from_value::<g::WorktreeInfo>(v)?
+            .directory
+            .to_string())
+    }
+
+    /// Removes a project's worktree folder. Without `force`, a worktree with
+    /// changes stays, and the error says so ([`Error::needs_force`]).
+    ///
+    /// # Errors
+    ///
+    /// Fails when it has changes and `force` is off, it isn't one of the
+    /// project's worktrees, or the server can't be reached.
+    pub async fn remove_worktree(
+        &self,
+        project_id: &str,
+        directory: &str,
+        force: bool,
+    ) -> Result<(), Error> {
+        let body = json!({ "projectID": project_id, "directory": directory, "force": force });
+        Self::send(self.request(Method::DELETE, "/api/worktree").json(&body)).await?;
+        Ok(())
+    }
+
+    /// Archives a session, or restores it with `archived` off. Archived
+    /// sessions stay on the server, out of the lists.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist or the server can't be reached.
+    pub async fn set_archived(&self, session_id: &str, archived: bool) -> Result<(), Error> {
+        Self::send(
+            self.request(Method::PATCH, &format!("/api/session/{session_id}"))
+                .json(&json!({ "archived": archived })),
+        )
+        .await?;
+        Ok(())
     }
 
     /// Returns one session.
