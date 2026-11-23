@@ -399,6 +399,10 @@ export struct ChangesFoot {
     /// The message is written and nothing's running.
     ready: bool,
     committing: bool,
+    /// ✦ can write the message: nothing's running or being written.
+    can-write: bool,
+    /// The message is being written.
+    writing: bool,
     /// "Push 2 commits" or "Pushing…"; empty with nothing to push.
     push: string,
     can-push: bool,
@@ -825,6 +829,8 @@ export global Logic {
     callback end-review();
     callback commit-message-edited(string);
     callback commit();
+    /// ✦: have the commit-message model write the message.
+    callback write-commit-message();
     callback push();
     callback refresh(int);
 

@@ -270,6 +270,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Notifications => Icon::Bell,
         Section::Shortcuts => Icon::Keyboard,
         Section::Projects => Icon::FolderGit2,
+        Section::Git => Icon::GitBranch,
         Section::Models => Icon::Bot,
         Section::Tools => Icon::Plug,
         Section::Server => Icon::Server,
@@ -286,6 +287,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         Section::Shortcuts => shortcuts(),
         // Searched without their icons.
         Section::Projects => project_rows(app, &Marks::default()),
+        Section::Git => git_settings_rows(app),
         Section::Models => {
             let mut rows = claude_rows(app);
             if let Load::Loaded(setup) = &app.sheets.setup {
@@ -855,6 +857,63 @@ fn opencode_rows(app: &App) -> Vec<SheetRow> {
             "Harlo follows this server and leaves it running when it closes.",
         ));
     }
+    rows
+}
+
+/// Settings → Git: git and the name on commits, undo's snapshots, and
+/// the model that writes commit messages.
+fn git_settings_rows(app: &App) -> Vec<SheetRow> {
+    let mut rows = git_rows(app);
+    rows.push(heading("Undo a turn"));
+    let shared = app.global_config().is_some();
+    match &app.sheets.git_settings.snapshots {
+        _ if !shared => rows.push(note(
+            "This server keeps its snapshot setting in its own opencode.json, on the computer \
+             it runs on.",
+        )),
+        Load::Loaded(on) => rows.push(switch(
+            Setting::Snapshots,
+            "Keep snapshots",
+            "Before each turn, OpenCode keeps a snapshot of the project's files, so Undo can put \
+             them back. Off, Undo takes back the conversation only.",
+            *on,
+        )),
+        Load::Failed(why) => rows.push(pair("Snapshots", why, 2)),
+        Load::Idle | Load::Loading => rows.push(pair("Snapshots", "Checking…", 3)),
+    }
+    if let Some(why) = &app.sheets.git_settings.error {
+        rows.push(pair("Not changed", why, 2));
+    }
+    if shared {
+        rows.push(note(
+            "Set in OpenCode's own config, so it applies to every app using this server.",
+        ));
+    }
+
+    rows.push(heading("Commit messages"));
+    let chosen = app.commit_model_choice();
+    let mut model = pair(
+        "Model",
+        &chosen.as_ref().map_or_else(
+            || "OpenCode's default".to_owned(),
+            |m| format!("{} · {}", m.name, m.provider_id),
+        ),
+        0,
+    );
+    model.action = "Change".into();
+    model.setting = crate::window::CHOOSE_COMMIT_MODEL;
+    rows.push(model);
+    if chosen.is_some() {
+        let mut reset = pair("", "Let OpenCode choose again", 3);
+        reset.action = "Use the default".into();
+        reset.setting = crate::window::DEFAULT_COMMIT_MODEL;
+        rows.push(reset);
+    }
+    rows.push(note(
+        "The ✦ button in the Changes panel writes the message for every uncommitted file, \
+         from their diffs alone: no tools, and nothing kept in a session. A small, fast model \
+         is enough.",
+    ));
     rows
 }
 

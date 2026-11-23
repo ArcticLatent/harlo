@@ -9,6 +9,8 @@ mod support;
 
 use std::sync::Arc;
 
+use i_slint_backend_testing::AccessibleRole;
+
 use harlo::app::{App, Load, Message};
 use harlo::model::Picker;
 use harlo_core::server::{Connected, Location, Update};
@@ -125,4 +127,77 @@ fn another_servers_default_model_is_only_shown() {
     ui.press("General");
     assert!(ui.shows("Model"));
     assert!(ui.find("Change").is_empty(), "nothing to change here");
+}
+
+#[test]
+fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_opencodes_config() {
+    let mut tasks = Tasks::new();
+    let sandbox = tasks.block_on(Sandbox::start());
+    let folder = sandbox.root().join("config/opencode");
+    let gitconfig = sandbox.root().join("home/.gitconfig");
+    std::fs::write(&gitconfig, "[user]\n\tname = Scratch Person\n").expect("a git config");
+    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    // The sandbox's own configs, never the real ones.
+    app.opencode_folder = Some(folder.clone());
+    app.git_config = harlo_core::git::Global::new()
+        .env("GIT_CONFIG_GLOBAL", gitconfig.to_string_lossy())
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let _ = app.update(Message::Tick(demo::now()));
+    let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
+        client: sandbox.client(),
+        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        snapshot: demo::snapshot(),
+    }))));
+    app.new_folder = Some(sandbox.project_str());
+    let ui = ui(app);
+
+    ui.press("Settings");
+    ui.press("Git");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui.shows("Keep snapshots")
+            && matches!(&ui.app().sheets.git, Load::Loaded(git) if git.name == "Scratch Person")),
+        "git's name and OpenCode's snapshots"
+    );
+    assert!(
+        ui.shows("OpenCode's default"),
+        "no commit-message model yet"
+    );
+    assert!(matches!(
+        ui.app().sheets.git_settings.snapshots,
+        Load::Loaded(true)
+    ));
+
+    ui.find("Keep snapshots")
+        .into_iter()
+        .find(|e| e.accessible_role() == Some(AccessibleRole::Checkbox))
+        .expect("the switch")
+        .invoke_accessible_default_action();
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            ui.app().sheets.git_settings.snapshots,
+            Load::Loaded(false)
+        )),
+        "turned off"
+    );
+    assert!(!harlo_core::config::snapshots(&folder).expect("read"));
+    let text = std::fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(text.contains("\"fake\""), "the rest of the config stays");
+
+    // The commit-message model is Harlo's own.
+    assert!(
+        tasks.until(&ui, WAIT, |ui| !ui.app().models.is_empty()),
+        "the models"
+    );
+    ui.press("Change");
+    assert_eq!(ui.app().picker, Some(Picker::CommitModel));
+    ui.fill("Filter models", "pickle");
+    ui.press("Big Pickle");
+    assert_eq!(ui.app().picker, None);
+    assert_eq!(
+        ui.app().preferences.commit_model.as_deref(),
+        Some("opencode/big-pickle")
+    );
+    assert!(ui.shows("Big Pickle · opencode"));
+    ui.press("Use the default");
+    assert_eq!(ui.app().preferences.commit_model, None);
 }

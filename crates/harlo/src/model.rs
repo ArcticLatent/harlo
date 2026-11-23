@@ -56,6 +56,8 @@ pub enum Picker {
     DefaultModel,
     /// The model new sessions in the project shown in Settings start with.
     ProjectModel,
+    /// The model that writes commit messages, from Settings → Git.
+    CommitModel,
 }
 
 impl Picker {
@@ -70,7 +72,17 @@ impl Picker {
             Self::Shield => 4,
             Self::DefaultModel => 5,
             Self::ProjectModel => 6,
+            Self::CommitModel => 7,
         }
+    }
+
+    /// Whether it lists models, with a filter field.
+    #[must_use]
+    pub fn lists_models(self) -> bool {
+        matches!(
+            self,
+            Self::Model | Self::DefaultModel | Self::ProjectModel | Self::CommitModel
+        )
     }
 
     /// The picker the UI numbers `index`.
@@ -84,6 +96,7 @@ impl Picker {
             4 => Self::Shield,
             5 => Self::DefaultModel,
             6 => Self::ProjectModel,
+            7 => Self::CommitModel,
             _ => return None,
         })
     }
@@ -243,10 +256,11 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 })
                 .collect()
         }
-        Picker::Model | Picker::DefaultModel | Picker::ProjectModel => {
+        Picker::Model | Picker::DefaultModel | Picker::ProjectModel | Picker::CommitModel => {
             let current = match picker {
                 Picker::DefaultModel => app.default_model_choice(),
                 Picker::ProjectModel => app.shown_project_model(),
+                Picker::CommitModel => app.commit_model_choice(),
                 _ => app.current_model_choice(),
             };
             app.models
@@ -270,6 +284,9 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                         }
                         Picker::ProjectModel => Message::Sheet(SheetEvent::Project(
                             crate::app::ProjectEvent::Model(Some(model.clone())),
+                        )),
+                        Picker::CommitModel => Message::Sheet(SheetEvent::GitSettings(
+                            crate::app::GitEvent::CommitModel(Some(model.clone())),
                         )),
                         _ => Message::PickModel(model.clone()),
                     },

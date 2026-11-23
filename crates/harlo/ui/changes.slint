@@ -229,7 +229,7 @@ component Foot inherits VerticalLayout {
             message := Field {
                 horizontal-stretch: 1;
                 min-height: 30px;
-                placeholder: "Commit message";
+                placeholder: State.changes-foot.writing ? "Writing…" : "Commit message";
                 text-size: Size.label;
                 // Rust's message replaces the field's when it changes there,
                 // as when a commit uses it up.
@@ -248,6 +248,13 @@ component Foot inherits VerticalLayout {
                         Logic.commit();
                     }
                 }
+            }
+            IconButton {
+                label: State.changes-foot.writing ? "Writing the message…" : "Write the message";
+                glyph: State.changes-foot.writing ? Icons.loader : Icons.sparkles;
+                glyph-color: self.enabled ? Theme.icon-base : Theme.icon-quiet;
+                enabled: State.changes-foot.can-write;
+                clicked => { Logic.write-commit-message(); }
             }
             CardButton {
                 text: State.changes-foot.committing ? "Committing…" : "Commit";

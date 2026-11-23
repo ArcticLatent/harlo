@@ -379,6 +379,10 @@ impl Presenter {
             Picker::ProjectModel => {
                 "For new sessions in this project, from Harlo on this computer.".to_owned()
             }
+            Picker::CommitModel => {
+                "Writes commit messages in the Changes panel, from Harlo on this computer."
+                    .to_owned()
+            }
             Picker::Folder | Picker::Variant | Picker::Model => String::new(),
         };
         state.set_menu_note(note.into());

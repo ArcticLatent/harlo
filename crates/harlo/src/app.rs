@@ -29,8 +29,10 @@ mod appearance;
 mod arrange;
 mod changes;
 mod claude;
+mod commit_message;
 mod context;
 mod files;
+mod git_settings;
 mod notes;
 mod notices;
 mod projects;
@@ -45,10 +47,12 @@ pub use changes::{
     ChangedFile, Changes, Event as ChangesEvent, GitAction, List, Loaded as ChangesLoaded,
 };
 pub use claude::{Action as ClaudeAction, Claude, Event as ClaudeEvent};
+pub use commit_message::{clean_message, commit_prompt};
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
+pub use git_settings::{GitEvent, GitSettings};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use projects::{ProjectEvent, Projects, icon_url};
@@ -500,6 +504,9 @@ pub struct App {
     /// Starting Harlo at login. Only the running app sets it; tests give a
     /// scratch folder or none.
     pub autostart: Option<Autostart>,
+    /// Git's global config: the user's own only in the running app, which
+    /// sets it; otherwise none, so nothing reads or changes theirs.
+    pub git_config: harlo_core::git::Global,
     /// Whether the desktop shows Harlo's tray icon.
     pub tray: bool,
     /// The composer's text.
@@ -632,6 +639,9 @@ impl App {
             new_folder: None,
             opencode_folder: None,
             autostart: None,
+            git_config: harlo_core::git::Global::new()
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1"),
             tray: false,
             composer: TextBox::new(),
             send_error: None,
@@ -737,7 +747,9 @@ impl App {
                 | Message::PickVariant(_)
                 | Message::PickShield(_)
                 | Message::Sheet(
-                    SheetEvent::DefaultModel(_) | SheetEvent::Project(ProjectEvent::Model(_))
+                    SheetEvent::DefaultModel(_)
+                        | SheetEvent::Project(ProjectEvent::Model(_))
+                        | SheetEvent::GitSettings(GitEvent::CommitModel(_))
                 )
         ) {
             self.picker = None;
@@ -1647,10 +1659,7 @@ impl App {
                     .position(|item| item.selected)
                     .unwrap_or(0);
                 let reveal = self.reveal_highlight();
-                if matches!(
-                    picker,
-                    Picker::Model | Picker::DefaultModel | Picker::ProjectModel
-                ) {
+                if picker.lists_models() {
                     return Task::batch([reveal, Task::effect(Effect::Focus(model::MENU_FILTER))]);
                 }
                 return reveal;

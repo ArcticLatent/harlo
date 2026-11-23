@@ -1,5 +1,5 @@
-//! Setting the model new sessions use in OpenCode's global config file,
-//! each test in its own scratch folder.
+//! Setting the model new sessions use, and whether undo keeps snapshots,
+//! in OpenCode's global config file, each test in its own scratch folder.
 
 // Rust guideline compliant 2026-10-09
 
@@ -98,4 +98,29 @@ fn a_broken_file_is_left_alone() {
     fs::write(folder.join("opencode.json"), "[1, 2]").expect("a list");
     let error = config::set_model(folder, Some("a/b")).expect_err("not an object");
     assert!(error.to_string().contains("settings object"), "{error}");
+}
+
+#[test]
+fn snapshots_are_on_unless_turned_off() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let folder = scratch.path();
+    assert!(config::snapshots(folder).expect("no file yet"));
+    let before = "{\n  // mine\n  \"model\": \"a/one\"\n}\n";
+    fs::write(folder.join("opencode.json"), before).expect("a file");
+    assert!(config::snapshots(folder).expect("not set"));
+
+    config::set_snapshots(folder, false).expect("off");
+    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(
+        text.contains("\"snapshots\": false") && text.contains("// mine"),
+        "{text}"
+    );
+    assert!(!config::snapshots(folder).expect("read"));
+
+    // On again takes the setting away: on is OpenCode's default.
+    config::set_snapshots(folder, true).expect("on");
+    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(!text.contains("snapshots"), "{text}");
+    assert!(text.contains("\"model\": \"a/one\""));
+    assert!(config::snapshots(folder).expect("read"));
 }

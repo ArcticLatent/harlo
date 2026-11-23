@@ -226,6 +226,7 @@ fn boot(options: &Options) -> App {
         .with_preferences(preferences)
         .notifying();
     app.opencode_folder = harlo_core::config::folder();
+    app.git_config = harlo_core::git::Global::new();
     app.autostart = harlo_core::autostart::folder()
         .zip(std::env::current_exe().ok())
         .map(|(folder, program)| app::Autostart {
@@ -536,6 +537,12 @@ pub const PICK_PROJECT: i32 = 21;
 /// The Settings button that goes back to the list of projects.
 pub const ALL_PROJECTS: i32 = 22;
 
+/// The Settings button that chooses the model writing commit messages.
+pub const CHOOSE_COMMIT_MODEL: i32 = 23;
+
+/// The Settings button that lets the server's default write them again.
+pub const DEFAULT_COMMIT_MODEL: i32 = 24;
+
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
@@ -571,6 +578,10 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
                 .clone(),
         ))),
         ALL_PROJECTS => project(ProjectEvent::Pick(None)),
+        CHOOSE_COMMIT_MODEL => Some(Message::TogglePicker(Picker::CommitModel)),
+        DEFAULT_COMMIT_MODEL => Some(Message::Sheet(SheetEvent::GitSettings(
+            app::GitEvent::CommitModel(None),
+        ))),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }
 }
@@ -838,6 +849,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         ChangesEvent::Message(text.to_string())
     ));
     send!(on_commit, || Message::Changes(ChangesEvent::Commit));
+    send!(on_write_commit_message, || Message::Changes(
+        ChangesEvent::WriteMessage
+    ));
     send!(on_push, || Message::Changes(ChangesEvent::Push));
 
     send!(on_composer_edited, |text, cursor, anchor| Message::Compose(

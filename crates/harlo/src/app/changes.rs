@@ -136,6 +136,10 @@ pub enum Event {
     Commit,
     /// Push the branch.
     Push,
+    /// Have the commit-message model write the message.
+    WriteMessage,
+    /// A message was written for the folder, or why it wasn't.
+    MessageWritten(String, Result<String, String>),
     /// A git action finished, with what to say about it or why it failed.
     Ran(GitAction, Result<String, String>),
 }
@@ -200,6 +204,8 @@ pub struct Changes {
     pub message: String,
     /// The git action on its way.
     pub running: Option<GitAction>,
+    /// Whether a commit message is being written.
+    pub writing: bool,
     /// What the last git action did, or why it failed.
     pub outcome: Option<Result<String, String>>,
 }
@@ -248,6 +254,12 @@ impl Changes {
             self.selected = first;
             self.hunk = None;
         }
+    }
+
+    /// The folder shown.
+    #[must_use]
+    pub fn folder(&self) -> Option<&str> {
+        self.shown.as_ref().map(|(_, folder)| folder.as_str())
     }
 
     /// Returns whether the first load hasn't landed yet.
@@ -302,6 +314,10 @@ impl App {
             Event::Message(text) => changes.message = text,
             Event::Commit => return self.run_git(GitAction::Commit),
             Event::Push => return self.run_git(GitAction::Push),
+            Event::WriteMessage => return self.write_commit_message(),
+            Event::MessageWritten(folder, written) => {
+                self.commit_message_written(&folder, written);
+            }
             Event::Ran(action, result) => {
                 changes.running = None;
                 changes.stale = true;

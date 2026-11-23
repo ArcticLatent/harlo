@@ -112,6 +112,8 @@ pub enum Section {
     Shortcuts,
     /// Each project's settings and worktrees.
     Projects,
+    /// Git: the name on commits, undo's snapshots, commit messages.
+    Git,
     /// The server's model providers.
     Models,
     /// Web search, MCP servers and plugins.
@@ -124,12 +126,13 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
         Self::Shortcuts,
         Self::Projects,
+        Self::Git,
         Self::Models,
         Self::Tools,
         Self::Server,
@@ -145,6 +148,7 @@ impl Section {
             Self::Notifications => "Notifications",
             Self::Shortcuts => "Shortcuts",
             Self::Projects => "Projects",
+            Self::Git => "Git",
             Self::Models => "Models",
             Self::Tools => "Tools for agents",
             Self::Server => "Server",
@@ -160,8 +164,8 @@ impl Section {
             | Self::Appearance
             | Self::Notifications
             | Self::Shortcuts
-            | Self::Projects
             | Self::About => None,
+            Self::Projects | Self::Git => Some("Your projects"),
             Self::Models | Self::Tools => Some("Agents and models"),
             Self::Server => Some("Connections"),
         }
@@ -194,11 +198,14 @@ pub enum Setting {
     Quiet,
     /// Whether questions get through quiet hours.
     QuietQuestions,
+    /// Whether OpenCode keeps snapshots for undo: its config, not a
+    /// preference.
+    Snapshots,
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -212,6 +219,7 @@ impl Setting {
         Self::NotifyLimits,
         Self::Quiet,
         Self::QuietQuestions,
+        Self::Snapshots,
     ];
 }
 
@@ -399,6 +407,8 @@ pub enum Event {
     DefaultModel(ModelChoice),
     /// The model new sessions use was set, or why it couldn't be.
     DefaultModelSet(Result<(), String>),
+    /// Something in Settings → Git.
+    GitSettings(super::GitEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
     AutostartSet(Result<bool, String>),
     /// Open the setup guide at its first step.
@@ -458,6 +468,8 @@ pub struct Sheets {
     pub notice_error: Option<String>,
     /// Settings → Projects.
     pub projects: Projects,
+    /// Settings → Git.
+    pub git_settings: super::GitSettings,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -494,7 +506,7 @@ impl App {
                     Sheet::Stats => self.load_stats(),
                     Sheet::Settings => {
                         self.sheets.query.clear();
-                        self.load_setup()
+                        self.open_settings()
                     }
                     Sheet::Setup => self.open_setup(),
                 };
@@ -511,7 +523,7 @@ impl App {
                 self.sheets.query.clear();
                 if self.sheets.open != Some(Sheet::Settings) {
                     self.sheets.open = Some(Sheet::Settings);
-                    return self.load_setup();
+                    return self.open_settings();
                 }
             }
             Event::Close => self.sheets.open = None,
@@ -520,7 +532,8 @@ impl App {
                 self.sheets.query.clear();
             }
             Event::Query(query) => self.sheets.query = query,
-            Event::Switch(Setting::StartAtLogin) => return self.toggle_autostart(),
+            Event::Switch(setting) => return self.flip(setting),
+            Event::GitSettings(event) => return self.git_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
                     autostart.on = on;
@@ -529,20 +542,6 @@ impl App {
                 (Err(why), _) => self.sheets.autostart_error = Some(why),
                 (Ok(_), None) => {}
             },
-            Event::Switch(setting) => {
-                match setting {
-                    Setting::StartAtLogin => {}
-                    Setting::KeepInTray => {
-                        self.preferences.keep_in_tray = !self.preferences.keep_in_tray;
-                    }
-                    Setting::ReopenTabs => {
-                        self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
-                    }
-                    Setting::Glass => self.preferences.glass = !self.preferences.glass,
-                    setting => self.switch_notice(setting),
-                }
-                return self.save_preferences();
-            }
             Event::Theme(id) => return self.pick_theme(id),
             Event::DefaultModel(model) => return self.set_default_model(&model),
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
@@ -585,6 +584,24 @@ impl App {
             Event::Stats(..) | Event::SetUp(..) => {}
         }
         Task::none()
+    }
+
+    /// Flips a switch: Harlo's own preference, starting at login, or
+    /// OpenCode's snapshots.
+    fn flip(&mut self, setting: Setting) -> Task<Message> {
+        match setting {
+            Setting::StartAtLogin => return self.toggle_autostart(),
+            Setting::Snapshots => return self.git_event(super::GitEvent::ToggleSnapshots),
+            Setting::KeepInTray => {
+                self.preferences.keep_in_tray = !self.preferences.keep_in_tray;
+            }
+            Setting::ReopenTabs => {
+                self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
+            }
+            Setting::Glass => self.preferences.glass = !self.preferences.glass,
+            setting => self.switch_notice(setting),
+        }
+        self.save_preferences()
     }
 
     /// Takes the text saved from a field.
@@ -636,7 +653,11 @@ impl App {
             Setting::NotifyLimits => &mut notices.limits,
             Setting::Quiet => &mut notices.quiet.on,
             Setting::QuietQuestions => &mut notices.quiet.questions,
-            Setting::ReopenTabs | Setting::Glass | Setting::StartAtLogin | Setting::KeepInTray => {
+            Setting::ReopenTabs
+            | Setting::Glass
+            | Setting::StartAtLogin
+            | Setting::KeepInTray
+            | Setting::Snapshots => {
                 return;
             }
         };
@@ -733,12 +754,12 @@ impl App {
     fn open_setup(&mut self) -> Task<Message> {
         self.sheets.open = Some(Sheet::Setup);
         self.sheets.step = Step::OpenCode;
-        self.sheets.git_error = None;
-        self.sheets.git = Load::Loading;
-        let git = Task::perform(async { git::Global::new().setup().await }, |setup| {
-            Message::Sheet(Event::Git(setup))
-        });
-        Task::batch([git, self.load_setup()])
+        Task::batch([self.load_git(), self.load_setup()])
+    }
+
+    /// Reads what Settings shows from the server and this computer.
+    fn open_settings(&mut self) -> Task<Message> {
+        Task::batch([self.load_git(), self.load_setup()])
     }
 
     /// Whether the guide offers to install OpenCode: when the background
@@ -782,9 +803,10 @@ impl App {
             }
         }
         self.sheets.git_error = None;
+        let global = self.git_config.clone();
         Task::perform(
             async move {
-                let result = git::Global::new().set(identity, &value).await;
+                let result = global.set(identity, &value).await;
                 result
                     .map(|()| value)
                     .map_err(|e| format!("Couldn't save it: {e}"))

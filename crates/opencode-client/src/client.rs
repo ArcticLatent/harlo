@@ -346,19 +346,49 @@ impl Client {
             .await
     }
 
+    /// Writes text from `prompt` alone with `model`, or the server's
+    /// default model: one generation, with no tools and no session.
+    ///
+    /// OpenCode marks this call experimental.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the model can't answer or the server can't be reached.
+    pub async fn generate_text(
+        &self,
+        prompt: &str,
+        model: Option<&ModelRef>,
+    ) -> Result<String, Error> {
+        let mut body = json!({ "prompt": prompt });
+        if let Some(model) = model {
+            body["model"] = Self::model_reference(model);
+        }
+        let v = Self::json(
+            self.request(Method::POST, "/api/experimental/generate/text")
+                .json(&body),
+        )
+        .await?;
+        Ok(v["data"]["text"].as_str().unwrap_or_default().to_owned())
+    }
+
+    /// A model as OpenCode's requests name it.
+    fn model_reference(model: &ModelRef) -> Value {
+        let mut reference = json!({ "id": model.id, "providerID": model.provider_id });
+        if let Some(variant) = &model.variant {
+            reference["variant"] = json!(variant);
+        }
+        reference
+    }
+
     /// Chooses the model, and its reasoning level, for the session's next steps.
     ///
     /// # Errors
     ///
     /// Fails when the model doesn't exist or the server can't be reached.
     pub async fn set_model(&self, session_id: &str, model: &ModelRef) -> Result<(), Error> {
-        let mut reference = json!({ "id": model.id, "providerID": model.provider_id });
-        if let Some(variant) = &model.variant {
-            reference["variant"] = json!(variant);
-        }
         self.post(
             &format!("/api/session/{session_id}/model"),
-            &json!({ "model": reference }),
+            &json!({ "model": Self::model_reference(model) }),
         )
         .await
     }

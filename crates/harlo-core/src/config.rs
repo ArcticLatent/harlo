@@ -13,13 +13,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use jsonc_parser::ParseOptions;
-use jsonc_parser::cst::CstRootNode;
+use jsonc_parser::cst::{CstInputValue, CstRootNode};
 
 /// The names of the global file, the one OpenCode prefers first.
 const NAMES: [&str; 2] = ["opencode.jsonc", "opencode.json"];
 
 /// The key naming the model new sessions use, as `provider/model`.
 const MODEL: &str = "model";
+
+/// The key that turns off the snapshots undo uses, when `false`.
+const SNAPSHOTS: &str = "snapshots";
 
 /// What a new global file starts with: the schema OpenCode's docs give.
 const NEW_FILE: &str = "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n";
@@ -120,6 +123,58 @@ pub fn model(folder: &Path) -> Result<Option<String>, Error> {
 /// Fails when the file can't be read or written, isn't valid JSONC, or
 /// doesn't hold an object.
 pub fn set_model(folder: &Path, model: Option<&str>) -> Result<(), Error> {
+    set(folder, MODEL, model.map(CstInputValue::from))
+}
+
+/// Whether OpenCode keeps snapshots of a project's files before each turn,
+/// so undoing a turn can put them back: on unless the global file in
+/// `folder` turns them off.
+///
+/// # Errors
+///
+/// Fails when the file exists but can't be read or isn't valid JSONC.
+pub fn snapshots(folder: &Path) -> Result<bool, Error> {
+    let path = file(folder);
+    let Some(root) = parse(&path)? else {
+        return Ok(true);
+    };
+    let off = root
+        .object_value()
+        .and_then(|object| object.get(SNAPSHOTS))
+        .and_then(|prop| prop.value())
+        .and_then(|value| value.as_boolean_lit())
+        .is_some_and(|value| !value.value());
+    Ok(!off)
+}
+
+/// Turns OpenCode's snapshots on or off in the global file in `folder`.
+/// On, the default, removes the setting.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does.
+pub fn set_snapshots(folder: &Path, on: bool) -> Result<(), Error> {
+    set(
+        folder,
+        SNAPSHOTS,
+        (!on).then_some(CstInputValue::from(false)),
+    )
+}
+
+/// Sets the snapshots as [`set_snapshots`] does, on a blocking thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_snapshots`], or an error when the thread is
+/// cancelled.
+pub async fn set_snapshots_later(folder: PathBuf, on: bool) -> Result<(), Error> {
+    later(folder, move |folder| set_snapshots(folder, on)).await
+}
+
+/// Sets `key` to `value` at the top of the global file in `folder`, or
+/// removes it for `None`, keeping the rest of the file. A missing file or
+/// folder is created.
+fn set(folder: &Path, key: &str, value: Option<CstInputValue>) -> Result<(), Error> {
     let path = file(folder);
     let root = match parse(&path)? {
         Some(root) => root,
@@ -135,15 +190,29 @@ pub fn set_model(folder: &Path, model: Option<&str>) -> Result<(), Error> {
             kind: Kind::NotObject,
         })?,
     };
-    match (object.get(MODEL), model) {
-        (Some(prop), Some(model)) => prop.set_value(model.into()),
+    match (object.get(key), value) {
+        (Some(prop), Some(value)) => prop.set_value(value),
         (Some(prop), None) => prop.remove(),
-        (None, Some(model)) => {
-            object.append(MODEL, model.into());
+        (None, Some(value)) => {
+            object.append(key, value);
         }
         (None, None) => return Ok(()),
     }
     write(folder, &path, &root.to_string())
+}
+
+/// Runs `change` on the global file in `folder` on a blocking thread.
+async fn later(
+    folder: PathBuf,
+    change: impl FnOnce(&Path) -> Result<(), Error> + Send + 'static,
+) -> Result<(), Error> {
+    let path = file(&folder);
+    tokio::task::spawn_blocking(move || change(&folder))
+        .await
+        .map_err(|join| Error {
+            path,
+            kind: Kind::Io(io::Error::other(join.to_string())),
+        })?
 }
 
 /// Sets the model as [`set_model`] does, on a blocking thread.
@@ -153,13 +222,7 @@ pub fn set_model(folder: &Path, model: Option<&str>) -> Result<(), Error> {
 /// Returns the errors of [`set_model`], or an error when the thread is
 /// cancelled.
 pub async fn set_model_later(folder: PathBuf, model: Option<String>) -> Result<(), Error> {
-    let path = file(&folder);
-    tokio::task::spawn_blocking(move || set_model(&folder, model.as_deref()))
-        .await
-        .map_err(|join| Error {
-            path,
-            kind: Kind::Io(io::Error::other(join.to_string())),
-        })?
+    later(folder, move |folder| set_model(folder, model.as_deref())).await
 }
 
 /// Parses the file at `path`, or `None` when there's no file.

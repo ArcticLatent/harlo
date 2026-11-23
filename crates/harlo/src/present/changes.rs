@@ -348,6 +348,8 @@ fn foot(changes: &Changes) -> ChangesFoot {
             foot.commit = files > 0;
             foot.ready = !changes.message.trim().is_empty() && changes.running.is_none();
             foot.committing = changes.running == Some(GitAction::Commit);
+            foot.writing = changes.writing;
+            foot.can_write = files > 0 && !changes.writing && changes.running.is_none();
             if let Some(upstream) = status.upstream.as_deref().filter(|_| status.ahead > 0) {
                 foot.push = if changes.running == Some(GitAction::Push) {
                     "Pushing…".to_owned()

@@ -72,6 +72,9 @@ pub struct Preferences {
     /// `provider/model`, by the project's folder; kept here, not on the
     /// server.
     pub project_models: BTreeMap<String, String>,
+    /// The model that writes commit messages, as `provider/model`; `None`
+    /// leaves it to the server's default model.
+    pub commit_model: Option<String>,
 }
 
 impl Default for Preferences {
@@ -92,6 +95,7 @@ impl Default for Preferences {
             code_size: TextSize::Normal,
             glass: false,
             project_models: BTreeMap::new(),
+            commit_model: None,
         }
     }
 }

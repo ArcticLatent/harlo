@@ -1,6 +1,6 @@
 //! The Changes panel: the session's and the folder's changes, opening a
-//! diff, committing and pushing, reloading when files change, and an edit
-//! opening its turn.
+//! diff, committing and pushing, ✦ writing the message, reloading when
+//! files change, and an edit opening its turn.
 //!
 //! Loads and git actions are fed in as their results; the git commands
 //! themselves are tested in `harlo-core`.
@@ -9,7 +9,10 @@
 
 mod support;
 
-use harlo::app::{ChangesEvent, ChangesLoaded, GitAction, Message, Panel};
+use harlo::app::{
+    ChangedFile, ChangesEvent, ChangesLoaded, GitAction, Message, Panel, clean_message,
+    commit_prompt,
+};
 use harlo::timeline::Event as TimelineEvent;
 use harlo_core::git::{FileState, Status};
 use harlo_core::server::{FileDiff, Update};
@@ -190,6 +193,79 @@ fn a_message_commits_every_uncommitted_file() {
         ui.app().changes.message.is_empty(),
         "the message is used up"
     );
+}
+
+#[test]
+fn the_sparkle_writes_the_message_for_the_folder_it_was_asked_for() {
+    let ui = panel(found(Some(status(
+        vec![
+            state("src/check.py", false, true),
+            state("notes.md", false, true),
+        ],
+        0,
+    ))));
+    drop(ui.driver.take_tasks());
+    ui.press("Write the message");
+    assert!(sent(&ui, |e| matches!(e, ChangesEvent::WriteMessage)));
+    assert_eq!(ui.driver.take_tasks().len(), 1, "a request to the server");
+    assert!(ui.shows("Writing…"));
+    ui.press("Writing the message…");
+    assert!(ui.driver.take_tasks().is_empty(), "one at a time");
+
+    let folder = ui.app().changes.folder().expect("a folder").to_owned();
+    ui.send(Message::Changes(ChangesEvent::MessageWritten(
+        "/elsewhere".into(),
+        Ok("Wrong folder".into()),
+    )));
+    assert!(
+        ui.app().changes.message.is_empty(),
+        "another folder's message"
+    );
+    ui.send(Message::Changes(ChangesEvent::MessageWritten(
+        folder.clone(),
+        Ok("Use port 9877".into()),
+    )));
+    assert_eq!(ui.app().changes.message, "Use port 9877");
+    assert!(ui.shows("Write the message"));
+
+    ui.send(Message::Changes(ChangesEvent::MessageWritten(
+        folder,
+        Err("Couldn't write a message: no model".into()),
+    )));
+    assert!(ui.shows("Couldn't write a message: no model"));
+}
+
+#[test]
+fn the_prompt_holds_the_diffs_and_names_what_doesnt_fit() {
+    let small = ChangedFile::from_diff(&diff(
+        "src/check.py",
+        "@@ -1,1 +1,2 @@\n import socket\n+PORT = 9877\n",
+        1,
+        0,
+    ));
+    let prompt = commit_prompt(std::slice::from_ref(&small));
+    assert!(prompt.starts_with("Write a git commit message"));
+    assert!(
+        prompt.contains("--- src/check.py (+1 -0)\n import socket\n+PORT = 9877\n"),
+        "{prompt}"
+    );
+
+    let huge_patch = format!("@@ -0,0 +1,3000 @@\n{}", "+a line of text\n".repeat(3000));
+    let huge = ChangedFile::from_diff(&diff("big.txt", &huge_patch, 3000, 0));
+    let prompt = commit_prompt(&[small, huge]);
+    assert!(prompt.len() < 25_000, "{}", prompt.len());
+    assert!(prompt.contains("+PORT = 9877"));
+    assert!(prompt.ends_with("Also changed, too large to show: big.txt\n"));
+}
+
+#[test]
+fn a_reply_loses_its_fences_and_quotes() {
+    assert_eq!(clean_message("  Fix the port\n\n"), "Fix the port");
+    assert_eq!(
+        clean_message("```text\nFix the port\n\nIt was wrong.\n```"),
+        "Fix the port\n\nIt was wrong."
+    );
+    assert_eq!(clean_message("\"Fix the port\""), "Fix the port");
 }
 
 #[test]
