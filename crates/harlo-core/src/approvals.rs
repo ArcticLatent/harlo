@@ -66,10 +66,10 @@ impl Shield {
     #[must_use]
     pub fn detail(self) -> &'static str {
         match self {
-            Self::Agent => "The agent decides; commands usually ask",
-            Self::Careful => "Every edit and command waits for you",
-            Self::Trusted => "Edits and commands run without asking",
-            Self::Custom => "This session has rules set elsewhere",
+            Self::Agent => "The agent decides. Commands usually ask.",
+            Self::Careful => "Every edit and command waits for you.",
+            Self::Trusted => "Edits and commands run without asking.",
+            Self::Custom => "This session has rules set elsewhere.",
         }
     }
 }

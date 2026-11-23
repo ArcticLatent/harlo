@@ -107,6 +107,11 @@ export struct Thumb {
 /// One row of a picker's menu.
 export struct MenuItem {
     label: string,
+    /// An icon before the label; empty for none.
+    glyph: string,
+    /// What it does, in a column of its own after the label; empty for none.
+    description: string,
+    /// A note on the right, such as a model's provider.
     detail: string,
     /// A line under the label saying what the choice means; empty for none.
     below: string,
@@ -297,6 +302,8 @@ export struct UndoCard {
     shown: bool,
     session: string,
     title: string,
+    /// The prompt being undone, in quotes; empty when it isn't known.
+    quote: string,
     note: string,
     files: [CardFile],
     /// Whether the user's own edits couldn't be told from the agent's.
@@ -313,6 +320,8 @@ export struct ApprovalCard {
     count: int,
     /// The command or paths, when no files are shown.
     detail: string,
+    /// Whether `detail` is a command to run.
+    command: bool,
     files: [CardFile],
     message: string,
     /// The "Always allow" button's label.

@@ -62,15 +62,14 @@ export component CardButton inherits Press {
             text: root.text;
             vertical-alignment: center;
             font-size: Size.label;
-            font-weight: 500;
             color: root.main ? Theme.text-on-brand-base
                 : root.risky ? Theme.risky-ink : Theme.text-strong;
         }
         if root.keys != "": Text {
             text: root.keys;
             vertical-alignment: center;
-            font-size: Size.small;
-            color: root.main ? Theme.text-on-brand-base : Theme.text-weak;
+            font-size: Size.small * 0.92;
+            color: root.main ? Theme.text-on-brand-base.transparentize(0.3) : Theme.text-weaker;
         }
     }
 }
@@ -132,13 +131,20 @@ component PatchView inherits VerticalLayout {
     spacing: 6px;
     HorizontalLayout {
         spacing: 8px;
+        Icon {
+            width: 14px;
+            text: Icons.file;
+            font-size: 13px;
+            color: Theme.icon-quiet;
+        }
         Text {
             text: root.file.name;
             horizontal-stretch: 1;
+            vertical-alignment: center;
             overflow: elide;
             font-family: Fonts.mono;
             font-size: Size.code;
-            color: Theme.text-strong;
+            color: Theme.text-base;
         }
         Counts {
             added: root.file.added;
@@ -186,11 +192,20 @@ component UndoView inherits Card {
         accent: Theme.icon-warning-base;
         text: State.undo-card.title;
     }
-    Text {
-        text: State.undo-card.note;
-        wrap: word-wrap;
-        font-size: Size.label;
-        color: Theme.text-base;
+    VerticalLayout {
+        spacing: 4px;
+        if State.undo-card.quote != "": Text {
+            text: State.undo-card.quote;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-weak;
+        }
+        Text {
+            text: State.undo-card.note;
+            wrap: word-wrap;
+            font-size: Size.label;
+            color: Theme.text-base;
+        }
     }
     for file in State.undo-card.files: PatchView {
         file: file;
@@ -235,14 +250,26 @@ component ApprovalView inherits Card {
         count: State.approval-card.count;
     }
     if State.approval-card.detail != "": Rectangle {
-        background: Theme.surface-inset-base;
+        background: Theme.field-fill;
         border-radius: Size.radius;
+        border-width: 1px;
+        border-color: Theme.control-edge;
         HorizontalLayout {
             padding-top: 8px;
             padding-bottom: 8px;
             padding-left: 10px;
             padding-right: 10px;
+            spacing: 10px;
+            // A command reads as typed at a prompt.
+            if State.approval-card.command: Text {
+                text: "$";
+                font-family: Fonts.mono;
+                font-size: Size.code;
+                color: Theme.text-weaker;
+                accessible-role: none;
+            }
             Text {
+                horizontal-stretch: 1;
                 text: State.approval-card.detail;
                 wrap: word-wrap;
                 font-family: Fonts.mono;
@@ -348,7 +375,7 @@ component ChoiceRow inherits Press {
             text: root.text;
             vertical-alignment: center;
             font-size: Size.label;
-            font-weight: root.selected ? 600 : 400;
+            font-weight: 400;
             color: Theme.text-strong;
         }
         if root.description != "": Text {

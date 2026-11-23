@@ -11,6 +11,7 @@ use std::fmt;
 
 use harlo_core::approvals::Shield;
 use harlo_core::theme::Rgba;
+use lucide_icons::Icon;
 
 use crate::app::{
     App, Load, Message, ProviderEvent, ScheduleEvent, SheetEvent, Status, capitalized,
@@ -139,6 +140,8 @@ pub struct Item {
     pub below: Option<String>,
     /// A colour dot before the name, such as an agent's.
     pub dot: Option<Rgba>,
+    /// An icon before the name, such as an agent's.
+    pub glyph: Option<Icon>,
     /// Whether it's the current choice.
     pub selected: bool,
     /// What choosing it does.
@@ -186,6 +189,49 @@ impl fmt::Display for AgentChoice {
 /// A reasoning level; `None` is the model's default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variant(pub Option<String>);
+
+/// The effort menu: the model's variants, the current one ticked.
+fn variant_items(app: &App) -> Vec<Item> {
+    let current = Variant(app.current_model().and_then(|m| m.variant));
+    app.variant_choices()
+        .into_iter()
+        .map(|variant| Item {
+            selected: variant == current,
+            label: capitalised(&variant.to_string()),
+            detail: None,
+            below: None,
+            dot: None,
+            glyph: None,
+            message: Message::PickVariant(variant),
+        })
+        .collect()
+}
+
+/// The permission menu: each mode and what it means, the current one ticked.
+fn shield_items(app: &App) -> Vec<Item> {
+    let current = app.current_shield();
+    Shield::CHOICES
+        .into_iter()
+        .map(|mode| Item {
+            selected: mode == current,
+            label: mode.label().to_owned(),
+            detail: None,
+            below: Some(mode.detail().to_owned()),
+            dot: None,
+            glyph: None,
+            message: Message::PickShield(mode),
+        })
+        .collect()
+}
+
+/// `text` with its first letter a capital, as a menu lists a choice.
+fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
 
 impl fmt::Display for Variant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -243,6 +289,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 detail: None,
                 below: None,
                 dot: None,
+                glyph: None,
                 message: Message::PickFolder(folder.directory),
             })
             .collect(),
@@ -259,38 +306,17 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     detail: agent.read_only.then(|| READ_ONLY.to_owned()),
                     below: None,
                     dot: agent.color,
+                    glyph: Some(if agent.read_only {
+                        Icon::Eye
+                    } else {
+                        Icon::Bot
+                    }),
                     message: Message::PickAgent(agent.id),
                 })
                 .collect()
         }
-        Picker::Variant => {
-            let current = Variant(app.current_model().and_then(|m| m.variant));
-            app.variant_choices()
-                .into_iter()
-                .map(|variant| Item {
-                    selected: variant == current,
-                    label: variant.to_string(),
-                    detail: None,
-                    below: None,
-                    dot: None,
-                    message: Message::PickVariant(variant),
-                })
-                .collect()
-        }
-        Picker::Shield => {
-            let current = app.current_shield();
-            Shield::CHOICES
-                .into_iter()
-                .map(|mode| Item {
-                    selected: mode == current,
-                    label: mode.label().to_owned(),
-                    detail: None,
-                    below: Some(mode.detail().to_owned()),
-                    dot: None,
-                    message: Message::PickShield(mode),
-                })
-                .collect()
-        }
+        Picker::Variant => variant_items(app),
+        Picker::Shield => shield_items(app),
         Picker::Model | Picker::DefaultModel | Picker::ProjectModel | Picker::CommitModel => {
             let current = match picker {
                 Picker::DefaultModel => app.default_model_choice(),
@@ -314,6 +340,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     detail: Some(model.provider_id.clone()),
                     below: None,
                     dot: None,
+                    glyph: None,
                     message: match picker {
                         Picker::DefaultModel => {
                             Message::Sheet(SheetEvent::DefaultModel(model.clone()))
@@ -351,6 +378,7 @@ fn provider_items(app: &App) -> Vec<Item> {
                 detail: signed.then(|| "signed in".to_owned()),
                 below: None,
                 dot: None,
+                glyph: None,
                 message: Message::Sheet(SheetEvent::Provider(ProviderEvent::Open(
                     integration.id.clone(),
                 ))),
@@ -371,6 +399,7 @@ fn language_items(app: &App) -> Vec<Item> {
             detail: None,
             below: None,
             dot: None,
+            glyph: None,
             message: Message::Sheet(SheetEvent::Choose(SettingChoice::VoiceLanguage, index)),
         })
         .collect()
@@ -390,6 +419,7 @@ fn schedule_items(app: &App, picker: Picker) -> Vec<Item> {
                     detail: None,
                     below: None,
                     dot: None,
+                    glyph: None,
                     message: schedule_message(ScheduleEvent::Folder(directory)),
                 })
             })
@@ -402,6 +432,7 @@ fn schedule_items(app: &App, picker: Picker) -> Vec<Item> {
             detail: Some("named after the schedule".to_owned()),
             below: None,
             dot: None,
+            glyph: None,
             message: schedule_message(ScheduleEvent::Session(None)),
         };
         let sessions = app
@@ -417,6 +448,7 @@ fn schedule_items(app: &App, picker: Picker) -> Vec<Item> {
                 detail: None,
                 below: None,
                 dot: None,
+                glyph: None,
                 message: schedule_message(ScheduleEvent::Session(Some(session.id.clone()))),
             });
         std::iter::once(new).chain(sessions).collect()

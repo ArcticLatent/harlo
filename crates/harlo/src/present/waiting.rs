@@ -27,9 +27,6 @@ const DETAIL_LINES: usize = 6;
 /// The most lines of each restored file an undo card shows.
 const UNDO_LINES: usize = 8;
 
-/// The most characters of the undone prompt an undo card's heading quotes.
-const PROMPT_CHARS: usize = 48;
-
 /// Shows the cards for what the open session waits on; the questions go
 /// into `questions`, row by row, so a field being typed in keeps its focus.
 pub fn show(app: &App, state: &State<'_>, questions: &Rc<VecModel<Question>>) {
@@ -111,20 +108,22 @@ fn undo_card(app: &App, staged: StagedUndo<'_>) -> UndoCard {
     } = staged;
     let session = app.active.clone().unwrap_or_default();
     let restores = harlo_core::undo::restores(revert, agent);
-    let prompt = prompt.map_or_else(|| "this prompt".to_owned(), |p| format!("“{}”", clipped(p)));
+    // The prompt in full, on a line of its own under the heading.
+    let quote = prompt.map_or_else(String::new, |p| {
+        format!("“{}”", p.split_whitespace().collect::<Vec<_>>().join(" "))
+    });
     // OpenCode puts the files back as soon as an undo is staged, so the card
     // says that first; only the conversation waits for the answer.
     let (title, note) = if restores.is_empty() {
         (
-            format!("Undo {prompt} and everything after it?"),
-            "No files change. Undo removes this prompt and everything after it from the \
-             conversation, for good.",
+            "Undo this prompt?",
+            "No files change. Undo permanently removes this prompt and all later messages.",
         )
     } else {
         (
-            format!("Files are back to before {prompt}"),
-            "Undo also removes this prompt and everything after it from the conversation, \
-             for good. Cancel undo puts the files back as they were.",
+            "Files restored to before this prompt",
+            "Undo permanently removes this prompt and all later messages. Cancel undo to \
+             restore the edits.",
         )
     };
     let files: Vec<CardFile> = restores
@@ -147,35 +146,11 @@ fn undo_card(app: &App, staged: StagedUndo<'_>) -> UndoCard {
         busy: app.undos.busy.contains(&session),
         session: session.into(),
         title: title.into(),
+        quote: quote.into(),
         note: note.into(),
         files: model(files),
         unchecked: restores.iter().any(|r| r.lost.is_none()),
     }
-}
-
-/// The first line of `text`, cut short to fit a heading.
-fn clipped(text: &str) -> String {
-    let line = text.lines().next().unwrap_or_default();
-    if line.chars().count() <= PROMPT_CHARS && !text.contains('\n') {
-        return line.to_owned();
-    }
-    // One character more, to see whether the cut falls at a word's end.
-    let cut: String = line.chars().take(PROMPT_CHARS + 1).collect();
-    let fits = |at: usize| cut[..at].chars().count() <= PROMPT_CHARS;
-    // At the last word that fits, unless that drops more than half of it.
-    let cut = match cut.rfind(char::is_whitespace) {
-        Some(at) if line.chars().count() > PROMPT_CHARS && fits(at) && at >= cut.len() / 2 => {
-            &cut[..at]
-        }
-        _ => {
-            let end = cut
-                .char_indices()
-                .nth(PROMPT_CHARS)
-                .map_or(cut.len(), |(at, _)| at);
-            &cut[..end]
-        }
-    };
-    format!("{}…", cut.trim_end().trim_end_matches([',', ';', ':', '.']))
 }
 
 /// The card asking to allow or refuse an action.
@@ -201,10 +176,11 @@ fn approval_card(app: &App, asked: &Permission, count: usize) -> ApprovalCard {
         files: model(files),
         message: asked.message.clone().unwrap_or_default().into(),
         always: "Always allow".into(),
+        command: asked.action == "shell" && asked.files.is_empty(),
         // The scope in words, on a line of its own so it's never cut short.
         always_note: format!(
-            "Always allow covers {} in this project, for every session. \
-             Settings → Agents → Saved approvals takes it back.",
+            "Always allow applies to {} in every session of this project.\n\
+             Manage saved approvals in Settings → Agents.",
             approvals::always_scope(asked)
         )
         .into(),
@@ -359,25 +335,4 @@ fn number(n: usize) -> i32 {
 /// A line count as the UI's `int`.
 fn count(n: u64) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::clipped;
-
-    #[test]
-    fn a_long_prompt_is_cut_at_a_word() {
-        assert_eq!(
-            clipped("Change the port to 9877"),
-            "Change the port to 9877"
-        );
-        assert_eq!(
-            clipped("Rename the configuration loader and update every caller, then run the tests"),
-            "Rename the configuration loader and update every…"
-        );
-        assert_eq!(clipped("First line\nsecond"), "First line…");
-        // One long word is cut where it must be.
-        let word = "a".repeat(60);
-        assert_eq!(clipped(&word), format!("{}…", "a".repeat(48)));
-    }
 }

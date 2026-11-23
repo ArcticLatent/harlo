@@ -873,6 +873,10 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
     let (icon, tone, working) = match status {
         ToolStatus::Completed => (tool_icon(name), crate::theme::quiet_icon(t), false),
         ToolStatus::Failed => (Icon::X, t.icon_critical_base, false),
+        // A question waits on the user, not the agent: it doesn't turn.
+        ToolStatus::Running | ToolStatus::Streaming if name == "question" => {
+            (Icon::CircleQuestionMark, t.text_weak, false)
+        }
         ToolStatus::Running | ToolStatus::Streaming => {
             (Icon::LoaderCircle, t.text_interactive_base, true)
         }
@@ -1026,6 +1030,7 @@ fn tool_icon(name: &str) -> Icon {
         "webfetch" | "websearch" => Icon::Globe,
         "task" => Icon::Bot,
         "skill" => Icon::Sparkles,
+        "question" => Icon::CircleQuestionMark,
         _ => Icon::Wrench,
     }
 }

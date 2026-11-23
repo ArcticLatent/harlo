@@ -2,7 +2,7 @@
 // and menus that choose a session's folder, agent, model and shield.
 
 import { ListView } from "std-widgets.slint";
-import { Theme, Size, Motion, Curves } from "theme.slint";
+import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Chip, MenuItem, AttachedChip } from "data.slint";
 import { Icon, IconButton, Press, Dot, Breathing, Spinner, Field } from "widgets.slint";
@@ -215,24 +215,56 @@ component ShieldButton inherits Press {
 component MenuRow inherits Press {
     in property <MenuItem> item;
     in property <bool> highlighted;
+    /// Whether names are code, such as commands, in a column of their own
+    /// before what they do.
+    in property <bool> columns;
+    /// The accent marks the row the keys are on, and the current choice.
+    property <color> ink: root.highlighted || item.selected ? Theme.accent-ink : Theme.text-strong;
 
     height: item.below != "" ? Size.menu-row + Size.two-line-extra : Size.menu-row;
     label: item.label;
-    about: item.below;
-    rest: root.highlighted ? Theme.surface-base-hover : transparent;
+    about: item.below != "" ? item.below : item.description;
+    rest: root.highlighted ? Theme.selected-tint : transparent;
+    hover: root.highlighted ? Theme.selected-tint : Theme.surface-base-hover;
 
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
         spacing: 8px;
-        if item.has-dot: VerticalLayout {
+        if item.glyph != "": Icon {
+            width: 15px;
+            text: item.glyph;
+            font-size: 13px;
+            color: root.highlighted || item.selected ? Theme.accent-ink : Theme.icon-quiet;
+        }
+        // A name without a description, such as a file's path, takes the room.
+        if root.columns: Text {
+            min-width: item.description != "" ? 140px : 0px;
+            max-width: item.description != "" ? 140px : 100000px;
+            horizontal-stretch: item.description != "" ? 0 : 1;
+            text: item.label;
+            vertical-alignment: center;
+            overflow: elide;
+            font-family: Fonts.mono;
+            font-size: Size.code;
+            color: root.highlighted ? Theme.accent-ink : Theme.text-strong;
+        }
+        if root.columns && item.description != "": Text {
+            horizontal-stretch: 1;
+            text: item.description;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        if item.has-dot && !root.columns: VerticalLayout {
             alignment: center;
             Dot {
                 size: 8px;
                 background: item.dot;
             }
         }
-        VerticalLayout {
+        if !root.columns: VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
             spacing: 1px;
@@ -240,7 +272,7 @@ component MenuRow inherits Press {
                 text: item.label;
                 overflow: elide;
                 font-size: Size.label;
-                color: Theme.text-strong;
+                color: root.ink;
             }
             if item.below != "": Text {
                 text: item.below;
@@ -257,10 +289,10 @@ component MenuRow inherits Press {
             font-size: Size.small;
             color: Theme.text-weak;
         }
-        Icon {
+        if !root.columns: Icon {
             width: 14px;
             text: item.selected ? Icons.check : "";
-            color: Theme.text-strong;
+            color: Theme.accent-ink;
         }
     }
 }
@@ -301,6 +333,7 @@ component ComposerMenu inherits Rectangle {
                 padding-bottom: 2px;
                 MenuRow {
                     item: item;
+                    columns: true;
                     highlighted: index == State.composer-menu-highlight;
                     clicked => { Logic.composer-menu-pick(index); }
                 }
@@ -557,6 +590,7 @@ export component PickerMenu inherits Rectangle {
                 || State.picker == Pickers.commit-model
                 || State.picker == Pickers.provider: Field {
                 height: 32px;
+                glyph: Icons.search;
                 placeholder: State.picker == Pickers.provider ? "Filter providers" : "Filter models";
                 text-size: Size.label;
                 text: State.menu-filter;

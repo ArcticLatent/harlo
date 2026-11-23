@@ -23,6 +23,7 @@ mod waiting;
 use std::rc::Rc;
 
 use harlo_core::approvals::Shield;
+use harlo_core::composer::Choice;
 use harlo_core::server::Location;
 use harlo_core::sessions::{SessionSummary, VISIBLE_SESSIONS, compact_age, visible};
 use harlo_core::theme::{Rgba, Tokens};
@@ -396,8 +397,26 @@ impl Presenter {
                         Some(r) if r.subagent => format!("{} · subagent", item.detail),
                         _ => item.detail.clone(),
                     };
+                    // Files say so on the right; the rest say what they do
+                    // in a column after their names.
+                    let (icon, file) = match &item.choice {
+                        Choice::File { directory, .. } => (
+                            Some(if *directory { Icon::Folder } else { Icon::File }),
+                            true,
+                        ),
+                        Choice::Agent(_) => (Some(Icon::Bot), false),
+                        Choice::Resource { .. } => (Some(Icon::Globe), false),
+                        _ => (None, false),
+                    };
+                    let (description, detail) = if file {
+                        (String::new(), detail)
+                    } else {
+                        (detail, String::new())
+                    };
                     MenuItem {
                         label: item.label.as_str().into(),
+                        glyph: icon.map(glyph).unwrap_or_default(),
+                        description: description.into(),
                         detail: detail.into(),
                         dot: dot.map(color).unwrap_or_default(),
                         has_dot: dot.is_some(),
@@ -441,6 +460,8 @@ impl Presenter {
                 .into_iter()
                 .map(|item| MenuItem {
                     label: item.label.into(),
+                    glyph: item.glyph.map(glyph).unwrap_or_default(),
+                    description: SharedString::new(),
                     detail: item.detail.unwrap_or_default().into(),
                     below: item.below.unwrap_or_default().into(),
                     dot: item.dot.map(color).unwrap_or_default(),
@@ -476,9 +497,7 @@ impl Presenter {
             Picker::ScheduleSession => {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }
-            Picker::Variant => {
-                "The model's variants: mostly how hard it thinks before answering.".to_owned()
-            }
+            Picker::Variant => "How much reasoning the model uses before it answers.".to_owned(),
             // Each mode says what it means on its own row.
             Picker::Shield
             | Picker::Folder
@@ -745,7 +764,12 @@ fn chips(app: &App, t: &Tokens) -> Vec<Chip> {
             "Effort: {}",
             Variant(app.current_model().and_then(|m| m.variant))
         );
-        chips.push(plain_chip(t, Picker::Variant, Icon::Brain, label));
+        chips.push(plain_chip(
+            t,
+            Picker::Variant,
+            Icon::SlidersHorizontal,
+            label,
+        ));
     }
     let label = app
         .current_model_choice()
