@@ -301,6 +301,25 @@ fn a_risky_buttons_label_reads_on_the_button_in_every_theme() {
 }
 
 #[test]
+fn quiet_marks_and_key_hints_read_in_every_theme() {
+    let mut faint = Vec::new();
+    for theme in harlo_core::theme::bundled() {
+        let t = theme.tokens();
+        // The prompt rail's marks, at full strength on the session.
+        let marks = harlo::theme::quiet_icon(&t).contrast(t.background_base);
+        if marks < 3.0 {
+            faint.push(format!("{} rail marks: {marks:.2}", theme.id));
+        }
+        // "Alt+A" on the filled Allow once button.
+        let hint = t.text_on_brand_base.contrast(t.surface_brand_base);
+        if hint < 4.5 {
+            faint.push(format!("{} key hint: {hint:.2}", theme.id));
+        }
+    }
+    assert!(faint.is_empty(), "too faint:\n{}", faint.join("\n"));
+}
+
+#[test]
 fn a_readable_accent_keeps_its_colour() {
     let t = tokens("dracula");
     assert_eq!(

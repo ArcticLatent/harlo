@@ -59,8 +59,10 @@ fn harlo_dark_matches_the_mockup() {
         ("surface-raised-base", t.surface_raised_base, "#2f2f2f"),
         ("border-weak-base", t.border_weak_base, "#383838"),
         ("text-strong", t.text_strong, "#d5d5d5"),
-        ("text-base", t.text_base, "#a5a6a9"),
-        ("text-weak", t.text_weak, "#8b8c8e"),
+        ("text-base", t.text_base, "#b8b9bb"),
+        ("text-weak", t.text_weak, "#a2a3a5"),
+        ("text-weaker", t.text_weaker, "#97989a"),
+        ("surface-raised-strong", t.surface_raised_strong, "#383838"),
         ("text-interactive-base", t.text_interactive_base, "#adcafa"),
     ];
     for (name, actual, want) in expected {
@@ -123,8 +125,8 @@ fn faint_colours_are_lifted_until_they_read() {
         nord.base(3).contrast(nord.base(1)) < 2.0,
         "the scheme's own grey is too faint"
     );
-    assert!(t.text_weaker.contrast(t.surface_inset_base) >= 2.5);
-    assert!(t.syntax_comment.contrast(t.surface_inset_base) >= 2.5);
+    assert!(t.text_weaker.contrast(t.surface_inset_base) >= 4.5);
+    assert!(t.syntax_comment.contrast(t.surface_inset_base) >= 4.5);
     assert_ne!(t.text_weaker, nord.base(3), "so it was moved");
 }
 
@@ -150,15 +152,20 @@ fn every_bundled_scheme_reads() {
     for scheme in theme::bundled() {
         let t = scheme.tokens();
         let backs = [
-            ("background", t.background_base),
-            ("sidebar", t.background_stronger),
-            ("field", t.surface_inset_base),
+            ("background", t.background_base, true),
+            ("sidebar", t.background_stronger, true),
+            ("field", t.surface_inset_base, true),
+            ("raised fill", t.surface_raised_strong, false),
         ];
-        for (back, color) in backs {
+        for (back, color, field_like) in backs {
             let checks = [
                 ("text", t.text_base, 4.5),
-                ("secondary text", t.text_weak, 3.0),
-                ("placeholder", t.text_weaker, 2.5),
+                ("secondary text", t.text_weak, 4.5),
+                (
+                    "placeholder",
+                    t.text_weaker,
+                    if field_like { 4.5 } else { 0.0 },
+                ),
                 ("icon", t.icon_base, 3.0),
             ];
             for (what, fore, least) in checks {
@@ -237,8 +244,8 @@ fn more_contrast_lifts_text_in_every_scheme() {
         let back = lifted.background_base;
         for (what, fore, least) in [
             ("text", lifted.text_base, 7.0),
-            ("secondary text", lifted.text_weak, 4.5),
-            ("placeholder", lifted.text_weaker, 3.5),
+            ("secondary text", lifted.text_weak, 6.0),
+            ("placeholder", lifted.text_weaker, 4.5),
         ] {
             let contrast = fore.contrast(back);
             assert!(

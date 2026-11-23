@@ -770,8 +770,8 @@ export component PromptRail inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: self.height / 2;
+            // Full strength: a 2px mark needs all its colour to be seen.
             background: parent.hot ? Theme.text-strong : parent.current ? Theme.accent-ink : Theme.icon-quiet;
-            opacity: parent.hot || parent.current ? 1 : 0.6;
 
             animate width { duration: 120ms; easing: ease-out; }
         }

@@ -70,32 +70,41 @@ const OUTLINE_HOVER: f32 = 0.8;
 /// The contrast text on a filled button needs: WCAG's minimum for text.
 const BODY_CONTRAST: f64 = 4.5;
 
-/// How much contrast each kind of text needs against the backgrounds.
+/// How much contrast each kind of text needs against the surfaces it sits on.
 #[derive(Debug, Clone, Copy)]
 struct Needs {
-    /// Body text.
+    /// The strongest text.
     body: f64,
-    /// Secondary text and icons.
+    /// Ordinary text: a step above secondary text, so the two stay apart.
+    text: f64,
+    /// Secondary text: notes, hints, times. It's small, so it needs as much
+    /// as body text does.
     secondary: f64,
-    /// Placeholders and code comments: fainter than secondary text on
-    /// purpose, but never lost.
+    /// Placeholders and code comments, against the fields and wells they
+    /// sit in.
     faint: f64,
+    /// Icons and other graphics.
+    icons: f64,
 }
 
-/// Standard contrast: WCAG AA's minimums for text (4.5) and for large text
-/// and graphics (3).
+/// Standard contrast: WCAG AA's minimums for text (4.5), every level of it,
+/// and for graphics (3).
 const STANDARD: Needs = Needs {
     body: 4.5,
-    secondary: 3.0,
-    faint: 2.5,
+    text: 4.5,
+    secondary: 4.5,
+    faint: 4.5,
+    icons: 3.0,
 };
 
-/// More contrast: WCAG AAA's minimum for text (7), and AA's for text for
-/// secondary text (4.5).
+/// More contrast: WCAG AAA's minimum for text (7), and more for every
+/// fainter level.
 const MORE: Needs = Needs {
     body: 7.0,
-    secondary: 4.5,
-    faint: 3.5,
+    text: 7.0,
+    secondary: 6.0,
+    faint: 4.5,
+    icons: 4.5,
 };
 
 /// How many steps a colour takes towards the text colour when it's too
@@ -582,6 +591,9 @@ fn derive(p: &[Rgba; 16], mode: Mode, look: Look) -> Tokens {
         Mode::Light => Rgba::WHITE.over(b0, SIDEBAR_LIGHT),
     };
     let backgrounds = [b0, stronger, b1];
+    // Text also sits on raised fills: menus, sheets and buttons.
+    let fill = subtle(b2, b1, b0);
+    let surfaces = [b0, stronger, b1, fill];
     // The strongest text is the scheme's light foreground, unless it reads
     // worse than the default one.
     let strong = if b6.contrast(b0) >= b5.contrast(b0) {
@@ -595,9 +607,9 @@ fn derive(p: &[Rgba; 16], mode: Mode, look: Look) -> Tokens {
         Mode::Dark => Rgba::WHITE,
         Mode::Light => Rgba::BLACK,
     };
-    let strong = readable(strong, extreme, needs.body, &backgrounds);
-    let text = readable(b5, strong, needs.body, &backgrounds);
-    let weak = readable(b4, text, needs.secondary, &backgrounds);
+    let strong = readable(strong, extreme, needs.body.max(needs.text), &surfaces);
+    let text = readable(b5, strong, needs.text, &surfaces);
+    let weak = readable(b4, text, needs.secondary, &surfaces);
     let weaker = readable(b3, weak, needs.faint, &backgrounds);
     let comment = readable(b3, weak, needs.faint, &[b1]);
     let (added, removed) = match look.diff {
@@ -605,7 +617,6 @@ fn derive(p: &[Rgba; 16], mode: Mode, look: Look) -> Tokens {
         DiffColors::BlueOrange => (blue, orange),
     };
     let hover = b5.over(blue, FILL_HOVER);
-    let fill = subtle(b2, b1, b0);
     let on_blue = on(blue, b0, b7);
     Tokens {
         background_base: b0,
@@ -635,7 +646,7 @@ fn derive(p: &[Rgba; 16], mode: Mode, look: Look) -> Tokens {
         border_interactive_hover: blue.over(b0, OUTLINE_HOVER),
         border_interactive_focus: blue,
         accent_base: purple,
-        icon_base: readable(b4, text, needs.secondary, &backgrounds),
+        icon_base: readable(b4, text, needs.icons, &surfaces),
         icon_weak_base: weaker,
         icon_selected: strong,
         icon_success_base: green,
