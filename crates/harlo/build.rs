@@ -12,6 +12,8 @@ use lucide_icons::Icon;
 const ICONS: &[(&str, Icon)] = &[
     ("sidebar", Icon::PanelLeft),
     ("plus", Icon::Plus),
+    ("message-square", Icon::MessageSquare),
+    ("message-square-plus", Icon::MessageSquarePlus),
     ("close", Icon::X),
     ("search", Icon::Search),
     ("folder", Icon::Folder),

@@ -130,6 +130,117 @@ component LineRow inherits Rectangle {
     if root.marks: TouchArea {
         clicked => { Logic.change-hunk(root.entry.hunk); }
     }
+    // The number opens the comment field under the line.
+    if root.entry.clickable: number := TouchArea {
+        x: root.marks ? 3px : 0;
+        width: 40px;
+        mouse-cursor: MouseCursor.pointer;
+        accessible-role: button;
+        accessible-label: "Comment on line " + root.entry.line.number;
+        accessible-action-default => { Logic.change-comment(root.entry.key, root.entry.at); }
+        clicked => { Logic.change-comment(root.entry.key, root.entry.at); }
+
+        if number.has-hover: Rectangle {
+            x: 6px;
+            y: 1px;
+            width: parent.width - 8px;
+            height: parent.height - 2px;
+            border-radius: 3px;
+            background: Theme.surface-interactive-base;
+            Icon {
+                text: Icons.message-square-plus;
+                font-size: 12px;
+                color: Theme.text-on-interactive-base;
+            }
+        }
+    }
+}
+
+/// A comment under the line it's on, with a button that removes it.
+component CommentRow inherits Rectangle {
+    in property <ChangeRow> entry;
+
+    background: Theme.surface-inset-base;
+    HorizontalLayout {
+        padding-left: 46px;
+        padding-right: 6px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        Rectangle {
+            border-radius: 4px;
+            background: Theme.surface-raised-base;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 2px;
+                spacing: 6px;
+                Icon {
+                    text: Icons.message-square;
+                    font-size: 12px;
+                    color: Theme.text-interactive-base;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.entry.text;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    font-size: Size.small;
+                    color: Theme.text-strong;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        width: 20px;
+                        height: 20px;
+                        label: "Remove the comment";
+                        glyph: Icons.close;
+                        glyph-size: 11px;
+                        glyph-color: Theme.icon-quiet;
+                        clicked => { Logic.change-comment-remove(root.entry.at); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The field for a comment on the line above: Enter or Add adds it.
+component CommentField inherits Rectangle {
+    background: Theme.surface-inset-base;
+    HorizontalLayout {
+        padding-left: 46px;
+        padding-right: 6px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        spacing: 6px;
+        field := Field {
+            horizontal-stretch: 1;
+            min-height: 30px;
+            placeholder: "Comment on this line";
+            text-size: Size.small;
+            fill: Theme.background-base;
+            idle-edge: Theme.border-weak-base;
+            init => { self.focus(); }
+            accepted => { Logic.change-comment-add(self.text); }
+        }
+        CardButton {
+            text: "Add";
+            main: true;
+            enabled: field.text != "";
+            clicked => { Logic.change-comment-add(field.text); }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                width: 24px;
+                height: 24px;
+                label: "Cancel the comment";
+                glyph: Icons.close;
+                glyph-size: 12px;
+                glyph-color: Theme.icon-quiet;
+                clicked => { Logic.change-comment-cancel(); }
+            }
+        }
+    }
 }
 
 /// One row of either list.
@@ -171,6 +282,10 @@ component Row inherits Rectangle {
                 }
             }
         }
+        if root.entry.kind == 8: CommentRow {
+            entry: root.entry;
+        }
+        if root.entry.kind == 9: CommentField { }
         if root.entry.kind == 6: Rectangle {
             background: Theme.surface-inset-base;
             HorizontalLayout {
@@ -215,7 +330,8 @@ component Rows inherits ListView {
 /// The foot: the commit message and Commit, Push, and how the last went.
 component Foot inherits VerticalLayout {
     property <bool> shown: State.changes-foot.commit || State.changes-foot.push != ""
-        || State.changes-foot.note != "" || State.changes-foot.outcome != "";
+        || State.changes-foot.note != "" || State.changes-foot.outcome != ""
+        || State.changes-foot.comments != "";
 
     if root.shown: HLine { }
     if root.shown: VerticalLayout {
@@ -224,6 +340,37 @@ component Foot inherits VerticalLayout {
         padding-left: Sides.padding;
         padding-right: Sides.padding;
         spacing: 10px;
+        if State.changes-foot.comments != "": HorizontalLayout {
+            spacing: 8px;
+            Icon {
+                text: Icons.message-square;
+                font-size: 13px;
+                color: Theme.text-interactive-base;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: State.changes-foot.comments;
+                vertical-alignment: center;
+                font-size: Size.label;
+                color: Theme.text-strong;
+            }
+            CardButton {
+                text: "Discard";
+                clicked => { Logic.change-comments-discard(); }
+            }
+            CardButton {
+                text: "Send to the agent";
+                main: true;
+                enabled: State.changes-foot.can-send;
+                clicked => { Logic.change-comments-send(); }
+            }
+        }
+        if State.changes-foot.send-note != "": Text {
+            text: State.changes-foot.send-note;
+            wrap: word-wrap;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
         if State.changes-foot.commit: HorizontalLayout {
             spacing: 8px;
             message := Field {

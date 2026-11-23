@@ -356,7 +356,8 @@ export struct TodoRow {
 /// where every row sits.
 export struct ChangeRow {
     /// 0 a title, 1 the turn's question, 2 a note, 3 a failure, 4 a file,
-    /// 5 a diff line, 6 "N more lines", 7 the space between hunks.
+    /// 5 a diff line, 6 "N more lines", 7 the space between hunks, 8 a
+    /// comment on the line above, 9 the field for one.
     kind: int,
     height: length,
     /// Space above, inside the height.
@@ -389,6 +390,9 @@ export struct ChangeRow {
     /// A diff line, and its hunk's place in the file.
     line: DiffLine,
     hunk: int,
+    /// A diff line's place in its file's diff, which commenting on it
+    /// names; a comment's place in the list of comments.
+    at: int,
 }
 
 /// The Changes panel's foot: committing and pushing, and how the last git
@@ -403,6 +407,12 @@ export struct ChangesFoot {
     can-write: bool,
     /// The message is being written.
     writing: bool,
+    /// "2 comments" on diff lines waiting to be sent; empty with none.
+    comments: string,
+    /// The comments can be sent: nothing else is being sent.
+    can-send: bool,
+    /// What sending them takes along, such as the composer's text.
+    send-note: string,
     /// "Push 2 commits" or "Pushing…"; empty with nothing to push.
     push: string,
     can-push: bool,
@@ -835,6 +845,14 @@ export global Logic {
     callback commit();
     /// ✦: have the commit-message model write the message.
     callback write-commit-message();
+    /// Comments on diff lines: open the field under a line (the file's key
+    /// and the line's place), add, cancel, remove one, send all, drop all.
+    callback change-comment(string, int);
+    callback change-comment-add(string);
+    callback change-comment-cancel();
+    callback change-comment-remove(int);
+    callback change-comments-send();
+    callback change-comments-discard();
     callback push();
     callback refresh(int);
 

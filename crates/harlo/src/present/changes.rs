@@ -39,6 +39,10 @@ mod height {
     pub const LINE: f32 = 19.0;
     /// "N more lines".
     pub const MORE: f32 = 26.0;
+    /// A comment under its line.
+    pub const COMMENT: f32 = 28.0;
+    /// The field for a comment.
+    pub const COMMENT_FIELD: f32 = 44.0;
     /// The space between two hunks of the maximized diff.
     pub const HUNK_GAP: f32 = 12.0;
     /// How far above the revealed row the view stops.
@@ -54,6 +58,8 @@ mod kind {
     pub const FILE: i32 = 4;
     pub const LINE: i32 = 5;
     pub const MORE: i32 = 6;
+    pub const COMMENT: i32 = 8;
+    pub const COMMENT_FIELD: i32 = 9;
 }
 
 /// The panel's lists, kept for the window's lifetime.
@@ -96,12 +102,15 @@ impl Lists {
         list.sections(app.active.is_some());
         state.set_change_rows_y(list.reveal.unwrap_or(0.0));
         sync(&self.rows, list.rows);
-        state.set_changes_foot(foot(changes));
+        state.set_changes_foot(foot(app));
         state.set_commit_message(changes.message.as_str().into());
 
         let selected = wide.then(|| changes.selected_file()).flatten();
         state.set_change_path(selected.map_or_else(SharedString::new, |f| f.path.as_str().into()));
-        let (rows, y) = selected.map_or_else(|| (Vec::new(), 0.0), |f| whole_diff(f, changes.hunk));
+        let (rows, y) = match (selected, changes.selected.as_deref()) {
+            (Some(file), Some(key)) => whole_diff(changes, key, file),
+            _ => (Vec::new(), 0.0),
+        };
         state.set_change_diff_y(y);
         sync(&self.diff, rows);
     }
@@ -273,7 +282,7 @@ impl<'a> Builder<'a> {
             .flatten()
             .filter(|&h| h > 0);
         let mut hunk = 0;
-        for line in &file.lines[..shown] {
+        for (at, line) in file.lines[..shown].iter().enumerate() {
             if line.kind == LineKind::Gap {
                 hunk += 1;
                 if lit_hunk == Some(hunk) {
@@ -283,7 +292,13 @@ impl<'a> Builder<'a> {
             self.push(kind::LINE, height::LINE, 0.0, |row| {
                 row.key = key.as_str().into();
                 row.line = diff_line(line);
+                row.at = int(at);
+                row.clickable = commentable(line);
             });
+            for row in under_line(changes, &key, &file.path, line) {
+                self.y += row.height;
+                self.rows.push(row);
+            }
         }
         if shown < file.lines.len() {
             let more = file.lines.len() - shown;
@@ -296,53 +311,122 @@ impl<'a> Builder<'a> {
 }
 
 /// The selected file's whole diff, hunk by hunk with a space between, and
-/// where its lit hunk starts.
-fn whole_diff(file: &ChangedFile, lit: Option<usize>) -> (Vec<ChangeRow>, f32) {
+/// where its lit hunk starts. `key` is the file's.
+fn whole_diff(changes: &Changes, key: &str, file: &ChangedFile) -> (Vec<ChangeRow>, f32) {
     let mut rows = Vec::new();
     let mut y = 0.0;
     let mut reveal = 0.0;
-    for (index, hunk) in hunks(&file.lines).into_iter().enumerate() {
-        let selected = lit == Some(index);
-        for (at, line) in hunk.iter().enumerate() {
-            let gap = match (at, index) {
-                (0, 0) => height::TOP,
-                (0, _) => height::HUNK_GAP,
-                _ => 0.0,
-            };
-            if at == 0 && selected {
-                reveal = y + gap;
+    // The hunk's place, counting only hunks with lines, and whether the
+    // current one has any yet.
+    let mut hunk = 0;
+    let mut started = false;
+    for (at, line) in file.lines.iter().enumerate() {
+        if line.kind == LineKind::Gap {
+            if started {
+                hunk += 1;
+                started = false;
             }
-            y += height::LINE + gap;
-            rows.push(ChangeRow {
-                kind: kind::LINE,
-                height: height::LINE + gap,
-                gap,
-                line: diff_line(line),
-                hunk: i32::try_from(index).unwrap_or(i32::MAX),
-                selected,
-                ..ChangeRow::default()
-            });
+            continue;
+        }
+        let selected = changes.hunk == Some(hunk);
+        let gap = match (started, rows.is_empty()) {
+            (true, _) => 0.0,
+            (false, true) => height::TOP,
+            (false, false) => height::HUNK_GAP,
+        };
+        if !started && selected {
+            reveal = y + gap;
+        }
+        started = true;
+        y += height::LINE + gap;
+        rows.push(ChangeRow {
+            kind: kind::LINE,
+            height: height::LINE + gap,
+            gap,
+            key: key.into(),
+            line: diff_line(line),
+            hunk: int(hunk),
+            at: int(at),
+            clickable: commentable(line),
+            selected,
+            ..ChangeRow::default()
+        });
+        for row in under_line(changes, key, &file.path, line) {
+            y += row.height;
+            rows.push(row);
         }
     }
     (rows, (reveal - height::MARGIN).max(0.0))
 }
 
-/// A diff's hunks: its lines between the gaps.
-fn hunks(lines: &[Line]) -> Vec<&[Line]> {
-    lines
-        .split(|line| line.kind == LineKind::Gap)
-        .filter(|hunk| !hunk.is_empty())
-        .collect()
+/// Whether a comment can go on `line`: one with a number.
+fn commentable(line: &Line) -> bool {
+    line.kind != LineKind::Gap && line.number.is_some()
 }
 
-/// The foot: Commit when there's something to commit here, Push when the
-/// branch is ahead, and how the last git action went.
-fn foot(changes: &Changes) -> ChangesFoot {
+/// What shows under `line` of the file at `path`, listed under `key`: its
+/// comments, then the field for one when it's being commented on.
+fn under_line(changes: &Changes, key: &str, path: &str, line: &Line) -> Vec<ChangeRow> {
+    let Some(folder) = changes.folder() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<_> = changes
+        .comments_in(folder)
+        .filter(|(_, c)| c.on.is(path, line))
+        .map(|(index, comment)| ChangeRow {
+            kind: kind::COMMENT,
+            height: height::COMMENT,
+            key: key.into(),
+            text: comment
+                .text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .into(),
+            at: int(index),
+            ..ChangeRow::default()
+        })
+        .collect();
+    if changes
+        .commenting
+        .as_ref()
+        .is_some_and(|c| c.key == key && c.on.is(path, line))
+    {
+        rows.push(ChangeRow {
+            kind: kind::COMMENT_FIELD,
+            height: height::COMMENT_FIELD,
+            key: key.into(),
+            ..ChangeRow::default()
+        });
+    }
+    rows
+}
+
+/// The foot: the comments waiting to be sent, Commit when there's something
+/// to commit here, Push when the branch is ahead, and how the last git
+/// action went.
+fn foot(app: &App) -> ChangesFoot {
+    let changes = &app.changes;
     let files = match &changes.tree {
         Some(Ok(files)) => files.len(),
         _ => 0,
     };
     let mut foot = ChangesFoot::default();
+    let comments = changes
+        .folder()
+        .map_or(0, |folder| changes.comments_in(folder).count());
+    if comments > 0 {
+        foot.comments = if comments == 1 {
+            "1 comment".to_owned()
+        } else {
+            format!("{comments} comments")
+        }
+        .into();
+        foot.can_send = !app.is_sending();
+        if !app.composer.text().trim().is_empty() {
+            foot.send_note = "Sent as one message after what's in the composer.".into();
+        }
+    }
     match &changes.status {
         Some(status) => {
             foot.commit = files > 0;
@@ -393,5 +477,10 @@ fn files_count(n: usize) -> String {
 
 /// A count as the UI's `int`.
 fn count(n: u64) -> i32 {
+    i32::try_from(n).unwrap_or(i32::MAX)
+}
+
+/// A place in a list as the UI's `int`.
+fn int(n: usize) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
 }

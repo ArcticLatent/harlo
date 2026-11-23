@@ -1,6 +1,6 @@
 //! The Changes panel: the session's and the folder's changes, opening a
-//! diff, committing and pushing, ✦ writing the message, reloading when
-//! files change, and an edit opening its turn.
+//! diff, committing and pushing, ✦ writing the message, comments on diff
+//! lines, reloading when files change, and an edit opening its turn.
 //!
 //! Loads and git actions are fed in as their results; the git commands
 //! themselves are tested in `harlo-core`.
@@ -10,10 +10,11 @@
 mod support;
 
 use harlo::app::{
-    ChangedFile, ChangesEvent, ChangesLoaded, GitAction, Message, Panel, clean_message,
-    commit_prompt,
+    ChangedFile, ChangesEvent, ChangesLoaded, GitAction, LineComment, LineRef, Message, Panel,
+    clean_message, comments_message, commit_prompt,
 };
 use harlo::timeline::Event as TimelineEvent;
+use harlo_core::diff::LineKind;
 use harlo_core::git::{FileState, Status};
 use harlo_core::server::{FileDiff, Update};
 use harlo_core::timeline::Entry;
@@ -422,4 +423,131 @@ fn an_edit_opens_its_turn_on_the_hunk_it_changed() {
 
     ui.press("End review");
     assert!(!ui.shows("This turn"));
+}
+
+/// Writes `text` as a comment on the line with the number button `line`.
+fn comment(ui: &Ui, line: &str, text: &str) {
+    ui.press(line);
+    ui.fill("Comment on this line", text);
+    ui.press("Add");
+}
+
+#[test]
+fn a_line_number_takes_a_comment_and_send_sends_them_as_one_message() {
+    let ui = panel(found(Some(status(vec![state("notes.md", false, true)], 0))));
+    ui.press("notes.md");
+    assert!(!ui.shows("Send to the agent"), "nothing to send yet");
+
+    comment(&ui, "Comment on line 1", "Say whose notes");
+    assert!(ui.shows("Say whose notes"), "under its line");
+    assert!(!ui.shows("Comment on this line"), "the field closes");
+    assert!(ui.shows("1 comment"));
+    // A second comment, on the same line.
+    comment(&ui, "Comment on line 1", "And date them");
+    assert!(ui.shows("2 comments"));
+
+    ui.press("Send to the agent");
+    assert!(ui.app().is_sending(), "sent the way the composer sends");
+    assert!(
+        ui.app().changes.comments.is_empty(),
+        "and gone from the panel"
+    );
+    assert!(!ui.shows("Send to the agent"));
+    assert!(ui.app().composer.text().is_empty());
+}
+
+#[test]
+fn the_composers_text_goes_first() {
+    let ui = panel(found(Some(status(vec![state("notes.md", false, true)], 0))));
+    ui.press("notes.md");
+    comment(&ui, "Comment on line 1", "Say whose notes");
+    ui.send(Message::Compose(harlo::text::Edit {
+        text: "Please fix these".into(),
+        cursor: 16,
+        anchor: 16,
+    }));
+    assert!(ui.shows("Sent as one message after what's in the composer."));
+    ui.press("Send to the agent");
+    // A failed send puts the whole message back in the composer.
+    ui.send(Message::Sent(Err("refused".into())));
+    let text = ui.app().composer.text();
+    assert!(
+        text.starts_with("Please fix these\n\nA comment on the changes:\n\nnotes.md, line 1:"),
+        "{text}"
+    );
+    assert!(text.ends_with("Say whose notes\n"), "{text}");
+}
+
+#[test]
+fn a_comment_stays_with_its_line_and_can_be_removed_or_discarded() {
+    let ui = panel(found(Some(status(
+        vec![state("src/check.py", false, true)],
+        0,
+    ))));
+    // The session's list has it first.
+    ui.button("src/check.py").invoke_accessible_default_action();
+    ui.press("Comment on line 2");
+    // The same number again closes the field.
+    ui.press("Comment on line 2");
+    assert!(!ui.shows("Comment on this line"));
+    ui.press("Comment on line 2");
+    ui.press("Cancel the comment");
+    assert!(!ui.shows("Comment on this line"));
+
+    comment(&ui, "Comment on line 2", "Read the port from the config");
+    comment(&ui, "Comment on line 1", "Unused import");
+    // A reload keeps them under their lines.
+    ui.send(Message::Changes(ChangesEvent::Refresh));
+    ui.send(Message::Changes(ChangesEvent::Loaded(
+        2,
+        Box::new(found(Some(status(
+            vec![state("src/check.py", false, true)],
+            0,
+        )))),
+    )));
+    assert!(ui.shows("Read the port from the config"));
+
+    ui.press("Remove the comment");
+    assert!(ui.shows("1 comment"));
+    ui.press("Discard");
+    assert!(!ui.shows("Read the port from the config") && !ui.shows("Unused import"));
+    assert!(ui.app().changes.comments.is_empty());
+}
+
+#[test]
+fn the_maximized_diff_takes_comments_too() {
+    let ui = panel(found(Some(status(vec![state("notes.md", false, true)], 0))));
+    ui.press("Maximize");
+    ui.button("notes.md").invoke_accessible_default_action();
+    comment(&ui, "Comment on line 1", "Say whose notes");
+    assert!(ui.shows("Say whose notes"));
+    assert!(ui.shows("1 comment"));
+}
+
+#[test]
+fn the_message_names_each_file_and_line() {
+    let line = |path: &str, kind, number, text: &str| LineRef {
+        path: path.into(),
+        kind,
+        number: Some(number),
+        text: text.into(),
+    };
+    let comments = [
+        LineComment {
+            folder: "/p".into(),
+            on: line("src/check.py", LineKind::Added, 2, "PORT = 9877"),
+            text: "Read it from the config".into(),
+        },
+        LineComment {
+            folder: "/p".into(),
+            on: line("src/old.py", LineKind::Removed, 7, "import os"),
+            text: "Still needed".into(),
+        },
+    ];
+    assert_eq!(
+        comments_message(&comments),
+        "Comments on the changes:\n\
+         \nsrc/check.py, line 2:\n```diff\n+PORT = 9877\n```\nRead it from the config\n\
+         \nsrc/old.py, line 7 (removed):\n```diff\n-import os\n```\nStill needed\n"
+    );
 }

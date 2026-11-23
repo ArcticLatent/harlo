@@ -142,6 +142,19 @@ pub enum Event {
     MessageWritten(String, Result<String, String>),
     /// A git action finished, with what to say about it or why it failed.
     Ran(GitAction, Result<String, String>),
+    /// Open or close the comment field under a line: the file's key and
+    /// the line's place in its diff.
+    CommentOn(String, usize),
+    /// Add the comment being written.
+    AddComment(String),
+    /// Close the comment field.
+    CancelComment,
+    /// Remove a comment, by its place in the list.
+    RemoveComment(usize),
+    /// Send the folder's comments to the agent as one message.
+    SendComments,
+    /// Drop the folder's comments.
+    DiscardComments,
 }
 
 /// Which list a file is in.
@@ -208,6 +221,10 @@ pub struct Changes {
     pub writing: bool,
     /// What the last git action did, or why it failed.
     pub outcome: Option<Result<String, String>>,
+    /// Comments on diff lines, waiting to be sent.
+    pub comments: Vec<super::LineComment>,
+    /// The line a comment is being written on.
+    pub commenting: Option<super::Commenting>,
 }
 
 impl Changes {
@@ -326,6 +343,12 @@ impl App {
                 }
                 changes.outcome = Some(result);
             }
+            Event::CommentOn(key, at) => changes.comment_on(&key, at),
+            Event::AddComment(text) => changes.add_comment(&text),
+            Event::CancelComment => changes.commenting = None,
+            Event::RemoveComment(index) => changes.remove_comment(index),
+            Event::SendComments => return self.send_comments(),
+            Event::DiscardComments => changes.discard_comments(),
         }
         Task::none()
     }

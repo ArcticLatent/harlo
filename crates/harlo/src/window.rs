@@ -882,6 +882,29 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         ChangesEvent::WriteMessage
     ));
     send!(on_push, || Message::Changes(ChangesEvent::Push));
+    send_with!(on_change_comment, |_app, key, at| usize::try_from(at)
+        .ok()
+        .map(|at| Message::Changes(ChangesEvent::CommentOn(
+            key.to_string(),
+            at
+        ))));
+    send!(on_change_comment_add, |text| Message::Changes(
+        ChangesEvent::AddComment(text.to_string())
+    ));
+    send!(on_change_comment_cancel, || Message::Changes(
+        ChangesEvent::CancelComment
+    ));
+    send_with!(on_change_comment_remove, |_app, index| usize::try_from(
+        index
+    )
+    .ok()
+    .map(|index| Message::Changes(ChangesEvent::RemoveComment(index))));
+    send!(on_change_comments_send, || Message::Changes(
+        ChangesEvent::SendComments
+    ));
+    send!(on_change_comments_discard, || Message::Changes(
+        ChangesEvent::DiscardComments
+    ));
 
     send!(on_composer_edited, |text, cursor, anchor| Message::Compose(
         Edit {
