@@ -125,6 +125,12 @@ impl Files {
                     state.set_editor_cursor(offset(text.editor.offset()));
                     state.set_editor_anchor(offset(text.editor.anchor()));
                     state.set_editor_revision(self.revision);
+                } else if state.get_editor_text().as_str() != text.editor.as_str() {
+                    // Typed text stays in the field without a reload, but a
+                    // field made afresh starts from these.
+                    state.set_editor_text(text.editor.as_str().into());
+                    state.set_editor_cursor(offset(text.editor.offset()));
+                    state.set_editor_anchor(offset(text.editor.anchor()));
                 }
                 let source = text.editor.as_str();
                 if source != self.coloured.0 || self.coloured.1.as_ref() != Some(&app.tokens) {

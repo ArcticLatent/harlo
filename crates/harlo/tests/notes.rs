@@ -121,3 +121,22 @@ fn the_note_goes_into_the_message() {
     ui.press("Insert into message");
     assert_eq!(ui.app().composer.text(), "See:\nsecond");
 }
+
+#[test]
+fn a_maximized_note_shows_what_was_typed() {
+    let ui = with_notes();
+    type_more(&ui, "Ship on Friday");
+    let field = |ui: &Ui| {
+        ui.find("Note")
+            .into_iter()
+            .find_map(|e| e.accessible_value())
+            .map(|v| v.to_string())
+    };
+    assert_eq!(field(&ui).as_deref(), Some("Ship on Friday"));
+
+    // The maximized panel makes its field afresh; it starts from the note.
+    ui.open("Maximize");
+    assert_eq!(field(&ui).as_deref(), Some("Ship on Friday"));
+    ui.open("Restore");
+    assert_eq!(field(&ui).as_deref(), Some("Ship on Friday"));
+}

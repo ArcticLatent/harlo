@@ -27,6 +27,8 @@ export component LeftRail inherits Rectangle {
     // Settings showing its Shortcuts section lights the keyboard button.
     property <bool> shortcuts-shown: State.sheet == 2 && State.settings-section == State.shortcuts-section
         && State.settings-query == "";
+    property <bool> phone-shown: State.sheet == 2 && State.settings-section == State.phone-section
+        && State.settings-query == "";
     width: Size.rail;
     background: Theme.background-stronger;
 
@@ -51,13 +53,12 @@ export component LeftRail inherits Rectangle {
 
             HorizontalLayout {
                 alignment: center;
-                // The phone link shows as on, as in the design; its
-                // milestone wires it up.
+                // Opens Settings → Phone, and shows as on while it's there.
                 RailButton {
                     glyph: Icons.phone;
                     label: "Phone";
-                    selected: true;
-                    enabled: false;
+                    selected: root.phone-shown;
+                    clicked => { Logic.open-section(State.phone-section); }
                 }
             }
             HorizontalLayout {
@@ -83,7 +84,7 @@ export component LeftRail inherits Rectangle {
                 RailButton {
                     glyph: Icons.settings;
                     label: "Settings";
-                    selected: State.sheet == 2 && !root.shortcuts-shown;
+                    selected: State.sheet == 2 && !root.shortcuts-shown && !root.phone-shown;
                     clicked => { Logic.toggle-sheet(2); }
                 }
             }

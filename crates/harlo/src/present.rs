@@ -302,6 +302,12 @@ impl Presenter {
             state.set_composer_cursor(offset(app.composer.offset()));
             state.set_composer_anchor(offset(app.composer.anchor()));
             state.set_composer_revision(revision);
+        } else if state.get_composer_text().as_str() != app.composer.as_str() {
+            // Typed text stays in the field without a reload, but a field
+            // made afresh starts from these.
+            state.set_composer_text(app.composer.as_str().into());
+            state.set_composer_cursor(offset(app.composer.offset()));
+            state.set_composer_anchor(offset(app.composer.anchor()));
         }
         let feedback = app.feedback();
         state.set_sending(feedback.sending);

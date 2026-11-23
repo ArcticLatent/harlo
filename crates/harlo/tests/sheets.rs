@@ -22,6 +22,7 @@ use slint::Model as _;
 use slint::platform::{Key, WindowEvent};
 use std::time::Duration;
 
+use i_slint_backend_testing::AccessibleRole;
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
 
@@ -149,6 +150,27 @@ fn the_shortcuts_section_lists_the_keys_and_closes() {
     ui.press("Keyboard shortcuts");
     assert_eq!(ui.app().sheets.open, Some(Sheet::Settings));
     assert_eq!(ui.app().sheets.section, Section::Shortcuts);
+}
+
+#[test]
+fn the_phone_rail_button_opens_the_phone_section() {
+    let ui = ui(demo::app());
+    ui.press("Phone");
+    assert_eq!(ui.app().sheets.open, Some(Sheet::Settings));
+    assert_eq!(ui.app().sheets.section, Section::Phone);
+    // From another section, it moves to Phone; on Phone, it closes.
+    ui.press("General");
+    let rail = |ui: &support::Ui| {
+        ui.find("Phone")
+            .into_iter()
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .min_by(|a, b| a.absolute_position().x.total_cmp(&b.absolute_position().x))
+            .expect("the rail's phone button")
+    };
+    rail(&ui).invoke_accessible_default_action();
+    assert_eq!(ui.app().sheets.section, Section::Phone);
+    rail(&ui).invoke_accessible_default_action();
+    assert_eq!(ui.app().sheets.open, None);
 }
 
 #[test]

@@ -140,13 +140,15 @@ impl Sheets {
         state.set_settings_sections(ModelRc::from(Rc::new(VecModel::from(sections))));
         let steps: Vec<SharedString> = Step::ALL.iter().map(|s| s.title().into()).collect();
         state.set_setup_steps(ModelRc::from(Rc::new(VecModel::from(steps))));
-        state.set_shortcuts_section(
+        let place = |section: Section| {
             Section::ALL
                 .iter()
-                .position(|s| *s == Section::Shortcuts)
+                .position(|s| *s == section)
                 .and_then(|i| i32::try_from(i).ok())
-                .unwrap_or_default(),
-        );
+                .unwrap_or_default()
+        };
+        state.set_shortcuts_section(place(Section::Shortcuts));
+        state.set_phone_section(place(Section::Phone));
         sheets
     }
 

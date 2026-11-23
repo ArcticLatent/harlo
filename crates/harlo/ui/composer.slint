@@ -512,7 +512,10 @@ export component PickerMenu inherits Rectangle {
 
     card := Rectangle {
         property <length> below: Requests.anchor-y + Requests.anchor-height + 6px;
-        x: Requests.anchor-x.clamp(8px, root.width - self.width - 8px);
+        // A composer menu stays off the right rail; one over Settings may
+        // use the whole window.
+        x: Requests.anchor-x.clamp(8px, root.width - self.width - 8px
+            - (State.picker < Pickers.first-in-settings ? Size.rail : 0));
         y: self.below + self.height > root.height - 8px
             ? max(8px, Requests.anchor-y - self.height - 6px) : self.below;
         width: root.card-width;

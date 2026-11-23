@@ -47,6 +47,13 @@ impl Notes {
             state.set_notes_revision(self.revision);
         }
         let text = note.content.as_str();
+        // Typed text stays in the field without a reload, but a field made
+        // afresh (the panel maximized or put back) starts from these.
+        if state.get_notes_text().as_str() != text {
+            state.set_notes_text(text.into());
+            state.set_notes_cursor(offset(note.content.offset()));
+            state.set_notes_anchor(offset(note.content.anchor()));
+        }
         state.set_notes_has_text(!text.trim().is_empty());
         let (open, all) = todo_counts(text);
         let todos = match (open, all) {
