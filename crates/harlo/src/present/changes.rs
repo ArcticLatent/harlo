@@ -307,12 +307,17 @@ impl<'a> Builder<'a> {
                 }
                 Shown::Line(at, line) => {
                     shown += 1;
-                    self.push(kind::LINE, height::LINE, 0.0, |row| {
-                        row.key = key.as_str().into();
-                        row.line = diff_line(line);
-                        row.at = int(at);
-                        row.clickable = commentable(line);
-                    });
+                    for (piece, part) in wrapped(diff_line(line), changes.columns[0])
+                        .into_iter()
+                        .enumerate()
+                    {
+                        self.push(kind::LINE, height::LINE, 0.0, |row| {
+                            row.key = key.as_str().into();
+                            row.line = part;
+                            row.at = int(at);
+                            row.clickable = piece == 0 && commentable(line);
+                        });
+                    }
                     for row in under_line(changes, &key, &file.path, line) {
                         self.y += row.height;
                         self.rows.push(row);
@@ -367,25 +372,71 @@ fn whole_diff(changes: &Changes, key: &str, file: &ChangedFile) -> (Vec<ChangeRo
             reveal = y + gap;
         }
         started = true;
-        y += height::LINE + gap;
-        rows.push(ChangeRow {
-            kind: kind::LINE,
-            height: height::LINE + gap,
-            gap,
-            key: key.into(),
-            line: diff_line(line),
-            hunk: int(hunk),
-            at: int(at),
-            clickable: commentable(line),
-            selected,
-            ..ChangeRow::default()
-        });
+        for (piece, part) in wrapped(diff_line(line), changes.columns[1])
+            .into_iter()
+            .enumerate()
+        {
+            // The space before a change goes above its first piece.
+            let gap = if piece == 0 { gap } else { 0.0 };
+            y += height::LINE + gap;
+            rows.push(ChangeRow {
+                kind: kind::LINE,
+                height: height::LINE + gap,
+                gap,
+                key: key.into(),
+                line: part,
+                hunk: int(hunk),
+                at: int(at),
+                clickable: piece == 0 && commentable(line),
+                selected,
+                ..ChangeRow::default()
+            });
+        }
         for row in under_line(changes, key, &file.path, line) {
             y += row.height;
             rows.push(row);
         }
     }
     (rows, (reveal - height::MARGIN).max(0.0))
+}
+
+/// `line` in pieces of at most `columns` characters, so a long line wraps
+/// rather than running off the panel; the pieces after the first have no
+/// number or mark. A piece breaks after a space when one is in its last
+/// third. `columns` 0 leaves the line whole.
+fn wrapped(line: DiffLine, columns: usize) -> Vec<DiffLine> {
+    let chars: Vec<char> = line.text.chars().collect();
+    if columns == 0 || chars.len() <= columns {
+        return vec![line];
+    }
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        let mut end = (start + columns).min(chars.len());
+        if end < chars.len()
+            && let Some(space) = chars[start..end].iter().rposition(|c| c.is_whitespace())
+            && space + 1 > columns * 2 / 3
+        {
+            end = start + space + 1;
+        }
+        let first = start == 0;
+        pieces.push(DiffLine {
+            number: if first {
+                line.number.clone()
+            } else {
+                SharedString::new()
+            },
+            mark: if first {
+                line.mark.clone()
+            } else {
+                SharedString::new()
+            },
+            text: chars[start..end].iter().collect::<String>().into(),
+            kind: line.kind,
+        });
+        start = end;
+    }
+    pieces
 }
 
 /// A row of a file's diff in the list: a changed line, by its place in the
@@ -552,4 +603,50 @@ fn count(n: u64) -> i32 {
 /// A place in a list as the UI's `int`.
 fn int(n: usize) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrapped;
+    use crate::ui::DiffLine;
+
+    fn line(text: &str) -> DiffLine {
+        DiffLine {
+            number: "7".into(),
+            mark: "+".into(),
+            text: text.into(),
+            kind: 1,
+        }
+    }
+
+    #[test]
+    fn a_short_line_or_unknown_width_stays_whole() {
+        assert_eq!(wrapped(line("short"), 20).len(), 1);
+        assert_eq!(wrapped(line(&"x".repeat(500)), 0).len(), 1);
+    }
+
+    #[test]
+    fn a_long_line_wraps_after_a_space_and_only_its_first_piece_is_numbered() {
+        let pieces = wrapped(line("alpha beta gamma delta epsilon"), 12);
+        let texts: Vec<&str> = pieces.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts, ["alpha beta ", "gamma delta ", "epsilon"]);
+        assert_eq!(pieces[0].number, "7");
+        assert_eq!(pieces[0].mark, "+");
+        assert!(
+            pieces[1..]
+                .iter()
+                .all(|p| p.number.is_empty() && p.mark.is_empty())
+        );
+        assert!(
+            pieces.iter().all(|p| p.kind == 1),
+            "each piece keeps its colour"
+        );
+    }
+
+    #[test]
+    fn a_line_without_spaces_breaks_at_the_width() {
+        let pieces = wrapped(line(&"x".repeat(25)), 10);
+        let lengths: Vec<usize> = pieces.iter().map(|p| p.text.chars().count()).collect();
+        assert_eq!(lengths, [10, 10, 5]);
+    }
 }

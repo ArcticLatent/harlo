@@ -1224,6 +1224,12 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         .ok()
         .map(|hunk| Message::Changes(ChangesEvent::Hunk(hunk))));
     send!(on_end_review, || Message::Changes(ChangesEvent::EndReview));
+    send!(on_diff_columns, |whole, columns| Message::Changes(
+        ChangesEvent::Columns {
+            whole,
+            columns: usize::try_from(columns).unwrap_or_default(),
+        }
+    ));
     send!(on_commit_message_edited, |text| Message::Changes(
         ChangesEvent::Message(text.to_string())
     ));

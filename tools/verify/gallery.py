@@ -328,21 +328,27 @@ def scene_menus(g):
 
 def long_change(h):
     """Commits a long workflow file to the sandbox's project, then changes
-    lines near its top and far down, so Changes has long lines and
-    three-digit line numbers to show."""
+    lines near its top, a run of fifty and some far down, so Changes has
+    long lines, more lines than it shows and three-digit numbers."""
     lines = [f"# step {n}: build, test and package the release for every platform we ship to" for n in range(1, 241)]
     h.file("release.yml", "\n".join(lines) + "\n")
+    numbers = [f"entry {n}" for n in range(1, 10501)]
+    h.file("numbers.txt", "\n".join(numbers) + "\n")
     git = ["git", "-C", h.project, "-c", "user.name=Gallery", "-c", "user.email=gallery@example.com",
            "-c", "commit.gpgsign=false"]
     env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
-    subprocess.run(git + ["add", "release.yml"], check=True, env=env)
+    subprocess.run(git + ["add", "release.yml", "numbers.txt"], check=True, env=env)
     subprocess.run(git + ["commit", "-q", "-m", "A long workflow"], check=True, env=env)
     lines[1] = "# step 2: build on the oldest supported system so the binary runs everywhere it can"
     lines[2] = "# step 3: test the packages on a clean machine before anything is published"
     lines[118] = "  QT_VERSION: removed"
     lines[205] = "# step 206: sign the update manifest that the app reads to offer updates"
+    for n in range(20, 70):
+        lines[n] = f"# step {n + 1}: run the platform's packaging tool, then check every file it wrote is signed"
     del lines[150:153]
     h.file("release.yml", "\n".join(lines) + "\n")
+    numbers[10230:10233] = ["entry 10231, changed", "entry 10232, changed", "entry 10233, changed"]
+    h.file("numbers.txt", "\n".join(numbers) + "\n")
 
 
 def scene_panels(g):
@@ -369,7 +375,18 @@ def scene_panels(g):
             h.wait("release.yml", role=None, where=lambda e: e.x > h.size[0] / 2, timeout=10)
             h.click("release.yml", role=None, where=lambda e: e.x > h.size[0] / 2 and e.role != "Tab")
             h.settle(0.8)
-            g.cap("changes-long", "A long file's changes: only the changed lines, with three-digit numbers")
+            g.cap("changes-long", "A long file's changes: only the changed lines, long ones wrapped")
+            h.click(None, role=None, where=lambda e: (e.label or "").endswith(" more lines"))
+            h.settle(1.2)
+            g.cap("changes-more", "More lines open the whole diff in the maximized panel")
+            h.key("Escape")
+            h.settle(0.8)
+            h.click("release.yml", role=None, where=lambda e: e.x > h.size[0] / 2 and e.role != "Tab")
+            h.click("numbers.txt", role=None, where=lambda e: e.x > h.size[0] / 2 and e.role != "Tab")
+            h.settle(0.8)
+            h.hover("Comment on line 10232", role="Button")
+            h.settle(0.6)
+            g.cap("changes-numbers", "Five-digit line numbers fit, and the comment button covers one exactly")
             continue
         if panel == "Notes":
             h.fill("Note", "Release checklist\n- [x] bump the version\n- [ ] tag the release\n- [ ] post the notes\n")

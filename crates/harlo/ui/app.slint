@@ -15,6 +15,7 @@ import { PanelBody } from "panels.slint";
 import { Home } from "home.slint";
 import { PickerMenu, Pickers } from "composer.slint";
 import { SessionView } from "session.slint";
+import { Column } from "timeline.slint";
 
 export { Theme, Size, Fonts, Motion, Icons, State, Logic, Requests, Tips }
 
@@ -48,6 +49,22 @@ export component AppWindow inherits Window {
     /// and is told when it changes. A desktop that doesn't say counts as
     /// dark.
     out property <bool> system-dark: Palette.color-scheme != ColorScheme.light;
+
+    // Five digits of the code font, for diffs' number columns: a long
+    // file's numbers fit whichever font and size is chosen.
+    digits := Text {
+        visible: false;
+        text: "00000";
+        font-family: Fonts.mono;
+        font-size: Size.small;
+    }
+    property <length> number-width: ceil(digits.preferred-width / 1px) * 1px + 6px;
+    changed number-width => {
+        Column.diff-number = self.number-width;
+    }
+    init => {
+        Column.diff-number = self.number-width;
+    }
     changed system-dark => {
         Logic.system-dark(self.system-dark);
     }

@@ -24,6 +24,9 @@ export global Column {
     out property <length> line: 24px;
     /// A diff line's height.
     out property <length> diff-line: 19px;
+    /// A diff line's number column: five digits of the code font, as the
+    /// window measures them.
+    in-out property <length> diff-number: 42px;
 }
 
 /// The agent whose turn starts here, before the turn's first line: its
@@ -372,7 +375,7 @@ export component PatchLine inherits Rectangle {
         padding-right: 8px;
         spacing: 10px;
         Text {
-            width: 28px;
+            width: Column.diff-number;
             text: root.line.number;
             horizontal-alignment: right;
             vertical-alignment: center;
@@ -446,7 +449,7 @@ component DiffRow inherits Rectangle {
                     line: line;
                 }
                 if root.item.more != "": HorizontalLayout {
-                    padding-left: 28px;
+                    padding-left: Column.diff-number;
                     padding-top: 4px;
                     alignment: start;
                     LinkButton {

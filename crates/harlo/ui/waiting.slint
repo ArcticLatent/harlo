@@ -6,7 +6,7 @@ import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, CardFile, Question, Answer } from "data.slint";
 import { Icon, Press, Field, QuietScroll } from "widgets.slint";
-import { Counts, PatchLine } from "timeline.slint";
+import { Counts, PatchLine, Column } from "timeline.slint";
 
 /// How the cards are laid out.
 global Cards {
@@ -162,7 +162,7 @@ component PatchView inherits VerticalLayout {
                 line: line;
             }
             if root.file.more != "": HorizontalLayout {
-                padding-left: 28px;
+                padding-left: Column.diff-number;
                 padding-top: 4px;
                 Text {
                     text: root.file.more;

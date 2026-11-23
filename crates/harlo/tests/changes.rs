@@ -19,6 +19,7 @@ use harlo_core::git::{FileState, Status};
 use harlo_core::server::{FileDiff, Update};
 use harlo_core::timeline::Entry;
 use harlo_core::workspace::{Event, EventKind, ToolStatus};
+use slint::Model as _;
 use support::{Ui, WINDOW, demo, ui_at};
 
 /// "pi update" in the demo data.
@@ -159,9 +160,45 @@ fn a_long_diff_shows_its_start_then_all_of_it() {
     ui.press("long.txt");
     assert!(ui.shows("line 0"));
     assert!(!ui.shows("line 45"), "cut short");
+    // The rest opens in the maximized panel, on this file.
     ui.press("20 more lines");
-    assert!(!ui.shows("20 more lines"));
-    assert!(ui.app().changes.whole.contains("tree:long.txt"));
+    assert_eq!(ui.app().maximized, Some(harlo::app::Panel::Changes));
+    assert_eq!(ui.app().changes.selected.as_deref(), Some("tree:long.txt"));
+    assert!(ui.shows("line 45"), "all of it");
+}
+
+#[test]
+fn a_long_line_wraps_inside_the_panel() {
+    let long = "word ".repeat(80);
+    let patch = format!("@@ -0,0 +1,1 @@\n+{long}\n");
+    let loaded = ChangesLoaded::new(
+        None,
+        Some(Ok(Vec::new())),
+        Ok(vec![diff("wide.txt", &patch, 1, 0)]),
+        Some(Ok(status(vec![state("wide.txt", false, true)], 0))),
+    );
+    let ui = panel(loaded);
+    ui.press("wide.txt");
+    ui.wait(50);
+    let columns = ui.app().changes.columns[0];
+    assert!(columns > 8, "the panel measured its width: {columns}");
+    let rows = slint::ComponentHandle::global::<harlo::ui::State>(&ui.window).get_change_rows();
+    let pieces: Vec<_> = rows.iter().filter(|row| row.line.kind == 1).collect();
+    assert!(pieces.len() > 1, "the line wraps");
+    assert!(
+        pieces
+            .iter()
+            .all(|p| p.line.text.chars().count() <= columns)
+    );
+    assert_eq!(
+        pieces
+            .iter()
+            .map(|p| p.line.text.to_string())
+            .collect::<String>(),
+        long,
+        "nothing is lost"
+    );
+    assert!(pieces[1..].iter().all(|p| p.line.number.is_empty()));
 }
 
 #[test]

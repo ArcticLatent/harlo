@@ -9,7 +9,7 @@ import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, ChangeRow } from "data.slint";
 import { Icon, FileIcon, Press, IconButton, Field, HLine, VLine, QuietBar } from "widgets.slint";
-import { Counts, PatchLine, LinkButton } from "timeline.slint";
+import { Counts, PatchLine, LinkButton, Column } from "timeline.slint";
 import { CardButton } from "waiting.slint";
 
 /// The space at the lists' sides.
@@ -145,9 +145,10 @@ component LineRow inherits Rectangle {
         clicked => { Logic.change-hunk(root.entry.hunk); }
     }
     // The number opens the comment field under the line.
+    // Exactly over the number, which it stands in for while hovered.
     if root.entry.clickable: number := TouchArea {
         x: root.marks ? 3px : 0;
-        width: 40px;
+        width: Column.diff-number + 4px;
         mouse-cursor: MouseCursor.pointer;
         accessible-role: button;
         accessible-label: "Comment on line " + root.entry.line.number;
@@ -155,9 +156,9 @@ component LineRow inherits Rectangle {
         clicked => { Logic.change-comment(root.entry.key, root.entry.at); }
 
         if number.has-hover: Rectangle {
-            x: 6px;
+            x: 2px;
             y: 1px;
-            width: parent.width - 8px;
+            width: parent.width - 4px;
             height: parent.height - 2px;
             border-radius: 3px;
             background: Theme.surface-interactive-base;
@@ -176,7 +177,7 @@ component CommentRow inherits Rectangle {
 
     background: Theme.surface-inset-base;
     HorizontalLayout {
-        padding-left: 46px;
+        padding-left: Column.diff-number + 18px;
         padding-right: 6px;
         padding-top: 2px;
         padding-bottom: 2px;
@@ -221,7 +222,7 @@ component CommentRow inherits Rectangle {
 component CommentField inherits Rectangle {
     background: Theme.surface-inset-base;
     HorizontalLayout {
-        padding-left: 46px;
+        padding-left: Column.diff-number + 18px;
         padding-right: 6px;
         padding-top: 5px;
         padding-bottom: 5px;
@@ -301,7 +302,7 @@ component Row inherits Rectangle {
         if root.entry.kind == 6: Rectangle {
             background: Theme.surface-inset-base;
             HorizontalLayout {
-                padding-left: 40px;
+                padding-left: Column.diff-number + 12px;
                 alignment: start;
                 VerticalLayout {
                     alignment: center;
@@ -324,6 +325,35 @@ component Rows inherits Rectangle {
     in property <length> reveal-y;
     /// Its name for screen readers.
     in property <string> label;
+
+    // How many characters of code fit beside a line's number and mark, from
+    // the code font's width; Rust wraps longer lines to it.
+    metrics := Text {
+        visible: false;
+        text: "0000000000";
+        font-family: Fonts.mono;
+        font-size: Size.code;
+    }
+    property <length> cell-width: max(1px, metrics.preferred-width / 10);
+    // The sides' padding, the number, the mark, their spaces and the end's
+    // padding (38px), the hunk mark, and room for the scroll bar.
+    property <int> columns: max(8, floor((root.width - 2 * Sides.padding - Column.diff-number
+        - 38px - (root.marks ? 3px : 0) - 8px) / root.cell-width));
+    // Sent after the layout settles, not in its middle.
+    report := Timer {
+        interval: 0ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            Logic.diff-columns(root.marks, root.columns);
+        }
+    }
+    changed columns => {
+        report.running = true;
+    }
+    init => {
+        report.running = true;
+    }
 
     property <int> scroll-serial: Requests.scroll-serial;
     changed scroll-serial => {

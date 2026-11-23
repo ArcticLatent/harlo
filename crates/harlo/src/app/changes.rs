@@ -122,12 +122,20 @@ pub enum Event {
     Loaded(u64, Box<Loaded>),
     /// Show or hide a file's diff, by key (see [`Changes::key`]).
     Toggle(String),
-    /// Show all of a file's diff, by key.
+    /// Show all of a file's diff, by key, in the maximized panel.
     Whole(String),
     /// Select a file, by key: the maximized panel shows its diff.
     Select(String),
     /// Light a hunk of the selected file, by its place in the diff.
     Hunk(usize),
+    /// How many characters of code fit on a diff's line: in the panel's
+    /// diffs, or the maximized panel's diff when `whole`.
+    Columns {
+        /// Whether it's the maximized panel's diff.
+        whole: bool,
+        /// The characters that fit.
+        columns: usize,
+    },
     /// Stop reviewing a turn.
     EndReview,
     /// The commit message changed.
@@ -225,6 +233,9 @@ pub struct Changes {
     pub comments: Vec<super::LineComment>,
     /// The line a comment is being written on.
     pub commenting: Option<super::Commenting>,
+    /// How many characters fit on a line of the panel's diffs, then of the
+    /// maximized panel's diff; longer lines wrap. 0 until measured.
+    pub columns: [usize; 2],
 }
 
 impl Changes {
@@ -292,6 +303,7 @@ impl App {
         let changes = &mut self.changes;
         match event {
             Event::Refresh => changes.stale = true,
+            Event::Columns { whole, columns } => changes.columns[usize::from(whole)] = columns,
             Event::Loaded(load, loaded) => {
                 if changes.loading == Some(load) {
                     changes.loading = None;
@@ -325,8 +337,16 @@ impl App {
                 changes.turn = None;
                 changes.select_some();
             }
+            // Too long for the panel: the maximized panel shows all of it.
             Event::Whole(key) => {
-                changes.whole.insert(key);
+                if changes.selected.as_ref() != Some(&key) {
+                    changes.selected = Some(key);
+                    changes.hunk = None;
+                }
+                if self.panel == Some(Panel::Changes) && self.maximized.is_none() {
+                    return self.arrange(Message::Maximize(Panel::Changes));
+                }
+                return self.scroll_to_hunk();
             }
             Event::Message(text) => changes.message = text,
             Event::Commit => return self.run_git(GitAction::Commit),

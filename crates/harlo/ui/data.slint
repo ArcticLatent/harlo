@@ -989,6 +989,9 @@ export global Logic {
     callback change-select(string);
     callback change-whole(string);
     callback change-hunk(int);
+    /// How many characters of code fit on a line of the panel's diffs, or of
+    /// the maximized panel's diff when the first is true.
+    callback diff-columns(bool, int);
     callback end-review();
     callback commit-message-edited(string);
     callback commit();
