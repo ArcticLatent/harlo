@@ -223,6 +223,12 @@ impl Timeline {
         self.revision += 1;
     }
 
+    /// Whether the session is working.
+    #[must_use]
+    pub fn busy(&self) -> bool {
+        self.busy
+    }
+
     /// Says whether the session is working, which keeps its last tool group open.
     pub fn set_busy(&mut self, busy: bool) {
         if self.busy != busy {

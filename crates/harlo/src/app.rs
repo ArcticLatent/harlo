@@ -1498,6 +1498,7 @@ impl App {
                     attachments,
                     pictures,
                     skills,
+                    agent: None,
                 };
                 timeline.pend(entry);
                 let fading = timeline.take_fading();

@@ -124,7 +124,7 @@ fn a_run_streams_in_and_its_tools_fold_up_when_done() {
     tool_events(&ui, "c1", "glob", json!({ "pattern": "docs/*.md" }), 100.0);
     tool_events(&ui, "c2", "read", json!({ "filePath": "docs/a.md" }), 200.0);
     for text in [
-        "Searched 1 time, read 1 file",
+        "Tool activity: 1 search · 1 file read",
         "Glob",
         "docs/*.md",
         "Stop",
@@ -164,13 +164,13 @@ fn a_run_streams_in_and_its_tools_fold_up_when_done() {
         },
         2_500.0,
     ));
-    assert!(ui.shows("Searched 1 time, read 1 file"));
+    assert!(ui.shows("Tool activity: 1 search · 1 file read"));
     assert!(!ui.shows("Glob"), "the finished group is folded");
     assert!(!ui.shows("Stop"));
 
     // Opening the group shows its calls with their times.
-    ui.press("Searched 1 time, read 1 file");
-    for text in ["Glob", "docs/*.md", "1.5s", "Read", "docs/a.md", "2.2s"] {
+    ui.press("Tool activity: 1 search · 1 file read");
+    for text in ["Glob", "docs/*.md", "1.5 s", "Read", "docs/a.md", "2.2 s"] {
         assert!(ui.shows(text), "shows {text:?} once opened");
     }
 }
@@ -480,7 +480,7 @@ fn a_short_window_keeps_the_question_cards_buttons_in_view() {
 
     // The questions scroll; Send and Dismiss stay above the composer.
     let composer = ui
-        .find("Send a message to continue this session · Tab switches agents")
+        .find("Send a message to continue this session…")
         .into_iter()
         .find(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
         .expect("the composer");
@@ -615,7 +615,7 @@ fn an_edit_shows_its_diff_under_the_row() {
         PI_UPDATE.into(),
         TimelineEvent::ToggleGroup("msg_e/tool/call_e".into()),
     ));
-    assert!(ui.shows("Edited 2 files"));
+    assert!(ui.shows("Tool activity: 2 files edited"));
     assert!(ui.shows("… 18 more lines"));
     ui.press("… 18 more lines");
     assert!(
@@ -637,6 +637,7 @@ fn with_history() -> Ui {
             attachments: Vec::new(),
             pictures: Vec::new(),
             skills: Vec::new(),
+            agent: None,
         },
         Entry::Answer {
             key: "msg_a1/text/0".into(),
@@ -777,6 +778,7 @@ fn long_history(count: usize) -> Vec<Entry> {
                     attachments: Vec::new(),
                     pictures: Vec::new(),
                     skills: Vec::new(),
+                    agent: None,
                 },
                 Entry::Answer {
                     key: format!("msg_a{i}/text/0"),
@@ -844,12 +846,14 @@ fn another_session_opens_at_its_end_after_scrolling_up() {
                 attachments,
                 pictures,
                 skills,
+                agent,
             } => Entry::Prompt {
                 key,
                 text: text.replace("Question", "Other question"),
                 attachments,
                 pictures,
                 skills,
+                agent,
             },
             entry => entry,
         })
@@ -952,7 +956,7 @@ fn a_tight_column_keeps_send_inside_the_composer() {
     ui.open("Changes");
 
     let field = ui
-        .find("Send a message to continue this session · Tab switches agents")
+        .find("Send a message to continue this session…")
         .into_iter()
         .find(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
         .expect("the composer");

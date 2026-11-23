@@ -154,7 +154,7 @@ def scene_chat(g):
     h.wait_says("planned the rest", timeout=40)
     h.settle(1)
     g.cap("tools", "Tool calls folded into a summary, an edit with its diff, and a todo list")
-    summary = h.find(None, role="Button", where=lambda e: e.label.startswith(("Searched", "Read", "Ran")))
+    summary = h.find(None, role="Button", where=lambda e: e.label.startswith("Tool activity"))
     if summary:
         h.click(summary[0].label)
         h.settle(0.8)

@@ -26,7 +26,9 @@ use crate::markdown::{self, Block, Highlighter};
 use crate::model::{ChildState, Crew, duration, gist};
 use crate::theme::color;
 use crate::timeline::{Load, RowView, Shown, Timeline};
-use crate::ui::{Chip, DiffLine, PromptMark, Shape, Thumb, TimelineRow};
+use crate::ui::{
+    Chip, DiffLine, ListEntry, PromptMark, Shape, TableCell, TableColumn, Thumb, TimelineRow,
+};
 
 /// Space above a row that starts an entry.
 const SPACING: f32 = 14.0;
@@ -36,6 +38,9 @@ const BLOCK_SPACING: f32 = 10.0;
 
 /// Space above the first row.
 const PAD: f32 = 18.0;
+
+/// The space between a turn's agent line and an answer under it.
+const TURN_GAP: f32 = 8.0;
 
 /// Diff lines shown before "… N more lines".
 const DIFF_LINES: usize = 12;
@@ -71,7 +76,7 @@ pub struct Rows {
     session: Option<String>,
     /// Answers' blocks and their rows, by key, so a growing answer rebuilds
     /// only the blocks that changed.
-    answers: HashMap<String, Vec<(Block, TimelineRow)>>,
+    answers: HashMap<String, Vec<(Block, bool, TimelineRow)>>,
     highlighter: Option<Highlighter>,
     /// The theme's tokens the rows were built with.
     tokens: Option<Tokens>,
@@ -168,7 +173,20 @@ impl Rows {
             self.generation = generation;
         }
         let next = next_items(timeline);
-        let looks: Vec<u64> = next.iter().map(|item| item_look(item, crew)).collect();
+        let turns = turns(&next, crew);
+        // An answer still being written ends with a caret.
+        let writing = timeline.busy()
+            && next.last().is_some_and(|item| {
+                matches!(item, Next::Shown(Shown::Row(view), _)
+                    if matches!(view.entry, Entry::Answer { .. }))
+            });
+        let last = next.len().saturating_sub(1);
+        let looks: Vec<u64> = (next.iter().zip(&turns).enumerate())
+            .map(|(at, (item, turn))| {
+                let caret = writing && at == last;
+                item_look(item, turn.as_deref(), caret, crew)
+            })
+            .collect();
 
         // The items alike at both ends stay; the stretch between is rebuilt.
         let prefix = self
@@ -200,7 +218,12 @@ impl Rows {
 
         let mut fresh = Vec::with_capacity(looks.len() - prefix - suffix);
         let end = looks.len() - suffix;
-        for (item, &look) in next.into_iter().zip(&looks).take(end).skip(prefix) {
+        for (at, ((item, &look), turn)) in (next.into_iter().zip(&looks).zip(turns))
+            .enumerate()
+            .take(end)
+            .skip(prefix)
+        {
+            let caret = writing && at == last;
             let key = match &item {
                 Next::Shown(Shown::Row(view), _) => view.entry.key(),
                 Next::Shown(Shown::Group { key, .. }, _) => key,
@@ -208,7 +231,11 @@ impl Rows {
             };
             let rows = match reusable.remove(key) {
                 Some(old) if old.look == look => old.rows,
-                _ => self.item_rows(t, item, crew),
+                _ => (self
+                    .item_rows(t, item, turn.as_deref(), caret, crew)
+                    .into_iter())
+                .map(built)
+                .collect(),
             };
             fresh.push(Item {
                 key: key.to_owned(),
@@ -260,12 +287,34 @@ impl Rows {
     }
 
     /// The rows of one item.
-    fn item_rows(&mut self, t: &Tokens, item: Next<'_>, crew: &Crew) -> Vec<Built> {
+    fn item_rows(
+        &mut self,
+        t: &Tokens,
+        item: Next<'_>,
+        turn: Option<&str>,
+        caret: bool,
+        crew: &Crew,
+    ) -> Vec<TimelineRow> {
+        let mut rows = self.item_rows_alone(t, item, caret, crew);
+        if let Some(agent) = turn {
+            start_turn(t, &mut rows, agent, crew);
+        }
+        rows
+    }
+
+    /// An item's rows, before any turn starts at them.
+    fn item_rows_alone(
+        &mut self,
+        t: &Tokens,
+        item: Next<'_>,
+        caret: bool,
+        crew: &Crew,
+    ) -> Vec<TimelineRow> {
         match item {
             Next::Notice(text, gap) => {
                 let mut row = blank(Shape::Notice, "", gap);
                 row.label = text.into();
-                vec![built(row)]
+                vec![row]
             }
             Next::Shown(
                 Shown::Group {
@@ -277,22 +326,23 @@ impl Rows {
                 gap,
             ) => {
                 let mut row = blank(Shape::Group, key, gap);
-                row.label = summary.into();
+                row.label = "Tool activity".into();
+                row.detail = summary.into();
                 row.open = open;
                 row.working = running;
-                vec![built(row)]
+                vec![row]
             }
             Next::Shown(Shown::Row(view), gap) => {
                 let key = view.entry.key();
                 let rows = if let Entry::Answer { text, .. } = view.entry {
                     let highlighter = self.highlighter.get_or_insert_with(|| Highlighter::new(t));
                     let blocks = self.answers.entry(key.to_owned()).or_default();
-                    answer_rows(key, text, gap, highlighter, blocks)
+                    answer_rows(key, text, gap, caret, highlighter, blocks)
                 } else {
                     entry_rows(t, &view, gap, crew, &mut self.slots.borrow_mut())
                 };
                 rows.into_iter()
-                    .map(|row| built(with_nesting(row, view.nested)))
+                    .map(|row| with_nesting(row, view.nested))
                     .collect()
             }
         }
@@ -377,9 +427,52 @@ fn next_items(timeline: &Timeline) -> Vec<Next<'_>> {
     next
 }
 
+/// Which items start an agent's turn, by the agent's ID: the first after
+/// each prompt, answered by the prompt's agent, or while it's still
+/// streaming by the one the session runs now.
+fn turns(next: &[Next<'_>], crew: &Crew) -> Vec<Option<String>> {
+    let mut pending: Option<String> = None;
+    next.iter()
+        .map(|item| match item {
+            Next::Shown(Shown::Row(view), _) => {
+                if let Entry::Prompt { agent, .. } = view.entry {
+                    pending = agent.clone().or_else(|| crew.current.clone());
+                    None
+                } else {
+                    pending.take()
+                }
+            }
+            Next::Shown(Shown::Group { .. }, _) => pending.take(),
+            Next::Notice(..) => None,
+        })
+        .collect()
+}
+
+/// Names `agent` at the start of `rows`: on the first one when it's a
+/// line, otherwise on a line of its own above them.
+fn start_turn(t: &Tokens, rows: &mut Vec<TimelineRow>, agent: &str, crew: &Crew) {
+    let tone = crew.color(agent).unwrap_or(t.accent_base);
+    let (name, tone) = (crew.name(agent), color(crate::theme::ink(t, tone)));
+    match rows.first_mut() {
+        Some(first) if matches!(first.shape, Shape::Line | Shape::Group) => {
+            first.turn = name.into();
+            first.turn_color = tone;
+        }
+        Some(first) => {
+            let mut row = blank(Shape::Line, &format!("{}/turn", first.key), first.gap);
+            row.turn = name.into();
+            row.turn_color = tone;
+            first.gap = TURN_GAP;
+            rows.insert(0, row);
+        }
+        None => {}
+    }
+}
+
 /// What an item's rows depend on, as one number.
-fn item_look(item: &Next<'_>, crew: &Crew) -> u64 {
+fn item_look(item: &Next<'_>, turn: Option<&str>, caret: bool, crew: &Crew) -> u64 {
     let mut hasher = DefaultHasher::new();
+    (turn, caret).hash(&mut hasher);
     match item {
         Next::Shown(Shown::Row(view), gap) => {
             0_u8.hash(&mut hasher);
@@ -427,6 +520,7 @@ fn built(row: TimelineRow) -> Built {
     row.note.as_str().hash(&mut hasher);
     row.more.as_str().hash(&mut hasher);
     row.gap.to_bits().hash(&mut hasher);
+    row.turn.as_str().hash(&mut hasher);
     (
         row.open,
         row.working,
@@ -554,7 +648,7 @@ fn entry_rows(
         // The caller builds answers, block by block.
         Entry::Answer { .. } => Vec::new(),
         Entry::Thought { text, .. } => {
-            let mut row = line(t, key, gap, Icon::Circle, crate::theme::quiet_icon(t));
+            let mut row = line(t, key, gap, Icon::ChevronRight, crate::theme::quiet_icon(t));
             row.label = "Thought".into();
             row.detail = summarize(text).into();
             vec![with(row)]
@@ -564,7 +658,7 @@ fn entry_rows(
             .map(with)
             .collect(),
         Entry::Stopped { outcome, .. } => {
-            let mut row = line(t, key, gap, Icon::CircleAlert, t.icon_warning_base);
+            let mut row = line(t, key, gap, Icon::CircleStop, t.icon_warning_base);
             row.label = if outcome == "interrupted" {
                 "Stopped"
             } else {
@@ -610,7 +704,7 @@ fn entry_rows(
 fn compaction_row(t: &Tokens, key: &str, gap: f32, state: &Compaction) -> TimelineRow {
     match state {
         Compaction::Running => {
-            let mut row = line(t, key, gap, Icon::Loader, t.text_interactive_base);
+            let mut row = line(t, key, gap, Icon::LoaderCircle, t.text_interactive_base);
             row.label = "Summarizing the conversation…".into();
             row.working = true;
             row
@@ -653,24 +747,40 @@ fn answer_rows(
     key: &str,
     text: &str,
     gap: f32,
+    caret: bool,
     highlighter: &Highlighter,
-    blocks: &mut Vec<(Block, TimelineRow)>,
+    blocks: &mut Vec<(Block, bool, TimelineRow)>,
 ) -> Vec<TimelineRow> {
     let fresh = markdown::blocks(text);
+    let last = fresh.len().saturating_sub(1);
     let mut kept = Vec::with_capacity(fresh.len());
     for (index, block) in fresh.into_iter().enumerate() {
         let gap = if index == 0 { gap } else { BLOCK_SPACING };
+        // Only a paragraph being written takes the caret, after its words.
+        let caret = caret && index == last && matches!(block, Block::Text(_));
         let row = match blocks.get(index) {
-            Some((old, row)) if *old == block => {
+            Some((old, had, row)) if *old == block && *had == caret => {
                 let mut row = row.clone();
                 row.gap = gap;
                 row
             }
-            _ => block_row(key, index, &block, gap, highlighter),
+            _ => {
+                let mut row = block_row(key, index, &block, gap, highlighter);
+                if caret && let Block::Text(source) = &block {
+                    let t = highlighter.tokens();
+                    let mark = format!(
+                        "{} {}",
+                        markdown::painted(t, source),
+                        markdown::colored(t, t.surface_interactive_base, "|")
+                    );
+                    row.text = styled(&mark);
+                }
+                row
+            }
         };
-        kept.push((block, row));
+        kept.push((block, caret, row));
     }
-    let rows = kept.iter().map(|(_, row)| row.clone()).collect();
+    let rows = kept.iter().map(|(_, _, row)| row.clone()).collect();
     *blocks = kept;
     rows
 }
@@ -696,14 +806,27 @@ fn block_row(
             row.level = i32::from(*level);
             row
         }
+        Block::List(items) => {
+            let mut row = blank(Shape::List, key, gap);
+            let entries: Vec<ListEntry> = (items.iter())
+                .map(|item| ListEntry {
+                    depth: i32::from(item.depth),
+                    marker: item.marker.as_str().into(),
+                    text: styled(&markdown::painted(t, &item.text)),
+                })
+                .collect();
+            row.items = ModelRc::new(VecModel::from(entries));
+            row
+        }
         Block::Code { language, text } => {
             let mut row = blank(Shape::Code, key, gap);
             row.text = styled(&highlighter.markup(language, text));
+            row.note = language_name(language).into();
             row
         }
-        Block::Table(text) => {
-            let mut row = blank(Shape::Code, key, gap);
-            row.text = styled(&markdown::escaped(text));
+        Block::Table(rows) => {
+            let mut row = blank(Shape::Table, key, gap);
+            row.columns = ModelRc::new(VecModel::from(table_columns(t, rows)));
             row
         }
         Block::Quote(source) => {
@@ -716,8 +839,14 @@ fn block_row(
     // What assistive technology reads out, as the text reads on screen.
     row.label = match block {
         Block::Text(source) | Block::Quote(source) => markdown::plain(source).trim().into(),
+        Block::List(items) => (items.iter())
+            .map(|item| format!("{} {}", item.marker, markdown::plain(&item.text).trim()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into(),
         Block::Heading { text, .. } => text.trim_matches('*').into(),
-        Block::Code { text, .. } | Block::Table(text) => text.as_str().into(),
+        Block::Code { text, .. } => text.as_str().into(),
+        Block::Table(rows) => markdown::aligned(rows).into(),
         Block::Rule => "".into(),
     };
     // Blocks of one answer differ by their place.
@@ -729,6 +858,7 @@ fn block_row(
 fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec<TimelineRow> {
     let Entry::Tool {
         key,
+        name,
         label,
         detail,
         status,
@@ -741,10 +871,10 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
         return Vec::new();
     };
     let (icon, tone, working) = match status {
-        ToolStatus::Completed => (Icon::Dot, t.icon_base, false),
+        ToolStatus::Completed => (tool_icon(name), crate::theme::quiet_icon(t), false),
         ToolStatus::Failed => (Icon::X, t.icon_critical_base, false),
         ToolStatus::Running | ToolStatus::Streaming => {
-            (Icon::Loader, t.text_interactive_base, true)
+            (Icon::LoaderCircle, t.text_interactive_base, true)
         }
     };
     let mut head = line(t, key, gap, icon, tone);
@@ -804,6 +934,100 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
         }
     }
     rows
+}
+
+/// A code block's language as people name it, from its fence's word, such
+/// as `Rust` for `rust`; empty for none.
+fn language_name(fence: &str) -> String {
+    let known = match fence.to_ascii_lowercase().as_str() {
+        "rs" | "rust" => "Rust",
+        "py" | "python" => "Python",
+        "js" | "javascript" => "JavaScript",
+        "ts" | "typescript" => "TypeScript",
+        "tsx" => "TSX",
+        "jsx" => "JSX",
+        "sh" | "bash" | "shell" | "zsh" | "console" => "Shell",
+        "json" => "JSON",
+        "toml" => "TOML",
+        "yml" | "yaml" => "YAML",
+        "html" => "HTML",
+        "css" => "CSS",
+        "sql" => "SQL",
+        "md" | "markdown" => "Markdown",
+        "c" => "C",
+        "cpp" | "c++" | "cc" => "C++",
+        "cs" | "csharp" => "C#",
+        "go" => "Go",
+        "swift" => "Swift",
+        "kt" | "kotlin" => "Kotlin",
+        "diff" | "patch" => "Diff",
+        _ => "",
+    };
+    if !known.is_empty() || fence.is_empty() {
+        return known.to_owned();
+    }
+    let mut chars = fence.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// Words a table's cell may hold alone to say something went well or
+/// didn't, which colour it.
+const GOOD: [&str; 5] = ["done", "passed", "ok", "success", "succeeded"];
+
+/// See [`GOOD`].
+const BAD: [&str; 3] = ["failed", "error", "broken"];
+
+/// A table's rows as columns of cells, the heading first; a cell saying
+/// only that something went well or didn't, such as `Done` or `3 failed`,
+/// takes the success or error colour.
+fn table_columns(t: &Tokens, rows: &[Vec<String>]) -> Vec<TableColumn> {
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    (0..columns)
+        .map(|c| {
+            let cells: Vec<TableCell> = (rows.iter().enumerate())
+                .map(|(r, row)| {
+                    let text = markdown::plain(row.get(c).map_or("", String::as_str));
+                    let text = text.trim();
+                    let last = text.rsplit(' ').next().unwrap_or("").to_lowercase();
+                    let tone = if r == 0 {
+                        t.text_weak
+                    } else if GOOD.contains(&last.as_str()) {
+                        crate::theme::ink(t, t.icon_success_base)
+                    } else if BAD.contains(&last.as_str()) {
+                        crate::theme::ink(t, t.icon_critical_base)
+                    } else {
+                        t.text_base
+                    };
+                    TableCell {
+                        text: text.into(),
+                        tone: color(tone),
+                    }
+                })
+                .collect();
+            TableColumn {
+                cells: ModelRc::new(VecModel::from(cells)),
+            }
+        })
+        .collect()
+}
+
+/// The icon of the tool called `name`, by what it does.
+fn tool_icon(name: &str) -> Icon {
+    match name {
+        "edit" | "write" | "apply_patch" | "patch" | "multiedit" => Icon::FilePen,
+        "read" => Icon::BookOpen,
+        "grep" | "glob" | "codesearch" => Icon::TextSearch,
+        "list" | "ls" => Icon::FolderOpen,
+        "bash" | "shell" => Icon::Terminal,
+        "todowrite" | "todoread" | "todo" => Icon::ListTodo,
+        "webfetch" | "websearch" => Icon::Globe,
+        "task" => Icon::Bot,
+        "skill" => Icon::Sparkles,
+        _ => Icon::Wrench,
+    }
 }
 
 pub(super) fn diff_line(line: &diff::Line) -> DiffLine {

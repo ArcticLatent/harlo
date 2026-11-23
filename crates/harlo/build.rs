@@ -73,6 +73,7 @@ const ICONS: &[(&str, Icon)] = &[
     ("circle-x", Icon::CircleX),
     ("circle-plus", Icon::CirclePlus),
     ("circle-alert", Icon::CircleAlert),
+    ("circle-stop", Icon::CircleStop),
     ("square", Icon::Square),
     ("square-check", Icon::SquareCheck),
     ("sparkles", Icon::Sparkles),

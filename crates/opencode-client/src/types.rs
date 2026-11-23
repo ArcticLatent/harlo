@@ -388,6 +388,8 @@ pub enum Message {
     Assistant {
         /// Message ID (`msg_…`).
         id: String,
+        /// The agent that took the step, such as `build`.
+        agent: String,
         /// The parts, in order.
         parts: Vec<Part>,
         /// Files this step changed, relative to the session folder.
@@ -478,6 +480,7 @@ impl Message {
                 let m: g::SessionMessageAssistant = serde_json::from_value(value)?;
                 Self::Assistant {
                     id,
+                    agent: m.agent.0,
                     parts: m.content.into_iter().map(Part::from).collect(),
                     files: m
                         .snapshot

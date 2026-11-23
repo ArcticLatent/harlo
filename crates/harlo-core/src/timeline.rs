@@ -42,6 +42,8 @@ pub enum Entry {
         pictures: Vec<Picture>,
         /// Names of the skills loaded with it.
         skills: Vec<String>,
+        /// The agent that answered it, such as `build`, once a step has.
+        agent: Option<String>,
     },
     /// Answer text from the model, as Markdown.
     Answer {
@@ -274,6 +276,8 @@ pub fn todo_progress(todos: &[Todo]) -> String {
 #[must_use]
 pub fn entries(messages: &[Message]) -> Vec<Entry> {
     let mut rows = Vec::new();
+    // Whether a step answered the latest prompt already.
+    let mut answered = true;
     for message in messages {
         match message {
             Message::User {
@@ -282,14 +286,31 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
                 attachments,
                 pictures,
                 skills,
-            } => rows.push(Entry::Prompt {
-                key: id.clone(),
-                text: text.clone(),
-                attachments: attachments.clone(),
-                pictures: pictures.clone(),
-                skills: skills.clone(),
-            }),
-            Message::Assistant { id, parts, .. } => {
+            } => {
+                answered = false;
+                rows.push(Entry::Prompt {
+                    key: id.clone(),
+                    text: text.clone(),
+                    attachments: attachments.clone(),
+                    pictures: pictures.clone(),
+                    skills: skills.clone(),
+                    agent: None,
+                });
+            }
+            Message::Assistant {
+                id, agent, parts, ..
+            } => {
+                // The prompt's first step names the agent that answered it.
+                if !answered {
+                    answered = true;
+                    if let Some(Entry::Prompt { agent: by, .. }) = rows
+                        .iter_mut()
+                        .rev()
+                        .find(|row| matches!(row, Entry::Prompt { .. }))
+                    {
+                        *by = Some(agent.clone());
+                    }
+                }
                 let (mut texts, mut thoughts) = (0, 0);
                 for part in parts {
                     match part {
@@ -518,6 +539,7 @@ impl Live {
                     attachments: waiting.attachments,
                     pictures: waiting.pictures,
                     skills: waiting.skills,
+                    agent: None,
                 })],
                 (None, true) => vec![Change::Reload],
                 (_, false) => Vec::new(),
@@ -690,7 +712,7 @@ impl OpenTool {
     }
 }
 
-/// Describes a run of tool calls in a few words: "Edited 4 files, ran 1 command".
+/// Tallies a run of tool calls in a few words: "4 files edited · 1 command run".
 ///
 /// `calls` are the tools' own names with how each went, in order. Calls of
 /// the same kind are counted together, in the order each kind first appears;
@@ -722,23 +744,19 @@ pub fn tools_summary<'a>(calls: impl IntoIterator<Item = (&'a str, ToolStatus)>)
                 }
             };
             match kind {
-                "edit" => format!("edited {n} {}", plural("file", "files")),
-                "read" => format!("read {n} {}", plural("file", "files")),
-                "search" => format!("searched {n} {}", plural("time", "times")),
-                "bash" => format!("ran {n} {}", plural("command", "commands")),
-                "todo" => "updated the todos".to_owned(),
-                "web" => format!("looked up {n} {}", plural("page", "pages")),
-                "task" => format!("started {n} {}", plural("agent", "agents")),
-                _ => format!("used {n} {}", plural("tool", "tools")),
+                "edit" => format!("{n} {} edited", plural("file", "files")),
+                "read" => format!("{n} {} read", plural("file", "files")),
+                "search" => format!("{n} {}", plural("search", "searches")),
+                "bash" => format!("{n} {} run", plural("command", "commands")),
+                "todo" => "todos updated".to_owned(),
+                "web" => format!("{n} {} fetched", plural("page", "pages")),
+                "task" => format!("{n} {} started", plural("agent", "agents")),
+                _ => format!("{n} {} used", plural("tool", "tools")),
             }
         })
         .chain((failed > 0).then(|| format!("{failed} failed")))
         .collect();
-    let mut summary = phrases.join(", ");
-    if let Some(first) = summary.get(..1) {
-        summary = first.to_uppercase() + &summary[1..];
-    }
-    summary
+    phrases.join(" · ")
 }
 
 fn tool_kind(name: &str) -> &'static str {

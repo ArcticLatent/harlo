@@ -485,6 +485,9 @@ pub struct Crew {
     pub children: HashMap<String, ChildState>,
     /// Agents by ID, for their names and colours.
     pub agents: HashMap<String, CrewAgent>,
+    /// The agent the session runs now, which answers a prompt still
+    /// streaming.
+    pub current: Option<String>,
 }
 
 impl Crew {
@@ -533,10 +536,10 @@ pub fn gist(report: &str) -> String {
 pub fn duration(d: std::time::Duration) -> String {
     let ms = d.as_millis();
     match ms {
-        0..1_000 => format!("{ms}ms"),
-        1_000..10_000 => format!("{:.1}s", d.as_secs_f64()),
-        10_000..60_000 => format!("{}s", d.as_secs()),
-        _ => format!("{}m {}s", d.as_secs() / 60, d.as_secs() % 60),
+        0..1_000 => format!("{ms} ms"),
+        1_000..10_000 => format!("{:.1} s", d.as_secs_f64()),
+        10_000..60_000 => format!("{} s", d.as_secs()),
+        _ => format!("{} min {} s", d.as_secs() / 60, d.as_secs() % 60),
     }
 }
 

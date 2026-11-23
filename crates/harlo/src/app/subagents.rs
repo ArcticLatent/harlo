@@ -29,7 +29,13 @@ impl App {
     /// for the cards in its timeline.
     #[must_use]
     pub fn crew(&self, session: &str) -> Crew {
-        let mut crew = Crew::default();
+        let mut crew = Crew {
+            current: self
+                .workspace
+                .session(session)
+                .and_then(|s| s.agent.clone()),
+            ..Crew::default()
+        };
         for child in self.workspace.children(session) {
             crew.children
                 .insert(child.id.clone(), self.child_state(&child.id));
@@ -39,6 +45,11 @@ impl App {
             .session(session)
             .and_then(|s| self.catalogs.get(&s.directory))
         {
+            // Without a choice of its own, a session runs the first
+            // primary agent, as OpenCode does.
+            if crew.current.is_none() {
+                crew.current = catalog.primary_agents().next().map(|a| a.id.clone());
+            }
             for agent in &catalog.agents {
                 crew.agents.insert(
                     agent.id.clone(),

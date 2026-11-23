@@ -76,6 +76,7 @@ fn history() -> Vec<Entry> {
             attachments: vec!["shot.png".into()],
             pictures: vec![picture("shot.png", &png(30, 20))],
             skills: Vec::new(),
+            agent: None,
         },
         Entry::Tool {
             key: "msg_2/tool/0".into(),

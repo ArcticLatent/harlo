@@ -66,13 +66,9 @@ component InboxLine inherits Rectangle {
         padding-right: root.item.kind == 0 ? 4px : 8px;
         spacing: 8px;
 
-        if root.item.working && root.item.kind == 0: Breathing {
-            width: 14px;
-            Icon {
-                text: root.item.glyph;
-                font-size: 13px;
-                color: root.item.glyph-color;
-            }
+        if root.item.working && root.item.kind == 0: Spinner {
+            size: 13px;
+            tint: root.item.glyph-color;
         }
         if !root.item.working || root.item.kind != 0: Icon {
             width: 14px;
@@ -100,7 +96,7 @@ component InboxLine inherits Rectangle {
             horizontal-stretch: root.item.detail == "" ? 1 : 0;
             overflow: elide;
             font-size: Size.small;
-            color: Theme.text-base;
+            color: root.item.kind == 0 ? Theme.text-weak : Theme.text-base;
         }
         if root.item.detail != "": Text {
             text: root.item.detail;

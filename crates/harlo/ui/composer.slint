@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Chip, MenuItem, AttachedChip } from "data.slint";
-import { Icon, IconButton, Press, Dot, Breathing, Field } from "widgets.slint";
+import { Icon, IconButton, Press, Dot, Breathing, Spinner, Field } from "widgets.slint";
 import { PictureThumb } from "pictures.slint";
 
 /// The picker numbers, as Rust's `Picker::index` gives them.
@@ -490,12 +490,9 @@ export component Composer inherits Rectangle {
                     hover: Theme.surface-brand-hover;
                     lit: Theme.surface-brand-hover;
                     clicked => { Logic.send(); }
-                    if State.sending: Breathing {
-                        Icon {
-                            text: Icons.loader;
-                            font-size: 16px;
-                            color: Theme.icon-selected;
-                        }
+                    if State.sending: Spinner {
+                        size: 15px;
+                        tint: Theme.icon-selected;
                     }
                     if !State.sending: Icon {
                         text: Icons.send;

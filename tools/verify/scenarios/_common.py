@@ -7,7 +7,7 @@ separated by ";;", parts by " | ", such as `say hi`, `think …`,
 """
 
 COMPOSER_NEW = "Ask, or describe what to build · Tab switches agents"
-COMPOSER = "Send a message to continue this session · Tab switches agents"
+COMPOSER = "Send a message to continue this session…"
 
 
 def sidebar(e):

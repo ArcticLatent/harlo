@@ -21,7 +21,7 @@ const SYNTHETIC: &str = "synthetic";
 /// What the composer says while the session works, and while it waits.
 const PLACEHOLDER_BUSY: &str =
     "Enter queues a message for when it's done · Ctrl+Enter steers it now";
-const PLACEHOLDER: &str = "Send a message to continue this session · Tab switches agents";
+const PLACEHOLDER: &str = "Send a message to continue this session…";
 
 /// Shows session `id`'s header and composer placeholder.
 pub fn header(app: &App, id: &str, state: &State<'_>) {
@@ -182,11 +182,21 @@ fn activity_row(app: &App, activity: Activity) -> InboxRow {
             )
         }
         Activity::Sending => (Icon::ArrowUp, format!("Sending to {agent}…"), String::new()),
-        Activity::Thinking => (Icon::Loader, format!("{agent} is thinking…"), String::new()),
-        Activity::Writing => (Icon::Loader, format!("{agent} is writing…"), String::new()),
-        Activity::Running { label, detail } => {
-            (Icon::Loader, format!("{agent} is running {label}"), detail)
-        }
+        Activity::Thinking => (
+            Icon::LoaderCircle,
+            format!("{agent} is thinking…"),
+            String::new(),
+        ),
+        Activity::Writing => (
+            Icon::LoaderCircle,
+            format!("{agent} is writing…"),
+            String::new(),
+        ),
+        Activity::Running { label, detail } => (
+            Icon::LoaderCircle,
+            format!("{agent} is running {label}"),
+            detail,
+        ),
     };
     InboxRow {
         kind: 0,

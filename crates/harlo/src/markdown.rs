@@ -26,8 +26,10 @@ use syntect::parsing::SyntaxSet;
 /// One block of an answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
-    /// A paragraph or a list, as inline Markdown.
+    /// A paragraph, as inline Markdown.
     Text(String),
+    /// A list, its nested lists' items included, in reading order.
+    List(Vec<ListItem>),
     /// A heading, as inline Markdown, and its level from 1 to 6.
     Heading {
         /// From 1, the largest, to 6.
@@ -46,8 +48,19 @@ pub enum Block {
     Quote(String),
     /// A horizontal rule.
     Rule,
-    /// A table, as lines of plain text with its columns aligned.
-    Table(String),
+    /// A table, row by row from its header, cell by cell.
+    Table(Vec<Vec<String>>),
+}
+
+/// One item of a list in an answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListItem {
+    /// How deeply it's nested: 0 in the outermost list.
+    pub depth: u8,
+    /// Its marker: a bullet, or its number such as `2.`.
+    pub marker: String,
+    /// Its own words as inline Markdown, without the lists nested in it.
+    pub text: String,
 }
 
 /// Splits `markdown` into the blocks the timeline lists.
@@ -144,9 +157,8 @@ fn finish(
     table: &mut Option<Table>,
 ) -> Option<Block> {
     match end {
-        TagEnd::Paragraph | TagEnd::List(_) | TagEnd::HtmlBlock => {
-            Some(Block::Text(source.trim_end().to_owned()))
-        }
+        TagEnd::Paragraph | TagEnd::HtmlBlock => Some(Block::Text(source.trim_end().to_owned())),
+        TagEnd::List(_) => Some(Block::List(list_items(source))),
         TagEnd::Heading(level) => Some(Block::Heading {
             level: heading_level(level),
             text: heading_text(source),
@@ -156,7 +168,7 @@ fn finish(
             text: text.trim_end_matches('\n').to_owned(),
         }),
         TagEnd::BlockQuote(_) => Some(Block::Quote(unquote(source))),
-        TagEnd::Table => table.take().map(|t| Block::Table(aligned(&t.rows))),
+        TagEnd::Table => table.take().map(|t| Block::Table(t.rows)),
         _ => None,
     }
 }
@@ -231,8 +243,82 @@ fn unquote(source: &str) -> String {
         .to_owned()
 }
 
-/// Table rows as lines of text, each column padded to its widest cell.
-fn aligned(rows: &[Vec<String>]) -> String {
+/// A list's items, the nested lists' included, in reading order.
+fn list_items(source: &str) -> Vec<ListItem> {
+    let mut items: Vec<ListItem> = Vec::new();
+    // Each open list's next number, or `None` for a bulleted one.
+    let mut lists: Vec<Option<u64>> = Vec::new();
+    // The open items: their place in `items`, and where their words start.
+    let mut open: Vec<(usize, usize)> = Vec::new();
+    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    for (event, range) in Parser::new_ext(source, options).into_offset_iter() {
+        match event {
+            Event::Start(Tag::List(first)) => {
+                // A nested list ends its parent item's own words.
+                if let Some(&(at, from)) = open.last()
+                    && items[at].text.is_empty()
+                {
+                    items[at].text = item_text(&source[from..range.start]);
+                }
+                lists.push(first);
+            }
+            Event::End(TagEnd::List(_)) => {
+                lists.pop();
+            }
+            Event::Start(Tag::Item) => {
+                let depth = u8::try_from(lists.len().saturating_sub(1)).unwrap_or(u8::MAX);
+                let marker = match lists.last_mut() {
+                    Some(Some(next)) => {
+                        let marker = format!("{next}.");
+                        *next += 1;
+                        marker
+                    }
+                    _ if depth == 0 => "•".to_owned(),
+                    _ => "◦".to_owned(),
+                };
+                items.push(ListItem {
+                    depth,
+                    marker,
+                    text: String::new(),
+                });
+                open.push((items.len() - 1, range.start));
+            }
+            Event::End(TagEnd::Item) => {
+                if let Some((at, from)) = open.pop()
+                    && items[at].text.is_empty()
+                {
+                    items[at].text = item_text(&source[from..range.end]);
+                }
+            }
+            _ => {}
+        }
+    }
+    items
+}
+
+/// An item's words, from its source: its marker gone and its lines joined.
+fn item_text(source: &str) -> String {
+    let source = source.trim_start();
+    let words = source.strip_prefix(['-', '*', '+']).unwrap_or_else(|| {
+        let after = source.trim_start_matches(|c: char| c.is_ascii_digit());
+        if after.len() < source.len() {
+            after.strip_prefix(['.', ')']).unwrap_or(source)
+        } else {
+            source
+        }
+    });
+    words
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Table rows as lines of text, each column padded to its widest cell, as
+/// a screen reader reads a table out.
+#[must_use]
+pub fn aligned(rows: &[Vec<String>]) -> String {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     let widths: Vec<usize> = (0..columns)
         .map(|c| {
@@ -524,6 +610,12 @@ pub fn painted(t: &Tokens, source: &str) -> String {
     out
 }
 
+/// `text` in `color`, made readable, as markup the window draws.
+#[must_use]
+pub fn colored(t: &Tokens, color: Rgba, text: &str) -> String {
+    format!("{}{text}</font>", font(t, color))
+}
+
 /// The opening colour tag for `color`, made readable.
 fn font(t: &Tokens, color: Rgba) -> String {
     format!(
@@ -566,14 +658,59 @@ mod tests {
                     level: 2,
                     text: "Plan".into()
                 },
-                Block::Text("- one\n- two".into()),
+                Block::List(vec![
+                    ListItem {
+                        depth: 0,
+                        marker: "•".into(),
+                        text: "one".into()
+                    },
+                    ListItem {
+                        depth: 0,
+                        marker: "•".into(),
+                        text: "two".into()
+                    },
+                ]),
                 Block::Code {
                     language: "rust".into(),
                     text: "fn main() {}".into()
                 },
                 Block::Quote("quoted".into()),
                 Block::Rule,
-                Block::Table("a  bb\n─────\n1  2".into()),
+                Block::Table(vec![
+                    vec!["a".into(), "bb".into()],
+                    vec!["1".into(), "2".into()]
+                ]),
+            ]
+        );
+        assert_eq!(
+            aligned(&[vec!["a".into(), "bb".into()], vec!["1".into(), "2".into()]]),
+            "a  bb\n─────\n1  2"
+        );
+    }
+
+    #[test]
+    fn lists_keep_their_nesting_and_numbers() {
+        let blocks = blocks("- Steered\n- Commands\n  - and **files**\n\n3. Bump\n4. Tag\n");
+        let items = |block: &Block| match block {
+            Block::List(items) => items
+                .iter()
+                .map(|i| (i.depth, i.marker.clone(), i.text.clone()))
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        assert_eq!(
+            items(&blocks[0]),
+            [
+                (0, "•".to_owned(), "Steered".to_owned()),
+                (0, "•".to_owned(), "Commands".to_owned()),
+                (1, "◦".to_owned(), "and **files**".to_owned()),
+            ]
+        );
+        assert_eq!(
+            items(&blocks[1]),
+            [
+                (0, "3.".to_owned(), "Bump".to_owned()),
+                (0, "4.".to_owned(), "Tag".to_owned()),
             ]
         );
     }

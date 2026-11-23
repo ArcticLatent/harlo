@@ -38,6 +38,7 @@ fn messages_become_rows_in_order() {
         },
         Message::Assistant {
             id: "msg_2".into(),
+            agent: "build".into(),
             parts: vec![
                 Part::Reasoning("**Updating README connectivity notes**\n\nThen the rest.".into()),
                 call(
@@ -184,6 +185,7 @@ fn long_details_are_shortened() {
     let long = "x".repeat(300);
     let rows = entries(&[Message::Assistant {
         id: "m".into(),
+        agent: "build".into(),
         parts: vec![call("bash", json!({ "command": long }), None)],
         files: Vec::new(),
     }]);
@@ -211,11 +213,11 @@ fn a_run_of_tools_is_summed_up() {
             "edit",
             "todowrite"
         ])),
-        "Edited 4 files, ran 1 command, updated the todos"
+        "4 files edited · 1 command run · todos updated"
     );
     assert_eq!(
         tools_summary(done(&["read", "grep", "glob", "webfetch", "mystery"])),
-        "Read 1 file, searched 2 times, looked up 1 page, used 1 tool"
+        "1 file read · 2 searches · 1 page fetched · 1 tool used"
     );
     assert_eq!(tools_summary([]), "");
 }
@@ -228,7 +230,7 @@ fn failed_calls_are_counted_as_failed() {
             ("edit", ToolStatus::Failed),
             ("todowrite", ToolStatus::Failed),
         ]),
-        "Read 1 file, 2 failed"
+        "1 file read · 2 failed"
     );
     assert_eq!(
         tools_summary([("bash", ToolStatus::Failed)]),
@@ -361,6 +363,7 @@ fn live_events_build_the_same_rows_as_the_history() {
                 attachments: vec!["shot.png".into()],
                 pictures: Vec::new(),
                 skills: Vec::new(),
+                agent: None,
             }),
             Change::Extend {
                 key: "msg_a/thought/0".into(),
@@ -490,6 +493,7 @@ fn edits_and_writes_carry_their_changes() {
     });
     let messages = vec![Message::Assistant {
         id: "msg_1".into(),
+        agent: "build".into(),
         parts: vec![
             stored,
             call(
@@ -573,6 +577,7 @@ fn handing_work_to_a_subagent_is_a_card_and_its_report_a_row() {
     let rows = entries(&[
         Message::Assistant {
             id: "msg_a".into(),
+            agent: "build".into(),
             parts: vec![Part::Tool(ToolCall {
                 child: Some("ses_child".into()),
                 ..match call("subagent", input.clone(), Some(5.0)) {
@@ -615,6 +620,7 @@ fn a_follow_up_names_the_child_it_goes_to() {
     });
     let rows = entries(&[Message::Assistant {
         id: "msg_a".into(),
+        agent: "build".into(),
         parts: vec![call("subagent", input, None)],
         files: Vec::new(),
     }]);
@@ -729,6 +735,7 @@ fn the_todo_list_is_the_last_one_written() {
     };
     let rows = entries(&[Message::Assistant {
         id: "msg_a".into(),
+        agent: "build".into(),
         parts: vec![
             first,
             Part::Tool(ToolCall {
@@ -796,4 +803,36 @@ fn a_live_todo_call_shows_its_list_once_its_arguments_arrive() {
         Some(1),
         "shown while it runs"
     );
+}
+
+/// A prompt is answered by the agent of the first step after it.
+#[test]
+fn a_prompt_names_the_agent_that_answered_it() {
+    let user = |id: &str| Message::User {
+        id: id.into(),
+        text: "Go".into(),
+        attachments: Vec::new(),
+        pictures: Vec::new(),
+        skills: Vec::new(),
+    };
+    let step = |id: &str, agent: &str| Message::Assistant {
+        id: id.into(),
+        agent: agent.into(),
+        parts: vec![Part::Text("Done".into())],
+        files: Vec::new(),
+    };
+    let rows = entries(&[
+        user("msg_1"),
+        step("msg_2", "plan"),
+        step("msg_3", "build"),
+        user("msg_4"),
+    ]);
+    let agents: Vec<Option<&str>> = rows
+        .iter()
+        .filter_map(|row| match row {
+            Entry::Prompt { agent, .. } => Some(agent.as_deref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(agents, [Some("plan"), None]);
 }

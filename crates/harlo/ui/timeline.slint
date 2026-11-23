@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Shape, TimelineRow, DiffLine, Chip, PromptMark } from "data.slint";
-import { Icon, Press, HLine, Breathing } from "widgets.slint";
+import { Icon, Press, HLine, Breathing, Spinner } from "widgets.slint";
 import { ThumbStrip } from "pictures.slint";
 
 /// The timeline column's widest size.
@@ -26,7 +26,39 @@ export global Column {
     out property <length> diff-line: 19px;
 }
 
-/// Text that breathes while `working`.
+/// The agent whose turn starts here, before the turn's first line: its
+/// icon and name in its colour, then a faint divider.
+component TurnMark inherits HorizontalLayout {
+    in property <string> agent;
+    in property <color> tint;
+
+    horizontal-stretch: 0;
+    spacing: 7px;
+    Icon {
+        text: Icons.bot;
+        font-size: 13px;
+        color: root.tint;
+    }
+    Text {
+        text: root.agent;
+        vertical-alignment: center;
+        font-size: Size.small;
+        font-weight: 500;
+        color: root.tint;
+    }
+    VerticalLayout {
+        alignment: center;
+        padding-left: 3px;
+        padding-right: 3px;
+        Rectangle {
+            width: 1px;
+            height: 11px;
+            background: Theme.border-weak-base;
+        }
+    }
+}
+
+/// A row's marker, which turns while `working`.
 component Glyph inherits Rectangle {
     in property <string> glyph;
     in property <color> glyph-color;
@@ -34,12 +66,9 @@ component Glyph inherits Rectangle {
     in property <length> size: 13px;
 
     width: 14px;
-    if root.working: Breathing {
-        Icon {
-            text: root.glyph;
-            font-size: root.size;
-            color: root.glyph-color;
-        }
+    if root.working: Spinner {
+        size: root.size;
+        tint: root.glyph-color;
     }
     if !root.working: Icon {
         text: root.glyph;
@@ -128,21 +157,36 @@ component PromptRow inherits Rectangle {
             // Read out as the prompt; its Prose reads out nothing itself.
             accessible-role: groupbox;
             accessible-label: root.item.label;
-            background: Theme.surface-raised-base;
-            border-color: Theme.border-weak-base;
-            border-width: 1px;
+            background: Theme.prompt-fill;
             border-radius: Size.composer-radius;
             opacity: root.item.sending ? 0.7 : 1;
 
             VerticalLayout {
                 padding-top: 11px;
                 padding-bottom: 11px;
-                padding-left: 16px;
+                padding-left: 14px;
                 padding-right: 16px;
                 spacing: 8px;
-                if root.item.label != "": Prose {
-                    text: root.item.text;
-                    default-color: Theme.text-strong;
+                if root.item.label != "": HorizontalLayout {
+                    spacing: 12px;
+                    // Who said it, set apart from what was said.
+                    VerticalLayout {
+                        alignment: start;
+                        Text {
+                            height: Size.answer * 1.4;
+                            text: "You";
+                            vertical-alignment: center;
+                            font-size: Size.small;
+                            font-weight: 500;
+                            color: Theme.accent-ink;
+                            accessible-role: none;
+                        }
+                    }
+                    Prose {
+                        horizontal-stretch: 1;
+                        text: root.item.text;
+                        default-color: Theme.text-strong;
+                    }
                 }
                 if root.item.pictures.length > 0: ThumbStrip {
                     pictures: root.item.pictures;
@@ -213,7 +257,11 @@ component LineRow inherits Rectangle {
     height: Column.line;
     HorizontalLayout {
         spacing: 9px;
-        Glyph {
+        if root.item.turn != "": TurnMark {
+            agent: root.item.turn;
+            tint: root.item.turn-color;
+        }
+        if root.item.glyph != "": Glyph {
             glyph: root.item.glyph;
             glyph-color: root.item.glyph-color;
             working: root.item.working;
@@ -223,9 +271,8 @@ component LineRow inherits Rectangle {
             vertical-alignment: center;
             horizontal-stretch: root.item.detail == "" ? 1 : 0;
             overflow: elide;
-            font-size: Size.small;
-            font-weight: 500;
-            color: Theme.text-base;
+            font-size: root.item.nested ? Size.label : Size.small;
+            color: root.item.nested ? Theme.text-base : Theme.text-weak;
         }
         if root.item.detail != "": Text {
             text: root.item.detail;
@@ -234,7 +281,8 @@ component LineRow inherits Rectangle {
             overflow: elide;
             font-size: root.item.mono ? Size.code : Size.small;
             font-family: root.item.mono ? Fonts.mono : Fonts.sans;
-            color: Theme.text-weak;
+            color: !root.item.mono ? Theme.text-weaker
+                : root.item.nested ? Theme.link-ink : Theme.text-base;
         }
         if root.item.counts: Counts {
             added: root.item.added;
@@ -254,13 +302,18 @@ component GroupRow inherits Press {
     in property <TimelineRow> item;
 
     height: Column.line;
-    label: root.item.label;
+    label: root.item.label + ": " + root.item.detail;
+    hover: transparent;
     accessible-expandable: true;
     accessible-expanded: root.item.open;
     clicked => { Logic.toggle-group(root.item.key); }
 
     HorizontalLayout {
         spacing: 9px;
+        if root.item.turn != "": TurnMark {
+            agent: root.item.turn;
+            tint: root.item.turn-color;
+        }
         Glyph {
             glyph: root.item.working ? Icons.loader
                 : root.item.open ? Icons.chevron-down : Icons.chevron-right;
@@ -270,11 +323,16 @@ component GroupRow inherits Press {
         Text {
             text: root.item.label;
             vertical-alignment: center;
+            font-size: Size.small;
+            color: root.hovered ? Theme.text-strong : Theme.text-base;
+        }
+        Text {
+            text: root.item.detail;
+            vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;
             font-size: Size.small;
-            font-weight: 500;
-            color: Theme.text-weak;
+            color: Theme.text-weaker;
         }
     }
 }
@@ -493,6 +551,14 @@ component RowView inherits Rectangle {
     // must wrap inside the column, not widen the list sideways.
     min-width: 0;
 
+    // Calls inside an open group hang from a faint line down their indent.
+    if root.item.nested: Rectangle {
+        x: root.left + 6px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border-weak-base;
+    }
+
     content := VerticalLayout {
         padding-top: root.item.gap;
         padding-left: root.left + (root.item.nested ? Column.indent : 0);
@@ -519,13 +585,83 @@ component RowView inherits Rectangle {
             accessible-label: root.item.label;
             // Headings rank by size and weight, below the session's title.
             default-color: Theme.text-strong;
-            default-font-size: root.item.level == 1 ? Size.answer * 1.2
-                : root.item.level == 2 ? Size.answer * 1.1 : Size.answer;
+            default-font-size: root.item.level == 1 ? Size.answer * 1.3
+                : root.item.level == 2 ? Size.answer * 1.2 : Size.answer * 1.1;
+        }
+        if root.item.shape == Shape.list: VerticalLayout {
+            spacing: 4px;
+            accessible-role: text;
+            accessible-label: root.item.label;
+            for entry in root.item.items: HorizontalLayout {
+                padding-left: entry.depth * 20px;
+                spacing: 4px;
+                Text {
+                    width: entry.marker == "•" || entry.marker == "◦" ? 14px : 20px;
+                    horizontal-alignment: center;
+                    text: entry.marker;
+                    font-size: Size.answer;
+                    color: Theme.text-weaker;
+                    accessible-role: none;
+                }
+                Prose {
+                    horizontal-stretch: 1;
+                    text: entry.text;
+                    accessible-role: none;
+                }
+            }
+        }
+        if root.item.shape == Shape.table: HorizontalLayout {
+            alignment: start;
+            accessible-role: table;
+            accessible-label: root.item.label;
+            Rectangle {
+                width: cells.preferred-width;
+                height: cells.preferred-height;
+                cells := HorizontalLayout {
+                    for column in root.item.columns: VerticalLayout {
+                        min-width: 110px;
+                        for cell[r] in column.cells: HorizontalLayout {
+                            height: r == 0 ? 30px : 24px;
+                            padding-right: 28px;
+                            Text {
+                                text: cell.text;
+                                vertical-alignment: r == 0 ? center : bottom;
+                                overflow: elide;
+                                font-size: r == 0 ? Size.small : Size.answer;
+                                color: cell.tone;
+                                accessible-role: none;
+                            }
+                        }
+                        // Room under the last row, above the closing line.
+                        Rectangle { height: 8px; }
+                    }
+                }
+                // Lines under the heading and the last row.
+                Rectangle {
+                    y: 30px;
+                    height: 1px;
+                    background: Theme.border-weak-base;
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border-weak-base;
+                }
+            }
         }
         if root.item.shape == Shape.code: Rectangle {
             background: Theme.surface-inset-base;
             border-radius: Size.radius;
             height: code.preferred-height;
+            // The language, quietly, in the corner.
+            if root.item.note != "": Text {
+                x: parent.width - self.width - 12px;
+                y: 9px;
+                text: root.item.note;
+                font-size: Size.small * 0.9;
+                color: Theme.text-weaker;
+                accessible-role: none;
+            }
             code := VerticalLayout {
                 padding-top: 9px;
                 padding-bottom: 9px;

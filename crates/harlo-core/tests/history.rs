@@ -85,12 +85,16 @@ fn apply(rows: &mut Vec<Entry>, changes: Vec<Change>) -> usize {
 }
 
 /// Tool times measured from events differ slightly from the stored ones.
+/// Rows without what only the stored history knows: how long tools took,
+/// and which agent answered a prompt, which the reload at a run's end fills.
 fn without_times(rows: &[Entry]) -> Vec<Entry> {
     rows.iter()
         .cloned()
         .map(|mut row| {
-            if let Entry::Tool { took, .. } = &mut row {
-                *took = None;
+            match &mut row {
+                Entry::Tool { took, .. } => *took = None,
+                Entry::Prompt { agent, .. } => *agent = None,
+                _ => {}
             }
             row
         })

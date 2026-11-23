@@ -22,7 +22,7 @@ use support::{Ui, demo, ui};
 const PI_UPDATE: &str = "ses_demo_03";
 
 /// The session composer's label.
-const COMPOSER: &str = "Send a message to continue this session · Tab switches agents";
+const COMPOSER: &str = "Send a message to continue this session…";
 
 /// The timeline's prompts, each with whether it's marked to fade in.
 fn prompts(ui: &Ui) -> Vec<(String, bool)> {
@@ -59,6 +59,7 @@ fn a_sent_prompt_fades_in_and_the_history_stays_still() {
             attachments: Vec::new(),
             pictures: Vec::new(),
             skills: Vec::new(),
+            agent: None,
         }]),
     ));
     let ui = ui(app);

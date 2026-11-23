@@ -121,11 +121,15 @@ export enum Shape {
     notice,
     /// Something the user sent.
     prompt,
-    /// A paragraph or list of an answer.
+    /// A paragraph of an answer.
     text,
+    /// A list in an answer, its nested lists included.
+    list,
+    /// A table in an answer.
+    table,
     /// A heading in an answer.
     heading,
-    /// A code block in an answer, or a table.
+    /// A code block in an answer.
     code,
     /// A quote in an answer.
     quote,
@@ -143,6 +147,26 @@ export enum Shape {
     report,
     /// The pictures a tool returned, as thumbnails.
     pictures,
+}
+
+/// One item of a list in an answer.
+export struct ListEntry {
+    /// How deeply it's nested: 0 in the outermost list.
+    depth: int,
+    /// A bullet, or its number such as `2.`.
+    marker: string,
+    text: styled-text,
+}
+
+/// One cell of a table in an answer, and its colour.
+export struct TableCell {
+    text: string,
+    tone: color,
+}
+
+/// One column of a table in an answer: its heading, then its cells.
+export struct TableColumn {
+    cells: [TableCell],
 }
 
 /// One line of a diff.
@@ -187,6 +211,14 @@ export struct TimelineRow {
     note-color: color,
     glyph: string,
     glyph-color: color,
+    /// A list's items.
+    items: [ListEntry],
+    /// A table's columns.
+    columns: [TableColumn],
+    /// The agent whose turn starts at this row, named before it; empty for
+    /// none.
+    turn: string,
+    turn-color: color,
     /// Whether it's working, and breathes.
     working: bool,
     /// A heading's level, from 1.

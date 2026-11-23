@@ -11,9 +11,9 @@ def run(h, s):
     s.step("tool calls fold into a summary")
     send(h, 'tool glob {"pattern":"*.txt"} ;; tool read {"path":"a.txt"} ;; say read them both')
     h.wait_says("read them both", timeout=30)
-    summary = h.wait("Searched 1 time, read 1 file", timeout=10)
+    summary = h.wait("Tool activity: 1 search · 1 file read", timeout=10)
     h.shot("folded")
-    h.click("Searched 1 time, read 1 file")
+    h.click("Tool activity: 1 search · 1 file read")
     h.settle(0.6)
     h.shot("unfolded")
 
