@@ -262,6 +262,8 @@ export component TodosPanel inherits Rectangle {
             FillBar {
                 fill: State.todos-card.total > 0
                     ? State.todos-card.done / State.todos-card.total : 0;
+                // Done is success, as on the line above the composer.
+                tint: Theme.icon-success-base;
                 track: Theme.surface-raised-strong;
             }
             VerticalLayout {

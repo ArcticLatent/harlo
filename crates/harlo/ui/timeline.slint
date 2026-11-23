@@ -510,10 +510,10 @@ component RowView inherits Rectangle {
             text: root.item.text;
             accessible-role: text;
             accessible-label: root.item.label;
-            default-color: Theme.heading-ink;
-            default-font-size: root.item.level == 1 ? Size.answer * 1.5
-                : root.item.level == 2 ? Size.answer * 1.3
-                : root.item.level == 3 ? Size.answer * 1.15 : Size.answer;
+            // Headings rank by size and weight, below the session's title.
+            default-color: Theme.text-strong;
+            default-font-size: root.item.level == 1 ? Size.answer * 1.2
+                : root.item.level == 2 ? Size.answer * 1.1 : Size.answer;
         }
         if root.item.shape == Shape.code: Rectangle {
             background: Theme.surface-inset-base;
@@ -538,13 +538,12 @@ component RowView inherits Rectangle {
             Rectangle {
                 width: 3px;
                 border-radius: 1.5px;
-                background: Theme.quote-ink;
+                background: Theme.border-base;
             }
             Prose {
                 text: root.item.text;
                 accessible-role: text;
                 accessible-label: root.item.label;
-                default-color: Theme.quote-ink;
             }
         }
         if root.item.shape == Shape.rule: VerticalLayout {

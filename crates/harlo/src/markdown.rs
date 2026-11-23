@@ -480,11 +480,15 @@ fn escape_into(out: &mut String, text: &str, leading: &mut bool) {
     }
 }
 
-/// Inline Markdown with its code spans, bold and italic text in the theme's
-/// reply colours, and the rest as it was.
+/// Inline Markdown with its bold text in the strongest text colour, and the
+/// rest as it was.
 ///
-/// The colours are wrapped around each span's own Markdown, so the window
-/// still draws code spans in its code font and bold text bold.
+/// Answers keep colour for links and leave meaning to the type: bold is
+/// bold and a shade stronger than the text around it, italics slant, and
+/// code spans take the code font, none of them borrowing the colours that
+/// mean waiting, done or pressable. The colour is wrapped around the bold
+/// span's own Markdown, so the window still draws it bold, and code inside
+/// it in the code font.
 #[must_use]
 pub fn painted(t: &Tokens, source: &str) -> String {
     // Each tag's place in the text, and its rank among tags at one place:
@@ -496,15 +500,13 @@ pub fn painted(t: &Tokens, source: &str) -> String {
         tags.push((start, (1, usize::MAX - length), font(t, color)));
         tags.push((end, (0, length), "</font>".to_owned()));
     };
-    let mut open: Vec<(usize, Rgba)> = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
     for (event, range) in Parser::new(source).into_offset_iter() {
         match event {
-            Event::Code(_) => span(range.start, range.end, t.markdown_code),
-            Event::Start(Tag::Strong) => open.push((range.start, t.markdown_strong)),
-            Event::Start(Tag::Emphasis) => open.push((range.start, t.markdown_emph)),
-            Event::End(TagEnd::Strong | TagEnd::Emphasis) => {
-                if let Some((start, color)) = open.pop() {
-                    span(start, range.end, color);
+            Event::Start(Tag::Strong) => open.push(range.start),
+            Event::End(TagEnd::Strong) => {
+                if let Some(start) = open.pop() {
+                    span(start, range.end, t.text_strong);
                 }
             }
             _ => {}
@@ -625,22 +627,27 @@ mod tests {
     }
 
     #[test]
-    fn reply_text_takes_the_themes_colours() {
+    fn only_bold_text_takes_a_colour_the_strongest_text() {
         let t = crate::theme::default_tokens();
-        let tag = |c: Rgba| font(&t, c);
         let source = "Plain, `code`, **bold with `code`**, *italic* and ***both***.";
         let markup = painted(&t, source);
-        let code = tag(t.markdown_code);
-        let strong = tag(t.markdown_strong);
-        let emph = tag(t.markdown_emph);
-        assert!(markup.contains(&format!("{code}`code`</font>")), "{markup}");
+        let strong = font(&t, t.text_strong);
         assert!(
-            markup.contains(&format!("{strong}**bold with {code}`code`</font>**</font>")),
-            "a span inside another: {markup}"
+            markup.contains(&format!("{strong}**bold with `code`**</font>")),
+            "bold, with its code left to the code font: {markup}"
         );
         assert!(
-            markup.contains(&format!("{emph}*italic*</font>")),
-            "{markup}"
+            markup.contains("Plain, `code`, "),
+            "code keeps the text's colour: {markup}"
+        );
+        assert!(
+            markup.contains(&format!("*{strong}**both**</font>*")),
+            "bold italics: {markup}"
+        );
+        assert_eq!(
+            markup.matches("<font").count(),
+            2,
+            "nothing else is coloured: {markup}"
         );
         let styled = slint::StyledText::from_markdown(&markup).expect("valid markup");
         let shown = format!("{styled:?}");

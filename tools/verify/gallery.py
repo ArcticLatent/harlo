@@ -114,10 +114,13 @@ def scene_chat(g):
           ("say", MARKDOWN)]])
     h.wait_says("everything for this release", timeout=40)
     h.settle(1)
-    g.cap("markdown-end", "The end of an answer: code, a table, a quote and a rule")
-    for _ in range(4):
-        h.scroll("Timeline", 300)
-    h.settle(0.8)
+    # The end and the top are one frame when the whole answer fits.
+    asked = h.find("Write the release notes for 0.4, with the steps and where the build is.")
+    if not (asked and h.visible(asked[0])):
+        g.cap("markdown-end", "The end of an answer: code, a table, a quote and a rule")
+        for _ in range(4):
+            h.scroll("Timeline", 300)
+        h.settle(0.8)
     g.cap("markdown", "The prompt, the thought, and the answer's headings, emphasis, link and lists")
     todos = {"todos": [{"content": "Bump the version", "status": "completed", "priority": "high"},
                        {"content": "Tag the release", "status": "in_progress", "priority": "high"},

@@ -69,8 +69,6 @@ pub fn apply(window: &AppWindow, t: &Tokens, theme_id: &str) {
     g.set_brand_ink(color(ink(t, t.surface_brand_base)));
     g.set_accent_ink(color(ink(t, t.accent_base)));
     g.set_link_ink(color(ink(t, t.markdown_link)));
-    g.set_heading_ink(color(ink(t, t.markdown_heading)));
-    g.set_quote_ink(color(ink(t, t.markdown_quote)));
     g.set_added_ink(color(ink(t, t.diff_added)));
     g.set_removed_ink(color(ink(t, t.diff_removed)));
     g.set_chip_hover(color(

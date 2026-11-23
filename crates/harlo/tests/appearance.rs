@@ -245,9 +245,6 @@ fn accents_and_secondary_icons_read_in_every_theme() {
             ("brand", harlo::theme::ink(&t, t.surface_brand_base)),
             ("accent", harlo::theme::ink(&t, t.accent_base)),
             ("link", harlo::theme::ink(&t, t.markdown_link)),
-            ("heading", harlo::theme::ink(&t, t.markdown_heading)),
-            ("quote", harlo::theme::ink(&t, t.markdown_quote)),
-            ("code", harlo::theme::ink(&t, t.markdown_code)),
         ];
         for (name, ink) in inks {
             for background in [t.background_base, t.background_stronger] {
