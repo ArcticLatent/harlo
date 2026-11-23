@@ -48,6 +48,7 @@ fn packages_show_their_updates_and_built_in_ones_are_counted() {
     let setup = SetUp {
         providers: Ok(Vec::new()),
         search: Ok(Vec::new()),
+        search_choice: None,
         mcp: Ok(Vec::new()),
         plugins: Ok(vec![
             plugin("opencode.agent", PluginSource::Builtin),

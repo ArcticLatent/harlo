@@ -953,6 +953,20 @@ export global Logic {
 /// Requests from Rust to one part of the window: focus a field, scroll a
 /// list. A request names its target and moves `serial`, so asking twice in
 /// a row works.
+/// The name shown beside a rail button that the pointer rests on, drawn over
+/// the whole window.
+export global Tips {
+    /// What it says; empty when none shows.
+    in-out property <string> text;
+    /// The keys that do the same, such as "Ctrl+,"; empty for none.
+    in-out property <string> keys;
+    /// The point it hangs from: the button's edge, halfway down.
+    in-out property <length> x;
+    in-out property <length> y;
+    /// Whether it opens to the left of the point, from the right rail.
+    in-out property <bool> leftward;
+}
+
 /// Where the keyboard is, as the window's own elements report it.
 export global Keyboard {
     /// Whether the shown terminal has the keyboard.

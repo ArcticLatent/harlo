@@ -104,6 +104,15 @@ def scene_home(g):
     h.wait("Write the release notes", timeout=15)
     h.settle(1)
     g.cap("sidebar", "The start screen with a project and three sessions in the sidebar")
+    # A rail button's name, after the pointer rests on it.
+    h.hover("Context", role="Button")
+    h.settle(0.8)
+    g.cap("rail-tip", "The pointer resting on a rail button: its name beside it")
+    h.hover("Settings", role="Button")
+    h.settle(0.8)
+    g.cap("rail-tip-keys", "A rail button's name with the keys that do the same")
+    h.hover("New session", role="Button")
+    h.settle(0.3)
 
 
 def scene_chat(g):
@@ -223,7 +232,7 @@ def scene_menus(g):
     g.cap("at", "The @ menu: files to mention")
     h.key("Escape")
     h.key("ctrl+a", "BackSpace")
-    for chip, what in (("Build", "The agent menu"), ("default", "The model variant menu"),
+    for chip, what in (("Build", "The agent menu"), ("Effort: default", "The effort (model variant) menu"),
                        ("Fake Coder", "The model menu, with its filter"),
                        ("Permissions", "The permissions (shield) menu")):
         found = h.find(chip, role="Button", where=lambda e: e.y > h.size[1] - 120)

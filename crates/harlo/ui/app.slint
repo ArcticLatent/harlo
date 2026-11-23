@@ -7,8 +7,8 @@ import { EditorView } from "editor.slint";
 import { SheetLayer } from "sheets.slint";
 import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, Requests, Keyboard, Content } from "data.slint";
-import { LeftRail, RightRail } from "rails.slint";
+import { State, Logic, Requests, Keyboard, Content, Tips } from "data.slint";
+import { LeftRail, RightRail, RailTip } from "rails.slint";
 import { Sidebar, Locations } from "sidebar.slint";
 import { DocumentTabs, TerminalStrip, PanelFrame, Grip } from "frame.slint";
 import { PanelBody } from "panels.slint";
@@ -16,7 +16,7 @@ import { Home } from "home.slint";
 import { PickerMenu, Pickers } from "composer.slint";
 import { SessionView } from "session.slint";
 
-export { Theme, Size, Fonts, Motion, Icons, State, Logic, Requests }
+export { Theme, Size, Fonts, Motion, Icons, State, Logic, Requests, Tips }
 
 /// A line of quiet text, for a tab with nothing to show yet.
 component Quiet inherits Rectangle {
@@ -219,6 +219,8 @@ export component AppWindow inherits Window {
         if State.sheet > 0: SheetLayer { }
         // Opened from Settings, so over it.
         if State.picker >= Pickers.first-in-settings: PickerMenu { }
+        // A rail button's name, over everything.
+        if Tips.text != "": RailTip { }
     }
 }
 

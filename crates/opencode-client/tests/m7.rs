@@ -97,6 +97,27 @@ async fn the_set_up_lists_providers_search_mcp_and_plugins() {
     let search = client.web_search(&project).await.expect("web search");
     assert!(!search.is_empty(), "OpenCode offers search services");
     assert!(search.iter().all(|s| !s.name.is_empty()));
+    assert_eq!(
+        client.web_search_choice(&project).await.expect("config"),
+        None,
+        "no config chooses one, so the first search asks"
+    );
+    // A folder whose config names one, opened for the first time, reads it
+    // back over the global config.
+    let folder = sandbox.project().join("docs");
+    std::fs::create_dir_all(&folder).expect("folder");
+    std::fs::write(
+        folder.join("opencode.json"),
+        r#"{ "websearch": { "provider": "tavily" } }"#,
+    )
+    .expect("folder config");
+    assert_eq!(
+        client
+            .web_search_choice(&folder.to_string_lossy())
+            .await
+            .expect("config"),
+        Some("tavily".to_owned())
+    );
 
     let mcp = client.mcp_servers(&project).await.expect("MCP servers");
     assert!(mcp.is_empty(), "none configured in the sandbox");

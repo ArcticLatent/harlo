@@ -349,3 +349,24 @@ fn each_permissions_mode_says_what_it_means_under_its_name() {
     }
     assert!(ui.shows("Agent's own rules"));
 }
+
+#[test]
+fn a_rail_button_shows_its_name_and_keys_when_the_pointer_rests_on_it() {
+    use slint::ComponentHandle as _;
+    let ui = ui(demo::app());
+    // Drawn for sight only: the button already has the name for screen
+    // readers, so the tip is read from the window's state.
+    let tip = || {
+        let tips = ui.window.global::<harlo::ui::Tips>();
+        (tips.get_text().to_string(), tips.get_keys().to_string())
+    };
+    ui.hover("Settings");
+    ui.wait(100);
+    assert_eq!(tip().0, "", "not while the pointer only passes");
+    ui.wait(500);
+    assert_eq!(tip(), ("Settings".to_owned(), "Ctrl+,".to_owned()));
+    // Off the button, it goes.
+    ui.hover("New session");
+    ui.wait(50);
+    assert_eq!(tip().0, "");
+}

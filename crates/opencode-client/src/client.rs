@@ -540,6 +540,30 @@ impl Client {
         Ok(each(&v, WebSearch::from_json))
     }
 
+    /// Returns the web search service OpenCode's config names for `directory`
+    /// (`websearch.provider`): an ID, `random`, or `None` when no config sets
+    /// one and the first search asks.
+    ///
+    /// The config comes as documents from lowest to highest priority, so the
+    /// last one that sets it wins.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn web_search_choice(&self, directory: &str) -> Result<Option<String>, Error> {
+        // A bare list of documents, not wrapped in `data`.
+        let req = self
+            .request(Method::GET, "/api/config")
+            .query(&[("location[directory]", directory)]);
+        let v = Self::json(req).await?;
+        Ok(v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry["info"]["websearch"]["provider"].as_str())
+            .next_back()
+            .map(str::to_owned))
+    }
+
     /// Lists the MCP servers `directory` connects to, and how each stands.
     ///
     /// # Errors

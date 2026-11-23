@@ -166,6 +166,9 @@ export global Motion {
     out property <length> rise: 8px;
     /// How long the sidebar takes to slide open or closed.
     out property <duration> slide: 200ms * root.speed;
+    /// How long the pointer rests on a rail button before its name shows.
+    /// A wait, not motion, so the motion setting leaves it alone.
+    out property <duration> tip-delay: 450ms;
     /// A whole breath of work in progress, dim to bright and back; slow
     /// enough to read as breathing rather than blinking.
     out property <duration> breath: 1800ms;

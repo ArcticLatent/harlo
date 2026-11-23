@@ -107,6 +107,7 @@ fn setup() -> SetUp {
             id: "exa".into(),
             name: "Exa".into(),
         }]),
+        search_choice: None,
         mcp: Ok(vec![McpServer {
             name: "docs".into(),
             title: None,
@@ -317,6 +318,22 @@ fn settings_show_the_servers_set_up_and_about() {
     let serial = ui.app().sheets.serial();
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(setup()))));
     assert!(ui.shows("Exa"));
+    // Each web search service says the key it needs, and how one is chosen.
+    assert!(ui.shows("Key: EXA_API_KEY"));
+    assert!(ui.shows(
+        "The first web search asks which to use, and OpenCode remembers it. Each needs a \
+         key: connect one with /\u{2060}connect in OpenCode's terminal app, or set its variable \
+         before OpenCode starts."
+    ));
+    let chosen = SetUp {
+        search_choice: Some("exa".into()),
+        ..setup()
+    };
+    ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(chosen))));
+    assert!(
+        ui.shows("In use · Key: EXA_API_KEY"),
+        "the one config chooses"
+    );
     // A server's row opens its page, and says how it stands.
     let docs = ui
         .find("docs")

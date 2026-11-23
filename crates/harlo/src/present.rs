@@ -446,10 +446,12 @@ impl Presenter {
             Picker::ScheduleSession => {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }
+            Picker::Variant => {
+                "The model's variants: mostly how hard it thinks before answering.".to_owned()
+            }
             // Each mode says what it means on its own row.
             Picker::Shield
             | Picker::Folder
-            | Picker::Variant
             | Picker::Model
             | Picker::ScheduleFolder
             | Picker::VoiceLanguage => String::new(),
@@ -706,7 +708,12 @@ fn chips(app: &App, t: &Tokens) -> Vec<Chip> {
         });
     }
     if app.variant_choices().len() > 1 {
-        let label = Variant(app.current_model().and_then(|m| m.variant)).to_string();
+        // OpenCode's variants are mostly how hard the model thinks; a bare
+        // "default" said nothing.
+        let label = format!(
+            "Effort: {}",
+            Variant(app.current_model().and_then(|m| m.variant))
+        );
         chips.push(plain_chip(t, Picker::Variant, Icon::Brain, label));
     }
     let label = app

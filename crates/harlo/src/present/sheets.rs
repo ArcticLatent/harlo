@@ -1563,14 +1563,42 @@ fn about_rows(app: &App) -> Vec<SheetRow> {
 /// The server's web search, MCP servers and plugins, for Tools.
 fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     let mut rows = Vec::new();
-    section(&mut rows, "Web search", &setup.search, |s| {
-        pair(&s.name, "", 0)
-    });
+    search_rows(setup, &mut rows);
     mcp::list_rows(app, setup, &mut rows);
     mcp::own_tools_rows(app, &mut rows);
     plugins::plugin_rows(app, &setup.plugins, &mut rows);
     rows.push(shared_note());
     rows
+}
+
+/// The web search services: which one is used, and the key each needs.
+fn search_rows(setup: &SetUp, rows: &mut Vec<SheetRow>) {
+    let choice = setup.search_choice.as_deref();
+    section(rows, "Web search", &setup.search, |s| {
+        let key = match s.id.as_str() {
+            "claude-agent" => "Through Claude Agent".to_owned(),
+            id => format!("Key: {}_API_KEY", id.to_uppercase().replace('-', "_")),
+        };
+        let value = if choice == Some(s.id.as_str()) {
+            format!("In use · {key}")
+        } else {
+            key
+        };
+        pair(&s.name, &value, 0)
+    });
+    if matches!(setup.search, Ok(ref list) if !list.is_empty()) {
+        let how = match choice {
+            Some("random") => {
+                "OpenCode picks one that has a key, and moves on when one is rate limited."
+            }
+            Some(_) => "OpenCode's config chooses the one in use.",
+            None => "The first web search asks which to use, and OpenCode remembers it.",
+        };
+        rows.push(note(&format!(
+            "{how} Each needs a key: connect one with /\u{2060}connect in OpenCode's terminal \
+             app, or set its variable before OpenCode starts."
+        )));
+    }
 }
 
 /// That the server's set-up is shared.

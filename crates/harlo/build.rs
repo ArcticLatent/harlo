@@ -25,7 +25,7 @@ const ICONS: &[(&str, Icon)] = &[
     ("chevron-right", Icon::ChevronRight),
     ("new-session", Icon::MessageSquarePlus),
     ("bot", Icon::Bot),
-    ("context", Icon::Clock),
+    ("context", Icon::Gauge),
     ("todos", Icon::ListChecks),
     ("changes", Icon::GitBranch),
     ("git-branch", Icon::GitBranch),

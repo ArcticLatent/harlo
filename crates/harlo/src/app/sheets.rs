@@ -494,6 +494,9 @@ pub struct SetUp {
     pub providers: Result<Vec<Provider>, String>,
     /// The web search services.
     pub search: Result<Vec<WebSearch>, String>,
+    /// The service OpenCode's config chooses, or `random`; `None` when the
+    /// first search asks, or the config couldn't be read.
+    pub search_choice: Option<String>,
     /// The MCP servers.
     pub mcp: Result<Vec<McpServer>, String>,
     /// The plugins.
@@ -1144,15 +1147,17 @@ impl App {
         let folder = self.folder();
         let setup = Task::future(async move {
             let text = |e: harlo_core::server::Error| e.to_string();
-            let (providers, search, mcp, plugins) = futures_util::join!(
+            let (providers, search, choice, mcp, plugins) = futures_util::join!(
                 client.providers(&folder),
                 client.web_search(&folder),
+                client.web_search_choice(&folder),
                 client.mcp_servers(&folder),
                 client.plugins(&folder),
             );
             let setup = SetUp {
                 providers: providers.map_err(text),
                 search: search.map_err(text),
+                search_choice: choice.ok().flatten(),
                 mcp: mcp.map_err(text),
                 plugins: plugins.map_err(text),
             };

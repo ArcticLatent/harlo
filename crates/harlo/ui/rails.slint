@@ -1,15 +1,37 @@
 // The narrow icon rails on the window's left and right edges.
 
-import { Theme, Size } from "theme.slint";
+import { Theme, Size, Motion } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic } from "data.slint";
+import { State, Logic, Tips } from "data.slint";
 import { Icon, Press, VLine } from "widgets.slint";
 
-/// A square rail button.
+/// A square rail button. Its name shows beside it when the pointer rests
+/// on it, with the keys that do the same.
 component RailButton inherits Press {
     in property <string> glyph;
+    in property <string> keys;
+    /// Whether the name opens to the left, from the right rail.
+    in property <bool> leftward;
     width: Size.rail-button;
     height: Size.rail-button;
+
+    changed hovered => {
+        if !self.hovered && Tips.text == root.label {
+            Tips.text = "";
+        }
+    }
+    Timer {
+        interval: Motion.tip-delay;
+        running: root.hovered && Tips.text != root.label;
+        triggered => {
+            Tips.keys = root.keys;
+            Tips.leftward = root.leftward;
+            Tips.x = root.leftward ? root.absolute-position.x - 6px
+                : root.absolute-position.x + root.width + 6px;
+            Tips.y = root.absolute-position.y + root.height / 2;
+            Tips.text = root.label;
+        }
+    }
 
     Icon {
         text: root.glyph;
@@ -84,6 +106,7 @@ export component LeftRail inherits Rectangle {
                 RailButton {
                     glyph: Icons.settings;
                     label: "Settings";
+                    keys: "Ctrl+,";
                     selected: State.sheet == 2 && !root.shortcuts-shown && !root.phone-shown;
                     clicked => { Logic.toggle-sheet(2); }
                 }
@@ -112,6 +135,42 @@ export component LeftRail inherits Rectangle {
     }
 }
 
+/// A rail button's name, beside it; see `Tips`.
+export component RailTip inherits Rectangle {
+    width: row.preferred-width;
+    height: row.preferred-height;
+    x: Tips.leftward ? Tips.x - self.width : Tips.x;
+    y: Tips.y - self.height / 2;
+    background: Theme.card;
+    border-radius: Size.radius;
+    border-width: 1px;
+    border-color: Theme.menu-edge;
+    drop-shadow-color: #00000059;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-blur: 14px;
+
+    row := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 8px;
+        // The button already carries the name for screen readers.
+        Text {
+            text: Tips.text;
+            font-size: Size.label;
+            color: Theme.text-strong;
+            accessible-role: none;
+        }
+        if Tips.keys != "": Text {
+            text: Tips.keys;
+            font-size: Size.small;
+            color: Theme.text-weak;
+            accessible-role: none;
+        }
+    }
+}
+
 /// The right rail: one button per tool panel, and the terminal at the bottom.
 export component RightRail inherits Rectangle {
     width: Size.rail;
@@ -136,6 +195,7 @@ export component RightRail inherits Rectangle {
                 RailButton {
                     glyph: panel.glyph;
                     label: panel.label;
+                    leftward: true;
                     selected: State.panels-shown[index];
                     clicked => { Logic.toggle-panel(index); }
                 }
@@ -148,6 +208,7 @@ export component RightRail inherits Rectangle {
                 RailButton {
                     glyph: Icons.terminal;
                     label: "Terminal";
+                    leftward: true;
                     selected: State.terminals-shown;
                     clicked => { Logic.toggle-terminal(); }
                 }
