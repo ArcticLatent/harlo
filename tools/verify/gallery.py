@@ -20,6 +20,7 @@ import datetime
 import html
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -77,6 +78,8 @@ class Gallery:
 
     def cap(self, name, what):
         """Takes a picture of the window now, saying what it shows."""
+        # Letters, digits and dashes only, so the files travel anywhere.
+        name = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
         path = self.h.shot(f"{self.scene}-{name}")
         self.taken.append({"scene": self.scene, "file": os.path.relpath(path, self.folder),
                            "what": what})
