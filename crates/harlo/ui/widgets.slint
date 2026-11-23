@@ -1,7 +1,7 @@
 // Small parts the window is built from: icons, pressable surfaces, lines,
 // a breathing indicator, a fading error line and a one-line text field.
 
-import { Theme, Size, Fonts, Motion } from "theme.slint";
+import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 
 /// A Lucide icon: set `text` to one of `Icons`' glyphs.
@@ -137,7 +137,7 @@ export component ErrorLine inherits Rectangle {
     property <bool> jump;
     animate shown {
         duration: Motion.appear;
-        easing: Motion.settle;
+        easing: Curves.settle;
         enabled: !root.jump;
     }
     init => {
@@ -242,7 +242,7 @@ export component Switch inherits Rectangle {
     height: 20px;
     border-radius: self.height / 2;
     background: root.on ? Theme.surface-interactive-base : Theme.border-base;
-    animate background { duration: Motion.appear; easing: Motion.settle; }
+    animate background { duration: Motion.appear; easing: Curves.settle; }
     accessible-role: checkbox;
     accessible-checkable: true;
     accessible-checked: root.on;
@@ -254,7 +254,7 @@ export component Switch inherits Rectangle {
         height: self.width;
         y: 2px;
         x: root.on ? parent.width - self.width - 2px : 2px;
-        animate x { duration: Motion.appear; easing: Motion.settle; }
+        animate x { duration: Motion.appear; easing: Curves.settle; }
         border-radius: self.height / 2;
         background: root.on ? Theme.text-on-interactive-base : white;
     }

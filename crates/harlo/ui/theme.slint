@@ -163,16 +163,21 @@ export global Motion {
     /// How long something new takes to fade in, and how far it rises.
     out property <duration> appear: 220ms * root.speed;
     out property <length> rise: 8px;
-    /// Something new slows as it settles: an ease-out cubic.
-    out property <easing> settle: cubic-bezier(0.33, 1, 0.68, 1);
     /// How long the sidebar takes to slide open or closed.
     out property <duration> slide: 200ms * root.speed;
-    /// A slide speeds up, then slows: an ease-in-out cubic.
-    out property <easing> glide: cubic-bezier(0.65, 0, 0.35, 1);
     /// A whole breath of work in progress, dim to bright and back; slow
     /// enough to read as breathing rather than blinking.
     out property <duration> breath: 1800ms;
     /// The dimmest a breathing indicator gets; with motion off it stays
     /// lit.
     out property <float> breath-low: root.speed > 0 ? 0.35 : 1;
+}
+
+/// Motion's easing curves. They're kept apart from [`Motion`], which Rust
+/// sets, because Slint can't hand `easing` properties to Rust.
+export global Curves {
+    /// Something new slows as it settles: an ease-out cubic.
+    out property <easing> settle: cubic-bezier(0.33, 1, 0.68, 1);
+    /// A slide speeds up, then slows: an ease-in-out cubic.
+    out property <easing> glide: cubic-bezier(0.65, 0, 0.35, 1);
 }

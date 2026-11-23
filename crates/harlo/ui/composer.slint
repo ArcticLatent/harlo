@@ -2,7 +2,7 @@
 // and menus that choose a session's folder, agent, model and shield.
 
 import { ListView } from "std-widgets.slint";
-import { Theme, Size, Motion } from "theme.slint";
+import { Theme, Size, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Chip, MenuItem, AttachedChip } from "data.slint";
 import { Icon, IconButton, Press, Dot, Breathing, Field } from "widgets.slint";
@@ -27,7 +27,7 @@ component AttachedView inherits Rectangle {
     property <float> shown: root.chip.fresh ? 0 : 1;
     animate shown {
         duration: Motion.appear;
-        easing: Motion.settle;
+        easing: Curves.settle;
     }
     init => {
         root.shown = 1;

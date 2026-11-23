@@ -5,7 +5,7 @@ import { Palette } from "std-widgets.slint";
 import { TerminalView } from "terminal.slint";
 import { EditorView } from "editor.slint";
 import { SheetLayer } from "sheets.slint";
-import { Theme, Size, Fonts, Motion } from "theme.slint";
+import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Keyboard, Content } from "data.slint";
 import { LeftRail, RightRail } from "rails.slint";
@@ -57,7 +57,7 @@ export component AppWindow inherits Window {
     property <float> sidebar-open: State.sidebar-shown ? 1 : 0;
     animate sidebar-open {
         duration: Motion.slide;
-        easing: Motion.glide;
+        easing: Curves.glide;
     }
     property <length> sidebar-room: State.sidebar-width * root.sidebar-open;
 
@@ -67,7 +67,7 @@ export component AppWindow inherits Window {
     property <float> panel-open: State.panel >= 0 ? 1 : 0;
     animate panel-open {
         duration: Motion.slide;
-        easing: Motion.glide;
+        easing: Curves.glide;
     }
     property <length> panel-room: State.maximized ? 0 : State.panel-width * root.panel-open;
     /// The panel shown: the open one, or the last one while it slides away.
@@ -85,7 +85,7 @@ export component AppWindow inherits Window {
     property <float> terminal-open: State.terminals-shown ? 1 : 0;
     animate terminal-open {
         duration: Motion.slide;
-        easing: Motion.glide;
+        easing: Curves.glide;
     }
     property <length> terminal-room: State.terminal-height * root.terminal-open;
     default-font-family: Fonts.sans;
