@@ -772,11 +772,14 @@ fn tool_kind(name: &str) -> &'static str {
     }
 }
 
-/// The name people see for a tool: `edit` becomes `Edit`, `todowrite` becomes `Todo`.
+/// The name people see for a tool: `edit` becomes `Edit`, `todowrite` becomes `Todo`,
+/// and the searches say what they look for: `glob` is `Find files`.
 #[must_use]
 pub fn tool_label(name: &str) -> String {
     match name {
         "bash" | "shell" => "Bash".to_owned(),
+        "glob" => "Find files".to_owned(),
+        "grep" => "Search in files".to_owned(),
         "todowrite" | "todoread" | "todo" => "Todo".to_owned(),
         "webfetch" => "Fetch".to_owned(),
         "websearch" => "Search".to_owned(),

@@ -901,7 +901,8 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
     let mut head = line(t, key, gap, icon, tone);
     head.label = label.as_str().into();
     head.detail = detail.as_str().into();
-    head.mono = true;
+    // A todo list's progress is words; the rest is code, a path or a pattern.
+    head.mono = !matches!(name.as_str(), "todowrite" | "todoread" | "todo");
     head.working = working;
     head.note = took.map(duration).unwrap_or_default().into();
     if !files.is_empty() {

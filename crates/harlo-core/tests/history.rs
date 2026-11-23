@@ -43,7 +43,7 @@ async fn a_finished_run_becomes_prompt_tool_and_answer_rows() {
         .iter()
         .position(|row| {
             matches!(row, Entry::Tool { label, detail, status: ToolStatus::Completed, took: Some(_), .. }
-                if label == "Glob" && detail == "*")
+                if label == "Find files" && detail == "*")
         })
         .unwrap_or_else(|| panic!("a finished Glob row with its pattern: {rows:#?}"));
     let answer = rows

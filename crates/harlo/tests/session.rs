@@ -125,7 +125,7 @@ fn a_run_streams_in_and_its_tools_fold_up_when_done() {
     tool_events(&ui, "c2", "read", json!({ "filePath": "docs/a.md" }), 200.0);
     for text in [
         "Tool activity: 1 search · 1 file read",
-        "Glob",
+        "Find files",
         "docs/*.md",
         "Stop",
         "Working",
@@ -165,12 +165,19 @@ fn a_run_streams_in_and_its_tools_fold_up_when_done() {
         2_500.0,
     ));
     assert!(ui.shows("Tool activity: 1 search · 1 file read"));
-    assert!(!ui.shows("Glob"), "the finished group is folded");
+    assert!(!ui.shows("Find files"), "the finished group is folded");
     assert!(!ui.shows("Stop"));
 
     // Opening the group shows its calls with their times.
     ui.press("Tool activity: 1 search · 1 file read");
-    for text in ["Glob", "docs/*.md", "1.5 s", "Read", "docs/a.md", "2.2 s"] {
+    for text in [
+        "Find files",
+        "docs/*.md",
+        "1.5 s",
+        "Read",
+        "docs/a.md",
+        "2.2 s",
+    ] {
         assert!(ui.shows(text), "shows {text:?} once opened");
     }
 }

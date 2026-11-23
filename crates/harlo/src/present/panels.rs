@@ -160,9 +160,9 @@ fn window(facts: &ContextFacts<'_>) -> ContextCard {
         card.fill = fill;
         card.warn = fill >= WARN_AT;
         card.percent = if percent == 0 && used > 0 {
-            "Under 1% full".to_owned()
+            "Under 1% of what the model can hold".to_owned()
         } else {
-            format!("{percent}% full")
+            format!("{percent}% of what the model can hold")
         }
         .into();
     }
@@ -172,7 +172,7 @@ fn window(facts: &ContextFacts<'_>) -> ContextCard {
         } else {
             format!("{} messages", context.messages)
         };
-        card.messages = format!("{messages} since the last compaction").into();
+        card.messages = format!("{messages} since it was last summarized").into();
     }
     card
 }

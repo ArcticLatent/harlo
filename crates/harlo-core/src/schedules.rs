@@ -81,7 +81,11 @@ pub fn describe(trigger: &Trigger, now: &ZonedDateTime) -> String {
             Ok(instant) => format!("Once, {}", moment_at(instant, now)),
             Err(_) => format!("Once, {at}"),
         },
-        Trigger::Every(every) => format!("Every {every}"),
+        // "Every day", not "Every 1 day".
+        Trigger::Every(every) => match every.strip_prefix("1 ") {
+            Some(unit) => format!("Every {unit}"),
+            None => format!("Every {every}"),
+        },
         Trigger::Cron(cron) => cron_words(cron).unwrap_or_else(|| format!("Cron {cron}")),
         Trigger::Event { server, event } => format!("When {server} sends {event}"),
     }

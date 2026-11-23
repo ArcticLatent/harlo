@@ -248,7 +248,7 @@ fn glob(status: ToolStatus, detail: &str, took_ms: Option<u64>) -> Change {
     Change::Put(Entry::Tool {
         key: "msg_a/tool/call_1".into(),
         name: "glob".into(),
-        label: "Glob".into(),
+        label: "Find files".into(),
         detail: detail.into(),
         status,
         took: took_ms.map(Duration::from_millis),

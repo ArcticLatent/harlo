@@ -114,8 +114,8 @@ fn the_window_shows_how_full_it_is_against_the_models_size() {
     assert!(ui.shows("Context window"));
     assert!(ui.shows("30k"), "the latest step's tokens");
     assert!(ui.shows("of 200k tokens"));
-    assert!(ui.shows("15% full"));
-    assert!(ui.shows("12 messages since the last compaction"));
+    assert!(ui.shows("15% of what the model can hold"));
+    assert!(ui.shows("12 messages since it was last summarized"));
     assert!(ui.shows("Deep Model"), "the step's model, by name");
     assert!(ui.shows("plan"), "and its agent");
 }

@@ -51,7 +51,7 @@ impl Fit {
         match self {
             Self::Well => "fits well",
             Self::Fits => "fits",
-            Self::Tight => "tight",
+            Self::Tight => "only just fits",
         }
     }
 }

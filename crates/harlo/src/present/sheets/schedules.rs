@@ -274,7 +274,7 @@ fn summary(app: &App, automation: &Automation) -> String {
         (AutomationStatus::Paused, _) => format!("Paused · {when} · {place}"),
         (AutomationStatus::Done, _) => format!("Done · {when} · {place}"),
         (AutomationStatus::Active, Some(next)) => {
-            format!("{when} · next {} · {place}", moment_now(next))
+            format!("{when} · next run {} · {place}", moment_now(next))
         }
         (AutomationStatus::Active, None) => format!("{when} · {place}"),
     }

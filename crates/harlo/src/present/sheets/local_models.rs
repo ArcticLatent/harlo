@@ -225,7 +225,9 @@ fn model_rows(app: &App, rows: &mut Vec<SheetRow>) {
         return;
     }
     rows.push(note(
-        "Models suited to agent tools, most capable first. Each uses the largest quantization that fits.\nA tight fit leaves little room for context.",
+        "Models suited to agent tools, most capable first. Each comes in the largest size that fits; \
+         Q8 keeps more of the model than Q4.\nOne that only just fits leaves little room for a long \
+         conversation.",
     ));
     let engine = app.local_engine();
     for (index, suggestion) in local.suggestions.iter().enumerate() {
