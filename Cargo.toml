@@ -104,6 +104,8 @@ tempfile = { version = "3.27.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 llmfit-core = { version = "1.1.20", default-features = false }
+# The system's font families for Settings → Appearance (MIT); the version Slint already uses.
+fontdb = { version = "=0.24.0", default-features = false, features = ["std", "fs", "memmap", "fontconfig"] }
 which = { version = "8.0.6", default-features = false, features = ["real-sys"] }
 flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 tar = { version = "0.4.46", default-features = false }

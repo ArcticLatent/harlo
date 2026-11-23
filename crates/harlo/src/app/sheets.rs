@@ -524,6 +524,16 @@ pub enum Event {
     Choose(SettingChoice, usize),
     /// Make this the model new sessions use, in OpenCode's global config.
     DefaultModel(ModelChoice),
+    /// The computer's font families were read.
+    SystemFonts(harlo_core::fonts::SystemFonts),
+    /// Use this font family for the interface, or for code when `code`;
+    /// empty for Harlo's own.
+    Font {
+        /// Whether it's the font for code, diffs and the terminal.
+        code: bool,
+        /// The family's name.
+        family: String,
+    },
     /// The model new sessions use was set, or why it couldn't be.
     DefaultModelSet(Result<(), String>),
     /// Something in Settings → Git.
@@ -709,6 +719,7 @@ impl App {
             },
             Event::Theme(id) => return self.pick_theme(id),
             Event::DefaultModel(model) => return self.set_default_model(&model),
+            event @ (Event::SystemFonts(_) | Event::Font { .. }) => return self.font_event(event),
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
             Event::Choose(choice, option) => return self.choose_option(choice, option),
             event @ (Event::OpenSetup
@@ -762,6 +773,32 @@ impl App {
                 self.sheets.mcp.view = super::McpView::List;
                 self.sheets.plugins.checked = None;
                 Task::batch([self.load_mcp(), self.load_setup()])
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// Keeps the computer's font families once read, or takes a chosen font.
+    fn font_event(&mut self, event: Event) -> Task<Message> {
+        match event {
+            Event::SystemFonts(fonts) => {
+                self.system_fonts = Some(fonts);
+                let Some(picker) = self.picker else {
+                    return Task::none();
+                };
+                self.picker_index = crate::model::items(self, picker)
+                    .iter()
+                    .position(|item| item.selected)
+                    .unwrap_or(0);
+                self.reveal_highlight()
+            }
+            Event::Font { code, family } => {
+                if code {
+                    self.preferences.code_font = family;
+                } else {
+                    self.preferences.interface_font = family;
+                }
+                self.save_preferences()
             }
             _ => Task::none(),
         }

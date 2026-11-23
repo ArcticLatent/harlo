@@ -498,8 +498,13 @@ impl Presenter {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }
             Picker::Variant => "How much reasoning the model uses before it answers.".to_owned(),
+            Picker::InterfaceFont | Picker::CodeFont if app.system_fonts.is_none() => {
+                "Looking for this computer's fonts…".to_owned()
+            }
             // Each mode says what it means on its own row.
-            Picker::Shield
+            Picker::InterfaceFont
+            | Picker::CodeFont
+            | Picker::Shield
             | Picker::Folder
             | Picker::Model
             | Picker::ScheduleFolder

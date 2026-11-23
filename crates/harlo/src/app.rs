@@ -628,6 +628,9 @@ pub struct App {
     pub picker: Option<Picker>,
     /// The open menu's filter text.
     pub picker_filter: String,
+    /// The computer's font families, once looked for (when a font menu
+    /// first opens).
+    pub system_fonts: Option<harlo_core::fonts::SystemFonts>,
     /// The open menu's highlighted row.
     pub picker_index: usize,
     /// How far the open menu's list is scrolled from its top.
@@ -763,6 +766,7 @@ impl App {
             models_for: None,
             picker: None,
             picker_filter: String::new(),
+            system_fonts: None,
             picker_index: 0,
             picker_scroll: 0.0,
             drafts: HashMap::new(),
@@ -868,6 +872,7 @@ impl App {
                 | Message::PickShield(_)
                 | Message::Sheet(
                     SheetEvent::DefaultModel(_)
+                        | SheetEvent::Font { .. }
                         | SheetEvent::Project(ProjectEvent::Model(_))
                         | SheetEvent::GitSettings(GitEvent::CommitModel(_))
                 )
@@ -1836,10 +1841,28 @@ impl App {
                     .position(|item| item.selected)
                     .unwrap_or(0);
                 let reveal = self.reveal_highlight();
+                let fonts = if matches!(picker, Picker::InterfaceFont | Picker::CodeFont)
+                    && self.system_fonts.is_none()
+                {
+                    Task::perform(
+                        async {
+                            tokio::task::spawn_blocking(harlo_core::fonts::SystemFonts::load)
+                                .await
+                                .unwrap_or_default()
+                        },
+                        |fonts| Message::Sheet(SheetEvent::SystemFonts(fonts)),
+                    )
+                } else {
+                    Task::none()
+                };
                 if picker.filters() {
-                    return Task::batch([reveal, Task::effect(Effect::Focus(model::MENU_FILTER))]);
+                    return Task::batch([
+                        reveal,
+                        fonts,
+                        Task::effect(Effect::Focus(model::MENU_FILTER)),
+                    ]);
                 }
-                return reveal;
+                return Task::batch([reveal, fonts]);
             }
             Message::ClosePicker => self.picker = None,
             Message::PickerFilter(filter) => {

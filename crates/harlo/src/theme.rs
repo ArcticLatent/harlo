@@ -6,7 +6,7 @@ use harlo_core::layout::{Preferences, TextSize};
 use harlo_core::theme::{self, Mode, Rgba, Tokens};
 use slint::{Color, ComponentHandle};
 
-use crate::ui::{AppWindow, Motion, Size, Theme};
+use crate::ui::{AppWindow, Fonts, Motion, Size, Theme};
 
 /// The tokens of Harlo's own dark scheme, the default.
 #[must_use]
@@ -152,6 +152,19 @@ pub fn apply_look(window: &AppWindow, preferences: &Preferences) {
     size.set_code_scale(code);
     size.set_chat_width(preferences.chat_width.pixels().unwrap_or(FULL_CHAT));
     window.global::<Theme>().set_glass(preferences.glass);
+    let fonts = window.global::<Fonts>();
+    let or_own = |chosen: &str, own: &str| {
+        if chosen.is_empty() {
+            own.into()
+        } else {
+            chosen.into()
+        }
+    };
+    fonts.set_sans(or_own(
+        &preferences.interface_font,
+        crate::model::OWN_INTERFACE_FONT,
+    ));
+    fonts.set_mono(or_own(&preferences.code_font, crate::model::OWN_CODE_FONT));
 }
 
 /// The chat column's widest when it has no limit: wider than any window.

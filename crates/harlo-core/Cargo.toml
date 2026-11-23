@@ -28,6 +28,8 @@ hex = { workspace = true }
 # Local models: what fits this computer (llmfit), and installing engines
 # from their release archives.
 llmfit-core = { workspace = true }
+# The system's font families, for Settings → Appearance.
+fontdb = { workspace = true }
 which = { workspace = true }
 # What follows `ssh` for another computer, split as a shell would.
 shell-words = { workspace = true }

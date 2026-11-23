@@ -22,6 +22,8 @@ export global Pickers {
     out property <int> schedule-session: 9;
     out property <int> provider: 10;
     out property <int> voice-language: 11;
+    out property <int> interface-font: 12;
+    out property <int> code-font: 13;
     /// Menus from 5 on open from Settings, so they show above it.
     out property <int> first-in-settings: 5;
 }
@@ -655,10 +657,13 @@ export component PickerMenu inherits Rectangle {
             if State.picker == Pickers.model || State.picker == Pickers.default-model
                 || State.picker == Pickers.project-model
                 || State.picker == Pickers.commit-model
-                || State.picker == Pickers.provider: Field {
+                || State.picker == Pickers.provider
+                || State.picker == Pickers.interface-font
+                || State.picker == Pickers.code-font: Field {
                 height: 32px;
                 glyph: Icons.search;
-                placeholder: State.picker == Pickers.provider ? "Filter providers" : "Filter models";
+                placeholder: State.picker == Pickers.provider ? "Filter providers"
+                    : State.picker >= Pickers.interface-font ? "Filter fonts" : "Filter models";
                 text-size: Size.label;
                 text: State.menu-filter;
                 edited(text) => { Logic.menu-filter-edited(text); }

@@ -411,6 +411,16 @@ const FIELD: i32 = 6;
 /// The kind of row that shows a command and a button that runs it.
 const COMMAND: i32 = 7;
 
+/// A font's row: the family in use, `own` when none is chosen, and Change,
+/// which opens the menu numbered `setting`.
+fn font_row(name: &str, chosen: &str, own: &str, setting: i32) -> SheetRow {
+    let family = if chosen.is_empty() { own } else { chosen };
+    let mut row = pair(name, family, 0);
+    row.action = "Change".into();
+    row.setting = setting;
+    row
+}
+
 /// Light or dark and the themes for it, then the colours, text and motion.
 fn appearance_rows(app: &App) -> Vec<SheetRow> {
     vec![
@@ -441,6 +451,18 @@ fn appearance_rows(app: &App) -> Vec<SheetRow> {
             app.preferences.glass,
         ),
         heading("Text"),
+        font_row(
+            "Interface font",
+            &app.preferences.interface_font,
+            crate::model::OWN_INTERFACE_FONT,
+            crate::window::CHOOSE_INTERFACE_FONT,
+        ),
+        font_row(
+            "Code font",
+            &app.preferences.code_font,
+            crate::model::OWN_CODE_FONT,
+            crate::window::CHOOSE_CODE_FONT,
+        ),
         choice(
             app,
             SettingChoice::TextSize,

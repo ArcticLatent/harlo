@@ -68,6 +68,11 @@ pub struct Preferences {
     pub code_size: TextSize,
     /// Whether menus and dialogs are translucent, blurring what's under them.
     pub glass: bool,
+    /// The interface's font family; empty for Harlo's own.
+    pub interface_font: String,
+    /// The family for code, diffs and the terminal; empty for Harlo's own
+    /// monospaced font.
+    pub code_font: String,
     /// The model new sessions in a project start with, as
     /// `provider/model`, by the project's folder; kept here, not on the
     /// server.
@@ -128,6 +133,8 @@ impl Default for Preferences {
             text_size: TextSize::Normal,
             code_size: TextSize::Normal,
             glass: false,
+            interface_font: String::new(),
+            code_font: String::new(),
             project_models: BTreeMap::new(),
             commit_model: None,
             gitlab_host: String::new(),

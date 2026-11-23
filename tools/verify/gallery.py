@@ -441,6 +441,48 @@ def scene_settings(g):
     close_sheet(h)
 
 
+def scene_fonts(g):
+    """The font menus, and the window in a font of the computer's."""
+    h = g.h
+    settings(h, "Appearance")
+    h.fill("Search settings", "font")
+    h.settle(0.6)
+    h.click("Change")
+    h.settle(1.5)
+    g.cap("font-menu", "Settings → Appearance: the interface font menu")
+    h.fill("Filter fonts", "Adwaita Sans")
+    h.settle(0.5)
+    h.key("Return")
+    h.settle(0.8)
+    h.click("Change", index=1)
+    h.settle(1.0)
+    g.cap("code-font-menu", "The code font menu lists monospaced fonts, with the interface in Adwaita Sans")
+    h.fill("Filter fonts", "Adwaita Mono")
+    h.key("Return")
+    h.fill("Search settings", "")
+    h.settle(0.6)
+    g.cap("adwaita", "Settings → Appearance in Adwaita Sans")
+    close_sheet(h)
+    h.click("Terminal", where=g.rail)
+    h.settle(1.5)
+    h.type("ls -la\n")
+    h.settle(1.2)
+    g.cap("adwaita-terminal", "The terminal in Adwaita Mono")
+    h.click("Terminal", where=g.rail)
+    h.settle(0.6)
+    settings(h, "Appearance")
+    h.fill("Search settings", "font")
+    h.click("Change")
+    h.settle(0.6)
+    h.fill("Filter fonts", "Geist")
+    h.key("Return")
+    h.click("Change", index=1)
+    h.fill("Filter fonts", "JetBrains")
+    h.key("Return")
+    h.fill("Search settings", "")
+    close_sheet(h)
+
+
 def scene_pages(g):
     h = g.h
     left = lambda e: e.x < 60
@@ -552,7 +594,7 @@ def scene_window(g):
 SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approval),
           ("question", scene_question), ("busy", scene_busy), ("menus", scene_menus),
           ("panels", scene_panels), ("terminal", scene_terminal), ("editor", scene_editor),
-          ("settings", scene_settings), ("pages", scene_pages), ("phone", scene_phone),
+          ("settings", scene_settings), ("fonts", scene_fonts), ("pages", scene_pages), ("phone", scene_phone),
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
           ("window", scene_window)]
 

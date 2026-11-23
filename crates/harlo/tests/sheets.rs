@@ -446,3 +446,53 @@ fn keeping_running_in_the_tray_shows_only_with_a_tray() {
     assert!(!ui.app().preferences.keep_in_tray);
     assert!(!switch(&ui, "Keep running in the tray").1);
 }
+
+#[test]
+fn appearance_chooses_the_interface_and_code_fonts_from_the_computers() {
+    use harlo::ui::Fonts;
+    use harlo_core::fonts::SystemFonts;
+
+    let ui = ui(demo::app());
+    ui.send(Message::Sheet(SheetEvent::Open(Section::Appearance)));
+    ui.send(Message::Sheet(SheetEvent::Query("font".into())));
+    assert!(
+        ui.shows("Geist") && ui.shows("JetBrains Mono"),
+        "Harlo's own at first"
+    );
+
+    let change = |at: usize| {
+        let buttons: Vec<_> = ui
+            .find("Change")
+            .into_iter()
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .collect();
+        buttons[at].invoke_accessible_default_action();
+    };
+    change(0);
+    ui.send(Message::Sheet(SheetEvent::SystemFonts(
+        SystemFonts::from_faces([("Noto Sans", false), ("Fira Code", true)]),
+    )));
+    assert!(ui.shows("Geist (Harlo's own)"));
+    assert!(
+        ui.shows("Noto Sans") && ui.shows("Fira Code"),
+        "every family for the interface"
+    );
+    ui.press("Noto Sans");
+    assert_eq!(ui.app().preferences.interface_font, "Noto Sans");
+    assert_eq!(ui.window.global::<Fonts>().get_sans(), "Noto Sans");
+
+    change(1);
+    assert!(ui.shows("JetBrains Mono (Harlo's own)"));
+    assert!(
+        !ui.shows("Noto Sans (") && ui.find("Noto Sans").len() == 1,
+        "code lists monospaced ones"
+    );
+    ui.press("Fira Code");
+    assert_eq!(ui.window.global::<Fonts>().get_mono(), "Fira Code");
+
+    // Harlo's own again.
+    change(0);
+    ui.press("Geist (Harlo's own)");
+    assert_eq!(ui.app().preferences.interface_font, "");
+    assert_eq!(ui.window.global::<Fonts>().get_sans(), "Geist");
+}

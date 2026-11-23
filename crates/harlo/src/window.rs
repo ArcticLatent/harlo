@@ -714,6 +714,12 @@ pub const REMOVE_PHONE: i32 = 71;
 /// The step of the button that sends a test notification.
 pub const TEST_PHONE: i32 = 72;
 
+/// The Settings button that opens the menu of interface fonts.
+pub const CHOOSE_INTERFACE_FONT: i32 = 73;
+
+/// The Settings button that opens the menu of code fonts.
+pub const CHOOSE_CODE_FONT: i32 = 74;
+
 /// The step a Settings button for this computer's models or other
 /// computers, numbered `number`, takes for item `item`.
 fn local_action(number: i32, item: i32) -> Option<Message> {
@@ -823,6 +829,8 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     };
     match number {
         CHOOSE_DEFAULT_MODEL => Some(Message::TogglePicker(Picker::DefaultModel)),
+        CHOOSE_INTERFACE_FONT => Some(Message::TogglePicker(Picker::InterfaceFont)),
+        CHOOSE_CODE_FONT => Some(Message::TogglePicker(Picker::CodeFont)),
         OPEN_SETUP => Some(Message::Sheet(SheetEvent::OpenSetup)),
         INSTALL_OPENCODE => Some(Message::Sheet(SheetEvent::InstallOpenCode)),
         TEST_NOTICE => Some(Message::Sheet(SheetEvent::TestNotice)),

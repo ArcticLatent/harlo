@@ -71,6 +71,10 @@ pub enum Picker {
     Provider,
     /// The language dictation listens for, from Settings → Voice.
     VoiceLanguage,
+    /// The interface's font, from Settings → Appearance.
+    InterfaceFont,
+    /// The font for code, diffs and the terminal.
+    CodeFont,
 }
 
 impl Picker {
@@ -90,13 +94,15 @@ impl Picker {
             Self::ScheduleSession => 9,
             Self::Provider => 10,
             Self::VoiceLanguage => 11,
+            Self::InterfaceFont => 12,
+            Self::CodeFont => 13,
         }
     }
 
-    /// Whether its menu has a filter field: models and providers.
+    /// Whether its menu has a filter field: models, providers and fonts.
     #[must_use]
     pub fn filters(self) -> bool {
-        self.lists_models() || self == Self::Provider
+        self.lists_models() || matches!(self, Self::Provider | Self::InterfaceFont | Self::CodeFont)
     }
 
     /// Whether the menu lists models.
@@ -124,6 +130,8 @@ impl Picker {
             9 => Self::ScheduleSession,
             10 => Self::Provider,
             11 => Self::VoiceLanguage,
+            12 => Self::InterfaceFont,
+            13 => Self::CodeFont,
             _ => return None,
         })
     }
@@ -296,6 +304,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
         Picker::ScheduleFolder | Picker::ScheduleSession => schedule_items(app, picker),
         Picker::Provider => provider_items(app),
         Picker::VoiceLanguage => language_items(app),
+        Picker::InterfaceFont | Picker::CodeFont => font_items(app, picker),
         Picker::Agent => {
             let current = app.current_agent();
             app.agent_choices()
@@ -386,6 +395,48 @@ fn provider_items(app: &App) -> Vec<Item> {
         })
         .collect()
 }
+
+/// Harlo's own font, then the computer's families that match the filter:
+/// monospaced ones only for code.
+fn font_items(app: &App, picker: Picker) -> Vec<Item> {
+    let code = picker == Picker::CodeFont;
+    let (chosen, own) = if code {
+        (&app.preferences.code_font, OWN_CODE_FONT)
+    } else {
+        (&app.preferences.interface_font, OWN_INTERFACE_FONT)
+    };
+    let item = |label: String, family: String| Item {
+        selected: *chosen == family,
+        label,
+        detail: None,
+        below: None,
+        dot: None,
+        glyph: None,
+        message: Message::Sheet(SheetEvent::Font { code, family }),
+    };
+    let mut items = Vec::new();
+    if matches(own, &app.picker_filter) {
+        items.push(item(format!("{own} (Harlo's own)"), String::new()));
+    }
+    let families = app
+        .system_fonts
+        .as_ref()
+        .map(|fonts| if code { &fonts.mono } else { &fonts.all });
+    items.extend(
+        families
+            .into_iter()
+            .flatten()
+            .filter(|family| matches(family, &app.picker_filter))
+            .map(|family| item(family.clone(), family.clone())),
+    );
+    items
+}
+
+/// The font Harlo's interface uses unless another is chosen.
+pub const OWN_INTERFACE_FONT: &str = "Geist";
+
+/// The font Harlo's code uses unless another is chosen.
+pub const OWN_CODE_FONT: &str = "JetBrains Mono";
 
 /// The languages dictation can listen for.
 fn language_items(app: &App) -> Vec<Item> {

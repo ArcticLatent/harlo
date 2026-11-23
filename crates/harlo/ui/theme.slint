@@ -162,10 +162,11 @@ export global Size {
 
 /// Font families.
 export global Fonts {
-    /// The interface font.
-    out property <string> sans: "Geist";
-    /// Code, paths and commands.
-    out property <string> mono: "JetBrains Mono";
+    /// The interface font: Harlo's own unless Settings → Appearance names
+    /// another.
+    in property <string> sans: "Geist";
+    /// Code, paths, commands and the terminal; Harlo's own unless chosen.
+    in property <string> mono: "JetBrains Mono";
     /// File-type icons.
     out property <string> file-icons: "Harlo File Icons";
 }
