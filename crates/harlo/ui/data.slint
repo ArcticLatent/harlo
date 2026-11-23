@@ -54,6 +54,8 @@ export struct SidebarRow {
     selected: bool,
     busy: bool,
     waiting: bool,
+    /// Whether the session runs without asking ("Don't ask").
+    trusted: bool,
     /// A session's maker logo: 0 none, 1 Anthropic, 2 OpenAI, 3 Z.ai.
     maker: int,
     /// The maker's tone, or a subagent's colour.
@@ -261,9 +263,9 @@ export struct ApprovalCard {
     detail: string,
     files: [CardFile],
     message: string,
-    /// "Always allow", or "Always allow <patterns>".
+    /// The "Always allow" button's label.
     always: string,
-    /// What "Always allow" keeps, and where to take it back.
+    /// What "Always allow" covers, in words, and where to take it back.
     always-note: string,
     busy: bool,
     /// Whether a reason for refusing is being typed.
@@ -759,6 +761,8 @@ export global State {
     in property <string> session-agent-glyph;
     in property <color> session-agent-color;
     in property <bool> session-read-only;
+    /// Whether the open session runs without asking ("Don't ask").
+    in property <bool> session-trusted;
     in property <string> session-model;
     in property <bool> session-busy;
     in property <string> session-placeholder;

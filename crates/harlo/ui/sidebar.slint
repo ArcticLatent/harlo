@@ -203,6 +203,13 @@ component Item inherits Rectangle {
                     color: entry.untitled ? Theme.text-weaker
                         : entry.selected ? Theme.text-strong : Theme.text-base;
                 }
+                // Runs without asking: marked beside what it's doing.
+                if entry.trusted: Icon {
+                    text: Icons.shield-off;
+                    color: Theme.icon-warning-base;
+                    accessible-role: image;
+                    accessible-label: "Don't ask";
+                }
                 if entry.waiting: Icon {
                     text: Icons.shield-alert;
                     color: Theme.icon-warning-base;

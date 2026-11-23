@@ -2,7 +2,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::approvals::{Draft, Shield, describe};
+use harlo_core::approvals::{Draft, Shield, always_scope, describe};
 use opencode_client::{
     Answer, Choice, Condition, Effect, Field, FieldKind, Form, Permission, Rule,
 };
@@ -78,6 +78,47 @@ fn approvals_say_what_the_agent_wants() {
     );
     assert_eq!(describe(&asked("edit", &["a.rs"])).detail, "a.rs");
     assert_eq!(describe(&asked("lsp_rename", &[])).wants, "use lsp rename");
+}
+
+#[test]
+fn always_allow_says_what_it_covers_in_words() {
+    let asked = |action: &str, save: &[&str]| Permission {
+        id: "per_1".into(),
+        session_id: "s1".into(),
+        action: action.into(),
+        resources: Vec::new(),
+        save: save.iter().map(|p| (*p).to_owned()).collect(),
+        message: None,
+        files: Vec::new(),
+    };
+    let cases = [
+        (
+            asked("shell", &["cargo test *"]),
+            "commands starting with “cargo test”",
+        ),
+        (asked("shell", &["ls"]), "the command “ls”"),
+        (
+            asked("shell", &["git status *", "git diff *"]),
+            "commands starting with “git status”, or commands starting with “git diff”",
+        ),
+        (asked("shell", &["*"]), "every command"),
+        (asked("shell", &[]), "every command"),
+        (asked("edit", &["src/**"]), "edits to everything in “src/”"),
+        (asked("edit", &["src/*"]), "edits to everything in “src/”"),
+        (
+            asked("edit", &["**/*.rs"]),
+            "edits to anything like “**/*.rs”",
+        ),
+        (asked("read", &["/etc/hosts"]), "reads of “/etc/hosts”"),
+        (asked("lsp_rename", &["*"]), "every request like this one"),
+        (
+            asked("webfetch", &["https://docs.rs/*"]),
+            "fetches of everything in “https://docs.rs/”",
+        ),
+    ];
+    for (permission, words) in cases {
+        assert_eq!(always_scope(&permission), words, "{:?}", permission.save);
+    }
 }
 
 #[test]

@@ -10,6 +10,7 @@ mod support;
 
 use harlo::app::{Message, Sheet, SheetEvent};
 use harlo::timeline::Event as TimelineEvent;
+use harlo_core::approvals::Shield;
 use harlo_core::server::{
     Answer, Choice, Delivery, Field, FieldKind, FileDiff, PermissionReply, Update,
 };
@@ -302,13 +303,16 @@ fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
     ));
     assert!(ui.shows("Allow Build to run a command?"));
     assert!(ui.shows("cargo test"));
-    assert!(ui.shows("Always allow cargo *"));
-    assert!(
-        ui.shows(
-            "Always allow saves this for the project, for every session. \
-             Settings → Agents → Saved approvals takes it back."
-        ),
-        "says where an always rule is kept"
+    // What Always allow covers is said in words, on a line of its own,
+    // and read out with the button.
+    let covers = "Always allow covers commands starting with “cargo” in this project, \
+                  for every session. Settings → Agents → Saved approvals takes it back.";
+    assert!(ui.shows(covers), "says what it covers and where it's kept");
+    assert_eq!(
+        ui.button("Always allow")
+            .accessible_description()
+            .as_deref(),
+        Some(covers)
     );
     assert!(marked_waiting(&ui), "the sidebar marks the session");
 
@@ -330,7 +334,7 @@ fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
         Err("Couldn't answer: the server went away".into()),
     ));
     assert!(ui.shows("Couldn't answer: the server went away"));
-    ui.press("Always allow cargo *");
+    ui.press("Always allow");
     assert!(ui.messages().iter().any(|m| matches!(
         m,
         Message::Approve {
@@ -956,4 +960,26 @@ fn a_tight_column_keeps_send_inside_the_composer() {
             button.size().width
         );
     }
+}
+
+#[test]
+fn a_session_that_doesnt_ask_says_so_in_its_header_and_sidebar_row() {
+    let ui = chatting();
+    assert!(!ui.shows("Don't ask"));
+    // Its rules, as another client or the shield menu set them.
+    ui.send(event(
+        EventKind::SessionPermissions {
+            session_id: PI_UPDATE.into(),
+            rules: Shield::Trusted.rules().expect("rules"),
+        },
+        2.0,
+    ));
+    let marks: Vec<_> = ui
+        .find("Don't ask")
+        .into_iter()
+        .map(|e| e.absolute_position())
+        .collect();
+    // The header, the composer's shield and the sidebar row.
+    assert!(marks.len() >= 3, "marked in {} places", marks.len());
+    assert!(marks.iter().any(|at| at.x < 344.0), "on the sidebar row");
 }

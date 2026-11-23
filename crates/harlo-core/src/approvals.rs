@@ -106,6 +106,105 @@ pub fn describe(asked: &Permission) -> Described {
     }
 }
 
+/// What "Always allow" on `asked` would cover, in words, such as
+/// "commands starting with “cargo test”".
+///
+/// OpenCode saves the request's patterns (`save`), where `*` stands for
+/// anything. A pattern ending in `*` covers what starts with the rest, one
+/// ending in a folder covers everything in it, and one without a `*`
+/// covers just itself; any other is quoted as written. No patterns, or
+/// only `*`, cover every request of the kind.
+#[must_use]
+pub fn always_scope(asked: &Permission) -> String {
+    let shell = asked.action == "shell";
+    let patterns: Vec<Pattern<'_>> = asked
+        .save
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty() && *p != "*")
+        .map(Pattern::read)
+        .collect();
+    if patterns.is_empty() {
+        return match asked.action.as_str() {
+            "shell" => "every command".to_owned(),
+            "edit" => "every edit".to_owned(),
+            "read" => "every read".to_owned(),
+            _ => "every request like this one".to_owned(),
+        };
+    }
+    let phrases: Vec<String> = patterns
+        .iter()
+        .map(|pattern| {
+            if shell {
+                match pattern {
+                    Pattern::Starts(x) => format!("commands starting with “{x}”"),
+                    Pattern::In(x) => format!("commands in “{x}”"),
+                    Pattern::Like(x) => format!("commands like “{x}”"),
+                    Pattern::Exactly(x) => format!("the command “{x}”"),
+                }
+            } else {
+                match pattern {
+                    Pattern::Starts(x) => format!("anything starting with “{x}”"),
+                    Pattern::In(x) => format!("everything in “{x}”"),
+                    Pattern::Like(x) => format!("anything like “{x}”"),
+                    Pattern::Exactly(x) => format!("“{x}”"),
+                }
+            }
+        })
+        .collect();
+    let phrases = match phrases.as_slice() {
+        [rest @ .., last] if !rest.is_empty() => format!("{}, or {last}", rest.join(", ")),
+        _ => phrases.concat(),
+    };
+    let what = match asked.action.as_str() {
+        "edit" => "edits to ",
+        "read" => "reads of ",
+        "external_directory" => "work in ",
+        "webfetch" => "fetches of ",
+        "websearch" => "web searches for ",
+        _ => "",
+    };
+    format!("{what}{phrases}")
+}
+
+/// A saved pattern, read for putting into words.
+enum Pattern<'a> {
+    /// What starts with this, from a trailing `*`.
+    Starts(&'a str),
+    /// Everything in this folder, from a trailing `/*` or `/**`.
+    In(&'a str),
+    /// A pattern with a `*` or `?` elsewhere, quoted as written.
+    Like(&'a str),
+    /// Just this.
+    Exactly(&'a str),
+}
+
+impl<'a> Pattern<'a> {
+    /// Reads `pattern`, already trimmed.
+    fn read(pattern: &'a str) -> Self {
+        let wild = |s: &str| s.contains(['*', '?']);
+        if let Some(folder) = pattern
+            .strip_suffix("**")
+            .or_else(|| pattern.strip_suffix('*'))
+            .filter(|s| s.ends_with('/') && !wild(s))
+        {
+            return Self::In(folder);
+        }
+        if let Some(start) = pattern
+            .strip_suffix('*')
+            .map(str::trim_end)
+            .filter(|s| !s.is_empty() && !wild(s))
+        {
+            return Self::Starts(start);
+        }
+        if wild(pattern) {
+            Self::Like(pattern)
+        } else {
+            Self::Exactly(pattern)
+        }
+    }
+}
+
 /// The answers being filled into one question, before they're sent.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Draft {

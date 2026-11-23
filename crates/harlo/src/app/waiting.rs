@@ -164,12 +164,18 @@ impl App {
     #[must_use]
     pub fn current_shield(&self) -> Shield {
         match self.active.as_deref() {
-            Some(id) => self
-                .workspace
-                .session(id)
-                .map_or(Shield::Agent, |s| Shield::of(&s.permissions)),
+            Some(id) => self.shield_of(id),
             None => self.new_shield,
         }
+    }
+
+    /// How much session `id` may do without asking; the agent's own rules
+    /// for a session not known.
+    #[must_use]
+    pub fn shield_of(&self, id: &str) -> Shield {
+        self.workspace
+            .session(id)
+            .map_or(Shield::Agent, |s| Shield::of(&s.permissions))
     }
 
     /// Sends a reply to an approval request in the open session.

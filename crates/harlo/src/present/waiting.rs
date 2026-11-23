@@ -162,11 +162,6 @@ fn approval_card(app: &App, asked: &Permission, count: usize) -> ApprovalCard {
     let said = approvals::describe(asked);
     let agent = app.agent_name();
     let refusing = app.refusing.as_ref().filter(|(id, _)| *id == asked.id);
-    let always = if asked.save.is_empty() || asked.save.iter().all(|p| p == "*") {
-        "Always allow".to_owned()
-    } else {
-        format!("Always allow {}", asked.save.join(", "))
-    };
     let files: Vec<CardFile> = asked
         .files
         .iter()
@@ -184,10 +179,14 @@ fn approval_card(app: &App, asked: &Permission, count: usize) -> ApprovalCard {
         },
         files: model(files),
         message: asked.message.clone().unwrap_or_default().into(),
-        always: always.into(),
-        always_note: "Always allow saves this for the project, for every session. \
-                      Settings → Agents → Saved approvals takes it back."
-            .into(),
+        always: "Always allow".into(),
+        // The scope in words, on a line of its own so it's never cut short.
+        always_note: format!(
+            "Always allow covers {} in this project, for every session. \
+             Settings → Agents → Saved approvals takes it back.",
+            approvals::always_scope(asked)
+        )
+        .into(),
         busy: app.answering.contains(&asked.id),
         refusing: refusing.is_some(),
         reason: refusing
