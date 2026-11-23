@@ -810,6 +810,8 @@ impl App {
 
     /// Applies a message, then saves the layout if it changed.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        // A menu with a filter has the keyboard; it goes back when it closes.
+        let filtering = self.picker.filter(|p| p.filters());
         if matches!(
             message,
             Message::PickFolder(_)
@@ -827,8 +829,19 @@ impl App {
         }
         let task = self.apply(message);
         let shown = self.follow_document();
+        let refocus = match filtering {
+            Some(picker) if self.picker.is_none() => Task::effect(Effect::Focus(
+                if picker == model::Picker::Model && self.sheets.open.is_none() {
+                    crate::ids::COMPOSER_TEXT
+                } else {
+                    crate::ids::WINDOW
+                },
+            )),
+            _ => Task::none(),
+        };
         let task = Task::batch([
             task,
+            refocus,
             shown,
             self.follow_folder(),
             self.follow_changes(),

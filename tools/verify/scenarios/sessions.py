@@ -24,6 +24,14 @@ def run(h, s):
     s.expect(h.find("Second session", role="Tab"), "its tab")
     h.shot("second")
 
+    s.step("a click on a tab shows its session")
+    first = h.find(None, role="Tab", where=lambda e: e.label != "Second session")
+    s.expect(first, "the first session's tab", [e.label for e in h.find(None, role="Tab")])
+    h.click(first[0].label, role="Tab")
+    h.until("the first session to show", lambda: h.says("hello from the scripted model"), timeout=5)
+    h.click("Second session", role="Tab")
+    h.until("the second session to show", lambda: h.says("second answer"), timeout=5)
+
     s.step("the filter finds it")
     h.fill("Filter sessions", "Second")
     s.expect(h.find("Second session", where=sidebar),

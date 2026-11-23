@@ -17,6 +17,9 @@ pub const PANEL_RESTORE: &str = "panel-restore";
 /// The composer box.
 pub const COMPOSER: &str = "composer";
 
+/// The window itself: its keys go to the shortcuts, and typing nowhere.
+pub const WINDOW: &str = "window";
+
 /// The composer's text area, inside [`COMPOSER`].
 pub const COMPOSER_TEXT: &str = "composer-text";
 

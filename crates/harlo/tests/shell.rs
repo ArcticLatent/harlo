@@ -282,3 +282,28 @@ fn a_picker_opens_its_menu_and_picks() {
     ui.send(Message::ClosePicker);
     assert!(!ui.shows("Add project…"));
 }
+
+#[test]
+fn escape_still_closes_menus_after_the_model_menu() {
+    use slint::ComponentHandle;
+    use slint::platform::WindowEvent;
+    let ui = ui(demo::app());
+    // The model menu's filter takes the keyboard, and is gone once it closes.
+    ui.send(Message::TogglePicker(harlo::model::Picker::Model));
+    assert!(ui.shows("Filter models"));
+    drop(ui.driver.take_tasks());
+    ui.send(Message::ClosePicker);
+    // Its focus request goes to the window, as the runtime would carry it.
+    let mut tasks = support::tasks::Tasks::new();
+    let _ = tasks.until(&ui, Duration::from_millis(100), |_| false);
+    ui.press("Permissions");
+    assert!(ui.app().picker.is_some(), "the permissions menu is open");
+    let escape = slint::SharedString::from(slint::platform::Key::Escape);
+    let window = ui.window.window();
+    window.dispatch_event(WindowEvent::KeyPressed {
+        text: escape.clone(),
+    });
+    window.dispatch_event(WindowEvent::KeyReleased { text: escape });
+    ui.wait(50);
+    assert!(ui.app().picker.is_none(), "a real Escape closes it");
+}

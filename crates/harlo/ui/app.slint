@@ -92,6 +92,13 @@ export component AppWindow inherits Window {
     default-font-size: Size.text;
     // Keys reach the window's shortcuts even before a field is focused.
     forward-focus: keys;
+    // Rust gives the keyboard back to the window when what had it closes.
+    property <int> focus-serial: Requests.focus-serial;
+    changed focus-serial => {
+        if (Requests.focus == "window") {
+            keys.focus();
+        }
+    }
 
     changed width => {
         Logic.resized(self.width, self.height);
