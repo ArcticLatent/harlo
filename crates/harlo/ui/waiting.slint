@@ -9,9 +9,8 @@ import { State, Logic, CardFile, Question, Answer } from "data.slint";
 import { Icon, Press, Field } from "widgets.slint";
 import { Counts, PatchLine } from "timeline.slint";
 
-/// The tallest the cards get before they scroll.
+/// How the cards are laid out.
 global Cards {
-    out property <length> max-height: 420px;
     out property <length> padding: 14px;
 }
 
@@ -323,12 +322,13 @@ component ChoiceRow inherits Press {
             width: 15px;
             text: root.glyph;
             font-size: 14px;
-            color: root.selected ? Theme.accent-ink : Theme.icon-base;
+            color: root.selected ? Theme.text-interactive-base : Theme.icon-base;
         }
         Text {
             text: root.text;
             vertical-alignment: center;
             font-size: Size.label;
+            font-weight: root.selected ? 600 : 400;
             color: Theme.text-strong;
         }
         if root.description != "": Text {
@@ -422,8 +422,11 @@ component QuestionView inherits VerticalLayout {
     }
 }
 
-/// The agent's questions, with Send and Dismiss.
+/// The agent's questions, with Send and Dismiss. Only the questions scroll:
+/// the buttons stay at the card's foot, however many questions there are.
 component QuestionsView inherits Card {
+    /// The most height the card may take.
+    in property <length> room;
     property <bool> busy: State.question-card.busy;
 
     edge: Theme.question-edge;
@@ -431,16 +434,28 @@ component QuestionsView inherits Card {
     accessible-role: groupbox;
     accessible-label: State.question-card.title;
 
-    Heading {
+    heading := Heading {
         glyph: Icons.question;
         accent: Theme.text-interactive-base;
         text: State.question-card.title;
         count: State.question-card.count;
     }
-    for question in State.questions: QuestionView {
-        item: question;
+    ScrollView {
+        height: min(questions.preferred-height,
+            max(80px, root.room - 2 * Cards.padding - 2 * root.gap
+                - heading.preferred-height - actions.preferred-height));
+        // Only up and down: the questions fit the card's width.
+        content-width: self.visible-width;
+        content-height: questions.preferred-height;
+        questions := VerticalLayout {
+            width: parent.visible-width;
+            spacing: 14px;
+            for question in State.questions: QuestionView {
+                item: question;
+            }
+        }
     }
-    HorizontalLayout {
+    actions := HorizontalLayout {
         alignment: start;
         spacing: 8px;
         CardButton {
@@ -457,18 +472,30 @@ component QuestionsView inherits Card {
     }
 }
 
-/// The cards for what the open session waits on, scrolling once they're tall.
+/// The cards for what the open session waits on, as tall as `room` allows,
+/// scrolling past it.
 export component WaitingCards inherits ScrollView {
-    height: min(cards.preferred-height, Cards.max-height);
+    /// The most height the cards may take.
+    in property <length> room;
+
+    height: min(cards.preferred-height, root.room);
     // Only up and down: the cards fit the column's width.
     content-width: self.visible-width;
     content-height: cards.preferred-height;
 
     cards := VerticalLayout {
         width: root.visible-width;
-        spacing: 8px;
-        if State.undo-card.shown: UndoView { }
-        if State.approval-card.shown: ApprovalView { }
-        if State.question-card.shown: QuestionsView { }
+        others := VerticalLayout {
+            spacing: 8px;
+            // The gap before the question card, only when there's a card
+            // above it: an empty slot takes no room.
+            padding-bottom: (State.undo-card.shown || State.approval-card.shown)
+                && State.question-card.shown ? 8px : 0;
+            if State.undo-card.shown: UndoView { }
+            if State.approval-card.shown: ApprovalView { }
+        }
+        if State.question-card.shown: QuestionsView {
+            room: root.room - others.preferred-height;
+        }
     }
 }

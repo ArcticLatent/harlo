@@ -315,7 +315,7 @@ export component SessionView inherits Rectangle {
     }
 
     VerticalLayout {
-        Header {
+        header := Header {
             column: root.column;
         }
         HLine { }
@@ -334,13 +334,19 @@ export component SessionView inherits Rectangle {
                 spacing: 4px;
                 if State.undo-card.shown || State.approval-card.shown || State.question-card.shown: VerticalLayout {
                     padding-bottom: 4px;
-                    WaitingCards { }
+                    // What the header, the composer, the gaps around them
+                    // (about 40px) and a strip of the timeline (120px)
+                    // leave free.
+                    WaitingCards {
+                        room: max(160px, root.height - header.preferred-height
+                            - composer.preferred-height - 160px);
+                    }
                 }
                 for row in State.inbox: InboxLine {
                     item: row;
                 }
                 Rectangle { height: 4px; }
-                Composer {
+                composer := Composer {
                     placeholder: State.session-placeholder;
                     busy: State.session-busy;
                     for chip in State.chips: VerticalLayout {

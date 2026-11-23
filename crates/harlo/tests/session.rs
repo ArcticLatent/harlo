@@ -388,6 +388,56 @@ fn colour_question() -> Form {
 }
 
 #[test]
+fn a_short_window_keeps_the_question_cards_buttons_in_view() {
+    let mut app = demo::app();
+    let _ = app.update(Message::OpenSession(PI_UPDATE.into()));
+    let _ = app.update(Message::History(PI_UPDATE.into(), Ok(Vec::new())));
+    let ui = ui_at(app, (1000.0, 760.0));
+    // Taller than the card can be: the first two questions twice more.
+    let mut form = colour_question();
+    let more: Vec<_> = form.fields[..2].to_vec();
+    for (n, mut field) in more
+        .into_iter()
+        .chain(form.fields[..2].to_vec())
+        .enumerate()
+    {
+        field.key = format!("{}{n}", field.key);
+        form.fields.push(field);
+    }
+    ui.send(event(EventKind::FormCreated(form), 1.0));
+    assert!(ui.shows("Build has a question"));
+
+    // The questions scroll; Send and Dismiss stay above the composer.
+    let composer = ui
+        .find("Send a message to continue this session · Tab switches agents")
+        .into_iter()
+        .find(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
+        .expect("the composer");
+    let composer_top = composer.absolute_position().y;
+    // The whole card shows, its foot included: the composer's text sits
+    // 16px inside its box, and 16px of gaps part the box from the cards.
+    let card = ui
+        .find("Build has a question")
+        .into_iter()
+        .find(|e| e.accessible_role() == Some(AccessibleRole::Groupbox))
+        .expect("the card");
+    let card_bottom = card.absolute_position().y + card.size().height;
+    assert!(
+        card_bottom <= composer_top - 30.0,
+        "the card ends at {card_bottom}, too near the composer's text at {composer_top}"
+    );
+    for label in ["Send answer", "Dismiss"] {
+        let button = ui.button(label);
+        let bottom = button.absolute_position().y + button.size().height;
+        assert!(
+            bottom <= composer_top,
+            "{label} ends at {bottom}, under the composer's top at {composer_top}"
+        );
+        assert!(button.absolute_position().y > 0.0, "{label} is on screen");
+    }
+}
+
+#[test]
 fn a_question_card_takes_answers_and_says_what_is_missing() {
     let ui = chatting();
     ui.send(event(EventKind::FormCreated(colour_question()), 1.0));
