@@ -1,6 +1,7 @@
 // Small parts the window is built from: icons, pressable surfaces, lines,
 // a breathing indicator, a fading error line and a one-line text field.
 
+import { ScrollView } from "std-widgets.slint";
 import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { Tips } from "data.slint";
@@ -185,6 +186,89 @@ export component IconButton inherits Press {
 export component HLine inherits Rectangle {
     height: 1px;
     background: Theme.border-weak-base;
+}
+
+/// A thin scrollbar with no track, laid over the right edge of a scroll
+/// view whose own bar is off (`vertical-scrollbar-policy: always-off`).
+/// Bind `content-y` both ways and pass the view's heights. It shows only
+/// when there's more than fits, and widens under the pointer.
+export component QuietBar inherits Rectangle {
+    in-out property <length> content-y;
+    in property <length> content-height;
+    in property <length> visible-height;
+
+    property <length> pad: 4px;
+    property <length> track: root.height - 2 * root.pad;
+    property <length> overflow: max(0px, root.content-height - root.visible-height);
+    property <length> thumb-height: root.content-height <= 0
+        ? root.track
+        : min(root.track, max(32px, root.track * root.visible-height / root.content-height));
+    property <length> travel: root.track - root.thumb-height;
+    property <bool> active: touch.has-hover || touch.pressed;
+
+    width: 12px;
+    visible: root.overflow > 0.5px;
+
+    thumb := Rectangle {
+        width: root.active ? 7px : 4px;
+        height: root.thumb-height;
+        x: root.width - self.width - 3px;
+        y: root.pad + (root.overflow > 0 ? root.travel * clamp(-root.content-y / root.overflow, 0, 1) : 0);
+        border-radius: self.width / 2;
+        background: Theme.icon-quiet;
+        opacity: root.active ? 0.9 : 0.5;
+        animate width, opacity { duration: 120ms; easing: ease-out; }
+    }
+
+    touch := TouchArea {
+        property <length> start-content-y;
+        property <length> start-y;
+        property <bool> dragging;
+
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                self.dragging = self.mouse-y >= thumb.y && self.mouse-y <= thumb.y + thumb.height;
+                if self.dragging {
+                    self.start-content-y = root.content-y;
+                    self.start-y = self.mouse-y;
+                } else {
+                    // A page towards where the track was pressed.
+                    root.content-y = clamp(root.content-y + (self.mouse-y < thumb.y ? 1 : -1) * root.visible-height * 0.9,
+                        -root.overflow, 0px);
+                }
+            }
+        }
+        moved => {
+            if self.dragging && root.travel > 0 {
+                root.content-y = clamp(self.start-content-y - (self.mouse-y - self.start-y) * root.overflow / root.travel,
+                    -root.overflow, 0px);
+            }
+        }
+    }
+}
+
+/// A scroll view with the quiet bar: what's inside scrolls up and down.
+export component QuietScroll inherits Rectangle {
+    out property <length> visible-width: view.visible-width;
+    in-out property <length> content-y <=> view.content-y;
+    out property <length> content-height: view.content-height;
+    out property <length> visible-height: view.visible-height;
+
+    view := ScrollView {
+        width: parent.width;
+        height: parent.height;
+        vertical-scrollbar-policy: always-off;
+        // Only up and down: what's inside fits the width.
+        content-width: self.visible-width;
+        @children
+    }
+    QuietBar {
+        x: parent.width - self.width;
+        height: parent.height;
+        content-y <=> view.content-y;
+        content-height: view.content-height;
+        visible-height: view.visible-height;
+    }
 }
 
 /// A one pixel line down.

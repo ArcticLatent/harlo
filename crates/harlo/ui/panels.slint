@@ -5,7 +5,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State } from "data.slint";
-import { Icon } from "widgets.slint";
+import { Icon, QuietBar } from "widgets.slint";
 import { ChangesPanel } from "changes.slint";
 import { FilesPanel } from "files.slint";
 import { NotesPanel } from "notes.slint";
@@ -16,18 +16,30 @@ global Bar {
 }
 
 /// A panel's body: its sections stacked, scrolling up and down once tall.
-component Body inherits ScrollView {
-    content-width: self.visible-width;
-    content-height: sections.preferred-height;
+component Body inherits Rectangle {
+    view := ScrollView {
+        width: parent.width;
+        height: parent.height;
+        vertical-scrollbar-policy: always-off;
+        content-width: self.visible-width;
+        content-height: sections.preferred-height;
 
-    sections := VerticalLayout {
-        width: root.visible-width;
-        padding-top: 16px;
-        padding-bottom: 16px;
-        padding-left: 18px;
-        padding-right: 18px;
-        spacing: 16px;
-        @children
+        sections := VerticalLayout {
+            width: view.visible-width;
+            padding-top: 16px;
+            padding-bottom: 16px;
+            padding-left: 18px;
+            padding-right: 18px;
+            spacing: 16px;
+            @children
+        }
+    }
+    QuietBar {
+        x: parent.width - self.width;
+        height: parent.height;
+        content-y <=> view.content-y;
+        content-height: view.content-height;
+        visible-height: view.visible-height;
     }
 }
 

@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts, Motion, Curves } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, Chip, MenuItem, AttachedChip } from "data.slint";
-import { Icon, IconButton, Press, Dot, Breathing, Spinner, Field, HoverTip } from "widgets.slint";
+import { Icon, IconButton, Press, Dot, Breathing, Spinner, Field, HoverTip, QuietBar } from "widgets.slint";
 import { PictureThumb } from "pictures.slint";
 
 /// The picker numbers, as Rust's `Picker::index` gives them.
@@ -339,26 +339,38 @@ component ComposerMenu inherits Rectangle {
 
     content := VerticalLayout {
         padding: 6px;
-        list := ListView {
+        Rectangle {
             height: root.shown * root.step;
-            // Keeps the highlighted row in view as it moves.
-            property <int> highlight: State.composer-menu-highlight;
-            changed highlight => {
-                let top = self.highlight * root.step;
-                if (top < -self.content-y) {
-                    self.content-y = -top;
-                } else if (top + root.step > -self.content-y + self.visible-height) {
-                    self.content-y = -(top + root.step - self.visible-height);
+            list := ListView {
+                width: parent.width;
+                height: parent.height;
+                vertical-scrollbar-policy: always-off;
+                // Keeps the highlighted row in view as it moves.
+                property <int> highlight: State.composer-menu-highlight;
+                changed highlight => {
+                    let top = self.highlight * root.step;
+                    if (top < -self.content-y) {
+                        self.content-y = -top;
+                    } else if (top + root.step > -self.content-y + self.visible-height) {
+                        self.content-y = -(top + root.step - self.visible-height);
+                    }
+                }
+                for item[index] in State.composer-menu: VerticalLayout {
+                    padding-bottom: 2px;
+                    MenuRow {
+                        item: item;
+                        columns: true;
+                        highlighted: index == State.composer-menu-highlight;
+                        clicked => { Logic.composer-menu-pick(index); }
+                    }
                 }
             }
-            for item[index] in State.composer-menu: VerticalLayout {
-                padding-bottom: 2px;
-                MenuRow {
-                    item: item;
-                    columns: true;
-                    highlighted: index == State.composer-menu-highlight;
-                    clicked => { Logic.composer-menu-pick(index); }
-                }
+            QuietBar {
+                x: parent.width - self.width;
+                height: parent.height;
+                content-y <=> list.content-y;
+                content-height: list.content-height;
+                visible-height: list.visible-height;
             }
         }
     }
@@ -663,25 +675,37 @@ export component PickerMenu inherits Rectangle {
                 }
             }
 
-            if State.menu-items.length > 0: list := ListView {
+            if State.menu-items.length > 0: Rectangle {
                 height: root.shown * root.step;
-                // Keeps the highlighted row in view as it moves.
-                property <int> highlight: State.menu-highlight;
-                changed highlight => {
-                    let top = self.highlight * root.step;
-                    if (top < -self.content-y) {
-                        self.content-y = -top;
-                    } else if (top + root.step > -self.content-y + self.visible-height) {
-                        self.content-y = -(top + root.step - self.visible-height);
+                list := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    vertical-scrollbar-policy: always-off;
+                    // Keeps the highlighted row in view as it moves.
+                    property <int> highlight: State.menu-highlight;
+                    changed highlight => {
+                        let top = self.highlight * root.step;
+                        if (top < -self.content-y) {
+                            self.content-y = -top;
+                        } else if (top + root.step > -self.content-y + self.visible-height) {
+                            self.content-y = -(top + root.step - self.visible-height);
+                        }
+                    }
+                    for item[index] in State.menu-items: VerticalLayout {
+                        padding-bottom: 2px;
+                        MenuRow {
+                            item: item;
+                            highlighted: index == State.menu-highlight;
+                            clicked => { Logic.pick(index); }
+                        }
                     }
                 }
-                for item[index] in State.menu-items: VerticalLayout {
-                    padding-bottom: 2px;
-                    MenuRow {
-                        item: item;
-                        highlighted: index == State.menu-highlight;
-                        clicked => { Logic.pick(index); }
-                    }
+                QuietBar {
+                    x: parent.width - self.width;
+                    height: parent.height;
+                    content-y <=> list.content-y;
+                    content-height: list.content-height;
+                    visible-height: list.visible-height;
                 }
             }
 

@@ -2,11 +2,11 @@
 // across sessions, Settings with its list of sections and search, and the
 // setup guide with its steps. A click outside the card or Esc closes them.
 
-import { AboutSlint, ScrollView } from "std-widgets.slint";
+import { AboutSlint } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, SheetRow, ThemeCard } from "data.slint";
-import { Field, Icon, IconButton, Press, HLine, VLine, Switch, ProjectMark } from "widgets.slint";
+import { Field, Icon, IconButton, Press, HLine, VLine, Switch, ProjectMark, QuietScroll } from "widgets.slint";
 import { CardButton, GhostButton } from "waiting.slint";
 
 /// A small button with a word on it, at the end of a row.
@@ -726,7 +726,7 @@ component SectionList inherits Rectangle {
         Rectangle { height: 8px; }
 
         // The sections scroll when the card is too short for them all.
-        ScrollView {
+        QuietScroll {
             vertical-stretch: 1;
             VerticalLayout {
                 alignment: start;
@@ -1061,7 +1061,7 @@ export component SheetLayer inherits Rectangle {
         if State.sheet == 1: VerticalLayout {
             SheetHead { }
             HLine { }
-            ScrollView {
+            QuietScroll {
                 vertical-stretch: 1;
                 VerticalLayout {
                     alignment: start;
@@ -1083,7 +1083,7 @@ export component SheetLayer inherits Rectangle {
                 horizontal-stretch: 1;
                 SheetHead { }
                 HLine { }
-                ScrollView {
+                QuietScroll {
                     vertical-stretch: 1;
                     VerticalLayout {
                         alignment: start;
@@ -1112,7 +1112,7 @@ export component SheetLayer inherits Rectangle {
                 horizontal-stretch: 1;
                 SheetHead { }
                 HLine { }
-                ScrollView {
+                QuietScroll {
                     vertical-stretch: 1;
                     VerticalLayout {
                         alignment: start;

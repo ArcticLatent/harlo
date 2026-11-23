@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SidebarRow, RowKind } from "data.slint";
-import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark } from "widgets.slint";
+import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark, QuietBar } from "widgets.slint";
 
 /// Space between the sidebar's edge and its content.
 global Inset {
@@ -463,10 +463,22 @@ export component Sidebar inherits Rectangle {
                 }
             }
 
-            if State.sidebar-notice == "": ListView {
+            if State.sidebar-notice == "": Rectangle {
                 vertical-stretch: 1;
-                for row in State.sidebar-rows: Item {
-                    entry: row;
+                sessions := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    vertical-scrollbar-policy: always-off;
+                    for row in State.sidebar-rows: Item {
+                        entry: row;
+                    }
+                }
+                QuietBar {
+                    x: parent.width - self.width;
+                    height: parent.height;
+                    content-y <=> sessions.content-y;
+                    content-height: sessions.content-height;
+                    visible-height: sessions.visible-height;
                 }
             }
         }

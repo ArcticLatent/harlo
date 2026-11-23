@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, FileRow } from "data.slint";
-import { Icon, FileIcon, Press } from "widgets.slint";
+import { Icon, FileIcon, Press, QuietBar } from "widgets.slint";
 
 /// One file or folder, indented by depth; folders with a chevron.
 component Entry inherits Press {
@@ -96,16 +96,28 @@ export component FilesPanel inherits VerticalLayout {
             color: Theme.text-base;
         }
     }
-    if State.files-note == "": ListView {
+    if State.files-note == "": Rectangle {
         vertical-stretch: 1;
-        accessible-label: "Folder";
-        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-        for entry in State.file-rows: HorizontalLayout {
-            padding-left: 8px;
-            padding-right: 8px;
-            Entry {
-                entry: entry;
+        folder := ListView {
+            width: parent.width;
+            height: parent.height;
+            accessible-label: "Folder";
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+            for entry in State.file-rows: HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                Entry {
+                    entry: entry;
+                }
             }
+        }
+        QuietBar {
+            x: parent.width - self.width;
+            height: parent.height;
+            content-y <=> folder.content-y;
+            content-height: folder.content-height;
+            visible-height: folder.visible-height;
         }
     }
 }

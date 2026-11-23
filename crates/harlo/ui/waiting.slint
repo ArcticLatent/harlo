@@ -2,11 +2,10 @@
 // undo to keep or cancel, an approval to allow or refuse, and questions to
 // answer. The oldest of each shows; "1 of 3" says more are waiting.
 
-import { ScrollView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, CardFile, Question, Answer } from "data.slint";
-import { Icon, Press, Field } from "widgets.slint";
+import { Icon, Press, Field, QuietScroll } from "widgets.slint";
 import { Counts, PatchLine } from "timeline.slint";
 
 /// How the cards are laid out.
@@ -486,13 +485,10 @@ component QuestionsView inherits Card {
         text: State.question-card.title;
         count: State.question-card.count;
     }
-    ScrollView {
+    QuietScroll {
         height: min(questions.preferred-height,
             max(80px, root.room - 2 * Cards.padding - 2 * root.gap
                 - heading.preferred-height - actions.preferred-height));
-        // Only up and down: the questions fit the card's width.
-        content-width: self.visible-width;
-        content-height: questions.preferred-height;
         questions := VerticalLayout {
             width: parent.visible-width;
             spacing: 14px;
@@ -520,14 +516,11 @@ component QuestionsView inherits Card {
 
 /// The cards for what the open session waits on, as tall as `room` allows,
 /// scrolling past it.
-export component WaitingCards inherits ScrollView {
+export component WaitingCards inherits QuietScroll {
     /// The most height the cards may take.
     in property <length> room;
 
     height: min(cards.preferred-height, root.room);
-    // Only up and down: the cards fit the column's width.
-    content-width: self.visible-width;
-    content-height: cards.preferred-height;
 
     cards := VerticalLayout {
         width: root.visible-width;

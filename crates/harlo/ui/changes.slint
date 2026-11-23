@@ -8,7 +8,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, ChangeRow } from "data.slint";
-import { Icon, FileIcon, Press, IconButton, Field, HLine, VLine } from "widgets.slint";
+import { Icon, FileIcon, Press, IconButton, Field, HLine, VLine, QuietBar } from "widgets.slint";
 import { Counts, PatchLine, LinkButton } from "timeline.slint";
 import { CardButton } from "waiting.slint";
 
@@ -316,26 +316,40 @@ component Row inherits Rectangle {
 }
 
 /// The lists, which scroll; `marks` for the maximized diff's lines.
-component Rows inherits ListView {
+component Rows inherits Rectangle {
     in property <[ChangeRow]> rows;
     in property <bool> marks;
     /// The name Rust scrolls it by, and where in it Rust asks for.
     in property <string> name;
     in property <length> reveal-y;
-
-    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+    /// Its name for screen readers.
+    in property <string> label;
 
     property <int> scroll-serial: Requests.scroll-serial;
     changed scroll-serial => {
         if Requests.scroll == root.name {
-            self.content-y = -min(root.reveal-y,
-                max(0, self.content-height - self.visible-height));
+            list.content-y = -min(root.reveal-y,
+                max(0, list.content-height - list.visible-height));
         }
     }
 
-    for row in root.rows: Row {
-        entry: row;
-        marks: root.marks;
+    list := ListView {
+        width: parent.width;
+        height: parent.height;
+        accessible-label: root.label;
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+        for row in root.rows: Row {
+            entry: row;
+            marks: root.marks;
+        }
+    }
+    QuietBar {
+        x: parent.width - self.width;
+        height: parent.height;
+        content-y <=> list.content-y;
+        content-height: list.content-height;
+        visible-height: list.visible-height;
     }
 }
 
@@ -481,7 +495,7 @@ component Lists inherits VerticalLayout {
     }
     if State.changes-note == "": Rows {
         vertical-stretch: 1;
-        accessible-label: "Changed files";
+        label: "Changed files";
         rows: State.change-rows;
         name: "changes-list";
         reveal-y: State.change-rows-y;
@@ -521,7 +535,7 @@ component SelectedDiff inherits VerticalLayout {
     if State.change-path != "": HLine { }
     if State.change-path != "": Rows {
         vertical-stretch: 1;
-        accessible-label: "Selected diff";
+        label: "Selected diff";
         rows: State.change-diff;
         marks: true;
         name: "changes-diff";
