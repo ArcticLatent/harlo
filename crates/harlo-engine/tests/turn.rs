@@ -123,6 +123,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         steering: None,
         compact_at: None,
         skills: Vec::new(),
+        todo: false,
         history: vec![Message::User {
             id: "msg_0".into(),
             time: Created { created: 0 },

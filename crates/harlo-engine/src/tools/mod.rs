@@ -166,6 +166,11 @@ pub enum Plan {
         /// The questions.
         questions: Vec<crate::question::Question>,
     },
+    /// Writes the session's todo list.
+    TodoWrite {
+        /// The whole list.
+        todos: Vec<crate::todo::Todo>,
+    },
     /// Loads a skill's instructions; run by the turn, which knows them.
     Skill {
         /// The skill's ID.
@@ -278,6 +283,9 @@ impl Plan {
                 questions: crate::question::parse(input)?,
             }),
             "skill" => Ok(Self::Skill { id: text("id")? }),
+            "todowrite" => Ok(Self::TodoWrite {
+                todos: crate::todo::parse(input)?,
+            }),
             "search_sessions" => Ok(Self::SearchSessions {
                 query: text("query")?,
             }),
@@ -340,6 +348,11 @@ impl Plan {
             Self::Question { questions } => Permission {
                 action: "question",
                 resources: questions.iter().map(|q| q.question.clone()).collect(),
+                metadata: Map::new(),
+            },
+            Self::TodoWrite { .. } => Permission {
+                action: "todowrite",
+                resources: vec!["*".to_owned()],
                 metadata: Map::new(),
             },
             Self::Skill { id } => Permission {
@@ -442,6 +455,14 @@ impl Plan {
             }
             Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
             Self::Skill { id } => Err(format!("There's no skill {id}.")),
+            Self::TodoWrite { todos } => Ok(Output {
+                text: crate::todo::summary(&todos),
+                metadata: json!({ "todos": todos, "truncated": false })
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default(),
+                changed: Vec::new(),
+            }),
             Self::Shell {
                 command,
                 timeout_ms,

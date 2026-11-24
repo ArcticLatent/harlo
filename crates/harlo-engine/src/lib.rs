@@ -28,6 +28,7 @@ pub mod question;
 mod rules;
 pub mod skills;
 pub mod snapshot;
+pub mod todo;
 pub mod tools;
 mod turn;
 

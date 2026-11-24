@@ -156,6 +156,8 @@ pub struct Config {
     pub permissions: Vec<Rule>,
     /// Extra instruction files (`instructions`): paths, `*` patterns, URLs.
     pub instructions: Vec<String>,
+    /// Whether agents keep a todo list (`experimental.todo`).
+    pub todo: bool,
     /// Extra skill folders (`skills`).
     pub skills: Vec<String>,
     /// Commands (`commands`), by name: `template`, `description`, `agent`
@@ -220,6 +222,7 @@ impl Config {
             permissions,
             instructions: strings(&value["instructions"]),
             skills: strings(&value["skills"]),
+            todo: value["experimental"]["todo"].as_bool().unwrap_or(false),
             commands: value["commands"].clone(),
         })
     }

@@ -762,6 +762,7 @@ impl Server {
             // Near the model's context limit, the next step starts from a summary.
             compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
             skills: self.skills_for(&session.location.directory).await,
+            todo: self.config.todo,
             steering: Some(Arc::new(crate::agents::SessionSteering {
                 server: Arc::clone(self),
                 session: session.id.clone(),

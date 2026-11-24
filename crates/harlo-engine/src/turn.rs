@@ -53,6 +53,8 @@ pub struct Turn {
     /// Where messages that steer the turn come from; none, and nothing
     /// joins it once it started.
     pub steering: Option<std::sync::Arc<dyn Steering>>,
+    /// Whether the model keeps a todo list (`experimental.todo`).
+    pub todo: bool,
     /// The skills the model may load, and people may have attached.
     pub skills: Vec<crate::skills::Skill>,
     /// The context size, in tokens, from which the next step starts from a
@@ -294,6 +296,9 @@ pub async fn run(
     }
     if turn.memory.is_some() {
         definitions.extend(crate::memory::definitions());
+    }
+    if turn.todo {
+        definitions.push(crate::todo::definition());
     }
     let mut compacted = false;
     for _ in 0..MAX_STEPS {
@@ -663,6 +668,10 @@ async fn call_tool(
     stop: &CancellationToken,
 ) -> Called {
     let plan = match Plan::new(name, &input, &turn.cwd) {
+        Ok(Plan::TodoWrite { .. }) if !turn.todo => {
+            let why = format!("There is no tool called `{name}`.");
+            return Called::Ran(failed(input, "tool", why), Vec::new());
+        }
         Ok(Plan::Remember { .. } | Plan::SearchSessions { .. }) if turn.memory.is_none() => {
             let why = format!("There is no tool called `{name}`. Notes are off.");
             return Called::Ran(failed(input, "tool", why), Vec::new());
