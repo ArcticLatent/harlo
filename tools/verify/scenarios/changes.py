@@ -2,6 +2,8 @@
 session's and the project's uncommitted ones, with the diff a click away;
 committed from the panel, it's a commit in the project's git."""
 
+ENGINE = True
+
 import subprocess
 
 from _common import close_sheet, open_project_session, send, settings

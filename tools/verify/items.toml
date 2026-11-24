@@ -183,3 +183,9 @@ checks = ["window:phone", "unit:harlo:phone", "unit:harlo-core:phone", "unit:har
 id = "opencode-api"
 title = "The OpenCode v2 client's other endpoints: sessions, history, files, config"
 checks = ["unit:opencode-client:m4", "unit:opencode-client:m6", "unit:opencode-client:m7"]
+
+[[item]]
+id = "engine"
+title = "Harlo's own server (harlo-server on harlo-engine): one turn with an approved edit, its diff, a restart; events replayed after a reconnect"
+checks = ["unit:harlo-engine", "unit:harlo-server", "window:turn", "engine:turn", "engine:approvals", "engine:queue", "engine:changes", "engine:restart", "engine:sessions"]
+

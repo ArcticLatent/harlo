@@ -1,6 +1,8 @@
 """After a restart Harlo opens the tabs that were open, with the session
 that was showing."""
 
+ENGINE = True
+
 from _common import open_project_session, send
 
 

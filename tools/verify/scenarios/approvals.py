@@ -2,6 +2,8 @@
 once, it runs and the answer follows. A second one is denied with a
 reason, which the agent is told."""
 
+ENGINE = True
+
 from _common import open_project_session, send
 
 

@@ -3,7 +3,7 @@
 # adds `default`. Paths are the repository's, changed since the last green
 # run (target/verify/last-green.json), or since main without one.
 
-default = ["lint:*", "unit:*", "window:*"]
+default = ["lint:*", "unit:*", "window:*", "engine:*"]
 
 [[rule]]
 paths = ["*.md", "docs/**", "packaging/**", ".github/**", "LICENSE*", "*.txt"]
@@ -11,7 +11,11 @@ checks = []
 
 [[rule]]
 paths = ["crates/opencode-client/**"]
-checks = ["lint:*", "unit:*", "window:*"]
+checks = ["lint:*", "unit:*", "window:*", "engine:*"]
+
+[[rule]]
+paths = ["crates/harlo-engine/**", "crates/harlo-server/**"]
+checks = ["lint:*", "unit:harlo-engine", "unit:harlo-server", "engine:*"]
 
 [[rule]]
 paths = ["crates/harlo-core/**"]
@@ -23,11 +27,11 @@ checks = ["unit:harlo-core", "unit:harlo", "window:phone"]
 
 [[rule]]
 paths = ["crates/harlo/**"]
-checks = ["lint:*", "unit:harlo", "window:*"]
+checks = ["lint:*", "unit:harlo", "window:*", "engine:*"]
 
 [[rule]]
 paths = ["Cargo.toml", "Cargo.lock"]
-checks = ["lint:*", "unit:*", "window:*"]
+checks = ["lint:*", "unit:*", "window:*", "engine:*"]
 
 [[rule]]
 paths = ["tools/verify/scenarios/real_*"]

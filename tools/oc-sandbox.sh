@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Starts a private OpenCode server and the scripted model in a scratch folder.
+# Starts a private OpenCode server (or, with HARLO_BACKEND=engine, harlo-server)
+# and the scripted model in a scratch folder.
 #
 #   tools/oc-sandbox.sh [dir]     prints KEY=VALUE lines (URL, PASSWORD, DIR, PROJECT, …)
 #   tools/oc-sandbox.sh stop dir  stops both and removes the folder
@@ -13,6 +14,11 @@ set -euo pipefail
 VERSION=$(cat "$(dirname "$0")/../crates/opencode-client/OPENCODE_VERSION" 2>/dev/null || echo 2.3.2)
 BIN=${HARLO_OPENCODE_BIN:-$HOME/.local/share/harlo-dev/opencode/$VERSION/opencode}
 TOOLS=$(cd "$(dirname "$0")" && pwd)
+# HARLO_BACKEND=engine starts Harlo's own server (target/debug/harlo-server,
+# built beforehand) in OpenCode's place, with the same config and project.
+if [[ ${HARLO_BACKEND:-opencode} == engine ]]; then
+  BIN=${HARLO_SERVER_BIN:-$TOOLS/../target/debug/harlo-server}
+fi
 
 if [[ ${1:-} == stop ]]; then
   dir=$2
