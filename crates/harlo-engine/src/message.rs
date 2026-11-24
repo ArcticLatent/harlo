@@ -28,6 +28,19 @@ pub enum Message {
         /// The text.
         text: String,
     },
+    /// What the server tells the model in the person's place, such as a
+    /// change of agent.
+    Synthetic {
+        /// Its ID; it sorts in the session's order.
+        id: String,
+        /// When it was made.
+        time: Created,
+        /// What the model reads.
+        text: String,
+        /// One line for people, when they should see it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+    },
     /// One model step.
     Assistant(Box<Assistant>),
     /// The end of a run.
@@ -49,7 +62,7 @@ impl Message {
     #[must_use]
     pub fn id(&self) -> &str {
         match self {
-            Self::User { id, .. } | Self::Idle { id, .. } => id,
+            Self::User { id, .. } | Self::Synthetic { id, .. } | Self::Idle { id, .. } => id,
             Self::Assistant(a) => &a.id,
         }
     }
@@ -296,6 +309,7 @@ mod tests {
             model: ModelRef {
                 provider: "fake".into(),
                 model: "fake-coder".into(),
+                variant: None,
             },
             content: vec![
                 Part::Text { text: "hi".into() },

@@ -31,6 +31,19 @@ pub fn descending_id(prefix: &str) -> String {
     make(prefix, true)
 }
 
+/// A new ascending ID that sorts just before `next`, with the same prefix;
+/// none when `next` isn't an ascending ID or nothing sorts before it.
+///
+/// IDs made in the same millisecond by different processes don't sort by
+/// when they were made; this puts one the server made where it belongs.
+#[must_use]
+pub fn just_before(next: &str) -> Option<String> {
+    let (prefix, body) = next.split_once('_')?;
+    let time = u64::from_str_radix(body.get(..TIME_DIGITS)?, 16).ok()?;
+    let value = time.checked_sub(1)?;
+    Some(with_value(prefix, value))
+}
+
 fn make(prefix: &str, descending: bool) -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -50,6 +63,11 @@ fn make(prefix: &str, descending: bool) -> String {
     if descending {
         value = !value & 0xffff_ffff_ffff;
     }
+    with_value(prefix, value)
+}
+
+/// An ID with time-and-counter `value`, then random letters.
+fn with_value(prefix: &str, value: u64) -> String {
     let mut out = format!("{prefix}_{value:0TIME_DIGITS$x}");
     let mut random = [0_u8; BODY_LEN - TIME_DIGITS];
     if getrandom::fill(&mut random).is_err() {
@@ -74,5 +92,8 @@ mod tests {
         let (c, d) = (descending_id("ses"), descending_id("ses"));
         assert!(c > d, "{c} then {d}");
         assert_eq!(a.len(), "msg_".len() + BODY_LEN);
+        let before = just_before(&b).expect("before");
+        assert!(before < b && before.len() == b.len(), "{before} before {b}");
+        assert_eq!(just_before("msg_000000000000abc"), None);
     }
 }

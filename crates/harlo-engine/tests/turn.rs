@@ -103,6 +103,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         model: ModelRef {
             provider: "fake".into(),
             model: "fake-coder".into(),
+            variant: None,
         },
         provider: ProviderSpec {
             id: "fake".into(),
@@ -112,14 +113,14 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
             models: vec![ModelSpec {
                 id: "fake-coder".into(),
                 name: "Fake Coder".into(),
-                context: None,
-                output: None,
+                ..ModelSpec::default()
             }],
         },
         system: "You are a coding agent.".into(),
         rules,
         shadow: None,
         memory: None,
+        steering: None,
         history: vec![Message::User {
             id: "msg_0".into(),
             time: Created { created: 0 },

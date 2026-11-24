@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use harlo_engine::question::Asked;
 use harlo_engine::{
     Answer, Ask, Assistant, Config, Created, ErrorInfo, Event, Gate, Message, Outcome, Part, Rule,
-    Sink, StepTime, ToolState, Turn, agent_rules, ascending_id, descending_id, now,
+    Sink, StepTime, ToolState, Turn, ascending_id, descending_id, now,
 };
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, oneshot};
@@ -24,8 +24,6 @@ use tokio_util::sync::CancellationToken;
 use crate::git;
 use crate::store::{Location, Session, SessionTime, Store, StoredEvent};
 
-/// The name of the one agent M1 has.
-const AGENT: &str = "build";
 /// Events a slow client may fall behind by before it must reconnect.
 const BACKLOG: usize = 4096;
 
@@ -60,7 +58,7 @@ pub(crate) struct Live {
     /// Forms answered or dismissed, with their state, by ID.
     pub(crate) settled_forms: HashMap<String, Value>,
     /// Prompts not yet delivered to a run, by session.
-    inbox: HashMap<String, Vec<(Message, String)>>,
+    pub(crate) inbox: HashMap<String, Vec<(Message, String)>>,
 }
 
 /// The server.
@@ -80,6 +78,8 @@ pub struct Server {
     events: broadcast::Sender<Outgoing>,
     emitting: Mutex<()>,
     pub(crate) live: Mutex<Live>,
+    /// The agents sessions run as.
+    pub(crate) agents: Vec<harlo_engine::agents::Agent>,
 }
 
 impl std::fmt::Debug for Server {
@@ -130,6 +130,7 @@ impl Server {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|t| jsonc_value(&t));
         let (events, _) = broadcast::channel(BACKLOG);
+        let agents = harlo_engine::agents::builtins(&snapshots.with_file_name("plans"));
         end_unfinished(&store);
         Self {
             store,
@@ -143,6 +144,7 @@ impl Server {
             events,
             emitting: Mutex::new(()),
             live: Mutex::default(),
+            agents,
         }
     }
 
@@ -257,6 +259,7 @@ impl Server {
             revert: None,
             permissions: Vec::new(),
             model: None,
+            agent: None,
         };
         self.store.put_session(&session)?;
         self.emit(
@@ -402,6 +405,9 @@ impl Server {
                         Message::User { id, text, time } => json!({
                             "id": id, "type": "user", "payload": { "text": text }, "delivery": delivery, "time": time,
                         }),
+                        Message::Synthetic { id, text, time, .. } => json!({
+                            "id": id, "type": "synthetic", "payload": { "text": text }, "delivery": delivery, "time": time,
+                        }),
                         _ => Value::Null,
                     })
                     .collect()
@@ -508,7 +514,9 @@ impl Server {
     /// Runs session `id` until its inbox is empty or it's stopped.
     async fn drive(self: Arc<Self>, id: String, stop: CancellationToken) {
         while let Ok(mut session) = self.session(&id) {
-            let delivered = lock(&self.live).inbox.remove(&id).unwrap_or_default();
+            let mut delivered = lock(&self.live).inbox.remove(&id).unwrap_or_default();
+            let inbox_ids: Vec<String> = delivered.iter().map(|(m, _)| m.id().to_owned()).collect();
+            order_notices(&mut delivered);
             let started = now();
             session.time.busy = Some(started);
             session.time.updated = started;
@@ -520,13 +528,13 @@ impl Server {
                 Some(&id),
             );
             let directory = session.location.directory.clone();
-            for (message, _) in &delivered {
+            for ((message, _), inbox_id) in delivered.iter().zip(&inbox_ids) {
                 if let Err(e) = self.store.put_message(&id, message) {
                     tracing::error!(name: "message.store.failed", error = %e, "couldn't store a prompt");
                 }
                 self.emit(
                     "session.inbox.delivered",
-                    json!({ "sessionID": id, "inboxID": message.id() }),
+                    json!({ "sessionID": id, "inboxID": inbox_id }),
                     Some(&directory),
                     Some(&id),
                 );
@@ -535,7 +543,11 @@ impl Server {
             self.finish(&id, word, error);
 
             let mut live = lock(&self.live);
-            let more = live.inbox.get(&id).is_some_and(|q| !q.is_empty());
+            // (Notices alone, such as a change of agent, wait for a prompt.)
+            let more = live.inbox.get(&id).is_some_and(|q| {
+                q.iter()
+                    .any(|(m, _)| !matches!(m, Message::Synthetic { .. }))
+            });
             if !more || stop.is_cancelled() {
                 live.runs.remove(&id);
                 break;
@@ -576,20 +588,30 @@ impl Server {
             Err(e) => return ("failed", Some(format!("Couldn't read the session: {e}"))),
         };
         let directory = session.location.directory.clone();
+        let agent = self.agent_for(session.agent.as_deref());
+        let mut system = self.system_prompt(&directory).await;
+        if let Some(own) = &agent.system {
+            system = format!("{own}\n\n{system}");
+        }
         let turn = Turn {
             cwd: PathBuf::from(&directory),
-            agent: AGENT.to_owned(),
+            agent: agent.id.clone(),
             model,
             provider: provider.clone(),
-            system: self.system_prompt(&directory).await,
+            system,
             rules: vec![
-                ("agent".to_owned(), agent_rules()),
+                ("agent".to_owned(), agent.rules.clone()),
                 ("config".to_owned(), self.config.permissions.clone()),
                 ("session".to_owned(), session.permissions.clone()),
             ],
             history,
             shadow: Some(self.shadow(&directory)),
             memory: self.memory_for(session),
+            steering: Some(Arc::new(crate::agents::SessionSteering {
+                server: Arc::clone(self),
+                session: session.id.clone(),
+                directory: directory.clone(),
+            })),
         };
         let hooks = Hooks {
             server: Arc::clone(self),
@@ -956,6 +978,21 @@ impl Gate for Hooks {
             .ask_questions(&self.session, &self.directory, &asked);
         // (A run that ended, or a server going down, dismisses them.)
         async move { rx?.await.ok().flatten() }
+    }
+}
+
+/// Gives the server's notices IDs that keep them before what was
+/// delivered after them: a client's ID made in the same millisecond can
+/// sort before one the server made earlier.
+fn order_notices(delivered: &mut [(Message, String)]) {
+    for at in (0..delivered.len().saturating_sub(1)).rev() {
+        let next = delivered[at + 1].0.id().to_owned();
+        if let Message::Synthetic { id, .. } = &mut delivered[at].0
+            && *id >= next
+            && let Some(before) = harlo_engine::just_before(&next)
+        {
+            *id = before;
+        }
     }
 }
 

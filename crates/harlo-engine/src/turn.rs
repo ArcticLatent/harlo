@@ -50,6 +50,9 @@ pub struct Turn {
     /// Where notes are kept and earlier sessions searched; none, and the
     /// model isn't offered `remember` or `search_sessions`.
     pub memory: Option<std::sync::Arc<dyn crate::memory::Memory>>,
+    /// Where messages that steer the turn come from; none, and nothing
+    /// joins it once it started.
+    pub steering: Option<std::sync::Arc<dyn Steering>>,
 }
 
 /// Something that happened during a turn.
@@ -210,6 +213,13 @@ pub enum Answer {
     Reject(Option<String>),
 }
 
+/// Where a turn picks up what people sent while it ran, to steer it.
+pub trait Steering: Send + Sync + std::fmt::Debug {
+    /// The messages that arrived to steer the turn, now delivered; none
+    /// when nothing came.
+    fn take(&self) -> Vec<Message>;
+}
+
 /// Where a turn asks a person: for permission, and the agent's questions.
 pub trait Gate: Send + Sync {
     /// Waits for a person's answer to `ask`.
@@ -254,6 +264,10 @@ pub async fn run(
     for _ in 0..MAX_STEPS {
         if stop.is_cancelled() {
             return Outcome::Interrupted;
+        }
+        // Between steps is a safe point: what steers the turn joins it here.
+        if let Some(steering) = &turn.steering {
+            turn.history.extend(steering.take());
         }
         let (assistant, go_on) = match step(&mut turn, &definitions, sink, gate, stop).await {
             Ok(done) => done,
@@ -358,10 +372,24 @@ async fn ask_model(
         error: None,
         snapshot: None,
     };
-    let body = chat::request(&turn.model.model, &turn.system, &turn.history, definitions);
+    let (extra, headers) = turn
+        .provider
+        .models
+        .iter()
+        .find(|m| m.id == turn.model.model)
+        .map(|m| m.request_extras(turn.model.variant.as_deref()))
+        .unwrap_or_default();
+    let body = chat::request(
+        &turn.model.model,
+        &turn.system,
+        &turn.history,
+        definitions,
+        &extra,
+    );
     let endpoint = Endpoint {
         base_url: &turn.provider.base_url,
         api_key: turn.provider.api_key.as_deref(),
+        headers: &headers,
     };
     let mut first_token = None;
     let reply = {

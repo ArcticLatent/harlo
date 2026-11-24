@@ -8,6 +8,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod agents;
 mod api;
 mod forms;
 mod fs;

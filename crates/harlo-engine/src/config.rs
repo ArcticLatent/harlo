@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::Error;
 use crate::rules::Rule;
@@ -24,10 +24,24 @@ pub struct ModelRef {
     /// The model's ID at that provider.
     #[serde(rename = "id")]
     pub model: String,
+    /// One of the model's variants, such as `high`, when one was chosen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+}
+
+/// A variant of a model: what its requests add.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantSpec {
+    /// Its ID, such as `high`.
+    pub id: String,
+    /// Fields merged into the request's body.
+    pub body: Map<String, Value>,
+    /// Headers added to the request.
+    pub headers: Vec<(String, String)>,
 }
 
 /// One model a provider offers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelSpec {
     /// Its ID at the provider.
     pub id: String,
@@ -37,6 +51,35 @@ pub struct ModelSpec {
     pub context: Option<u64>,
     /// The most it writes in one reply, when known.
     pub output: Option<u64>,
+    /// Fields merged into every request's body.
+    pub body: Map<String, Value>,
+    /// Headers added to every request.
+    pub headers: Vec<(String, String)>,
+    /// Its variants, in the order the file lists them.
+    pub variants: Vec<VariantSpec>,
+}
+
+impl ModelSpec {
+    /// What a request with `variant` adds: the model's body and headers,
+    /// then the variant's over them.
+    #[must_use]
+    pub fn request_extras(
+        &self,
+        variant: Option<&str>,
+    ) -> (Map<String, Value>, Vec<(String, String)>) {
+        let mut body = self.body.clone();
+        let mut headers = self.headers.clone();
+        if let Some(v) = variant.and_then(|id| self.variants.iter().find(|v| v.id == id)) {
+            body.extend(v.body.clone());
+            headers.retain(|(name, _)| {
+                !v.headers
+                    .iter()
+                    .any(|(over, _)| over.eq_ignore_ascii_case(name))
+            });
+            headers.extend(v.headers.clone());
+        }
+        (body, headers)
+    }
 }
 
 /// A provider: where its OpenAI-compatible API is and how to sign requests.
@@ -148,6 +191,7 @@ impl Config {
                 p.models.first().map(|m| ModelRef {
                     provider: p.id.clone(),
                     model: m.id.clone(),
+                    variant: None,
                 })
             })
         })
@@ -181,6 +225,20 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
             name: m["name"].as_str().unwrap_or(model).to_owned(),
             context: m["limit"]["context"].as_u64(),
             output: m["limit"]["output"].as_u64(),
+            body: m["body"].as_object().cloned().unwrap_or_default(),
+            headers: headers_of(&m["headers"]),
+            variants: m["variants"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| {
+                    Some(VariantSpec {
+                        id: v["id"].as_str()?.to_owned(),
+                        body: v["body"].as_object().cloned().unwrap_or_default(),
+                        headers: headers_of(&v["headers"]),
+                    })
+                })
+                .collect(),
         })
         .collect();
     Some(ProviderSpec {
@@ -192,6 +250,15 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
     })
 }
 
+/// A JSON object of header names and values.
+fn headers_of(v: &Value) -> Vec<(String, String)> {
+    v.as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+        .collect()
+}
+
 /// `"provider/model"` or `{ "providerID", "model" }`.
 fn model_ref(v: &Value) -> Option<ModelRef> {
     if let Some(s) = v.as_str() {
@@ -199,6 +266,7 @@ fn model_ref(v: &Value) -> Option<ModelRef> {
         return Some(ModelRef {
             provider: provider.to_owned(),
             model: model.to_owned(),
+            variant: None,
         });
     }
     let provider = v["providerID"].as_str()?;
@@ -206,6 +274,7 @@ fn model_ref(v: &Value) -> Option<ModelRef> {
     Some(ModelRef {
         provider: provider.to_owned(),
         model: model.to_owned(),
+        variant: v["variant"].as_str().map(str::to_owned),
     })
 }
 
@@ -224,7 +293,14 @@ mod tests {
                 "fake": {
                     "name": "Fake",
                     "settings": { "baseURL": "http://127.0.0.1:9/v1/", "apiKey": "k" },
-                    "models": { "fake-coder": { "name": "Fake Coder", "limit": { "context": 128000, "output": 8192 } } },
+                    "models": { "fake-coder": {
+                        "name": "Fake Coder", "limit": { "context": 128000, "output": 8192 },
+                        "body": { "temperature": 0.2 }, "headers": { "X-Team": "a" },
+                        "variants": [
+                            { "id": "high", "body": { "reasoning_effort": "high" } },
+                            { "id": "low", "body": { "reasoning_effort": "low" }, "headers": { "X-Team": "b" } }
+                        ]
+                    } },
                 },
                 "nourl": { "models": {} }
             }
@@ -243,8 +319,15 @@ mod tests {
             (model.provider.as_str(), model.model.as_str()),
             ("fake", "fake-coder")
         );
-        assert!(config.resolve(&model).is_some());
+        let (_, spec) = config.resolve(&model).expect("resolved");
         assert_eq!(config.permissions[0].effect, Effect::Ask);
+        let (body, headers) = spec.request_extras(Some("low"));
+        assert_eq!(
+            Value::Object(body),
+            serde_json::json!({ "temperature": 0.2, "reasoning_effort": "low" })
+        );
+        assert_eq!(headers.last(), Some(&("X-Team".to_owned(), "b".to_owned())));
+        assert_eq!(spec.request_extras(None).0.len(), 1, "no variant");
     }
 
     #[test]

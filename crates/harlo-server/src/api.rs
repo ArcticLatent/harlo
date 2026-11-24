@@ -21,7 +21,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use base64::Engine as _;
 use futures_util::{Stream, StreamExt, stream};
-use harlo_engine::{Message, Rule, agent_rules, now};
+use harlo_engine::{Message, Rule, now};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::broadcast::error::RecvError;
@@ -55,6 +55,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/session/{id}/permission", get(permissions))
         .route("/api/session/{id}/permission/{request}/reply", post(reply))
         .route("/api/session/{id}/prompt", post(prompt))
+        .route("/api/session/{id}/model", post(set_model))
+        .route("/api/session/{id}/agent", post(set_agent))
         .route("/api/session/{id}/interrupt", post(interrupt))
         .route("/api/session/{id}/revert", delete(cancel_revert))
         .route("/api/session/{id}/revert/stage", post(stage_revert))
@@ -431,19 +433,45 @@ async fn interrupt(State(server): Shared, Path(id): Path<String>) -> Answer {
     done()
 }
 
-async fn agents(Query(q): Params) -> Answer {
-    let build = json!({
-        "id": "build", "name": "Build", "mode": "primary", "hidden": false,
-        "description": "The default agent. Runs tools as the permission rules allow.",
-        "permissions": agent_rules(),
-    });
-    ok(json!({ "location": location(&q), "data": [build] }))
+async fn agents(State(server): Shared, Query(q): Params) -> Answer {
+    ok(json!({ "location": location(&q), "data": server.agents_json() }))
+}
+
+/// A model chosen for a session.
+#[derive(Debug, serde::Deserialize)]
+struct ModelChoice {
+    model: harlo_engine::ModelRef,
+}
+
+async fn set_model(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<ModelChoice>,
+) -> Answer {
+    server.set_model(&id, body.model)?;
+    done()
+}
+
+/// An agent chosen for a session.
+#[derive(Debug, serde::Deserialize)]
+struct AgentChoice {
+    agent: String,
+}
+
+async fn set_agent(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<AgentChoice>,
+) -> Answer {
+    server.set_agent(&id, &body.agent)?;
+    done()
 }
 
 fn model_json(provider: &harlo_engine::ProviderSpec, m: &harlo_engine::ModelSpec) -> Value {
     json!({
         "id": m.id, "modelID": m.id, "providerID": provider.id, "name": m.name, "type": "chat",
-        "enabled": true, "status": "active", "variants": [],
+        "enabled": true, "status": "active",
+        "variants": m.variants.iter().map(|v| json!({ "id": v.id })).collect::<Vec<_>>(),
         "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
         "limit": { "context": m.context, "output": m.output },
     })

@@ -50,6 +50,9 @@ pub struct Session {
     /// The model it uses, when one was chosen for it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<ModelRef>,
+    /// The agent it runs as, when one was chosen for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 /// A folder.
@@ -189,7 +192,7 @@ impl Store {
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
-            Message::Idle { .. } => String::new(),
+            Message::Synthetic { .. } | Message::Idle { .. } => String::new(),
         };
         let conn = self.conn();
         conn.execute(
@@ -570,6 +573,7 @@ mod tests {
             revert: None,
             permissions: Vec::new(),
             model: None,
+            agent: None,
         };
         store.put_session(&session).expect("put");
         assert_eq!(store.session("ses_1").expect("get"), Some(session));

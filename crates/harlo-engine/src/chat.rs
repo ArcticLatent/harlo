@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sse_stream::SseByteStream;
 use tokio_util::sync::CancellationToken;
 
@@ -28,6 +28,8 @@ pub struct Endpoint<'a> {
     pub base_url: &'a str,
     /// The key, sent as a bearer token.
     pub api_key: Option<&'a str>,
+    /// Headers the model or its variant adds.
+    pub headers: &'a [(String, String)],
 }
 
 /// A piece of the reply as it streams.
@@ -74,8 +76,15 @@ pub(crate) struct Reply {
     pub finish: Option<String>,
 }
 
-/// The request's body: the system prompt, the history and the tools.
-pub(crate) fn request(model: &str, system: &str, history: &[Message], tools: &[Value]) -> Value {
+/// The request's body: the system prompt, the history and the tools,
+/// then the model's and variant's own fields over them.
+pub(crate) fn request(
+    model: &str,
+    system: &str,
+    history: &[Message],
+    tools: &[Value],
+    extra: &Map<String, Value>,
+) -> Value {
     let mut messages = vec![json!({ "role": "system", "content": system })];
     messages.extend(chat_messages(history));
     let mut body = json!({
@@ -92,6 +101,9 @@ pub(crate) fn request(model: &str, system: &str, history: &[Message], tools: &[V
         body["tools"] = json!(functions);
         body["tool_choice"] = json!("auto");
     }
+    if let Value::Object(fields) = &mut body {
+        fields.extend(extra.clone());
+    }
     body
 }
 
@@ -101,7 +113,9 @@ fn chat_messages(history: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
     for message in history {
         match message {
-            Message::User { text, .. } => out.push(json!({ "role": "user", "content": text })),
+            Message::User { text, .. } | Message::Synthetic { text, .. } => {
+                out.push(json!({ "role": "user", "content": text }));
+            }
             Message::Assistant(step) => {
                 let text: String = step
                     .content
@@ -179,6 +193,9 @@ pub(crate) async fn stream(
         .json(body);
     if let Some(key) = to.api_key {
         req = req.bearer_auth(key);
+    }
+    for (name, value) in to.headers {
+        req = req.header(name.as_str(), value.as_str());
     }
     let response = tokio::select! {
         () = stop.cancelled() => return Err(Error::stopped()),
@@ -477,6 +494,7 @@ mod tests {
             model: crate::ModelRef {
                 provider: "p".into(),
                 model: "m".into(),
+                variant: None,
             },
             content: vec![Part::Tool {
                 id: "c1".into(),
@@ -502,7 +520,15 @@ mod tests {
             },
             Message::Assistant(Box::new(step)),
         ];
-        let body = request("m", "sys", &history, &[]);
+        let extra = json!({ "reasoning_effort": "high" });
+        let body = request(
+            "m",
+            "sys",
+            &history,
+            &[],
+            extra.as_object().expect("object"),
+        );
+        assert_eq!(body["reasoning_effort"], "high", "a variant's fields");
         let messages = body["messages"].as_array().expect("messages");
         assert_eq!(messages.len(), 4);
         assert_eq!(

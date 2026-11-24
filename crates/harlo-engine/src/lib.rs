@@ -13,6 +13,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+pub mod agents;
 mod chat;
 mod config;
 mod error;
@@ -26,12 +27,12 @@ pub mod snapshot;
 pub mod tools;
 mod turn;
 
-pub use config::{Config, ModelRef, ModelSpec, ProviderSpec};
+pub use config::{Config, ModelRef, ModelSpec, ProviderSpec, VariantSpec};
 pub use error::Error;
-pub use id::{ascending_id, descending_id};
+pub use id::{ascending_id, descending_id, just_before};
 pub use message::{
     Assistant, Cache, Created, ErrorInfo, Message, Part, Snapshot, StepTime, Tokens, ToolState,
     ToolTime,
 };
 pub use rules::{Decision, Effect, Rule, agent_rules, decide};
-pub use turn::{Answer, Ask, Event, Gate, Outcome, Sink, Turn, now, run};
+pub use turn::{Answer, Ask, Event, Gate, Outcome, Sink, Steering, Turn, now, run};
