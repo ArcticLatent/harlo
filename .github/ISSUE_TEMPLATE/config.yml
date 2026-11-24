@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Help with Harlo
+    url: https://harlo.run/support
+    about: Setting up, pairing the iPhone, notifications, dictation and other common questions, and my email (hello@harlo.run) if you'd rather not post publicly.
+  - name: A security problem
+    url: https://github.com/ArcticLatent/harlo/blob/main/SECURITY.md
+    about: Please report privately, not in an issue.
