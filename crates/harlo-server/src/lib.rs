@@ -16,6 +16,7 @@ mod folder;
 mod forms;
 mod fs;
 mod git;
+mod goals;
 mod memory;
 mod phone;
 mod projects;

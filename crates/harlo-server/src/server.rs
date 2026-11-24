@@ -800,6 +800,9 @@ impl Server {
             } else {
                 ended
             };
+            if prompted {
+                self.review_goal(&session, word, &stop).await;
+            }
             self.finish(&id, word, error);
 
             let mut live = lock(&self.live);
@@ -974,6 +977,26 @@ impl Server {
     /// When there's no such session or model, or the model fails.
     pub(crate) async fn aside(&self, id: &str, prompt: &str) -> Result<Value, Refusal> {
         let session = self.session(id)?;
+        let (answer, cost) = self
+            .ask_model(&session, prompt, &CancellationToken::new())
+            .await
+            .map_err(Refusal::Bad)?;
+        Ok(json!({ "text": answer.text, "tokens": answer.tokens, "cost": cost }))
+    }
+
+    /// What session `session`'s model answers to `prompt` after the
+    /// conversation so far, with no tools and nothing stored; and what it
+    /// cost.
+    ///
+    /// # Errors
+    ///
+    /// When no model is set up, the store fails, or the model fails.
+    pub(crate) async fn ask_model(
+        &self,
+        session: &Session,
+        prompt: &str,
+        stop: &CancellationToken,
+    ) -> Result<(harlo_engine::generate::Answer, f64), String> {
         let folder = self.folder(&session.location.directory);
         let agent = folder.agent(session.agent.as_deref());
         let model = agent
@@ -981,12 +1004,12 @@ impl Server {
             .clone()
             .or_else(|| session.model.clone())
             .or_else(|| folder.config.default_model())
-            .ok_or_else(|| Refusal::Bad("No model is set up.".to_owned()))?;
+            .ok_or_else(|| "No model is set up.".to_owned())?;
         let (provider, spec) = folder.config.resolve(&model).ok_or_else(|| {
-            Refusal::Bad(format!(
+            format!(
                 "The model {}/{} isn't in the configuration.",
                 model.provider, model.model
-            ))
+            )
         })?;
         let mut system = self
             .system_prompt(&session.location.directory, &folder)
@@ -994,20 +1017,17 @@ impl Server {
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
         }
-        let stored = self.store.messages(id)?;
+        let stored = self
+            .store
+            .messages(&session.id)
+            .map_err(|e| format!("Couldn't read the session: {e}"))?;
         let mut history = harlo_engine::compaction::since_summary(&stored).to_vec();
         history.push(harlo_engine::generate::user(prompt));
-        let answer = harlo_engine::generate::answer(
-            provider,
-            &model,
-            &system,
-            &history,
-            &CancellationToken::new(),
-        )
-        .await
-        .map_err(|e| Refusal::Bad(e.to_string()))?;
+        let answer = harlo_engine::generate::answer(provider, &model, &system, &history, stop)
+            .await
+            .map_err(|e| e.to_string())?;
         let cost = spec.cost(&answer.tokens);
-        Ok(json!({ "text": answer.text, "tokens": answer.tokens, "cost": cost }))
+        Ok((answer, cost))
     }
 
     /// Answers `prompt` with `model`, or the default one, outside any

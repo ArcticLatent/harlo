@@ -82,6 +82,10 @@ impl Server {
         delivery: &str,
         skills: &[String],
     ) -> Result<Value, Refusal> {
+        if name == "goal" {
+            self.goal_command(id, arguments, delivery)?;
+            return Ok(Value::Null);
+        }
         let session = self.session(id)?;
         let directory = session.location.directory.clone();
         let Some(command) = self

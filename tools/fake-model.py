@@ -62,6 +62,7 @@ SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
 
 # How OpenCode asks the model to review a goal (/goal).
 REVIEWER = "Stop acting as the assistant. You are now the reviewer for the session's goal."
+HARLO_REVIEWER = "Review the session's goal now, as its reviewer rather than its assistant."
 
 # The verdict a goal's reviewer gives unless scripts.json keeps another.
 MET = '{"verdict":"done","reason":"The work is done and shown."}'
@@ -131,7 +132,7 @@ def plan(messages):
            for m in messages):
         return [("say", SUMMARY)]
     script = text_of(messages[last_user].get("content")).strip()
-    if script.startswith(REVIEWER):
+    if script.startswith((REVIEWER, HARLO_REVIEWER)):
         return [("say", stored_scripts().get("<reviewer>", MET))]
     for preamble in (SUBAGENT_PREAMBLE, HARLO_SUBAGENT_PREAMBLE):
         if script.startswith(preamble):

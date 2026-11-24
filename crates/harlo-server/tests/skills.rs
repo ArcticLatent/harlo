@@ -41,7 +41,7 @@ async fn commands_and_skills_reach_the_model() {
 
     let commands = client.commands(&folder).await.expect("commands");
     let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["greet", "init", "review"]);
+    assert_eq!(names, ["greet", "init", "review", "goal"]);
     assert!(commands.iter().all(|c| c.description.is_some()));
     let skills = client.skills(&folder).await.expect("skills");
     assert_eq!(

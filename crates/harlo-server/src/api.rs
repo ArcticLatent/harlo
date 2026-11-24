@@ -98,7 +98,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/vcs/diff", get(vcs_diff))
         .route("/api/session/{id}/generate", post(aside))
         .route("/api/experimental/generate/text", post(write_text))
-        .route("/api/rpc/opencode.goal/get", post(no_goal))
+        .route("/api/rpc/opencode.goal/get", post(read_goal))
         .route("/api/experimental/client-mcp", get(no_client_tools))
         // No web search tool yet: truthfully, no providers.
         .route("/api/websearch/provider", get(located_empty))
@@ -731,6 +731,7 @@ async fn command_list(State(server): Shared, Query(q): Params) -> Answer {
         .await
         .iter()
         .map(harlo_engine::commands::Command::to_json)
+        .chain([json!({ "name": "goal", "description": crate::goals::DESCRIPTION })])
         .collect();
     ok(json!({ "location": location(&q), "data": list }))
 }
@@ -1107,6 +1108,7 @@ async fn test_phone(State(server): Shared) -> Answer {
     ok(json!({ "sent": sent }))
 }
 
-async fn no_goal() -> Answer {
-    ok(json!({ "output": null }))
+async fn read_goal(State(server): Shared, axum::Json(body): axum::Json<Value>) -> Answer {
+    let session = body["input"]["sessionID"].as_str().unwrap_or_default();
+    ok(json!({ "output": server.goal(session) }))
 }
