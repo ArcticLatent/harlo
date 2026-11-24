@@ -9,7 +9,7 @@ use harlo_core::phone::RelayStatus;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use super::{code_pair, heading, int, note, pair, switch};
-use crate::app::{App, Setting};
+use crate::app::{App, PhoneHost, Setting};
 use crate::ui::SheetRow;
 use crate::window;
 
@@ -34,15 +34,20 @@ pub(super) fn phone_rows(app: &App) -> Vec<SheetRow> {
         ),
     ];
     if on {
-        rows.push(match (&state.running, &state.error) {
-            (Some(running), _) => {
+        rows.push(match (state.port(), &state.error) {
+            (Some(port), _) => {
                 let connected = state.connected.len();
                 let what = match connected {
-                    0 => format!("Port {}", running.address().port()),
-                    1 => format!("Port {} · 1 phone connected", running.address().port()),
-                    n => format!("Port {} · {n} phones connected", running.address().port()),
+                    0 => format!("Port {port}"),
+                    1 => format!("Port {port} · 1 phone connected"),
+                    n => format!("Port {port} · {n} phones connected"),
                 };
-                code_pair("Listening", &what, 1)
+                let label = if state.host == PhoneHost::Server {
+                    "Listening on the server"
+                } else {
+                    "Listening"
+                };
+                code_pair(label, &what, 1)
             }
             (None, Some(why)) => pair("Not started", why, 2),
             (None, None) => pair("Status", "Starting…", 3),
@@ -73,7 +78,7 @@ pub(super) fn phone_rows(app: &App) -> Vec<SheetRow> {
 /// The pairing code, or the button that shows one.
 fn pairing_rows(app: &App, rows: &mut Vec<SheetRow>) {
     let state = &app.phone;
-    if state.running.is_none() {
+    if !state.is_running() {
         rows.push(note("Turn on phone access to pair a phone."));
         return;
     }
@@ -120,15 +125,15 @@ fn device_rows(app: &App, rows: &mut Vec<SheetRow>) {
             let when = harlo_core::sessions::compact_age(age);
             pair(&device.name, &format!("Last connected {when} ago"), 3)
         };
-        if state.running.is_some() {
+        if state.is_running() {
             row.action = "Remove".into();
             row.setting = window::REMOVE_PHONE;
             row.choice = int(index);
         }
         rows.push(row);
     }
-    let pushes = state.devices.iter().filter(|d| d.push.is_some()).count();
-    if state.relay.is_some() && pushes > 0 {
+    let pushes = state.devices.iter().filter(|d| d.push).count();
+    if state.on_relay() && pushes > 0 {
         let mut row = pair(
             "Notifications",
             &format!("{pushes} of them take notifications"),

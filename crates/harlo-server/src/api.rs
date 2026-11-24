@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use base64::Engine as _;
 use futures_util::{Stream, StreamExt, stream};
 use harlo_engine::{Message, Rule, agent_rules, now};
@@ -63,6 +63,11 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/experimental/client-mcp", get(no_client_tools))
         // No web search tool yet: truthfully, no providers.
         .route("/api/websearch/provider", get(located_empty))
+        // Harlo's own: phone access hosted here.
+        .route("/harlo/phone", get(phone_state).put(want_phone))
+        .route("/harlo/phone/pair", post(pair_phone))
+        .route("/harlo/phone/device/{id}", delete(remove_phone))
+        .route("/harlo/phone/test", post(test_phone))
         .fallback(not_here)
         .layer(middleware::from_fn_with_state(
             Arc::clone(&server),
@@ -157,7 +162,7 @@ async fn info(headers: HeaderMap) -> Answer {
         "pid": std::process::id(),
         "urls": [format!("http://{host}")],
         "paths": { "tmp": std::env::temp_dir() },
-        "capabilities": { "persistentPty": false, "clientTools": false },
+        "capabilities": { "persistentPty": false, "clientTools": false, "phone": true },
     }))
 }
 
@@ -444,6 +449,45 @@ async fn no_client_tools() -> Response {
         "data": { "capability": "clientTools" },
     });
     (StatusCode::NOT_IMPLEMENTED, axum::Json(body)).into_response()
+}
+
+#[derive(Deserialize)]
+struct After {
+    after: Option<u64>,
+}
+
+async fn phone_state(State(server): Shared, Query(q): Query<After>) -> Answer {
+    let state = match q.after {
+        Some(after) => server.phone.state_after(after).await,
+        None => server.phone.state(),
+    };
+    ok(serde_json::to_value(state).unwrap_or_default())
+}
+
+async fn want_phone(
+    State(server): Shared,
+    axum::Json(wanted): axum::Json<opencode_client::PhoneWanted>,
+) -> Answer {
+    let state = server.phone.want(wanted).await;
+    ok(serde_json::to_value(state).unwrap_or_default())
+}
+
+async fn pair_phone(State(server): Shared) -> Answer {
+    let link = server.phone.pair().await.map_err(Refusal::Bad)?;
+    ok(json!({ "link": link }))
+}
+
+async fn remove_phone(State(server): Shared, Path(id): Path<String>) -> Answer {
+    if server.phone.remove(&id).await.map_err(Refusal::Bad)? {
+        done()
+    } else {
+        Err(Refusal::NotFound(format!("There's no paired phone {id}.")))
+    }
+}
+
+async fn test_phone(State(server): Shared) -> Answer {
+    let sent = server.phone.test().await.map_err(Refusal::Bad)?;
+    ok(json!({ "sent": sent }))
 }
 
 async fn no_goal() -> Answer {

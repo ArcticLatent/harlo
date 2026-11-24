@@ -13,7 +13,9 @@ axum = { workspace = true, features = ["http1", "tokio", "json", "query"] }
 base64 = { workspace = true, features = ["std"] }
 dirs = { workspace = true }
 futures-util = { workspace = true }
+harlo-core = { workspace = true }
 harlo-engine = { workspace = true }
+opencode-client = { workspace = true }
 hex = { workspace = true }
 jsonc-parser = { workspace = true, features = ["serde"] }
 rusqlite = { workspace = true, features = ["bundled"] }
@@ -25,7 +27,7 @@ tokio-util = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-opencode-client = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["connect"] }
 reqwest = { workspace = true, features = ["stream", "native-tls", "json"] }
 tempfile = { workspace = true }
 

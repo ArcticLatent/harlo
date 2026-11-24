@@ -17,6 +17,7 @@ mod approval;
 mod automation;
 mod catalog;
 mod client;
+mod daemon;
 mod endpoint;
 mod error;
 mod event;
@@ -43,6 +44,8 @@ pub use automation::{
 pub use catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 #[doc(inline)]
 pub use client::{Client, Events};
+#[doc(inline)]
+pub use daemon::{PhoneDevice, PhoneRelay, PhoneState, PhoneWanted};
 #[doc(inline)]
 pub use endpoint::{
     Endpoint, SharedService, parse_registration, read_registration, registration_path,

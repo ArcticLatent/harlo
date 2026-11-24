@@ -82,7 +82,7 @@ pub use mcp::{McpEvent, McpServers, McpView};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use own_tools::OwnToolsEvent;
-pub use phone::{PhoneEvent, PhoneState, Shown};
+pub use phone::{Host as PhoneHost, Paired, PhoneEvent, PhoneState, Shown};
 pub use pictures::{PictureEvent, PicturesState, Pixels, Sent, Thumb, Viewing};
 pub use plugins::{PluginEvent, Plugins, is_outdated};
 pub use projects::{ProjectEvent, Projects, icon_url};
@@ -1306,6 +1306,7 @@ impl App {
                     version: connected.version.clone(),
                 };
                 self.client = Some(connected.client.clone());
+                let ask_host = self.ask_phone_host(connected.client.clone());
                 self.own_tools_hold = own_tools::Hold::None;
                 self.own_tools_error = None;
                 self.branches.clear();
@@ -1346,6 +1347,7 @@ impl App {
                 if matches!(self.sheets.open, Some(Sheet::Settings | Sheet::Setup)) {
                     reloads.push(self.load_setup());
                 }
+                reloads.push(ask_host);
                 return Task::batch(reloads);
             }
             Update::Event(event) => {

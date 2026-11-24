@@ -37,7 +37,20 @@ async fn main() -> ExitCode {
         Ok(l) => l,
         Err(e) => return fail(&format!("Couldn't listen on {hostname}:{port}: {e}")),
     };
+    let port = listener.local_addr().map_or(port, |a| a.port());
     println!("harlo-server listening on http://{hostname}:{port}");
+    // Phone access reaches this server through loopback.
+    let me = if hostname == "0.0.0.0" || hostname == "::" {
+        "127.0.0.1"
+    } else {
+        hostname.as_str()
+    };
+    let phone = std::sync::Arc::clone(&server.phone);
+    let (url, pw) = (
+        format!("http://{me}:{port}"),
+        server.password().map(str::to_owned),
+    );
+    tokio::spawn(async move { phone.attach(url, pw).await });
     let stopped = async {
         let mut term =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();

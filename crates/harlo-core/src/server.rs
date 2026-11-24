@@ -30,10 +30,11 @@ pub use opencode_client::{
     AutomationTrigger, Choice, Client, Command, Condition, Connection, Day, Delivery, Effect,
     Endpoint, Error, Field, FieldKind, FileChange, FileDiff, FileMatch, Form, Goal, GoalStatus,
     Integration, Job, JobKind, JobStatus, McpResource, McpServer, McpStatus, Mention, Model,
-    ModelUsage, NewAction, NewAutomation, OAuthAttempt, PROJECT_COLORS, PermissionReply, Picture,
-    Plugin, PluginSource, ProjectChange, Prompt, Provider, Pty, PtyInput, PtyOutput, Rule,
-    SavedApproval, ScriptCall, SessionContext, ShellRun, ShellStatus, SignInMethod, Skill, Stats,
-    Tokens, WebSearch, message_id,
+    ModelUsage, NewAction, NewAutomation, OAuthAttempt, PROJECT_COLORS, PermissionReply,
+    PhoneDevice, PhoneRelay, PhoneState as ServerPhone, PhoneWanted, Picture, Plugin, PluginSource,
+    ProjectChange, Prompt, Provider, Pty, PtyInput, PtyOutput, Rule, SavedApproval, ScriptCall,
+    SessionContext, ShellRun, ShellStatus, SignInMethod, Skill, Stats, Tokens, WebSearch,
+    message_id,
 };
 
 /// The longest wait between reconnection attempts.

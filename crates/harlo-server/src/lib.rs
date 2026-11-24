@@ -10,6 +10,7 @@
 
 mod api;
 mod git;
+mod phone;
 mod server;
 mod store;
 
@@ -17,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub use api::router;
+pub use phone::PhoneHost;
 pub use server::Server;
 pub use store::Store;
 
@@ -27,6 +29,10 @@ pub struct Places {
     pub config_home: PathBuf,
     /// The SQLite file.
     pub database: PathBuf,
+    /// Where phone access keeps its key and paired phones.
+    pub phone: Option<PathBuf>,
+    /// Where the wanted phone access is kept.
+    pub phone_wanted: PathBuf,
 }
 
 impl Places {
@@ -44,6 +50,8 @@ impl Places {
         Self {
             config_home,
             database: data_home.join("harlo/server.db"),
+            phone: harlo_core::phone::folder(),
+            phone_wanted: data_home.join("harlo/phone.json"),
         }
     }
 }
@@ -62,10 +70,12 @@ pub fn open(places: &Places, password: Option<String>) -> Result<Arc<Server>, St
     let store = Store::open(&places.database)
         .map_err(|e| format!("Couldn't open {}: {e}", places.database.display()))?;
     let config = harlo_engine::Config::load(&places.config_home).map_err(|e| e.to_string())?;
+    let phone = PhoneHost::new(places.phone.clone(), places.phone_wanted.clone());
     Ok(Arc::new(Server::new(
         store,
         config,
         &places.config_home,
         password,
+        phone,
     )))
 }

@@ -66,6 +66,8 @@ pub struct Server {
     pub(crate) config_text: Option<Value>,
     pub(crate) config_dir: PathBuf,
     pub(crate) password: Option<String>,
+    /// Phone access, hosted here.
+    pub phone: Arc<crate::PhoneHost>,
     events: broadcast::Sender<Outgoing>,
     emitting: Mutex<()>,
     live: Mutex<Live>,
@@ -110,6 +112,7 @@ impl Server {
         config: Config,
         config_home: &std::path::Path,
         password: Option<String>,
+        phone: Arc<crate::PhoneHost>,
     ) -> Self {
         let config_text = config
             .source
@@ -123,10 +126,17 @@ impl Server {
             config_text,
             config_dir: config_home.join("opencode"),
             password,
+            phone,
             events,
             emitting: Mutex::new(()),
             live: Mutex::default(),
         }
+    }
+
+    /// The server's password, if it has one.
+    #[must_use]
+    pub fn password(&self) -> Option<&str> {
+        self.password.as_deref()
     }
 
     /// Announces an event. With `durable`, it's stored under that ID first
