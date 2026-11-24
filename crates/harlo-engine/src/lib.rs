@@ -17,6 +17,7 @@ mod chat;
 mod config;
 mod error;
 mod id;
+pub mod instructions;
 mod message;
 mod rules;
 pub mod tools;

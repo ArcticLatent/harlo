@@ -25,6 +25,14 @@ pub async fn project_id(directory: &str) -> String {
     hex::encode(digest)[..40].to_owned()
 }
 
+/// The top folder of the checkout `directory` is in, if it's in one.
+pub async fn toplevel(directory: &str) -> Option<String> {
+    git(directory, &["rev-parse", "--show-toplevel"])
+        .await
+        .map(|o| o.trim().to_owned())
+        .filter(|t| !t.is_empty())
+}
+
 /// Whether `directory` is in a git repository.
 pub async fn is_repo(directory: &str) -> bool {
     git(directory, &["rev-parse", "--is-inside-work-tree"])

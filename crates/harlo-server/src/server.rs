@@ -8,6 +8,7 @@
 // Rust guideline compliant 2026-10-09
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -512,7 +513,7 @@ impl Server {
             agent: AGENT.to_owned(),
             model,
             provider: provider.clone(),
-            system: system_prompt(&directory),
+            system: self.system_prompt(&directory).await,
             rules: vec![
                 ("agent".to_owned(), agent_rules()),
                 ("config".to_owned(), self.config.permissions.clone()),
@@ -530,6 +531,37 @@ impl Server {
             Outcome::Interrupted => ("interrupted", None),
             Outcome::Failed(e) => ("failed", Some(e.to_string())),
         }
+    }
+
+    /// The system prompt for a session in `directory`, as OpenCode orders
+    /// it: the agent's prompt, the project's instructions, then the date
+    /// and environment.
+    async fn system_prompt(&self, directory: &str) -> String {
+        let root = git::toplevel(directory).await;
+        let home = dirs::home_dir().unwrap_or_default();
+        let search = harlo_engine::instructions::Search {
+            workspace: std::path::Path::new(directory),
+            project_root: root.as_deref().map(std::path::Path::new),
+            home: &home,
+            config_dir: &self.config_dir,
+            configured: &self.config.instructions,
+            ..Default::default()
+        }
+        .with_env();
+        let found = harlo_engine::instructions::load(&search);
+        let mut prompt = BASE_PROMPT.to_owned();
+        if !found.is_empty() {
+            prompt.push_str("\n\n");
+            prompt.push_str(&harlo_engine::instructions::render(&found));
+        }
+        let _ = write!(
+            prompt,
+            "\n\nWorking folder: {directory}\nIs a git repository: {}\nPlatform: {}\nToday's date: {}",
+            if root.is_some() { "yes" } else { "no" },
+            std::env::consts::OS,
+            today(),
+        );
+        prompt
     }
 
     /// Records how a run ended.
@@ -728,13 +760,26 @@ fn title_of(text: &str) -> String {
     title
 }
 
-/// The system prompt for a session in `directory`.
-fn system_prompt(directory: &str) -> String {
-    format!(
-        "You are a coding agent working in {directory}.\n\
-         Use the tools to read and change files and to run commands. Paths are relative to that folder.\n\
-         Change only what the task needs. When you're done, say briefly what you did."
-    )
+/// The parts of the system prompt that don't depend on the project.
+const BASE_PROMPT: &str = "You are a coding agent.\n\
+    Use the tools to read and change files and to run commands. Paths are relative to the \
+    project's folder.\n\
+    Change only what the task needs. When you're done, say briefly what you did.";
+
+/// Today's date, `YYYY-MM-DD`, in UTC.
+fn today() -> String {
+    let days = now().div_euclid(86_400_000);
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 /// A config file's text as JSON (comments allowed).

@@ -338,6 +338,7 @@ async fn a_reconnecting_client_gets_the_events_it_missed_once_and_in_order() {
     let sandbox = Sandbox::start().await;
     let client = sandbox.client();
     let project = sandbox.project();
+    std::fs::write(project.join("AGENTS.md"), "Answer in lowercase.\n").expect("AGENTS.md");
     let session = client
         .create_session(project.to_str().expect("utf-8"))
         .await
@@ -353,6 +354,17 @@ async fn a_reconnecting_client_gets_the_events_it_missed_once_and_in_order() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+
+    // The project's AGENTS.md reached the model, under its path.
+    let log = std::fs::read_to_string(sandbox.dir.path().join("model.jsonl")).expect("model log");
+    let first: serde_json::Value =
+        serde_json::from_str(log.lines().next().expect("a request")).expect("json");
+    let system = first["body"]["messages"][0]["content"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(system.contains("Answer in lowercase."), "{system}");
+    let source = format!("Instructions from: {}", project.join("AGENTS.md").display());
+    assert!(system.contains(&source), "{system}");
 
     let all = replay(&sandbox, 0).await;
     assert!(all.len() >= 6, "{all:?}");

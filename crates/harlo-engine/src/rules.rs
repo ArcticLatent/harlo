@@ -104,7 +104,7 @@ pub fn decide(layers: &[(&str, &[Rule])], action: &str, resource: &str) -> Decis
 
 /// Whether `text` matches `pattern`, where `*` stands for any text
 /// (including none) and `?` for one character.
-fn glob(pattern: &str, text: &str) -> bool {
+pub(crate) fn glob(pattern: &str, text: &str) -> bool {
     let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
     let (mut pi, mut ti) = (0, 0);
     // Where the last `*` was, and how much text it had taken then.

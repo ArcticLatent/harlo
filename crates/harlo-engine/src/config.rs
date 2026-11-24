@@ -65,6 +65,8 @@ pub struct Config {
     pub model: Option<ModelRef>,
     /// Permission rules from the file, applied after the agent's own.
     pub permissions: Vec<Rule>,
+    /// Extra instruction files (`instructions`): paths, `*` patterns, URLs.
+    pub instructions: Vec<String>,
 }
 
 impl Config {
@@ -122,6 +124,12 @@ impl Config {
             providers,
             model: model_ref(&value["model"]),
             permissions,
+            instructions: value["instructions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect(),
         })
     }
 
