@@ -1,5 +1,5 @@
-//! Settings → Models' providers: the ones OpenCode uses and how each is
-//! signed in, and the page that signs in to one.
+//! Settings → Providers: the ones OpenCode uses and how each is signed in,
+//! the best-known ones to connect, and the page that signs in to one.
 
 // Rust guideline compliant 2026-10-09
 
@@ -7,17 +7,55 @@ use harlo_core::server::{Connection, FieldKind, Integration, SignInMethod};
 use lucide_icons::Icon;
 use slint::{ModelRc, SharedString, VecModel};
 
-use super::{PROJECT, glyph, heading, int, live_field, note, pair};
+use super::{LINK, PROJECT, glyph, heading, int, live_field, note, pair};
 use crate::app::{App, Field, Load, SettingChoice, SignInAttempt};
 use crate::ui::SheetRow;
 use crate::window;
 
-/// The providers OpenCode uses, how each is signed in, and a button that
-/// signs in to another.
+/// The best-known providers, by OpenCode's id, in the order Popular lists
+/// the ones not yet connected, each with a line on what it offers and
+/// whether it's recommended.
+const POPULAR: [(&str, &str, bool); 8] = [
+    (
+        "opencode-go",
+        "A low-cost subscription to open coding models.",
+        true,
+    ),
+    (
+        "opencode",
+        "Hand-picked models, Claude, GPT and Gemini among them.",
+        true,
+    ),
+    ("anthropic", "Claude models, with an API key.", false),
+    (
+        "github-copilot",
+        "The models of a GitHub Copilot plan.",
+        false,
+    ),
+    (
+        "openai",
+        "GPT models, with a ChatGPT plan or an API key.",
+        false,
+    ),
+    ("google", "Gemini models, quick and structured.", false),
+    (
+        "openrouter",
+        "Most providers' models, through one account.",
+        false,
+    ),
+    (
+        "vercel",
+        "Many providers' models through one gateway.",
+        false,
+    ),
+];
+
+/// The providers OpenCode uses and how each is signed in, the best-known
+/// ones not yet connected, and a button that lists them all.
 pub(super) fn provider_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.providers;
     let mut rows = vec![
-        heading("Providers"),
+        heading("Connected"),
         note("Sign-ins are shared by every app on this server."),
     ];
     let integrations = match &page.list {
@@ -74,12 +112,36 @@ pub(super) fn provider_rows(app: &App) -> Vec<SheetRow> {
     match &page.list {
         Load::Failed(why) => rows.push(pair("Couldn't list providers", why, 2)),
         Load::Idle | Load::Loading if shown.is_empty() => rows.push(note("Loading…")),
+        Load::Loaded(_) if shown.is_empty() => rows.push(note("None yet.")),
         _ => {}
     }
-    let mut add = pair("", "", 3);
-    add.action = "Add a provider".into();
-    add.setting = window::ADD_PROVIDER;
-    rows.push(add);
+    let popular: Vec<SheetRow> = POPULAR
+        .iter()
+        .filter(|(id, ..)| !shown.iter().any(|(shown, ..)| shown == id))
+        .filter_map(|&(id, what, recommended)| {
+            let at = integrations.iter().position(|i| i.id == id)?;
+            Some(SheetRow {
+                kind: LINK,
+                name: integrations[at].name.as_str().into(),
+                value: what.into(),
+                hint: if recommended { "Recommended" } else { "" }.into(),
+                action: "Connect".into(),
+                setting: window::OPEN_PROVIDER,
+                choice: int(at),
+                ..SheetRow::default()
+            })
+        })
+        .collect();
+    if !popular.is_empty() {
+        rows.push(heading("Popular"));
+        rows.extend(popular);
+    }
+    if matches!(page.list, Load::Loaded(_)) {
+        let mut more = pair("", "", 3);
+        more.action = "Show more providers".into();
+        more.setting = window::ADD_PROVIDER;
+        rows.push(more);
+    }
     rows
 }
 

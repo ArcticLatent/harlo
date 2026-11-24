@@ -1,4 +1,4 @@
-//! Settings → Models' providers against a private `opencode serve` with
+//! Settings → Providers' providers against a private `opencode serve` with
 //! scratch `HOME`/`XDG_*` folders: signing a provider in with a key,
 //! removing it, a form a sign-in needs answered first, and choosing among
 //! the ways to sign in. Never the shared service, and no sign-in reaches a
@@ -24,7 +24,7 @@ use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
 
-/// Settings → Models, connected to `sandbox` once it lists its
+/// Settings → Providers, connected to `sandbox` once it lists its
 /// integrations (it loads them after it starts).
 fn models(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
     let client = sandbox.client();
@@ -52,7 +52,7 @@ fn models(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
     app.new_folder = Some(sandbox.project_str());
     let ui = ui(app);
     ui.press("Settings");
-    ui.press("Models");
+    ui.press("Providers");
     assert!(
         tasks.until(&ui, WAIT, |ui| {
             matches!(&ui.app().sheets.providers.list, Load::Loaded(l) if l.len() > 100)
@@ -68,7 +68,7 @@ fn models(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
 
 /// Opens the sign-in page of the provider named `name` from the menu.
 fn add(ui: &Ui, filter: &str, name: &str) {
-    ui.press("Add a provider");
+    ui.press("Show more providers");
     assert_eq!(ui.app().picker, Some(Picker::Provider));
     ui.fill("Filter providers", filter);
     ui.press(name);
@@ -85,6 +85,16 @@ fn a_provider_signs_in_with_a_key_and_is_removed() {
         Some("No sign-in needed"),
         "the scripted model's provider"
     );
+
+    // The best-known ones not yet connected, to connect in one press.
+    assert!(ui.shows("Popular"));
+    assert!(ui.shows("Recommended"), "OpenCode's own");
+    ui.press("Connect: Anthropic");
+    assert_eq!(
+        ui.app().sheets.providers.shown.as_deref(),
+        Some("anthropic")
+    );
+    ui.press("All providers");
 
     add(&ui, "302", "302.AI");
     assert!(ui.shows("Sign in with a key"));
@@ -195,7 +205,7 @@ fn a_browser_sign_in_shows_its_page_takes_a_code_and_ends() {
     // No server: the sign-in's steps are fed in, and no page opens.
     let ui = ui(demo::new_app());
     ui.press("Settings");
-    ui.press("Models");
+    ui.press("Providers");
     let service = Integration {
         id: "scratch".into(),
         name: "Scratch AI".into(),

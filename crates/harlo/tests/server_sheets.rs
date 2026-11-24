@@ -38,7 +38,7 @@ fn settings_and_stats_load_from_the_server() {
     let ui = window(&sandbox);
 
     ui.press("Settings");
-    ui.press("Models");
+    ui.press("Providers");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Fake")),
         "the scripted model's provider"

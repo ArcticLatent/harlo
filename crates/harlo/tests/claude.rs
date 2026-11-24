@@ -1,4 +1,4 @@
-//! The Claude subscription in Settings → Models, with Claude Code's checks,
+//! The Claude subscription in Settings → Providers, with Claude Code's checks,
 //! the plan's usage
 //! and OpenCode's answers fed in as messages. The real flow, against a
 //! private server and a stand-in Claude Code, is in `server_claude.rs`.
@@ -26,7 +26,7 @@ fn agent(connections: Vec<Connection>) -> Integration {
 fn models(app: App, code: Option<ClaudeCode>, integration: Integration) -> Ui {
     let ui = ui(app);
     ui.press("Settings");
-    ui.press("Models");
+    ui.press("Providers");
     if let Some(code) = code {
         ui.send(Message::Claude(ClaudeEvent::Checked(code)));
     }

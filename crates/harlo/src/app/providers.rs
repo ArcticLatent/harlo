@@ -1,4 +1,4 @@
-//! Settings → Models: the model providers OpenCode is signed in to, signing
+//! Settings → Providers: the model providers OpenCode is signed in to, signing
 //! in to another (with a key, in a browser, by a program, or with what's
 //! already on the server's computer), and removing a sign-in. OpenCode keeps
 //! the credentials, so a sign-in applies to every app using the server.
@@ -24,7 +24,7 @@ const POLL: Duration = Duration::from_secs(2);
 /// The most form fields a sign-in method shows; more are left out.
 pub const FORM_FIELDS: usize = 8;
 
-/// Something that happened in the providers part of Settings → Models.
+/// Something that happened in the providers part of Settings → Providers.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderEvent {
     /// Every integration, as the server lists them, or why not.
@@ -79,7 +79,7 @@ pub enum Attempt {
     },
 }
 
-/// The providers part of Settings → Models.
+/// The providers part of Settings → Providers.
 #[derive(Debug, Default)]
 pub struct Providers {
     /// Every integration the server knows.
@@ -200,7 +200,7 @@ impl App {
                 return Task::batch([reload, open]);
             }
             ProviderEvent::OpenFrom(id) => {
-                self.sheets.section = super::Section::Models;
+                self.sheets.section = super::Section::Providers;
                 self.sheets.query.clear();
                 return self.provider_event(ProviderEvent::Open(id));
             }

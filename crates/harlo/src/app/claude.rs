@@ -1,4 +1,4 @@
-//! A Claude subscription for OpenCode: Settings → Models checks Claude Code
+//! A Claude subscription for OpenCode: Settings → Providers checks Claude Code
 //! on this computer and OpenCode's Claude Agent integration, and offers the
 //! next step.
 //!
@@ -233,7 +233,7 @@ impl App {
                     notice.sound_name(RESET_SOUND);
                 }
                 // Without a notification service there's nothing to show it
-                // on; Settings → Models still shows the limits.
+                // on; Settings → Providers still shows the limits.
                 let _ = notice.show_async().await;
             }
         })

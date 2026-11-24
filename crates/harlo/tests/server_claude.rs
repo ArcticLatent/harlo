@@ -114,7 +114,7 @@ fn a_claude_subscription_signs_in_connects_and_disconnects() {
     });
 
     ui.press("Settings");
-    ui.press("Models");
+    ui.press("Providers");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Not signed in")
             && ui.shows("Not connected")),

@@ -109,7 +109,7 @@ class Setup:
 
     def prepare(self, h):
         """Puts the wrapper where the sandbox server runs `claude`, then
-        connects OpenCode's Claude Agent from Settings → Models."""
+        connects OpenCode's Claude Agent from Settings → Providers."""
         sandbox = h.info["sandbox"]
         home = os.path.join(sandbox, "home")
         os.makedirs(os.path.join(sandbox, "bin"), exist_ok=True)

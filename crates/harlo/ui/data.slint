@@ -621,7 +621,9 @@ export struct SheetRow {
     action: string,
     options: [string],
     choice: int,
-    /// For a text field (kind 6): what it shows while empty.
+    /// For a text field (kind 6): what it shows while empty. For a row with
+    /// a line under its name and a button (kind 13): a tag after the name,
+    /// such as "Recommended"; that row's icon tile shows only with a glyph.
     hint: string,
     /// For swatches (kind 8): each option's colour; the first, none.
     colors: [color],

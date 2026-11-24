@@ -50,7 +50,7 @@ fn the_steps_go_on_and_back_and_finishing_is_remembered() {
     assert!(!ui.shows("Back"), "nothing before the first step");
 
     ui.press("Next");
-    assert_eq!(ui.app().sheets.step, Step::Models);
+    assert_eq!(ui.app().sheets.step, Step::Providers);
     assert!(ui.shows("New sessions"), "the model for new sessions");
     ui.press("Back");
     assert_eq!(ui.app().sheets.step, Step::OpenCode);

@@ -43,7 +43,7 @@ pub enum Step {
     #[default]
     OpenCode,
     /// The models agents use, and the providers that serve them.
-    Models,
+    Providers,
     /// Git, and the name and email on commits.
     Git,
     /// How Harlo looks.
@@ -52,14 +52,14 @@ pub enum Step {
 
 impl Step {
     /// Every step, in order.
-    pub const ALL: [Self; 4] = [Self::OpenCode, Self::Models, Self::Git, Self::Theme];
+    pub const ALL: [Self; 4] = [Self::OpenCode, Self::Providers, Self::Git, Self::Theme];
 
     /// Its title.
     #[must_use]
     pub fn title(self) -> &'static str {
         match self {
             Self::OpenCode => "OpenCode",
-            Self::Models => "Models",
+            Self::Providers => "Providers",
             Self::Git => "Git",
             Self::Theme => "Theme",
         }
@@ -73,7 +73,7 @@ impl Step {
                 "OpenCode runs the agents, in a background service on this computer. Harlo \
                  shows them, the work they do and what they ask you."
             }
-            Self::Models => {
+            Self::Providers => {
                 "Agents need a model. OpenCode's own free models work without signing in; \
                  a provider or a subscription adds more."
             }
@@ -117,7 +117,7 @@ pub enum Section {
     /// Git: the name on commits, undo's snapshots, commit messages.
     Git,
     /// The server's model providers.
-    Models,
+    Providers,
     /// Engines and models on this computer.
     LocalModels,
     /// OpenCode's agents and the approvals it saved.
@@ -144,7 +144,7 @@ impl Section {
         Self::Voice,
         Self::Projects,
         Self::Git,
-        Self::Models,
+        Self::Providers,
         Self::LocalModels,
         Self::Agents,
         Self::Tools,
@@ -165,7 +165,7 @@ impl Section {
             Self::Voice => "Voice",
             Self::Projects => "Projects",
             Self::Git => "Git",
-            Self::Models => "Models",
+            Self::Providers => "Providers",
             Self::LocalModels => "Local models",
             Self::Agents => "Agents",
             Self::Tools => "Tools for agents",
@@ -187,7 +187,7 @@ impl Section {
             | Self::Voice
             | Self::About => None,
             Self::Projects | Self::Git => Some("Your projects"),
-            Self::Models | Self::LocalModels | Self::Agents | Self::Tools => {
+            Self::Providers | Self::LocalModels | Self::Agents | Self::Tools => {
                 Some("Agents and models")
             }
             Self::Schedules => Some("Automation"),
@@ -658,11 +658,11 @@ impl Sheets {
 
 impl App {
     /// Applies something that happened to the pages, and checks the Claude
-    /// subscription when Models comes into view.
+    /// subscription when Providers comes into view.
     pub(super) fn sheet_event(&mut self, event: Event) -> Task<Message> {
         let models_shown = |app: &Self| match app.sheets.open {
-            Some(Sheet::Settings) => app.sheets.section == Section::Models,
-            Some(Sheet::Setup) => app.sheets.step == Step::Models,
+            Some(Sheet::Settings) => app.sheets.section == Section::Providers,
+            Some(Sheet::Setup) => app.sheets.step == Step::Providers,
             _ => false,
         };
         let before = models_shown(self);

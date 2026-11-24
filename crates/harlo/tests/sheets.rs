@@ -187,7 +187,7 @@ fn settings_list_their_sections_and_open_with_ctrl_comma() {
     for section in &Section::ALL[..6] {
         assert!(ui.shows(section.title()), "{} is listed", section.title());
     }
-    ui.wheel("Models", -10);
+    ui.wheel("Providers", -10);
     for section in &Section::ALL[Section::ALL.len() - 4..] {
         assert!(ui.shows(section.title()), "{} is listed", section.title());
     }
@@ -311,7 +311,7 @@ fn a_failed_count_says_why() {
 fn settings_show_the_servers_set_up_and_about() {
     let ui = ui(demo::app());
     ui.press("Settings");
-    ui.press("Models");
+    ui.press("Providers");
     assert!(ui.shows("Loading…"));
     ui.send(Message::Sheet(SheetEvent::SetUp(1, Box::new(setup()))));
     assert!(ui.shows("Fake"));
@@ -363,7 +363,7 @@ fn settings_show_the_servers_set_up_and_about() {
     );
     assert!(ui.shows("Couldn't list them: server went away"));
     // The last section, at the end of the list.
-    ui.wheel("Models", -10);
+    ui.wheel("Providers", -10);
     ui.press("About");
     assert!(
         ui.shows(concat!(

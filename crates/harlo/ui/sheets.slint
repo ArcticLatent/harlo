@@ -309,7 +309,7 @@ component RowBody inherits VerticalLayout {
         padding-top: 3px;
         padding-bottom: 3px;
         spacing: 12px;
-        VerticalLayout {
+        if root.entry.glyph != "": VerticalLayout {
             alignment: center;
             Rectangle {
                 width: 28px;
@@ -327,11 +327,30 @@ component RowBody inherits VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
             spacing: 2px;
-            Text {
-                text: root.entry.name;
-                font-size: Size.small;
-                color: Theme.text-strong;
-                accessible-role: AccessibleRole.text;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Text {
+                    text: root.entry.name;
+                    font-size: Size.small;
+                    color: Theme.text-strong;
+                    vertical-alignment: center;
+                    accessible-role: AccessibleRole.text;
+                }
+                // A short tag after the name, such as "Recommended".
+                if root.entry.hint != "": Rectangle {
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: Theme.control-edge;
+                    width: tag.preferred-width + 10px;
+                    tag := Text {
+                        text: root.entry.hint;
+                        font-size: Size.small - 1px;
+                        color: Theme.text-weak;
+                        vertical-alignment: center;
+                        accessible-role: AccessibleRole.text;
+                    }
+                }
             }
             Text {
                 text: root.entry.value;

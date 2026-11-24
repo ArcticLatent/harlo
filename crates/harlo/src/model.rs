@@ -68,7 +68,7 @@ pub enum Picker {
     ScheduleFolder,
     /// The session a new schedule's prompt goes to.
     ScheduleSession,
-    /// A model provider to sign in to, from Settings → Models.
+    /// A model provider to sign in to, from Settings → Providers.
     Provider,
     /// The language dictation listens for, from Settings → Voice.
     VoiceLanguage,

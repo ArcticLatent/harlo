@@ -307,7 +307,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Voice => Icon::Mic,
         Section::Projects => Icon::FolderGit2,
         Section::Git => Icon::GitBranch,
-        Section::Models => Icon::Bot,
+        Section::Providers => Icon::Plug,
         Section::LocalModels => Icon::Cpu,
         Section::Agents => Icon::UsersRound,
         Section::Tools => Icon::Plug,
@@ -330,7 +330,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         // Searched without their icons.
         Section::Projects => project_rows(app, &Marks::default()),
         Section::Git => git_settings_rows(app),
-        Section::Models => {
+        Section::Providers => {
             // A provider's sign-in page shows alone.
             if app.sheets.providers.shown.is_some() {
                 return providers::sign_in_rows(app);
@@ -358,7 +358,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
 
 /// How loading the server's set-up stands, for the sections that show it.
 fn setup_note(app: &App, section: Section) -> String {
-    if !matches!(section, Section::Models | Section::Tools) {
+    if !matches!(section, Section::Providers | Section::Tools) {
         return String::new();
     }
     match &app.sheets.setup {
@@ -951,10 +951,10 @@ fn status_row(app: &App) -> SheetRow {
 fn step_rows(app: &App, step: Step) -> Vec<SheetRow> {
     match step {
         Step::OpenCode => opencode_rows(app),
-        Step::Models => {
+        Step::Providers => {
             let mut rows = model_rows(app);
-            rows.extend(section_rows(app, Section::Models));
-            let loading = setup_note(app, Section::Models);
+            rows.extend(section_rows(app, Section::Providers));
+            let loading = setup_note(app, Section::Providers);
             if !loading.is_empty() {
                 rows.push(note(&loading));
             }
@@ -1717,7 +1717,7 @@ fn link(icon: Icon, name: &str, what: &str, action: &str, page: i32) -> SheetRow
 const ABOUT: i32 = 12;
 
 /// The kind of row with an icon, a name, a line under it and a button.
-const LINK: i32 = 13;
+pub(super) const LINK: i32 = 13;
 
 /// The server's web search, MCP servers and plugins, for Tools.
 fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
