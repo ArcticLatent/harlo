@@ -156,6 +156,11 @@ pub struct Config {
     pub permissions: Vec<Rule>,
     /// Extra instruction files (`instructions`): paths, `*` patterns, URLs.
     pub instructions: Vec<String>,
+    /// Extra skill folders (`skills`).
+    pub skills: Vec<String>,
+    /// Commands (`commands`), by name: `template`, `description`, `agent`
+    /// and `model`.
+    pub commands: Value,
 }
 
 impl Config {
@@ -213,12 +218,9 @@ impl Config {
             providers,
             model: model_ref(&value["model"]),
             permissions,
-            instructions: value["instructions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect(),
+            instructions: strings(&value["instructions"]),
+            skills: strings(&value["skills"]),
+            commands: value["commands"].clone(),
         })
     }
 
@@ -323,14 +325,28 @@ fn headers_of(v: &Value) -> Vec<(String, String)> {
         .collect()
 }
 
-/// `"provider/model"` or `{ "providerID", "model" }`.
-fn model_ref(v: &Value) -> Option<ModelRef> {
+/// The strings in a JSON array; none when it isn't one.
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// `"provider/model#variant"` (the variant optional) or
+/// `{ "providerID", "model", "variant" }`.
+pub(crate) fn model_ref(v: &Value) -> Option<ModelRef> {
     if let Some(s) = v.as_str() {
         let (provider, model) = s.split_once('/')?;
+        let (model, variant) = match model.split_once('#') {
+            Some((model, variant)) => (model, Some(variant.to_owned())),
+            None => (model, None),
+        };
         return Some(ModelRef {
             provider: provider.to_owned(),
             model: model.to_owned(),
-            variant: None,
+            variant,
         });
     }
     let provider = v["providerID"].as_str()?;

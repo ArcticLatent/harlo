@@ -119,7 +119,12 @@ fn chat_messages(history: &[Message]) -> Vec<Value> {
                     out.push(json!({ "role": "user", "content": text }));
                 }
             }
-            Message::User { text, .. } | Message::Synthetic { text, .. } => {
+            Message::User { text, skills, .. } => {
+                let mut content: String = skills.iter().map(|s| s.text.as_str()).collect();
+                content.push_str(text);
+                out.push(json!({ "role": "user", "content": content }));
+            }
+            Message::Synthetic { text, .. } => {
                 out.push(json!({ "role": "user", "content": text }));
             }
             Message::Assistant(step) => {
@@ -523,6 +528,7 @@ mod tests {
                 id: "u".into(),
                 time: Created { created: 0 },
                 text: "hi".into(),
+                skills: Vec::new(),
             },
             Message::Assistant(Box::new(step)),
         ];

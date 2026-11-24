@@ -337,13 +337,19 @@ impl Server {
         message_id: Option<String>,
         text: &str,
         delivery: &str,
+        skills: Vec<harlo_engine::skills::Attached>,
     ) -> Result<Value, Refusal> {
         let session = self.session(id)?;
         let message_id = message_id.unwrap_or_else(|| ascending_id("msg"));
         let created = now();
+        let payload = if skills.is_empty() {
+            json!({ "text": text })
+        } else {
+            json!({ "text": text, "skills": skills })
+        };
         let answer = json!({ "data": {
             "id": message_id, "sessionID": id, "time": { "created": created }, "type": "user",
-            "payload": { "text": text }, "delivery": delivery,
+            "payload": payload, "delivery": delivery,
         }});
         let queued = lock(&self.live)
             .inbox
@@ -365,10 +371,11 @@ impl Server {
             id: message_id.clone(),
             time: Created { created },
             text: text.to_owned(),
+            skills,
         };
         self.emit(
             "session.inbox.enqueued",
-            json!({ "inboxID": message_id, "sessionID": id, "item": { "type": "user", "payload": { "text": text }, "delivery": delivery } }),
+            json!({ "inboxID": message_id, "sessionID": id, "item": { "type": "user", "payload": payload, "delivery": delivery } }),
             Some(&session.location.directory),
             Some(id),
         );
@@ -436,7 +443,7 @@ impl Server {
             .map(|q| {
                 q.iter()
                     .map(|(m, delivery)| match m {
-                        Message::User { id, text, time } => json!({
+                        Message::User { id, text, time, .. } => json!({
                             "id": id, "type": "user", "payload": { "text": text }, "delivery": delivery, "time": time,
                         }),
                         Message::Synthetic { id, text, time, .. } => json!({
@@ -754,6 +761,7 @@ impl Server {
             memory: self.memory_for(session),
             // Near the model's context limit, the next step starts from a summary.
             compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
+            skills: self.skills_for(&session.location.directory).await,
             steering: Some(Arc::new(crate::agents::SessionSteering {
                 server: Arc::clone(self),
                 session: session.id.clone(),

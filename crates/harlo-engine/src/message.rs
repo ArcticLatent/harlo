@@ -27,6 +27,9 @@ pub enum Message {
         time: Created,
         /// The text.
         text: String,
+        /// Skills loaded with it, read by the model before the text.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skills: Vec<crate::skills::Attached>,
     },
     /// What the server tells the model in the person's place, such as a
     /// change of agent.
@@ -351,6 +354,7 @@ mod tests {
             id: "msg_0".into(),
             time: Created { created: 1 },
             text: "hi".into(),
+            skills: Vec::new(),
         })
         .expect("json");
         assert_eq!(

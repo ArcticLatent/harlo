@@ -10,6 +10,7 @@
 
 mod agents;
 mod api;
+mod commands;
 mod forms;
 mod fs;
 mod git;

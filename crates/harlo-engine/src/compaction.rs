@@ -123,6 +123,7 @@ pub async fn compact(
         id: String::new(),
         time: Created { created: now() },
         text: SUMMARIZE.to_owned(),
+        skills: Vec::new(),
     });
     let spec = provider.models.iter().find(|m| m.id == model.model);
     let (extra, headers) = spec

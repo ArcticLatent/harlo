@@ -584,6 +584,7 @@ mod tests {
                 id: id.into(),
                 time: Created { created: 0 },
                 text: text.into(),
+                skills: Vec::new(),
             };
             store.put_message("ses_1", &m).expect("put");
         }

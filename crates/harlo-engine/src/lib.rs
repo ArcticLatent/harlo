@@ -15,6 +15,7 @@
 
 pub mod agents;
 mod chat;
+pub mod commands;
 pub mod compaction;
 mod config;
 mod error;
@@ -25,6 +26,7 @@ pub mod memory;
 mod message;
 pub mod question;
 mod rules;
+pub mod skills;
 pub mod snapshot;
 pub mod tools;
 mod turn;

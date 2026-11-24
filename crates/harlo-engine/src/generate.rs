@@ -27,6 +27,7 @@ pub async fn generate(
         id: String::new(),
         time: Created { created: 0 },
         text: prompt.to_owned(),
+        skills: Vec::new(),
     }];
     let (extra, headers) = provider
         .models

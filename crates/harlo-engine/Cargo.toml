@@ -10,6 +10,8 @@ publish.workspace = true
 
 [dependencies]
 globset = { workspace = true }
+gray_matter = { workspace = true }
+shell-words = { workspace = true }
 ignore = { workspace = true }
 regex = { workspace = true, features = ["std", "unicode", "perf"] }
 futures-util = { workspace = true }

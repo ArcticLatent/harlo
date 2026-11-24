@@ -53,6 +53,8 @@ pub struct Turn {
     /// Where messages that steer the turn come from; none, and nothing
     /// joins it once it started.
     pub steering: Option<std::sync::Arc<dyn Steering>>,
+    /// The skills the model may load, and people may have attached.
+    pub skills: Vec<crate::skills::Skill>,
     /// The context size, in tokens, from which the next step starts from a
     /// summary; none never compacts by itself.
     pub compact_at: Option<u64>,
@@ -273,6 +275,23 @@ pub async fn run(
 ) -> Outcome {
     let mut definitions = tools::definitions();
     definitions.push(crate::question::definition());
+    // Skills a rule denies aren't offered.
+    let offered: Vec<&crate::skills::Skill> = turn
+        .skills
+        .iter()
+        .filter(|s| s.offered())
+        .filter(|s| {
+            let layers: Vec<(&str, &[Rule])> = turn
+                .rules
+                .iter()
+                .map(|(n, r)| (n.as_str(), r.as_slice()))
+                .collect();
+            decide(&layers, "skill", &s.id).effect != Effect::Deny
+        })
+        .collect();
+    if !offered.is_empty() {
+        definitions.push(crate::skills::definition(&offered));
+    }
     if turn.memory.is_some() {
         definitions.extend(crate::memory::definitions());
     }
@@ -815,6 +834,19 @@ async fn run_plan(
                 changed: Vec::new(),
             })
         }
+        (Plan::Skill { id }, _) => turn
+            .skills
+            .iter()
+            .find(|s| s.id == id)
+            .map(|skill| tools::Output {
+                text: skill.loaded(),
+                metadata: json!({ "skill": skill.id, "name": skill.name })
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default(),
+                changed: Vec::new(),
+            })
+            .ok_or_else(|| format!("There's no skill {id}.")),
         (plan, _) => plan.run(&turn.cwd, stop).await,
     }
 }

@@ -166,6 +166,11 @@ pub enum Plan {
         /// The questions.
         questions: Vec<crate::question::Question>,
     },
+    /// Loads a skill's instructions; run by the turn, which knows them.
+    Skill {
+        /// The skill's ID.
+        id: String,
+    },
     /// Searches the project's earlier sessions.
     SearchSessions {
         /// The words.
@@ -272,6 +277,7 @@ impl Plan {
             "question" => Ok(Self::Question {
                 questions: crate::question::parse(input)?,
             }),
+            "skill" => Ok(Self::Skill { id: text("id")? }),
             "search_sessions" => Ok(Self::SearchSessions {
                 query: text("query")?,
             }),
@@ -334,6 +340,11 @@ impl Plan {
             Self::Question { questions } => Permission {
                 action: "question",
                 resources: questions.iter().map(|q| q.question.clone()).collect(),
+                metadata: Map::new(),
+            },
+            Self::Skill { id } => Permission {
+                action: "skill",
+                resources: vec![id.clone()],
                 metadata: Map::new(),
             },
             Self::SearchSessions { query } => Permission {
@@ -430,6 +441,7 @@ impl Plan {
                 Err("Notes aren't kept on this server.".to_owned())
             }
             Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
+            Self::Skill { id } => Err(format!("There's no skill {id}.")),
             Self::Shell {
                 command,
                 timeout_ms,

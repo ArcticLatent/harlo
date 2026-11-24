@@ -63,10 +63,11 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/session/{id}/revert/stage", post(stage_revert))
         .route("/api/session/{id}/revert/commit", post(commit_revert))
         .route("/api/agent", get(agents))
+        .route("/api/command", get(command_list))
+        .route("/api/skill", get(skill_list))
+        .route("/api/session/{id}/command", post(command))
         .route("/api/model", get(models))
         .route("/api/model/default", get(default_model))
-        .route("/api/command", get(located_empty))
-        .route("/api/skill", get(located_empty))
         .route("/api/config", get(config))
         .route("/api/mcp/resource", get(mcp_resources))
         .route("/api/experimental/job", get(empty_data))
@@ -419,6 +420,60 @@ struct Prompt {
     id: Option<String>,
     text: String,
     delivery: Option<String>,
+    #[serde(default)]
+    skills: Vec<SkillRef>,
+}
+
+/// A skill named in a prompt.
+#[derive(Deserialize)]
+struct SkillRef {
+    id: String,
+}
+
+/// A command run in a session.
+#[derive(Deserialize)]
+struct CommandRun {
+    name: String,
+    #[serde(default)]
+    text: String,
+    delivery: Option<String>,
+    #[serde(default)]
+    skills: Vec<SkillRef>,
+}
+
+async fn command(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<CommandRun>,
+) -> Answer {
+    let delivery = body.delivery.unwrap_or_else(|| "queue".to_owned());
+    let skills: Vec<String> = body.skills.into_iter().map(|s| s.id).collect();
+    server
+        .run_command(&id, &body.name, &body.text, &delivery, &skills)
+        .await?;
+    done()
+}
+
+async fn command_list(State(server): Shared, Query(q): Params) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    let list: Vec<Value> = server
+        .commands_for(&directory)
+        .await
+        .iter()
+        .map(harlo_engine::commands::Command::to_json)
+        .collect();
+    ok(json!({ "location": location(&q), "data": list }))
+}
+
+async fn skill_list(State(server): Shared, Query(q): Params) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    let list: Vec<Value> = server
+        .skills_for(&directory)
+        .await
+        .iter()
+        .map(harlo_engine::skills::Skill::to_json)
+        .collect();
+    ok(json!({ "location": location(&q), "data": list }))
 }
 
 async fn prompt(
@@ -427,7 +482,10 @@ async fn prompt(
     axum::Json(body): axum::Json<Prompt>,
 ) -> Answer {
     let delivery = body.delivery.unwrap_or_else(|| "queue".to_owned());
-    ok(server.prompt(&id, body.id, &body.text, &delivery)?)
+    let directory = server.session(&id)?.location.directory;
+    let ids: Vec<String> = body.skills.into_iter().map(|s| s.id).collect();
+    let skills = server.attach(&directory, &ids).await?;
+    ok(server.prompt(&id, body.id, &body.text, &delivery, skills)?)
 }
 
 async fn compact(State(server): Shared, Path(id): Path<String>) -> Answer {
