@@ -20,6 +20,13 @@ const CONFLICT: u16 = 409;
 /// HTTP status for a missing or wrong server password.
 const UNAUTHORIZED: u16 = 401;
 
+/// HTTP status a server gives for a capability it doesn't have.
+const NOT_IMPLEMENTED: u16 = 501;
+
+/// The tag a server gives a capability it doesn't have, such as Harlo's
+/// own server for client tools.
+const UNAVAILABLE_TAG: &str = "CapabilityUnavailableError";
+
 #[derive(Debug)]
 enum Kind {
     /// The server could not be reached, or the connection broke.
@@ -143,6 +150,14 @@ impl Error {
     #[must_use]
     pub fn needs_force(&self) -> bool {
         matches!(self.kind, Kind::Status { force: true, .. })
+    }
+
+    /// Whether the server doesn't have this capability at all, so asking
+    /// again won't help (for example, client tools on a server that can't
+    /// take them).
+    #[must_use]
+    pub fn is_unavailable(&self) -> bool {
+        self.tag() == Some(UNAVAILABLE_TAG) || self.http_status() == Some(NOT_IMPLEMENTED)
     }
 
     /// Whether the server rejected the password.

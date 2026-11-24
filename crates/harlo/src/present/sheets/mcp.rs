@@ -73,7 +73,12 @@ pub(super) fn own_tools_rows(app: &App, rows: &mut Vec<SheetRow>) {
         .as_ref()
         .filter(|_| app.preferences.own_tools)
     {
-        rows.push(pair("Not offered", why, 2));
+        let label = if app.own_tools_unavailable() {
+            "Not available on this server"
+        } else {
+            "Not offered"
+        };
+        rows.push(pair(label, why, 2));
     }
 }
 

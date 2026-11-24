@@ -732,8 +732,8 @@ pub struct App {
     following: Option<crate::task::Handle>,
     /// The connections offering Harlo's own tools to agents, by folder.
     own_tools: HashMap<String, crate::task::Handle>,
-    /// Whether attaching waits a moment after a connection broke.
-    own_tools_paused: bool,
+    /// Whether attaching waits, and why.
+    own_tools_hold: own_tools::Hold,
     /// Why offering them last failed.
     pub own_tools_error: Option<String>,
     /// Dictation into the composer.
@@ -847,7 +847,7 @@ impl App {
             claude: Claude::default(),
             following: None,
             own_tools: HashMap::new(),
-            own_tools_paused: false,
+            own_tools_hold: own_tools::Hold::None,
             own_tools_error: None,
             voice: Voice::default(),
             local: LocalModels::default(),
@@ -1306,6 +1306,8 @@ impl App {
                     version: connected.version.clone(),
                 };
                 self.client = Some(connected.client.clone());
+                self.own_tools_hold = own_tools::Hold::None;
+                self.own_tools_error = None;
                 self.branches.clear();
                 self.workspace.resync(connected.snapshot.clone());
                 self.forget_catalogs();

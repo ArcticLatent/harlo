@@ -60,6 +60,9 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/experimental/job", get(empty_data))
         .route("/api/vcs/diff", get(vcs_diff))
         .route("/api/rpc/opencode.goal/get", post(no_goal))
+        .route("/api/experimental/client-mcp", get(no_client_tools))
+        // No web search tool yet: truthfully, no providers.
+        .route("/api/websearch/provider", get(located_empty))
         .fallback(not_here)
         .layer(middleware::from_fn_with_state(
             Arc::clone(&server),
@@ -155,7 +158,7 @@ async fn info(headers: HeaderMap) -> Answer {
         "pid": std::process::id(),
         "urls": [format!("http://{host}")],
         "paths": { "tmp": std::env::temp_dir() },
-        "capabilities": { "persistentPty": false },
+        "capabilities": { "persistentPty": false, "clientTools": false },
     }))
 }
 
@@ -430,6 +433,18 @@ async fn located_empty(Query(q): Params) -> Answer {
 
 async fn empty_data() -> Answer {
     ok(json!({ "data": [] }))
+}
+
+/// Client tools aren't taken yet: a plain "unavailable", so a client stops
+/// asking and shows why, rather than an empty success that would look like
+/// its tools were registered.
+async fn no_client_tools() -> Response {
+    let body = json!({
+        "_tag": "CapabilityUnavailableError",
+        "message": "This server doesn't offer clients' tools to its agents yet.",
+        "data": { "capability": "clientTools" },
+    });
+    (StatusCode::NOT_IMPLEMENTED, axum::Json(body)).into_response()
 }
 
 async fn no_goal() -> Answer {

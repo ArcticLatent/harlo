@@ -19,7 +19,8 @@ The checks:
     window:<scenario>       a scenario in tools/verify/scenarios/ driving
                             the real window, with the scripted model
     engine:<scenario>       the same scenario on harlo-server instead of
-                            OpenCode (scenarios marked ENGINE = True)
+                            OpenCode (scenarios marked ENGINE = True; those
+                            marked ENGINE = "only" run there alone)
     real:<scenario>         a scenario with a real model (Claude, through
                             OpenCode's Claude Agent and Claude Code)
 
@@ -80,10 +81,13 @@ def scenario_names(kind):
         if not f.endswith(".py") or f.startswith("_"):
             continue
         name = f[:-3]
+        with open(os.path.join(SCENARIOS, f)) as source:
+            marker = re.search(r'^ENGINE = (True|"only")$', source.read(), re.M)
         if kind == "engine":
-            with open(os.path.join(SCENARIOS, f)) as source:
-                if not name.startswith("real_") and re.search(r"^ENGINE = True$", source.read(), re.M):
-                    names.append(name)
+            if not name.startswith("real_") and marker:
+                names.append(name)
+        elif kind == "window" and marker and marker.group(1) == '"only"':
+            continue
         elif (kind == "real") == name.startswith("real_"):
             names.append(name[len(prefix):])
     return names
@@ -476,10 +480,8 @@ def known_checks():
         for name in sorted(os.listdir(folder)):
             if name.endswith(".rs"):
                 checks.append(f"unit:{crate}:{name[:-3]}")
-    for name in sorted(os.listdir(SCENARIOS)):
-        if name.endswith(".py") and not name.startswith("_"):
-            stem = name[:-3]
-            checks.append(f"real:{stem[5:]}" if stem.startswith("real_") else f"window:{stem}")
+    checks += [f"window:{name}" for name in scenario_names("window")]
+    checks += [f"real:{name}" for name in scenario_names("real")]
     checks += [f"engine:{name}" for name in scenario_names("engine")]
     return checks
 

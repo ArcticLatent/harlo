@@ -1,0 +1,203 @@
+//! A scratch sandbox for `harlo-server` tests: the scripted model, a git
+//! project, and the server, with its own `HOME`, XDG folders and password.
+
+// Rust guideline compliant 2026-10-09
+
+#![allow(dead_code, reason = "each test file uses part of it")]
+
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::Duration;
+
+use opencode_client::{Client, Endpoint, EventKind, Events};
+
+/// A scratch folder with the scripted model, a git project and a server.
+pub struct Sandbox {
+    pub dir: tempfile::TempDir,
+    model: Child,
+    server: Child,
+    pub port: u16,
+    pub password: String,
+}
+
+pub fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .expect("a free port")
+        .port()
+}
+
+pub fn run(dir: &Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .expect("git")
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
+impl Sandbox {
+    pub async fn start() -> Self {
+        let dir = tempfile::Builder::new()
+            .prefix("harlo-server-m1.")
+            .tempdir()
+            .expect("scratch");
+        let root = dir.path();
+        for sub in [
+            "home",
+            "config/opencode",
+            "data",
+            "state",
+            "cache",
+            "project",
+        ] {
+            std::fs::create_dir_all(root.join(sub)).expect("folder");
+        }
+        let model_port = free_port();
+        let config = format!(
+            r#"{{
+  "model": "fake/fake-coder",
+  "permissions": [{{ "action": "shell", "resource": "*", "effect": "ask" }}],
+  "providers": {{ "fake": {{
+    "name": "Fake",
+    "settings": {{ "baseURL": "http://127.0.0.1:{model_port}/v1", "apiKey": "fake-key" }},
+    "models": {{ "fake-coder": {{ "name": "Fake Coder", "limit": {{ "context": 128000, "output": 8192 }} }} }}
+  }} }}
+}}"#
+        );
+        std::fs::write(root.join("config/opencode/opencode.json"), config).expect("config");
+        let project = root.join("project");
+        run(&project, &["init", "-q"]);
+        std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
+        run(&project, &["add", "."]);
+        run(
+            &project,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                "init",
+            ],
+        );
+
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-model.py");
+        let model = Command::new("python3")
+            .arg("-I")
+            .arg(script)
+            .arg(model_port.to_string())
+            .arg(root.join("model.jsonl"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start the scripted model");
+        for _ in 0..200 {
+            if tokio::net::TcpStream::connect(("127.0.0.1", model_port))
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let port = free_port();
+        let password = format!("test-{}", opencode_client::message_id());
+        let server = spawn_server(root, port, &password);
+        let sandbox = Self {
+            dir,
+            model,
+            server,
+            port,
+            password,
+        };
+        sandbox.wait_until_up().await;
+        sandbox
+    }
+
+    pub fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    pub fn client(&self) -> Client {
+        Client::new(Endpoint::new(self.url(), Some(self.password.clone())))
+    }
+
+    pub fn project(&self) -> PathBuf {
+        self.dir.path().join("project")
+    }
+
+    pub async fn wait_until_up(&self) {
+        let client = self.client();
+        for _ in 0..200 {
+            if client.info().await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("harlo-server didn't come up");
+    }
+
+    pub async fn restart(&mut self) {
+        let _ = self.server.kill();
+        let _ = self.server.wait();
+        self.server = spawn_server(self.dir.path(), self.port, &self.password);
+        self.wait_until_up().await;
+    }
+}
+
+impl Drop for Sandbox {
+    fn drop(&mut self) {
+        for child in [&mut self.server, &mut self.model] {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+pub fn spawn_server(root: &Path, port: u16, password: &str) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_harlo-server"))
+        .args([
+            "serve",
+            "--hostname",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ])
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", root.join("home"))
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_DATA_HOME", root.join("data"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("XDG_CACHE_HOME", root.join("cache"))
+        .env("OPENCODE_PASSWORD", password)
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}", root.join("no-bus").display()),
+        )
+        .current_dir(root.join("project"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start harlo-server")
+}
+
+/// The first event `pick` takes, within 20 seconds.
+pub async fn until<T>(events: &mut Events, mut pick: impl FnMut(EventKind) -> Option<T>) -> T {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let event = futures_util::StreamExt::next(events)
+                .await
+                .expect("stream open")
+                .expect("event");
+            if let Some(found) = pick(event.kind) {
+                return found;
+            }
+        }
+    })
+    .await
+    .expect("the event within 20 s")
+}
