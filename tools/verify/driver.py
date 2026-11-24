@@ -133,9 +133,24 @@ class Harlo:
     def __exit__(self, *_):
         self.stop()
 
+    def kill(self):
+        """Ends Harlo's process at once, as a crash or a closed laptop
+        would; the sandbox's server keeps running. Returns the PID."""
+        out = self.gui("kill")
+        self.window = None
+        return int(out.split()[-1])
+
+    def revive(self):
+        """Starts Harlo again after `kill`."""
+        self.gui("revive")
+        self._come_back()
+
     def restart(self):
         """Restarts Harlo only; its saved layout and settings stay."""
         self.gui("restart")
+        self._come_back()
+
+    def _come_back(self):
         self.window = None
         deadline = time.time() + 30
         while self.window is None:

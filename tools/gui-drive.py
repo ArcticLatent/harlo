@@ -32,6 +32,9 @@ the private bus are logged instead of shown.
     tools/gui-drive.py log [N]                   the last N lines of Harlo's output
     tools/gui-drive.py notifications             desktop notifications Harlo sent
     tools/gui-drive.py restart                   restarts Harlo only (its saved layout stays)
+    tools/gui-drive.py kill                      ends Harlo's process at once (SIGKILL) and
+                                                 waits until it's gone; the sandbox stays
+    tools/gui-drive.py revive                    starts Harlo again after kill
     tools/gui-drive.py stop                      stops everything and removes the scratch folders
 
 With HARLO_GUI_PREFS='{"setup_done": true}' at `start`, Harlo's saved preferences
@@ -498,6 +501,37 @@ def cmd_restart(_args):
     print("restarted")
 
 
+def cmd_kill(_args):
+    state = load()
+    pid = state.get("harlo_pid")
+    if pid:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        for _ in range(100):
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+            if not os.path.exists(f"/proc/{pid}") or open(f"/proc/{pid}/stat").read().split()[2] == "Z":
+                break
+            time.sleep(0.05)
+        else:
+            sys.exit(f"Harlo ({pid}) is still running")
+    state["harlo_pid"] = None
+    save(state)
+    print(f"killed {pid}")
+
+
+def cmd_revive(_args):
+    state = load()
+    start_harlo(state)
+    xdotool(state, "windowmove", state["window"], "0", "0")
+    save(state)
+    print("revived")
+
+
 def cmd_stop(_args):
     state = load()
     for pid in [
@@ -521,7 +555,7 @@ COMMANDS = {
     "resize": cmd_resize,
     "api": cmd_api, "file": cmd_file, "env": cmd_env, "log": cmd_log,
     "notifications": cmd_notifications,
-    "restart": cmd_restart, "stop": cmd_stop,
+    "restart": cmd_restart, "stop": cmd_stop, "kill": cmd_kill, "revive": cmd_revive,
 }
 
 if __name__ == "__main__":
