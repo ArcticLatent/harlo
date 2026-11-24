@@ -9,6 +9,8 @@
 // Rust guideline compliant 2026-10-09
 
 mod api;
+mod forms;
+mod fs;
 mod git;
 mod memory;
 mod phone;

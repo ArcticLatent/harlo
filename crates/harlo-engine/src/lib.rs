@@ -20,6 +20,7 @@ mod id;
 pub mod instructions;
 pub mod memory;
 mod message;
+pub mod question;
 mod rules;
 pub mod snapshot;
 pub mod tools;

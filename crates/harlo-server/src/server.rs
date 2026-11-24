@@ -12,6 +12,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use harlo_engine::question::Asked;
 use harlo_engine::{
     Answer, Ask, Assistant, Config, Created, ErrorInfo, Event, Gate, Message, Outcome, Part, Rule,
     Sink, StepTime, ToolState, Turn, agent_rules, ascending_id, descending_id, now,
@@ -38,9 +39,11 @@ pub struct Outgoing {
 }
 
 /// A run in progress.
-struct Run {
+pub(crate) struct Run {
     stop: CancellationToken,
     asks: Vec<Pending>,
+    /// The agent's questions waiting for answers.
+    pub(crate) forms: Vec<crate::forms::PendingForm>,
 }
 
 /// A permission request waiting for an answer.
@@ -52,8 +55,10 @@ struct Pending {
 
 /// What runs and what waits, guarded together.
 #[derive(Default)]
-struct Live {
-    runs: HashMap<String, Run>,
+pub(crate) struct Live {
+    pub(crate) runs: HashMap<String, Run>,
+    /// Forms answered or dismissed, with their state, by ID.
+    pub(crate) settled_forms: HashMap<String, Value>,
     /// Prompts not yet delivered to a run, by session.
     inbox: HashMap<String, Vec<(Message, String)>>,
 }
@@ -74,7 +79,7 @@ pub struct Server {
     shadows: Mutex<HashMap<String, harlo_engine::snapshot::Shadow>>,
     events: broadcast::Sender<Outgoing>,
     emitting: Mutex<()>,
-    live: Mutex<Live>,
+    pub(crate) live: Mutex<Live>,
 }
 
 impl std::fmt::Debug for Server {
@@ -104,7 +109,7 @@ impl From<rusqlite::Error> for Refusal {
     }
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -374,6 +379,7 @@ impl Server {
                     Run {
                         stop: stop.clone(),
                         asks: Vec::new(),
+                        forms: Vec::new(),
                     },
                 );
                 Some(stop)
@@ -942,6 +948,14 @@ impl Gate for Hooks {
             );
         }
         async move { rx.await.unwrap_or(Answer::Reject(None)) }
+    }
+
+    fn question(&self, asked: Asked) -> impl Future<Output = Option<Vec<Vec<String>>>> + Send {
+        let rx = self
+            .server
+            .ask_questions(&self.session, &self.directory, &asked);
+        // (A run that ended, or a server going down, dismisses them.)
+        async move { rx?.await.ok().flatten() }
     }
 }
 

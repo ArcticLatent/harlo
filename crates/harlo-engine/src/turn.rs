@@ -19,6 +19,7 @@ use crate::config::{ModelRef, ProviderSpec};
 use crate::message::{
     Assistant, ErrorInfo, Message, Part, Snapshot, StepTime, ToolState, ToolTime,
 };
+use crate::question::Asked;
 use crate::rules::{Effect, Rule, decide};
 use crate::tools::{self, Plan};
 use crate::{Error, id};
@@ -209,10 +210,14 @@ pub enum Answer {
     Reject(Option<String>),
 }
 
-/// Where a turn asks for permission.
+/// Where a turn asks a person: for permission, and the agent's questions.
 pub trait Gate: Send + Sync {
     /// Waits for a person's answer to `ask`.
     fn ask(&self, ask: Ask) -> impl Future<Output = Answer> + Send;
+
+    /// Waits for a person's answers to the agent's questions: one list per
+    /// question, or `None` when they dismissed them.
+    fn question(&self, asked: Asked) -> impl Future<Output = Option<Vec<Vec<String>>>> + Send;
 }
 
 /// How a turn ended.
@@ -242,6 +247,7 @@ pub async fn run(
     stop: &CancellationToken,
 ) -> Outcome {
     let mut definitions = tools::definitions();
+    definitions.push(crate::question::definition());
     if turn.memory.is_some() {
         definitions.extend(crate::memory::definitions());
     }
@@ -642,8 +648,15 @@ async fn call_tool(
         }
     }
     time.ran = Some(now());
-    let ran = run_plan(turn, plan, message, stop).await;
-    match ran {
+    if let Plan::Question { questions } = plan {
+        return ask_questions(input, questions, message, call, gate, stop).await;
+    }
+    ran(input, run_plan(turn, plan, message, stop).await)
+}
+
+/// A call that ran, from what it returned.
+fn ran(input: Map<String, Value>, result: Result<tools::Output, String>) -> Called {
+    match result {
         Ok(out) => {
             let state = ToolState::Completed {
                 input,
@@ -654,6 +667,47 @@ async fn call_tool(
         }
         Err(why) => Called::Ran(failed(input, "tool", why), Vec::new()),
     }
+}
+
+/// Asks the person the agent's questions and waits. Dismissed, the turn
+/// stops, as a declined call without a reason does.
+async fn ask_questions(
+    input: Map<String, Value>,
+    questions: Vec<crate::question::Question>,
+    message: &str,
+    call: &str,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Called {
+    let asked = Asked {
+        id: id::ascending_id("frm"),
+        message: message.to_owned(),
+        call: call.to_owned(),
+        questions: questions.clone(),
+    };
+    let answers = tokio::select! {
+        a = gate.question(asked) => a,
+        () = stop.cancelled() => return Called::Refused(failed(input, "aborted", "Stopped while waiting for answers.".to_owned())),
+    };
+    let Some(answers) = answers else {
+        return Called::Halted(failed(
+            input,
+            "aborted",
+            "The user dismissed this question".to_owned(),
+        ));
+    };
+    let text = crate::question::answered(&questions, &answers);
+    Called::Ran(
+        ToolState::Completed {
+            input,
+            content: vec![json!({ "type": "text", "text": text })],
+            metadata: json!({ "answers": answers, "truncated": false })
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+        },
+        Vec::new(),
+    )
 }
 
 /// Runs a checked call: the memory tools through the turn's memory, the

@@ -84,7 +84,10 @@ def scenario_names(kind):
         with open(os.path.join(SCENARIOS, f)) as source:
             marker = re.search(r'^ENGINE = (True|"only")$', source.read(), re.M)
         if kind == "engine":
-            if not name.startswith("real_") and marker:
+            # HARLO_VERIFY_ENGINE_ALL=1 surveys every window scenario on
+            # harlo-server, to see what the engine still lacks.
+            surveying = os.environ.get("HARLO_VERIFY_ENGINE_ALL") == "1"
+            if not name.startswith("real_") and (marker or surveying):
                 names.append(name)
         elif kind == "window" and marker and marker.group(1) == '"only"':
             continue

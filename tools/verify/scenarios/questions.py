@@ -1,6 +1,8 @@
 """Questions: the agent asks with OpenCode's question tool; the card shows
 the question and its options, and the chosen answer goes back to it."""
 
+ENGINE = True
+
 import json
 
 from _common import open_project_session, send

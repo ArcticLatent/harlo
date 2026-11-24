@@ -8,6 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use harlo_engine::question::Asked;
 use harlo_engine::{
     Answer, Ask, Created, Effect, Event, Gate, Message, ModelRef, ModelSpec, Outcome, Part,
     ProviderSpec, Rule, Sink, ToolState, Turn, agent_rules, run,
@@ -78,6 +79,16 @@ impl Gate for Person {
     fn ask(&self, ask: Ask) -> impl Future<Output = Answer> + Send {
         self.asked.lock().expect("asks").push(ask);
         std::future::ready(self.answer.clone())
+    }
+
+    /// Picks each question's first option; with no options, dismisses them.
+    fn question(&self, asked: Asked) -> impl Future<Output = Option<Vec<Vec<String>>>> + Send {
+        let picks: Option<Vec<Vec<String>>> = asked
+            .questions
+            .iter()
+            .map(|q| q.options.first().map(|o| vec![o.label.clone()]))
+            .collect();
+        std::future::ready(picks)
     }
 }
 
@@ -244,4 +255,68 @@ async fn without_a_careful_rule_edits_run_unasked_and_a_refusal_stops_the_turn()
         .filter(|e| matches!(e, Event::StepEnded { .. }))
         .count();
     assert_eq!(ends, 1, "no second model step after a refusal");
+}
+
+/// The tool results of the steps a turn ended.
+fn tool_results(events: &Events) -> Vec<ToolState> {
+    events
+        .0
+        .lock()
+        .expect("events")
+        .iter()
+        .filter_map(|e| match e {
+            Event::StepEnded { step } => Some(step.content.clone()),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|p| match p {
+            Part::Tool { state, .. } => Some(state),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn questions_wait_for_answers_and_a_dismissal_stops_the_turn() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    let model = Model::start(dir.path()).await;
+    let person = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+
+    let answered = Events::default();
+    let ask = r#"tool question {"questions":[{"question":"Which colour?","options":[{"label":"Blue"}]}]} ;; say Blue it is."#;
+    let outcome = run(
+        turn(&model, &project, ask, false),
+        &answered,
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    assert!(matches!(
+        &tool_results(&answered)[0],
+        ToolState::Completed { content, metadata, .. }
+            if content[0]["text"] == "User has answered your questions: \"Which colour?\"=\"Blue\". You can now continue with the user's answers in mind."
+                && metadata["answers"] == serde_json::json!([["Blue"]])
+    ));
+
+    // With no options the test's person dismisses the questions.
+    let dismissed = Events::default();
+    let ask = r#"tool question {"questions":[{"question":"Anything else?","options":[]}]} ;; say Never seen."#;
+    let outcome = run(
+        turn(&model, &project, ask, false),
+        &dismissed,
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Interrupted), "{outcome:?}");
+    assert!(matches!(
+        &tool_results(&dismissed)[0],
+        ToolState::Error { error, .. } if error.message == "The user dismissed this question"
+    ));
 }

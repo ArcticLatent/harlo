@@ -23,7 +23,7 @@ use base64::Engine as _;
 use futures_util::{Stream, StreamExt, stream};
 use harlo_engine::{Message, Rule, agent_rules, now};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::git;
@@ -44,7 +44,13 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/session/{id}", get(session).patch(update_session))
         .route("/api/session/{id}/message", get(messages))
         .route("/api/session/{id}/diff", get(session_diff))
-        .route("/api/session/{id}/form", get(empty_data))
+        .route("/api/session/{id}/form", get(forms))
+        .route(
+            "/api/session/{id}/form/{form}",
+            get(form).delete(dismiss_form),
+        )
+        .route("/api/session/{id}/form/{form}/reply", post(answer_form))
+        .route("/api/form", get(forms_in))
         .route("/api/session/{id}/inbox", get(inbox))
         .route("/api/session/{id}/permission", get(permissions))
         .route("/api/session/{id}/permission/{request}/reply", post(reply))
@@ -67,6 +73,10 @@ pub fn router(server: Arc<Server>) -> Router {
         // No web search tool yet: truthfully, no providers.
         .route("/api/websearch/provider", get(located_empty))
         // Harlo's own: phone access hosted here.
+        .route("/api/fs/find", get(find_files))
+        .route("/api/fs/list", get(list_files))
+        .route("/api/fs/read/{*path}", get(read_file))
+        .route("/api/experimental/fs/write", post(write_file))
         .route("/harlo/memory", get(memory).put(set_memory))
         .route("/harlo/notes", get(notes))
         .route("/harlo/notes/{id}", patch(correct_note).delete(forget_note))
@@ -346,6 +356,40 @@ async fn inbox(State(server): Shared, Path(id): Path<String>) -> Answer {
     ok(json!({ "data": server.inbox(&id) }))
 }
 
+async fn forms(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.session(&id)?;
+    ok(json!({ "data": server.forms(&id) }))
+}
+
+async fn forms_in(State(server): Shared, Query(q): Params) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    ok(json!({ "location": location(&q), "data": server.forms_in(&directory) }))
+}
+
+async fn form(State(server): Shared, Path((id, form)): Path<(String, String)>) -> Answer {
+    ok(json!({ "data": server.form(&id, &form)? }))
+}
+
+/// A person's answers to a form.
+#[derive(Debug, serde::Deserialize)]
+struct FormReply {
+    answer: Map<String, Value>,
+}
+
+async fn answer_form(
+    State(server): Shared,
+    Path((id, form)): Path<(String, String)>,
+    axum::Json(body): axum::Json<FormReply>,
+) -> Answer {
+    server.settle_form(&id, &form, Some(&body.answer))?;
+    done()
+}
+
+async fn dismiss_form(State(server): Shared, Path((id, form)): Path<(String, String)>) -> Answer {
+    server.settle_form(&id, &form, None)?;
+    done()
+}
+
 async fn permissions(State(server): Shared, Path(id): Path<String>) -> Answer {
     ok(json!({ "data": server.asks(&id) }))
 }
@@ -488,6 +532,60 @@ async fn cancel_revert(State(server): Shared, Path(id): Path<String>) -> Answer 
 #[derive(Deserialize)]
 struct After {
     after: Option<u64>,
+}
+
+/// The folder a request names in `location[directory]`, which must be set.
+fn folder_of(q: &HashMap<String, String>) -> Result<std::path::PathBuf, Refusal> {
+    q.get("location[directory]")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| Refusal::Bad("Which folder? Set location[directory].".to_owned()))
+}
+
+async fn find_files(Query(q): Params) -> Answer {
+    let root = folder_of(&q)?;
+    let query = q.get("query").cloned().unwrap_or_default();
+    let kind = q.get("type").cloned();
+    let limit = q
+        .get("limit")
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(50_usize);
+    let data =
+        tokio::task::spawn_blocking(move || crate::fs::find(&root, &query, kind.as_deref(), limit))
+            .await
+            .unwrap_or_default();
+    ok(json!({ "location": location(&q), "data": data }))
+}
+
+async fn list_files(Query(q): Params) -> Answer {
+    let root = folder_of(&q)?;
+    let path = q.get("path").cloned().unwrap_or_default();
+    let data = crate::fs::list(&root, &path).map_err(Refusal::NotFound)?;
+    ok(json!({ "location": location(&q), "data": data }))
+}
+
+async fn read_file(Path(path): Path<String>, Query(q): Params) -> Answer {
+    let root = folder_of(&q)?;
+    let file = crate::fs::inside(&root, &path).map_err(Refusal::Bad)?;
+    let bytes = tokio::fs::read(&file)
+        .await
+        .map_err(|e| Refusal::NotFound(format!("Couldn't read {path}: {e}")))?;
+    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
+}
+
+async fn write_file(Query(q): Params, body: axum::body::Bytes) -> Answer {
+    let root = folder_of(&q)?;
+    let path = q.get("path").cloned().unwrap_or_default();
+    let file = crate::fs::inside(&root, &path).map_err(Refusal::Bad)?;
+    if let Some(parent) = file.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| Refusal::Bad(format!("Couldn't make the folder for {path}: {e}")))?;
+    }
+    tokio::fs::write(&file, &body)
+        .await
+        .map_err(|e| Refusal::Bad(format!("Couldn't write {path}: {e}")))?;
+    ok(json!({ "location": location(&q), "data": { "path": file } }))
 }
 
 /// Whether notes are on.

@@ -187,5 +187,5 @@ checks = ["unit:opencode-client:m4", "unit:opencode-client:m6", "unit:opencode-c
 [[item]]
 id = "engine"
 title = "Harlo's own server (harlo-server on harlo-engine): one turn with an approved edit, its diff, a restart; events replayed after a reconnect"
-checks = ["unit:harlo-engine", "unit:harlo-server", "window:turn", "engine:turn", "engine:phone_handoff", "window:undo", "engine:undo", "window:reconnect", "engine:reconnect", "engine:answers", "window:memory", "engine:memory", "engine:client_tools", "engine:approvals", "engine:queue", "engine:changes", "engine:restart", "engine:sessions"]
+checks = ["unit:harlo-engine", "unit:harlo-server", "window:turn", "engine:turn", "engine:phone_handoff", "window:undo", "engine:undo", "window:reconnect", "engine:reconnect", "engine:answers", "window:memory", "engine:memory", "engine:questions", "engine:composer", "engine:files_editor", "engine:client_tools", "engine:approvals", "engine:queue", "engine:changes", "engine:restart", "engine:sessions"]
 

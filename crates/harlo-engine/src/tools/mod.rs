@@ -161,6 +161,11 @@ pub enum Plan {
         /// The note.
         draft: crate::memory::Draft,
     },
+    /// Asks the person; answered through the turn's gate.
+    Question {
+        /// The questions.
+        questions: Vec<crate::question::Question>,
+    },
     /// Searches the project's earlier sessions.
     SearchSessions {
         /// The words.
@@ -264,6 +269,9 @@ impl Plan {
                 })
             }
             "remember" => remember(input),
+            "question" => Ok(Self::Question {
+                questions: crate::question::parse(input)?,
+            }),
             "search_sessions" => Ok(Self::SearchSessions {
                 query: text("query")?,
             }),
@@ -321,6 +329,11 @@ impl Plan {
             Self::Remember { draft } => Permission {
                 action: "remember",
                 resources: vec![draft.text.clone()],
+                metadata: Map::new(),
+            },
+            Self::Question { questions } => Permission {
+                action: "question",
+                resources: questions.iter().map(|q| q.question.clone()).collect(),
                 metadata: Map::new(),
             },
             Self::SearchSessions { query } => Permission {
@@ -416,6 +429,7 @@ impl Plan {
             Self::Remember { .. } | Self::SearchSessions { .. } => {
                 Err("Notes aren't kept on this server.".to_owned())
             }
+            Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
             Self::Shell {
                 command,
                 timeout_ms,
