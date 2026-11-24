@@ -46,6 +46,9 @@ pub struct Turn {
     /// Records the project's files around each step that runs tools, so
     /// the step can be undone; none, and steps aren't recorded.
     pub shadow: Option<crate::snapshot::Shadow>,
+    /// Where notes are kept and earlier sessions searched; none, and the
+    /// model isn't offered `remember` or `search_sessions`.
+    pub memory: Option<std::sync::Arc<dyn crate::memory::Memory>>,
 }
 
 /// Something that happened during a turn.
@@ -238,7 +241,10 @@ pub async fn run(
     gate: &impl Gate,
     stop: &CancellationToken,
 ) -> Outcome {
-    let definitions = tools::definitions();
+    let mut definitions = tools::definitions();
+    if turn.memory.is_some() {
+        definitions.extend(crate::memory::definitions());
+    }
     for _ in 0..MAX_STEPS {
         if stop.is_cancelled() {
             return Outcome::Interrupted;
@@ -553,6 +559,10 @@ async fn call_tool(
     stop: &CancellationToken,
 ) -> Called {
     let plan = match Plan::new(name, &input, &turn.cwd) {
+        Ok(Plan::Remember { .. } | Plan::SearchSessions { .. }) if turn.memory.is_none() => {
+            let why = format!("There is no tool called `{name}`. Notes are off.");
+            return Called::Ran(failed(input, "tool", why), Vec::new());
+        }
         Ok(plan) => plan,
         Err(why) => return Called::Ran(failed(input, "tool", why), Vec::new()),
     };
@@ -632,7 +642,8 @@ async fn call_tool(
         }
     }
     time.ran = Some(now());
-    match plan.run(&turn.cwd, stop).await {
+    let ran = run_plan(turn, plan, message, stop).await;
+    match ran {
         Ok(out) => {
             let state = ToolState::Completed {
                 input,
@@ -642,6 +653,36 @@ async fn call_tool(
             Called::Ran(state, out.changed)
         }
         Err(why) => Called::Ran(failed(input, "tool", why), Vec::new()),
+    }
+}
+
+/// Runs a checked call: the memory tools through the turn's memory, the
+/// rest in the project folder.
+async fn run_plan(
+    turn: &Turn,
+    plan: Plan,
+    message: &str,
+    stop: &CancellationToken,
+) -> Result<tools::Output, String> {
+    match (plan, turn.memory.as_ref()) {
+        (Plan::Remember { draft }, Some(memory)) => {
+            memory.remember(draft, message).map(|note| tools::Output {
+                text: format!("Kept as note {}.", note.id),
+                metadata: json!({ "note": note })
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default(),
+                changed: Vec::new(),
+            })
+        }
+        (Plan::SearchSessions { query }, Some(memory)) => {
+            memory.search(&query).map(|text| tools::Output {
+                text,
+                metadata: Map::new(),
+                changed: Vec::new(),
+            })
+        }
+        (plan, _) => plan.run(&turn.cwd, stop).await,
     }
 }
 

@@ -18,6 +18,7 @@ mod config;
 mod error;
 mod id;
 pub mod instructions;
+pub mod memory;
 mod message;
 mod rules;
 pub mod snapshot;

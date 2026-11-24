@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use base64::Engine as _;
 use futures_util::{Stream, StreamExt, stream};
 use harlo_engine::{Message, Rule, agent_rules, now};
@@ -67,6 +67,9 @@ pub fn router(server: Arc<Server>) -> Router {
         // No web search tool yet: truthfully, no providers.
         .route("/api/websearch/provider", get(located_empty))
         // Harlo's own: phone access hosted here.
+        .route("/harlo/memory", get(memory).put(set_memory))
+        .route("/harlo/notes", get(notes))
+        .route("/harlo/notes/{id}", patch(correct_note).delete(forget_note))
         .route("/harlo/phone", get(phone_state).put(want_phone))
         .route("/harlo/phone/pair", post(pair_phone))
         .route("/harlo/phone/device/{id}", delete(remove_phone))
@@ -165,7 +168,7 @@ async fn info(headers: HeaderMap) -> Answer {
         "pid": std::process::id(),
         "urls": [format!("http://{host}")],
         "paths": { "tmp": std::env::temp_dir() },
-        "capabilities": { "persistentPty": false, "clientTools": false, "phone": true },
+        "capabilities": { "persistentPty": false, "clientTools": false, "phone": true, "memory": true },
     }))
 }
 
@@ -485,6 +488,46 @@ async fn cancel_revert(State(server): Shared, Path(id): Path<String>) -> Answer 
 #[derive(Deserialize)]
 struct After {
     after: Option<u64>,
+}
+
+/// Whether notes are on.
+#[derive(Debug, serde::Deserialize)]
+struct MemorySwitch {
+    enabled: bool,
+}
+
+async fn memory(State(server): Shared) -> Answer {
+    ok(json!({ "enabled": server.memory_on() }))
+}
+
+async fn set_memory(State(server): Shared, axum::Json(switch): axum::Json<MemorySwitch>) -> Answer {
+    server.set_memory(switch.enabled)?;
+    ok(json!({ "enabled": server.memory_on() }))
+}
+
+async fn notes(State(server): Shared, Query(q): Params) -> Answer {
+    let notes = server.notes(q.get("projectID").map(String::as_str))?;
+    ok(json!({ "data": notes }))
+}
+
+/// A note's corrected text.
+#[derive(Debug, serde::Deserialize)]
+struct Correction {
+    text: String,
+}
+
+async fn correct_note(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(c): axum::Json<Correction>,
+) -> Answer {
+    let note = server.correct_note(&id, &c.text)?;
+    ok(json!({ "data": note }))
+}
+
+async fn forget_note(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.forget_note(&id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn phone_state(State(server): Shared, Query(q): Query<After>) -> Answer {

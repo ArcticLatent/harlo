@@ -128,6 +128,8 @@ pub enum Section {
     Extensions,
     /// Web search and Harlo's own tools.
     Tools,
+    /// Notes the agent keeps between sessions.
+    Memory,
     /// Prompts the server sends on a schedule.
     Schedules,
     /// The server Harlo follows.
@@ -140,7 +142,7 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -154,6 +156,7 @@ impl Section {
         Self::Agents,
         Self::Extensions,
         Self::Tools,
+        Self::Memory,
         Self::Schedules,
         Self::Server,
         Self::Phone,
@@ -177,6 +180,7 @@ impl Section {
             Self::Agents => "Agents",
             Self::Extensions => "Extensions",
             Self::Tools => "Tools for agents",
+            Self::Memory => "Memory",
             Self::Schedules => "Schedules",
             Self::Server => "Server",
             Self::Phone => "Phone",
@@ -200,7 +204,8 @@ impl Section {
             | Self::LocalModels
             | Self::Agents
             | Self::Extensions
-            | Self::Tools => Some("Agents and models"),
+            | Self::Tools
+            | Self::Memory => Some("Agents and models"),
             Self::Schedules => Some("Automation"),
             Self::Server | Self::Phone => Some("Connections"),
         }
@@ -243,11 +248,14 @@ pub enum Setting {
     Phone,
     /// [`Preferences::phone_relay`].
     PhoneRelay,
+    /// Whether the server keeps notes between sessions: the server's
+    /// setting, not a preference.
+    Notes,
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -266,6 +274,7 @@ impl Setting {
         Self::OwnTools,
         Self::Phone,
         Self::PhoneRelay,
+        Self::Notes,
     ];
 }
 
@@ -316,11 +325,13 @@ pub enum Field {
     McpUrl,
     /// Another computer to follow, as what follows `ssh`.
     Computer,
+    /// The corrected text of the note being edited.
+    NoteText,
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -357,6 +368,7 @@ impl Field {
         Self::McpCommand,
         Self::McpUrl,
         Self::Computer,
+        Self::NoteText,
     ];
 }
 
@@ -675,6 +687,8 @@ pub struct Sheets {
     /// Which of Extensions' tabs shows, by its place in
     /// [`SettingChoice::ExtensionsTab`]'s options.
     pub extensions_tab: usize,
+    /// Settings → Memory.
+    pub memory: super::Memory,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -836,6 +850,11 @@ impl App {
                 Task::batch([self.load_mcp(), self.load_setup()])
             }
             Section::Tools => Task::batch([self.load_mcp(), self.load_setup()]),
+            Section::Memory => {
+                self.sheets.memory.editing = None;
+                self.sheets.memory.error = None;
+                self.load_memory()
+            }
             _ => Task::none(),
         }
     }
@@ -902,6 +921,7 @@ impl App {
             Setting::Automations => {
                 return self.schedule_event(super::ScheduleEvent::ToggleAllowed);
             }
+            Setting::Notes => return self.memory_event(super::MemoryEvent::Toggle),
             Setting::KeepInTray => {
                 self.preferences.keep_in_tray = !self.preferences.keep_in_tray;
             }
@@ -942,6 +962,7 @@ impl App {
             }
             Field::McpName | Field::McpCommand | Field::McpUrl => self.mcp_text(field, value),
             Field::Computer => self.add_computer(value),
+            Field::NoteText => self.memory_event(super::MemoryEvent::Save(value.to_owned())),
             Field::ModelFilter => {
                 value.clone_into(&mut self.sheets.model_filter);
                 Task::none()
@@ -995,7 +1016,8 @@ impl App {
             | Setting::Automations
             | Setting::OwnTools
             | Setting::Phone
-            | Setting::PhoneRelay => {
+            | Setting::PhoneRelay
+            | Setting::Notes => {
                 return;
             }
         };
@@ -1044,7 +1066,8 @@ impl App {
             | Field::McpCommand
             | Field::McpUrl
             | Field::ModelFilter
-            | Field::Computer => {
+            | Field::Computer
+            | Field::NoteText => {
                 return Task::none();
             }
         }

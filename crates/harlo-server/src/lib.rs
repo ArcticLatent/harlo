@@ -10,6 +10,7 @@
 
 mod api;
 mod git;
+mod memory;
 mod phone;
 mod server;
 mod store;

@@ -583,6 +583,7 @@ impl Server {
             ],
             history,
             shadow: Some(self.shadow(&directory)),
+            memory: self.memory_for(session),
         };
         let hooks = Hooks {
             server: Arc::clone(self),
@@ -617,6 +618,11 @@ impl Server {
         if !found.is_empty() {
             prompt.push_str("\n\n");
             prompt.push_str(&harlo_engine::instructions::render(&found));
+        }
+        let notes = self.notes_prompt(&git::project_id(directory).await);
+        if !notes.is_empty() {
+            prompt.push_str("\n\n");
+            prompt.push_str(notes.trim_end());
         }
         let _ = write!(
             prompt,

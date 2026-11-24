@@ -1,5 +1,5 @@
-//! What the server keeps on disk: sessions, their messages, and every
-//! durable event in order.
+//! What the server keeps on disk: sessions, their messages (indexed for
+//! search), every durable event in order, notes and settings.
 //!
 //! One SQLite file. Events carry a sequence number that only grows, so a
 //! client that reconnects can name the last one it saw and get the rest.
@@ -9,6 +9,7 @@
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use harlo_engine::memory::Note;
 use harlo_engine::{Message, ModelRef, Rule, Tokens};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -73,6 +74,21 @@ pub struct SessionTime {
     pub idle: Option<i64>,
 }
 
+/// A message that matched a search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hit {
+    /// Its session.
+    pub session: String,
+    /// The message.
+    pub message: String,
+    /// The matching part, with the words in brackets.
+    pub snippet: String,
+    /// The session's title, if it has one.
+    pub title: Option<String>,
+    /// When the session was made, in Unix milliseconds.
+    pub created: Option<i64>,
+}
+
 /// A stored event: its sequence number, the session (or other thing) it
 /// belongs to, and its JSON without the sequence.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +127,11 @@ impl Store {
     }
 
     fn with(conn: Connection) -> Result<Self, Error> {
+        let indexed: bool = conn.query_row(
+            "SELECT count(*) > 0 FROM sqlite_master WHERE name = 'message_text'",
+            [],
+            |r| r.get(0),
+        )?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
@@ -122,11 +143,184 @@ impl Store {
                  seq INTEGER PRIMARY KEY AUTOINCREMENT, aggregate TEXT NOT NULL, body TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS decision (
                  request TEXT PRIMARY KEY, session TEXT NOT NULL, reply TEXT NOT NULL,
-                 message TEXT, time INTEGER NOT NULL);",
+                 message TEXT, time INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS note (
+                 id TEXT PRIMARY KEY, project TEXT, body TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE VIRTUAL TABLE IF NOT EXISTS message_text
+                 USING fts5(text, session UNINDEXED, message UNINDEXED);",
         )?;
-        Ok(Self {
+        let store = Self {
             conn: Mutex::new(conn),
-        })
+        };
+        if !indexed {
+            store.index_all()?;
+        }
+        Ok(store)
+    }
+
+    /// Indexes every stored message's text for search (a store made
+    /// before search existed).
+    fn index_all(&self) -> Result<(), Error> {
+        let bodies: Vec<(String, String)> = {
+            let conn = self.conn();
+            let mut stmt = conn.prepare("SELECT session, body FROM message")?;
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()?
+        };
+        for (session, body) in bodies {
+            if let Ok(message) = serde_json::from_str::<Message>(&body) {
+                self.index(session.as_str(), &message)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Indexes `message`'s text (a prompt, or what a step said) for search.
+    fn index(&self, session: &str, message: &Message) -> Result<(), Error> {
+        let text = match message {
+            Message::User { text, .. } => text.clone(),
+            Message::Assistant(step) => step
+                .content
+                .iter()
+                .filter_map(|p| match p {
+                    harlo_engine::Part::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Message::Idle { .. } => String::new(),
+        };
+        let conn = self.conn();
+        conn.execute(
+            "DELETE FROM message_text WHERE message = ?1",
+            [message.id()],
+        )?;
+        if !text.trim().is_empty() {
+            conn.execute(
+                "INSERT INTO message_text (text, session, message) VALUES (?1, ?2, ?3)",
+                params![text, session, message.id()],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The messages of `project`'s sessions whose text has every word of
+    /// `words`, best first, at most `limit`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn search(&self, project: &str, words: &[String], limit: usize) -> Result<Vec<Hit>, Error> {
+        // Each word quoted, so punctuation can't make a query of it.
+        let query = words
+            .iter()
+            .map(|w| format!("\"{}\"", w.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT t.session, t.message, snippet(message_text, 0, '[', ']', '…', 16),
+                    json_extract(s.info, '$.title'), json_extract(s.info, '$.time.created')
+             FROM message_text t JOIN session s ON s.id = t.session
+             WHERE message_text MATCH ?1 AND json_extract(s.info, '$.projectID') = ?2
+             ORDER BY rank LIMIT ?3",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        stmt.query_map(params![query, project, limit], |r| {
+            Ok(Hit {
+                session: r.get(0)?,
+                message: r.get(1)?,
+                snippet: r.get(2)?,
+                title: r.get(3)?,
+                created: r.get(4)?,
+            })
+        })?
+        .collect()
+    }
+
+    /// Saves a note, new or changed.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn put_note(&self, note: &Note) -> Result<(), Error> {
+        let body = serde_json::to_string(note).map_err(json_error)?;
+        self.conn().execute(
+            "INSERT INTO note (id, project, body) VALUES (?1, ?2, ?3)
+             ON CONFLICT (id) DO UPDATE SET project = excluded.project, body = excluded.body",
+            params![note.id, note.project, body],
+        )?;
+        Ok(())
+    }
+
+    /// Note `id`, if it's kept.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn note(&self, id: &str) -> Result<Option<Note>, Error> {
+        self.conn()
+            .query_row("SELECT body FROM note WHERE id = ?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?
+            .map(|b| serde_json::from_str(&b).map_err(json_error))
+            .transpose()
+    }
+
+    /// The user's notes and, with `project`, that project's, oldest first;
+    /// replaced ones included.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn notes(&self, project: Option<&str>) -> Result<Vec<Note>, Error> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare("SELECT body FROM note WHERE project IS NULL OR project = ?1 ORDER BY id")?;
+        stmt.query_map([project], |r| r.get::<_, String>(0))?
+            .map(|b| serde_json::from_str(&b?).map_err(json_error))
+            .collect()
+    }
+
+    /// Forgets note `id`; whether there was one.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn delete_note(&self, id: &str) -> Result<bool, Error> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM note WHERE id = ?1", [id])?
+            > 0)
+    }
+
+    /// Setting `key`, if it was set.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn setting(&self, key: &str) -> Result<Option<String>, Error> {
+        self.conn()
+            .query_row("SELECT value FROM setting WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()
+    }
+
+    /// Sets setting `key` to `value`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn put_setting(&self, key: &str, value: &str) -> Result<(), Error> {
+        self.conn().execute(
+            "INSERT INTO setting (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
     }
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
@@ -190,7 +384,7 @@ impl Store {
              ON CONFLICT (id) DO UPDATE SET body = excluded.body",
             params![message.id(), session, body],
         )?;
-        Ok(())
+        self.index(session, message)
     }
 
     /// Whether message `id` is stored.
@@ -262,7 +456,12 @@ impl Store {
     ///
     /// Fails when the write fails.
     pub fn remove_messages_from(&self, session: &str, from: &str) -> Result<usize, Error> {
-        self.conn().execute(
+        let conn = self.conn();
+        conn.execute(
+            "DELETE FROM message_text WHERE session = ?1 AND message >= ?2",
+            [session, from],
+        )?;
+        conn.execute(
             "DELETE FROM message WHERE session = ?1 AND id >= ?2",
             [session, from],
         )

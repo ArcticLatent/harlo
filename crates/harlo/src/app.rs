@@ -42,6 +42,7 @@ mod jobs;
 mod line_comments;
 mod local_models;
 mod mcp;
+mod memory;
 mod notes;
 mod notices;
 mod own_tools;
@@ -79,6 +80,7 @@ pub use jobs::JobEvent;
 pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
 pub use local_models::{EngineState, Getting, LocalEvent, LocalModels, ServerState};
 pub use mcp::{McpEvent, McpServers, McpView};
+pub use memory::{Kept, Memory, MemoryEvent};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use own_tools::OwnToolsEvent;
@@ -333,6 +335,8 @@ pub enum Message {
     Local(LocalEvent),
     /// Something that happened to phone access.
     Phone(PhoneEvent),
+    /// Something happened in Settings → Memory.
+    Memory(MemoryEvent),
     /// Something happened to pictures: a thumbnail, the viewer, the grid.
     Pictures(PictureEvent),
     /// Something happened to a side question.
@@ -999,6 +1003,7 @@ impl App {
             Message::Voice(event) => self.voice_event(event),
             Message::Local(event) => self.local_event(event),
             Message::Phone(event) => self.phone_event(event),
+            Message::Memory(event) => self.memory_event(event),
             Message::Pictures(event) => self.pictures_event(event),
             _ => Task::none(),
         }
@@ -1035,6 +1040,7 @@ impl App {
             | Message::Voice(_)
             | Message::Local(_)
             | Message::Phone(_)
+            | Message::Memory(_)
             | Message::Pictures(_)) => return self.feature_event(message),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,

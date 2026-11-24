@@ -1,8 +1,9 @@
 //! What Harlo's own server adds to the API: phone access hosted by the
-//! server, so phones keep working while no desktop is open.
+//! server, so phones keep working while no desktop is open, and notes kept
+//! between sessions.
 //!
-//! OpenCode doesn't have these routes; [`Client::hosts_phone`] says whether
-//! the server does.
+//! OpenCode doesn't have these routes; [`Client::hosts_phone`] and
+//! [`Client::keeps_notes`] say whether the server does.
 
 // Rust guideline compliant 2026-10-09
 
@@ -79,7 +80,118 @@ pub struct PhoneState {
     pub connected: Vec<String>,
 }
 
+/// Who a note is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteScope {
+    /// Every session of the project, in any of its worktrees.
+    Project,
+    /// Every session of the user's.
+    User,
+}
+
+/// Where a note came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteSource {
+    /// The session.
+    pub session: String,
+    /// The message that kept it.
+    pub message: String,
+    /// The session's title then, if it had one.
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// A decision kept between sessions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    /// Its ID.
+    pub id: String,
+    /// Who it's for.
+    pub scope: NoteScope,
+    /// What was decided.
+    pub text: String,
+    /// Where it came from.
+    pub source: NoteSource,
+    /// When it was kept, in Unix milliseconds.
+    pub created: i64,
+    /// The note that replaced it, if one did.
+    #[serde(rename = "supersededBy", default)]
+    pub superseded_by: Option<String>,
+}
+
 impl Client {
+    /// Whether the server keeps notes between sessions (Harlo's own
+    /// server).
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or rejects the password.
+    pub async fn keeps_notes(&self) -> Result<bool, Error> {
+        let info = Self::json(self.request(Method::GET, "/api/info")).await?;
+        Ok(info["capabilities"]["memory"].as_bool() == Some(true))
+    }
+
+    /// Whether notes are on.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or doesn't keep notes.
+    pub async fn notes_on(&self) -> Result<bool, Error> {
+        let v = Self::json(self.request(Method::GET, "/harlo/memory")).await?;
+        Ok(v["enabled"].as_bool() == Some(true))
+    }
+
+    /// Turns notes on or off, for every session on the server.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or doesn't keep notes.
+    pub async fn set_notes_on(&self, on: bool) -> Result<(), Error> {
+        let request = self
+            .request(Method::PUT, "/harlo/memory")
+            .json(&serde_json::json!({ "enabled": on }));
+        Self::json(request).await.map(drop)
+    }
+
+    /// The user's notes and project `project`'s, oldest first, replaced
+    /// ones included.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or doesn't keep notes.
+    pub async fn notes(&self, project: Option<&str>) -> Result<Vec<Note>, Error> {
+        let mut request = self.request(Method::GET, "/harlo/notes");
+        if let Some(project) = project {
+            request = request.query(&[("projectID", project)]);
+        }
+        let v = Self::json(request).await?;
+        Ok(serde_json::from_value(v["data"].clone())?)
+    }
+
+    /// Corrects note `id` to say `text`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such note or the text is empty.
+    pub async fn correct_note(&self, id: &str, text: &str) -> Result<(), Error> {
+        let request = self
+            .request(Method::PATCH, &format!("/harlo/notes/{id}"))
+            .json(&serde_json::json!({ "text": text }));
+        Self::json(request).await.map(drop)
+    }
+
+    /// Forgets note `id`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such note.
+    pub async fn forget_note(&self, id: &str) -> Result<(), Error> {
+        Self::send(self.request(Method::DELETE, &format!("/harlo/notes/{id}")))
+            .await
+            .map(drop)
+    }
+
     /// Whether the server hosts phone access itself (Harlo's own server).
     ///
     /// # Errors

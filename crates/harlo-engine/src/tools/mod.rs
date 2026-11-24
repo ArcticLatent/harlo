@@ -156,6 +156,16 @@ pub enum Plan {
         /// Only files whose name matches this glob.
         include: Option<String>,
     },
+    /// Keeps a note for later sessions.
+    Remember {
+        /// The note.
+        draft: crate::memory::Draft,
+    },
+    /// Searches the project's earlier sessions.
+    SearchSessions {
+        /// The words.
+        query: String,
+    },
     /// Runs a command.
     Shell {
         /// The command.
@@ -253,6 +263,10 @@ impl Plan {
                     }
                 })
             }
+            "remember" => remember(input),
+            "search_sessions" => Ok(Self::SearchSessions {
+                query: text("query")?,
+            }),
             "shell" => Ok(Self::Shell {
                 command: text("command")?,
                 timeout_ms: number("timeout")
@@ -302,6 +316,16 @@ impl Plan {
             Self::Grep { pattern, .. } => Permission {
                 action: "grep",
                 resources: vec![pattern.clone()],
+                metadata: Map::new(),
+            },
+            Self::Remember { draft } => Permission {
+                action: "remember",
+                resources: vec![draft.text.clone()],
+                metadata: Map::new(),
+            },
+            Self::SearchSessions { query } => Permission {
+                action: "search_sessions",
+                resources: vec![query.clone()],
                 metadata: Map::new(),
             },
             Self::Shell { command, .. } => Permission {
@@ -389,6 +413,9 @@ impl Plan {
                 })
             }
             Self::Glob { .. } | Self::Grep { .. } => self.search(cwd).await,
+            Self::Remember { .. } | Self::SearchSessions { .. } => {
+                Err("Notes aren't kept on this server.".to_owned())
+            }
             Self::Shell {
                 command,
                 timeout_ms,
@@ -418,6 +445,35 @@ impl Plan {
             changed: Vec::new(),
         })
     }
+}
+
+/// Checks a `remember` call.
+fn remember(input: &Map<String, Value>) -> Result<Plan, String> {
+    let text = input
+        .get("text")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "remember needs `text`, as text.".to_owned())?;
+    let scope = match input.get("scope").and_then(Value::as_str) {
+        None | Some("project") => crate::memory::Scope::Project,
+        Some("user") => crate::memory::Scope::User,
+        Some(other) => {
+            return Err(format!(
+                "remember's scope is project or user, not `{other}`."
+            ));
+        }
+    };
+    Ok(Plan::Remember {
+        draft: crate::memory::Draft {
+            text,
+            scope,
+            replaces: input
+                .get("replaces")
+                .and_then(Value::as_str)
+                .filter(|r| !r.is_empty())
+                .map(str::to_owned),
+        },
+    })
 }
 
 /// The file `named` and how to show it: relative to `cwd` when inside it.

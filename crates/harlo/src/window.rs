@@ -750,6 +750,15 @@ pub const MCP_SCRIPTS: i32 = 81;
 /// Settings → Schedules: open the shown schedule's session.
 pub const OPEN_SCHEDULE_SESSION: i32 = 82;
 
+/// Settings → Memory: correct the note numbered by its item.
+pub const EDIT_NOTE: i32 = 83;
+
+/// Settings → Memory: forget the note being corrected.
+pub const FORGET_NOTE: i32 = 84;
+
+/// Settings → Memory: stop correcting a note.
+pub const CANCEL_NOTE: i32 = 85;
+
 /// The first number of Settings → Models' switches: the one for the model
 /// at place `n` of [`App::models`] is numbered this plus `n`.
 pub const MODEL_SWITCHES: i32 = 10_000;
@@ -964,6 +973,11 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
             app::PluginEvent::Update(usize::try_from(item).ok()),
         ))),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
+        EDIT_NOTE => Some(Message::Memory(app::MemoryEvent::Edit(
+            usize::try_from(item).ok()?,
+        ))),
+        FORGET_NOTE => Some(Message::Memory(app::MemoryEvent::Forget)),
+        CANCEL_NOTE => Some(Message::Memory(app::MemoryEvent::Cancel)),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }
 }
