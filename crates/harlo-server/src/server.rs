@@ -128,6 +128,8 @@ pub struct Server {
     pub(crate) store: Store,
     /// The global config file, read again when it changes.
     global: Mutex<Global>,
+    /// The model catalog: the bundled one, or the last fetched.
+    pub(crate) catalog: Mutex<Arc<harlo_engine::catalog::Catalog>>,
     pub(crate) config_dir: PathBuf,
     pub(crate) password: Option<String>,
     /// Phone access, hosted here.
@@ -220,6 +222,7 @@ impl Server {
         Self {
             store,
             global: Mutex::new(global),
+            catalog: Mutex::new(Arc::new(harlo_engine::catalog::Catalog::bundled())),
             config_dir: config_home.join("opencode"),
             password,
             phone,

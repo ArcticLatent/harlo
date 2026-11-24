@@ -14,6 +14,7 @@ mod approvals;
 mod automations;
 mod code;
 mod commands;
+mod credentials;
 mod folder;
 mod forms;
 mod fs;

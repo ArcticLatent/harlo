@@ -53,6 +53,7 @@ async fn main() -> ExitCode {
     );
     tokio::spawn(async move { phone.attach(url, pw).await });
     server.start_automations();
+    server.start_catalog();
     let stopped = async {
         let mut term =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();

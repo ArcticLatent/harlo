@@ -133,6 +133,8 @@ impl Server {
         if config.providers.is_empty() {
             config.providers.clone_from(&global.providers);
         }
+        let signed_in = self.signed_in(&config.providers);
+        config.providers.extend(signed_in);
         let mut dirs = vec![self.config_dir.clone()];
         let mut project: Vec<PathBuf> = workspace
             .ancestors()

@@ -15,6 +15,7 @@
 
 pub mod agents;
 pub mod attachment;
+pub mod catalog;
 mod chat;
 pub mod codemode;
 pub mod commands;

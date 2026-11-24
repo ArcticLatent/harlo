@@ -150,6 +150,8 @@ pub struct ProviderSpec {
     pub api_key: Option<String>,
     /// Its models, in the order the file lists them.
     pub models: Vec<ModelSpec>,
+    /// The API it speaks.
+    pub wire: crate::catalog::Wire,
 }
 
 /// What the engine read from the configuration.
@@ -396,6 +398,12 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
         base_url: base_url.trim_end_matches('/').to_owned(),
         api_key,
         models,
+        wire: crate::catalog::Wire::of_package(
+            p["package"]
+                .as_str()
+                .or_else(|| p["npm"].as_str())
+                .unwrap_or_default(),
+        ),
     })
 }
 

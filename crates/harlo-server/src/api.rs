@@ -73,10 +73,28 @@ fn file_and_harlo_routes() -> Router<Arc<Server>> {
         .route("/harlo/phone/test", post(test_phone))
 }
 
+/// The integration and credential routes.
+fn integration_routes() -> Router<Arc<Server>> {
+    Router::new()
+        .route("/api/integration", get(integration_list))
+        .route("/api/integration/{id}", get(integration_info))
+        .route("/api/integration/{id}/connect/key", post(connect_key))
+        .route(
+            "/api/integration/{id}/connect/external",
+            post(connect_external),
+        )
+        .route("/api/credential", get(credential_list))
+        .route(
+            "/api/credential/{id}",
+            patch(label_credential).delete(remove_credential),
+        )
+}
+
 /// The routes, behind the password check.
 pub fn router(server: Arc<Server>) -> Router {
     Router::new()
         .merge(automation_routes())
+        .merge(integration_routes())
         .merge(file_and_harlo_routes())
         .route("/api/info", get(info))
         .route("/api/event", get(events))
@@ -855,8 +873,9 @@ fn model_json(provider: &harlo_engine::ProviderSpec, m: &harlo_engine::ModelSpec
 }
 
 async fn models(State(server): Shared, Query(q): Params) -> Answer {
-    let (global, _) = server.global();
-    let list: Vec<Value> = global
+    let folder = server.folder(&directory_of(&q));
+    let list: Vec<Value> = folder
+        .config
         .providers
         .iter()
         .flat_map(|p| p.models.iter().map(move |m| model_json(p, m)))
@@ -894,11 +913,19 @@ async fn jobs(State(server): Shared, Query(q): Params) -> Answer {
 async fn providers(State(server): Shared, Query(q): Params) -> Answer {
     let directory = q.get("location[directory]").cloned().unwrap_or_default();
     let folder = server.folder(&directory);
+    let catalog = server.catalog();
     let list: Vec<Value> = folder
         .config
         .providers
         .iter()
-        .map(|p| json!({ "id": p.id, "name": p.name, "activation": "enabled" }))
+        .map(|p| {
+            let mut info = json!({ "id": p.id, "name": p.name, "activation": "enabled" });
+            if catalog.get(&p.id).is_some() {
+                info["integrationID"] = json!(p.id);
+                info["activation"] = json!("auto");
+            }
+            info
+        })
         .collect();
     ok(json!({ "location": location(&q), "data": list }))
 }
@@ -980,6 +1007,60 @@ async fn change_approval(
 
 async fn remove_approval(State(server): Shared, Path(id): Path<String>) -> Answer {
     server.store.delete_approval(&id)?;
+    done()
+}
+
+async fn integration_list(State(server): Shared, Query(q): Params) -> Answer {
+    ok(json!({ "location": location(&q), "data": server.integrations()? }))
+}
+
+async fn integration_info(
+    State(server): Shared,
+    Path(id): Path<String>,
+    Query(q): Params,
+) -> Answer {
+    ok(json!({ "location": location(&q), "data": server.integration(&id)? }))
+}
+
+async fn connect_key(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<crate::credentials::KeySignIn>,
+) -> Answer {
+    server.connect_key(&id, body)?;
+    done()
+}
+
+async fn connect_external(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<crate::credentials::ExternalSignIn>,
+) -> Answer {
+    server.connect_external(&id, body)?;
+    done()
+}
+
+async fn credential_list(State(server): Shared) -> Answer {
+    ok(json!({ "data": server.store.credentials()? }))
+}
+
+/// A credential's new label.
+#[derive(Deserialize)]
+struct CredentialLabel {
+    label: String,
+}
+
+async fn label_credential(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<CredentialLabel>,
+) -> Answer {
+    server.label_credential(&id, &body.label)?;
+    done()
+}
+
+async fn remove_credential(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.remove_credential(&id)?;
     done()
 }
 

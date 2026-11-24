@@ -14,6 +14,7 @@ ignore = { workspace = true }
 axum = { workspace = true, features = ["http1", "tokio", "json", "query", "ws"] }
 base64 = { workspace = true, features = ["std"] }
 croner = { workspace = true }
+reqwest = { workspace = true, features = ["native-tls"] }
 dirs = { workspace = true }
 futures-util = { workspace = true }
 harlo-core = { workspace = true }

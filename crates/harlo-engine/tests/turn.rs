@@ -115,6 +115,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
                 name: "Fake Coder".into(),
                 ..ModelSpec::default()
             }],
+            wire: harlo_engine::catalog::Wire::Chat,
         },
         system: "You are a coding agent.".into(),
         rules,

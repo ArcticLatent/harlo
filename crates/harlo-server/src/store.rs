@@ -165,6 +165,7 @@ impl Store {
         )?;
         Self::make_approvals(&conn)?;
         Self::make_automations(&conn)?;
+        Self::make_credentials(&conn)?;
         let store = Self {
             conn: Mutex::new(conn),
         };
