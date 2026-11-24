@@ -1112,14 +1112,15 @@ impl Client {
     ///
     /// Fails when the server can't be reached.
     pub async fn branch(&self, directory: &str) -> Result<Option<String>, Error> {
-        /// How often an answer without a provider is asked again.
-        const TRIES: u32 = 5;
+        /// How often an answer without a provider is asked again, about
+        /// three seconds in all.
+        const TRIES: u32 = 10;
         let mut v = self.list("/api/vcs", directory, &[]).await?;
         for _ in 1..TRIES {
             if v.get("provider").is_some() {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             v = self.list("/api/vcs", directory, &[]).await?;
         }
         Ok(v["branch"]["current"]

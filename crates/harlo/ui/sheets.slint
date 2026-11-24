@@ -757,13 +757,15 @@ component RowBody inherits VerticalLayout {
         VerticalLayout {
             horizontal-stretch: 1;
             spacing: 2px;
+            // A name alone sits level with its switch.
+            alignment: center;
             Text {
                 text: root.entry.name;
                 font-size: Size.small;
                 color: Theme.text-base;
                 accessible-role: AccessibleRole.text;
             }
-            Text {
+            if root.entry.value != "": Text {
                 text: root.entry.value;
                 font-size: Size.small;
                 color: Theme.text-weak;

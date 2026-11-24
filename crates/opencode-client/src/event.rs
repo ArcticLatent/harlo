@@ -51,6 +51,11 @@ pub enum Kind {
     ProjectUpdated { project_id: String },
     /// A project's worktrees changed.
     WorktreesChanged { project_id: String },
+    /// The branch checked out in `directory` changed, or became known.
+    BranchChanged {
+        directory: String,
+        branch: Option<String>,
+    },
     /// A session started working.
     Busy { session_id: String },
     /// A session stopped working, with `succeeded`, `failed` or `interrupted`.
@@ -274,6 +279,7 @@ impl Kind {
             Self::Connected
             | Self::ProjectUpdated { .. }
             | Self::WorktreesChanged { .. }
+            | Self::BranchChanged { .. }
             | Self::CatalogChanged
             | Self::FileChanged { .. }
             | Self::Other { .. } => None,
@@ -297,6 +303,17 @@ impl Event {
         let data = raw["data"].take();
         let kind = if kind == "filesystem.changed" {
             file_changed(&raw["location"], &data)
+        } else if kind == "vcs.branch.updated" {
+            Kind::BranchChanged {
+                directory: raw["location"]["directory"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                branch: data["branch"]
+                    .as_str()
+                    .filter(|b| !b.is_empty())
+                    .map(str::to_owned),
+            }
         } else {
             decode(&kind, data)?
         };

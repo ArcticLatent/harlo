@@ -1313,6 +1313,12 @@ impl App {
                 self.changes_event(&event.kind);
                 self.context_event(&event.kind);
                 let files = self.files_event(&event.kind);
+                // A worktree's branch, as OpenCode sees it change.
+                if let EventKind::BranchChanged { directory, branch } = &event.kind
+                    && self.branches.contains_key(directory)
+                {
+                    self.branches.insert(directory.clone(), branch.clone());
+                }
                 if matches!(event.kind, EventKind::CatalogChanged) {
                     // Reloaded for the current folder once this update ends.
                     self.catalogs.clear();

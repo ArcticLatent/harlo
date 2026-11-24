@@ -295,6 +295,21 @@ fn worktree_sessions_sit_with_the_projects_marked_with_the_worktree() {
     ));
     assert_eq!(marked()[0].2, "helper-temperature");
     assert!(ui.shows("Worktree feature-x · branch helper-temperature"));
+    // OpenCode says when the branch there changes.
+    ui.send(Message::Server(Update::Event(ServerEvent {
+        id: "evt".into(),
+        seq: None,
+        time: 1.0,
+        kind: EventKind::BranchChanged {
+            directory: worktree.into(),
+            branch: Some("helper-humidity".into()),
+        },
+    })));
+    assert_eq!(marked()[0].2, "helper-humidity");
+    ui.send(Message::Branch(
+        worktree.into(),
+        Some("helper-temperature".into()),
+    ));
 
     // The header says where it runs.
     ui.send(Message::OpenSession(id));

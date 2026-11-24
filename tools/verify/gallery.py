@@ -721,8 +721,11 @@ def scene_worktrees(g):
     h.wait_gone("Search settings", role="TextInput")
     # A session in the worktree, made through OpenCode and titled, as the
     # other scenes give theirs: the scripted model names none.
-    folders = h.api("GET", "/api/worktree?location%5Bdirectory%5D="
-                    + urllib.parse.quote(h.project, safe=""))["data"]
+    projects = h.api("GET", "/api/project")
+    projects = projects.get("data", projects) if isinstance(projects, dict) else projects
+    project = next(p["id"] for p in projects if p.get("canonical") == h.project)
+    folders = h.api("GET", "/api/worktree?projectID=" + urllib.parse.quote(project, safe=""))
+    folders = folders.get("data", folders) if isinstance(folders, dict) else folders
     tree = next(f["directory"] for f in folders if f["directory"].endswith("fix-tabs"))
     created = h.api("POST", "/api/session", {"location": {"directory": tree}})["data"]
     h.api("PATCH", f"/api/session/{created['id']}", {"title": "Tab order"})
