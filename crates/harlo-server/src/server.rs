@@ -74,6 +74,8 @@ pub(crate) struct Live {
     pub(crate) inbox: HashMap<String, Vec<(Message, String)>>,
     /// Background jobs, such as subagents, by ID.
     pub(crate) jobs: HashMap<String, Value>,
+    /// Files clients watch.
+    pub(crate) watches: crate::watch::Watches,
 }
 
 /// The server.
@@ -409,15 +411,18 @@ impl Server {
         text: &str,
         delivery: &str,
         skills: Vec<harlo_engine::skills::Attached>,
+        files: Vec<harlo_engine::attachment::File>,
     ) -> Result<Value, Refusal> {
         let session = self.session(id)?;
         let message_id = message_id.unwrap_or_else(|| ascending_id("msg"));
         let created = now();
-        let payload = if skills.is_empty() {
-            json!({ "text": text })
-        } else {
-            json!({ "text": text, "skills": skills })
-        };
+        let mut payload = json!({ "text": text });
+        if !skills.is_empty() {
+            payload["skills"] = json!(skills);
+        }
+        if !files.is_empty() {
+            payload["files"] = json!(files);
+        }
         let answer = json!({ "data": {
             "id": message_id, "sessionID": id, "time": { "created": created }, "type": "user",
             "payload": payload, "delivery": delivery,
@@ -443,6 +448,7 @@ impl Server {
             time: Created { created },
             text: text.to_owned(),
             skills,
+            files,
         };
         self.emit(
             "session.inbox.enqueued",
@@ -504,6 +510,57 @@ impl Server {
         );
         self.enqueue(id, Message::Compaction(Box::new(pending)), "steer");
         Ok(json!({ "data": item }))
+    }
+
+    /// Changes how a waiting item in session `id`'s inbox reaches its run.
+    ///
+    /// # Errors
+    ///
+    /// When it isn't waiting there: delivered already, or never sent.
+    pub(crate) fn set_delivery(&self, id: &str, item: &str, delivery: &str) -> Result<(), Refusal> {
+        let session = self.session(id)?;
+        let mut live = lock(&self.live);
+        let waiting = live
+            .inbox
+            .get_mut(id)
+            .and_then(|q| q.iter_mut().find(|(m, _)| m.id() == item))
+            .ok_or_else(|| Refusal::NotFound(format!("{item} isn't waiting in {id}.")))?;
+        delivery.clone_into(&mut waiting.1);
+        drop(live);
+        self.emit(
+            "session.inbox.delivery.changed",
+            json!({ "sessionID": id, "inboxID": item, "delivery": delivery }),
+            Some(&session.location.directory),
+            Some(id),
+        );
+        Ok(())
+    }
+
+    /// Takes a waiting item out of session `id`'s inbox; one already gone
+    /// is fine.
+    ///
+    /// # Errors
+    ///
+    /// When there's no such session.
+    pub(crate) fn cancel_inbox(&self, id: &str, item: &str) -> Result<(), Refusal> {
+        let session = self.session(id)?;
+        let removed = {
+            let mut live = lock(&self.live);
+            live.inbox.get_mut(id).is_some_and(|q| {
+                let before = q.len();
+                q.retain(|(m, _)| m.id() != item);
+                q.len() < before
+            })
+        };
+        if removed {
+            self.emit(
+                "session.inbox.cancelled",
+                json!({ "sessionID": id, "inboxID": item }),
+                Some(&session.location.directory),
+                Some(id),
+            );
+        }
+        Ok(())
     }
 
     /// Prompts waiting for session `id`'s run.
@@ -630,14 +687,15 @@ impl Server {
     /// Asks the session's model for a title from its first message, and
     /// uses it unless the session was renamed meanwhile.
     async fn name_session(self: Arc<Self>, session: Session, first: String, provisional: String) {
+        let folder = self.folder(&session.location.directory);
         let Some(model) = session
             .model
             .clone()
-            .or_else(|| self.config.default_model())
+            .or_else(|| folder.config.default_model())
         else {
             return;
         };
-        let Some((provider, _)) = self.config.resolve(&model) else {
+        let Some((provider, _)) = folder.config.resolve(&model) else {
             return;
         };
         let asked = harlo_engine::generate::generate(
@@ -741,17 +799,20 @@ impl Server {
             directory: session.location.directory.clone(),
             streaming: Mutex::default(),
         };
-        let Some(model) = session
+        let folder = self.folder(&session.location.directory);
+        let agent = folder.agent(session.agent.as_deref());
+        let Some(model) = agent
             .model
             .clone()
-            .or_else(|| self.config.default_model())
+            .or_else(|| session.model.clone())
+            .or_else(|| folder.config.default_model())
         else {
             return (
                 "failed",
                 Some("No model is set up to write the summary.".to_owned()),
             );
         };
-        let Some((provider, _)) = self.config.resolve(&model) else {
+        let Some((provider, _)) = folder.config.resolve(&model) else {
             return (
                 "failed",
                 Some(format!(
@@ -764,8 +825,9 @@ impl Server {
             Ok(h) => h,
             Err(e) => return ("failed", Some(format!("Couldn't read the session: {e}"))),
         };
-        let agent = self.agent_for(session.agent.as_deref());
-        let mut system = self.system_prompt(&session.location.directory).await;
+        let mut system = self
+            .system_prompt(&session.location.directory, &folder)
+            .await;
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
         }
@@ -787,10 +849,13 @@ impl Server {
         session: &Session,
         stop: &CancellationToken,
     ) -> (&'static str, Option<String>) {
-        let Some(model) = session
+        let folder = self.folder(&session.location.directory);
+        let agent = folder.agent(session.agent.as_deref());
+        let Some(model) = agent
             .model
             .clone()
-            .or_else(|| self.config.default_model())
+            .or_else(|| session.model.clone())
+            .or_else(|| folder.config.default_model())
         else {
             return (
                 "failed",
@@ -799,7 +864,7 @@ impl Server {
                 ),
             );
         };
-        let Some((provider, spec)) = self.config.resolve(&model) else {
+        let Some((provider, spec)) = folder.config.resolve(&model) else {
             return (
                 "failed",
                 Some(format!(
@@ -813,8 +878,7 @@ impl Server {
             Err(e) => return ("failed", Some(format!("Couldn't read the session: {e}"))),
         };
         let directory = session.location.directory.clone();
-        let agent = self.agent_for(session.agent.as_deref());
-        let mut system = self.system_prompt(&directory).await;
+        let mut system = self.system_prompt(&directory, &folder).await;
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
         }
@@ -826,7 +890,7 @@ impl Server {
             system,
             rules: vec![
                 ("agent".to_owned(), agent.rules.clone()),
-                ("config".to_owned(), self.config.permissions.clone()),
+                ("config".to_owned(), folder.config.permissions.clone()),
                 ("session".to_owned(), session.permissions.clone()),
             ],
             history,
@@ -836,11 +900,11 @@ impl Server {
                 server: Arc::clone(self),
                 session: session.id.clone(),
             })),
-            subagent_agents: self.subagent_agents(),
+            subagent_agents: folder.subagents(),
             // Near the model's context limit, the next step starts from a summary.
             compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
             skills: self.skills_for(&session.location.directory).await,
-            todo: self.config.todo,
+            todo: folder.config.todo,
             steering: Some(Arc::new(crate::agents::SessionSteering {
                 server: Arc::clone(self),
                 session: session.id.clone(),
@@ -863,7 +927,7 @@ impl Server {
     /// The system prompt for a session in `directory`, as OpenCode orders
     /// it: the agent's prompt, the project's instructions, then the date
     /// and environment.
-    async fn system_prompt(&self, directory: &str) -> String {
+    async fn system_prompt(&self, directory: &str, folder: &crate::folder::Folder) -> String {
         let root = git::toplevel(directory).await;
         let home = dirs::home_dir().unwrap_or_default();
         let search = harlo_engine::instructions::Search {
@@ -871,7 +935,7 @@ impl Server {
             project_root: root.as_deref().map(std::path::Path::new),
             home: &home,
             config_dir: &self.config_dir,
-            configured: &self.config.instructions,
+            configured: &folder.config.instructions,
             ..Default::default()
         }
         .with_env();
@@ -1189,6 +1253,11 @@ impl Sink for Hooks {
                 self.send("session.compaction.started", json!({ "reason": reason, "inputID": id }), true);
             }
             Event::CompactionEnded { compaction } => self.compacted(&compaction),
+            Event::Noted { message } => {
+                if let Err(e) = self.server.store.put_message(&self.session, &message) {
+                    tracing::error!(name: "message.store.failed", error = %e, "couldn't store a note");
+                }
+            }
             Event::StepEnded { step } => {
                 self.server.store_step(&self.session, &step, true);
                 if let Some(error) = &step.error {

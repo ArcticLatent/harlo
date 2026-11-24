@@ -17,13 +17,14 @@ impl Server {
     /// The skills found for a session in `directory`.
     pub(crate) async fn skills_for(&self, directory: &str) -> Vec<Skill> {
         let root = git::toplevel(directory).await;
+        let folder = self.folder(directory);
         let home = dirs::home_dir().unwrap_or_default();
         let search = skills::Search {
             workspace: Path::new(directory),
             project_root: root.as_deref().map(Path::new),
             home: &home,
             config_dir: &self.config_dir,
-            configured: &self.config.skills,
+            configured: &folder.config.skills,
         };
         tokio::task::block_in_place(|| skills::discover(&search))
     }
@@ -31,11 +32,12 @@ impl Server {
     /// The commands found for a session in `directory`.
     pub(crate) async fn commands_for(&self, directory: &str) -> Vec<Command> {
         let root = git::toplevel(directory).await;
+        let folder = self.folder(directory);
         let search = commands::Search {
             workspace: Path::new(directory),
             project_root: root.as_deref().map(Path::new),
             config_dir: &self.config_dir,
-            configured: &self.config.commands,
+            configured: &folder.config.commands,
         };
         tokio::task::block_in_place(|| commands::discover(&search))
     }
@@ -99,6 +101,6 @@ impl Server {
         let text = commands::fill(&command.template, arguments);
         let text = commands::run_shell_blocks(&text, Path::new(&directory)).await;
         let attached = self.attach(&directory, skills).await?;
-        self.prompt(id, None, &text, delivery, attached)
+        self.prompt(id, None, &text, delivery, attached, Vec::new())
     }
 }

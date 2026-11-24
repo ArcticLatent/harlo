@@ -211,6 +211,32 @@ fn matching(path: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// The instruction files in the folders between `cwd` and `file`, which
+/// the agent meets as it reads files below the session's folder, with
+/// their text, outermost first; files in `known` are left out.
+///
+/// In each folder an `AGENTS.md` is taken, or a `CLAUDE.md` when there's
+/// none.
+#[must_use]
+pub fn on_the_way(cwd: &Path, file: &Path, known: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    let mut found = Vec::new();
+    let mut folder = file.parent();
+    while let Some(dir) = folder.filter(|d| *d != cwd && d.starts_with(cwd)) {
+        let named = ["AGENTS.md", "CLAUDE.md"]
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|p| p.is_file());
+        if let Some(path) = named.filter(|p| !known.contains(p))
+            && let Ok(text) = std::fs::read_to_string(&path)
+        {
+            found.push((path, text));
+        }
+        folder = dir.parent();
+    }
+    found.reverse();
+    found
+}
+
 /// The instructions as the system prompt carries them, each under the
 /// path it came from.
 #[must_use]

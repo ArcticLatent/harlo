@@ -119,10 +119,25 @@ fn chat_messages(history: &[Message]) -> Vec<Value> {
                     out.push(json!({ "role": "user", "content": text }));
                 }
             }
-            Message::User { text, skills, .. } => {
-                let mut content: String = skills.iter().map(|s| s.text.as_str()).collect();
-                content.push_str(text);
-                out.push(json!({ "role": "user", "content": content }));
+            Message::User {
+                text,
+                skills,
+                files,
+                ..
+            } => {
+                let mut said: String = skills.iter().map(|s| s.text.as_str()).collect();
+                said.push_str(text);
+                let attached: Vec<Value> = files
+                    .iter()
+                    .filter_map(crate::attachment::File::content)
+                    .collect();
+                if attached.is_empty() {
+                    out.push(json!({ "role": "user", "content": said }));
+                } else {
+                    let mut content = vec![json!({ "type": "text", "text": said })];
+                    content.extend(attached);
+                    out.push(json!({ "role": "user", "content": content }));
+                }
             }
             Message::Synthetic { text, .. } => {
                 out.push(json!({ "role": "user", "content": text }));
@@ -156,16 +171,41 @@ fn chat_messages(history: &[Message]) -> Vec<Value> {
                     m["tool_calls"] = json!(calls);
                 }
                 out.push(m);
+                let mut pictures = Vec::new();
                 for part in &step.content {
                     if let Part::Tool { id, state, .. } = part {
                         out.push(json!({ "role": "tool", "tool_call_id": id, "content": result_text(state) }));
+                        pictures.extend(result_pictures(state));
                     }
+                }
+                // Tool messages carry text only: pictures follow as the
+                // person's message.
+                if !pictures.is_empty() {
+                    let mut content =
+                        vec![json!({ "type": "text", "text": "The pictures the tools returned:" })];
+                    content.extend(pictures);
+                    out.push(json!({ "role": "user", "content": content }));
                 }
             }
             Message::Idle { .. } => {}
         }
     }
     out
+}
+
+/// The pictures a call returned, as image parts.
+fn result_pictures(state: &ToolState) -> Vec<Value> {
+    let ToolState::Completed { content, .. } = state else {
+        return Vec::new();
+    };
+    content
+        .iter()
+        .filter(|c| {
+            c["type"] == "file" && c["mime"].as_str().is_some_and(|m| m.starts_with("image/"))
+        })
+        .filter_map(|c| c["uri"].as_str())
+        .map(|uri| json!({ "type": "image_url", "image_url": { "url": uri } }))
+        .collect()
 }
 
 /// What the model is told a call returned.
@@ -529,6 +569,7 @@ mod tests {
                 time: Created { created: 0 },
                 text: "hi".into(),
                 skills: Vec::new(),
+                files: Vec::new(),
             },
             Message::Assistant(Box::new(step)),
         ];

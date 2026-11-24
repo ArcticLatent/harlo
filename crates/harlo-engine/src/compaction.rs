@@ -124,6 +124,7 @@ pub async fn compact(
         time: Created { created: now() },
         text: SUMMARIZE.to_owned(),
         skills: Vec::new(),
+        files: Vec::new(),
     });
     let spec = provider.models.iter().find(|m| m.id == model.model);
     let (extra, headers) = spec

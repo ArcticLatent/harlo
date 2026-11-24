@@ -158,6 +158,7 @@ fn said(text: String, code: Option<i32>) -> Output {
         text,
         metadata,
         changed: Vec::new(),
+        pictures: Vec::new(),
     }
 }
 

@@ -131,6 +131,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
             time: Created { created: 0 },
             text: prompt.into(),
             skills: Vec::new(),
+            files: Vec::new(),
         }],
     }
 }

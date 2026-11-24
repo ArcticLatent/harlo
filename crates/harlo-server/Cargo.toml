@@ -17,6 +17,7 @@ dirs = { workspace = true }
 futures-util = { workspace = true }
 harlo-core = { workspace = true }
 harlo-engine = { workspace = true }
+mime_guess = { workspace = true }
 opencode-client = { workspace = true }
 hex = { workspace = true }
 jsonc-parser = { workspace = true, features = ["serde"] }

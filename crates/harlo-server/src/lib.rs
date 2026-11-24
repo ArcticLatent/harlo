@@ -11,6 +11,7 @@
 mod agents;
 mod api;
 mod commands;
+mod folder;
 mod forms;
 mod fs;
 mod git;
@@ -20,6 +21,7 @@ mod server;
 mod store;
 mod subagents;
 mod undo;
+mod watch;
 
 use std::path::PathBuf;
 use std::sync::Arc;

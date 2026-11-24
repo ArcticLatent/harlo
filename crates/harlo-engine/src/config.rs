@@ -163,6 +163,8 @@ pub struct Config {
     /// Commands (`commands`), by name: `template`, `description`, `agent`
     /// and `model`.
     pub commands: Value,
+    /// Agents (`agents`), by ID: new ones, or changes to built-in ones.
+    pub agents: Value,
 }
 
 impl Config {
@@ -203,6 +205,13 @@ impl Config {
         let value: Value =
             jsonc_parser::parse_to_serde_value(text, &jsonc_parser::ParseOptions::default())
                 .map_err(|e| Error::config(format!("Couldn't parse {shown}: {e}")))?;
+        Ok(Self::from_value(&value, source))
+    }
+
+    /// Reads a configuration from an OpenCode config document, or several
+    /// [`merge_config`]d into one.
+    #[must_use]
+    pub fn from_value(value: &Value, source: Option<PathBuf>) -> Self {
         let providers = value["providers"]
             .as_object()
             .into_iter()
@@ -215,7 +224,7 @@ impl Config {
             .flatten()
             .filter_map(|r| serde_json::from_value(r.clone()).ok())
             .collect();
-        Ok(Self {
+        Self {
             source,
             providers,
             model: model_ref(&value["model"]),
@@ -224,7 +233,8 @@ impl Config {
             skills: strings(&value["skills"]),
             todo: value["experimental"]["todo"].as_bool().unwrap_or(false),
             commands: value["commands"].clone(),
-        })
+            agents: value["agents"].clone(),
+        }
     }
 
     /// The provider with ID `id`.
@@ -254,6 +264,69 @@ impl Config {
         let provider = self.provider(&model.provider)?;
         let spec = provider.models.iter().find(|m| m.id == model.model)?;
         Some((provider, spec))
+    }
+}
+
+/// The config files a project adds over the global one, in order.
+///
+/// In each folder from the project's root down to `workspace` they are its
+/// `opencode.json` (or `.jsonc`), then its `.opencode/opencode.json`.
+#[must_use]
+pub fn project_config_files(workspace: &Path, root: Option<&Path>) -> Vec<PathBuf> {
+    let mut folders = vec![workspace.to_path_buf()];
+    if let Some(root) = root {
+        let mut at = workspace;
+        while let Some(up) = at.parent().filter(|up| up.starts_with(root)) {
+            folders.push(up.to_path_buf());
+            at = up;
+        }
+    }
+    folders.reverse();
+    let mut files = Vec::new();
+    for folder in folders {
+        for dir in [folder.clone(), folder.join(".opencode")] {
+            let file = ["opencode.json", "opencode.jsonc"]
+                .iter()
+                .map(|n| dir.join(n))
+                .find(|p| p.is_file());
+            files.extend(file);
+        }
+    }
+    files
+}
+
+/// Reads the config document in `file`, comments allowed.
+///
+/// # Errors
+///
+/// When it can't be read or isn't JSON.
+pub fn read_config_document(file: &Path) -> Result<Value, Error> {
+    let text = std::fs::read_to_string(file)
+        .map_err(|e| Error::config(format!("Couldn't read {}: {e}", file.display())))?;
+    jsonc_parser::parse_to_serde_value(&text, &jsonc_parser::ParseOptions::default())
+        .map_err(|e| Error::config(format!("Couldn't parse {}: {e}", file.display())))
+}
+
+/// Lays config document `over` on `base`: objects merge key by key, the
+/// lists of rules, instructions and skills add up, and anything else in
+/// `over` replaces what `base` had.
+pub fn merge_config(base: &mut Value, over: &Value) {
+    merge_at(base, over, "");
+}
+
+fn merge_at(base: &mut Value, over: &Value, key: &str) {
+    match (base, over) {
+        (Value::Object(base), Value::Object(over)) => {
+            for (k, v) in over {
+                merge_at(base.entry(k.clone()).or_insert(Value::Null), v, k);
+            }
+        }
+        (Value::Array(base), Value::Array(over))
+            if matches!(key, "permissions" | "instructions" | "skills") =>
+        {
+            base.extend(over.iter().cloned());
+        }
+        (base, over) => *base = over.clone(),
     }
 }
 

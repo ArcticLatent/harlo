@@ -100,6 +100,8 @@ pub struct Output {
     pub metadata: Map<String, Value>,
     /// Files the call changed, relative to the project.
     pub changed: Vec<String>,
+    /// Pictures it returns, such as an image file it read.
+    pub pictures: Vec<crate::attachment::File>,
 }
 
 /// A checked call, ready to ask permission for and run.
@@ -193,6 +195,51 @@ pub enum Plan {
         /// Milliseconds before it's stopped.
         timeout_ms: u64,
     },
+}
+
+/// Reads `path` (shown as `shown`): a picture whole, text as numbered
+/// lines from `offset`, at most `limit` of them.
+async fn read(path: &Path, shown: &str, offset: usize, limit: usize) -> Result<Output, String> {
+    if let Some(mime) = picture_type(path) {
+        let bytes = tokio::fs::read(path)
+            .await
+            .map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        let picture = crate::attachment::File::new(
+            &bytes,
+            mime,
+            json!({ "type": "uri", "uri": format!("file://{}", path.display()) }),
+            name,
+        );
+        return Ok(Output {
+            text: format!("Read the picture {shown}; it follows."),
+            metadata: Map::new(),
+            changed: Vec::new(),
+            pictures: vec![picture],
+        });
+    }
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+    Ok(Output {
+        text: numbered(&content, offset, limit),
+        metadata: Map::new(),
+        changed: Vec::new(),
+        pictures: Vec::new(),
+    })
+}
+
+/// The picture type of the file at `path`, judged by its extension, when
+/// it's a picture the model can see.
+fn picture_type(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return None,
+    })
 }
 
 /// Lines a read shows when no limit is given.
@@ -400,16 +447,7 @@ impl Plan {
                 shown,
                 offset,
                 limit,
-            } => {
-                let content = tokio::fs::read_to_string(&path)
-                    .await
-                    .map_err(|e| format!("Couldn't read {shown}: {e}"))?;
-                Ok(Output {
-                    text: numbered(&content, offset, limit),
-                    metadata: Map::new(),
-                    changed: Vec::new(),
-                })
-            }
+            } => read(&path, &shown, offset, limit).await,
             Self::Write {
                 path,
                 shown,
@@ -429,6 +467,7 @@ impl Plan {
                     text: format!("{verb} {shown}"),
                     metadata: files_metadata(&shown, before.as_deref(), &after),
                     changed: vec![shown],
+                    pictures: Vec::new(),
                 })
             }
             Self::Edit {
@@ -460,6 +499,7 @@ impl Plan {
                     text: format!("Edited {shown} ({places})"),
                     metadata: files_metadata(&shown, Some(&before), &after),
                     changed: vec![shown],
+                    pictures: Vec::new(),
                 })
             }
             Self::Glob { .. } | Self::Grep { .. } => self.search(cwd).await,
@@ -476,6 +516,7 @@ impl Plan {
                     .cloned()
                     .unwrap_or_default(),
                 changed: Vec::new(),
+                pictures: Vec::new(),
             }),
             Self::Shell {
                 command,
@@ -504,6 +545,7 @@ impl Plan {
             text,
             metadata: Map::new(),
             changed: Vec::new(),
+            pictures: Vec::new(),
         })
     }
 }

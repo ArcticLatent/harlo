@@ -52,6 +52,11 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/session/{id}/form/{form}/reply", post(answer_form))
         .route("/api/form", get(forms_in))
         .route("/api/session/{id}/inbox", get(inbox))
+        .route("/api/session/{id}/context", get(context))
+        .route(
+            "/api/session/{id}/inbox/{item}",
+            axum::routing::patch(set_delivery).delete(cancel_inbox),
+        )
         .route("/api/session/{id}/permission", get(permissions))
         .route("/api/session/{id}/permission/{request}/reply", post(reply))
         .route("/api/session/{id}/prompt", post(prompt))
@@ -81,6 +86,10 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/fs/list", get(list_files))
         .route("/api/fs/read/{*path}", get(read_file))
         .route("/api/experimental/fs/write", post(write_file))
+        .route(
+            "/api/experimental/fs/watch",
+            post(watch_file).delete(unwatch_file),
+        )
         .route("/harlo/memory", get(memory).put(set_memory))
         .route("/harlo/notes", get(notes))
         .route("/harlo/notes/{id}", patch(correct_note).delete(forget_note))
@@ -154,6 +163,11 @@ fn done() -> Answer {
 }
 
 /// The folder a catalog request is about.
+/// The folder a request is about.
+fn directory_of(q: &HashMap<String, String>) -> String {
+    q.get("location[directory]").cloned().unwrap_or_default()
+}
+
 fn location(q: &HashMap<String, String>) -> Value {
     json!({ "directory": q.get("location[directory]").cloned().unwrap_or_default() })
 }
@@ -272,6 +286,12 @@ async fn sessions(State(server): Shared, Query(q): Params) -> Answer {
         .sessions()?
         .into_iter()
         .filter(|s| directory.is_none_or(|d| &s.location.directory == d))
+        // `null` asks for top-level sessions; an ID, for its children.
+        .filter(|s| match q.get("parentID").map(String::as_str) {
+            None => true,
+            Some("null") => s.parent_id.is_none(),
+            Some(parent) => s.parent_id.as_deref() == Some(parent),
+        })
         .collect();
     ok(json!({ "data": list, "cursor": { "previous": null, "next": null } }))
 }
@@ -357,6 +377,40 @@ async fn vcs_diff(Query(q): Params) -> Answer {
     ok(json!({ "location": location, "data": data }))
 }
 
+/// A new way for a waiting prompt to reach its run.
+#[derive(Deserialize)]
+struct DeliveryChange {
+    delivery: String,
+}
+
+async fn set_delivery(
+    State(server): Shared,
+    Path((id, item)): Path<(String, String)>,
+    axum::Json(body): axum::Json<DeliveryChange>,
+) -> Answer {
+    if !matches!(body.delivery.as_str(), "queue" | "steer") {
+        return Err(Refusal::Bad(format!(
+            "Delivery is queue or steer, not {}.",
+            body.delivery
+        )));
+    }
+    server.set_delivery(&id, &item, &body.delivery)?;
+    done()
+}
+
+async fn cancel_inbox(State(server): Shared, Path((id, item)): Path<(String, String)>) -> Answer {
+    server.cancel_inbox(&id, &item)?;
+    done()
+}
+
+/// The messages the model reads now: from the last summary on.
+async fn context(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.session(&id)?;
+    let messages = server.store.messages(&id)?;
+    let current = harlo_engine::compaction::since_summary(&messages);
+    ok(json!({ "data": current }))
+}
+
 async fn inbox(State(server): Shared, Path(id): Path<String>) -> Answer {
     server.session(&id)?;
     ok(json!({ "data": server.inbox(&id) }))
@@ -422,6 +476,76 @@ struct Prompt {
     delivery: Option<String>,
     #[serde(default)]
     skills: Vec<SkillRef>,
+    #[serde(default)]
+    files: Vec<FileRef>,
+}
+
+/// A file sent with a prompt: a `file://` path on this machine, or the
+/// bytes in a `data:` URI.
+#[derive(Deserialize)]
+struct FileRef {
+    uri: String,
+    name: Option<String>,
+    mention: Option<Value>,
+}
+
+/// The largest file a prompt may carry.
+const FILE_LIMIT: u64 = 20 * 1024 * 1024;
+
+impl FileRef {
+    /// The file, read.
+    fn read(self) -> Result<harlo_engine::attachment::File, Refusal> {
+        use base64::Engine as _;
+        let mut file = if let Some(path) = self.uri.strip_prefix("file://") {
+            let size = std::fs::metadata(path)
+                .map_err(|e| Refusal::Bad(format!("Couldn't read {path}: {e}")))?
+                .len();
+            if size > FILE_LIMIT {
+                return Err(Refusal::Bad(format!("{path} is too large to send.")));
+            }
+            let bytes = std::fs::read(path)
+                .map_err(|e| Refusal::Bad(format!("Couldn't read {path}: {e}")))?;
+            let mime = match mime_guess::from_path(path).first() {
+                Some(mime) => mime.essence_str().to_owned(),
+                None if std::str::from_utf8(&bytes).is_ok() => "text/plain".to_owned(),
+                None => "application/octet-stream".to_owned(),
+            };
+            let name = std::path::Path::new(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned());
+            harlo_engine::attachment::File::new(
+                &bytes,
+                &mime,
+                json!({ "type": "uri", "uri": self.uri }),
+                self.name.clone().or(name),
+            )
+        } else if let Some(rest) = self.uri.strip_prefix("data:") {
+            let (head, data) = rest
+                .split_once(',')
+                .ok_or_else(|| Refusal::Bad("A data URI needs a comma.".to_owned()))?;
+            let mime = head.trim_end_matches(";base64");
+            let bytes = if head.ends_with(";base64") {
+                base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .map_err(|e| Refusal::Bad(format!("The data URI isn't base64: {e}")))?
+            } else {
+                data.as_bytes().to_vec()
+            };
+            harlo_engine::attachment::File::new(
+                &bytes,
+                if mime.is_empty() { "text/plain" } else { mime },
+                json!({ "type": "inline" }),
+                self.name.clone(),
+            )
+        } else {
+            return Err(Refusal::Bad(format!(
+                "Files are sent as file:// or data: URIs, not {}.",
+                self.uri
+            )));
+        };
+        file.mention = self.mention;
+        Ok(file)
+    }
 }
 
 /// A skill named in a prompt.
@@ -485,7 +609,12 @@ async fn prompt(
     let directory = server.session(&id)?.location.directory;
     let ids: Vec<String> = body.skills.into_iter().map(|s| s.id).collect();
     let skills = server.attach(&directory, &ids).await?;
-    ok(server.prompt(&id, body.id, &body.text, &delivery, skills)?)
+    let files = body
+        .files
+        .into_iter()
+        .map(FileRef::read)
+        .collect::<Result<Vec<_>, _>>()?;
+    ok(server.prompt(&id, body.id, &body.text, &delivery, skills, files)?)
 }
 
 async fn compact(State(server): Shared, Path(id): Path<String>) -> Answer {
@@ -499,7 +628,8 @@ async fn interrupt(State(server): Shared, Path(id): Path<String>) -> Answer {
 }
 
 async fn agents(State(server): Shared, Query(q): Params) -> Answer {
-    ok(json!({ "location": location(&q), "data": server.agents_json() }))
+    let folder = server.folder(&directory_of(&q));
+    ok(json!({ "location": location(&q), "data": folder.agents_json() }))
 }
 
 /// A model chosen for a session.
@@ -553,21 +683,16 @@ async fn models(State(server): Shared, Query(q): Params) -> Answer {
 }
 
 async fn default_model(State(server): Shared, Query(q): Params) -> Answer {
-    let model = server
-        .config
+    let config = server.folder(&directory_of(&q)).config;
+    let model = config
         .default_model()
-        .and_then(|r| server.config.resolve(&r).map(|(p, m)| model_json(p, m)))
+        .and_then(|r| config.resolve(&r).map(|(p, m)| model_json(p, m)))
         .unwrap_or(Value::Null);
     ok(json!({ "location": location(&q), "data": model }))
 }
 
-async fn config(State(server): Shared) -> Answer {
-    let mut out = Vec::new();
-    if let (Some(path), Some(info)) = (&server.config.source, &server.config_text) {
-        out.push(json!({ "type": "document", "path": path, "info": info }));
-    }
-    out.push(json!({ "type": "directory", "path": server.config_dir }));
-    ok(json!(out))
+async fn config(State(server): Shared, Query(q): Params) -> Answer {
+    ok(json!(server.folder(&directory_of(&q)).entries()))
 }
 
 async fn mcp_resources(Query(q): Params) -> Answer {
@@ -679,6 +804,37 @@ async fn write_file(Query(q): Params, body: axum::body::Bytes) -> Answer {
         .await
         .map_err(|e| Refusal::Bad(format!("Couldn't write {path}: {e}")))?;
     ok(json!({ "location": location(&q), "data": { "path": file } }))
+}
+
+/// A file to watch, relative to the folder.
+#[derive(Deserialize)]
+struct Watched {
+    path: String,
+}
+
+async fn watch_file(
+    State(server): Shared,
+    Query(q): Params,
+    axum::Json(body): axum::Json<Watched>,
+) -> Answer {
+    let root = folder_of(&q)?;
+    let file = crate::fs::inside(&root, &body.path).map_err(Refusal::Bad)?;
+    if !file.exists() {
+        return Err(Refusal::NotFound(format!("There's no {}.", body.path)));
+    }
+    server.watch(&directory_of(&q), file);
+    done()
+}
+
+async fn unwatch_file(
+    State(server): Shared,
+    Query(q): Params,
+    axum::Json(body): axum::Json<Watched>,
+) -> Answer {
+    let root = folder_of(&q)?;
+    let file = crate::fs::inside(&root, &body.path).map_err(Refusal::Bad)?;
+    server.unwatch(&file);
+    done()
 }
 
 /// Whether notes are on.

@@ -30,6 +30,9 @@ pub enum Message {
         /// Skills loaded with it, read by the model before the text.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skills: Vec<crate::skills::Attached>,
+        /// Files and pictures sent with it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<crate::attachment::File>,
     },
     /// What the server tells the model in the person's place, such as a
     /// change of agent.
@@ -358,6 +361,7 @@ mod tests {
             time: Created { created: 1 },
             text: "hi".into(),
             skills: Vec::new(),
+            files: Vec::new(),
         })
         .expect("json");
         assert_eq!(

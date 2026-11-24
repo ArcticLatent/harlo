@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use harlo_engine::agents::Mode;
 use harlo_engine::subagent::{self, Request, Subagents};
 use harlo_engine::{Created, Message, ascending_id, now};
 use serde_json::{Value, json};
@@ -38,47 +37,49 @@ impl Subagents for SessionSubagents {
 }
 
 impl Server {
-    /// The agents a subagent may run as, `(id, what for)`.
-    pub(crate) fn subagent_agents(&self) -> Vec<(String, String)> {
-        self.agents
-            .iter()
-            .filter(|a| a.mode == Mode::Subagent)
-            .map(|a| (a.id.clone(), a.description.clone()))
-            .collect()
-    }
-
     /// Starts `request` in a new child of session `parent`, or sends it to
     /// the child it names; returns the child's ID.
     fn start_subagent(self: &Arc<Self>, parent: &str, request: &Request) -> Result<String, String> {
         let parent = self.session(parent).map_err(|e| e.to_string())?;
+        let folder = self.folder(&parent.location.directory);
         let child = if let Some(id) = &request.session {
             let child = self
                 .session(id)
                 .ok()
                 .filter(|c| c.parent_id.as_deref() == Some(parent.id.as_str()))
                 .ok_or_else(|| format!("There's no subagent session {id} of this session."))?;
-            self.prompt(&child.id, None, &request.prompt, "steer", Vec::new())
-                .map_err(|e| e.to_string())?;
+            self.prompt(
+                &child.id,
+                None,
+                &request.prompt,
+                "steer",
+                Vec::new(),
+                Vec::new(),
+            )
+            .map_err(|e| e.to_string())?;
             child
         } else {
-            let Some(agent) = self
+            let Some(agent) = folder
                 .agents
                 .iter()
-                .find(|a| a.id == request.agent && a.mode == Mode::Subagent)
+                .find(|a| a.id == request.agent && a.mode.takes_tasks() && !a.hidden)
             else {
-                let known: Vec<String> = self
-                    .subagent_agents()
-                    .into_iter()
-                    .map(|(id, _)| id)
-                    .collect();
+                let known: Vec<String> = folder.subagents().into_iter().map(|(id, _)| id).collect();
                 return Err(format!(
                     "There's no subagent {}. The subagents are: {}.",
                     request.agent,
                     known.join(", ")
                 ));
             };
-            let model = request.model.clone().or_else(|| parent.model.clone());
-            if let Some(model) = model.as_ref().filter(|m| self.config.resolve(m).is_none()) {
+            let model = request
+                .model
+                .clone()
+                .or_else(|| agent.model.clone())
+                .or_else(|| parent.model.clone());
+            if let Some(model) = model
+                .as_ref()
+                .filter(|m| folder.config.resolve(m).is_none())
+            {
                 return Err(format!(
                     "The model {}/{} isn't in the configuration.",
                     model.provider, model.model
@@ -88,7 +89,7 @@ impl Server {
                 .create_child(&parent, &agent.id, &request.description, model)
                 .map_err(|e| e.to_string())?;
             let text = format!("{}\n{}", subagent::PREAMBLE, request.prompt);
-            self.prompt(&child.id, None, &text, "steer", Vec::new())
+            self.prompt(&child.id, None, &text, "steer", Vec::new(), Vec::new())
                 .map_err(|e| e.to_string())?;
             child
         };
@@ -101,7 +102,10 @@ impl Server {
         let Some(parent) = &child.parent_id else {
             return;
         };
-        let agent = self.agent_for(child.agent.as_deref()).name.clone();
+        let agent = self
+            .folder(&child.location.directory)
+            .agent(child.agent.as_deref())
+            .name;
         let title = child.title.clone().unwrap_or_default();
         let mut time = json!({ "started": child.time.created });
         if let Some(at) = completed {
@@ -157,7 +161,10 @@ impl Server {
             })
             .unwrap_or_default();
         let description = child.title.clone().unwrap_or_default();
-        let agent = self.agent_for(child.agent.as_deref()).name.clone();
+        let agent = self
+            .folder(&child.location.directory)
+            .agent(child.agent.as_deref())
+            .name;
         let text = subagent::report(id, state, &description, &answer);
         let metadata =
             json!({ "source": "subagent", "childID": id, "agent": agent, "state": state });

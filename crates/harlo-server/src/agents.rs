@@ -5,39 +5,12 @@
 
 use std::sync::Arc;
 
-use harlo_engine::agents::{self, Agent, Mode};
 use harlo_engine::{Created, Message, ModelRef, Steering, ascending_id, now};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::server::{Refusal, Server, lock};
 
 impl Server {
-    /// The agent session `session` runs as: its chosen one, else Build.
-    pub(crate) fn agent_for(&self, chosen: Option<&str>) -> &Agent {
-        chosen
-            .and_then(|id| self.agents.iter().find(|a| a.id == id))
-            .or_else(|| self.agents.iter().find(|a| a.id == agents::DEFAULT))
-            .unwrap_or(&self.agents[0])
-    }
-
-    /// The agents, as OpenCode lists them.
-    pub(crate) fn agents_json(&self) -> Vec<Value> {
-        self.agents
-            .iter()
-            .map(|a| {
-                let mut agent = json!({
-                    "id": a.id, "name": a.name, "description": a.description,
-                    "mode": a.mode.as_str(), "hidden": false, "permissions": a.rules,
-                    "request": { "settings": {}, "headers": {}, "body": {} },
-                });
-                if let Some(system) = &a.system {
-                    agent["system"] = json!(system);
-                }
-                agent
-            })
-            .collect()
-    }
-
     /// Sets session `id`'s model, with its variant.
     ///
     /// # Errors
@@ -45,7 +18,8 @@ impl Server {
     /// When there's no such session, or the model isn't configured.
     pub(crate) fn set_model(&self, id: &str, model: ModelRef) -> Result<(), Refusal> {
         let mut session = self.session(id)?;
-        if self.config.resolve(&model).is_none() {
+        let folder = self.folder(&session.location.directory);
+        if folder.config.resolve(&model).is_none() {
             return Err(Refusal::Bad(format!(
                 "The model {}/{} isn't in the configuration.",
                 model.provider, model.model
@@ -72,16 +46,17 @@ impl Server {
     /// When there's no such session, or no such agent to talk to.
     pub(crate) fn set_agent(&self, id: &str, agent: &str) -> Result<(), Refusal> {
         let mut session = self.session(id)?;
-        let Some(next) = self
+        let folder = self.folder(&session.location.directory);
+        let Some(next) = folder
             .agents
             .iter()
-            .find(|a| a.id == agent && a.mode == Mode::Primary)
+            .find(|a| a.id == agent && a.mode.talks_to_people())
         else {
             return Err(Refusal::Bad(format!(
                 "There's no agent {agent} to switch to."
             )));
         };
-        let before = self.agent_for(session.agent.as_deref());
+        let before = folder.agent(session.agent.as_deref());
         if before.id == next.id {
             return Ok(());
         }

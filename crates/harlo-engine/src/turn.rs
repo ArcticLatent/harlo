@@ -69,6 +69,12 @@ pub struct Turn {
 /// Something that happened during a turn.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    /// The engine added a message of its own to the history, such as the
+    /// instructions of a folder the agent read in.
+    Noted {
+        /// The message.
+        message: Box<Message>,
+    },
     /// The session began summarizing itself.
     CompactionStarted {
         /// The compaction's message ID.
@@ -364,7 +370,9 @@ pub async fn run(
             Err(e) if e.is_stopped() => return Outcome::Interrupted,
             Err(e) => return Outcome::Failed(e),
         };
+        let found = instructions_met(&turn, &assistant);
         turn.history.push(Message::Assistant(Box::new(assistant)));
+        note_instructions(&mut turn, found, sink);
         match go_on {
             Next::Model => {}
             Next::Done => return Outcome::Succeeded,
@@ -374,6 +382,69 @@ pub async fn run(
     Outcome::Failed(Error::provider(format!(
         "Stopped after {MAX_STEPS} model steps without an answer."
     )))
+}
+
+/// Adds the instruction files `found` to the conversation, telling `sink`.
+fn note_instructions(turn: &mut Turn, found: Vec<(PathBuf, String)>, sink: &impl Sink) {
+    for (path, text) in found {
+        let message = Message::Synthetic {
+            id: id::ascending_id("msg"),
+            time: Created { created: now() },
+            text: format!("Instructions from: {}\n{}", path.display(), text.trim_end()),
+            description: None,
+            metadata: Some(json!({ "instruction": { "paths": [path] } })),
+        };
+        sink.emit(Event::Noted {
+            message: Box::new(message.clone()),
+        });
+        turn.history.push(message);
+    }
+}
+
+/// The instruction files of the folders that `step`'s reads went into,
+/// not yet in the conversation.
+fn instructions_met(turn: &Turn, step: &Assistant) -> Vec<(PathBuf, String)> {
+    let mut known: Vec<PathBuf> = turn
+        .history
+        .iter()
+        .filter_map(|m| match m {
+            Message::Synthetic {
+                metadata: Some(meta),
+                ..
+            } => meta["instruction"]["paths"].as_array().cloned(),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|p| p.as_str().map(PathBuf::from))
+        .collect();
+    let mut found = Vec::new();
+    for part in &step.content {
+        let Part::Tool {
+            name,
+            state: ToolState::Completed { input, .. },
+            ..
+        } = part
+        else {
+            continue;
+        };
+        let Some(path) = input
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|_| name == "read")
+        else {
+            continue;
+        };
+        let file = if std::path::Path::new(path).is_absolute() {
+            PathBuf::from(path)
+        } else {
+            turn.cwd.join(path)
+        };
+        for (path, text) in crate::instructions::on_the_way(&turn.cwd, &file, &known) {
+            known.push(path.clone());
+            found.push((path, text));
+        }
+    }
+    found
 }
 
 /// What follows a step.
@@ -786,9 +857,16 @@ async fn call_tool(
 fn ran(input: Map<String, Value>, result: Result<tools::Output, String>) -> Called {
     match result {
         Ok(out) => {
+            let mut content = vec![json!({ "type": "text", "text": out.text })];
+            content.extend(out.pictures.iter().map(|p| {
+                json!({
+                    "type": "file", "uri": format!("data:{};base64,{}", p.mime, p.data),
+                    "mime": p.mime, "name": p.name,
+                })
+            }));
             let state = ToolState::Completed {
                 input,
-                content: vec![json!({ "type": "text", "text": out.text })],
+                content,
                 metadata: out.metadata,
             };
             Called::Ran(state, out.changed)
@@ -856,6 +934,7 @@ async fn run_plan(
                     .cloned()
                     .unwrap_or_default(),
                 changed: Vec::new(),
+                pictures: Vec::new(),
             })
         }
         (Plan::SearchSessions { query }, Some(memory)) => {
@@ -863,6 +942,7 @@ async fn run_plan(
                 text,
                 metadata: Map::new(),
                 changed: Vec::new(),
+                pictures: Vec::new(),
             })
         }
         (Plan::Subagent { request }, _) => match &turn.subagents {
@@ -877,6 +957,7 @@ async fn run_plan(
                             .cloned()
                             .unwrap_or_default(),
                     changed: Vec::new(),
+                    pictures: Vec::new(),
                 }),
             None => Err("There is no tool called `subagent`.".to_owned()),
         },
@@ -891,6 +972,7 @@ async fn run_plan(
                     .cloned()
                     .unwrap_or_default(),
                 changed: Vec::new(),
+                pictures: Vec::new(),
             })
             .ok_or_else(|| format!("There's no skill {id}.")),
         (plan, _) => plan.run(&turn.cwd, stop).await,

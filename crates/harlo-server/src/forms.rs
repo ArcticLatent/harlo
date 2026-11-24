@@ -233,7 +233,8 @@ impl Server {
         let settled = self.form(session, form)?;
         let same = match answer {
             Some(a) => settled["state"]["answer"] == Value::Object(a.clone()),
-            None => settled["state"]["status"] == "cancelled",
+            // (A dismissal is refused the second time, as OpenCode does.)
+            None => false,
         };
         if same {
             Ok(())

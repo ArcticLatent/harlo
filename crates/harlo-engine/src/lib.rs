@@ -14,6 +14,7 @@
 // Rust guideline compliant 2026-10-09
 
 pub mod agents;
+pub mod attachment;
 mod chat;
 pub mod commands;
 pub mod compaction;
@@ -33,7 +34,10 @@ pub mod todo;
 pub mod tools;
 mod turn;
 
-pub use config::{Config, ModelRef, ModelSpec, Price, ProviderSpec, VariantSpec};
+pub use config::{
+    Config, ModelRef, ModelSpec, Price, ProviderSpec, VariantSpec, merge_config,
+    project_config_files, read_config_document,
+};
 pub use error::Error;
 pub use id::{ascending_id, descending_id, just_before};
 pub use message::{
