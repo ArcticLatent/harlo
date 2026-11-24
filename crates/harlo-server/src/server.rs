@@ -86,6 +86,8 @@ pub enum Refusal {
     NotFound(String),
     /// The request was wrong.
     Bad(String),
+    /// The request was already answered differently.
+    Settled(String),
     /// The store failed.
     Store(String),
 }
@@ -385,10 +387,14 @@ impl Server {
 
     /// Answers permission request `request` of session `id`.
     ///
+    /// Each request is decided once. The same reply again (a client
+    /// retrying, or a phone and a desktop both sending it) succeeds and
+    /// changes nothing; a different one is refused as settled.
+    ///
     /// # Errors
     ///
-    /// Fails when there's no such request, or the decision isn't one of
-    /// `once`, `always` and `reject`.
+    /// Fails when there's no such request, it was answered differently, or
+    /// the decision isn't one of `once`, `always` and `reject`.
     pub(crate) fn reply(
         &self,
         id: &str,
@@ -406,19 +412,36 @@ impl Server {
                 )));
             }
         };
+        // Taking the request and recording its decision happen under one
+        // lock, so two replies racing each other decide it once.
         let pending = {
             let mut live = lock(&self.live);
             let asks = live.runs.get_mut(id).map(|r| &mut r.asks);
-            asks.and_then(|a| {
+            let pending = asks.and_then(|a| {
                 a.iter()
                     .position(|p| p.id == request)
                     .map(|at| a.remove(at))
-            })
+            });
+            if pending.is_some() {
+                let said = match &answer {
+                    Answer::Reject(m) => m.as_deref(),
+                    _ => None,
+                };
+                self.store
+                    .record_decision(request, id, decision, said, now())?;
+            }
+            pending
         };
         let Some(pending) = pending else {
-            return Err(Refusal::NotFound(format!(
-                "There's no permission request {request}."
-            )));
+            return match self.store.decision(id, request)? {
+                Some(made) if made == decision => Ok(()),
+                Some(made) => Err(Refusal::Settled(format!(
+                    "The permission request {request} was already answered: {made}."
+                ))),
+                None => Err(Refusal::NotFound(format!(
+                    "There's no permission request {request}."
+                ))),
+            };
         };
         let directory = self
             .store
@@ -430,7 +453,7 @@ impl Server {
             "permission.replied",
             json!({ "sessionID": id, "requestID": request, "reply": decision }),
             directory.as_deref(),
-            None,
+            Some(id),
         );
         // (The run may have been stopped meanwhile.)
         let _ = pending.answer.send(answer);
@@ -735,8 +758,12 @@ impl Gate for Hooks {
             })
         };
         if registered.is_some() {
-            self.server
-                .emit("permission.asked", data, Some(&self.directory), None);
+            self.server.emit(
+                "permission.asked",
+                data,
+                Some(&self.directory),
+                Some(&self.session),
+            );
         }
         async move { rx.await.unwrap_or(Answer::Reject(None)) }
     }

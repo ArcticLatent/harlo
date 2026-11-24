@@ -201,3 +201,42 @@ pub async fn until<T>(events: &mut Events, mut pick: impl FnMut(EventKind) -> Op
     .await
     .expect("the event within 20 s")
 }
+
+/// The stored events after `after`, read from the stream with
+/// `Last-Event-ID` until it goes quiet.
+pub async fn replay(sandbox: &Sandbox, after: u64) -> Vec<(u64, String)> {
+    let response = reqwest::Client::new()
+        .get(format!("{}/api/event", sandbox.url()))
+        .basic_auth("opencode", Some(&sandbox.password))
+        .header("Last-Event-ID", after.to_string())
+        .send()
+        .await
+        .expect("events");
+    let mut body = response.bytes_stream();
+    let mut text = String::new();
+    while let Ok(Some(Ok(chunk))) = tokio::time::timeout(
+        Duration::from_millis(500),
+        futures_util::StreamExt::next(&mut body),
+    )
+    .await
+    {
+        text.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    let mut out = Vec::new();
+    for block in text.split("\n\n") {
+        let id = block
+            .lines()
+            .find_map(|l| l.strip_prefix("id: ").or_else(|| l.strip_prefix("id:")));
+        let data = block
+            .lines()
+            .find_map(|l| l.strip_prefix("data: ").or_else(|| l.strip_prefix("data:")));
+        if let (Some(id), Some(data)) = (id, data) {
+            let v: serde_json::Value = serde_json::from_str(data).expect("json");
+            out.push((
+                id.trim().parse().expect("a number"),
+                v["type"].as_str().unwrap_or_default().to_owned(),
+            ));
+        }
+    }
+    out
+}

@@ -95,19 +95,18 @@ async fn password(State(server): Shared, request: Request, next: Next) -> Respon
 
 impl IntoResponse for Refusal {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
-            Self::NotFound(m) => (StatusCode::NOT_FOUND, m),
-            Self::Bad(m) => (StatusCode::BAD_REQUEST, m),
+        let (status, tag, message) = match self {
+            Self::NotFound(m) => (StatusCode::NOT_FOUND, "NotFoundError", m),
+            Self::Bad(m) => (StatusCode::BAD_REQUEST, "InvalidRequestError", m),
+            Self::Settled(m) => (StatusCode::CONFLICT, "AlreadySettledError", m),
             Self::Store(m) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
+                "StoreError",
                 format!("The server's store failed: {m}"),
             ),
         };
-        (
-            status,
-            axum::Json(json!({ "error": { "message": message } })),
-        )
-            .into_response()
+        let body = json!({ "_tag": tag, "message": message });
+        (status, axum::Json(body)).into_response()
     }
 }
 

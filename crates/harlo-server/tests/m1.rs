@@ -13,11 +13,10 @@ mod support;
 
 use std::time::Duration;
 
-use futures_util::StreamExt;
 use opencode_client::{
     Delivery, Effect, EventKind, Message, Part, PermissionReply, Prompt, Rule, ToolStatus,
 };
-use support::{Sandbox, until};
+use support::{Sandbox, replay, until};
 
 const EDIT: &str = r#"tool edit {"path":"a.txt","oldString":"alpha","newString":"omega"} ;; say Changed alpha to omega."#;
 
@@ -186,40 +185,4 @@ async fn a_reconnecting_client_gets_the_events_it_missed_once_and_in_order() {
     // Having seen the third, the client gets exactly the rest.
     let rest = replay(&sandbox, seqs[2]).await;
     assert_eq!(rest, all[3..]);
-}
-
-/// The stored events after `after`, read from the stream with
-/// `Last-Event-ID` until it goes quiet.
-async fn replay(sandbox: &Sandbox, after: u64) -> Vec<(u64, String)> {
-    let response = reqwest::Client::new()
-        .get(format!("{}/api/event", sandbox.url()))
-        .basic_auth("opencode", Some(&sandbox.password))
-        .header("Last-Event-ID", after.to_string())
-        .send()
-        .await
-        .expect("events");
-    let mut body = response.bytes_stream();
-    let mut text = String::new();
-    while let Ok(Some(Ok(chunk))) =
-        tokio::time::timeout(Duration::from_millis(500), body.next()).await
-    {
-        text.push_str(&String::from_utf8_lossy(&chunk));
-    }
-    let mut out = Vec::new();
-    for block in text.split("\n\n") {
-        let id = block
-            .lines()
-            .find_map(|l| l.strip_prefix("id: ").or_else(|| l.strip_prefix("id:")));
-        let data = block
-            .lines()
-            .find_map(|l| l.strip_prefix("data: ").or_else(|| l.strip_prefix("data:")));
-        if let (Some(id), Some(data)) = (id, data) {
-            let v: serde_json::Value = serde_json::from_str(data).expect("json");
-            out.push((
-                id.trim().parse().expect("a number"),
-                v["type"].as_str().unwrap_or_default().to_owned(),
-            ));
-        }
-    }
-    out
 }

@@ -115,7 +115,10 @@ impl Store {
                  id TEXT PRIMARY KEY, session TEXT NOT NULL, body TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS message_by_session ON message (session, id);
              CREATE TABLE IF NOT EXISTS event (
-                 seq INTEGER PRIMARY KEY AUTOINCREMENT, aggregate TEXT NOT NULL, body TEXT NOT NULL);",
+                 seq INTEGER PRIMARY KEY AUTOINCREMENT, aggregate TEXT NOT NULL, body TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS decision (
+                 request TEXT PRIMARY KEY, session TEXT NOT NULL, reply TEXT NOT NULL,
+                 message TEXT, time INTEGER NOT NULL);",
         )?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -196,6 +199,57 @@ impl Store {
             .query_row("SELECT 1 FROM message WHERE id = ?1", [id], |_| Ok(()))
             .optional()
             .map(|found| found.is_some())
+    }
+
+    /// Records the decision on permission request `request`, once: false
+    /// when it was already decided.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn record_decision(
+        &self,
+        request: &str,
+        session: &str,
+        reply: &str,
+        message: Option<&str>,
+        time: i64,
+    ) -> Result<bool, Error> {
+        let changed = self.conn().execute(
+            "INSERT OR IGNORE INTO decision (request, session, reply, message, time)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![request, session, reply, message, time],
+        )?;
+        Ok(changed == 1)
+    }
+
+    /// The decision on permission request `request` of `session`, if one
+    /// was made: its reply (`once`, `always` or `reject`).
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn decision(&self, session: &str, request: &str) -> Result<Option<String>, Error> {
+        self.conn()
+            .query_row(
+                "SELECT reply FROM decision WHERE request = ?1 AND session = ?2",
+                [request, session],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
+    /// How many decisions were made in `session`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn decisions(&self, session: &str) -> Result<i64, Error> {
+        self.conn().query_row(
+            "SELECT COUNT(*) FROM decision WHERE session = ?1",
+            [session],
+            |r| r.get(0),
+        )
     }
 
     /// A session's messages, oldest first.
