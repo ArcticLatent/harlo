@@ -15,7 +15,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use opencode_client::{EventKind, FileDiff, Message, Part, Picture, Report, ToolCall, ToolStatus};
+use opencode_client::{
+    EventKind, FileDiff, Message, Part, Picture, Report, ScriptCall, ToolCall, ToolStatus,
+};
 use serde_json::Value;
 
 /// The tool that hands work to a subagent in a child session.
@@ -81,6 +83,8 @@ pub enum Entry {
         pictures: Vec<Picture>,
         /// Why it failed, when it did and the tool said.
         error: Option<String>,
+        /// A Code Mode script's code and calls; `None` for other tools.
+        script: Option<Box<Script>>,
     },
     /// Work handed to a subagent, which runs in a child session.
     Subagent {
@@ -128,6 +132,15 @@ pub enum Entry {
         /// Whether it's a problem.
         warning: bool,
     },
+}
+
+/// A Code Mode script: what it runs and the tools it has called.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Script {
+    /// The JavaScript.
+    pub code: String,
+    /// The tools it called, as it runs and once it ends.
+    pub calls: Vec<ScriptCall>,
 }
 
 /// Where a compaction is.
@@ -411,7 +424,25 @@ fn tool(message: &str, call: &ToolCall) -> Entry {
         todos: todo_list(&call.name, &call.input),
         pictures: call.pictures.clone(),
         error: reason(call.error.as_deref()),
+        script: script_of(&call.name, &call.input, &call.calls),
     }
+}
+
+/// The Code Mode tool, which runs a script that calls other tools.
+pub const SCRIPT: &str = "execute";
+
+/// A Code Mode call's script, from its arguments and the calls it made;
+/// `None` for other tools.
+fn script_of(name: &str, input: &Value, calls: &[ScriptCall]) -> Option<Box<Script>> {
+    (name == SCRIPT).then(|| {
+        Box::new(Script {
+            code: input["code"]
+                .as_str()
+                .map(|code| code.trim_matches('\n').to_owned())
+                .unwrap_or_default(),
+            calls: calls.to_vec(),
+        })
+    })
 }
 
 /// Why a tool call failed, trimmed, or nothing when it didn't say.
@@ -440,6 +471,10 @@ fn subagent(key: String, input: &Value, child: Option<String>, status: ToolStatu
 /// An edit reports its patches. A write reports only its input, so the
 /// content it wrote is shown as added.
 fn changes(name: &str, status: ToolStatus, input: &Value, files: &[FileDiff]) -> Vec<FileDiff> {
+    // A script's changes show as it runs, and stay when it fails: they're real.
+    if name == SCRIPT {
+        return files.to_vec();
+    }
     if status != ToolStatus::Completed {
         return Vec::new();
     }
@@ -485,6 +520,10 @@ struct OpenTool {
     started: f64,
     detail: String,
     input: Value,
+    /// A running script's calls so far.
+    calls: Vec<ScriptCall>,
+    /// A running script's changed files so far.
+    files: Vec<FileDiff>,
 }
 
 /// A prompt waiting in the inbox, shown once it's delivered.
@@ -610,6 +649,8 @@ impl Live {
                     started: time,
                     detail: String::new(),
                     input: Value::Null,
+                    calls: Vec::new(),
+                    files: Vec::new(),
                 };
                 let change = Change::Put(open.entry(ToolStatus::Streaming, None, &[], &[], None));
                 self.tools.insert(call_id.clone(), open);
@@ -619,15 +660,37 @@ impl Live {
                 Some(open) => {
                     open.detail = shorten(&tool_detail(&open.name, input));
                     open.input = input.clone();
+                    let files = open.files.clone();
                     vec![Change::Put(open.entry(
                         ToolStatus::Running,
                         None,
-                        &[],
+                        &files,
                         &[],
                         None,
                     ))]
                 }
                 None => vec![Change::Reload],
+            },
+            EventKind::ToolProgress {
+                call_id,
+                files,
+                calls,
+                ..
+            } => match self.tools.get_mut(call_id) {
+                Some(open) => {
+                    open.calls.clone_from(calls);
+                    open.files.clone_from(files);
+                    vec![Change::Put(open.entry(
+                        ToolStatus::Running,
+                        None,
+                        files,
+                        &[],
+                        None,
+                    ))]
+                }
+                // Progress before the call is known: the reload after the run
+                // catches up.
+                None => Vec::new(),
             },
             EventKind::ToolEnded {
                 call_id,
@@ -653,13 +716,19 @@ impl Live {
                         ))];
                     }
                     let took = millis(time - open.started);
-                    vec![Change::Put(open.entry(
+                    let row = Change::Put(open.entry(
                         status,
                         Some(took),
                         files,
                         pictures,
                         error.as_deref(),
-                    ))]
+                    ));
+                    // A script's last calls are in its stored result, not
+                    // its last progress.
+                    if open.name == SCRIPT {
+                        return vec![row, Change::Reload];
+                    }
+                    vec![row]
                 }
                 None => vec![Change::Reload],
             },
@@ -739,6 +808,7 @@ impl OpenTool {
             todos: todo_list(&self.name, &self.input),
             pictures: pictures.to_vec(),
             error: reason(error),
+            script: script_of(&self.name, &self.input, &self.calls),
         }
     }
 }
@@ -815,6 +885,7 @@ pub fn tool_label(name: &str) -> String {
         "webfetch" => "Fetch".to_owned(),
         "websearch" => "Search".to_owned(),
         "apply_patch" | "patch" => "Patch".to_owned(),
+        SCRIPT => "Script".to_owned(),
         other => {
             let mut chars = other.chars();
             chars.next().map_or_else(String::new, |first| {
@@ -834,6 +905,8 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
         "webfetch" => field("url"),
         "websearch" => field("query"),
         "task" => field("description"),
+        // The script shows below; its row says what it's for, if it says.
+        SCRIPT => return script_summary(field("code").unwrap_or_default()),
         _ => None,
     };
     if let Some(found) = found {
@@ -855,6 +928,33 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
         .and_then(|o| o.values().find_map(Value::as_str))
         .map(|s| first_line(s).to_owned())
         .unwrap_or_default()
+}
+
+/// What a script's call was given, in one short line: its main text
+/// argument, or its arguments as compact JSON.
+#[must_use]
+pub fn call_detail(input: &Value) -> String {
+    let text = match input {
+        Value::Null => return String::new(),
+        Value::String(text) => first_line(text).to_owned(),
+        Value::Object(fields) => ["path", "filePath", "command", "pattern", "url", "query"]
+            .into_iter()
+            .find_map(|key| fields.get(key).and_then(Value::as_str))
+            .map_or_else(|| input.to_string(), |text| first_line(text).to_owned()),
+        other => other.to_string(),
+    };
+    shorten(&text)
+}
+
+/// What a script is for: its first comment, or else its first line.
+fn script_summary(code: &str) -> String {
+    let lines = || code.lines().map(str::trim).filter(|l| !l.is_empty());
+    lines()
+        .find_map(|l| l.strip_prefix("//").map(str::trim))
+        .filter(|comment| !comment.is_empty())
+        .or_else(|| lines().next())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// The first line of some reasoning, without Markdown emphasis or heading marks.

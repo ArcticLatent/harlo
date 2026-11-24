@@ -176,6 +176,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
             headers: vec![("Authorization".into(), "Bearer x".into())],
         },
         disabled: false,
+        codemode: true,
     };
     let local = McpEntry {
         name: "browser".into(),
@@ -184,6 +185,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
             environment: vec![("TOKEN".into(), "t".into())],
         },
         disabled: false,
+        codemode: true,
     };
     config::set_mcp_server(folder, &remote).expect("add");
     config::set_mcp_server(folder, &local).expect("add");
@@ -212,6 +214,24 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
             .contains("disabled")
     );
     config::set_mcp_disabled(folder, "missing", true).expect("left alone");
+
+    // Code Mode is OpenCode's default; off lists the tools one by one.
+    config::set_mcp_codemode(folder, "browser", false).expect("listed");
+    let json: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(folder.join("opencode.json"))
+            .expect("read")
+            .replace("// mine", ""),
+    )
+    .expect("JSON");
+    assert_eq!(json["mcp"]["servers"]["browser"]["codemode"], false);
+    assert!(!config::mcp_servers(folder).expect("read")[1].codemode);
+    config::set_mcp_codemode(folder, "browser", true).expect("scripts");
+    assert!(config::mcp_servers(folder).expect("read")[1].codemode);
+    assert!(
+        !fs::read_to_string(folder.join("opencode.json"))
+            .expect("read")
+            .contains("codemode")
+    );
     assert_eq!(config::mcp_servers(folder).expect("read").len(), 2);
 
     config::remove_mcp_server(folder, "docs").expect("removed");

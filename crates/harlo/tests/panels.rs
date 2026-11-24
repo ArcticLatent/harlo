@@ -260,6 +260,7 @@ fn written(key: &str, todos: Vec<Todo>) -> Entry {
         todos: Some(todos),
         pictures: Vec::new(),
         error: None,
+        script: None,
     }
 }
 

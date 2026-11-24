@@ -51,6 +51,9 @@ pub enum McpEvent {
     Disconnect,
     /// Turn the shown server off (`true`) or on in the config.
     TurnOff(bool),
+    /// Have agents reach the shown server's tools through scripts (`true`)
+    /// or as tools listed one by one.
+    Scripts(bool),
     /// Remove the shown server from the config, asking once.
     Remove,
     /// A step ended: what to say, or why it failed.
@@ -145,6 +148,7 @@ impl App {
                 return self.connect_mcp(connect);
             }
             McpEvent::TurnOff(off) => return self.turn_off_mcp(off),
+            McpEvent::Scripts(on) => return self.mcp_scripts(on),
             McpEvent::Remove => return self.remove_mcp(),
             McpEvent::Done(result) => {
                 page.busy = false;
@@ -258,6 +262,7 @@ impl App {
                 name,
                 run,
                 disabled: false,
+                codemode: true,
             },
             said,
         )
@@ -337,6 +342,35 @@ impl App {
         Task::perform(
             async move {
                 config::set_mcp_disabled_later(folder, name, off)
+                    .await
+                    .map(|()| said)
+                    .map_err(|e| e.to_string())
+            },
+            |result| mcp_message(McpEvent::Done(result)),
+        )
+    }
+
+    /// Has agents reach the shown server's tools through Code Mode scripts,
+    /// or as tools listed one by one, in the global config.
+    fn mcp_scripts(&mut self, on: bool) -> Task<Message> {
+        let (Some(folder), Some(name)) = (
+            self.global_config().map(ToOwned::to_owned),
+            self.sheets.mcp.shown().map(ToOwned::to_owned),
+        ) else {
+            return Task::none();
+        };
+        let page = &mut self.sheets.mcp;
+        page.busy = true;
+        page.error = None;
+        let said = if on {
+            "Its tools are reached through scripts."
+        } else {
+            "Its tools are listed one by one."
+        }
+        .to_owned();
+        Task::perform(
+            async move {
+                config::set_mcp_codemode_later(folder, name, on)
                     .await
                     .map(|()| said)
                     .map_err(|e| e.to_string())

@@ -797,12 +797,47 @@ def scene_subagents(g):
     h.settle(0.8)
 
 
+CODEMODE_SCRIPT = """// Check the schedules and pause the stale one
+const all = await tools.automation.list({});
+const stale = all.automations.filter((a) => a.status === "active");
+const results = await Promise.allSettled([
+  tools.automation.pause({ id: "aut_stale_nightly" }),
+  tools.automation.list({}),
+]);
+const failed = results.filter((r) => r.status === "rejected");
+return {
+  schedules: all.automations.length,
+  active: stale.length,
+  failed: failed.length,
+};"""
+
+
+def scene_codemode(g):
+    """A Code Mode script: its code cut short, each tool it called with how
+    that went, and the whole script on asking."""
+    h = g.h
+    open_project_session(h, title="Schedules check")
+    ask(h, "Check the schedules and pause the stale nightly one.",
+        [[("think", "One script can look at every schedule and pause the stale one."),
+          ("tool", "execute " + json.dumps({"code": CODEMODE_SCRIPT}))],
+         [("say", "There are no schedules yet, so there was nothing stale to pause.")]])
+    h.wait_says("nothing stale to pause", timeout=60)
+    h.settle(1)
+    g.cap("script", "A script: what it's for, its first lines, and each tool it called")
+    h.click("… 3 more lines", role=None)
+    h.settle(0.8)
+    g.cap("whole", "The whole script, shown on asking")
+    h.click("Show less", role=None)
+    h.settle(0.5)
+
+
 SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approval),
           ("question", scene_question), ("busy", scene_busy), ("states", scene_states),
           ("menus", scene_menus),
           ("panels", scene_panels), ("terminal", scene_terminal), ("editor", scene_editor),
           ("settings", scene_settings), ("fonts", scene_fonts), ("pages", scene_pages), ("phone", scene_phone),
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
+          ("codemode", scene_codemode),
           # These two leave a subagent's or a worktree's session open, so they come last.
           ("subagents", scene_subagents), ("worktrees", scene_worktrees),
           ("window", scene_window)]

@@ -111,6 +111,17 @@ pub enum Kind {
         call_id: String,
         input: Value,
     },
+    /// A running tool call reported progress: for a Code Mode script, the
+    /// calls it has made so far and the files it has changed.
+    ToolProgress {
+        session_id: String,
+        message_id: String,
+        call_id: String,
+        /// The files changed so far.
+        files: Vec<FileDiff>,
+        /// The calls made so far, in the order they started.
+        calls: Vec<crate::types::ScriptCall>,
+    },
     /// A tool call finished, successfully or not.
     ToolEnded {
         session_id: String,
@@ -254,6 +265,7 @@ impl Kind {
             | Self::ToolStarted { session_id, .. }
             | Self::ToolCalled { session_id, .. }
             | Self::ToolEnded { session_id, .. }
+            | Self::ToolProgress { session_id, .. }
             | Self::SubagentReported { session_id, .. }
             | Self::StepEnded { session_id, .. }
             | Self::UsageUpdated { session_id, .. }
@@ -529,6 +541,18 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
                 message_id: d.assistant_message_id.to_string(),
                 call_id: d.id,
                 name: d.name,
+            }
+        }
+        "session.tool.progress" => {
+            let metadata = data["metadata"].as_object();
+            Kind::ToolProgress {
+                session_id: session_of(&data),
+                message_id: text_of(&data, "assistantMessageID"),
+                call_id: text_of(&data, "id"),
+                files: metadata
+                    .map(crate::types::proposed_files)
+                    .unwrap_or_default(),
+                calls: metadata.map(crate::types::script_calls).unwrap_or_default(),
             }
         }
         "session.tool.success" | "session.tool.failed" => Kind::ToolEnded {

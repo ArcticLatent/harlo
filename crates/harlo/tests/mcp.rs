@@ -55,6 +55,24 @@ fn status(ui: &Ui) -> Option<McpStatus> {
     }
 }
 
+/// The shown server's tools: through scripts, OpenCode's Code Mode and
+/// its default, or listed one by one, and back.
+fn lists_and_scripts(ui: &Ui, tasks: &mut Tasks, folder: &std::path::Path) {
+    // OpenCode's Code Mode is the default; its tools can be listed instead.
+    assert!(ui.shows("Through scripts"));
+    ui.press("List them");
+    assert!(
+        tasks.until(ui, WAIT, |ui| ui.shows("Its tools are listed one by one.")
+            && ui.shows("Use scripts"))
+    );
+    assert!(!config::mcp_servers(folder).expect("config")[0].codemode);
+    ui.press("Use scripts");
+    assert!(tasks.until(ui, WAIT, |ui| {
+        ui.shows("Its tools are reached through scripts.")
+    }));
+    assert!(config::mcp_servers(folder).expect("config")[0].codemode);
+}
+
 #[test]
 fn ones_own_server_is_added_connected_turned_off_and_removed() {
     let mut tasks = Tasks::new();
@@ -147,6 +165,8 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     assert!(tasks.until(&ui, WAIT, |ui| ui.shows("Turned on.")
         && ui.shows("Turn off")));
     assert!(!config::mcp_servers(&folder).expect("config")[0].disabled);
+
+    lists_and_scripts(&ui, &mut tasks, &folder);
 
     ui.press("Remove");
     assert!(ui.shows("Remove it for every app using this server?"));

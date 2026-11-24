@@ -206,6 +206,7 @@ pub fn automations(folder: &Path) -> Result<bool, Error> {
 }
 
 /// Turns OpenCode's automations on or off in the global file in `folder`.
+///
 /// On, the default, removes the setting; off writes `"automations": false`.
 /// Either way the `experimental.automations` of older releases goes, since
 /// OpenCode now warns about it.
@@ -261,6 +262,9 @@ pub struct McpEntry {
     pub run: McpRun,
     /// Whether it's turned off, so OpenCode doesn't start it.
     pub disabled: bool,
+    /// Whether agents reach its tools through Code Mode scripts, OpenCode's
+    /// default, rather than as tools listed one by one.
+    pub codemode: bool,
 }
 
 impl McpEntry {
@@ -293,6 +297,7 @@ impl McpEntry {
             name: name.to_owned(),
             run,
             disabled: value["disabled"].as_bool().unwrap_or(false),
+            codemode: value["codemode"].as_bool().unwrap_or(true),
         })
     }
 
@@ -327,6 +332,9 @@ impl McpEntry {
         }
         if self.disabled {
             fields.push(("disabled".to_owned(), CstInputValue::Bool(true)));
+        }
+        if !self.codemode {
+            fields.push(("codemode".to_owned(), CstInputValue::Bool(false)));
         }
         CstInputValue::Object(fields)
     }
@@ -397,6 +405,44 @@ pub fn set_mcp_disabled(folder: &Path, name: &str, disabled: bool) -> Result<(),
         &[MCP, SERVERS, name, "disabled"],
         disabled.then_some(CstInputValue::Bool(true)),
     )
+}
+
+/// Sets how agents reach MCP server `name`'s tools.
+///
+/// Through Code Mode scripts, OpenCode's default, removes `codemode`; as
+/// tools listed one by one writes `codemode: false`. A server the file
+/// doesn't have is left alone.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does.
+pub fn set_mcp_codemode(folder: &Path, name: &str, codemode: bool) -> Result<(), Error> {
+    if !mcp_servers(folder)?.iter().any(|entry| entry.name == name) {
+        return Ok(());
+    }
+    set_at(
+        folder,
+        &[MCP, SERVERS, name, "codemode"],
+        (!codemode).then_some(CstInputValue::Bool(false)),
+    )
+}
+
+/// Sets the server's Code Mode as [`set_mcp_codemode`] does, on a blocking
+/// thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_mcp_codemode`], or an error when the thread
+/// is cancelled.
+pub async fn set_mcp_codemode_later(
+    folder: PathBuf,
+    name: String,
+    codemode: bool,
+) -> Result<(), Error> {
+    later(folder, move |folder| {
+        set_mcp_codemode(folder, &name, codemode)
+    })
+    .await
 }
 
 /// Reads the MCP servers as [`mcp_servers`] does, on a blocking thread.

@@ -89,6 +89,7 @@ fn history() -> Vec<Entry> {
             todos: None,
             pictures: vec![picture("plot.png", &png(60, 20))],
             error: None,
+            script: None,
         },
     ]
 }

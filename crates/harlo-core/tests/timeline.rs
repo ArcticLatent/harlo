@@ -24,6 +24,7 @@ fn call(name: &str, input: serde_json::Value, took_ms: Option<f64>) -> Part {
         child: None,
         pictures: Vec::new(),
         error: None,
+        calls: Vec::new(),
     })
 }
 
@@ -142,6 +143,7 @@ fn messages_become_rows_in_order() {
             todos: None,
             pictures: Vec::new(),
             error: None,
+            script: None,
         }
     );
     assert!(
@@ -289,6 +291,7 @@ fn glob(status: ToolStatus, detail: &str, took_ms: Option<u64>) -> Change {
         todos: None,
         pictures: Vec::new(),
         error: None,
+        script: None,
     })
 }
 
@@ -869,4 +872,168 @@ fn a_prompt_names_the_agent_that_answered_it() {
         })
         .collect();
     assert_eq!(agents, [Some("plan"), None]);
+}
+
+fn script_call(tool: &str, status: ToolStatus) -> harlo_core::server::ScriptCall {
+    harlo_core::server::ScriptCall {
+        tool: tool.into(),
+        status,
+        input: json!({ "path": "src/main.rs" }),
+    }
+}
+
+#[test]
+fn a_script_shows_its_code_its_calls_and_what_it_changed() {
+    let code = "\n// Read both files at once\nconst [a, b] = await Promise.all([\n  tools.fs.read({ path: \"a\" }),\n  tools.fs.read({ path: \"b\" }),\n]);\nreturn a + b;\n";
+    let Part::Tool(base) = call("execute", json!({ "code": code }), Some(40.0)) else {
+        unreachable!("a tool call")
+    };
+    let failed = ToolCall {
+        status: ToolStatus::Failed,
+        error: Some("b: not found".into()),
+        files: vec![FileDiff {
+            file: "a".into(),
+            patch: "@@ -1 +1 @@\n-x\n+y\n".into(),
+            additions: 1,
+            deletions: 1,
+            status: "modified".into(),
+        }],
+        calls: vec![
+            script_call("fs.read", ToolStatus::Completed),
+            script_call("fs.read", ToolStatus::Failed),
+        ],
+        ..base
+    };
+    let rows = entries(&[Message::Assistant {
+        id: "msg_a".into(),
+        agent: "build".into(),
+        parts: vec![Part::Tool(failed)],
+        files: Vec::new(),
+    }]);
+    let Entry::Tool {
+        label,
+        detail,
+        script: Some(script),
+        files,
+        ..
+    } = &rows[0]
+    else {
+        panic!("a script row: {rows:?}")
+    };
+    assert_eq!(label, "Script");
+    // Its first comment says what it's for.
+    assert_eq!(detail, "Read both files at once");
+    assert!(script.code.starts_with("// Read both"), "{script:?}");
+    assert!(
+        script.code.ends_with("return a + b;"),
+        "trimmed: {script:?}"
+    );
+    assert_eq!(script.calls.len(), 2);
+    assert_eq!(script.calls[1].status, ToolStatus::Failed);
+    // A failed script's changes still happened, so they show.
+    assert_eq!(files.len(), 1);
+
+    // Without a comment, its first line.
+    assert_eq!(
+        tool_detail("execute", &json!({ "code": "\n  return 1;" })),
+        "return 1;"
+    );
+    assert_eq!(
+        harlo_core::timeline::call_detail(&json!({ "path": "src/main.rs", "x": 1 })),
+        "src/main.rs"
+    );
+    assert_eq!(
+        harlo_core::timeline::call_detail(&json!({ "n": 1 })),
+        "{\"n\":1}"
+    );
+}
+
+#[test]
+fn a_running_script_shows_its_calls_and_files_as_they_come() {
+    let mut live = Live::new();
+    let started = live.apply(
+        &session(|session_id| EventKind::ToolStarted {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            name: "execute".into(),
+        }),
+        1_000.0,
+    );
+    assert!(matches!(&*started, [Change::Put(Entry::Tool { label, .. })] if label == "Script"));
+    live.apply(
+        &session(|session_id| EventKind::ToolCalled {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            input: json!({ "code": "return await tools.fs.read({});" }),
+        }),
+        1_100.0,
+    );
+    let diff = FileDiff {
+        file: "notes.md".into(),
+        patch: "@@ -0,0 +1 @@\n+hi\n".into(),
+        additions: 1,
+        deletions: 0,
+        status: "added".into(),
+    };
+    let progress = live.apply(
+        &session(|session_id| EventKind::ToolProgress {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            files: vec![diff.clone()],
+            calls: vec![script_call("fs.read", ToolStatus::Running)],
+        }),
+        1_200.0,
+    );
+    let [
+        Change::Put(Entry::Tool {
+            status,
+            files,
+            script: Some(script),
+            ..
+        }),
+    ] = &*progress
+    else {
+        panic!("one row: {progress:?}")
+    };
+    assert_eq!(*status, ToolStatus::Running);
+    assert_eq!(script.calls[0].status, ToolStatus::Running);
+    assert_eq!(files, &vec![diff]);
+    assert_eq!(script.code, "return await tools.fs.read({});");
+
+    // The end shows the calls so far, then reads the stored result for
+    // the last ones.
+    let ended = live.apply(
+        &session(|session_id| EventKind::ToolEnded {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_1".into(),
+            failed: false,
+            error: None,
+            files: Vec::new(),
+            child: None,
+            pictures: Vec::new(),
+        }),
+        1_500.0,
+    );
+    assert!(
+        matches!(&*ended, [Change::Put(Entry::Tool { script: Some(script), status: ToolStatus::Completed, .. }), Change::Reload]
+            if script.calls.len() == 1),
+        "{ended:?}"
+    );
+
+    // Progress for a call it never saw start waits for the reload.
+    let stray = live.apply(
+        &session(|session_id| EventKind::ToolProgress {
+            session_id,
+            message_id: "msg_a".into(),
+            call_id: "call_9".into(),
+            files: Vec::new(),
+            calls: Vec::new(),
+        }),
+        1_600.0,
+    );
+    assert!(stray.is_empty());
 }

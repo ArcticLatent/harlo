@@ -49,6 +49,9 @@ const TURN_GAP: f32 = 8.0;
 /// Diff lines shown before "… N more lines".
 const DIFF_LINES: usize = 12;
 
+/// Script lines shown before "… N more lines".
+const SCRIPT_LINES: usize = 10;
+
 /// Diff lines per row, when a diff shows whole.
 const DIFF_CHUNK: usize = 40;
 
@@ -338,7 +341,9 @@ impl Rows {
                     let blocks = self.answers.entry(key.to_owned()).or_default();
                     answer_rows(key, text, gap, caret, highlighter, blocks)
                 } else {
-                    let mut rows = entry_rows(t, &view, gap, crew, &mut self.slots.borrow_mut());
+                    let highlighter = self.highlighter.get_or_insert_with(|| Highlighter::new(t));
+                    let mut slots = self.slots.borrow_mut();
+                    let mut rows = entry_rows(t, &view, gap, crew, &mut slots, highlighter);
                     // The session's last stop offers to go on.
                     if caret && matches!(view.entry, Entry::Stopped { .. }) {
                         for row in &mut rows {
@@ -631,11 +636,13 @@ fn entry_rows(
     gap: f32,
     crew: &Crew,
     slots: &mut Slots,
+    highlighter: &Highlighter,
 ) -> Vec<TimelineRow> {
     let key = view.entry.key();
     let nested = view.nested;
+    // A script's calls sit indented under it, in a group or not.
     let with = |mut row: TimelineRow| {
-        row.nested = nested;
+        row.nested = nested || row.nested;
         row
     };
     match view.entry {
@@ -681,10 +688,12 @@ fn entry_rows(
             row.detail = summarize(text).into();
             vec![with(row)]
         }
-        Entry::Tool { key, .. } => tool_rows(t, view, gap, slots, crew.asking.contains(key))
-            .into_iter()
-            .map(with)
-            .collect(),
+        Entry::Tool { key, .. } => {
+            tool_rows(t, view, gap, slots, highlighter, crew.asking.contains(key))
+                .into_iter()
+                .map(with)
+                .collect()
+        }
         Entry::Stopped { outcome, error, .. } => {
             let mut row = line(t, key, gap, Icon::CircleStop, t.icon_warning_base);
             row.label = if outcome == "interrupted" {
@@ -761,9 +770,10 @@ fn line(t: &Tokens, key: &str, gap: f32, icon: Icon, tone: Rgba) -> TimelineRow 
     row
 }
 
-/// Marks a row as inside an open group, or not.
+/// Marks a row as inside an open group; a script's calls stay indented
+/// either way.
 fn with_nesting(mut row: TimelineRow, nested: bool) -> TimelineRow {
-    row.nested = nested;
+    row.nested = nested || row.nested;
     row
 }
 
@@ -893,6 +903,7 @@ fn tool_rows(
     view: &RowView<'_>,
     gap: f32,
     slots: &mut Slots,
+    highlighter: &Highlighter,
     asking: bool,
 ) -> Vec<TimelineRow> {
     let Entry::Tool {
@@ -905,6 +916,7 @@ fn tool_rows(
         files,
         pictures,
         error,
+        script,
         ..
     } = view.entry
     else {
@@ -928,8 +940,9 @@ fn tool_rows(
     let mut head = line(t, key, gap, icon, tone);
     head.label = label.as_str().into();
     head.detail = detail.as_str().into();
-    // A todo list's progress is words; the rest is code, a path or a pattern.
-    head.mono = !matches!(name.as_str(), "todowrite" | "todoread" | "todo");
+    // A todo list's progress and a script's purpose are words; the rest is
+    // code, a path or a pattern.
+    head.mono = !matches!(name.as_str(), "todowrite" | "todoread" | "todo" | "execute");
     head.working = working;
     head.note = took.map(duration).unwrap_or_default().into();
     if !files.is_empty() {
@@ -938,6 +951,9 @@ fn tool_rows(
         head.removed = count(files.iter().map(|f| f.deletions).sum());
     }
     let mut rows = vec![head];
+    if let Some(script) = script {
+        rows.extend(script_rows(t, key, script, view.whole, highlighter));
+    }
     if let Some(why) = error {
         let mut row = blank(Shape::Reason, key, 2.0);
         row.label = why.as_str().into();
@@ -990,6 +1006,56 @@ fn tool_rows(
             row.detail = format!("{index}:{at}").into();
             rows.push(row);
         }
+    }
+    rows
+}
+
+/// A Code Mode script under its row: the JavaScript, cut short unless
+/// shown whole, then each tool it called with how that went.
+fn script_rows(
+    t: &Tokens,
+    key: &str,
+    script: &harlo_core::timeline::Script,
+    whole: bool,
+    highlighter: &Highlighter,
+) -> Vec<TimelineRow> {
+    let lines: Vec<&str> = script.code.lines().collect();
+    let shown = if whole {
+        lines.len()
+    } else {
+        lines.len().min(SCRIPT_LINES)
+    };
+    let mut code = blank(Shape::Code, key, 6.0);
+    code.text = styled(&highlighter.markup("javascript", &lines[..shown].join("\n")));
+    code.label = script.code.as_str().into();
+    // Told apart from the diffs, which count from 0.
+    code.file = -1;
+    let hidden = lines.len() - shown;
+    code.more = if hidden > 0 {
+        format!("… {hidden} more lines").into()
+    } else if whole && lines.len() > SCRIPT_LINES {
+        "Show less".into()
+    } else {
+        SharedString::new()
+    };
+    let mut rows = vec![code];
+    for (index, call) in script.calls.iter().enumerate() {
+        let (icon, tone, working) = match call.status {
+            ToolStatus::Completed => (Icon::CircleCheck, crate::theme::quiet_icon(t), false),
+            ToolStatus::Failed => (Icon::X, t.icon_critical_base, false),
+            ToolStatus::Running | ToolStatus::Streaming => {
+                (Icon::LoaderCircle, t.text_interactive_base, true)
+            }
+        };
+        let mut row = line(t, key, if index == 0 { 4.0 } else { 0.0 }, icon, tone);
+        row.label = call.tool.as_str().into();
+        row.detail = harlo_core::timeline::call_detail(&call.input).into();
+        row.mono = true;
+        row.working = working;
+        row.nested = true;
+        // Each call is told apart by its place.
+        row.file = -2 - i32::try_from(index).unwrap_or(i32::MAX - 2);
+        rows.push(row);
     }
     rows
 }
@@ -1085,6 +1151,7 @@ fn tool_icon(name: &str) -> Icon {
         "task" => Icon::Bot,
         "skill" => Icon::Sparkles,
         "question" => Icon::CircleQuestionMark,
+        "execute" => Icon::Code,
         _ => Icon::Wrench,
     }
 }

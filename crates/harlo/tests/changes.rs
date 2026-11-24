@@ -426,6 +426,7 @@ fn an_edit_opens_its_turn_on_the_hunk_it_changed() {
             todos: None,
             pictures: Vec::new(),
             error: None,
+            script: None,
         },
     ];
     ui.send(Message::History(PI_UPDATE.into(), Ok(history)));

@@ -331,6 +331,7 @@ fn bash_call(call: &str, status: ToolStatus, error: Option<&str>) -> Entry {
         todos: None,
         pictures: Vec::new(),
         error: error.map(str::to_owned),
+        script: None,
     }
 }
 
@@ -1166,4 +1167,82 @@ fn a_session_that_doesnt_ask_says_so_in_its_header_and_sidebar_row() {
     // The header, the composer's shield and the sidebar row.
     assert!(marks.len() >= 3, "marked in {} places", marks.len());
     assert!(marks.iter().any(|at| at.x < 344.0), "on the sidebar row");
+}
+
+/// A Code Mode script's row in "pi update", `lines` long, having called
+/// `calls`.
+fn script_call(lines: usize, calls: &[(&str, ToolStatus)]) -> Entry {
+    let mut script = vec!["// Gather the logs".to_owned()];
+    script.extend(
+        (1..lines).map(|n| format!("const part{n} = await tools.logs.read({{ n: {n} }});")),
+    );
+    Entry::Tool {
+        key: harlo_core::timeline::tool_key("msg_a", "call_s"),
+        name: "execute".into(),
+        label: "Script".into(),
+        detail: "Gather the logs".into(),
+        status: ToolStatus::Running,
+        took: None,
+        files: Vec::new(),
+        todos: None,
+        pictures: Vec::new(),
+        error: None,
+        script: Some(Box::new(harlo_core::timeline::Script {
+            code: script.join("\n"),
+            calls: calls
+                .iter()
+                .map(|(tool, status)| harlo_core::server::ScriptCall {
+                    tool: (*tool).into(),
+                    status: *status,
+                    input: json!({ "path": format!("{tool}.log") }),
+                })
+                .collect(),
+        })),
+    }
+}
+
+#[test]
+fn a_script_shows_its_code_and_each_call_under_it() {
+    let ui = chatting();
+    busy(&ui);
+    ui.send(Message::History(
+        PI_UPDATE.into(),
+        Ok(vec![script_call(
+            14,
+            &[
+                ("logs.read", ToolStatus::Completed),
+                ("logs.grep", ToolStatus::Failed),
+                ("fetch", ToolStatus::Running),
+            ],
+        )]),
+    ));
+    assert!(ui.shows("Script"));
+    assert!(ui.shows("Gather the logs"));
+    let rows = ui.window.global::<State>().get_timeline();
+    let all: Vec<_> = (0..rows.row_count())
+        .filter_map(|i| rows.row_data(i))
+        .collect();
+    let code = all
+        .iter()
+        .find(|row| row.shape == Shape::Code)
+        .expect("the script's code");
+    // The first lines show; the rest wait behind a link.
+    assert_eq!(code.more.as_str(), "… 4 more lines");
+    assert!(code.label.contains("part13"), "the whole script reads out");
+    let calls: Vec<_> = all
+        .iter()
+        .filter(|row| row.shape == Shape::Line && row.nested)
+        .map(|row| (row.label.to_string(), row.detail.to_string(), row.working))
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            ("logs.read".to_owned(), "logs.read.log".to_owned(), false),
+            ("logs.grep".to_owned(), "logs.grep.log".to_owned(), false),
+            ("fetch".to_owned(), "fetch.log".to_owned(), true),
+        ]
+    );
+
+    ui.press("… 4 more lines");
+    assert!(ui.shows("Show less"));
 }

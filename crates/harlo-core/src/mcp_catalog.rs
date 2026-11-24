@@ -48,6 +48,7 @@ impl Offered {
             name: self.name.to_owned(),
             run,
             disabled: false,
+            codemode: true,
         }
     }
 }

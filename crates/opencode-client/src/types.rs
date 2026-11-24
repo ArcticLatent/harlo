@@ -703,26 +703,31 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
             g::SessionMessageAssistantContentItem::Tool(t) => {
                 let mut pictures = Vec::new();
                 let mut error = None;
+                let mut calls = Vec::new();
                 let (status, input, files, child) = match t.state {
                     g::SessionMessageAssistantToolState::Streaming(_) => {
                         (ToolStatus::Streaming, Value::Null, Vec::new(), None)
                     }
-                    g::SessionMessageAssistantToolState::Running(s) => (
-                        ToolStatus::Running,
-                        Value::Object(s.input),
-                        Vec::new(),
-                        None,
-                    ),
+                    // A script reports its calls and changed files as it runs.
+                    g::SessionMessageAssistantToolState::Running(s) => {
+                        calls = script_calls(&s.metadata);
+                        let files = proposed_files(&s.metadata);
+                        (ToolStatus::Running, Value::Object(s.input), files, None)
+                    }
                     g::SessionMessageAssistantToolState::Completed(s) => {
                         let files = proposed_files(&s.metadata);
                         let child = child_session(&s.metadata);
+                        calls = script_calls(&s.metadata);
                         pictures = Picture::from_tool(&s.content);
                         (ToolStatus::Completed, Value::Object(s.input), files, child)
                     }
+                    // A failed script's files really changed, so they stay.
                     g::SessionMessageAssistantToolState::Error(s) => {
                         pictures = Picture::from_tool(&s.content);
                         error = Some(s.error.message);
-                        (ToolStatus::Failed, Value::Object(s.input), Vec::new(), None)
+                        calls = script_calls(&s.metadata);
+                        let files = proposed_files(&s.metadata);
+                        (ToolStatus::Failed, Value::Object(s.input), files, None)
                     }
                 };
                 let took_ms = t.time.completed.map(|end| (end - t.time.created).max(0.0));
@@ -736,6 +741,7 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
                     child,
                     pictures,
                     error,
+                    calls,
                 })
             }
         }
@@ -763,6 +769,23 @@ pub struct ToolCall {
     pub pictures: Vec<Picture>,
     /// Why it failed, in the tool's words, when it did.
     pub error: Option<String>,
+    /// The tools a Code Mode script (`execute`) called, in the order they
+    /// started; empty for other tools.
+    pub calls: Vec<ScriptCall>,
+}
+
+/// A tool a Code Mode script called, or a `fetch` it made.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScriptCall {
+    /// The tool's path as the script called it, such as `github.search`,
+    /// or `fetch`.
+    pub tool: String,
+    /// [`ToolStatus::Running`], [`ToolStatus::Completed`] or
+    /// [`ToolStatus::Failed`].
+    pub status: ToolStatus,
+    /// Its arguments as OpenCode shows them, shortened; `Null` when it
+    /// didn't say.
+    pub input: Value,
 }
 
 /// Where a tool call is.
@@ -811,6 +834,28 @@ pub(crate) fn child_session(metadata: &serde_json::Map<String, Value>) -> Option
         .and_then(Value::as_str)
         .filter(|id| id.starts_with("ses"))
         .map(str::to_owned)
+}
+
+/// Reads the calls a Code Mode script made, from its `toolCalls` metadata.
+pub(crate) fn script_calls(metadata: &serde_json::Map<String, Value>) -> Vec<ScriptCall> {
+    let Some(calls) = metadata.get("toolCalls").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    calls
+        .iter()
+        .filter_map(|c| {
+            let status = match c["status"].as_str()? {
+                "completed" => ToolStatus::Completed,
+                "error" => ToolStatus::Failed,
+                _ => ToolStatus::Running,
+            };
+            Some(ScriptCall {
+                tool: c["tool"].as_str()?.to_owned(),
+                status,
+                input: c.get("input").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect()
 }
 
 /// Reads the file changes an edit request carries in its metadata.

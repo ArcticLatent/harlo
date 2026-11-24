@@ -147,6 +147,22 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         starts.setting = window::TURN_OFF_MCP;
         starts.choice = int(usize::from(!entry.disabled));
         rows.push(starts);
+        // OpenCode's Code Mode: agents call these tools from short scripts,
+        // so their definitions don't fill every request.
+        let mut scripts = if entry.codemode {
+            pair("Agents use its tools", "Through scripts", 1)
+        } else {
+            pair("Agents use its tools", "Listed one by one", 3)
+        };
+        scripts.action = if entry.codemode {
+            "List them"
+        } else {
+            "Use scripts"
+        }
+        .into();
+        scripts.setting = window::MCP_SCRIPTS;
+        scripts.choice = int(usize::from(!entry.codemode));
+        rows.push(scripts);
         let mut remove = if page.removing {
             pair("Remove", "Remove it for every app using this server?", 4)
         } else {

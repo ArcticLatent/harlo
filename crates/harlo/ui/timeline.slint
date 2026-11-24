@@ -715,6 +715,15 @@ component RowView inherits Rectangle {
                     default-font-family: Fonts.mono;
                     default-font-size: Size.code;
                 }
+                // A script cut short shows the rest on asking.
+                if root.item.more != "": HorizontalLayout {
+                    padding-top: 4px;
+                    alignment: start;
+                    LinkButton {
+                        text: root.item.more;
+                        clicked => { Logic.toggle-diff(root.item.key); }
+                    }
+                }
             }
         }
         if root.item.shape == Shape.quote: HorizontalLayout {

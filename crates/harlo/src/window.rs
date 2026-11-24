@@ -743,6 +743,10 @@ pub const SOUND_LICENCE: i32 = 79;
 /// by its item.
 pub const FOLLOW_SSH_HOST: i32 = 80;
 
+/// The Settings button that has agents reach the shown MCP server's tools
+/// through scripts (item 1) or as tools listed one by one (item 0).
+pub const MCP_SCRIPTS: i32 = 81;
+
 /// The first number of Settings → Models' switches: the one for the model
 /// at place `n` of [`App::models`] is numbered this plus `n`.
 pub const MODEL_SWITCHES: i32 = 10_000;
@@ -806,6 +810,7 @@ fn mcp_action(app: &App, number: i32, item: i32) -> Option<Message> {
         CONNECT_MCP if item == 1 => McpEvent::Connect,
         CONNECT_MCP => McpEvent::Disconnect,
         TURN_OFF_MCP => McpEvent::TurnOff(item == 1),
+        MCP_SCRIPTS => McpEvent::Scripts(item == 1),
         REMOVE_MCP => McpEvent::Remove,
         ADD_MCP => McpEvent::Add,
         ADD_OFFERED_MCP => McpEvent::AddOffered(usize::try_from(item).ok()?),
@@ -966,7 +971,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         REMOVE_APPROVAL => Some(Message::Sheet(SheetEvent::Approval(
             app::ApprovalEvent::Remove(usize::try_from(item).ok()?),
         ))),
-        OPEN_MCP..=SIGN_IN_MCP => mcp_action(app, number, item),
+        OPEN_MCP..=SIGN_IN_MCP | MCP_SCRIPTS => mcp_action(app, number, item),
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
