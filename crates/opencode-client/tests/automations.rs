@@ -1,6 +1,6 @@
-//! OpenCode's automations against a private server: refused until
-//! `experimental.automations` is on, then created, listed, paused, resumed,
-//! run and deleted.
+//! OpenCode's automations against a private server: refused while
+//! `automations` is off, then created, listed, paused, resumed, run and
+//! deleted.
 //!
 //! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
@@ -12,13 +12,13 @@ mod support;
 use opencode_client::{AutomationAction, AutomationStatus, AutomationTrigger, NewAutomation};
 use support::{Sandbox, wait_for};
 
-/// Turns automations on in the sandbox's global config; the server reads
-/// the change without restarting.
-fn allow_automations(sandbox: &Sandbox) {
+/// Turns automations on or off in the sandbox's global config; the server
+/// reads the change without restarting.
+fn allow_automations(sandbox: &Sandbox, on: bool) {
     let config = sandbox.root().join("config/opencode/opencode.json");
     let mut settings: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).expect("config")).expect("JSON");
-    settings["experimental"] = serde_json::json!({ "automations": true });
+    settings["automations"] = serde_json::json!(on);
     std::fs::write(&config, settings.to_string()).expect("config");
 }
 
@@ -37,17 +37,22 @@ async fn automations_are_created_paused_resumed_run_and_deleted() {
         prompt: "Check the build.".into(),
     };
 
-    let refused = client
-        .create_automation(&new(AutomationTrigger::Cron("0 9 * * 1-5".into())))
-        .await
-        .expect_err("automations are off");
+    // On unless the config turns them off.
+    allow_automations(&sandbox, false);
+    let refused = wait_for("automations off", || async {
+        client
+            .create_automation(&new(AutomationTrigger::Cron("0 9 * * 1-5".into())))
+            .await
+            .err()
+    })
+    .await;
     assert!(
-        refused.to_string().contains("experimental.automations"),
+        refused.to_string().contains("Automations are disabled"),
         "{refused}"
     );
     assert!(client.automations().await.expect("the list").is_empty());
 
-    allow_automations(&sandbox);
+    allow_automations(&sandbox, true);
     let weekday = wait_for("automations on", || async {
         client
             .create_automation(&new(AutomationTrigger::Cron("0 9 * * 1-5".into())))

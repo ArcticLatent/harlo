@@ -627,6 +627,7 @@ impl ::std::convert::TryFrom<::std::string::String> for ArtifactUpdatedType {
 pub enum AutomationAction {
     Prompt(AutomationActionPrompt),
     Code(AutomationActionCode),
+    Shell(AutomationActionShell),
 }
 impl ::std::convert::From<AutomationActionPrompt> for AutomationAction {
     fn from(value: AutomationActionPrompt) -> Self {
@@ -636,6 +637,11 @@ impl ::std::convert::From<AutomationActionPrompt> for AutomationAction {
 impl ::std::convert::From<AutomationActionCode> for AutomationAction {
     fn from(value: AutomationActionCode) -> Self {
         Self::Code(value)
+    }
+}
+impl ::std::convert::From<AutomationActionShell> for AutomationAction {
+    fn from(value: AutomationActionShell) -> Self {
+        Self::Shell(value)
     }
 }
 ///`AutomationActionCode`
@@ -694,12 +700,13 @@ impl ::std::convert::TryFrom<::std::string::String> for AutomationActionCodeType
         value.parse()
     }
 }
-///What it does: { type: "prompt", prompt, to? } sends a prompt; { type: "code", code, args? } runs Code Mode with no model.
+///What it does: { type: "prompt", prompt, to? } sends a prompt; { type: "code", code, args? } runs Code Mode; { type: "shell", command } runs a fixed shell command.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum AutomationActionInput {
     PromptActionInput(AutomationPromptActionInput),
     CodeActionInput(AutomationCodeActionInput),
+    ShellActionInput(AutomationShellActionInput),
 }
 impl ::std::convert::From<AutomationPromptActionInput> for AutomationActionInput {
     fn from(value: AutomationPromptActionInput) -> Self {
@@ -709,6 +716,11 @@ impl ::std::convert::From<AutomationPromptActionInput> for AutomationActionInput
 impl ::std::convert::From<AutomationCodeActionInput> for AutomationActionInput {
     fn from(value: AutomationCodeActionInput) -> Self {
         Self::CodeActionInput(value)
+    }
+}
+impl ::std::convert::From<AutomationShellActionInput> for AutomationActionInput {
+    fn from(value: AutomationShellActionInput) -> Self {
+        Self::ShellActionInput(value)
     }
 }
 ///`AutomationActionPrompt`
@@ -766,17 +778,120 @@ impl ::std::convert::TryFrom<::std::string::String> for AutomationActionPromptTy
         value.parse()
     }
 }
+///`AutomationActionShell`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct AutomationActionShell {
+    pub command: AutomationActionShellCommand,
+    #[serde(rename = "type")]
+    pub type_: AutomationActionShellType,
+}
+///`AutomationActionShellCommand`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct AutomationActionShellCommand(::std::string::String);
+impl ::std::ops::Deref for AutomationActionShellCommand {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<AutomationActionShellCommand> for ::std::string::String {
+    fn from(value: AutomationActionShellCommand) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for AutomationActionShellCommand {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for AutomationActionShellCommand {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AutomationActionShellCommand {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AutomationActionShellCommand {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(::std::string::String::deserialize(deserializer)?)
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`AutomationActionShellType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum AutomationActionShellType {
+    #[serde(rename = "shell")]
+    Shell,
+}
+impl ::std::fmt::Display for AutomationActionShellType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Shell => f.write_str("shell"),
+        }
+    }
+}
+impl ::std::str::FromStr for AutomationActionShellType {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "shell" => Ok(Self::Shell),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AutomationActionShellType {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AutomationActionShellType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 ///`AutomationCodeActionInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 pub struct AutomationCodeActionInput {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub args: ::std::option::Option<::serde_json::Value>,
-    ///Code Mode JavaScript run on each trigger with no model (no fetch; 30s, 20 tool calls, 32 KB output cap). Call tools statically as tools.<ns>.<tool>(...) or tools["ns-name"].tool(...); each is authorized once at creation to run unattended. Receives input = { state, now, runs, args } (also globals): state starts null, now is epoch ms, runs counts earlier runs. Event triggers also receive input.event = { id, timestamp, data }; data follows the event type's payloadSchema. Return nothing, or { state?, done?, send? }. JSON state is kept for the next run; done: true stops. lastOutput shows the delivery target and any logs. Return at most one send per run. { send: { prompt } } steers the creating session; { send: { prompt, to: { subagent } } } starts a permitted child that does not report back. No session IDs. Omit send to stay quiet. A rejected send commits neither state nor done. Example code string: if (runs < 2) return; return { done: true, send: { prompt: "Three checks elapsed. Review the build." } }
+    ///Code Mode JavaScript run on each trigger with no model (32 KB output cap). Call tools statically as tools.<ns>.<tool>(...) or tools["ns-name"].tool(...); each is authorized once at creation to run unattended. Receives input = { state, now, runs, args } (also globals): state starts null, now is epoch ms, runs counts earlier runs. Event triggers also receive input.event = { id, timestamp, data }; data follows the event type's payloadSchema. Return nothing, or { state?, done?, send? }. JSON state is kept for the next run; done: true stops. lastOutput shows the delivery target and any logs. Return at most one send per run. { send: { prompt } } steers the creating session; { send: { prompt, to: { subagent } } } starts a permitted child that does not report back. No session IDs. Omit send to stay quiet. A rejected send commits neither state nor done. Example code string: if (runs < 2) return; return { done: true, send: { prompt: "Three checks elapsed. Review the build." } }
     pub code: AutomationCodeActionInputCode,
     #[serde(rename = "type")]
     pub type_: AutomationCodeActionInputType,
 }
-///Code Mode JavaScript run on each trigger with no model (no fetch; 30s, 20 tool calls, 32 KB output cap). Call tools statically as tools.<ns>.<tool>(...) or tools["ns-name"].tool(...); each is authorized once at creation to run unattended. Receives input = { state, now, runs, args } (also globals): state starts null, now is epoch ms, runs counts earlier runs. Event triggers also receive input.event = { id, timestamp, data }; data follows the event type's payloadSchema. Return nothing, or { state?, done?, send? }. JSON state is kept for the next run; done: true stops. lastOutput shows the delivery target and any logs. Return at most one send per run. { send: { prompt } } steers the creating session; { send: { prompt, to: { subagent } } } starts a permitted child that does not report back. No session IDs. Omit send to stay quiet. A rejected send commits neither state nor done. Example code string: if (runs < 2) return; return { done: true, send: { prompt: "Three checks elapsed. Review the build." } }
+///Code Mode JavaScript run on each trigger with no model (32 KB output cap). Call tools statically as tools.<ns>.<tool>(...) or tools["ns-name"].tool(...); each is authorized once at creation to run unattended. Receives input = { state, now, runs, args } (also globals): state starts null, now is epoch ms, runs counts earlier runs. Event triggers also receive input.event = { id, timestamp, data }; data follows the event type's payloadSchema. Return nothing, or { state?, done?, send? }. JSON state is kept for the next run; done: true stops. lastOutput shows the delivery target and any logs. Return at most one send per run. { send: { prompt } } steers the creating session; { send: { prompt, to: { subagent } } } starts a permitted child that does not report back. No session IDs. Omit send to stay quiet. A rejected send commits neither state nor done. Example code string: if (runs < 2) return; return { done: true, send: { prompt: "Three checks elapsed. Review the build." } }
 #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[serde(transparent)]
 pub struct AutomationCodeActionInputCode(::std::string::String);
@@ -1302,6 +1417,110 @@ impl ::std::convert::TryFrom<::std::string::String> for AutomationPromptActionIn
         value.parse()
     }
 }
+///`AutomationShellActionInput`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct AutomationShellActionInput {
+    ///The fixed shell command to run on each trigger without a model.
+    pub command: AutomationShellActionInputCommand,
+    #[serde(rename = "type")]
+    pub type_: AutomationShellActionInputType,
+}
+///The fixed shell command to run on each trigger without a model.
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct AutomationShellActionInputCommand(::std::string::String);
+impl ::std::ops::Deref for AutomationShellActionInputCommand {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<AutomationShellActionInputCommand> for ::std::string::String {
+    fn from(value: AutomationShellActionInputCommand) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for AutomationShellActionInputCommand {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for AutomationShellActionInputCommand {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if value.chars().count() < 1usize {
+            return Err("shorter than 1 characters".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AutomationShellActionInputCommand {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AutomationShellActionInputCommand {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(::std::string::String::deserialize(deserializer)?)
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`AutomationShellActionInputType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum AutomationShellActionInputType {
+    #[serde(rename = "shell")]
+    Shell,
+}
+impl ::std::fmt::Display for AutomationShellActionInputType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Shell => f.write_str("shell"),
+        }
+    }
+}
+impl ::std::str::FromStr for AutomationShellActionInputType {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "shell" => Ok(Self::Shell),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AutomationShellActionInputType {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AutomationShellActionInputType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 ///`AutomationStatus`
 #[derive(
     ::serde::Deserialize,
@@ -1372,7 +1591,7 @@ pub enum AutomationTarget {
         subagent: AgentId,
     },
 }
-///When it runs: { type: "at", at: "in 20 minutes" | "2026-10-27T09:00" }, { type: "every", every: "1 hour" } or { type: "cron", cron: "0 9 * * 1-5" }, each with an optional tz. Or { type: "event", server, event, args? } for a connected MCP server advertising push delivery (requires mcp_events).
+///When it runs: { type: "at", at: "in 20 minutes" | "2026-10-27T09:00" }, { type: "every", every: "1 hour" } or { type: "cron", cron: "0 9 * * 1-5" }, each with an optional tz. Or { type: "event", server, event, args? } for a connected MCP server advertising push delivery.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum AutomationTrigger {
@@ -1754,7 +1973,7 @@ impl ::std::convert::TryFrom<::std::string::String> for AutomationTriggerEveryTy
         value.parse()
     }
 }
-///`BlobId`
+///A stored blob, such as a generated video, which outlives the job that made it
 #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[serde(transparent)]
 pub struct BlobId(::std::string::String);
@@ -1780,17 +1999,10 @@ impl ::std::convert::TryFrom<&str> for BlobId {
     fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
             ::std::sync::LazyLock::new(|| {
-                ::regress::Regex::with_flags(
-                    "^video_[0-9a-f]{12}[0-9A-Za-z]{14}_(0|[1-9][0-9]{0,2})$",
-                    "u",
-                )
-                .unwrap()
+                ::regress::Regex::with_flags("^blob_[0-9a-f]{12}[0-9A-Za-z]{14}$", "u").unwrap()
             });
         if PATTERN.find(value).is_none() {
-            return Err(
-                "doesn't match pattern \"^video_[0-9a-f]{12}[0-9A-Za-z]{14}_(0|[1-9][0-9]{0,2})$\""
-                    .into(),
-            );
+            return Err("doesn't match pattern \"^blob_[0-9a-f]{12}[0-9A-Za-z]{14}$\"".into());
         }
         Ok(Self(value.to_string()))
     }
@@ -1818,9 +2030,6 @@ impl<'de> ::serde::Deserialize<'de> for BlobId {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 pub struct BlobInfo {
     pub bytes: f64,
-    ///Epoch milliseconds after which the blob may be deleted. Read it with GET /api/experimental/blob/:id
-    #[serde(rename = "expiresAt")]
-    pub expires_at: f64,
     pub id: BlobId,
     pub mime: ::std::string::String,
 }
@@ -2855,6 +3064,8 @@ pub struct ConfigFormatterEntryEncoded {
 pub struct ConfigInfoEncoded {
     #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub agents: ::std::collections::HashMap<::std::string::String, ConfigAgentEncoded>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub automations: ::std::option::Option<bool>,
     #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub commands: ::std::collections::HashMap<::std::string::String, ConfigCommandEncoded>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -3001,22 +3212,26 @@ pub struct ConfigInfoEncodedExperimental {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub artifacts: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub automations: ::std::option::Option<bool>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub codemode_vm: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub console_watches: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub full_codemode: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub home_memory: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub image_generate: ::std::option::Option<ConfigInfoEncodedExperimentalImageGenerate>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub location_idle_timeout:
         ::std::option::Option<ConfigInfoEncodedExperimentalLocationIdleTimeout>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub mcp_events: ::std::option::Option<bool>,
+    pub machines: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub media_blob: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub model_speeds: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub opencode_api: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub part_rows: ::std::option::Option<bool>,
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
@@ -3024,13 +3239,17 @@ pub struct ConfigInfoEncodedExperimental {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub portable_shell_scanner: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub schedules: ::std::option::Option<bool>,
+    pub project_overlay: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub recommended_api: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub sqlite_fts: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub subagent_depth: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub todo: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub video_generate: ::std::option::Option<bool>,
+    pub video_generate: ::std::option::Option<ConfigInfoEncodedExperimentalVideoGenerate>,
 }
 ///`ConfigInfoEncodedExperimentalImageGenerate`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
@@ -3464,6 +3683,283 @@ impl ::std::convert::TryFrom<::std::string::String>
         value: ::std::string::String,
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
+    }
+}
+///`ConfigInfoEncodedExperimentalVideoGenerate`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum ConfigInfoEncodedExperimentalVideoGenerate {
+    Boolean(bool),
+    Object {
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        model: ::std::option::Option<ConfigInfoEncodedExperimentalVideoGenerateObjectModel>,
+    },
+}
+impl ::std::convert::From<bool> for ConfigInfoEncodedExperimentalVideoGenerate {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+///`ConfigInfoEncodedExperimentalVideoGenerateObjectModel`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum ConfigInfoEncodedExperimentalVideoGenerateObjectModel {
+    String(ConfigInfoEncodedExperimentalVideoGenerateObjectModelString),
+    Object {
+        model: ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel,
+        #[serde(rename = "providerID")]
+        provider_id: ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId,
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        variant: ::std::option::Option<
+            ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant,
+        >,
+    },
+}
+impl ::std::convert::From<ConfigInfoEncodedExperimentalVideoGenerateObjectModelString>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModel
+{
+    fn from(value: ConfigInfoEncodedExperimentalVideoGenerateObjectModelString) -> Self {
+        Self::String(value)
+    }
+}
+///`ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel(::std::string::String);
+impl ::std::ops::Deref for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel>
+    for ::std::string::String
+{
+    fn from(value: ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel
+{
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+            ::std::sync::LazyLock::new(|| ::regress::Regex::with_flags("^[^#]+$", "u").unwrap());
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[^#]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel
+{
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectModel
+{
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(::std::string::String::deserialize(deserializer)?)
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId(
+    ::std::string::String,
+);
+impl ::std::ops::Deref for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId>
+    for ::std::string::String
+{
+    fn from(value: ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId
+{
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+            ::std::sync::LazyLock::new(|| ::regress::Regex::with_flags("^[^/#]+$", "u").unwrap());
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[^/#]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId
+{
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectProviderId
+{
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(::std::string::String::deserialize(deserializer)?)
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant(
+    ::std::string::String,
+);
+impl ::std::ops::Deref for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant>
+    for ::std::string::String
+{
+    fn from(value: ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant
+{
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+            ::std::sync::LazyLock::new(|| ::regress::Regex::with_flags("^[^#]+$", "u").unwrap());
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[^#]+$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant
+{
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelObjectVariant
+{
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(::std::string::String::deserialize(deserializer)?)
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
+    }
+}
+///`ConfigInfoEncodedExperimentalVideoGenerateObjectModelString`
+#[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[serde(transparent)]
+pub struct ConfigInfoEncodedExperimentalVideoGenerateObjectModelString(::std::string::String);
+impl ::std::ops::Deref for ConfigInfoEncodedExperimentalVideoGenerateObjectModelString {
+    type Target = ::std::string::String;
+    fn deref(&self) -> &::std::string::String {
+        &self.0
+    }
+}
+impl ::std::convert::From<ConfigInfoEncodedExperimentalVideoGenerateObjectModelString>
+    for ::std::string::String
+{
+    fn from(value: ConfigInfoEncodedExperimentalVideoGenerateObjectModelString) -> Self {
+        value.0
+    }
+}
+impl ::std::str::FromStr for ConfigInfoEncodedExperimentalVideoGenerateObjectModelString {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value)
+    }
+}
+impl ::std::convert::TryFrom<&str> for ConfigInfoEncodedExperimentalVideoGenerateObjectModelString {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+            ::std::sync::LazyLock::new(|| {
+                ::regress::Regex::with_flags("^[^/#]+\\/[^#]+(?:#[^#]+)?$", "u").unwrap()
+            });
+        if PATTERN.find(value).is_none() {
+            return Err("doesn't match pattern \"^[^/#]+\\/[^#]+(?:#[^#]+)?$\"".into());
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelString
+{
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        ::std::convert::TryFrom::try_from(value.as_str())
+    }
+}
+impl<'de> ::serde::Deserialize<'de>
+    for ConfigInfoEncodedExperimentalVideoGenerateObjectModelString
+{
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        ::std::convert::TryFrom::try_from(::std::string::String::deserialize(deserializer)?)
+            .map_err(|e: self::error::ConversionError| {
+                <D::Error as ::serde::de::Error>::custom(e.to_string())
+            })
     }
 }
 ///`ConfigInfoEncodedFormatter`
@@ -5789,6 +6285,71 @@ impl<'de> ::serde::Deserialize<'de> for EventVersionEncodedC77c5abcb68d {
     {
         Self::try_from(<f64>::deserialize(deserializer)?)
             .map_err(|e| <D::Error as ::serde::de::Error>::custom(e.to_string()))
+    }
+}
+///`ExperimentalJobUpdated`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct ExperimentalJobUpdated {
+    pub created: f64,
+    pub data: ExperimentalJobUpdatedData,
+    pub id: EventId,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub location: ::std::option::Option<LocationRef>,
+    #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
+    pub metadata: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+    #[serde(rename = "type")]
+    pub type_: ExperimentalJobUpdatedType,
+}
+///`ExperimentalJobUpdatedData`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct ExperimentalJobUpdatedData {
+    pub info: JobInfo,
+}
+///`ExperimentalJobUpdatedType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum ExperimentalJobUpdatedType {
+    #[serde(rename = "experimental.job.updated")]
+    ExperimentalJobUpdated,
+}
+impl ::std::fmt::Display for ExperimentalJobUpdatedType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ExperimentalJobUpdated => f.write_str("experimental.job.updated"),
+        }
+    }
+}
+impl ::std::str::FromStr for ExperimentalJobUpdatedType {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "experimental.job.updated" => Ok(Self::ExperimentalJobUpdated),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ExperimentalJobUpdatedType {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ExperimentalJobUpdatedType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
     }
 }
 ///`ExperimentalMcpEvent`
@@ -13306,6 +13867,7 @@ pub enum JobInfo {
     Shell(JobShell),
     Subagent(JobSubagent),
     Image(JobImage),
+    Video(JobVideo),
     CodeMode(JobCodeMode),
 }
 impl ::std::convert::From<JobShell> for JobInfo {
@@ -13321,6 +13883,11 @@ impl ::std::convert::From<JobSubagent> for JobInfo {
 impl ::std::convert::From<JobImage> for JobInfo {
     fn from(value: JobImage) -> Self {
         Self::Image(value)
+    }
+}
+impl ::std::convert::From<JobVideo> for JobInfo {
+    fn from(value: JobVideo) -> Self {
+        Self::Video(value)
     }
 }
 impl ::std::convert::From<JobCodeMode> for JobInfo {
@@ -13348,6 +13915,8 @@ pub enum JobKind {
     Subagent,
     #[serde(rename = "image")]
     Image,
+    #[serde(rename = "video")]
+    Video,
     #[serde(rename = "codemode")]
     Codemode,
 }
@@ -13357,6 +13926,7 @@ impl ::std::fmt::Display for JobKind {
             Self::Shell => f.write_str("shell"),
             Self::Subagent => f.write_str("subagent"),
             Self::Image => f.write_str("image"),
+            Self::Video => f.write_str("video"),
             Self::Codemode => f.write_str("codemode"),
         }
     }
@@ -13368,6 +13938,7 @@ impl ::std::str::FromStr for JobKind {
             "shell" => Ok(Self::Shell),
             "subagent" => Ok(Self::Subagent),
             "image" => Ok(Self::Image),
+            "video" => Ok(Self::Video),
             "codemode" => Ok(Self::Codemode),
             _ => Err("invalid value".into()),
         }
@@ -13579,6 +14150,66 @@ pub struct JobTime {
     ///Start time in milliseconds since the Unix epoch
     pub started: f64,
 }
+///`JobVideo`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct JobVideo {
+    pub id: ::std::string::String,
+    pub kind: JobVideoKind,
+    pub path: ::std::string::String,
+    #[serde(rename = "sessionID")]
+    pub session_id: SessionId,
+    pub status: JobStatus,
+    pub time: JobTime,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub title: ::std::option::Option<::std::string::String>,
+}
+///`JobVideoKind`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum JobVideoKind {
+    #[serde(rename = "video")]
+    Video,
+}
+impl ::std::fmt::Display for JobVideoKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Video => f.write_str("video"),
+        }
+    }
+}
+impl ::std::str::FromStr for JobVideoKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "video" => Ok(Self::Video),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for JobVideoKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for JobVideoKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 ///`LocationNotFoundErrorEncoded`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 pub struct LocationNotFoundErrorEncoded {
@@ -13721,6 +14352,420 @@ impl ::std::convert::TryFrom<::std::string::String> for LocationShutdownType {
         value.parse()
     }
 }
+///`MachineAddPayload`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct MachineAddPayload {
+    pub name: ::std::string::String,
+    pub reach: ::std::vec::Vec<MachineReach>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub replace: ::std::option::Option<bool>,
+}
+///`MachineInfo`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct MachineInfo {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub arch: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub connection: ::std::option::Option<MachineInfoConnection>,
+    pub id: ::std::string::String,
+    pub online: bool,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub os: ::std::option::Option<::std::string::String>,
+    pub paired: bool,
+}
+///`MachineInfoConnection`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct MachineInfoConnection {
+    pub kind: MachineInfoConnectionKind,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub path: ::std::option::Option<MachineInfoConnectionPath>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub rtt: ::std::option::Option<MachineInfoConnectionRtt>,
+}
+///`MachineInfoConnectionKind`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum MachineInfoConnectionKind {
+    #[serde(rename = "websocket")]
+    Websocket,
+    #[serde(rename = "iroh")]
+    Iroh,
+}
+impl ::std::fmt::Display for MachineInfoConnectionKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Websocket => f.write_str("websocket"),
+            Self::Iroh => f.write_str("iroh"),
+        }
+    }
+}
+impl ::std::str::FromStr for MachineInfoConnectionKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "websocket" => Ok(Self::Websocket),
+            "iroh" => Ok(Self::Iroh),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MachineInfoConnectionKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MachineInfoConnectionKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`MachineInfoConnectionPath`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum MachineInfoConnectionPath {
+    #[serde(rename = "direct")]
+    Direct,
+    #[serde(rename = "relayed")]
+    Relayed,
+}
+impl ::std::fmt::Display for MachineInfoConnectionPath {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Direct => f.write_str("direct"),
+            Self::Relayed => f.write_str("relayed"),
+        }
+    }
+}
+impl ::std::str::FromStr for MachineInfoConnectionPath {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "direct" => Ok(Self::Direct),
+            "relayed" => Ok(Self::Relayed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MachineInfoConnectionPath {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MachineInfoConnectionPath {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`MachineInfoConnectionRtt`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum MachineInfoConnectionRtt {
+    Number(f64),
+    String(MachineInfoConnectionRttString),
+}
+impl ::std::fmt::Display for MachineInfoConnectionRtt {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            Self::Number(x) => x.fmt(f),
+            Self::String(x) => x.fmt(f),
+        }
+    }
+}
+impl ::std::str::FromStr for MachineInfoConnectionRtt {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if let Ok(v) = value.parse() {
+            Ok(Self::Number(v))
+        } else if let Ok(v) = value.parse() {
+            Ok(Self::String(v))
+        } else {
+            Err("string conversion failed for all variants".into())
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MachineInfoConnectionRtt {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MachineInfoConnectionRtt {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::From<f64> for MachineInfoConnectionRtt {
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
+}
+impl ::std::convert::From<MachineInfoConnectionRttString> for MachineInfoConnectionRtt {
+    fn from(value: MachineInfoConnectionRttString) -> Self {
+        Self::String(value)
+    }
+}
+///`MachineInfoConnectionRttString`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum MachineInfoConnectionRttString {
+    Infinity,
+    #[serde(rename = "-Infinity")]
+    XInfinity,
+    NaN,
+}
+impl ::std::fmt::Display for MachineInfoConnectionRttString {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Infinity => f.write_str("Infinity"),
+            Self::XInfinity => f.write_str("-Infinity"),
+            Self::NaN => f.write_str("NaN"),
+        }
+    }
+}
+impl ::std::str::FromStr for MachineInfoConnectionRttString {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "Infinity" => Ok(Self::Infinity),
+            "-Infinity" => Ok(Self::XInfinity),
+            "NaN" => Ok(Self::NaN),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MachineInfoConnectionRttString {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MachineInfoConnectionRttString {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`MachineInvite`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct MachineInvite {
+    pub expires: i64,
+    pub join: ::std::string::String,
+    pub name: ::std::string::String,
+    pub reach: ::std::vec::Vec<MachineInviteReachItem>,
+}
+///`MachineInviteReachItem`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum MachineInviteReachItem {
+    MachineReach(MachineReach),
+    Object {
+        #[serde(rename = "type")]
+        type_: MachineInviteReachItemObjectType,
+    },
+}
+impl ::std::convert::From<MachineReach> for MachineInviteReachItem {
+    fn from(value: MachineReach) -> Self {
+        Self::MachineReach(value)
+    }
+}
+///`MachineInviteReachItemObjectType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum MachineInviteReachItemObjectType {
+    #[serde(rename = "iroh")]
+    Iroh,
+}
+impl ::std::fmt::Display for MachineInviteReachItemObjectType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Iroh => f.write_str("iroh"),
+        }
+    }
+}
+impl ::std::str::FromStr for MachineInviteReachItemObjectType {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "iroh" => Ok(Self::Iroh),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MachineInviteReachItemObjectType {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MachineInviteReachItemObjectType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`MachineNotFoundErrorEncoded`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct MachineNotFoundErrorEncoded {
+    pub machine: ::std::string::String,
+    pub message: ::std::string::String,
+    #[serde(rename = "_tag")]
+    pub tag: MachineNotFoundErrorEncodedTag,
+}
+///`MachineNotFoundErrorEncodedTag`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum MachineNotFoundErrorEncodedTag {
+    MachineNotFoundError,
+}
+impl ::std::fmt::Display for MachineNotFoundErrorEncodedTag {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::MachineNotFoundError => f.write_str("MachineNotFoundError"),
+        }
+    }
+}
+impl ::std::str::FromStr for MachineNotFoundErrorEncodedTag {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "MachineNotFoundError" => Ok(Self::MachineNotFoundError),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MachineNotFoundErrorEncodedTag {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MachineNotFoundErrorEncodedTag {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`MachineReach`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct MachineReach {
+    #[serde(rename = "type")]
+    pub type_: MachineReachType,
+    pub url: ::std::string::String,
+}
+///`MachineReachType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum MachineReachType {
+    #[serde(rename = "url")]
+    Url,
+}
+impl ::std::fmt::Display for MachineReachType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Url => f.write_str("url"),
+        }
+    }
+}
+impl ::std::str::FromStr for MachineReachType {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "url" => Ok(Self::Url),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for MachineReachType {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for MachineReachType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 ///`McpLocalConfigEncoded`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 pub struct McpLocalConfigEncoded {
@@ -13815,7 +14860,7 @@ pub struct McpOAuthConfigEncoded {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub scope: ::std::option::Option<::std::string::String>,
 }
-///MCP protocol negotiation. "legacy" (default) opens with the initialize handshake and speaks protocol revisions up to 2025-11-25. "auto" probes for the 2026-07-28 revision and falls back to legacy when the server does not support it. "2026-07-28" requires that revision and fails otherwise.
+///MCP protocol negotiation. "auto" (default) probes for the 2026-07-28 revision and falls back to legacy when the server does not support it. "legacy" opens with the initialize handshake and speaks protocol revisions up to 2025-11-25. "2026-07-28" requires that revision and fails otherwise.
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -14807,6 +15852,8 @@ pub struct ModelInfo {
     pub cost: ::std::vec::Vec<ModelCost>,
     pub enabled: bool,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub experimental: ::std::option::Option<ModelInfoExperimental>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub family: ::std::option::Option<::std::string::String>,
     #[serde(default, skip_serializing_if = "::std::collections::HashMap::is_empty")]
     pub headers: ::std::collections::HashMap<::std::string::String, ::std::string::String>,
@@ -14829,6 +15876,12 @@ pub struct ModelInfo {
     )]
     pub type_: ::std::option::Option<ModelType>,
     pub variants: ::std::vec::Vec<ModelVariant>,
+}
+///`ModelInfoExperimental`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default)]
+pub struct ModelInfoExperimental {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub speed: ::std::option::Option<ModelSpeed>,
 }
 ///`ModelInfoLimit`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
@@ -15160,6 +16213,13 @@ pub struct ModelSettings {
     pub encoding: ::std::option::Option<ProviderEncoding>,
     #[serde(flatten)]
     pub extra: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+}
+///`ModelSpeed`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+pub struct ModelSpeed {
+    pub base: ::std::string::String,
+    pub faster: bool,
+    pub id: ::std::string::String,
 }
 ///`ModelType`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
@@ -29185,6 +30245,7 @@ pub enum V2Event {
     ShellCreated(ShellCreated),
     ShellExited(ShellExited),
     ShellDeleted(ShellDeleted),
+    ExperimentalJobUpdated(ExperimentalJobUpdated),
     FormCreated(FormCreated),
     FormReplied(FormReplied),
     FormCancelled(FormCancelled),
@@ -29608,6 +30669,11 @@ impl ::std::convert::From<ShellExited> for V2Event {
 impl ::std::convert::From<ShellDeleted> for V2Event {
     fn from(value: ShellDeleted) -> Self {
         Self::ShellDeleted(value)
+    }
+}
+impl ::std::convert::From<ExperimentalJobUpdated> for V2Event {
+    fn from(value: ExperimentalJobUpdated) -> Self {
+        Self::ExperimentalJobUpdated(value)
     }
 }
 impl ::std::convert::From<FormCreated> for V2Event {
@@ -30307,7 +31373,9 @@ impl ::std::convert::TryFrom<::std::string::String> for VideoNotFoundErrorEncode
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 pub struct VoiceModel {
     pub available: bool,
+    pub engine: ::std::string::String,
     pub model: ::std::string::String,
+    pub name: ::std::string::String,
     pub provider: ::std::string::String,
     pub transports: ::std::vec::Vec<VoiceTransportType>,
 }

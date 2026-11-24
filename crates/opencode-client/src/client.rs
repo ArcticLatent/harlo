@@ -30,6 +30,17 @@ const USER: &str = "opencode";
 /// the page size on its side anyway.
 const PAGE: &str = "200";
 
+/// How long a read waits for OpenCode to load a folder's models.
+///
+/// OpenCode loads a folder's providers and models in the background the
+/// first time it's asked about the folder, and answers with empty lists
+/// until they're in; that takes a second or two. A server with really no
+/// models waits this long on each read, so it stays short.
+const CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// The pause between reads while OpenCode loads a folder's models.
+const CATALOG_POLL: std::time::Duration = std::time::Duration::from_millis(150);
+
 /// A client for one OpenCode server.
 ///
 /// Cheap to clone: clones share one connection pool. It never starts, stops or
@@ -397,12 +408,29 @@ impl Client {
         if let Some(model) = model {
             body["model"] = Self::model_reference(model);
         }
-        let v = Self::json(
-            self.request(Method::POST, "/api/experimental/generate/text")
-                .json(&body),
-        )
-        .await?;
-        Ok(v["data"]["text"].as_str().unwrap_or_default().to_owned())
+        // A model OpenCode hasn't loaded yet isn't found; it's in soon.
+        let started = std::time::Instant::now();
+        loop {
+            let sent = Self::json(
+                self.request(Method::POST, "/api/experimental/generate/text")
+                    .json(&body),
+            )
+            .await;
+            match sent {
+                Err(e)
+                    if e.tag() == Some("ModelNotFoundError")
+                        && started.elapsed() < CATALOG_WAIT =>
+                {
+                    tokio::time::sleep(CATALOG_POLL).await;
+                }
+                sent => {
+                    return Ok(sent?["data"]["text"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned());
+                }
+            }
+        }
     }
 
     /// A model as OpenCode's requests name it.
@@ -468,8 +496,23 @@ impl Client {
     ///
     /// Fails when the server can't be reached.
     pub async fn models(&self, directory: &str) -> Result<Vec<Model>, Error> {
-        let v = self.list("/api/model", directory, &[]).await?;
+        let v = self.loaded("/api/model", directory).await?;
         Ok(each(&v, Model::from_json))
+    }
+
+    /// Reads the list at `path` in `directory`, waiting up to
+    /// [`CATALOG_WAIT`] while OpenCode is still loading the folder's models
+    /// and answers with nothing.
+    async fn loaded(&self, path: &str, directory: &str) -> Result<Value, Error> {
+        let started = std::time::Instant::now();
+        loop {
+            let v = self.list(path, directory, &[]).await?;
+            let empty = v.is_null() || v.as_array().is_some_and(Vec::is_empty);
+            if !empty || started.elapsed() >= CATALOG_WAIT {
+                return Ok(v);
+            }
+            tokio::time::sleep(CATALOG_POLL).await;
+        }
     }
 
     /// Returns the model new sessions in `directory` use, if one is configured.
@@ -478,7 +521,7 @@ impl Client {
     ///
     /// Fails when the server can't be reached.
     pub async fn default_model(&self, directory: &str) -> Result<Option<Model>, Error> {
-        let v = self.list("/api/model/default", directory, &[]).await?;
+        let v = self.loaded("/api/model/default", directory).await?;
         Ok(Model::from_json(&v))
     }
 
@@ -526,7 +569,7 @@ impl Client {
     ///
     /// Fails when the server can't be reached.
     pub async fn providers(&self, directory: &str) -> Result<Vec<Provider>, Error> {
-        let v = self.list("/api/provider", directory, &[]).await?;
+        let v = self.loaded("/api/provider", directory).await?;
         Ok(each(&v, Provider::from_json))
     }
 

@@ -43,8 +43,8 @@ fn list_rows(app: &App) -> Vec<SheetRow> {
         Load::Failed(why) => rows.push(pair("OpenCode's config", why, 2)),
         // Another computer's server reads its own config.
         Load::Idle => rows.push(note(
-            "Making schedules needs experimental.automations turned on in OpenCode's config on \
-             the server's computer.",
+            "Schedules run unless automations is set to false in OpenCode's config on the \
+             server's computer.",
         )),
         Load::Loading => {}
     }
@@ -135,6 +135,10 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
         AutomationAction::Code { code } => {
             rows.push(pair("Runs", "Code, with no model", 0));
             rows.push(note(code));
+        }
+        AutomationAction::Shell { command } => {
+            rows.push(pair("Runs", "A shell command", 0));
+            rows.push(note(command));
         }
     }
 

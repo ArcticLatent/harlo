@@ -3,8 +3,8 @@
 //! keeps and runs them, so they run with Harlo closed; Harlo lists them,
 //! makes new ones, and pauses, resumes and deletes them.
 //!
-//! OpenCode keeps automations behind `experimental.automations` in its
-//! config. The switch here turns that on in the global config, only when
+//! OpenCode runs automations unless `automations` is `false` in its
+//! config. The switch here changes that in the global config, only when
 //! the user asks, and the page says it changes every client's server.
 
 // Rust guideline compliant 2026-10-09

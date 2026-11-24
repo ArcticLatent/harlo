@@ -185,9 +185,8 @@ pub async fn set_snapshots_later(folder: PathBuf, on: bool) -> Result<(), Error>
     later(folder, move |folder| set_snapshots(folder, on)).await
 }
 
-/// Whether OpenCode lets clients create automations (Harlo's schedules):
-/// `experimental.automations` in the global file in `folder`, off unless
-/// set.
+/// Whether OpenCode runs automations (Harlo's schedules): the top-level
+/// `automations` in the global file in `folder`, on unless set to `false`.
 ///
 /// # Errors
 ///
@@ -195,30 +194,31 @@ pub async fn set_snapshots_later(folder: PathBuf, on: bool) -> Result<(), Error>
 pub fn automations(folder: &Path) -> Result<bool, Error> {
     let path = file(folder);
     let Some(root) = parse(&path)? else {
-        return Ok(false);
+        return Ok(true);
     };
-    let on = root
+    let off = root
         .object_value()
-        .and_then(|object| object.object_value(EXPERIMENTAL))
         .and_then(|object| object.get(AUTOMATIONS))
         .and_then(|prop| prop.value())
         .and_then(|value| value.as_boolean_lit())
-        .is_some_and(|value| value.value());
-    Ok(on)
+        .is_some_and(|value| !value.value());
+    Ok(!off)
 }
 
 /// Turns OpenCode's automations on or off in the global file in `folder`.
-/// Off, the default, removes the setting, and `experimental` with it when
-/// nothing else is left there.
+/// On, the default, removes the setting; off writes `"automations": false`.
+/// Either way the `experimental.automations` of older releases goes, since
+/// OpenCode now warns about it.
 ///
 /// # Errors
 ///
 /// Fails as [`set_model`] does, or when `experimental` isn't an object.
 pub fn set_automations(folder: &Path, on: bool) -> Result<(), Error> {
+    set_at(folder, &[EXPERIMENTAL, AUTOMATIONS], None)?;
     set_at(
         folder,
-        &[EXPERIMENTAL, AUTOMATIONS],
-        on.then_some(CstInputValue::from(true)),
+        &[AUTOMATIONS],
+        (!on).then_some(CstInputValue::from(false)),
     )
 }
 

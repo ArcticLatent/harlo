@@ -78,20 +78,34 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
     let ui = schedules(&sandbox, &mut tasks);
-    assert!(ui.shows("No schedules yet. Turn on Allow schedules to add one."));
-    assert!(ui.find("New schedule").is_empty(), "not allowed yet");
+    // OpenCode runs automations unless its config says otherwise.
+    assert_eq!(ui.app().sheets.schedules.allowed, Load::Loaded(true));
+    let switch = || {
+        ui.find("Allow schedules")
+            .into_iter()
+            .find(|e| e.accessible_role() == Some(AccessibleRole::Checkbox))
+            .expect("the switch")
+            .invoke_accessible_default_action();
+    };
+    let folder = sandbox.root().join("config/opencode");
+    switch();
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui.app().sheets.schedules.allowed
+            == Load::Loaded(false)),
+        "turned off"
+    );
+    assert!(!harlo_core::config::automations(&folder).expect("read"));
+    assert!(tasks.until(&ui, WAIT, |ui| {
+        ui.shows("No schedules yet. Turn on Allow schedules to add one.")
+    }));
+    assert!(ui.find("New schedule").is_empty(), "not allowed now");
 
-    ui.find("Allow schedules")
-        .into_iter()
-        .find(|e| e.accessible_role() == Some(AccessibleRole::Checkbox))
-        .expect("the switch")
-        .invoke_accessible_default_action();
+    switch();
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.app().sheets.schedules.allowed
             == Load::Loaded(true)),
         "allowed"
     );
-    let folder = sandbox.root().join("config/opencode");
     assert!(harlo_core::config::automations(&folder).expect("read"));
 
     create(&ui, "Morning check", "Every", "30 minutes");

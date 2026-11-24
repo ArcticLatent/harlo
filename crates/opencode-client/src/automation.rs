@@ -53,6 +53,11 @@ pub enum Action {
         /// The program.
         code: String,
     },
+    /// Runs a fixed shell command in the automation's folder.
+    Shell {
+        /// The command line.
+        command: String,
+    },
 }
 
 /// Whether an automation runs.
@@ -124,6 +129,9 @@ impl From<g::AutomationInfo> for Automation {
                 }
             }
             g::AutomationAction::Code(c) => Action::Code { code: c.code },
+            g::AutomationAction::Shell(c) => Action::Shell {
+                command: c.command.to_string(),
+            },
         };
         Self {
             id: info.id.to_string(),

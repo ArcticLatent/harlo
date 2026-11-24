@@ -196,7 +196,10 @@ fn settings_list_their_sections_and_open_with_ctrl_comma() {
 
     ui.press("Server");
     assert_eq!(ui.app().sheets.section, Section::Server);
-    assert!(ui.shows("Connected · OpenCode 2.3.2"));
+    assert!(ui.shows(&format!(
+        "Connected · OpenCode {}",
+        harlo_core::OPENCODE_VERSION
+    )));
     assert!(!ui.shows("Reopen tabs"), "only the section shown");
 
     key(&ui, ',', true);
@@ -368,10 +371,10 @@ fn settings_show_the_servers_set_up_and_about() {
     ui.wheel("Providers", -10);
     ui.press("About");
     assert!(
-        ui.shows(concat!(
-            "Version ",
+        ui.shows(&format!(
+            "Version {} · OpenCode {}",
             env!("CARGO_PKG_VERSION"),
-            " · OpenCode 2.3.2"
+            harlo_core::OPENCODE_VERSION
         )),
         "Harlo's version and the server's"
     );

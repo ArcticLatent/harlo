@@ -127,36 +127,37 @@ fn snapshots_are_on_unless_turned_off() {
 }
 
 #[test]
-fn automations_are_off_until_turned_on_inside_experimental() {
+fn automations_are_on_until_turned_off_at_the_top() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let folder = scratch.path();
-    assert!(!config::automations(folder).expect("no file yet"));
+    assert!(config::automations(folder).expect("no file yet"));
     let before = "{\n  // mine\n  \"model\": \"a/one\"\n}\n";
     fs::write(folder.join("opencode.json"), before).expect("a file");
+    assert!(config::automations(folder).expect("not set"));
 
-    config::set_automations(folder, true).expect("on");
+    config::set_automations(folder, false).expect("off");
     let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
     assert!(text.contains("// mine"), "{text}");
     let json: serde_json::Value = serde_json::from_str(&text.replace("// mine", "")).expect("JSON");
-    assert_eq!(json["experimental"]["automations"], true);
-    assert!(config::automations(folder).expect("read"));
-
-    // Off takes the switch away, and `experimental` with it once empty.
-    config::set_automations(folder, false).expect("off");
-    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
-    assert!(!text.contains("experimental"), "{text}");
-    assert!(text.contains("\"model\": \"a/one\""), "{text}");
+    assert_eq!(json["automations"], false);
     assert!(!config::automations(folder).expect("read"));
 
-    // Other experimental switches stay.
+    // On takes the setting away again.
+    config::set_automations(folder, true).expect("on");
+    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    assert!(!text.contains("automations"), "{text}");
+    assert!(text.contains("\"model\": \"a/one\""), "{text}");
+    assert!(config::automations(folder).expect("read"));
+
+    // The old experimental switch goes; other experimental switches stay.
     let other = "{\n  \"experimental\": { \"todo\": true, \"automations\": true }\n}\n";
     fs::write(folder.join("opencode.json"), other).expect("a file");
-    assert!(config::automations(folder).expect("read"));
-    config::set_automations(folder, false).expect("off");
+    config::set_automations(folder, true).expect("on");
     let json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(folder.join("opencode.json")).expect("read"))
             .expect("JSON");
     assert_eq!(json["experimental"], serde_json::json!({ "todo": true }));
+    assert!(json.get("automations").is_none());
 }
 
 #[test]
