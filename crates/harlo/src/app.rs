@@ -58,6 +58,7 @@ mod subagents;
 mod terminal;
 mod todos;
 mod undo;
+mod updates;
 mod voice;
 
 pub use agents::{ApprovalEvent, Approvals};
@@ -101,6 +102,7 @@ pub use sheets::{
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;
+pub use updates::{Phase as UpdatePhase, ServerRestart, UpdateEvent, Updates, VERSION};
 pub use voice::{Listening, Voice, VoiceEvent};
 mod waiting;
 pub(crate) use claude::{epoch_seconds, resets_in};
@@ -330,6 +332,8 @@ pub enum Message {
     Local(LocalEvent),
     /// Something that happened to phone access.
     Phone(PhoneEvent),
+    /// Something happened to Harlo's own update.
+    Update(UpdateEvent),
     /// Something happened in Settings → Memory.
     Memory(MemoryEvent),
     /// Something happened to pictures: a thumbnail, the viewer, the grid.
@@ -741,6 +745,8 @@ pub struct App {
     pub local: LocalModels,
     /// Phone access: paired phones, the relay, the pairing code.
     pub phone: PhoneState,
+    /// Harlo's own updates.
+    pub updates: updates::Updates,
     /// Pictures' thumbnails, the viewer and the grid.
     pub pictures: PicturesState,
 }
@@ -767,11 +773,7 @@ impl App {
             status: Status::Connecting { attempt: 1 },
             picking_location: false,
             client: None,
-            workspace: {
-                let mut workspace = Workspace::new(layout.order.clone());
-                workspace.set_hidden(layout.hidden.clone());
-                workspace
-            },
+            workspace: saved_workspace(&layout),
             projects: Vec::new(),
             now: SystemTime::now(),
             filter: String::new(),
@@ -851,6 +853,7 @@ impl App {
             voice: Voice::default(),
             local: LocalModels::default(),
             phone: PhoneState::default(),
+            updates: updates::Updates::default(),
             pictures: PicturesState::default(),
             saved: layout,
         };
@@ -1000,6 +1003,7 @@ impl App {
             Message::Phone(event) => self.phone_event(event),
             Message::Memory(event) => self.memory_event(event),
             Message::Pictures(event) => self.pictures_event(event),
+            Message::Update(event) => self.update_event(event),
             _ => Task::none(),
         }
     }
@@ -1036,7 +1040,8 @@ impl App {
             | Message::Local(_)
             | Message::Phone(_)
             | Message::Memory(_)
-            | Message::Pictures(_)) => return self.feature_event(message),
+            | Message::Pictures(_)
+            | Message::Update(_)) => return self.feature_event(message),
             Message::SystemDark(dark) => self.set_system_dark(dark),
             Message::Filter(filter) => self.filter = filter,
             Message::ToggleMore(folder) => self.toggle_more(folder),
@@ -2369,6 +2374,7 @@ impl App {
             Task::stream(ticks),
             claude::watch_usage(),
             self.start_local_servers(),
+            self.update_timer(),
         ])
     }
 
@@ -2583,4 +2589,12 @@ async fn send(
     }
     .map_err(failed)?;
     Ok(Box::new(session))
+}
+
+/// The sessions' workspace, in the sidebar order and with the projects
+/// hidden as `layout` saved them.
+fn saved_workspace(layout: &Layout) -> Workspace {
+    let mut workspace = Workspace::new(layout.order.clone());
+    workspace.set_hidden(layout.hidden.clone());
+    workspace
 }

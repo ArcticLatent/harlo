@@ -23,6 +23,7 @@ use crate::app::Load;
 use crate::app::{
     self, App, ChangesEvent, ContextEvent, Edge, FilesEvent, Message, NotesEvent, Panel,
     ProjectEvent, ProviderEvent, ScheduleEvent, SchedulePage, SheetEvent, TerminalEvent,
+    UpdateEvent,
 };
 use crate::keys::KeyPress;
 use crate::model::{self, Picker};
@@ -243,8 +244,11 @@ fn boot(options: &Options) -> App {
     app.git_config = harlo_core::git::Global::new();
     app.hosting = Some(harlo_core::hosting::Hosting::new());
     app.opens_pages = true;
+    app.updates.kind = harlo_core::updates::InstallKind::current();
+    // An AppImage's own file, not the program inside it, which is mounted
+    // somewhere new each time.
     app.autostart = harlo_core::autostart::folder()
-        .zip(std::env::current_exe().ok())
+        .zip(harlo_core::updates::this_program())
         .map(|(folder, program)| app::Autostart {
             on: harlo_core::autostart::enabled(&folder),
             folder,
@@ -279,6 +283,8 @@ pub fn run(options: &Options) -> Result<(), RunError> {
         return Ok(());
     }
     let window = AppWindow::new()?;
+    // The menu entry's name (harlo.desktop), so the desktop shows its icon.
+    slint::set_xdg_app_id("harlo")?;
     let (runtime, mut actions) = Runtime::new().map_err(RunError::Runtime)?;
     // What's chosen in the tray, or asked by a later launch, arrives as
     // background work's results do.
@@ -767,6 +773,19 @@ pub const CANCEL_NOTE: i32 = 85;
 /// Settings → Server: bring every session over from OpenCode.
 pub const IMPORT_OPENCODE: i32 = 86;
 
+/// Settings → General: look for a new Harlo now.
+pub const CHECK_UPDATE: i32 = 88;
+
+/// Settings → General: download and install the new Harlo found.
+pub const INSTALL_UPDATE: i32 = 89;
+
+/// Settings → General: quit and start the Harlo just installed.
+pub const RESTART_HARLO: i32 = 90;
+
+/// Settings → General: restart the server on this computer, which still
+/// runs the version before the update.
+pub const RESTART_SERVER: i32 = 91;
+
 /// The first number of Settings → Models' switches: the one for the model
 /// at place `n` of [`App::models`] is numbered this plus `n`.
 pub const MODEL_SWITCHES: i32 = 10_000;
@@ -929,6 +948,10 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         CHOOSE_DEFAULT_MODEL => Some(Message::TogglePicker(Picker::DefaultModel)),
         CHOOSE_INTERFACE_FONT..=SOUND_LICENCE => look_action(number, item),
         OPEN_SETUP => Some(Message::Sheet(SheetEvent::OpenSetup)),
+        CHECK_UPDATE => Some(Message::Update(UpdateEvent::Check { asked: true })),
+        INSTALL_UPDATE => Some(Message::Update(UpdateEvent::Install)),
+        RESTART_HARLO => Some(Message::Update(UpdateEvent::Restart)),
+        RESTART_SERVER => Some(Message::Update(UpdateEvent::RestartServer)),
         TEST_NOTICE => Some(Message::Sheet(SheetEvent::TestNotice)),
         CHOOSE_PROJECT_MODEL => Some(Message::TogglePicker(Picker::ProjectModel)),
         DEFAULT_PROJECT_MODEL => project(ProjectEvent::Model(None)),

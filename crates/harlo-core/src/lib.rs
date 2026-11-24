@@ -34,5 +34,6 @@ pub mod terminal;
 pub mod theme;
 pub mod timeline;
 pub mod undo;
+pub mod updates;
 pub mod voice;
 pub mod workspace;

@@ -77,7 +77,7 @@ fn settings_name_the_server_harlo_is_on() {
     app.location = Location::Local;
     app.status = harlo::app::Status::Connected {
         server: "Harlo".into(),
-        version: "0.1.0".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
     };
     let ui = ui(app);
     ui.send(Message::Sheet(SheetEvent::Open(Section::General)));

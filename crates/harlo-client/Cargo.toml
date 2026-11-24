@@ -1,6 +1,6 @@
 [package]
 name = "harlo-client"
-version = "0.1.0"
+version.workspace = true
 description = "Client for Harlo's server API: sessions, events, approvals and diffs."
 edition.workspace = true
 rust-version.workspace = true

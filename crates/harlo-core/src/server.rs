@@ -5,11 +5,12 @@
 //! its own (the server drops slow readers), loads a [`Snapshot`], and only then
 //! forwards the events that arrived meanwhile. When the connection breaks it
 //! waits a little and starts over. Dropping the stream detaches: the server
-//! itself is never stopped, restarted or reconfigured.
+//! itself is never stopped or reconfigured, and restarted only when the user
+//! asks, after an update ([`restart_local`]).
 
 // Rust guideline compliant 2026-10-09
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -366,16 +367,113 @@ fn registration() -> PathBuf {
 
 /// The `harlo-server` program: `HARLO_SERVER_BIN`, else the one beside
 /// this program, else the one on `PATH`.
+///
+/// An AppImage's own files go away when its window closes, while the server
+/// keeps running; so from an AppImage, the server runs from a copy of its
+/// own, one per version, in Harlo's data folder.
 #[must_use]
 pub fn server_program() -> PathBuf {
     if let Some(program) = std::env::var_os("HARLO_SERVER_BIN").filter(|v| !v.is_empty()) {
         return PathBuf::from(program);
     }
-    std::env::current_exe()
+    let beside = std::env::current_exe()
         .ok()
         .and_then(|me| Some(me.parent()?.join("harlo-server")))
-        .filter(|p| p.is_file())
-        .unwrap_or_else(|| PathBuf::from("harlo-server"))
+        .filter(|p| p.is_file());
+    let Some(beside) = beside else {
+        return PathBuf::from("harlo-server");
+    };
+    if std::env::var_os("APPIMAGE").is_some_and(|a| !a.is_empty()) {
+        let copies = dirs::data_local_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("harlo/server");
+        if let Ok(copy) = server_copy(&beside, &copies, env!("CARGO_PKG_VERSION")) {
+            return copy;
+        }
+    }
+    beside
+}
+
+/// `bundled`, copied into `folder/<version>/harlo-server` unless it's there.
+///
+/// # Errors
+///
+/// When the copy can't be made.
+pub fn server_copy(bundled: &Path, folder: &Path, version: &str) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = folder.join(version);
+    let copy = dir.join("harlo-server");
+    if copy.is_file() {
+        return Ok(copy);
+    }
+    std::fs::create_dir_all(&dir)?;
+    // Whole or not at all: under another name first.
+    let part = dir.join(format!("harlo-server.{}", std::process::id()));
+    std::fs::copy(bundled, &part)?;
+    std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::rename(&part, &copy).inspect_err(|_| {
+        let _ = std::fs::remove_file(&part);
+    })?;
+    Ok(copy)
+}
+
+/// The version of Harlo's server running on this computer, when one is
+/// registered.
+#[must_use]
+pub fn local_version() -> Option<String> {
+    read_registration(&registration())
+        .ok()
+        .flatten()
+        .and_then(|s| s.version)
+}
+
+/// Whether process `pid` runs `harlo-server`, an old copy replaced on disk
+/// included.
+fn is_server(pid: u32) -> bool {
+    std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|exe| {
+        exe.file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("harlo-server"))
+    })
+}
+
+/// How long a stopped server may take to exit.
+const STOP_WAIT: Duration = Duration::from_secs(15);
+
+/// Stops Harlo's server on this computer and starts it again, the current
+/// version: what an update asks for, at the user's word. Its sessions'
+/// runs stop; followers reconnect.
+///
+/// # Errors
+///
+/// When it doesn't stop in time, or doesn't start again.
+pub async fn restart_local() -> Result<(), String> {
+    let pid = read_registration(&registration())
+        .map_err(|e| format!("Couldn't read the server's registration: {e}"))?
+        .and_then(|s| s.pid)
+        // Only a process that is Harlo's server: a stale registration's
+        // number may belong to another program by now.
+        .filter(|pid| is_server(*pid));
+    if let Some(pid) = pid {
+        let stopped = tokio::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .map_err(|e| format!("Couldn't stop the server: {e}"))?;
+        if stopped.success() {
+            let proc = PathBuf::from(format!("/proc/{pid}"));
+            let deadline = tokio::time::Instant::now() + STOP_WAIT;
+            while proc.exists() {
+                if tokio::time::Instant::now() > deadline {
+                    return Err("The server didn't stop in time.".to_owned());
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+    start_local().await
 }
 
 /// Starts Harlo's server, unless one answers.

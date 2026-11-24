@@ -1,6 +1,6 @@
 [package]
 name = "harlo-engine"
-version = "0.1.0"
+version.workspace = true
 description = "Harlo's agent engine: the loop, tools, providers and permission rules, as a library."
 edition.workspace = true
 rust-version.workspace = true
@@ -23,7 +23,7 @@ getrandom = { workspace = true, features = ["std"] }
 httpdate = { workspace = true }
 jsonc-parser = { workspace = true, features = ["serde"] }
 libc = { workspace = true }
-reqwest = { workspace = true, features = ["json", "stream", "native-tls"] }
+reqwest = { workspace = true, features = ["json", "stream", "rustls"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 similar = { workspace = true, features = ["std", "text"] }

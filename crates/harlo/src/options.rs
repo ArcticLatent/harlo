@@ -32,11 +32,12 @@ impl std::fmt::Debug for Options {
 pub const USAGE: &str = "\
 Usage: harlo [--server <url>] [--setup]
 
-  --server <url>  Follow the Harlo server at <url> instead of the one on
-                  background service. Its password is read from
+  --server <url>  Follow the Harlo server at <url> instead of the one in the
+                  background on this computer. Its password is read from
                   HARLO_SERVER_PASSWORD.
   --setup         Open the setup guide: the server, models, Git, and the theme.
                   A Harlo already running opens it in its window.
+  -V, --version   Show Harlo's version.
   -h, --help      Show this help.";
 
 /// Why the arguments couldn't be used.
@@ -44,6 +45,8 @@ Usage: harlo [--server <url>] [--setup]
 pub enum ArgsError {
     /// `--help` was asked for.
     Help,
+    /// `--version` was asked for.
+    Version,
     /// The arguments are wrong; the message says how.
     Invalid(String),
 }
@@ -53,7 +56,8 @@ impl Options {
     ///
     /// # Errors
     ///
-    /// Returns [`ArgsError::Help`] for `--help`, and [`ArgsError::Invalid`]
+    /// Returns [`ArgsError::Help`] for `--help`, [`ArgsError::Version`] for
+    /// `--version`, and [`ArgsError::Invalid`]
     /// for unknown arguments or a `--server` without a URL.
     pub fn parse(
         args: impl IntoIterator<Item = String>,
@@ -68,6 +72,7 @@ impl Options {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Err(ArgsError::Help),
+                "-V" | "--version" => return Err(ArgsError::Version),
                 "--setup" => options.setup = true,
                 "--server" => {
                     let url = args

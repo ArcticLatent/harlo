@@ -57,21 +57,24 @@ impl Debug for Endpoint {
     }
 }
 
-/// The shared background service's registration, as OpenCode writes it.
+/// The background service's registration, as `harlo-server` writes it.
 #[derive(Debug, Deserialize)]
 struct Registration {
     url: String,
     password: Option<String>,
     version: Option<String>,
+    pid: Option<u32>,
 }
 
-/// The shared OpenCode service found on this computer.
+/// The background service found on this computer.
 #[derive(Debug, Clone)]
 pub struct SharedService {
     /// How to reach it.
     pub endpoint: Endpoint,
-    /// The OpenCode version that registered it, when recorded.
+    /// The server version that registered it, when recorded.
     pub version: Option<String>,
+    /// Its process, when recorded.
+    pub pid: Option<u32>,
 }
 
 /// Returns the path of the shared service's registration file.
@@ -116,5 +119,6 @@ pub fn parse_registration(text: &str) -> Result<SharedService, Error> {
     Ok(SharedService {
         endpoint: Endpoint::new(registration.url, registration.password),
         version: registration.version,
+        pid: registration.pid,
     })
 }

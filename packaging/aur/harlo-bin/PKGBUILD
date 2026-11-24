@@ -1,0 +1,37 @@
+# Maintainer: ArcticLatent <hello@harlo.run>
+#
+# Harlo's release build, from the release's Arch package:
+#   cd packaging/aur/harlo-bin && makepkg -si
+# (For a release: set pkgver, then `updpkgsums`.) `harlo-git` builds the
+# latest commit from source instead.
+
+pkgname=harlo-bin
+pkgver=2.0.0
+pkgrel=1
+pkgdesc="Desktop app for coding agents (release build)"
+arch=('x86_64')
+url="https://harlo.run"
+license=('MIT' 'OFL-1.1')
+depends=('glibc' 'gcc-libs' 'fontconfig' 'freetype2' 'alsa-lib' 'libxkbcommon' 'libxkbcommon-x11'
+         'libx11' 'libxcursor' 'libxrandr' 'libxi' 'wayland' 'libglvnd' 'git')
+optdepends=('openssh: Harlo servers on other computers')
+provides=('harlo')
+conflicts=('harlo' 'harlo-git')
+options=('!strip' '!debug')
+source=("harlo-$pkgver-1-x86_64.pkg.tar.zst::https://github.com/ArcticLatent/harlo/releases/download/v$pkgver/harlo-$pkgver-1-x86_64.pkg.tar.zst")
+sha256sums=('SKIP')
+noextract=("harlo-$pkgver-1-x86_64.pkg.tar.zst")
+
+prepare() {
+    mkdir -p release
+    bsdtar -xf "harlo-$pkgver-1-x86_64.pkg.tar.zst" -C release --exclude '.*'
+}
+
+package() {
+    cp -a release/. "$pkgdir/"
+    # (Updated by pacman, not by Harlo itself.)
+    rm -f "$pkgdir/opt/harlo/install-kind"
+    install -d "$pkgdir/usr/share/licenses/$pkgname"
+    cp -a release/opt/harlo/share/licenses/harlo/. "$pkgdir/usr/share/licenses/$pkgname/"
+    rm -rf "$pkgdir/usr/share/licenses/harlo"
+}

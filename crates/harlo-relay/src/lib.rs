@@ -656,7 +656,10 @@ mod tests {
     /// app's key; Apple's "gone" comes back; what isn't a notification,
     /// and too many to one phone, are refused; a relay without the key says so.
     #[tokio::test]
-    #[expect(clippy::too_many_lines, reason = "one scenario against one stand-in Apple")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario against one stand-in Apple"
+    )]
     async fn sends_notifications_on() {
         use axum::extract::Path;
         let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::default();

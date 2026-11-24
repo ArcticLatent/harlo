@@ -3,6 +3,8 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
+# Harlo's version: packaging/release.sh sets it from CHANGELOG.md.
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
@@ -10,6 +12,9 @@ repository = "https://github.com/ArcticLatent/harlo"
 publish = false
 
 [workspace.dependencies]
+# The signature on Harlo's update manifest, and the release tool that makes it.
+harlo-update-signing = { path = "crates/harlo-update-signing" }
+ed25519-dalek = { version = "2.2.0", default-features = false }
 # The relay's notifications to the iOS app (crates/harlo-relay).
 harlo-apns = { path = "crates/harlo-apns" }
 # APNs' ES256 token, in harlo-apns.
@@ -19,9 +24,9 @@ regex = { version = "1.13.2", default-features = false }
 ignore = { version = "0.4.35", default-features = false }
 globset = { version = "0.4.22", default-features = false }
 # Our crates.
-harlo-client = { path = "crates/harlo-client", version = "0.1.0" }
-harlo-core = { path = "crates/harlo-core", version = "0.1.0" }
-harlo-engine = { path = "crates/harlo-engine", version = "0.1.0" }
+harlo-client = { path = "crates/harlo-client" }
+harlo-core = { path = "crates/harlo-core" }
+harlo-engine = { path = "crates/harlo-engine" }
 
 # The UI toolkit for crates/harlo: Slint, under its Royalty-free 2.0
 # licence (GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR
@@ -193,3 +198,8 @@ multiple_crate_versions = "allow"
 # debug. Unoptimised, laying out the window takes several times longer.
 [profile.dev.package."*"]
 opt-level = 2
+
+# The programs people install: smaller, without debug symbols.
+[profile.release]
+lto = "thin"
+strip = true

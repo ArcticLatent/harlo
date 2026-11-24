@@ -1,6 +1,6 @@
 [package]
 name = "harlo"
-version = "0.1.0"
+version.workspace = true
 description = "A native desktop app for coding agents, drawn with Slint."
 edition.workspace = true
 rust-version.workspace = true

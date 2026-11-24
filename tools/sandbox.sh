@@ -99,7 +99,7 @@ cd $(printf %q "$dir/project")
 env $unset_claude HOME=$(printf %q "$dir/home") XDG_CONFIG_HOME=$(printf %q "$dir/config") \\
   XDG_DATA_HOME=$(printf %q "$dir/data") XDG_STATE_HOME=$(printf %q "$dir/state") \\
   XDG_CACHE_HOME=$(printf %q "$dir/cache") HARLO_SERVER_PASSWORD=$(printf %q "$password") \\
-  HARLO_CLAUDE_PATH=$(printf %q "$dir/bin/claude") HARLO_KEY_CHECK_BASE=http://127.0.0.1:9 HARLO_RELAY=http://127.0.0.1:9 \\
+  HARLO_CLAUDE_PATH=$(printf %q "$dir/bin/claude") HARLO_KEY_CHECK_BASE=http://127.0.0.1:9 HARLO_RELAY=http://127.0.0.1:9 HARLO_UPDATE_MANIFEST_URL=http://127.0.0.1:9 HARLO_UPDATE_CHANGELOG_URL=http://127.0.0.1:9 \\
   DBUS_SESSION_BUS_ADDRESS=$(printf %q "unix:path=$dir/no-bus") \\
   setsid $(printf %q "$BIN") serve --hostname 127.0.0.1 --port $port >> $(printf %q "$dir/server.log") 2>&1 < /dev/null &
 echo \$! > $(printf %q "$dir/server.pid")

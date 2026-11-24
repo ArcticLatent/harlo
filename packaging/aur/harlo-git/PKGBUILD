@@ -1,0 +1,59 @@
+# Maintainer: ArcticLatent <hello@harlo.run>
+#
+# Builds Harlo from the latest commit on GitHub:
+#   cd packaging/aur/harlo-git && makepkg -si
+
+pkgname=harlo-git
+pkgver=r0.0000000
+pkgrel=1
+pkgdesc="Desktop app for coding agents"
+arch=('x86_64' 'aarch64')
+url="https://harlo.run"
+license=('MIT' 'OFL-1.1')
+depends=('glibc' 'gcc-libs' 'fontconfig' 'freetype2' 'alsa-lib' 'libxkbcommon' 'libxkbcommon-x11'
+         'libx11' 'libxcursor' 'libxrandr' 'libxi' 'wayland' 'libglvnd' 'git')
+# cmake and clang build the bundled whisper.cpp (dictation); python the
+# window's renderer (Skia) where no prebuilt copy fits.
+makedepends=('cargo' 'cmake' 'clang' 'python' 'curl')
+optdepends=('openssh: Harlo servers on other computers')
+provides=('harlo')
+conflicts=('harlo' 'harlo-bin')
+source=("harlo::git+https://github.com/ArcticLatent/harlo.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd harlo
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+    cd harlo
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd harlo
+    export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+    cargo build --frozen --release -p harlo -p harlo-server
+}
+
+package() {
+    cd harlo
+    # harlo starts the harlo-server beside it.
+    install -Dm755 target/release/harlo "$pkgdir/usr/bin/harlo"
+    install -Dm755 target/release/harlo-server "$pkgdir/usr/bin/harlo-server"
+    install -Dm644 packaging/harlo.desktop "$pkgdir/usr/share/applications/harlo.desktop"
+    install -Dm644 packaging/harlo.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/harlo.svg"
+    local lic="$pkgdir/usr/share/licenses/$pkgname"
+    install -Dm644 LICENSE "$lic/LICENSE"
+    install -Dm644 THIRD-PARTY-NOTICES.md "$lic/THIRD-PARTY-NOTICES.md"
+    install -Dm644 crates/harlo/ui/fonts/Geist-OFL.txt "$lic/geist-OFL.txt"
+    install -Dm644 crates/harlo/ui/fonts/JetBrainsMono-OFL.txt "$lic/jetbrains-mono-OFL.txt"
+    install -Dm644 crates/harlo/ui/fonts/FileIcons-LICENSE.txt "$lic/file-icons-LICENSE.txt"
+    install -Dm644 crates/harlo/sounds/LICENSE.txt "$lic/sounds-LICENSE.txt"
+    install -Dm644 crates/harlo-core/themes/TINTED-LICENSE "$lic/themes-LICENSE"
+    for f in crates/harlo/ui/images/providers/*-LICENSE; do
+        install -Dm644 "$f" "$lic/provider-logos-$(basename "$f" -LICENSE | tr '[:upper:]' '[:lower:]')-LICENSE"
+    done
+}

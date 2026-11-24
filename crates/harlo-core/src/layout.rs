@@ -118,6 +118,12 @@ pub struct Preferences {
     pub phone_paused: bool,
     /// The user's picture on the rail, by name, such as `classic`.
     pub avatar: String,
+    /// Whether Harlo looks for a new version of itself, when it was
+    /// installed from a package or an AppImage.
+    pub check_updates: bool,
+    /// The newest version a notification already announced, so each is
+    /// announced once.
+    pub update_announced: String,
 }
 
 impl Default for Preferences {
@@ -156,6 +162,8 @@ impl Default for Preferences {
             phone_relay: false,
             phone_paused: false,
             avatar: "classic".to_owned(),
+            check_updates: true,
+            update_announced: String::new(),
         }
     }
 }

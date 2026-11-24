@@ -1,0 +1,16 @@
+[package]
+name = "harlo-update-signing"
+description = "The signature on harlo's update manifest: what is signed, and its check against the key built into harlo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64 = { workspace = true, features = ["std"] }
+ed25519-dalek = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

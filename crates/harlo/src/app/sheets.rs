@@ -248,11 +248,13 @@ pub enum Setting {
     /// Whether the server keeps notes between sessions: the server's
     /// setting, not a preference.
     Notes,
+    /// [`Preferences::check_updates`].
+    CheckUpdates,
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -272,6 +274,7 @@ impl Setting {
         Self::Phone,
         Self::PhoneRelay,
         Self::Notes,
+        Self::CheckUpdates,
     ];
 }
 
@@ -936,6 +939,9 @@ impl App {
                 self.retry_phone();
             }
             Setting::PhoneRelay => self.preferences.phone_relay = !self.preferences.phone_relay,
+            Setting::CheckUpdates => {
+                self.preferences.check_updates = !self.preferences.check_updates;
+            }
             setting => self.switch_notice(setting),
         }
         self.save_preferences()
@@ -1023,7 +1029,8 @@ impl App {
             | Setting::OwnTools
             | Setting::Phone
             | Setting::PhoneRelay
-            | Setting::Notes => {
+            | Setting::Notes
+            | Setting::CheckUpdates => {
                 return;
             }
         };

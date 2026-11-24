@@ -303,7 +303,7 @@ fn uses_branch(settings: &Notifications, kind: Kind) -> bool {
 ///
 /// Without a notification service there's nothing to show it on; the
 /// session still shows what happened.
-async fn show(title: &str, body: &str) -> bool {
+pub(super) async fn show(title: &str, body: &str) -> bool {
     let mut notice = notify_rust::Notification::new();
     notice
         .appname(APP_NAME)

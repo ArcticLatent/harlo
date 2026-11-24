@@ -1,2 +1,2 @@
 # Product and format names that docs use as words, not code.
-doc-valid-idents = ["OpenCode", "OpenAPI", "OpenTunnel", ".."]
+doc-valid-idents = ["OpenCode", "OpenAPI", "OpenTunnel", "AppImage", "AppImages", "TestFlight", ".."]

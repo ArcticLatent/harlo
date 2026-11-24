@@ -6,6 +6,7 @@
 //!   background service.
 //! - `harlo-server service start` starts the background service unless one answers, and
 //!   prints where it is; `service status` only says.
+//! - `harlo-server --version` prints its version.
 
 // Rust guideline compliant 2026-10-09
 
@@ -20,6 +21,10 @@ async fn main() -> ExitCode {
     let mut args = std::env::args().skip(1).peekable();
     if args.peek().map(String::as_str) == Some("service") {
         return service(args.nth(1).as_deref()).await;
+    }
+    if matches!(args.peek().map(String::as_str), Some("-V" | "--version")) {
+        println!("harlo-server {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
     }
     while let Some(arg) = args.next() {
         match arg.as_str() {

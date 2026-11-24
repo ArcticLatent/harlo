@@ -217,7 +217,7 @@ pub enum Kind {
 #[derive(Debug)]
 pub struct Push<'a> {
     pub device_token: &'a str,
-    /// The development environment (an app run from Xcode); `TestFlight` and
+    /// The development environment (an app run from Xcode); TestFlight and
     /// the App Store use production.
     pub sandbox: bool,
     /// The app's bundle id.

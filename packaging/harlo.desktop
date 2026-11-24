@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=Harlo
+GenericName=Coding agent workspace
+Comment=Desktop app for coding agents
+Exec=harlo
+Icon=harlo
+Terminal=false
+Categories=Development;IDE;
+Keywords=ai;agent;coding;llm;assistant;
+StartupNotify=true
+StartupWMClass=harlo
+SingleMainWindow=true
+Actions=setup;
+
+[Desktop Action setup]
+Name=Setup guide
+Exec=harlo --setup

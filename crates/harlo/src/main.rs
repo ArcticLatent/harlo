@@ -24,6 +24,10 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Err(ArgsError::Version) => {
+            println!("harlo {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
         Err(ArgsError::Invalid(message)) => {
             eprintln!("harlo: {message}\n\n{USAGE}");
             ExitCode::from(2)

@@ -26,6 +26,7 @@ mod voice;
 use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::theme::{Mode, Scheme};
 
+use crate::app::VERSION;
 use crate::app::{
     App, ClaudeAction, Field, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet, Status,
     Step, epoch_seconds, resets_in,
@@ -635,11 +636,143 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
             app.preferences.keep_in_tray,
         ));
     }
+    update_rows(app, &mut rows);
     let mut guide = pair("Setup guide", "The server, models, Git, and the theme", 3);
     guide.action = "Open".into();
     guide.setting = crate::window::OPEN_SETUP;
     rows.extend([heading("Help"), guide]);
     rows
+}
+
+/// Harlo's own updates: the switch, where the update stands with its next
+/// step, and the server still on the version before an update.
+fn update_rows(app: &App, rows: &mut Vec<SheetRow>) {
+    rows.push(heading("Updates"));
+    if app.updates.kind.is_none() {
+        rows.push(pair(
+            &format!("Harlo {VERSION}"),
+            "Built from source, so it updates with its code.",
+            3,
+        ));
+    } else {
+        rows.push(switch(
+            Setting::CheckUpdates,
+            "Check for updates",
+            "Looks for a new Harlo when it opens and every 6 hours.",
+            app.preferences.check_updates,
+        ));
+        phase_rows(app, rows);
+    }
+    stale_server_rows(app, rows);
+}
+
+/// Where Harlo's own update stands, with its next step.
+fn phase_rows(app: &App, rows: &mut Vec<SheetRow>) {
+    use crate::app::UpdatePhase as Phase;
+    use crate::window::{CHECK_UPDATE, INSTALL_UPDATE, RESTART_HARLO};
+    let current = format!("Harlo {VERSION}");
+    let with = |mut row: SheetRow, action: &str, step: i32| {
+        row.action = action.into();
+        row.setting = step;
+        row
+    };
+    match &app.updates.phase {
+        Phase::Idle => rows.push(with(pair(&current, "", 0), "Check now", CHECK_UPDATE)),
+        Phase::Checking => rows.push(pair(&current, "Checking…", 3)),
+        Phase::Current => rows.push(with(
+            pair(&current, "This is the newest version.", 1),
+            "Check now",
+            CHECK_UPDATE,
+        )),
+        Phase::Found { release, notes } => {
+            rows.push(with(
+                pair(
+                    &format!("Harlo {} is out", release.version),
+                    &format!("You have {VERSION}."),
+                    5,
+                ),
+                "Update",
+                INSTALL_UPDATE,
+            ));
+            if !notes.is_empty() {
+                rows.push(note(notes));
+            }
+            rows.push(link(
+                Icon::History,
+                "What's new",
+                "Every release's notes, on GitHub.",
+                "Releases",
+                1,
+            ));
+        }
+        Phase::Downloading(fraction) => {
+            let percent = (fraction * 100.0).round();
+            rows.push(pair(
+                &current,
+                &format!("Downloading the update… {percent}%"),
+                3,
+            ));
+        }
+        Phase::Installing => rows.push(pair(
+            &current,
+            "Installing the update… Your password may be asked for.",
+            3,
+        )),
+        Phase::Installed(version) => rows.push(with(
+            pair(
+                &format!("Harlo {version} is installed"),
+                "Restart Harlo to use it.",
+                1,
+            ),
+            "Restart",
+            RESTART_HARLO,
+        )),
+        Phase::Failed(failed) => {
+            rows.push(with(
+                pair("Not updated", &failed.message, 2),
+                "Try again",
+                CHECK_UPDATE,
+            ));
+            if let Some(command) = &failed.manual {
+                let mut by_hand = pair("Install it by hand", command, 3);
+                by_hand.mono_value = true;
+                by_hand.action = "Copy".into();
+                by_hand.copy = command.as_str().into();
+                // Copying is all it does.
+                by_hand.setting = -1;
+                rows.push(by_hand);
+            }
+        }
+    }
+}
+
+/// The server on this computer, while it still runs the version before an
+/// update, with its Restart button.
+fn stale_server_rows(app: &App, rows: &mut Vec<SheetRow>) {
+    use crate::app::ServerRestart;
+    if let Some(running) = app.server_behind() {
+        match &app.updates.server {
+            ServerRestart::Restarting => {
+                rows.push(pair("Harlo's server", "Restarting…", 3));
+            }
+            restart => {
+                let mut row = pair(
+                    "Harlo's server",
+                    &format!(
+                        "Still runs {running}. Restarting it stops the sessions it's running."
+                    ),
+                    4,
+                );
+                row.action = "Restart server".into();
+                row.setting = crate::window::RESTART_SERVER;
+                row.risky = true;
+                rows.push(row);
+                if let ServerRestart::Failed(why) = restart {
+                    rows.push(pair("Not restarted", why, 2));
+                }
+            }
+        }
+    }
 }
 
 /// The model new sessions use, with a button to change it where Harlo may.
@@ -1716,9 +1849,9 @@ fn event_name(kind: Kind) -> (&'static str, &'static str) {
 fn about_rows(app: &App) -> Vec<SheetRow> {
     let version = match &app.status {
         Status::Connected { server, version } => {
-            format!("Version {} · {server} {version}", env!("CARGO_PKG_VERSION"))
+            format!("Version {VERSION} · {server} {version}")
         }
-        _ => format!("Version {}", env!("CARGO_PKG_VERSION")),
+        _ => format!("Version {VERSION}"),
     };
     let repository = env!("CARGO_PKG_REPOSITORY").trim_start_matches("https://");
     let mut rows = vec![

@@ -1,6 +1,6 @@
 [package]
 name = "harlo-core"
-version = "0.1.0"
+version.workspace = true
 description = "Harlo's domain model: themes, sessions and the state the app shows. No UI code."
 edition.workspace = true
 rust-version.workspace = true
@@ -22,8 +22,9 @@ dirs = { workspace = true }
 jsonc-parser = { workspace = true, features = ["cst", "serde_json"] }
 jiff = { workspace = true }
 similar = { workspace = true, features = ["std", "text"] }
-# Forgejo's API, over the system's TLS and certificates (company CAs included).
-reqwest = { workspace = true, features = ["native-tls", "json"] }
+# Forgejo's API and Harlo's updates, over rustls with the system's
+# certificates (company CAs included), so no OpenSSL is needed.
+reqwest = { workspace = true, features = ["rustls", "json"] }
 # Downloads are checked against their published SHA-256.
 sha2 = { workspace = true }
 hex = { workspace = true }
@@ -42,12 +43,14 @@ ruzstd = { workspace = true }
 # sealed frames between them.
 axum = { workspace = true, features = ["http1", "tokio", "ws"] }
 crypto_box = { workspace = true, features = ["std", "getrandom", "salsa20"] }
-tokio-tungstenite = { workspace = true, features = ["connect", "native-tls"] }
+tokio-tungstenite = { workspace = true, features = ["connect", "rustls-tls-native-roots"] }
 base64 = { workspace = true, features = ["std"] }
 # The addresses phones on this network reach Harlo at.
 if-addrs = { workspace = true }
 # Answers as HTML for the phone.
 pulldown-cmark = { workspace = true, features = ["html"] }
+# Harlo's updates: the release manifest's signature.
+harlo-update-signing = { workspace = true }
 # Dictation: whisper.cpp, built in, behind one API for speech models.
 transcribe-rs = { workspace = true, features = ["whisper-cpp"] }
 
@@ -55,6 +58,8 @@ transcribe-rs = { workspace = true, features = ["whisper-cpp"] }
 workspace = true
 
 [dev-dependencies]
+# Release manifests signed with a throwaway key.
+ed25519-dalek = { workspace = true, features = ["std"] }
 # A stand-in relay for the phone tests.
 axum = { workspace = true, features = ["http1", "tokio", "ws", "query", "json"] }
 crypto_box = { workspace = true, features = ["std", "getrandom", "salsa20"] }

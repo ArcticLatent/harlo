@@ -45,6 +45,12 @@ start as that JSON (any field left out keeps its default).
 With HARLO_GUI_API_LOG=<file> at `start`, Harlo reaches the server through
 tools/api-log.py, which records every request, response and event in <file>.
 
+With HARLO_GUI_INSTALLED=deb (or rpm, arch) at `start`, Harlo runs as if
+installed from that kind of package (a hard link under target/gui-installed
+beside an install-kind marker), so its updates show; HARLO_GUI_MANIFEST and
+HARLO_GUI_CHANGELOG then give the addresses of the update manifest and
+changelog it reads (by default nothing answers at either).
+
 With HARLO_GUI_SHARED=1 at `start`, Harlo takes the sandbox for Harlo's
 server on this computer (and opens there, as "Local") (a registration in
 Harlo's scratch state folder) and the sandbox's config folder as its own, so
@@ -158,6 +164,8 @@ def harlo_env(state):
         # sandbox never takes a real Harlo's port or reaches the real relay.
         HARLO_PHONE_PORT="0",
         HARLO_RELAY="http://127.0.0.1:9",
+        HARLO_UPDATE_MANIFEST_URL="http://127.0.0.1:9",
+        HARLO_UPDATE_CHANGELOG_URL="http://127.0.0.1:9",
         DBUS_SESSION_BUS_ADDRESS=state["bus"],
         RUST_BACKTRACE="1",
         # Silent: sounds go to a null device, never the desktop's speakers.
@@ -167,7 +175,26 @@ def harlo_env(state):
     )
     if state.get("mcp_port"):
         env["SLINT_MCP_PORT"] = str(state["mcp_port"])
+    for key, var in (("manifest", "HARLO_UPDATE_MANIFEST_URL"),
+                     ("changelog", "HARLO_UPDATE_CHANGELOG_URL")):
+        if state.get(key):
+            env[var] = state[key]
     return env
+
+
+def installed_binary(state, kind):
+    """A hard link to Harlo beside an install-kind marker, as a package
+    installs it, so it runs as that kind of install."""
+    root = os.path.join(os.path.dirname(os.path.dirname(state["binary"])), "gui-installed")
+    os.makedirs(f"{root}/bin", exist_ok=True)
+    with open(f"{root}/install-kind", "w") as f:
+        f.write(kind + "\n")
+    link = f"{root}/bin/harlo"
+    if os.path.exists(link):
+        os.remove(link)
+    os.link(state["binary"], link)
+    state["installed_root"] = root
+    return link
 
 
 def start_harlo(state):
@@ -182,7 +209,10 @@ def start_harlo(state):
                     "Host gpu-box\n    HostName 192.0.2.11\n")
     # Through the API log's proxy when there is one.
     url = state.get("harlo_url") or state["url"]
-    argv = [state["binary"], "--server", url]
+    binary = state["binary"]
+    if state.get("installed"):
+        binary = installed_binary(state, state["installed"])
+    argv = [binary, "--server", url]
     if state.get("shared"):
         # The sandbox registered as Harlo's server on this computer, where
         # Harlo looks for it, and its config folder as the global one.
@@ -192,7 +222,7 @@ def start_harlo(state):
             json.dump({"url": url, "password": state["password"]}, f)
         os.chmod(f"{registry}/service.json", 0o600)
         env["XDG_CONFIG_HOME"] = f"{state['sandbox']}/config"
-        argv = [state["binary"]]
+        argv = [binary]
     state["harlo_pid"] = spawn(argv, env, f"{state['gui_root']}/harlo.log")
     # Wait for the window to map.
     for _ in range(100):
@@ -240,6 +270,9 @@ def cmd_start(args):
         "binary": f"{REPO}/target/{'mcp/' if mcp else ''}debug/harlo", "shots": 0, "clip_pids": [],
         "mcp_port": free_port() if mcp else None,
         "shared": os.environ.get("HARLO_GUI_SHARED") == "1",
+        "installed": os.environ.get("HARLO_GUI_INSTALLED", ""),
+        "manifest": os.environ.get("HARLO_GUI_MANIFEST", ""),
+        "changelog": os.environ.get("HARLO_GUI_CHANGELOG", ""),
     }
     # Several drivers may start at once: one at a time picks a free display
     # and holds it until its Xvfb has taken it.
@@ -570,6 +603,8 @@ def cmd_stop(_args):
     time.sleep(0.3)
     if os.path.basename(state["gui_root"]).startswith("harlo-gui."):
         shutil.rmtree(state["gui_root"], ignore_errors=True)
+    if state.get("installed_root"):
+        shutil.rmtree(state["installed_root"], ignore_errors=True)
     os.remove(STATE)
     print("stopped")
 

@@ -1,0 +1,26 @@
+[package]
+name = "harlo-manifest-signer"
+description = "Signs and checks harlo's update manifest (linux-release.json). Release tooling only: not part of harlo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "manifest-signer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["std"] }
+harlo-update-signing.workspace = true
+base64 = { workspace = true, features = ["std"] }
+ed25519-dalek = { workspace = true, features = ["std"] }
+# keygen: 32 bytes straight from the system's random source.
+getrandom = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
