@@ -8,7 +8,7 @@
 
 #[path = "../../harlo-core/tests/remote/mod.rs"]
 mod remote;
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod server;
 mod support;
 

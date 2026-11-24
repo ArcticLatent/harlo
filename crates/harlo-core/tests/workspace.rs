@@ -5,11 +5,11 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use harlo_core::workspace::{Fetch, Fetched, Snapshot, Workspace};
-use opencode_client::{
+use harlo_client::{
     Delivery, Effect, EventKind, Form, InboxItem, ModelRef, Permission, Project, Revert, Rule,
     Session, Tokens,
 };
+use harlo_core::workspace::{Fetch, Fetched, Snapshot, Workspace};
 
 /// "Now" in the tests: 2026-11-21, in milliseconds.
 const NOW_MS: f64 = 1_795_000_000_000.0;

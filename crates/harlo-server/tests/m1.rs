@@ -1,4 +1,4 @@
-//! M1 at the client level: `opencode-client`, unchanged, drives one whole
+//! M1 at the client level: `harlo-client`, unchanged, drives one whole
 //! turn on `harlo-server` with the scripted model. An edit asks, is
 //! approved and shows its diff. The server restarts and the session is
 //! still there, and a client that names the last event it saw gets the
@@ -13,7 +13,7 @@ mod support;
 
 use std::time::Duration;
 
-use opencode_client::{
+use harlo_client::{
     Delivery, Effect, EventKind, Message, Part, PermissionReply, Prompt, Rule, ToolStatus,
 };
 use support::{Sandbox, replay, until};

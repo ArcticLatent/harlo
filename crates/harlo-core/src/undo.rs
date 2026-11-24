@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use opencode_client::{FileDiff, Revert};
+use harlo_client::{FileDiff, Revert};
 
 use crate::diff::{self, LineKind};
 

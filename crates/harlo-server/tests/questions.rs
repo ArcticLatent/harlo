@@ -6,7 +6,7 @@
 
 mod support;
 
-use opencode_client::{Answer, Delivery, EventKind, Prompt};
+use harlo_client::{Answer, Delivery, EventKind, Prompt};
 use serde_json::Value;
 use support::{Sandbox, until};
 

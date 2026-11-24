@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use opencode_client::{Client, Endpoint, EventKind, Events};
+use harlo_client::{Client, Endpoint, EventKind, Events};
 
 /// A scratch folder with the scripted model, a git project and a server.
 pub struct Sandbox {
@@ -115,7 +115,7 @@ impl Sandbox {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         let port = free_port();
-        let password = format!("test-{}", opencode_client::message_id());
+        let password = format!("test-{}", harlo_client::message_id());
         let server = spawn_server(root, port, &password, &env);
         let sandbox = Self {
             dir,
@@ -185,7 +185,7 @@ pub fn spawn_server(root: &Path, port: u16, password: &str, env: &[(String, Stri
         .env("XDG_DATA_HOME", root.join("data"))
         .env("XDG_STATE_HOME", root.join("state"))
         .env("XDG_CACHE_HOME", root.join("cache"))
-        .env("OPENCODE_PASSWORD", password)
+        .env("HARLO_SERVER_PASSWORD", password)
         .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .env(
             "DBUS_SESSION_BUS_ADDRESS",

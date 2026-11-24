@@ -7,7 +7,7 @@
 
 #[path = "../../harlo-server/tests/support/oauth_guard.rs"]
 mod oauth_guard;
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod server;
 mod support;
 

@@ -23,7 +23,7 @@ futures-util = { workspace = true }
 harlo-core = { workspace = true }
 harlo-engine = { workspace = true }
 mime_guess = { workspace = true }
-opencode-client = { workspace = true }
+harlo-client = { workspace = true }
 portable-pty = { workspace = true }
 hex = { workspace = true }
 jiff = { workspace = true }

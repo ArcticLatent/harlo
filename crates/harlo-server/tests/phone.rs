@@ -8,8 +8,8 @@ mod support;
 #[path = "../../harlo-core/tests/test_phone/mod.rs"]
 mod test_phone;
 
+use harlo_client::{Effect, PhoneWanted, Rule};
 use harlo_core::phone::{Identity, Offer};
-use opencode_client::{Effect, PhoneWanted, Rule};
 use serde_json::json;
 use support::Sandbox;
 

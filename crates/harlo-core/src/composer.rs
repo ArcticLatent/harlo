@@ -7,7 +7,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use opencode_client::{Attachment, Delivery, Mention, Picture, Prompt};
+use harlo_client::{Attachment, Delivery, Mention, Picture, Prompt};
 
 use crate::server::{Catalog, Command, FileMatch};
 

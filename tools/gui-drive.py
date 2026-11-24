@@ -147,13 +147,13 @@ def harlo_env(state):
     env.update(
         # Harlo checks and runs the sandbox's Claude Code, as the sandbox
         # server does: nothing is there unless a stand-in is put in place.
-        OPENCODE_CLAUDE_PATH=f"{state['sandbox']}/bin/claude",
+        HARLO_CLAUDE_PATH=f"{state['sandbox']}/bin/claude",
         HOME=f"{root}/home",
         XDG_CONFIG_HOME=f"{root}/config",
         XDG_DATA_HOME=f"{root}/data",
         XDG_STATE_HOME=f"{root}/state",
         XDG_CACHE_HOME=f"{root}/cache",
-        HARLO_OPENCODE_PASSWORD=state["password"],
+        HARLO_SERVER_PASSWORD=state["password"],
         # Phone access on a free port, and a relay nothing answers at: a
         # sandbox never takes a real Harlo's port or reaches the real relay.
         HARLO_PHONE_PORT="0",

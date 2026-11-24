@@ -7,7 +7,7 @@
 
 mod support;
 
-use opencode_client::{Delivery, EventKind, Message, ModelRef, Part, Prompt, ToolStatus};
+use harlo_client::{Delivery, EventKind, Message, ModelRef, Part, Prompt, ToolStatus};
 use support::{Sandbox, until};
 
 /// Adds providers `fake-messages` and `fake-responses`, the scripted model

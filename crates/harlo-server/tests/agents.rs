@@ -7,7 +7,7 @@
 
 mod support;
 
-use opencode_client::{Delivery, EventKind, Prompt};
+use harlo_client::{Delivery, EventKind, Prompt};
 use serde_json::Value;
 use support::{Sandbox, until};
 
@@ -30,7 +30,7 @@ fn user_texts(body: &Value) -> Vec<String> {
         .collect()
 }
 
-async fn done(events: &mut opencode_client::Events) {
+async fn done(events: &mut harlo_client::Events) {
     until(events, |kind| match kind {
         EventKind::Done { .. } => Some(()),
         _ => None,
@@ -127,7 +127,7 @@ async fn a_steer_joins_the_running_turn_at_its_next_step() {
     let messages = client.messages(&session.id).await.expect("messages");
     let idles = messages
         .iter()
-        .filter(|m| matches!(m, opencode_client::Message::Idle { .. }))
+        .filter(|m| matches!(m, harlo_client::Message::Idle { .. }))
         .count();
     assert_eq!(idles, 1, "one run");
 }

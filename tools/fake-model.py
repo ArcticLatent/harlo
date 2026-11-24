@@ -24,7 +24,7 @@ by " | " and run in order:
     flaky <n> <code> <text>  that error for the step's first n requests, then
                           the rest of the step
 
-A subagent's prompt starts with OpenCode's line telling it it's one, and a
+A subagent's prompt starts with the server's line telling it it's one, and a
 side question (/btw) with the lines asking for a quick answer; the
 script, or the plain words kept in scripts.json, is what follows.
 
@@ -39,8 +39,8 @@ A goal's reviewer (/goal) gets the verdict kept in scripts.json under
 
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
-gets a filled-in summary in OpenCode's template. Every request body is appended to the log, so a
-test can see which tools OpenCode offered and what it sent back.
+gets a filled-in summary in the server's template. Every request body is appended to the log, so a
+test can see which tools the server offered and what it sent back.
 """
 
 import json
@@ -57,15 +57,15 @@ LOREM = (
 )
 
 
-# How OpenCode starts its request to summarize a session.
+# How the server starts its request to summarize a session.
 SUMMARIZE = "You MUST summarize the conversation"
 
-# The line OpenCode puts before the prompt it gives a subagent.
+# The line the server puts before the prompt it gives a subagent.
 HARLO_SUMMARIZE = "Summarize the conversation so far for the agent"
 HARLO_SUBAGENT_PREAMBLE = "You are a subagent: another session handed you this task."
 SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
 
-# How OpenCode asks the model to review a goal (/goal).
+# How the server asks the model to review a goal (/goal).
 REVIEWER = "Stop acting as the assistant. You are now the reviewer for the session's goal."
 HARLO_REVIEWER = "Review the session's goal now, as its reviewer rather than its assistant."
 
@@ -132,7 +132,7 @@ def plan(messages):
                      and not (i > 0 and messages[i - 1].get("role") == "tool")), default=-1)
     if last_user < 0:
         return [("say", "ok.")]
-    # A request to summarize, wherever OpenCode puts the instruction.
+    # A request to summarize, wherever the server puts the instruction.
     if any(text_of(m.get("content")).lstrip().startswith((SUMMARIZE, HARLO_SUMMARIZE))
            for m in messages):
         return [("say", SUMMARY)]

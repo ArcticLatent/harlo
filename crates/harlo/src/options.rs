@@ -5,7 +5,7 @@
 use harlo_core::server::Location;
 
 /// The environment variable holding the password for `--server`.
-pub const PASSWORD_VAR: &str = "HARLO_OPENCODE_PASSWORD";
+pub const PASSWORD_VAR: &str = "HARLO_SERVER_PASSWORD";
 
 /// What Harlo was started with.
 #[derive(Clone, PartialEq, Eq, Default)]
@@ -34,7 +34,7 @@ Usage: harlo [--server <url>] [--setup]
 
   --server <url>  Follow the Harlo server at <url> instead of the one on
                   background service. Its password is read from
-                  HARLO_OPENCODE_PASSWORD.
+                  HARLO_SERVER_PASSWORD.
   --setup         Open the setup guide: the server, models, Git, and the theme.
                   A Harlo already running opens it in its window.
   -h, --help      Show this help.";

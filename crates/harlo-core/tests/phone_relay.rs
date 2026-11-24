@@ -7,7 +7,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod support;
 
 use std::collections::HashMap;
@@ -21,9 +21,9 @@ use axum::extract::{Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt as _, StreamExt as _};
+use harlo_client::{Delivery, Effect, Prompt, Rule};
 use harlo_core::phone::{Identity, Phone, RelayStatus, Sealed, Settings, key_bytes, relay_id};
 use harlo_core::server::Location;
-use opencode_client::{Delivery, Effect, Prompt, Rule};
 use serde_json::{Value, json};
 use support::{Sandbox, WAIT, wait_for};
 use tokio::sync::mpsc;
@@ -229,7 +229,7 @@ async fn pair_through(offer: &harlo_core::phone::Offer, key: &Identity) -> TestP
 
 /// Runs a prompt in `session` to its end: its answer saved and the session
 /// no longer working.
-async fn run_to_end(client: &opencode_client::Client, session: &str, text: &str) {
+async fn run_to_end(client: &harlo_client::Client, session: &str, text: &str) {
     let before = client.messages(session).await.expect("messages").len();
     client
         .prompt(session, &Prompt::new(text, Delivery::Steer))
@@ -248,7 +248,7 @@ async fn run_to_end(client: &opencode_client::Client, session: &str, text: &str)
 async fn paused_phones_hear_only_tests(
     phone: &Phone,
     relay: &Relay,
-    client: &opencode_client::Client,
+    client: &harlo_client::Client,
     session: &str,
 ) {
     let pushes = || relay.pushes.lock().expect("pushes").len();
@@ -356,7 +356,7 @@ async fn phones_reach_harlo_through_a_relay_and_get_notifications() {
         .reply_permission(
             &session.id,
             &waiting.id,
-            opencode_client::PermissionReply::Once,
+            harlo_client::PermissionReply::Once,
             None,
         )
         .await

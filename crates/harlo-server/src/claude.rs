@@ -16,10 +16,10 @@ use tokio_util::sync::CancellationToken;
 use crate::server::{Server, lock};
 use crate::store::Session;
 
-/// The `claude` program: `OPENCODE_CLAUDE_PATH`, as OpenCode reads it, or
+/// The `claude` program: `HARLO_CLAUDE_PATH`, or
 /// `claude` on the path.
 pub(crate) fn program() -> PathBuf {
-    std::env::var_os("OPENCODE_CLAUDE_PATH")
+    std::env::var_os("HARLO_CLAUDE_PATH")
         .filter(|p| !p.is_empty())
         .map_or_else(|| PathBuf::from("claude"), PathBuf::from)
 }

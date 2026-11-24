@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use opencode_client::{Answer, Effect, Field, FieldKind, Form, Permission, Rule};
+use harlo_client::{Answer, Effect, Field, FieldKind, Form, Permission, Rule};
 
 /// How much a session may do without asking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

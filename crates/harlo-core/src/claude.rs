@@ -29,7 +29,7 @@ pub const INTEGRATION: &str = "claude-agent";
 pub const LOGIN_METHOD: &str = "claude-login";
 
 /// The variable the server reads for the `claude` program to run.
-pub const PROGRAM_VARIABLE: &str = "OPENCODE_CLAUDE_PATH";
+pub const PROGRAM_VARIABLE: &str = "HARLO_CLAUDE_PATH";
 
 /// How long a `claude` check may take before it counts as failed.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(15);

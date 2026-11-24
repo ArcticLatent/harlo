@@ -12,7 +12,7 @@ mod support;
 use std::path::Path;
 use std::time::Duration;
 
-use opencode_client::{Client, Delivery, Effect, Message, Prompt, Rule};
+use harlo_client::{Client, Delivery, Effect, Message, Prompt, Rule};
 use serde_json::{Value, json};
 use support::Sandbox;
 

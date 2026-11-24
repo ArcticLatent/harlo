@@ -3,7 +3,7 @@
 //! shortcuts, the server's set-up, About) and its search.
 //!
 //! Loads are fed in as their results; the endpoints are tested in
-//! `opencode-client`, and against a private server in `server_sheets.rs`.
+//! `harlo-client`, and against a private server in `server_sheets.rs`.
 
 // Rust guideline compliant 2026-10-09
 

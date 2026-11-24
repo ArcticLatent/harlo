@@ -7,7 +7,7 @@ mod support;
 
 use std::time::Duration;
 
-use opencode_client::{Delivery, McpStatus, Prompt};
+use harlo_client::{Delivery, McpStatus, Prompt};
 use support::Sandbox;
 
 /// A stdio MCP server with one tool, `echo`.

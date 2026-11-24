@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use opencode_client::{
+use harlo_client::{
     EventKind, FileDiff, Message, Part, Picture, Report, ScriptCall, ShellRun, ToolCall, ToolStatus,
 };
 use serde_json::Value;

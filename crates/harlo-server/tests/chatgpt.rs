@@ -9,7 +9,7 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
-use opencode_client::AttemptStatus;
+use harlo_client::AttemptStatus;
 use support::{Sandbox, free_port};
 
 /// A JSON web token with `claims`, unsigned.
@@ -61,7 +61,7 @@ async fn the_browser_return_signs_chatgpt_in() {
         .expect("OpenAI");
     assert!(openai.methods.iter().any(|m| matches!(
         m,
-        opencode_client::SignInMethod::OAuth { label, .. } if label == "Sign in with ChatGPT"
+        harlo_client::SignInMethod::OAuth { label, .. } if label == "Sign in with ChatGPT"
     )));
 
     let attempt = client

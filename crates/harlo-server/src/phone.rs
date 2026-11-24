@@ -15,9 +15,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use harlo_client::{PhoneDevice, PhoneRelay, PhoneState, PhoneWanted};
 use harlo_core::phone::{self, Phone, Relay, RelayStatus, Settings};
 use harlo_core::server::Location;
-use opencode_client::{PhoneDevice, PhoneRelay, PhoneState, PhoneWanted};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 

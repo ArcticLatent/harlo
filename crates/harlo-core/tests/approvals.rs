@@ -2,10 +2,8 @@
 
 // Rust guideline compliant 2026-10-09
 
+use harlo_client::{Answer, Choice, Condition, Effect, Field, FieldKind, Form, Permission, Rule};
 use harlo_core::approvals::{Draft, Shield, always_scope, describe};
-use opencode_client::{
-    Answer, Choice, Condition, Effect, Field, FieldKind, Form, Permission, Rule,
-};
 
 fn field(key: &str, kind: FieldKind) -> Field {
     Field {

@@ -12,7 +12,7 @@ use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::response::{Html, Response};
 use axum::routing::get;
 use futures_util::{SinkExt as _, StreamExt as _};
-use opencode_client::{Attachment, Delivery, ModelRef, Prompt};
+use harlo_client::{Attachment, Delivery, ModelRef, Prompt};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
@@ -563,7 +563,7 @@ impl Conn {
     async fn answer(&mut self, op: &str, m: &Value, server: &Arc<Server>) -> (Value, Vec<Value>) {
         let key = m["key"].as_str().unwrap_or_default();
         let client = &server.client;
-        let done = |r: Result<(), opencode_client::Error>| match r {
+        let done = |r: Result<(), harlo_client::Error>| match r {
             Ok(()) => json!({ "ok": true }),
             Err(e) => error(e.to_string()),
         };
@@ -669,7 +669,7 @@ impl Conn {
     }
 
     /// Answers an approval or a question.
-    async fn reply(&self, key: &str, m: &Value, client: &opencode_client::Client) -> Value {
+    async fn reply(&self, key: &str, m: &Value, client: &harlo_client::Client) -> Value {
         let request = m["requestId"].as_str().unwrap_or_default();
         let answer = &m["answer"];
         let result = if request.starts_with("per") {

@@ -8,7 +8,7 @@ mod support;
 
 use std::time::Duration;
 
-use opencode_client::{Client, Delivery, Message, Part, Prompt};
+use harlo_client::{Client, Delivery, Message, Part, Prompt};
 use support::Sandbox;
 
 /// Sends `script` to `session` and waits until its run is over.

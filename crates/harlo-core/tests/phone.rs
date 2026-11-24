@@ -8,15 +8,15 @@
 
 // Rust guideline compliant 2026-10-09
 
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod support;
 mod test_phone;
 
 use std::time::Duration;
 
+use harlo_client::{Effect, Rule};
 use harlo_core::phone::{Identity, Offer, Phone, Settings};
 use harlo_core::server::Location;
-use opencode_client::{Effect, Rule};
 use serde_json::{Value, json};
 use support::Sandbox;
 use test_phone::{TestPhone, connect};

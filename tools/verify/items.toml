@@ -16,12 +16,12 @@ checks = ["lint:fmt", "lint:clippy"]
 
 [[item]]
 id = "server"
-title = "The OpenCode server: attaching to the shared one, its address and password, following its events, reconnecting"
-checks = ["unit:opencode-client:m0", "unit:opencode-client:endpoint", "unit:harlo-core:follow", "unit:harlo-core:workspace", "unit:harlo:server_sheets", "window:sessions"]
+title = "The server: attaching to the one on this computer, its address and password, following its events, reconnecting"
+checks = ["unit:harlo-client:m0", "unit:harlo-client:endpoint", "unit:harlo-core:follow", "unit:harlo-core:workspace", "unit:harlo:server_sheets", "window:sessions"]
 
 [[item]]
 id = "start"
-title = "First start: the setup guide (OpenCode, models, git, theme), skipped for good"
+title = "First start: the setup guide (the server, models, git, theme), skipped for good"
 checks = ["window:start_guide", "unit:harlo:setup", "unit:harlo-core:autostart"]
 
 [[item]]
@@ -32,12 +32,12 @@ checks = ["window:sessions", "unit:harlo:session", "unit:harlo:shell", "unit:har
 [[item]]
 id = "answers"
 title = "Answers: Markdown, thoughts, tool calls folded into a summary, streaming"
-checks = ["window:answers", "unit:harlo-core:timeline", "unit:opencode-client:m3"]
+checks = ["window:answers", "unit:harlo-core:timeline", "unit:harlo-client:m3"]
 
 [[item]]
 id = "approvals"
 title = "Approvals: a command waits for Allow once / Always / Deny with a reason"
-checks = ["window:approvals", "unit:harlo:session", "unit:harlo-core:approvals", "unit:opencode-client:approvals", "real:approval"]
+checks = ["window:approvals", "unit:harlo:session", "unit:harlo-core:approvals", "unit:harlo-client:approvals", "real:approval"]
 
 [[item]]
 id = "questions"
@@ -52,7 +52,7 @@ checks = ["window:web_search", "unit:harlo-server:web", "unit:harlo:sheets"]
 [[item]]
 id = "queue"
 title = "A busy session: queue, steer, cancel, Stop"
-checks = ["window:queue", "unit:harlo:session", "unit:opencode-client:m3", "real:stop"]
+checks = ["window:queue", "unit:harlo:session", "unit:harlo-client:m3", "real:stop"]
 
 [[item]]
 id = "composer"
@@ -72,7 +72,7 @@ checks = ["window:panels", "unit:harlo:panels", "unit:harlo:arrange", "unit:harl
 [[item]]
 id = "changes"
 title = "Changes and git: this session's and uncommitted changes, diffs, commit (with a name from Settings → Git), push"
-checks = ["window:changes", "unit:harlo:changes", "unit:harlo-core:git", "unit:harlo-core:diff", "unit:opencode-client:git"]
+checks = ["window:changes", "unit:harlo:changes", "unit:harlo-core:git", "unit:harlo-core:diff", "unit:harlo-client:git"]
 
 [[item]]
 id = "files"
@@ -122,12 +122,12 @@ checks = ["unit:harlo:tray", "unit:harlo:instance"]
 [[item]]
 id = "projects"
 title = "Projects and worktrees: add, colour, icon, models per project, remove"
-checks = ["unit:harlo:projects", "unit:opencode-client:projects", "unit:harlo-core:location", "unit:harlo-core:config"]
+checks = ["unit:harlo:projects", "unit:harlo-client:projects", "unit:harlo-core:location", "unit:harlo-core:config"]
 
 [[item]]
 id = "providers"
 title = "Providers: sign in with a key, OAuth or a form; remove"
-checks = ["unit:harlo:providers", "unit:opencode-client:integrations"]
+checks = ["unit:harlo:providers", "unit:harlo-client:integrations"]
 
 [[item]]
 id = "agents"
@@ -151,7 +151,7 @@ checks = ["unit:harlo:plugins"]
 
 [[item]]
 id = "claude"
-title = "Claude Code through OpenCode: found, signed in, used as a model"
+title = "Claude Code through the server: found, signed in, used as a model"
 checks = ["unit:harlo:claude", "unit:harlo:server_claude", "unit:harlo-core:claude", "real:reply"]
 
 [[item]]
@@ -161,8 +161,8 @@ checks = ["unit:harlo:hosting", "unit:harlo-core:hosting"]
 
 [[item]]
 id = "schedules"
-title = "Schedules: allowed, made, paused, resumed, deleted on OpenCode's server"
-checks = ["window:schedules", "unit:harlo:schedules", "unit:harlo-core:schedules", "unit:opencode-client:automations"]
+title = "Schedules: allowed, made, paused, resumed, deleted on the server"
+checks = ["window:schedules", "unit:harlo:schedules", "unit:harlo-core:schedules", "unit:harlo-client:automations"]
 
 [[item]]
 id = "voice"
@@ -176,7 +176,7 @@ checks = ["unit:harlo:local_models", "unit:harlo-core:local_models", "unit:harlo
 
 [[item]]
 id = "backends"
-title = "Harlo's server and OpenCode's on this computer: both offered, where Harlo opens, the service started and found, OpenCode sessions imported"
+title = "Harlo's server on this computer and others: offered, the service started and found, OpenCode sessions imported"
 checks = ["unit:harlo:server_choice", "unit:harlo:import_button", "unit:harlo-core:engine_location", "unit:harlo-server:service", "unit:harlo-server:opencode_import"]
 
 [[item]]
@@ -190,12 +190,12 @@ title = "Phone: access on, pairing by QR code or link, devices, relay, test noti
 checks = ["window:phone", "unit:harlo:phone", "unit:harlo-core:phone", "unit:harlo-core:phone_relay"]
 
 [[item]]
-id = "opencode-api"
-title = "The OpenCode v2 client's other endpoints: sessions, history, files, config"
-checks = ["unit:opencode-client:m4", "unit:opencode-client:m6", "unit:opencode-client:m7"]
+id = "client-api"
+title = "The client's other endpoints: sessions, history, files, config"
+checks = ["unit:harlo-client:m4", "unit:harlo-client:m6", "unit:harlo-client:m7"]
 
 [[item]]
 id = "engine"
-title = "Harlo's own server (harlo-server on harlo-engine): one turn with an approved edit, its diff, a restart; events replayed after a reconnect"
+title = "Harlo's server (harlo-server on harlo-engine): one turn with an approved edit, its diff, a restart; events replayed after a reconnect"
 checks = ["unit:harlo-engine", "unit:harlo-server", "window:turn", "window:phone_handoff", "window:undo", "window:reconnect", "window:answers", "window:memory", "window:questions", "window:agents", "window:composer", "window:files_editor", "window:client_tools", "window:approvals", "window:queue", "window:changes", "window:restart", "window:sessions", "window:compaction", "window:commands_skills", "window:todos", "window:subagents", "window:shell_jobs", "window:session_menu", "window:goals", "window:schedules"]
 

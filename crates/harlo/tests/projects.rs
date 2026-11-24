@@ -4,7 +4,7 @@
 //!
 //! The demo's client points at nothing: requests are dropped, and the
 //! server's answers fed in. Making, removing and changing projects against
-//! a real server is tested in `opencode-client`.
+//! a real server is tested in `harlo-client`.
 
 // Rust guideline compliant 2026-10-09
 

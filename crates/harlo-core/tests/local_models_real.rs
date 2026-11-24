@@ -8,19 +8,19 @@
 
 // Rust guideline compliant 2026-10-09
 
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod support;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use harlo_client::ModelRef;
 use harlo_core::config::{self, LocalProvider};
 use harlo_core::download::Download;
 use harlo_core::local_models::{
     Computer, Engine, Engines, Fit, Install, ModelFiles, Serve, Suggestion, answers, base_url,
 };
-use opencode_client::ModelRef;
 use support::{Sandbox, wait_for};
 
 /// A free port on the loopback address.

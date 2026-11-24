@@ -11,7 +11,7 @@ publish.workspace = true
 [dependencies]
 # The hosts in ~/.ssh/config, offered in Settings → Server.
 ssh2-config = { workspace = true }
-opencode-client = { workspace = true }
+harlo-client = { workspace = true }
 futures-util = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["rt", "sync", "time", "process", "macros", "io-util", "fs", "net"] }
 serde = { workspace = true, features = ["std", "derive"] }

@@ -2,7 +2,7 @@
 //! session's usage, cost and instruction files, and the agent's todo list.
 //!
 //! Loads are fed in as their results; the endpoints are tested in
-//! `opencode-client` and the instruction rule in `harlo-core`.
+//! `harlo-client` and the instruction rule in `harlo-core`.
 
 // Rust guideline compliant 2026-10-09
 

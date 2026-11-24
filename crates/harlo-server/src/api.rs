@@ -1,5 +1,5 @@
 //! The HTTP API: the part of OpenCode 2's API Harlo uses for a session's
-//! turn, in OpenCode's paths and JSON, so `opencode-client` works against
+//! turn, in OpenCode's paths and JSON, so `harlo-client` works against
 //! this server unchanged.
 //!
 //! The event stream adds what reconnecting needs: each durable event goes
@@ -1489,7 +1489,7 @@ async fn phone_state(State(server): Shared, Query(q): Query<After>) -> Answer {
 
 async fn want_phone(
     State(server): Shared,
-    axum::Json(wanted): axum::Json<opencode_client::PhoneWanted>,
+    axum::Json(wanted): axum::Json<harlo_client::PhoneWanted>,
 ) -> Answer {
     let state = server.phone.want(wanted).await;
     ok(serde_json::to_value(state).unwrap_or_default())

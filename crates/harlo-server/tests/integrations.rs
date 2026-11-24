@@ -6,7 +6,7 @@
 
 mod support;
 
-use opencode_client::{Answer, FieldKind, SignInMethod};
+use harlo_client::{Answer, FieldKind, SignInMethod};
 use support::Sandbox;
 
 #[tokio::test(flavor = "multi_thread")]

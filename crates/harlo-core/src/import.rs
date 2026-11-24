@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use opencode_client::{Client, read_registration, registration_path};
+use harlo_client::{Client, read_registration, registration_path};
 
 /// What an import did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

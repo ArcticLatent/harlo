@@ -7,14 +7,14 @@
 
 // Rust guideline compliant 2026-10-09
 
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod oc;
 mod support;
 
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use opencode_client::{Delivery, Message, Prompt};
+use harlo_client::{Delivery, Message, Prompt};
 
 /// Where the dev setup keeps the last OpenCode release the import was
 /// checked against.
@@ -34,7 +34,7 @@ fn opencode() -> Option<PathBuf> {
 }
 
 /// Sends `script` to session `id` on `client` and waits for its turn.
-async fn turn(client: &opencode_client::Client, id: &str, script: &str) {
+async fn turn(client: &harlo_client::Client, id: &str, script: &str) {
     client
         .prompt(id, &Prompt::new(script, Delivery::Queue))
         .await

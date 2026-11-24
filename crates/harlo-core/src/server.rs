@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use futures_util::Stream;
 use futures_util::future::try_join_all;
-use opencode_client::{Event, read_registration};
+use harlo_client::{Event, read_registration};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -25,7 +25,7 @@ use crate::ssh;
 use crate::workspace::{Fetch, Fetched, Snapshot};
 
 #[doc(inline)]
-pub use opencode_client::{
+pub use harlo_client::{
     Agent, Answer, Attachment, AttemptStatus, Automation, AutomationAction, AutomationStatus,
     AutomationTrigger, Choice, Client, Command, Condition, Connection, Day, Delivery, Effect,
     Endpoint, Error, Field, FieldKind, FileChange, FileDiff, FileMatch, Form, Goal, GoalStatus,

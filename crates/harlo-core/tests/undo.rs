@@ -2,8 +2,8 @@
 
 // Rust guideline compliant 2026-10-09
 
+use harlo_client::{FileDiff, Revert};
 use harlo_core::undo::restores;
-use opencode_client::{FileDiff, Revert};
 
 fn file(name: &str, patch: &str) -> FileDiff {
     FileDiff {

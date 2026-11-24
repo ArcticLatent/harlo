@@ -7,10 +7,10 @@
 
 mod support;
 
-use opencode_client::{Delivery, EventKind, Message, Part, Prompt};
+use harlo_client::{Delivery, EventKind, Message, Part, Prompt};
 use support::{Sandbox, until};
 
-async fn done(events: &mut opencode_client::Events) {
+async fn done(events: &mut harlo_client::Events) {
     until(events, |kind| match kind {
         EventKind::Done { .. } => Some(()),
         _ => None,

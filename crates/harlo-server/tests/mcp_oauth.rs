@@ -10,18 +10,18 @@ mod support;
 
 use std::time::Duration;
 
+use harlo_client::{AttemptStatus, McpStatus};
 use oauth_guard::{browse, guard};
-use opencode_client::{AttemptStatus, McpStatus};
 use serde_json::json;
 use support::Sandbox;
 
 /// The status of server `name` in `folder`, once `done` says it's settled.
 async fn status_until(
-    client: &opencode_client::Client,
+    client: &harlo_client::Client,
     folder: &str,
     name: &str,
     done: impl Fn(&McpStatus) -> bool,
-) -> opencode_client::McpServer {
+) -> harlo_client::McpServer {
     let mut last = None;
     for _ in 0..300 {
         let listed = client.mcp_servers(folder).await.expect("listed");
@@ -35,7 +35,7 @@ async fn status_until(
 }
 
 /// How sign-in `attempt` to `id` ended.
-async fn settled(client: &opencode_client::Client, id: &str, attempt: &str) -> AttemptStatus {
+async fn settled(client: &harlo_client::Client, id: &str, attempt: &str) -> AttemptStatus {
     let mut status = AttemptStatus::Pending(None);
     for _ in 0..100 {
         status = client.oauth_status(id, attempt).await.expect("status");
@@ -74,7 +74,7 @@ async fn a_remote_server_signs_in_in_the_browser_and_connects() {
         .expect("listed");
     assert_eq!(integration.name, "guarded");
     assert!(integration.connections.is_empty());
-    let Some(opencode_client::SignInMethod::OAuth { id: method, .. }) =
+    let Some(harlo_client::SignInMethod::OAuth { id: method, .. }) =
         integration.methods.first().cloned()
     else {
         panic!("a browser sign-in: {:?}", integration.methods);

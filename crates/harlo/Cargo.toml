@@ -65,7 +65,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 llmfit-core = { workspace = true }
 # A private OpenCode server for the tests that need one.
-opencode-client = { workspace = true }
+harlo-client = { workspace = true }
 # The stress example times frames with Slint's rendering notifier, which the
 # default Skia surface (wgpu) serves only with its graphics API exposed.
 # Dev-only, so the app itself doesn't take the unstable API.

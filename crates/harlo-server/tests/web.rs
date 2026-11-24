@@ -9,7 +9,7 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use opencode_client::{Delivery, Prompt};
+use harlo_client::{Delivery, Prompt};
 use support::Sandbox;
 
 /// What the stand-in search services saw: (service, keyed) per search.
@@ -159,7 +159,7 @@ async fn offered_with(sandbox: &Sandbox, text: &str) -> String {
 }
 
 /// Session `session`'s first waiting form, once there is one.
-async fn form(sandbox: &Sandbox, session: &str) -> opencode_client::Form {
+async fn form(sandbox: &Sandbox, session: &str) -> harlo_client::Form {
     for _ in 0..200 {
         let forms = sandbox.client().forms(session).await.expect("forms");
         if let Some(form) = forms.into_iter().next() {
@@ -171,14 +171,14 @@ async fn form(sandbox: &Sandbox, session: &str) -> opencode_client::Form {
 }
 
 /// Answers `form`'s one question with `value`.
-async fn reply(sandbox: &Sandbox, session: &str, form: &opencode_client::Form, value: &str) {
+async fn reply(sandbox: &Sandbox, session: &str, form: &harlo_client::Form, value: &str) {
     let key = form.fields[0].key.clone();
     sandbox
         .client()
         .reply_form(
             session,
             &form.id,
-            &[(key, opencode_client::Answer::Text(value.into()))],
+            &[(key, harlo_client::Answer::Text(value.into()))],
         )
         .await
         .expect("answered");

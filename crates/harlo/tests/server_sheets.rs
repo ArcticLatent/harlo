@@ -3,7 +3,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod server;
 mod support;
 

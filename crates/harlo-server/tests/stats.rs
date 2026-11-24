@@ -5,7 +5,7 @@
 
 mod support;
 
-use opencode_client::{Delivery, EventKind, Prompt};
+use harlo_client::{Delivery, EventKind, Prompt};
 use support::{Sandbox, until};
 
 #[tokio::test(flavor = "multi_thread")]

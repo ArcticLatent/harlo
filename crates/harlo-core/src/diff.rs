@@ -11,7 +11,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use opencode_client::FileDiff;
+use harlo_client::FileDiff;
 use similar::{ChangeTag, TextDiff};
 
 /// How alike a removed and an added line must be to mark their changed words.

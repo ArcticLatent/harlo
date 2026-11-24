@@ -4,7 +4,7 @@
 //! continues Claude Code's session.
 //!
 //! The stand-in sits in the scratch folder and is named by
-//! `OPENCODE_CLAUDE_PATH`; the real Claude Code is never run.
+//! `HARLO_CLAUDE_PATH`; the real Claude Code is never run.
 
 // Rust guideline compliant 2026-10-09
 
@@ -13,7 +13,7 @@ mod support;
 use std::os::unix::fs::PermissionsExt as _;
 use std::time::Duration;
 
-use opencode_client::{Delivery, Message, ModelRef, PermissionReply, Prompt};
+use harlo_client::{Delivery, Message, ModelRef, PermissionReply, Prompt};
 use support::Sandbox;
 
 /// A stand-in Claude Code: it lists Opus and Sonnet, and for a message
@@ -91,7 +91,7 @@ async fn claude_code_runs_a_turn_that_asks_first_and_resumes() {
     std::fs::write(&claude, STAND_IN).expect("stand-in");
     std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).expect("mode");
     let path = claude.to_str().expect("utf-8");
-    let sandbox = Sandbox::start_with_env(&[("OPENCODE_CLAUDE_PATH", path)]).await;
+    let sandbox = Sandbox::start_with_env(&[("HARLO_CLAUDE_PATH", path)]).await;
     let client = sandbox.client();
     let folder = sandbox.project().to_str().expect("utf-8").to_owned();
 
@@ -211,11 +211,10 @@ async fn claude_agent_searches_the_web_when_chosen() {
     std::fs::write(&claude, SEARCHER).expect("stand-in");
     std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).expect("mode");
     let path = claude.to_str().expect("utf-8");
-    let sandbox = Sandbox::start_with_env(&[("OPENCODE_CLAUDE_PATH", path)]).await;
+    let sandbox = Sandbox::start_with_env(&[("HARLO_CLAUDE_PATH", path)]).await;
     let client = sandbox.client();
     let folder = sandbox.project().to_str().expect("utf-8").to_owned();
-    let offered =
-        |list: Vec<opencode_client::WebSearch>| list.iter().any(|s| s.id == "claude-agent");
+    let offered = |list: Vec<harlo_client::WebSearch>| list.iter().any(|s| s.id == "claude-agent");
     assert!(!offered(
         client.web_search(&folder).await.expect("services")
     ));
@@ -255,10 +254,7 @@ async fn claude_agent_searches_the_web_when_chosen() {
             .reply_form(
                 &session.id,
                 &form.id,
-                &[(
-                    field.to_owned(),
-                    opencode_client::Answer::Text(value.into()),
-                )],
+                &[(field.to_owned(), harlo_client::Answer::Text(value.into()))],
             )
             .await
             .expect("answered");

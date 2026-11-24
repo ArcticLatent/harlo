@@ -10,8 +10,8 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use harlo_client::{Client, Message, Part, Session, ToolHost, ToolOutcome, ToolRun, ToolSpec};
 use jiff::Timestamp;
-use opencode_client::{Client, Message, Part, Session, ToolHost, ToolOutcome, ToolRun, ToolSpec};
 use serde_json::{Value, json};
 
 /// The name the tools are offered under.

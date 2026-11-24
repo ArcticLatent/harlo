@@ -5,15 +5,15 @@
 
 // Rust guideline compliant 2026-10-09
 
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod support;
 
 use std::time::{Duration, SystemTime};
 
 use futures_util::StreamExt;
+use harlo_client::EventKind;
 use harlo_core::server::{self, Location, Update};
 use harlo_core::workspace::Workspace;
-use opencode_client::EventKind;
 use support::{Sandbox, WAIT};
 
 /// Waits for the next update that `pick` accepts.

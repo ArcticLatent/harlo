@@ -8,7 +8,7 @@ mod support;
 
 use std::time::Duration;
 
-use opencode_client::{Delivery, EventKind, Message, Prompt};
+use harlo_client::{Delivery, EventKind, Message, Prompt};
 use support::{Sandbox, until};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -32,7 +32,7 @@ async fn a_subagent_works_in_a_child_and_reports_back() {
 
     let child = until(&mut events, |kind| match kind {
         EventKind::JobUpdated(job) => match job.kind {
-            opencode_client::JobKind::Subagent { child, .. } => Some(child),
+            harlo_client::JobKind::Subagent { child, .. } => Some(child),
             _ => None,
         },
         _ => None,

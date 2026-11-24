@@ -12,7 +12,7 @@
 //!
 //! Files the agent picks up later, such as a subfolder's `AGENTS.md` once it
 //! reads a file there, come from the server itself (see
-//! `opencode_client::SessionContext::loaded`). Paths from a config file's
+//! `harlo_client::SessionContext::loaded`). Paths from a config file's
 //! `instructions` setting aren't followed here.
 
 // Rust guideline compliant 2026-10-09

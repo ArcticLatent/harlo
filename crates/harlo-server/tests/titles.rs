@@ -7,8 +7,8 @@ mod support;
 
 use std::time::Duration;
 
+use harlo_client::{Delivery, Prompt};
 use harlo_engine::generate::title_prompt;
-use opencode_client::{Delivery, Prompt};
 use support::Sandbox;
 
 #[tokio::test(flavor = "multi_thread")]

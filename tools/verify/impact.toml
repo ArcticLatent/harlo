@@ -10,7 +10,7 @@ paths = ["*.md", "docs/**", "packaging/**", ".github/**", "LICENSE*", "*.txt"]
 checks = []
 
 [[rule]]
-paths = ["crates/opencode-client/**"]
+paths = ["crates/harlo-client/**"]
 checks = ["lint:*", "unit:*", "window:*"]
 
 [[rule]]

@@ -5,7 +5,7 @@
 
 mod support;
 
-use opencode_client::{Delivery, EventKind, Message, Prompt};
+use harlo_client::{Delivery, EventKind, Message, Prompt};
 use support::{Sandbox, until};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -15,7 +15,7 @@ async fn a_compacted_session_carries_on_from_its_summary() {
     let directory = sandbox.project().to_str().expect("utf-8").to_owned();
     let mut events = client.events().await.expect("events");
     let session = client.create_session(&directory).await.expect("session");
-    let done = async |events: &mut opencode_client::Events| {
+    let done = async |events: &mut harlo_client::Events| {
         until(events, |kind| match kind {
             EventKind::Done { .. } => Some(()),
             _ => None,

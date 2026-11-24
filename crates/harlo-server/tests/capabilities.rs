@@ -9,7 +9,7 @@ mod support;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use opencode_client::{Delivery, Prompt, ToolHost, ToolRun, ToolSpec};
+use harlo_client::{Delivery, Prompt, ToolHost, ToolRun, ToolSpec};
 use support::Sandbox;
 
 /// One tool, `whoami`, which answers with the calling session.

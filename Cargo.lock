@@ -976,19 +976,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codespace"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad2220b174fd87f25c53717f0cfd18eb43b9cb69c67ca43176d3e9c50865a08"
-dependencies = [
- "proc-macro2",
- "quote",
- "semver",
- "syn 3.0.10",
- "version-ranges",
-]
-
-[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2419,6 +2406,7 @@ dependencies = [
  "dirs",
  "flate2",
  "futures-util",
+ "harlo-client",
  "harlo-core",
  "hex",
  "i-slint-backend-testing",
@@ -2429,7 +2417,6 @@ dependencies = [
  "mimalloc",
  "notify-rust",
  "open",
- "opencode-client",
  "png",
  "pulldown-cmark",
  "qrcode",
@@ -2452,6 +2439,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "harlo-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "futures-util",
+ "getrandom 0.4.3",
+ "gray_matter",
+ "percent-encoding",
+ "regress",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "sse-stream 0.3.0",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tracing",
+]
+
+[[package]]
 name = "harlo-core"
 version = "0.1.0"
 dependencies = [
@@ -2462,12 +2470,12 @@ dependencies = [
  "flate2",
  "fontdb",
  "futures-util",
+ "harlo-client",
  "hex",
  "if-addrs",
  "jiff",
  "jsonc-parser",
  "llmfit-core",
- "opencode-client",
  "pulldown-cmark",
  "reqwest",
  "rusqlite",
@@ -2527,6 +2535,7 @@ dependencies = [
  "frizbee",
  "futures-util",
  "getrandom 0.4.3",
+ "harlo-client",
  "harlo-core",
  "harlo-engine",
  "hex",
@@ -2534,7 +2543,6 @@ dependencies = [
  "jiff",
  "jsonc-parser",
  "mime_guess",
- "opencode-client",
  "portable-pty",
  "reqwest",
  "rmcp",
@@ -4712,39 +4720,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-client"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "futures-util",
- "getrandom 0.4.3",
- "gray_matter",
- "percent-encoding",
- "regress",
- "reqwest",
- "rmcp",
- "serde",
- "serde_json",
- "sse-stream 0.3.0",
- "tempfile",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "tracing",
-]
-
-[[package]]
-name = "opencode-gen"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "prettyplease 0.3.0",
- "schemars 0.8.22",
- "serde_json",
- "syn 3.0.10",
- "typify",
-]
-
-[[package]]
 name = "openssl"
 version = "0.10.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5757,7 +5732,7 @@ dependencies = [
  "pin-project-lite",
  "process-wrap",
  "reqwest",
- "schemars 1.2.3",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -6009,18 +5984,6 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
-dependencies = [
- "dyn-clone",
- "schemars_derive 0.8.22",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "schemars"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
@@ -6028,21 +5991,9 @@ dependencies = [
  "chrono",
  "dyn-clone",
  "ref-cast",
- "schemars_derive 1.2.3",
+ "schemars_derive",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "schemars_derive"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde_derive_internals 0.29.1",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -6053,7 +6004,7 @@ checksum = "e1c3a92094fa7d61aa124645844facb6b554dfc797136d0f5fd1f890e2bffc69"
 dependencies = [
  "proc-macro2",
  "quote",
- "serde_derive_internals 0.30.0",
+ "serde_derive_internals",
  "syn 3.0.10",
 ]
 
@@ -6149,17 +6100,6 @@ dependencies = [
 
 [[package]]
 name = "serde_derive_internals"
-version = "0.29.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "serde_derive_internals"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
@@ -6175,8 +6115,6 @@ version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
- "foldhash 0.2.0",
- "indexmap",
  "itoa",
  "memchr",
  "serde",
@@ -7524,55 +7462,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
-name = "typespace"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f85ea45c92b262c35a6e8e563e27951b86275e8c3e3aa03ba4cf9addeaf5ef7"
-dependencies = [
- "codespace",
- "heck",
- "log",
- "proc-macro2",
- "quote",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "strum",
- "syn 3.0.10",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "typify"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19f174e99e1652ac0b6110431a2f9312cbfb6c618c74f3f235821e3ff0f63e9c"
-dependencies = [
- "typify-impl",
-]
-
-[[package]]
-name = "typify-impl"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82ce9c7f17c54101c576f7cee9b10390d690146a1dfa56da2deb4a4dfd8828c4"
-dependencies = [
- "heck",
- "log",
- "proc-macro2",
- "quote",
- "regress",
- "schemars 0.8.22",
- "semver",
- "serde",
- "serde_json",
- "syn 3.0.10",
- "thiserror 2.0.21",
- "typespace",
- "unicode-ident",
-]
-
-[[package]]
 name = "uds_windows"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7785,16 +7674,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "version-ranges"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31e9bd4e9c9ff6a2a9b5969462ba26216af3e010df0377dad8320ab515262ef8"
-dependencies = [
- "semver",
- "smallvec",
-]
 
 [[package]]
 name = "version_check"

@@ -6,7 +6,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-#[path = "../../opencode-client/tests/support/mod.rs"]
+#[path = "../../harlo-client/tests/support/mod.rs"]
 mod server;
 mod support;
 
@@ -14,11 +14,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use harlo::app::Message;
+use harlo_client::Events;
 use harlo_core::server::{
     Connected, Delivery, Effect, JobStatus, Prompt, Rule, ShellStatus, Update,
 };
 use harlo_core::workspace::{Event, EventKind};
-use opencode_client::Events;
 use server::{Sandbox, WAIT};
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};

@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use opencode_client::{SharedService, parse_registration};
+use harlo_client::{SharedService, parse_registration};
 
 /// Returns the SSH config Harlo offers hosts from: `~/.ssh/config`.
 #[must_use]

@@ -10,7 +10,7 @@ mod support;
 
 use std::time::Duration;
 
-use opencode_client::{Client, Delivery, Message, Prompt};
+use harlo_client::{Client, Delivery, Message, Prompt};
 use serde_json::{Value, json};
 use support::Sandbox;
 

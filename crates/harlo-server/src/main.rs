@@ -1,8 +1,8 @@
 //! Harlo's server.
 //!
 //! - `harlo-server serve [--hostname H] [--port P] [--register]` runs it until it's
-//!   stopped. The password, when set, comes from `HARLO_SERVER_PASSWORD` (or
-//!   `OPENCODE_PASSWORD`); clients send it as basic auth. `--register` records it as the
+//!   stopped. The password, when set, comes from `HARLO_SERVER_PASSWORD`; clients
+//!   send it as basic auth. `--register` records it as the
 //!   background service.
 //! - `harlo-server service start` starts the background service unless one answers, and
 //!   prints where it is; `service status` only says.
@@ -37,9 +37,9 @@ async fn main() -> ExitCode {
             }
         }
     }
-    let password = ["HARLO_SERVER_PASSWORD", "OPENCODE_PASSWORD"]
-        .iter()
-        .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()));
+    let password = std::env::var("HARLO_SERVER_PASSWORD")
+        .ok()
+        .filter(|v| !v.is_empty());
     let server = match harlo_server::open(&harlo_server::Places::from_env(), password) {
         Ok(s) => s,
         Err(e) => return fail(&e),

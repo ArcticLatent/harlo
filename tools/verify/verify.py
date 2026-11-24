@@ -54,7 +54,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 HERE = os.path.join(ROOT, "tools", "verify")
 SCENARIOS = os.path.join(HERE, "scenarios")
 RUNS = os.environ.get("VERIFY_RUNS") or os.path.join(ROOT, "target", "verify")
-CRATES = ["opencode-client", "harlo-core", "harlo", "harlo-engine", "harlo-server"]
+CRATES = ["harlo-client", "harlo-core", "harlo", "harlo-engine", "harlo-server"]
 KINDS = ["build", "lint", "unit", "window", "real"]
 
 sys.path.insert(0, HERE)

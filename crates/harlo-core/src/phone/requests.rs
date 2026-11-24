@@ -7,7 +7,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use opencode_client::{Answer, Field, FieldKind, PermissionReply};
+use harlo_client::{Answer, Field, FieldKind, PermissionReply};
 use serde_json::{Value, json};
 
 use crate::workspace::{Form, Permission};
@@ -127,7 +127,7 @@ fn ask(form: &Form, fields: &[&Field]) -> Value {
 }
 
 /// The value of the option with `label`, or the label itself as typed text.
-fn value_of(options: &[opencode_client::Choice], label: &str) -> String {
+fn value_of(options: &[harlo_client::Choice], label: &str) -> String {
     options
         .iter()
         .find(|o| o.label == label)

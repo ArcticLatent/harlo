@@ -8,7 +8,7 @@
 
 mod support;
 
-use opencode_client::{Delivery, Effect, EventKind, PermissionReply, Prompt, Rule};
+use harlo_client::{Delivery, Effect, EventKind, PermissionReply, Prompt, Rule};
 use support::{Sandbox, replay, until};
 
 const EDIT: &str =
