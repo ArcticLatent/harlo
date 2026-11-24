@@ -551,7 +551,7 @@ fn backoff(attempt: u32) -> Duration {
 /// Streams the reply to `body` for step `message`, asking again after a
 /// failure that may pass; notes when the first token came.
 async fn stream_retrying(
-    endpoint: Endpoint<'_>,
+    endpoint: &Endpoint,
     body: &Value,
     message: &str,
     sink: &impl Sink,
@@ -624,27 +624,15 @@ async fn ask_model(
         error: None,
         snapshot: None,
     };
-    let (extra, headers) = turn
-        .provider
-        .models
-        .iter()
-        .find(|m| m.id == turn.model.model)
-        .map(|m| m.request_extras(turn.model.variant.as_deref()))
-        .unwrap_or_default();
-    let body = chat::request(
-        &turn.model.model,
+    let (endpoint, body) = chat::prepare(
+        &turn.provider,
+        &turn.model,
         &turn.system,
         &turn.history,
         definitions,
-        &extra,
     );
-    let endpoint = Endpoint {
-        base_url: &turn.provider.base_url,
-        api_key: turn.provider.api_key.as_deref(),
-        headers: &headers,
-    };
     let mut first_token = None;
-    let reply = stream_retrying(endpoint, &body, &message, sink, stop, &mut first_token).await;
+    let reply = stream_retrying(&endpoint, &body, &message, sink, stop, &mut first_token).await;
     assistant.time.first_token = first_token;
     let reply = match reply {
         Ok(reply) => reply,
@@ -692,7 +680,9 @@ fn fill(assistant: &mut Assistant, blocks: Vec<Block>, sink: &impl Sink) -> Vec<
     for block in blocks {
         match block {
             Block::Text(text) => assistant.content.push(Part::Text { text }),
-            Block::Reasoning(text) => assistant.content.push(Part::Reasoning { text }),
+            Block::Reasoning(text, signature) => {
+                assistant.content.push(Part::Reasoning { text, signature });
+            }
             Block::Call {
                 id,
                 name,

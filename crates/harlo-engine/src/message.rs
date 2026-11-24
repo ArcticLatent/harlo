@@ -240,6 +240,10 @@ pub enum Part {
     Reasoning {
         /// The reasoning.
         text: String,
+        /// What the provider needs back to continue from it, and whose
+        /// it is.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<serde_json::Value>,
     },
     /// A tool call and what came of it.
     Tool {

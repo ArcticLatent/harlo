@@ -6,7 +6,7 @@
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::chat::{self, Block, Endpoint};
+use crate::chat::{self, Block};
 use crate::config::{ModelRef, ProviderSpec};
 use crate::message::{Created, Message, Tokens};
 
@@ -61,19 +61,8 @@ pub async fn answer(
     history: &[Message],
     stop: &CancellationToken,
 ) -> Result<Answer, Error> {
-    let (extra, headers) = provider
-        .models
-        .iter()
-        .find(|m| m.id == model.model)
-        .map(|m| m.request_extras(model.variant.as_deref()))
-        .unwrap_or_default();
-    let body = chat::request(&model.model, system, history, &[], &extra);
-    let to = Endpoint {
-        base_url: &provider.base_url,
-        api_key: provider.api_key.as_deref(),
-        headers: &headers,
-    };
-    let reply = chat::stream(to, &body, stop, &mut |_| {}).await?;
+    let (to, body) = chat::prepare(provider, model, system, history, &[]);
+    let reply = chat::stream(&to, &body, stop, &mut |_| {}).await?;
     let text = reply
         .blocks
         .into_iter()

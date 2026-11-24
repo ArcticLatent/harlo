@@ -4,6 +4,11 @@
 
 GET  /v1/models            one model, "fake-coder"
 POST /v1/chat/completions  streamed (SSE) or plain JSON
+POST /v1/messages          the same script, streamed as Anthropic's Messages
+POST /v1/responses         the same script, streamed as OpenAI's Responses
+
+Reasoning comes back signed ("fake-signature") or encrypted ("fake-
+encrypted"), so a test can see it sent back.
 
 The last user message is a script. Steps are separated by ";;". Which
 step runs is the number of tool results after that user message, so
@@ -165,6 +170,36 @@ def plan(messages):
     return parts
 
 
+def as_chat(body, path):
+    """The request's conversation as chat completions' messages: enough for
+    plan(), which counts the tool results after the last prompt."""
+    if path.endswith("/messages"):
+        out = []
+        for m in body.get("messages", []):
+            content = m.get("content")
+            if m.get("role") != "user" or isinstance(content, str):
+                out.append({"role": m.get("role"), "content": text_of(content)})
+                continue
+            results = [b for b in content if b.get("type") == "tool_result"]
+            out.extend({"role": "tool"} for _ in results)
+            said = text_of([b for b in content if b.get("type") == "text"])
+            if said or not results:
+                out.append({"role": "user", "content": said})
+        return out
+    out = []
+    for item in body.get("input", []):
+        if item.get("role") == "user":
+            content = item.get("content")
+            said = content if isinstance(content, str) else "".join(
+                p.get("text", "") for p in content if isinstance(p, dict))
+            out.append({"role": "user", "content": said})
+        elif item.get("type") == "function_call_output":
+            out.append({"role": "tool"})
+        else:
+            out.append({"role": "assistant"})
+    return out
+
+
 def long_markdown(n):
     blocks = []
     for i in range(n):
@@ -216,10 +251,12 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         with open(LOG, "a") as f:
             f.write(json.dumps({"path": self.path, "body": body, "t": time.time()}) + "\n")
-        if not self.path.rstrip("/").endswith("/chat/completions"):
-            self.send_json(404, {"error": {"message": "only chat completions"}})
+        path = self.path.rstrip("/")
+        wire = next((w for w in ("chat/completions", "messages", "responses") if path.endswith("/" + w)), None)
+        if wire is None:
+            self.send_json(404, {"error": {"message": "only chat completions, messages and responses"}})
             return
-        messages = body.get("messages", [])
+        messages = body.get("messages", []) if wire == "chat/completions" else as_chat(body, path)
         parts = plan(messages)
         failed = next((rest for word, rest in parts if word == "fail"), None)
         flaky = next((rest for word, rest in parts if word == "flaky"), None)
@@ -235,7 +272,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(int(code), {"error": {"message": message or "failed",
                                                  "type": "invalid_request_error"}})
             return
-        if body.get("stream"):
+        if wire == "messages":
+            self.stream_messages(parts)
+        elif wire == "responses":
+            self.stream_responses(parts)
+        elif body.get("stream"):
             self.stream(parts)
         else:
             self.plain(parts)
@@ -290,6 +331,103 @@ class Handler(BaseHTTPRequestHandler):
             self.send(chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}))
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def open_stream(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+    def event(self, obj, pace=0.0):
+        if pace:
+            time.sleep(pace)
+        self.wfile.write(f"event: {obj['type']}\ndata: ".encode() + json.dumps(obj).encode() + b"\n\n")
+        self.wfile.flush()
+
+    def stream_messages(self, parts):
+        """The step as Anthropic's Messages events."""
+        self.open_stream()
+        pace, calls, index = 0.0, 0, 0
+        try:
+            self.event({"type": "message_start", "message": {"usage": {
+                "input_tokens": 10, "cache_read_input_tokens": 0, "output_tokens": 1}}})
+            for word, rest in parts:
+                if word == "pace":
+                    pace = int(rest) / 1000
+                    continue
+                if word == "think":
+                    self.event({"type": "content_block_start", "index": index,
+                                "content_block": {"type": "thinking", "thinking": ""}})
+                    for p in pieces(rest):
+                        self.event({"type": "content_block_delta", "index": index,
+                                    "delta": {"type": "thinking_delta", "thinking": p}}, pace)
+                    self.event({"type": "content_block_delta", "index": index,
+                                "delta": {"type": "signature_delta", "signature": "fake-signature"}})
+                elif word in ("say", "long"):
+                    text = long_markdown(int(rest)) if word == "long" else rest
+                    self.event({"type": "content_block_start", "index": index,
+                                "content_block": {"type": "text", "text": ""}})
+                    for p in pieces(text):
+                        self.event({"type": "content_block_delta", "index": index,
+                                    "delta": {"type": "text_delta", "text": p}}, pace)
+                elif word == "tool":
+                    call = self.call(calls, rest)
+                    self.event({"type": "content_block_start", "index": index, "content_block": {
+                        "type": "tool_use", "id": call["id"], "name": call["function"]["name"], "input": {}}})
+                    for p in pieces(call["function"]["arguments"], 16):
+                        self.event({"type": "content_block_delta", "index": index,
+                                    "delta": {"type": "input_json_delta", "partial_json": p}}, pace)
+                    calls += 1
+                else:
+                    continue
+                self.event({"type": "content_block_stop", "index": index})
+                index += 1
+            self.event({"type": "message_delta", "delta": {"stop_reason": "tool_use" if calls else "end_turn"},
+                        "usage": {"output_tokens": 5}})
+            self.event({"type": "message_stop"})
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def stream_responses(self, parts):
+        """The step as OpenAI's Responses events."""
+        self.open_stream()
+        pace, output = 0.0, []
+        try:
+            for word, rest in parts:
+                at = len(output)
+                if word == "pace":
+                    pace = int(rest) / 1000
+                elif word == "think":
+                    self.event({"type": "response.output_item.added", "output_index": at, "item": {"type": "reasoning"}})
+                    for p in pieces(rest):
+                        self.event({"type": "response.reasoning_summary_text.delta", "output_index": at,
+                                    "summary_index": 0, "delta": p}, pace)
+                    item = {"type": "reasoning", "encrypted_content": "fake-encrypted"}
+                    self.event({"type": "response.output_item.done", "output_index": at, "item": item})
+                    output.append(item)
+                elif word in ("say", "long"):
+                    text = long_markdown(int(rest)) if word == "long" else rest
+                    self.event({"type": "response.output_item.added", "output_index": at, "item": {"type": "message"}})
+                    for p in pieces(text):
+                        self.event({"type": "response.output_text.delta", "output_index": at, "delta": p}, pace)
+                    item = {"type": "message"}
+                    self.event({"type": "response.output_item.done", "output_index": at, "item": item})
+                    output.append(item)
+                elif word == "tool":
+                    call = self.call(at, rest)
+                    item = {"type": "function_call", "call_id": call["id"], "name": call["function"]["name"]}
+                    self.event({"type": "response.output_item.added", "output_index": at, "item": item})
+                    for p in pieces(call["function"]["arguments"], 16):
+                        self.event({"type": "response.function_call_arguments.delta", "output_index": at,
+                                    "delta": p}, pace)
+                    self.event({"type": "response.output_item.done", "output_index": at, "item": item})
+                    output.append(item)
+            self.event({"type": "response.completed", "response": {"status": "completed", "output": output,
+                        "usage": {"input_tokens": 10, "input_tokens_details": {"cached_tokens": 0},
+                                  "output_tokens": 5}}})
         except (BrokenPipeError, ConnectionResetError):
             pass
 

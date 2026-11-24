@@ -1,9 +1,12 @@
-//! OpenAI-compatible chat completions, streamed: what most model servers
-//! speak (`llama.cpp`, Ollama, vLLM, LM Studio, `OpenRouter`, …).
+//! Talking to a model's server: OpenAI-compatible chat completions, what
+//! most model servers speak (`llama.cpp`, Ollama, vLLM, LM Studio,
+//! `OpenRouter`, …), and through [`crate::messages`] and
+//! [`crate::responses`] the two other APIs providers use.
 //!
-//! [`stream`] sends one request and reports the reply's pieces as they
-//! come: text, reasoning and tool calls, each started, grown and ended.
-//! The reply's blocks come back in order with the usage and why it ended.
+//! [`prepare`] makes a request for a provider's API and [`stream`] sends it
+//! and reports the reply's pieces as they come: text, reasoning and tool
+//! calls, each started, grown and ended. The reply's blocks come back in
+//! order with the usage and why it ended.
 
 // Rust guideline compliant 2026-10-09
 
@@ -15,21 +18,97 @@ use serde_json::{Map, Value, json};
 use sse_stream::SseByteStream;
 use tokio_util::sync::CancellationToken;
 
-use crate::Error;
+use crate::catalog::Wire;
 use crate::message::{Cache, Message, Part, Tokens, ToolState};
+use crate::{Error, ModelRef, ProviderSpec};
 
 /// The longest the server may stay silent during a reply.
 const IDLE: Duration = Duration::from_mins(5);
 
 /// Where a request goes.
-#[derive(Debug, Clone, Copy)]
-pub struct Endpoint<'a> {
-    /// The API's base URL, up to `/chat/completions`.
-    pub base_url: &'a str,
-    /// The key, sent as a bearer token.
-    pub api_key: Option<&'a str>,
+#[derive(Debug, Clone)]
+pub struct Endpoint {
+    /// The API's base URL, up to `/chat/completions` (or `/messages`,
+    /// `/responses`).
+    pub base_url: String,
+    /// The key.
+    pub api_key: Option<String>,
     /// Headers the model or its variant adds.
-    pub headers: &'a [(String, String)],
+    pub headers: Vec<(String, String)>,
+    /// The API the server speaks.
+    pub wire: Wire,
+    /// The provider and model asked, whose reasoning signatures the reply
+    /// carries.
+    pub signer: (String, String),
+}
+
+/// The request for `model` of `provider` after `history`, with `system` as
+/// its instructions and `tools` offered: where it goes and its body.
+pub(crate) fn prepare(
+    provider: &ProviderSpec,
+    model: &ModelRef,
+    system: &str,
+    history: &[Message],
+    tools: &[Value],
+) -> (Endpoint, Value) {
+    let spec = provider.models.iter().find(|m| m.id == model.model);
+    let (extra, headers) = spec
+        .map(|m| m.request_extras(model.variant.as_deref()))
+        .unwrap_or_default();
+    let output = spec.and_then(|m| m.output);
+    let at = Signer {
+        provider: &provider.id,
+        model: &model.model,
+    };
+    let body = match &provider.wire {
+        Wire::Chat => request(&model.model, system, history, tools, &extra),
+        Wire::Messages => crate::messages::request(at, output, system, history, tools, &extra),
+        Wire::Responses => crate::responses::request(at, system, history, tools, &extra),
+        Wire::Unsupported(_) => Value::Null,
+    };
+    let endpoint = Endpoint {
+        base_url: provider.base_url.clone(),
+        api_key: provider.api_key.clone(),
+        headers,
+        wire: provider.wire.clone(),
+        signer: (provider.id.clone(), model.model.clone()),
+    };
+    (endpoint, body)
+}
+
+/// Whose reasoning blocks go back to the model: those its provider and
+/// model signed.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Signer<'a> {
+    pub provider: &'a str,
+    pub model: &'a str,
+}
+
+impl Signer<'_> {
+    /// A reasoning block's signature, `kept` with whose it is.
+    pub fn sign(&self, wire: &str, kept: &Value) -> Value {
+        json!({ "wire": wire, "provider": self.provider, "model": self.model, "kept": kept })
+    }
+
+    /// What signature `signature` keeps, when this provider and model made
+    /// it over `wire`.
+    pub fn mine<'v>(&self, wire: &str, signature: Option<&'v Value>) -> Option<&'v Value> {
+        let s = signature?;
+        (s["wire"] == wire && s["provider"] == self.provider && s["model"] == self.model)
+            .then(|| &s["kept"])
+    }
+}
+
+/// A picture part as chat completions send it (`image_url` with a data
+/// URL): its type and base64 data; or its URL when it isn't data.
+pub(crate) fn picture(part: &Value) -> Option<Result<(String, String), String>> {
+    let url = part["image_url"]["url"].as_str()?;
+    Some(
+        url.strip_prefix("data:")
+            .and_then(|rest| rest.split_once(";base64,"))
+            .map(|(mime, data)| (mime.to_owned(), data.to_owned()))
+            .ok_or_else(|| url.to_owned()),
+    )
 }
 
 /// A piece of the reply as it streams.
@@ -59,7 +138,8 @@ pub(crate) enum Piece {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Block {
     Text(String),
-    Reasoning(String),
+    /// Reasoning, with what the provider needs back to continue from it.
+    Reasoning(String, Option<Value>),
     Call {
         id: String,
         name: String,
@@ -196,7 +276,7 @@ fn chat_messages(history: &[Message]) -> Vec<Value> {
 }
 
 /// The pictures a call returned, as image parts.
-fn result_pictures(state: &ToolState) -> Vec<Value> {
+pub(crate) fn result_pictures(state: &ToolState) -> Vec<Value> {
     let ToolState::Completed { content, .. } = state else {
         return Vec::new();
     };
@@ -211,7 +291,7 @@ fn result_pictures(state: &ToolState) -> Vec<Value> {
 }
 
 /// What the model is told a call returned.
-fn result_text(state: &ToolState) -> String {
+pub(crate) fn result_text(state: &ToolState) -> String {
     match state {
         ToolState::Completed { content, .. } => content
             .iter()
@@ -232,27 +312,43 @@ fn result_text(state: &ToolState) -> String {
 /// # Errors
 ///
 /// Fails when the server can't be reached, refuses the request, reports an
-/// error in its stream, goes silent for five minutes, or `stop` is
-/// cancelled.
+/// error in its stream, goes silent for five minutes, speaks an API the
+/// engine doesn't, or `stop` is cancelled.
 pub(crate) async fn stream(
-    to: Endpoint<'_>,
+    to: &Endpoint,
     body: &Value,
     stop: &CancellationToken,
     on: &mut (dyn FnMut(Piece) + Send),
 ) -> Result<Reply, Error> {
     let client = reqwest::Client::new();
-    let mut req = client
-        .post(format!("{}/chat/completions", to.base_url))
-        .json(body);
-    if let Some(key) = to.api_key {
-        req = req.bearer_auth(key);
+    let base = &to.base_url;
+    let mut req = match &to.wire {
+        Wire::Chat => client.post(format!("{base}/chat/completions")),
+        Wire::Messages => client
+            .post(format!("{base}/messages"))
+            .header("anthropic-version", "2023-06-01"),
+        Wire::Responses => client.post(format!("{base}/responses")),
+        Wire::Unsupported(package) => {
+            return Err(Error::provider(format!(
+                "Harlo's server can't talk to this provider yet: it speaks {package}."
+            )));
+        }
     }
-    for (name, value) in to.headers {
+    .json(body);
+    if let Some(key) = &to.api_key {
+        req = match &to.wire {
+            Wire::Messages => req.header("x-api-key", key),
+            // Azure takes its keys in a header of its own.
+            Wire::Responses if base.contains(".azure.com") => req.header("api-key", key),
+            _ => req.bearer_auth(key),
+        };
+    }
+    for (name, value) in &to.headers {
         req = req.header(name.as_str(), value.as_str());
     }
     let response = tokio::select! {
         () = stop.cancelled() => return Err(Error::stopped()),
-        r = req.send() => r.map_err(|e| Error::unreachable(format!("Couldn't reach {}: {e}", to.base_url)))?,
+        r = req.send() => r.map_err(|e| Error::unreachable(format!("Couldn't reach {base}: {e}")))?,
     };
     let status = response.status();
     if !status.is_success() {
@@ -270,7 +366,16 @@ pub(crate) async fn stream(
         ));
     }
     let mut events = SseByteStream::new(response.bytes_stream());
-    let mut reply = Assembler::default();
+    let mut reply = Assembler {
+        signer: Some((
+            match &to.wire {
+                Wire::Messages => "messages",
+                _ => "responses",
+            },
+            to.signer.clone(),
+        )),
+        ..Assembler::default()
+    };
     loop {
         let next = tokio::select! {
             () = stop.cancelled() => return Err(Error::stopped()),
@@ -290,18 +395,31 @@ pub(crate) async fn stream(
         let Ok(chunk) = serde_json::from_str::<Value>(&data) else {
             continue;
         };
-        if let Some(e) = chunk.get("error").filter(|e| !e.is_null()) {
-            let said = e["message"]
-                .as_str()
-                .or_else(|| e.as_str())
-                .unwrap_or("the request failed");
-            return Err(Error::provider(format!(
-                "The model's server reported an error: {said}"
-            )));
+        let more = match &to.wire {
+            Wire::Messages => crate::messages::take(&mut reply, &chunk, on)?,
+            Wire::Responses => crate::responses::take(&mut reply, &chunk, on)?,
+            _ => {
+                if let Some(e) = chunk.get("error").filter(|e| !e.is_null()) {
+                    let said = e["message"]
+                        .as_str()
+                        .or_else(|| e.as_str())
+                        .unwrap_or("the request failed");
+                    return Err(reported(said));
+                }
+                reply.take(&chunk, on);
+                true
+            }
+        };
+        if !more {
+            break;
         }
-        reply.take(&chunk, on);
     }
     Ok(reply.finish(on))
+}
+
+/// An error the model's server reported in its stream.
+pub(crate) fn reported(said: &str) -> Error {
+    Error::provider(format!("The model's server reported an error: {said}"))
 }
 
 /// Why a server refused, for a person.
@@ -315,17 +433,19 @@ fn refusal(status: u16, text: &str) -> String {
     format!("The model's server refused the request ({status}): {said}")
 }
 
-/// Builds the reply from its chunks.
+/// Builds the reply from its pieces, whichever API they came in.
 #[derive(Default)]
-struct Assembler {
+pub(crate) struct Assembler {
     blocks: Vec<Block>,
     /// The text or reasoning block still growing.
     open: Option<usize>,
-    /// A call's stream index → its block.
-    calls: HashMap<u64, usize>,
-    tokens: Tokens,
-    finish: Option<String>,
+    /// A call's key in the stream → its block.
+    calls: HashMap<String, usize>,
+    pub tokens: Tokens,
+    pub finish: Option<String>,
     started: bool,
+    /// The wire, provider and model signatures are kept with.
+    signer: Option<(&'static str, (String, String))>,
 }
 
 impl Assembler {
@@ -348,42 +468,109 @@ impl Assembler {
             self.grow(false, text, on);
         }
         for c in d["tool_calls"].as_array().into_iter().flatten() {
-            self.first(on);
-            let index = c["index"].as_u64().unwrap_or(0);
-            let at = if let Some(at) = self.calls.get(&index) {
-                *at
-            } else {
-                self.close(on);
-                let at = self.blocks.len();
-                let id = c["id"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .map_or_else(|| crate::id::ascending_id("call"), str::to_owned);
-                let name = c["function"]["name"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned();
-                on(Piece::CallStarted {
-                    id: id.clone(),
-                    name: name.clone(),
-                });
-                self.blocks.push(Block::Call {
-                    id,
-                    name,
-                    arguments: String::new(),
-                });
-                self.calls.insert(index, at);
-                at
-            };
-            if let Some(Block::Call { arguments, .. }) = self.blocks.get_mut(at)
-                && let Some(a) = c["function"]["arguments"].as_str()
-            {
-                arguments.push_str(a);
+            let key = c["index"].as_u64().unwrap_or(0).to_string();
+            if !self.calls.contains_key(&key) {
+                self.call_started(
+                    key.clone(),
+                    c["id"].as_str().unwrap_or_default(),
+                    c["function"]["name"].as_str().unwrap_or_default(),
+                    on,
+                );
+            }
+            if let Some(a) = c["function"]["arguments"].as_str() {
+                self.call_grew(&key, a);
             }
         }
         if let Some(f) = choice["finish_reason"].as_str() {
             self.finish = Some(f.to_owned());
         }
+    }
+
+    /// A tool call began; `key` names it in later pieces.
+    pub fn call_started(
+        &mut self,
+        key: String,
+        id: &str,
+        name: &str,
+        on: &mut (dyn FnMut(Piece) + Send),
+    ) {
+        self.first(on);
+        self.close(on);
+        let at = self.blocks.len();
+        let id = Some(id)
+            .filter(|s| !s.is_empty())
+            .map_or_else(|| crate::id::ascending_id("call"), str::to_owned);
+        on(Piece::CallStarted {
+            id: id.clone(),
+            name: name.to_owned(),
+        });
+        self.blocks.push(Block::Call {
+            id,
+            name: name.to_owned(),
+            arguments: String::new(),
+        });
+        self.calls.insert(key, at);
+    }
+
+    /// More of call `key`'s arguments.
+    pub fn call_grew(&mut self, key: &str, delta: &str) {
+        if let Some(at) = self.calls.get(key)
+            && let Some(Block::Call { arguments, .. }) = self.blocks.get_mut(*at)
+        {
+            arguments.push_str(delta);
+        }
+    }
+
+    /// More text.
+    pub fn text(&mut self, delta: &str, on: &mut (dyn FnMut(Piece) + Send)) {
+        if !delta.is_empty() {
+            self.grow(false, delta, on);
+        }
+    }
+
+    /// More reasoning; a fresh block when `new`.
+    pub fn reasoning(&mut self, delta: &str, new: bool, on: &mut (dyn FnMut(Piece) + Send)) {
+        if new {
+            self.close(on);
+        }
+        if !delta.is_empty() {
+            self.grow(true, delta, on);
+        }
+    }
+
+    /// Gives the last reasoning block `signature`, or adds an empty one
+    /// that holds it (reasoning the server keeps to itself).
+    pub fn sign(&mut self, signature: Value, on: &mut (dyn FnMut(Piece) + Send)) {
+        let signature = match &self.signer {
+            Some((wire, (provider, model))) => Signer { provider, model }.sign(wire, &signature),
+            None => signature,
+        };
+        let last = self
+            .blocks
+            .iter_mut()
+            .rev()
+            .find(|b| !matches!(b, Block::Call { .. }));
+        if let Some(Block::Reasoning(_, kept @ None)) = last {
+            *kept = Some(signature);
+            return;
+        }
+        self.first(on);
+        self.close(on);
+        // Announced like any block, so the places of later ones hold.
+        let at = self.blocks.len();
+        on(Piece::ReasoningStarted { at });
+        self.blocks
+            .push(Block::Reasoning(String::new(), Some(signature)));
+        on(Piece::ReasoningEnded {
+            at,
+            text: String::new(),
+        });
+    }
+
+    /// Ends the growing text or reasoning block, so the next piece starts
+    /// another.
+    pub fn end_block(&mut self, on: &mut (dyn FnMut(Piece) + Send)) {
+        self.close(on);
     }
 
     fn first(&mut self, on: &mut (dyn FnMut(Piece) + Send)) {
@@ -399,14 +586,14 @@ impl Assembler {
         let same = self.open.is_some_and(|at| {
             matches!(
                 (&self.blocks[at], reasoning),
-                (Block::Reasoning(_), true) | (Block::Text(_), false)
+                (Block::Reasoning(..), true) | (Block::Text(_), false)
             )
         });
         if !same {
             self.close(on);
             let at = self.blocks.len();
             self.blocks.push(if reasoning {
-                Block::Reasoning(String::new())
+                Block::Reasoning(String::new(), None)
             } else {
                 Block::Text(String::new())
             });
@@ -418,7 +605,7 @@ impl Assembler {
             });
         }
         let Some(at) = self.open else { return };
-        if let Block::Reasoning(s) | Block::Text(s) = &mut self.blocks[at] {
+        if let Block::Reasoning(s, _) | Block::Text(s) = &mut self.blocks[at] {
             s.push_str(delta);
         }
         let delta = delta.to_owned();
@@ -437,7 +624,7 @@ impl Assembler {
                     at,
                     text: s.clone(),
                 }),
-                Block::Reasoning(s) => on(Piece::ReasoningEnded {
+                Block::Reasoning(s, _) => on(Piece::ReasoningEnded {
                     at,
                     text: s.clone(),
                 }),
@@ -446,7 +633,7 @@ impl Assembler {
         }
     }
 
-    fn finish(mut self, on: &mut (dyn FnMut(Piece) + Send)) -> Reply {
+    pub fn finish(mut self, on: &mut (dyn FnMut(Piece) + Send)) -> Reply {
         self.close(on);
         for block in &self.blocks {
             if let Block::Call { id, arguments, .. } = block {
@@ -513,7 +700,7 @@ mod tests {
         assert_eq!(
             reply.blocks,
             [
-                Block::Reasoning("think".into()),
+                Block::Reasoning("think".into(), None),
                 Block::Text("Hello".into()),
                 Block::Call {
                     id: "c1".into(),

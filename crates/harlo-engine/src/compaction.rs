@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::chat::{self, Block, Endpoint};
+use crate::chat::{self, Block};
 use crate::config::{ModelRef, ProviderSpec};
 use crate::message::{Created, ErrorInfo, Message, Tokens};
 use crate::turn::{Event, Sink, now};
@@ -127,17 +127,9 @@ pub async fn compact(
         files: Vec::new(),
     });
     let spec = provider.models.iter().find(|m| m.id == model.model);
-    let (extra, headers) = spec
-        .map(|m| m.request_extras(model.variant.as_deref()))
-        .unwrap_or_default();
-    let body = chat::request(&model.model, system, &asked, &[], &extra);
-    let to = Endpoint {
-        base_url: &provider.base_url,
-        api_key: provider.api_key.as_deref(),
-        headers: &headers,
-    };
+    let (to, body) = chat::prepare(provider, model, system, &asked, &[]);
     done.model = Some(model.clone());
-    match chat::stream(to, &body, stop, &mut |_| {}).await {
+    match chat::stream(&to, &body, stop, &mut |_| {}).await {
         Ok(reply) => {
             let summary: String = reply
                 .blocks

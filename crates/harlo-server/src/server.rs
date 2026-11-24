@@ -1321,16 +1321,19 @@ impl Hooks {
                     *at,
                     Part::Reasoning {
                         text: String::new(),
+                        signature: None,
                     },
                 );
             }
             Event::TextDelta { at, delta, .. } | Event::ReasoningDelta { at, delta, .. } => {
-                if let Some(Part::Text { text } | Part::Reasoning { text }) = s.parts.get_mut(at) {
+                if let Some(Part::Text { text } | Part::Reasoning { text, .. }) =
+                    s.parts.get_mut(at)
+                {
                     text.push_str(delta);
                 }
             }
             Event::TextEnded { at, text, .. } | Event::ReasoningEnded { at, text, .. } => {
-                if let Some(Part::Text { text: t } | Part::Reasoning { text: t }) =
+                if let Some(Part::Text { text: t } | Part::Reasoning { text: t, .. }) =
                     s.parts.get_mut(at)
                 {
                     t.clone_from(text);
