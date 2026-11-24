@@ -50,9 +50,10 @@ const POPULAR: [(&str, &str, bool); 8] = [
     ),
 ];
 
-/// The providers OpenCode uses and how each is signed in, the best-known
-/// ones not yet connected, and a button that lists them all.
-pub(super) fn provider_rows(app: &App) -> Vec<SheetRow> {
+/// The providers OpenCode uses and how each is signed in, then
+/// `after_connected`, the best-known ones not yet connected, and a button
+/// that lists them all.
+pub(super) fn provider_rows(app: &App, after_connected: Vec<SheetRow>) -> Vec<SheetRow> {
     let page = &app.sheets.providers;
     let mut rows = vec![
         heading("Connected"),
@@ -115,6 +116,7 @@ pub(super) fn provider_rows(app: &App) -> Vec<SheetRow> {
         Load::Loaded(_) if shown.is_empty() => rows.push(note("None yet.")),
         _ => {}
     }
+    rows.extend(after_connected);
     let popular: Vec<SheetRow> = POPULAR
         .iter()
         .filter(|(id, ..)| !shown.iter().any(|(shown, ..)| shown == id))

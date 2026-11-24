@@ -144,7 +144,7 @@ fn a_claude_subscription_signs_in_connects_and_disconnects() {
 
     ui.press("Connect");
     assert!(
-        tasks.until(&ui, WAIT, |ui| ui.shows("Connected")),
+        tasks.until(&ui, WAIT, |ui| ui.shows("Disconnect")),
         "OpenCode is connected"
     );
     let project = sandbox.project_str();

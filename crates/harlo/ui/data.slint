@@ -37,9 +37,7 @@ export struct Tab {
 /// What a sidebar row is.
 export enum RowKind {
     project,
-    worktree,
     session,
-    child,
     more,
 }
 
@@ -60,16 +58,16 @@ export struct SidebarRow {
     trusted: bool,
     /// A session's maker logo: 0 none, 1 Anthropic, 2 OpenAI, 3 Z.ai.
     maker: int,
-    /// The maker's tone, or a subagent's colour.
+    /// The maker's tone, or a project's colour.
     tone: color,
-    /// A child's agent name.
-    agent: string,
     /// Whether the title is a placeholder.
     untitled: bool,
     /// Whether space follows, closing a project's group.
     gap: bool,
-    /// Whether it belongs to a worktree, under the worktree's row.
-    nested: bool,
+    /// A session's worktree, when it runs in one rather than the
+    /// project's own folder, and the branch checked out there, once known.
+    worktree: string,
+    branch: string,
     /// For a project: whether it has a colour, `tone`, and its icon image,
     /// if it has one.
     colored: bool,
@@ -428,6 +426,22 @@ export struct TodoRow {
     status: int,
 }
 
+/// One of the Subagents panel's rows: a subagent's session.
+export struct SubagentRow {
+    id: string,
+    /// Its agent's name, drawn in `tone`.
+    agent: string,
+    title: string,
+    tone: color,
+    selected: bool,
+    busy: bool,
+    waiting: bool,
+    /// Whether all it waits for are answers, no approvals.
+    asking: bool,
+    /// How long ago it last changed.
+    detail: string,
+}
+
 /// One row of the Changes panel's list: a section's title, a note, a file,
 /// or a line of a file's open diff. Rust gives each its height, so it knows
 /// where every row sits.
@@ -701,7 +715,7 @@ export global State {
     // The shell.
     in property <bool> sidebar-shown: true;
     in property <length> sidebar-width: 288px;
-    in property <[bool]> panels-shown: [false, false, false, false, false];
+    in property <[bool]> panels-shown: [false, false, false, false, false, false];
     /// The tool panel on screen, by number, or -1; with `maximized` it
     /// covers the space between the rails.
     in property <int> panel: -1;
@@ -730,6 +744,9 @@ export global State {
     /// loading stands, or what the guide's step is for.
     in property <int> sheet;
     in property <string> sheet-title;
+    /// Which page Settings shows, as a key that changes with it: a new
+    /// page starts at its top.
+    in property <string> sheet-page;
     in property <[SheetRow]> sheet-rows;
     in property <string> sheet-note;
     /// The stats' numbers, day bars and range: 0 a week, 1 a month, 2 all.
@@ -768,6 +785,12 @@ export global State {
     in property <[InstructionFile]> context-files;
     in property <TodosCard> todos-card;
     in property <[TodoRow]> todo-rows;
+    /// The Subagents panel's rows, and its words when it has none.
+    in property <[SubagentRow]> subagent-rows;
+    in property <string> subagents-note;
+    /// How many of the open session's subagents work or wait, counted on
+    /// the panel's rail button.
+    in property <int> subagents-working;
     /// The Changes panel: a note instead of its lists while loading, the
     /// lists, the selected file's path and diff (maximized), its foot, the
     /// commit message, and where the selected rows sit in each list.
@@ -885,6 +908,8 @@ export global State {
     /// The worktree the open session runs in, by name; empty in a
     /// project's own folder.
     in property <string> session-worktree;
+    /// The branch checked out in the session's worktree, once known.
+    in property <string> session-branch;
     in property <bool> session-busy;
     in property <string> session-placeholder;
     in property <[TimelineRow]> timeline;

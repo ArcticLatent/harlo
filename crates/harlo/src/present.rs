@@ -30,7 +30,7 @@ use harlo_core::theme::{Rgba, Tokens};
 use lucide_icons::Icon;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
-use crate::app::{App, Document, FileBody, Listening, Panel, Status, capitalized};
+use crate::app::{App, Document, FileBody, Listening, Panel, Status};
 use crate::model::{self, Picker, READ_ONLY, Variant};
 use crate::theme::color;
 use crate::ui::{
@@ -157,6 +157,16 @@ impl Presenter {
             &self.panels,
             Panel::ALL.iter().map(|&p| app.panel_shown(p)).collect(),
         );
+        // The Subagents button counts those at work, panel open or not.
+        state.set_subagents_working(app.subagent_parent().map_or(0, |parent| {
+            offset(
+                parent
+                    .children
+                    .iter()
+                    .filter(|c| c.busy || c.waiting)
+                    .count(),
+            )
+        }));
         Self::sides(app, &state);
         self.sidebar(app, &state);
         self.center(app, &state);
@@ -580,8 +590,21 @@ fn empty_text(status: &Status) -> String {
     }
 }
 
-/// The sidebar's rows: each project's heading and sessions, then its
-/// worktrees' headings and sessions.
+/// A session the sidebar lists under its project, with the worktree it
+/// runs in, if not the project's own folder.
+struct Listed<'a> {
+    session: &'a SessionSummary,
+    worktree: Option<&'a harlo_core::sessions::Worktree>,
+}
+
+impl std::borrow::Borrow<SessionSummary> for Listed<'_> {
+    fn borrow(&self) -> &SessionSummary {
+        self.session
+    }
+}
+
+/// The sidebar's rows: each project's heading, then its sessions and its
+/// worktrees', newest first, those in a worktree marked with it.
 fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
     let filtering = !app.filter.trim().is_empty();
     let mut rows = Vec::new();
@@ -602,25 +625,22 @@ fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
             picture: marks.image(project.icon.as_deref()),
             ..SidebarRow::default()
         });
-        let mut any = session_rows(app, &project.directory, &project.sessions, &mut rows);
-        for worktree in &project.worktrees {
-            let heading = rows.len();
-            rows.push(SidebarRow {
-                kind: RowKind::Worktree,
-                id: worktree.directory.as_str().into(),
-                title: worktree.name.as_str().into(),
-                detail: worktree.sessions.len().to_string().into(),
-                ..SidebarRow::default()
-            });
-            if session_rows(app, &worktree.directory, &worktree.sessions, &mut rows) {
-                for row in &mut rows[heading + 1..] {
-                    row.nested = true;
-                }
-                any = true;
-            } else if filtering {
-                rows.truncate(heading);
-            }
-        }
+        let mut listed: Vec<Listed<'_>> = project
+            .sessions
+            .iter()
+            .map(|session| Listed {
+                session,
+                worktree: None,
+            })
+            .chain(project.worktrees.iter().flat_map(|w| {
+                w.sessions.iter().map(move |session| Listed {
+                    session,
+                    worktree: Some(w),
+                })
+            }))
+            .collect();
+        listed.sort_by_key(|l| l.session.age);
+        let any = session_rows(app, &project.directory, &listed, &mut rows);
         if filtering && !any {
             rows.truncate(start);
         } else if let Some(last) = rows.last_mut() {
@@ -630,12 +650,12 @@ fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
     rows
 }
 
-/// Adds one folder's session rows, with "Show N more"; returns whether
+/// Adds one project's session rows, with "Show N more"; returns whether
 /// any showed.
 fn session_rows(
     app: &App,
     folder: &str,
-    sessions: &[SessionSummary],
+    sessions: &[Listed<'_>],
     rows: &mut Vec<SidebarRow>,
 ) -> bool {
     let t = &app.tokens;
@@ -645,8 +665,11 @@ fn session_rows(
     if shown.is_empty() {
         return false;
     }
-    for session in shown {
-        let selected = app.active.as_deref() == Some(session.id.as_str());
+    for &Listed { session, worktree } in shown {
+        // A subagent's session open marks its parent's row.
+        let selected = app.active.as_deref().is_some_and(|active| {
+            session.id == active || session.children.iter().any(|c| c.id == active)
+        });
         let (maker, tone) = maker(t, session.maker.as_deref());
         rows.push(SidebarRow {
             kind: RowKind::Session,
@@ -665,20 +688,13 @@ fn session_rows(
             trusted: app.shield_of(&session.id) == Shield::Trusted,
             maker,
             tone: color(tone),
+            worktree: worktree.map(|w| w.name.as_str()).unwrap_or_default().into(),
+            branch: worktree
+                .and_then(|w| app.branch_of(&w.directory))
+                .unwrap_or_default()
+                .into(),
             ..SidebarRow::default()
         });
-        // Its subagents, while they matter: it or one of them is open, or
-        // one is still working or asking.
-        let open = selected
-            || session
-                .children
-                .iter()
-                .any(|c| app.active.as_deref() == Some(c.id.as_str()));
-        for child in &session.children {
-            if open || child.busy || child.waiting {
-                rows.push(child_row(app, child));
-            }
-        }
     }
     if hidden > 0 || (expanded && !filtering && sessions.len() > VISIBLE_SESSIONS) {
         let title = if hidden > 0 {
@@ -694,36 +710,6 @@ fn session_rows(
         });
     }
     true
-}
-
-/// A subagent's session under its parent.
-fn child_row(app: &App, child: &SessionSummary) -> SidebarRow {
-    let t = &app.tokens;
-    let agent = child.agent.as_deref().and_then(|id| app.agent(id));
-    let name = agent.as_ref().map_or_else(
-        || {
-            child
-                .agent
-                .as_deref()
-                .map_or_else(|| "Subagent".to_owned(), capitalized)
-        },
-        |a| a.name.clone(),
-    );
-    SidebarRow {
-        kind: RowKind::Child,
-        id: child.id.as_str().into(),
-        title: child.title.as_str().into(),
-        agent: name.into(),
-        tone: color(
-            agent
-                .and_then(|a| a.color)
-                .map_or_else(|| crate::theme::quiet_icon(t), |c| crate::theme::ink(t, c)),
-        ),
-        selected: app.active.as_deref() == Some(child.id.as_str()),
-        busy: child.busy,
-        waiting: child.waiting,
-        ..SidebarRow::default()
-    }
 }
 
 /// The logo of a session's model maker, by OpenCode provider ID, and its
@@ -862,7 +848,7 @@ fn can_refresh(app: &App, panel: Panel) -> bool {
     match panel {
         Panel::Context => app.active.is_some(),
         Panel::Changes | Panel::Files => true,
-        Panel::Todos | Panel::Notes => false,
+        Panel::Todos | Panel::Subagents | Panel::Notes => false,
     }
 }
 

@@ -4,8 +4,8 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State } from "data.slint";
-import { Icon, QuietBar } from "widgets.slint";
+import { State, Logic, SubagentRow } from "data.slint";
+import { Icon, QuietBar, Press, Spinner } from "widgets.slint";
 import { ChangesPanel } from "changes.slint";
 import { FilesPanel } from "files.slint";
 import { NotesPanel } from "notes.slint";
@@ -307,6 +307,71 @@ export component TodosPanel inherits Rectangle {
     }
 }
 
+/// A subagent's row: its agent and what it works on, and how it stands;
+/// a click opens its session.
+component SubagentItem inherits Press {
+    in property <SubagentRow> entry;
+    height: 48px;
+    label: root.entry.agent + ": " + root.entry.title;
+    about: root.entry.waiting ? (root.entry.asking ? "Asks a question" : "Waits for approval")
+        : root.entry.busy ? "Working" : root.entry.detail;
+    selected: root.entry.selected;
+    lit: Theme.selected-tint;
+    clicked => { Logic.open-session(root.entry.id); }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                text: Icons.bot;
+                font-size: 14px;
+                color: root.entry.tone;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.entry.agent;
+                overflow: elide;
+                font-size: Size.small;
+                color: Theme.text-weak;
+            }
+            Text {
+                text: root.entry.title;
+                overflow: elide;
+                font-size: Size.label;
+                color: root.entry.selected ? Theme.text-strong : Theme.text-base;
+            }
+        }
+        if root.entry.waiting: Icon {
+            text: root.entry.asking ? Icons.circle-question : Icons.shield-alert;
+            color: root.entry.asking ? Theme.accent-ink : Theme.icon-warning-base;
+        }
+        if root.entry.busy && !root.entry.waiting: Spinner { }
+        if !root.entry.busy && !root.entry.waiting: Text {
+            text: root.entry.detail;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weaker;
+        }
+    }
+}
+
+/// The Subagents panel: the open session's subagents.
+component SubagentsPanel inherits Rectangle {
+    if State.subagents-note != "": Note { text: State.subagents-note; }
+    if State.subagents-note == "": Body {
+        VerticalLayout {
+            spacing: 2px;
+            for entry in State.subagent-rows: SubagentItem { entry: entry; }
+        }
+    }
+}
+
 /// The shown tool panel's body, by its number in the rail's order.
 ///
 /// `panel` is the one shown, the open one unless a closing panel is still
@@ -316,9 +381,10 @@ export component PanelBody inherits Rectangle {
     background: Theme.background-base;
     if root.panel == 0: ContextPanel { }
     if root.panel == 1: TodosPanel { }
-    if root.panel == 2: ChangesPanel {
+    if root.panel == 2: SubagentsPanel { }
+    if root.panel == 3: ChangesPanel {
         wide: State.maximized;
     }
-    if root.panel == 3: FilesPanel { }
-    if root.panel == 4: NotesPanel { }
+    if root.panel == 4: FilesPanel { }
+    if root.panel == 5: NotesPanel { }
 }

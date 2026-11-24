@@ -248,7 +248,7 @@ fn clicking_a_session_opens_it() {
 }
 
 #[test]
-fn worktrees_group_their_sessions_under_the_project() {
+fn worktree_sessions_sit_with_the_projects_marked_with_the_worktree() {
     let mut snapshot = demo::snapshot();
     let worktree = "/home/burce/.worktrees/feature-x";
     snapshot
@@ -261,25 +261,50 @@ fn worktrees_group_their_sessions_under_the_project() {
     let ui = ui(app);
     ui.send(Message::Tick(demo::now()));
     ui.send(demo::connected(snapshot));
-    assert!(ui.shows("feature-x"));
     assert!(ui.shows("Working in the worktree"));
 
-    // Its session sits under the worktree's row, and says where it runs.
+    // No heading row for the worktree: its session is among the project's,
+    // with a mark naming the worktree, and its branch once read.
     let state = slint::ComponentHandle::global::<harlo::ui::State>(&ui.window);
-    let rows = state.get_sidebar_rows();
-    let nested: Vec<_> = (0..rows.row_count())
-        .filter_map(|i| rows.row_data(i))
-        .filter(|row| row.nested)
-        .map(|row| row.title.to_string())
-        .collect();
-    assert_eq!(nested, ["Working in the worktree"]);
+    let marked = || {
+        let rows = state.get_sidebar_rows();
+        (0..rows.row_count())
+            .filter_map(|i| rows.row_data(i))
+            .filter(|row| !row.worktree.is_empty())
+            .map(|row| {
+                (
+                    row.title.to_string(),
+                    row.worktree.to_string(),
+                    row.branch.to_string(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        marked(),
+        [(
+            "Working in the worktree".into(),
+            "feature-x".into(),
+            String::new()
+        )]
+    );
+    assert!(ui.shows("Worktree feature-x"), "the mark's name");
+    ui.send(Message::Branch(
+        worktree.into(),
+        Some("helper-temperature".into()),
+    ));
+    assert_eq!(marked()[0].2, "helper-temperature");
+    assert!(ui.shows("Worktree feature-x · branch helper-temperature"));
+
+    // The header says where it runs.
     ui.send(Message::OpenSession(id));
     assert_eq!(state.get_session_worktree(), "feature-x");
     assert!(ui.shows("In worktree feature-x"));
+    assert!(ui.shows("On branch helper-temperature"));
 
-    // The filter keeps the worktree heading when it has matches.
+    // The filter finds it like any other.
     ui.send(Message::Filter("worktree".into()));
-    assert!(ui.shows("feature-x"));
+    assert!(ui.shows("Working in the worktree"));
     assert!(!ui.shows("hi how are you"));
 }
 

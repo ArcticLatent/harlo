@@ -62,6 +62,8 @@ component RailButton inherits Press {
     in property <string> tip: self.label;
     /// A small amber pause mark on its corner.
     in property <bool> paused;
+    /// A number on its corner, when above 0.
+    in property <int> count;
     /// Whether the name opens to the left, from the right rail.
     in property <bool> leftward;
     /// Pressed since the pointer came: its name stays away until it leaves.
@@ -110,6 +112,22 @@ component RailButton inherits Press {
         // shown as on but not yet working, stays plain.
         color: (root.selected || root.hovered) && root.enabled ? Theme.accent-ink
             : root.selected ? Theme.icon-selected : Theme.icon-base;
+    }
+    if root.count > 0: Rectangle {
+        x: parent.width - self.width - 2px;
+        y: 2px;
+        width: max(14px, badge.preferred-width + 6px);
+        height: 14px;
+        border-radius: 7px;
+        background: Theme.surface-interactive-base;
+        badge := Text {
+            text: root.count;
+            font-size: 9px;
+            font-weight: 600;
+            color: Theme.text-on-interactive-base;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
     if root.paused: Rectangle {
         x: parent.width - self.width - 3px;
@@ -343,6 +361,7 @@ export component RightRail inherits Rectangle {
             for panel[index] in [
                 { glyph: Icons.context, label: "Context" },
                 { glyph: Icons.todos, label: "Todos" },
+                { glyph: Icons.bot, label: "Subagents" },
                 { glyph: Icons.changes, label: "Changes" },
                 { glyph: Icons.files, label: "Files" },
                 { glyph: Icons.notes, label: "Notes" },
@@ -353,6 +372,8 @@ export component RightRail inherits Rectangle {
                     label: panel.label;
                     leftward: true;
                     selected: State.panels-shown[index];
+                    // Subagents counts those at work.
+                    count: index == 2 ? State.subagents-working : 0;
                     clicked => { Logic.toggle-panel(index); }
                 }
             }

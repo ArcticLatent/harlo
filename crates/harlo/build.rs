@@ -32,6 +32,7 @@ const ICONS: &[(&str, Icon)] = &[
     ("todos", Icon::ListChecks),
     ("changes", Icon::GitBranch),
     ("git-branch", Icon::GitBranch),
+    ("worktree", Icon::FolderGit2),
     ("fork", Icon::GitFork),
     ("files", Icon::Files),
     ("notes", Icon::FileText),

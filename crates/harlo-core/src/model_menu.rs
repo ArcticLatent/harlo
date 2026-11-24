@@ -25,10 +25,11 @@ pub fn key(provider_id: &str, id: &str) -> String {
     format!("{provider_id}/{id}")
 }
 
-/// The keys of the models that show when nobody chose, out of `models`, at
-/// `now`: per provider, the newest of each family released within
-/// [`RECENT`] (free and paid ones apart), OpenCode's free models, and those
-/// without a release date.
+/// Returns the keys of the models that show until someone chooses.
+///
+/// Out of `models`, at `now`: per provider, the newest of each family
+/// released within [`RECENT`] (free and paid ones apart), OpenCode's free
+/// models, and those without a release date.
 #[must_use]
 pub fn shown_by_default(models: &[Model], now: SystemTime) -> HashSet<String> {
     let now_ms = now
@@ -68,7 +69,11 @@ pub fn shown_by_default(models: &[Model], now: SystemTime) -> HashSet<String> {
 /// Whether the model with key `key` shows: as chosen in `choices`, else as
 /// `defaults` (from [`shown_by_default`]) say.
 #[must_use]
-pub fn shown(choices: &BTreeMap<String, bool>, defaults: &HashSet<String>, key: &str) -> bool {
+pub fn shown<S: std::hash::BuildHasher>(
+    choices: &BTreeMap<String, bool>,
+    defaults: &HashSet<String, S>,
+    key: &str,
+) -> bool {
     choices
         .get(key)
         .copied()

@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 import traceback
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -700,7 +701,7 @@ def with_sidebar(h):
 
 def scene_worktrees(g):
     """A worktree made from Settings → Projects, its row in the sidebar,
-    and a session in it."""
+    and a session in it, among the project's."""
     h = g.h
     with_sidebar(h)
     settings(h, "Projects")
@@ -718,24 +719,26 @@ def scene_worktrees(g):
     g.cap("settings", "Settings → Projects: the project's worktree, Make for another, and its setup command")
     h.press("Close")
     h.wait_gone("Search settings", role="TextInput")
-    h.wait("New session in fix-tabs", role="Button", timeout=30)
+    # A session in the worktree, made through OpenCode and titled, as the
+    # other scenes give theirs: the scripted model names none.
+    folders = h.api("GET", "/api/worktree?location%5Bdirectory%5D="
+                    + urllib.parse.quote(h.project, safe=""))["data"]
+    tree = next(f["directory"] for f in folders if f["directory"].endswith("fix-tabs"))
+    created = h.api("POST", "/api/session", {"location": {"directory": tree}})["data"]
+    h.api("PATCH", f"/api/session/{created['id']}", {"title": "Tab order"})
+    h.wait("Tab order", role=None, where=lambda e: e.x < 340, timeout=15)
     h.settle(0.8)
-    g.cap("sidebar", "The sidebar: the worktree under its project, with its sessions' count")
-    h.press("New session in fix-tabs")
+    h.hover("Worktree fix-tabs", role=None)
+    h.settle(1.2)
+    g.cap("sidebar", "The sidebar: the worktree's session among its project's, its mark naming the worktree")
+    h.click("Tab order", role=None, where=lambda e: e.x < 340)
     h.wait(None, role="TextInput", where=composer, timeout=15)
     ask(h, "Fix the tab order in the settings dialog.",
         [[("tool", 'glob {"pattern":"*.txt"}')],
          [("say", "Fixed the tab order on the **fix-tabs** branch; the main checkout is untouched.")]])
     h.wait_says("main checkout is untouched", timeout=40)
-    # A title, as the other scenes give theirs: the scripted model has none.
-    listed = h.api("GET", "/api/session?limit=50")["data"]
-    listed = listed.get("items", listed) if isinstance(listed, dict) else listed
-    for session in listed:
-        if session.get("location", {}).get("directory", session.get("directory", "")).endswith("fix-tabs"):
-            h.api("PATCH", f"/api/session/{session['id']}", {"title": "Tab order"})
-    h.wait("Tab order", role=None, where=lambda e: e.x < 340, timeout=15)
     h.settle(1)
-    g.cap("session", "A session working in the worktree, listed under it in the sidebar")
+    g.cap("session", "A session working in the worktree: the header names the worktree and its branch")
 
 
 # What the explorer is asked, and what it does: a search, a read, then a
@@ -783,6 +786,11 @@ def scene_subagents(g):
     h.settle(1)
     g.cap("child", "The subagent's own session: its task, its tool calls and report, and the way back")
     h.click("Subagent of Test coverage", role=None)
+    h.settle(0.8)
+    h.click("Subagents", role=None, where=lambda e: e.x > h.size[0] - 60)
+    h.settle(1.2)
+    g.cap("panel", "The Subagents panel: the session's subagents, each opening its own session")
+    h.click("Subagents", role=None, where=lambda e: e.x > h.size[0] - 60)
     h.settle(0.8)
 
 

@@ -88,18 +88,18 @@ impl Project {
 ///
 /// A non-empty `filter` keeps titles containing it, ignoring case, and shows
 /// every match. Otherwise the first [`VISIBLE_SESSIONS`] are listed unless
-/// `expanded`.
+/// `expanded`. The sessions may come with more, such as where each runs.
 #[must_use]
-pub fn visible<'a>(
-    sessions: &'a [SessionSummary],
+pub fn visible<'a, T: std::borrow::Borrow<SessionSummary>>(
+    sessions: &'a [T],
     filter: &str,
     expanded: bool,
-) -> (Vec<&'a SessionSummary>, usize) {
+) -> (Vec<&'a T>, usize) {
     let filter = filter.trim().to_lowercase();
     if !filter.is_empty() {
         let found = sessions
             .iter()
-            .filter(|s| s.title.to_lowercase().contains(&filter))
+            .filter(|s| s.borrow().title.to_lowercase().contains(&filter))
             .collect();
         return (found, 0);
     }

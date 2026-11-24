@@ -1102,6 +1102,32 @@ impl Client {
         Ok(SessionContext::from_json(messages))
     }
 
+    /// Returns the branch checked out in `directory`, when it's in a
+    /// repository on one.
+    ///
+    /// The server answers without a provider until it has looked at the
+    /// folder, so such an answer is asked again a few times.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached.
+    pub async fn branch(&self, directory: &str) -> Result<Option<String>, Error> {
+        /// How often an answer without a provider is asked again.
+        const TRIES: u32 = 5;
+        let mut v = self.list("/api/vcs", directory, &[]).await?;
+        for _ in 1..TRIES {
+            if v.get("provider").is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            v = self.list("/api/vcs", directory, &[]).await?;
+        }
+        Ok(v["branch"]["current"]
+            .as_str()
+            .filter(|b| !b.is_empty())
+            .map(str::to_owned))
+    }
+
     /// Returns the uncommitted changes in `directory`'s repository, as diffs.
     ///
     /// Each file's patch compares it with the last commit, so staged and

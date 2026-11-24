@@ -14,10 +14,13 @@ use harlo_core::server::Tokens;
 use harlo_core::timeline::{Todo, TodoStatus, todo_counts, todo_progress};
 use slint::VecModel;
 
+use harlo_core::sessions::{SessionSummary, compact_age};
+
 use super::sync;
-use crate::app::{App, ContextFacts, Panel};
+use crate::app::{App, ContextFacts, Panel, capitalized};
 use crate::model::{TODO_SETTING, compact, dollars};
-use crate::ui::{ContextCard, Fact, InstructionFile, State, TodoRow, TodosCard};
+use crate::theme::color;
+use crate::ui::{ContextCard, Fact, InstructionFile, State, SubagentRow, TodoRow, TodosCard};
 
 /// How full the window gets before its bar warns, from 0 to 1.
 ///
@@ -30,6 +33,7 @@ pub struct Lists {
     facts: Rc<VecModel<Fact>>,
     files: Rc<VecModel<InstructionFile>>,
     todos: Rc<VecModel<TodoRow>>,
+    subagents: Rc<VecModel<SubagentRow>>,
 }
 
 impl std::fmt::Debug for Lists {
@@ -45,7 +49,9 @@ impl Lists {
             facts: Rc::new(VecModel::default()),
             files: Rc::new(VecModel::default()),
             todos: Rc::new(VecModel::default()),
+            subagents: Rc::new(VecModel::default()),
         };
+        state.set_subagent_rows(Rc::clone(&lists.subagents).into());
         state.set_context_facts(Rc::clone(&lists.facts).into());
         state.set_context_files(Rc::clone(&lists.files).into());
         state.set_todo_rows(Rc::clone(&lists.todos).into());
@@ -60,6 +66,29 @@ impl Lists {
         if app.panel_shown(Panel::Todos) {
             self.todos(app, state);
         }
+        if app.panel_shown(Panel::Subagents) {
+            self.subagents(app, state);
+        }
+    }
+
+    /// The Subagents panel: the session's subagents, newest first, each
+    /// opening its own session.
+    fn subagents(&self, app: &App, state: &State<'_>) {
+        let parent = app.subagent_parent();
+        let note = match parent {
+            _ if app.active.is_none() => "No session selected.",
+            Some(parent) if !parent.children.is_empty() => "",
+            _ => {
+                "No subagents in this session. An agent starts one to work on part of a task apart."
+            }
+        };
+        state.set_subagents_note(note.into());
+        sync(
+            &self.subagents,
+            parent
+                .map(|p| p.children.iter().map(|c| subagent_row(app, c)).collect())
+                .unwrap_or_default(),
+        );
     }
 
     /// The Context panel.
@@ -114,6 +143,41 @@ impl Lists {
             &self.todos,
             todos.unwrap_or_default().iter().map(todo).collect(),
         );
+    }
+}
+
+/// A subagent's row: its agent, in the agent's colour, what it works on,
+/// and how it stands.
+fn subagent_row(app: &App, child: &SessionSummary) -> SubagentRow {
+    let t = &app.tokens;
+    let agent = child.agent.as_deref().and_then(|id| app.agent(id));
+    let name = agent.as_ref().map_or_else(
+        || {
+            child
+                .agent
+                .as_deref()
+                .map_or_else(|| "Subagent".to_owned(), capitalized)
+        },
+        |a| a.name.clone(),
+    );
+    SubagentRow {
+        id: child.id.as_str().into(),
+        agent: name.into(),
+        title: if child.title.is_empty() {
+            "Starting…".into()
+        } else {
+            child.title.as_str().into()
+        },
+        tone: color(
+            agent
+                .and_then(|a| a.color)
+                .map_or_else(|| crate::theme::quiet_icon(t), |c| crate::theme::ink(t, c)),
+        ),
+        selected: app.active.as_deref() == Some(child.id.as_str()),
+        busy: child.busy,
+        waiting: child.waiting,
+        asking: child.asking,
+        detail: compact_age(child.age).into(),
     }
 }
 

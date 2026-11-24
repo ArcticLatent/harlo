@@ -213,6 +213,16 @@ impl Sheets {
                 }
                 if app.sheets.query.trim().is_empty() {
                     state.set_sheet_title(section.title().into());
+                    state.set_sheet_page(
+                        format!(
+                            "{section:?} {:?} {:?} {:?} {}",
+                            app.sheets.providers.shown,
+                            app.sheets.projects.shown,
+                            app.sheets.mcp.view,
+                            app.sheets.extensions_tab
+                        )
+                        .into(),
+                    );
                     let rows = if section == Section::Projects {
                         project_rows(app, &self.marks)
                     } else {
@@ -337,9 +347,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
             if app.sheets.providers.shown.is_some() {
                 return providers::sign_in_rows(app);
             }
-            let mut rows = providers::provider_rows(app);
-            rows.extend(claude_rows(app));
-            rows
+            providers::provider_rows(app, claude_rows(app))
         }
         Section::Models => menu_model_rows(app),
         Section::Extensions => {
@@ -1841,7 +1849,7 @@ fn skill_rows(app: &App, rows: &mut Vec<SheetRow>) {
                 value: skill
                     .description
                     .as_deref()
-                    .map(|d| crate::model::gist(d))
+                    .map(crate::model::gist)
                     .unwrap_or_default()
                     .into(),
                 ..SheetRow::default()

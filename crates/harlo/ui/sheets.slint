@@ -1291,6 +1291,10 @@ export component SheetLayer inherits Rectangle {
                 HLine { }
                 QuietScroll {
                     vertical-stretch: 1;
+                    // Another page, such as a provider's sign-in, starts
+                    // at its top.
+                    property <string> page: State.sheet-page;
+                    changed page => { self.content-y = 0; }
                     VerticalLayout {
                         alignment: start;
                         padding: 20px;

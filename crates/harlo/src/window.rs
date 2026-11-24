@@ -1520,6 +1520,6 @@ fn refresh(panel: Panel) -> Option<Message> {
         Panel::Context => Some(Message::Context(ContextEvent::Refresh)),
         Panel::Changes => Some(Message::Changes(ChangesEvent::Refresh)),
         Panel::Files => Some(Message::Files(FilesEvent::Refresh)),
-        Panel::Todos | Panel::Notes => None,
+        Panel::Todos | Panel::Subagents | Panel::Notes => None,
     }
 }

@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SidebarRow, RowKind } from "data.slint";
-import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark, QuietBar } from "widgets.slint";
+import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark, QuietBar, HoverTip } from "widgets.slint";
 
 /// Space between the sidebar's edge and its content.
 global Inset {
@@ -57,13 +57,37 @@ component SelectedBar inherits Rectangle {
     background: Theme.accent-ink;
 }
 
+/// A session's worktree: its icon, and on hover the worktree's name and
+/// branch.
+component WorktreeMark inherits TouchArea {
+    in property <string> worktree;
+    in property <string> branch;
+    property <string> words: "Worktree " + root.worktree
+        + (root.branch != "" ? " · branch " + root.branch : "");
+    width: 16px;
+    accessible-role: image;
+    accessible-label: root.words;
+    Icon {
+        text: Icons.worktree;
+        font-size: 13px;
+        color: Theme.icon-quiet;
+    }
+    HoverTip {
+        text: root.words;
+        hovered: root.has-hover;
+        pressed: root.pressed;
+        button-x: root.absolute-position.x;
+        button-y: root.absolute-position.y;
+        button-width: root.width;
+        button-height: root.height;
+    }
+}
+
 component Item inherits Rectangle {
     in property <SidebarRow> entry;
 
     height: entry.kind == RowKind.project ? 36px + (entry.gap ? 13px : 0)
-        : entry.kind == RowKind.worktree ? 32px
         : entry.kind == RowKind.session ? 42px + (entry.gap ? 13px : 0)
-        : entry.kind == RowKind.child ? 28px + (entry.gap ? 13px : 0)
         : 30px + (entry.gap ? 13px : 0);
 
     VerticalLayout {
@@ -127,40 +151,6 @@ component Item inherits Rectangle {
             }
         }
 
-        if entry.kind == RowKind.worktree: HorizontalLayout {
-            height: 32px;
-            padding-left: 16px;
-            padding-right: 4px;
-            spacing: 9px;
-            Icon {
-                text: Icons.changes;
-                font-size: 13px;
-                color: Theme.icon-quiet;
-            }
-            Text {
-                text: entry.title;
-                horizontal-stretch: 1;
-                overflow: elide;
-                vertical-alignment: center;
-                font-size: Size.label;
-                color: Theme.text-base;
-            }
-            Text {
-                text: entry.detail;
-                vertical-alignment: center;
-                font-size: Size.small;
-                color: Theme.text-weak;
-            }
-            Press {
-                width: 22px;
-                label: "New session in " + entry.title;
-                clicked => { Logic.new-session(entry.id); }
-                Icon {
-                    text: Icons.plus;
-                }
-            }
-        }
-
         if entry.kind == RowKind.session: Press {
             height: 42px;
             label: entry.title;
@@ -171,8 +161,7 @@ component Item inherits Rectangle {
                 height: parent.height - 16px;
             }
             HorizontalLayout {
-                // A worktree's sessions sit under its row.
-                padding-left: entry.nested ? 20px : 4px;
+                padding-left: 4px;
                 padding-right: 4px;
                 spacing: 10px;
                 alignment: stretch;
@@ -191,6 +180,13 @@ component Item inherits Rectangle {
                     font-size: Size.text;
                     color: entry.untitled ? Theme.text-weaker
                         : entry.selected ? Theme.text-strong : Theme.text-weak;
+                }
+                // Runs in a worktree: a quiet mark that names it, and its
+                // branch, on hover.
+                if entry.worktree != "": WorktreeMark {
+                    worktree: entry.worktree;
+                    branch: entry.branch;
+                    clicked => { Logic.open-session(entry.id); }
                 }
                 // Runs without asking: marked beside what it's doing.
                 if entry.trusted: Icon {
@@ -215,57 +211,9 @@ component Item inherits Rectangle {
             }
         }
 
-        if entry.kind == RowKind.child: Press {
-            height: 28px;
-            label: entry.agent + ": " + entry.title;
-            selected: entry.selected;
-            lit: Theme.selected-tint;
-            clicked => { Logic.open-session(entry.id); }
-            if entry.selected: SelectedBar {
-                height: parent.height - 16px;
-            }
-            HorizontalLayout {
-                padding-left: entry.nested ? 30px : 14px;
-                padding-right: 4px;
-                spacing: 7px;
-                Icon {
-                    text: Icons.corner-down-right;
-                    font-size: 12px;
-                    color: Theme.icon-quiet;
-                }
-                Icon {
-                    text: Icons.bot;
-                    font-size: 12px;
-                    color: entry.tone;
-                }
-                Text {
-                    text: entry.agent;
-                    vertical-alignment: center;
-                    font-size: Size.small;
-                    color: Theme.text-base;
-                }
-                Text {
-                    text: entry.title;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                    vertical-alignment: center;
-                    font-size: Size.small;
-                    color: Theme.text-weak;
-                }
-                if entry.waiting: Icon {
-                    text: Icons.shield-alert;
-                    font-size: 13px;
-                    color: Theme.icon-warning-base;
-                }
-                if entry.busy && !entry.waiting: Working {
-                    size: 12px;
-                }
-            }
-        }
-
         if entry.kind == RowKind.more: HorizontalLayout {
             height: 30px;
-            padding-left: entry.nested ? 32px : 16px;
+            padding-left: 16px;
             alignment: start;
             Press {
                 label: entry.title;

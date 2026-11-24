@@ -18,7 +18,7 @@ use super::{App, Message};
 /// server, before its status is asked again.
 const SETTLE: Duration = Duration::from_millis(1500);
 
-/// What the MCP part of Tools for agents shows.
+/// What Extensions' MCP servers tab shows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum McpView {
     /// The servers, with the rest of the section.

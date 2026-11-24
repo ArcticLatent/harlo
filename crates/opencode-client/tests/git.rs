@@ -85,3 +85,17 @@ async fn snapshots_off_leaves_files_as_they_are_on_undo() {
         }
     }
 }
+
+#[tokio::test]
+async fn a_folders_branch_is_named() {
+    let sandbox = Sandbox::start().await;
+    let project = sandbox.project_str();
+    let current = std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(&project)
+        .output()
+        .expect("git");
+    let current = String::from_utf8_lossy(&current.stdout).trim().to_owned();
+    let branch = sandbox.client().branch(&project).await.expect("the branch");
+    assert_eq!(branch.as_deref(), Some(current.as_str()));
+}

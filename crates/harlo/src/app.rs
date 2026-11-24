@@ -159,6 +159,8 @@ pub enum Panel {
     Context,
     /// The session's todo list.
     Todos,
+    /// The session's subagents, and how each is doing.
+    Subagents,
     /// Files the session changed.
     Changes,
     /// The project's files.
@@ -169,9 +171,10 @@ pub enum Panel {
 
 impl Panel {
     /// Every panel, in rail order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Context,
         Self::Todos,
+        Self::Subagents,
         Self::Changes,
         Self::Files,
         Self::Notes,
@@ -183,6 +186,7 @@ impl Panel {
         match self {
             Self::Context => "panel-context",
             Self::Todos => "panel-todos",
+            Self::Subagents => "panel-subagents",
             Self::Changes => "panel-changes",
             Self::Files => "panel-files",
             Self::Notes => "panel-notes",
@@ -195,6 +199,7 @@ impl Panel {
         match self {
             Self::Context => "Context",
             Self::Todos => "Todos",
+            Self::Subagents => "Subagents",
             Self::Changes => "Changes",
             Self::Files => "Files",
             Self::Notes => "Notes",
@@ -399,6 +404,8 @@ pub enum Message {
     Server(Update),
     /// A follow-up load finished.
     Fetched(Result<Fetched, String>),
+    /// The branch checked out in a worktree's folder, read.
+    Branch(String, Option<String>),
     /// The clock moved on; ages are measured from this time.
     Tick(SystemTime),
     /// The desktop's colour scheme is dark (`true`) or light.
@@ -629,6 +636,9 @@ pub struct App {
     /// The keys of the models in `models` that show unless hidden, by
     /// [`harlo_core::model_menu::shown_by_default`].
     model_defaults: std::collections::HashSet<String>,
+    /// The branch checked out in each worktree's folder: `None` until
+    /// read, or when it's on none.
+    branches: std::collections::HashMap<String, Option<String>>,
     models_for: Option<String>,
     /// The picker whose menu is open.
     pub picker: Option<Picker>,
@@ -708,6 +718,7 @@ impl App {
     /// `location` reopen once the server connects.
     #[must_use]
     pub fn new(location: Location, locations: Vec<Location>, layout: Layout) -> Self {
+        let terminal_range = (fit::TERMINAL_MIN, f32::MAX);
         let mut app = Self {
             tokens: theme::harlo(Mode::Dark).tokens(),
             themes: theme::bundled(),
@@ -738,11 +749,7 @@ impl App {
             keep: None,
             sidebar_width: size(layout.sidebar_width, fit::SIDEBAR, fit::SIDEBAR_RANGE),
             panel_width: size(layout.panel_width, fit::PANEL, fit::PANEL_RANGE),
-            terminal_height: size(
-                layout.terminal_height,
-                fit::TERMINAL,
-                (fit::TERMINAL_MIN, f32::MAX),
-            ),
+            terminal_height: size(layout.terminal_height, fit::TERMINAL, terminal_range),
             resizing: false,
             tabs: Vec::new(),
             active: None,
@@ -774,6 +781,7 @@ impl App {
             new_model: None,
             models: Vec::new(),
             model_defaults: std::collections::HashSet::new(),
+            branches: std::collections::HashMap::new(),
             models_for: None,
             picker: None,
             picker_filter: String::new(),
@@ -915,6 +923,7 @@ impl App {
             self.follow_own_tools(),
             self.follow_phone(),
             self.follow_pictures(),
+            self.follow_branches(),
         ]);
         // While an edge is dragged, the layout is saved once, when it's let go.
         let layout = self.layout();
@@ -1049,17 +1058,23 @@ impl App {
             Message::Timeline(id, event) => return self.timeline_event(id, event),
             Message::Server(update) => return self.server(update),
             Message::Fetched(Ok(result)) => return self.fetched(result),
+            Message::Branch(folder, branch) => {
+                self.branches.insert(folder, branch);
+            }
             // A failed fetch leaves the row as it was until the next event or
             // resync corrects it; after a fade, only the window's next showing
             // changes.
             Message::Fetched(Err(_)) | Message::Settled => {}
-            Message::Tick(now) => {
-                self.now = now;
-                self.refresh();
-                return self.claude_tick();
-            }
+            Message::Tick(now) => return self.tick(now),
         }
         Task::none()
+    }
+
+    /// Moves the clock on to `now`: ages are measured from it.
+    fn tick(&mut self, now: SystemTime) -> Task<Message> {
+        self.now = now;
+        self.refresh();
+        self.claude_tick()
     }
 
     /// Applies something a session's timeline reported.
@@ -1246,6 +1261,7 @@ impl App {
                     version: connected.version.clone(),
                 };
                 self.client = Some(connected.client.clone());
+                self.branches.clear();
                 self.workspace.resync(connected.snapshot.clone());
                 self.forget_catalogs();
                 // Tabs saved from last time reopen, unless the user turned
@@ -1342,6 +1358,38 @@ impl App {
                 Message::Fetched,
             )
         }))
+    }
+
+    /// Reads the branch of each worktree not read yet, for the sidebar's
+    /// marks.
+    fn follow_branches(&mut self) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let mut tasks = Vec::new();
+        for worktree in self.projects.iter().flat_map(|p| &p.worktrees) {
+            if self.branches.contains_key(&worktree.directory) {
+                continue;
+            }
+            // Asked once; the answer replaces this.
+            self.branches.insert(worktree.directory.clone(), None);
+            let (client, folder) = (client.clone(), worktree.directory.clone());
+            tasks.push(Task::perform(
+                async move {
+                    let branch = client.branch(&folder).await.ok().flatten();
+                    (folder, branch)
+                },
+                |(folder, branch)| Message::Branch(folder, branch),
+            ));
+        }
+        Task::batch(tasks)
+    }
+
+    /// Returns the branch checked out in the worktree at `folder`, once
+    /// read.
+    #[must_use]
+    pub fn branch_of(&self, folder: &str) -> Option<&str> {
+        self.branches.get(folder)?.as_deref()
     }
 
     /// Rebuilds the sidebar from the workspace.

@@ -68,11 +68,17 @@ fn models(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
 
 /// Opens the sign-in page of the provider named `name` from the menu.
 fn add(ui: &Ui, filter: &str, name: &str) {
+    // At the end of the page, after the popular ones.
+    if ui.find("Show more providers").is_empty() {
+        ui.wheel("Popular", -10);
+    }
     ui.press("Show more providers");
     assert_eq!(ui.app().picker, Some(Picker::Provider));
     ui.fill("Filter providers", filter);
     ui.press(name);
     assert_eq!(ui.app().picker, None);
+    // The page starts at its top as the next frame draws.
+    ui.wait(50);
 }
 
 #[test]

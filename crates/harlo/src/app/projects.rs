@@ -365,6 +365,28 @@ impl App {
             .map(|w| w.name.as_str())
     }
 
+    /// Returns the session whose subagents the Subagents panel lists: the
+    /// open one, or its parent while one of its subagents is open.
+    #[must_use]
+    pub fn subagent_parent(&self) -> Option<&harlo_core::sessions::SessionSummary> {
+        let active = self.active.as_deref()?;
+        self.projects
+            .iter()
+            .flat_map(|p| {
+                p.sessions
+                    .iter()
+                    .chain(p.worktrees.iter().flat_map(|w| &w.sessions))
+            })
+            .find(|s| s.id == active || s.children.iter().any(|c| c.id == active))
+    }
+
+    /// Returns the branch checked out in the worktree session `id` runs
+    /// in, once read.
+    #[must_use]
+    pub fn worktree_branch_of(&self, id: &str) -> Option<&str> {
+        self.branch_of(&self.workspace.session(id)?.directory)
+    }
+
     /// The model new sessions in `folder`, or a worktree of its project,
     /// start with, when one was chosen for the project.
     pub(super) fn project_model(&self, folder: &str) -> Option<harlo_core::workspace::ModelRef> {

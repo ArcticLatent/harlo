@@ -152,6 +152,14 @@ def harlo_env(state):
 
 def start_harlo(state):
     env = harlo_env(state)
+    # A scratch SSH config, so Settings → Server has hosts to offer; their
+    # addresses are documentation ones nothing answers at.
+    ssh = f"{state['gui_root']}/home/.ssh"
+    os.makedirs(ssh, mode=0o700, exist_ok=True)
+    if not os.path.exists(f"{ssh}/config"):
+        with open(f"{ssh}/config", "w") as f:
+            f.write("Host buildbox\n    HostName 192.0.2.10\n"
+                    "Host gpu-box\n    HostName 192.0.2.11\n")
     argv = [state["binary"], "--server", state["url"]]
     if state.get("shared"):
         # The sandbox registered as the background service, where Harlo
