@@ -179,3 +179,118 @@ async fn claude_code_runs_a_turn_that_asks_first_and_resumes() {
     assert!(!turns[0].contains("--resume"));
     assert!(turns[1].contains(r#""--resume", "cc-1""#), "{log}");
 }
+
+/// A stand-in Claude Code for web searches: it connects, and for a search
+/// sends back `WebSearch`'s links and notes as Claude Code reports them.
+const SEARCHER: &str = r#"#!/usr/bin/env python3
+import json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+open(os.path.join(here, "args.log"), "a").write(json.dumps(sys.argv[1:]) + "\n")
+def say(v):
+    print(json.dumps(v), flush=True)
+if "--tools" not in sys.argv:
+    for line in sys.stdin:
+        msg = json.loads(line)
+        if msg.get("type") == "control_request":
+            say({"type": "control_response", "response": {"subtype": "success",
+                 "request_id": msg["request_id"], "response": {"models": []}}})
+    sys.exit(0)
+query = sys.stdin.read()
+say({"type": "system", "subtype": "init", "session_id": "cc-s"})
+say({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "w1",
+     "content": "..."}]}, "tool_use_result": {"query": query, "results": [
+     {"tool_use_id": "w1", "content": [{"title": "Rust 9 notes", "url": "https://example.com/r9"}]},
+     "Rust 9 is out, for " + query]}})
+say({"type": "result", "subtype": "success", "is_error": False, "result": "done"})
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn claude_agent_searches_the_web_when_chosen() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    let claude = scratch.path().join("claude");
+    std::fs::write(&claude, SEARCHER).expect("stand-in");
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).expect("mode");
+    let path = claude.to_str().expect("utf-8");
+    let sandbox = Sandbox::start_with_env(&[("OPENCODE_CLAUDE_PATH", path)]).await;
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    let offered =
+        |list: Vec<opencode_client::WebSearch>| list.iter().any(|s| s.id == "claude-agent");
+    assert!(!offered(
+        client.web_search(&folder).await.expect("services")
+    ));
+    client
+        .connect_external("claude-agent", "claude-login")
+        .await
+        .expect("connected");
+    assert!(offered(client.web_search(&folder).await.expect("services")));
+
+    let session = client.create_session(&folder).await.expect("session");
+    client
+        .prompt(
+            &session.id,
+            &Prompt::new(
+                r#"tool websearch {"query":"rust 9"} ;; say found"#,
+                Delivery::Queue,
+            ),
+        )
+        .await
+        .expect("prompt");
+    for (field, value) in [("choice", "choose"), ("provider", "claude-agent")] {
+        let mut form = None;
+        for _ in 0..200 {
+            form = client
+                .forms(&session.id)
+                .await
+                .expect("forms")
+                .into_iter()
+                .next();
+            if form.as_ref().is_some_and(|f| f.fields[0].key == field) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let form = form.expect("asked");
+        client
+            .reply_form(
+                &session.id,
+                &form.id,
+                &[(
+                    field.to_owned(),
+                    opencode_client::Answer::Text(value.into()),
+                )],
+            )
+            .await
+            .expect("answered");
+    }
+    // What the model was given back.
+    let results = || {
+        support::turn_requests(sandbox.dir.path())
+            .iter()
+            .flat_map(|r| r["messages"].as_array().cloned().unwrap_or_default())
+            .filter(|m| m["role"] == "tool")
+            .map(|m| m["content"].to_string())
+            .collect::<String>()
+    };
+    for _ in 0..200 {
+        if results().contains("Rust 9 notes") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let all = results();
+    assert!(
+        all.contains("[Rust 9 notes](https://example.com/r9)"),
+        "{all}"
+    );
+    assert!(all.contains("Rust 9 is out, for rust 9"), "{all}");
+    let log = std::fs::read_to_string(scratch.path().join("args.log")).expect("args");
+    let search = log
+        .lines()
+        .find(|l| l.contains("--tools"))
+        .expect("a search run");
+    assert!(
+        search.contains(r#""--tools", "WebSearch""#) && search.contains(r#""haiku""#),
+        "{search}"
+    );
+}

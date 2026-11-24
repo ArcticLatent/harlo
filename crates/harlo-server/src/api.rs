@@ -1064,10 +1064,11 @@ async fn host_tools(
 }
 
 /// The web search services agents can use.
-async fn search_services(Query(q): Params) -> Answer {
-    let data: Vec<Value> = harlo_engine::web::SERVICES
-        .iter()
-        .map(|(id, name, _)| json!({ "id": id, "name": name }))
+async fn search_services(State(server): Shared, Query(q): Params) -> Answer {
+    let data: Vec<Value> = server
+        .search_services()
+        .into_iter()
+        .map(|(id, name)| json!({ "id": id, "name": name }))
         .collect();
     ok(json!({ "location": location(&q), "data": data }))
 }

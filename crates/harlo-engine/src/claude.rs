@@ -7,6 +7,9 @@
 //! Claude Code asks before acting; each request goes through the turn's
 //! permission rules and, when they say ask, to the person. Its session
 //! continues from turn to turn (`--resume`).
+//!
+//! It can also search the web for a turn on another model, with its own
+//! `WebSearch` tool and nothing else.
 
 // Rust guideline compliant 2026-10-09
 
@@ -516,6 +519,118 @@ impl<S: Sink> Reading<'_, S> {
             _ => {}
         }
         None
+    }
+}
+
+/// What Claude Code is told when it searches for another model's turn.
+const SEARCH_PROMPT: &str = "You are a web search relay. Call the WebSearch tool exactly once, \
+                             with the user's message as the query, verbatim. Do not answer from \
+                             memory and do not call any other tool.";
+
+/// How long a search may take.
+const SEARCH_TIME: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Searches the web for `query` with Claude Code (`program`): its
+/// `WebSearch` tool alone, on its quickest model. It's stopped once the
+/// search comes back.
+///
+/// # Errors
+///
+/// When Claude Code can't be started, fails, takes over a minute, or
+/// ends without searching.
+pub async fn search(
+    program: &std::path::Path,
+    query: &str,
+) -> Result<crate::tools::Output, String> {
+    let mut child = Command::new(program)
+        .args([
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--model",
+            "haiku",
+            "--system-prompt",
+            SEARCH_PROMPT,
+            "--tools",
+            "WebSearch",
+            "--allowedTools",
+            "WebSearch",
+            "--no-session-persistence",
+        ])
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("Couldn't start Claude Code ({}): {e}", program.display()))?;
+    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        return Err("Claude Code's pipes didn't open.".to_owned());
+    };
+    let read = async move {
+        stdin
+            .write_all(query.as_bytes())
+            .await
+            .map_err(|e| format!("Claude Code stopped listening: {e}"))?;
+        drop(stdin);
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(event) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if event["type"] == "user"
+                && let Some(results) = event["tool_use_result"]["results"].as_array()
+            {
+                return Ok(searched(query, results));
+            }
+            if event["type"] == "result" && event["is_error"] == true {
+                let said = event["result"].as_str().unwrap_or("it failed");
+                return Err(format!("Claude Code couldn't search: {said}"));
+            }
+        }
+        Err("Claude finished without searching the web.".to_owned())
+    };
+    tokio::time::timeout(SEARCH_TIME, read)
+        .await
+        .unwrap_or_else(|_| Err("Claude didn't finish the web search within a minute.".to_owned()))
+}
+
+/// The search for `query` as the model reads it, from Claude Code's
+/// `WebSearch` results: lists of links, and its notes on them.
+fn searched(query: &str, results: &[Value]) -> crate::tools::Output {
+    let mut parts: Vec<String> = Vec::new();
+    for r in results {
+        match r {
+            Value::String(text) if !text.trim().is_empty() => parts.push(text.trim().to_owned()),
+            _ => parts.extend(
+                r["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|link| {
+                        let url = link["url"].as_str()?;
+                        let title = link["title"]
+                            .as_str()
+                            .filter(|t| !t.is_empty())
+                            .unwrap_or(url);
+                        Some(format!("## [{title}]({url})"))
+                    }),
+            ),
+        }
+    }
+    let text = if parts.is_empty() {
+        format!("The search for \"{query}\" found nothing.")
+    } else {
+        parts.join("\n\n")
+    };
+    let mut metadata = Map::new();
+    metadata.insert("provider".to_owned(), json!(PROVIDER));
+    crate::tools::Output {
+        text,
+        metadata,
+        changed: Vec::new(),
+        pictures: Vec::new(),
     }
 }
 

@@ -6,6 +6,10 @@
 //! off, and keeps the answer for every project. `"websearch": false` in
 //! the config, or the answer to turn it off, leaves the tool out.
 //!
+//! Claude Agent, while connected, is one more choice: Claude Code
+//! searches with its `WebSearch` tool, under the person's Claude plan. It's
+//! never chosen at random.
+//!
 //! At random, a session keeps the service it was given until that one is
 //! limited (HTTP 429); then the search goes to another, and the limited
 //! one is left alone as long as it asked, a minute unless it said.
@@ -21,7 +25,7 @@ use harlo_engine::tools::Output;
 use harlo_engine::web::{SERVICES, Search, Searcher};
 use serde_json::{Value, json};
 
-use crate::credentials::from_env;
+use crate::credentials::{CLAUDE_AGENT, from_env};
 use crate::server::{Server, lock};
 
 /// The setting that keeps the person's answer.
@@ -44,6 +48,7 @@ impl Choice {
         match value {
             Value::Bool(false) => Some(Self::Off),
             Value::String(s) if s == "random" => Some(Self::Random),
+            Value::String(s) if s == CLAUDE_AGENT => Some(Self::Service(s.clone())),
             Value::String(s) if SERVICES.iter().any(|(id, _, _)| id == s) => {
                 Some(Self::Service(s.clone()))
             }
@@ -119,6 +124,14 @@ impl Searcher for SessionSearch {
             };
             match choice {
                 Choice::Off => Err("Web search is turned off.".to_owned()),
+                Choice::Service(id) if id == CLAUDE_AGENT => {
+                    if !self.server.claude_connected() {
+                        return Err(
+                            "Claude Agent, chosen for web search, isn't connected.".to_owned()
+                        );
+                    }
+                    harlo_engine::claude::search(&crate::claude::program(), query).await
+                }
                 Choice::Service(id) => harlo_engine::web::search(&self.server.search(&id), query)
                     .await
                     .map_err(|f| f.text),
@@ -129,6 +142,19 @@ impl Searcher for SessionSearch {
 }
 
 impl Server {
+    /// The search services offered: Claude Agent too while it's
+    /// connected. `(ID, name)`.
+    pub(crate) fn search_services(&self) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = SERVICES
+            .iter()
+            .map(|(id, name, _)| ((*id).to_owned(), (*name).to_owned()))
+            .collect();
+        if self.claude_connected() {
+            out.push((CLAUDE_AGENT.to_owned(), "Claude Agent".to_owned()));
+        }
+        out
+    }
+
     /// The choice for `directory`: its config's, else the person's answer.
     pub(crate) fn search_choice(&self, directory: &str) -> Option<Choice> {
         if let Some(said) = self.folder(directory).config.websearch {
@@ -229,8 +255,11 @@ impl Server {
             "allow" => Choice::Random,
             "disable" => Choice::Off,
             _ => {
-                let services: Vec<(&str, &str)> =
-                    SERVICES.iter().map(|(id, name, _)| (*id, *name)).collect();
+                let offered = self.search_services();
+                let services: Vec<(&str, &str)> = offered
+                    .iter()
+                    .map(|(id, name)| (id.as_str(), name.as_str()))
+                    .collect();
                 let id = self
                     .ask_one(
                         session,

@@ -76,7 +76,7 @@ fn prompt(history: &[Message], fresh: bool) -> String {
 
 impl Server {
     /// Whether Claude Agent is connected.
-    fn claude_connected(&self) -> bool {
+    pub(crate) fn claude_connected(&self) -> bool {
         self.store
             .credentials()
             .unwrap_or_default()
