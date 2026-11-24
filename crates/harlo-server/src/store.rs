@@ -164,6 +164,7 @@ impl Store {
                  USING fts5(text, session UNINDEXED, message UNINDEXED);",
         )?;
         Self::make_approvals(&conn)?;
+        Self::make_automations(&conn)?;
         let store = Self {
             conn: Mutex::new(conn),
         };

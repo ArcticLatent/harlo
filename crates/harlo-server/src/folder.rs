@@ -106,11 +106,11 @@ impl Server {
         let workspace = Path::new(directory);
         let root = project_root(workspace);
         let mut documents = Vec::new();
-        let mut merged = self
-            .config_text
+        let (global, global_text) = self.global();
+        let mut merged = global_text
             .clone()
             .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-        if let (Some(path), Some(info)) = (&self.config.source, &self.config_text) {
+        if let (Some(path), Some(info)) = (&global.source, &global_text) {
             documents.push((path.clone(), info.clone()));
         }
         for file in project_config_files(workspace, root.as_deref()) {
@@ -124,14 +124,14 @@ impl Server {
                 }
             }
         }
-        let mut config = if documents.len() > usize::from(self.config.source.is_some()) {
-            Config::from_value(&merged, self.config.source.clone())
+        let mut config = if documents.len() > usize::from(global.source.is_some()) {
+            Config::from_value(&merged, global.source.clone())
         } else {
-            self.config.clone()
+            global.clone()
         };
         // Providers come from the global file, whose keys stay there.
         if config.providers.is_empty() {
-            config.providers.clone_from(&self.config.providers);
+            config.providers.clone_from(&global.providers);
         }
         let mut dirs = vec![self.config_dir.clone()];
         let mut project: Vec<PathBuf> = workspace

@@ -11,6 +11,8 @@
 mod agents;
 mod api;
 mod approvals;
+mod automations;
+mod code;
 mod commands;
 mod folder;
 mod forms;

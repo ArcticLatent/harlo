@@ -108,6 +108,11 @@ pub struct Output {
 /// A checked call, ready to ask permission for and run.
 #[derive(Debug, Clone)]
 pub enum Plan {
+    /// Runs a Code Mode script.
+    Execute {
+        /// The script: an async function's body.
+        code: String,
+    },
     /// Reads a file.
     Read {
         /// The file.
@@ -368,6 +373,9 @@ impl Plan {
                 query: text("query")?,
             }),
             "shell" => shell_call(input),
+            "execute" => Ok(Self::Execute {
+                code: text("code")?,
+            }),
             other => Err(format!(
                 "There is no tool called `{other}`. The tools are read, write, edit, glob, grep and shell."
             )),
@@ -448,6 +456,11 @@ impl Plan {
                 resources: vec![command.clone()],
                 metadata: Map::new(),
             },
+            Self::Execute { .. } => Permission {
+                action: "execute",
+                resources: vec!["*".to_owned()],
+                metadata: Map::new(),
+            },
         }
     }
 
@@ -525,6 +538,7 @@ impl Plan {
                 Err("Notes aren't kept on this server.".to_owned())
             }
             Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
+            Self::Execute { .. } => Err("Code Mode isn't available here.".to_owned()),
             Self::Skill { id } => Err(format!("There's no skill {id}.")),
             Self::Subagent { .. } => Err("Subagents can't start here.".to_owned()),
             Self::TodoWrite { todos } => Ok(Output {

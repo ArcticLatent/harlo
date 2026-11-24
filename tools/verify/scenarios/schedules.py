@@ -6,6 +6,7 @@ from _common import open_project_session, settings
 # OpenCode's own config folder is where schedules are allowed, so Harlo
 # attaches as to the shared server.
 SHARED = True
+ENGINE = True
 
 
 def run(h, s):

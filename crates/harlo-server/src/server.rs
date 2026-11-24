@@ -93,12 +93,41 @@ pub(crate) struct Live {
     pub(crate) ptys: HashMap<String, Arc<crate::pty::Terminal>>,
 }
 
+/// The global config file as last read.
+#[derive(Debug)]
+struct Global {
+    /// Where config files are looked for.
+    home: PathBuf,
+    /// The configuration.
+    config: Config,
+    /// The file's text as read, for `/api/config`.
+    text: Option<Value>,
+    /// When the file read was last changed, to notice edits.
+    stamp: Option<std::time::SystemTime>,
+}
+
+/// When the global config file in `home` was last changed.
+fn stamp(home: &std::path::Path) -> Option<std::time::SystemTime> {
+    ["opencode.json", "opencode.jsonc"]
+        .iter()
+        .find_map(|n| std::fs::metadata(home.join("opencode").join(n)).ok())
+        .and_then(|m| m.modified().ok())
+}
+
+/// The text of the config file `config` was read from.
+fn text_of(config: &Config) -> Option<Value> {
+    config
+        .source
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| jsonc_value(&t))
+}
+
 /// The server.
 pub struct Server {
     pub(crate) store: Store,
-    pub(crate) config: Config,
-    /// The config file's text as read, for `/api/config`.
-    pub(crate) config_text: Option<Value>,
+    /// The global config file, read again when it changes.
+    global: Mutex<Global>,
     pub(crate) config_dir: PathBuf,
     pub(crate) password: Option<String>,
     /// Phone access, hosted here.
@@ -117,7 +146,7 @@ pub struct Server {
 impl std::fmt::Debug for Server {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Server")
-            .field("config", &self.config.source)
+            .field("config", &self.config_dir)
             .finish_non_exhaustive()
     }
 }
@@ -179,18 +208,18 @@ impl Server {
         phone: Arc<crate::PhoneHost>,
         snapshots: PathBuf,
     ) -> Self {
-        let config_text = config
-            .source
-            .as_ref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| jsonc_value(&t));
+        let global = Global {
+            home: config_home.to_path_buf(),
+            text: text_of(&config),
+            stamp: stamp(config_home),
+            config,
+        };
         let (events, _) = broadcast::channel(BACKLOG);
         let agents = harlo_engine::agents::builtins(&snapshots.with_file_name("plans"));
         end_unfinished(&store);
         Self {
             store,
-            config,
-            config_text,
+            global: Mutex::new(global),
             config_dir: config_home.join("opencode"),
             password,
             phone,
@@ -201,6 +230,26 @@ impl Server {
             live: Mutex::default(),
             agents,
         }
+    }
+
+    /// The global configuration and its file's text, read again when the
+    /// file has changed since; an unreadable edit keeps what was read.
+    pub(crate) fn global(&self) -> (Config, Option<Value>) {
+        let mut global = lock(&self.global);
+        let now_stamp = stamp(&global.home);
+        if now_stamp != global.stamp {
+            global.stamp = now_stamp;
+            match Config::load(&global.home) {
+                Ok(config) => {
+                    global.text = text_of(&config);
+                    global.config = config;
+                }
+                Err(e) => {
+                    tracing::warn!(name: "config.global.unreadable", error = %e, "keeping the config as last read");
+                }
+            }
+        }
+        (global.config.clone(), global.text.clone())
     }
 
     /// The shadow repository recording the files of the project in
@@ -948,6 +997,10 @@ impl Server {
                 session: session.id.clone(),
             })),
             subagent_agents: folder.subagents(),
+            code: Some(Arc::new(crate::code::ServerCatalog {
+                server: Arc::clone(self),
+                session: Some(session.id.clone()),
+            })),
             // Near the model's context limit, the next step starts from a summary.
             compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
             skills: self.skills_for(&session.location.directory).await,
@@ -1043,10 +1096,11 @@ impl Server {
         prompt: &str,
         model: Option<harlo_engine::ModelRef>,
     ) -> Result<String, Refusal> {
+        let (global, _) = self.global();
         let model = model
-            .or_else(|| self.config.default_model())
+            .or_else(|| global.default_model())
             .ok_or_else(|| Refusal::Bad("No model is set up.".to_owned()))?;
-        let (provider, _) = self.config.resolve(&model).ok_or_else(|| {
+        let (provider, _) = global.resolve(&model).ok_or_else(|| {
             Refusal::NotFound(format!(
                 "The model {}/{} isn't in the configuration.",
                 model.provider, model.model

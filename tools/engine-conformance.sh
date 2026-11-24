@@ -36,7 +36,7 @@ declare -A SKIP=(
 
 suites=("$@")
 if [ ${#suites[@]} -eq 0 ]; then
-	suites=(m0 m3 m4 m6 endpoint events asides git shell transfer projects approvals goals m7)
+	suites=(m0 m3 m4 m6 endpoint events asides git shell transfer projects approvals goals m7 codemode automations)
 fi
 
 cargo build -q -p harlo-server

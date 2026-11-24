@@ -78,6 +78,10 @@ qrcode = { version = "0.14.1", default-features = false }
 open = { version = "5.4.5", default-features = false }
 # Terminals the server runs for its clients (MIT).
 portable-pty = { version = "0.9.0", default-features = false }
+# Automations' cron schedules, in a time zone (MIT).
+croner = { version = "5.0.0", default-features = false, features = ["std", "jiff"] }
+# Code Mode: runs an agent's JavaScript against Harlo's tools (MIT).
+rquickjs = { version = "0.14.0", default-features = false, features = ["std"] }
 
 # Code generation (dev tool only).
 typify = { version = "0.10.1", default-features = false }

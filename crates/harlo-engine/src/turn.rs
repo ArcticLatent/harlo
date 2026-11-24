@@ -59,6 +59,8 @@ pub struct Turn {
     /// Where background jobs start; none runs background commands in the
     /// foreground.
     pub jobs: Option<std::sync::Arc<dyn crate::jobs::Jobs>>,
+    /// The tools Code Mode scripts can call; none leaves `execute` out.
+    pub code: Option<std::sync::Arc<dyn crate::codemode::Catalog>>,
     /// Where subagents start; none offers no subagent tool.
     pub subagents: Option<std::sync::Arc<dyn crate::subagent::Subagents>>,
     /// The agents a subagent may run as: `(id, what for)`.
@@ -298,13 +300,10 @@ pub fn now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-/// Runs a turn until the model answers, it fails, or `stop` is cancelled.
-pub async fn run(
-    mut turn: Turn,
-    sink: &impl Sink,
-    gate: &impl Gate,
-    stop: &CancellationToken,
-) -> Outcome {
+/// The tools offered to the model this turn: the built-in ones, and those
+/// the turn's skills, memory, todos, Code Mode and subagents add, less what
+/// a rule denies.
+fn offered(turn: &Turn) -> Vec<Value> {
     let mut definitions = tools::definitions();
     definitions.push(crate::question::definition());
     // Skills a rule denies aren't offered.
@@ -327,6 +326,12 @@ pub async fn run(
     if turn.memory.is_some() {
         definitions.extend(crate::memory::definitions());
     }
+    if let Some(catalog) = &turn.code {
+        let namespaces = catalog.namespaces();
+        if !namespaces.is_empty() {
+            definitions.push(crate::codemode::definition(&namespaces));
+        }
+    }
     if turn.todo {
         definitions.push(crate::todo::definition());
     }
@@ -346,6 +351,17 @@ pub async fn run(
             definitions.push(crate::subagent::definition(&allowed));
         }
     }
+    definitions
+}
+
+/// Runs a turn until the model answers, it fails, or `stop` is cancelled.
+pub async fn run(
+    mut turn: Turn,
+    sink: &impl Sink,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Outcome {
+    let definitions = offered(&turn);
     let mut compacted = false;
     for _ in 0..MAX_STEPS {
         if stop.is_cancelled() {
@@ -811,6 +827,36 @@ enum Called {
     Halted(ToolState),
 }
 
+/// How long a Code Mode script may run.
+const SCRIPT_LIMIT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Runs Code Mode script `code` for call `call` of step `message`.
+async fn execute(
+    catalog: &dyn crate::codemode::Catalog,
+    code: &str,
+    message: &str,
+    call: &str,
+    stop: &CancellationToken,
+) -> Result<tools::Output, String> {
+    let ran = crate::codemode::run(catalog, code, &json!({}), SCRIPT_LIMIT, stop, &|calls| {
+        catalog.progress(message, call, calls);
+    })
+    .await;
+    let (text, truncated) = ran.text();
+    if ran.value.is_err() {
+        return Err(text);
+    }
+    Ok(tools::Output {
+        text,
+        metadata: json!({ "toolCalls": ran.calls, "truncated": truncated })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        changed: Vec::new(),
+        pictures: Vec::new(),
+    })
+}
+
 /// The rules "always" adds for `action` on `resources`.
 fn always(action: &str, resources: &[String]) -> Vec<Rule> {
     crate::rules::save_patterns(action, resources)
@@ -1074,6 +1120,10 @@ async fn run_plan(
                 changed: Vec::new(),
                 pictures: Vec::new(),
             })
+        }
+        (Plan::Execute { code }, _) if turn.code.is_some() => {
+            let catalog = turn.code.as_ref().ok_or_else(String::new)?;
+            execute(catalog.as_ref(), &code, message, call, stop).await
         }
         (Plan::Subagent { request }, _) => match &turn.subagents {
             Some(subagents) => subagents

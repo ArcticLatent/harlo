@@ -16,6 +16,7 @@
 pub mod agents;
 pub mod attachment;
 mod chat;
+pub mod codemode;
 pub mod commands;
 pub mod compaction;
 mod config;

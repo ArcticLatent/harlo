@@ -177,6 +177,9 @@ pub struct Config {
     /// Whether steps are recorded so undo can put files back
     /// (`snapshots`, on unless turned off).
     pub snapshots: bool,
+    /// Whether automations may be made (`automations`, on unless turned
+    /// off).
+    pub automations: bool,
 }
 
 impl Config {
@@ -247,6 +250,10 @@ impl Config {
             commands: value["commands"].clone(),
             agents: value["agents"].clone(),
             snapshots: value["snapshots"].as_bool().unwrap_or(true),
+            automations: value["automations"]
+                .as_bool()
+                .or_else(|| value["experimental"]["automations"].as_bool())
+                .unwrap_or(true),
         }
     }
 

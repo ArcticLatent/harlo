@@ -32,9 +32,52 @@ use crate::server::{Outgoing, Refusal, Server};
 type Shared = State<Arc<Server>>;
 type Params = Query<HashMap<String, String>>;
 
+/// The automation routes.
+fn automation_routes() -> Router<Arc<Server>> {
+    Router::new()
+        .route(
+            "/api/experimental/automation",
+            get(automation_list).post(create_automation),
+        )
+        .route(
+            "/api/experimental/automation/{id}",
+            get(automation_info).delete(remove_automation),
+        )
+        .route(
+            "/api/experimental/automation/{id}/pause",
+            post(pause_automation),
+        )
+        .route(
+            "/api/experimental/automation/{id}/resume",
+            post(resume_automation),
+        )
+}
+
+/// The file routes, and Harlo's own: notes, memory and phone access.
+fn file_and_harlo_routes() -> Router<Arc<Server>> {
+    Router::new()
+        .route("/api/fs/find", get(find_files))
+        .route("/api/fs/list", get(list_files))
+        .route("/api/fs/read/{*path}", get(read_file))
+        .route("/api/experimental/fs/write", post(write_file))
+        .route(
+            "/api/experimental/fs/watch",
+            post(watch_file).delete(unwatch_file),
+        )
+        .route("/harlo/memory", get(memory).put(set_memory))
+        .route("/harlo/notes", get(notes))
+        .route("/harlo/notes/{id}", patch(correct_note).delete(forget_note))
+        .route("/harlo/phone", get(phone_state).put(want_phone))
+        .route("/harlo/phone/pair", post(pair_phone))
+        .route("/harlo/phone/device/{id}", delete(remove_phone))
+        .route("/harlo/phone/test", post(test_phone))
+}
+
 /// The routes, behind the password check.
 pub fn router(server: Arc<Server>) -> Router {
     Router::new()
+        .merge(automation_routes())
+        .merge(file_and_harlo_routes())
         .route("/api/info", get(info))
         .route("/api/event", get(events))
         .route("/api/project", get(projects))
@@ -110,22 +153,6 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/experimental/client-mcp", get(no_client_tools))
         // No web search tool yet: truthfully, no providers.
         .route("/api/websearch/provider", get(located_empty))
-        // Harlo's own: phone access hosted here.
-        .route("/api/fs/find", get(find_files))
-        .route("/api/fs/list", get(list_files))
-        .route("/api/fs/read/{*path}", get(read_file))
-        .route("/api/experimental/fs/write", post(write_file))
-        .route(
-            "/api/experimental/fs/watch",
-            post(watch_file).delete(unwatch_file),
-        )
-        .route("/harlo/memory", get(memory).put(set_memory))
-        .route("/harlo/notes", get(notes))
-        .route("/harlo/notes/{id}", patch(correct_note).delete(forget_note))
-        .route("/harlo/phone", get(phone_state).put(want_phone))
-        .route("/harlo/phone/pair", post(pair_phone))
-        .route("/harlo/phone/device/{id}", delete(remove_phone))
-        .route("/harlo/phone/test", post(test_phone))
         .fallback(not_here)
         .layer(middleware::from_fn_with_state(
             Arc::clone(&server),
@@ -828,8 +855,8 @@ fn model_json(provider: &harlo_engine::ProviderSpec, m: &harlo_engine::ModelSpec
 }
 
 async fn models(State(server): Shared, Query(q): Params) -> Answer {
-    let list: Vec<Value> = server
-        .config
+    let (global, _) = server.global();
+    let list: Vec<Value> = global
         .providers
         .iter()
         .flat_map(|p| p.models.iter().map(move |m| model_json(p, m)))
@@ -954,6 +981,35 @@ async fn change_approval(
 async fn remove_approval(State(server): Shared, Path(id): Path<String>) -> Answer {
     server.store.delete_approval(&id)?;
     done()
+}
+
+async fn automation_list(State(server): Shared, Query(q): Params) -> Answer {
+    let project = q.get("projectID").map(String::as_str);
+    ok(json!({ "data": server.automation_list(project)? }))
+}
+
+async fn create_automation(
+    State(server): Shared,
+    axum::Json(body): axum::Json<crate::automations::NewAutomation>,
+) -> Answer {
+    ok(json!({ "data": server.create_automation(body)? }))
+}
+
+async fn automation_info(State(server): Shared, Path(id): Path<String>) -> Answer {
+    ok(json!({ "data": server.automation(&id)? }))
+}
+
+async fn remove_automation(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.delete_automation(&id)?;
+    done()
+}
+
+async fn pause_automation(State(server): Shared, Path(id): Path<String>) -> Answer {
+    ok(json!({ "data": server.set_automation_status(&id, "paused")? }))
+}
+
+async fn resume_automation(State(server): Shared, Path(id): Path<String>) -> Answer {
+    ok(json!({ "data": server.set_automation_status(&id, "active")? }))
 }
 
 async fn cancel_job(State(server): Shared, Path(id): Path<String>) -> Answer {

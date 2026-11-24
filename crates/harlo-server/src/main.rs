@@ -52,6 +52,7 @@ async fn main() -> ExitCode {
         server.password().map(str::to_owned),
     );
     tokio::spawn(async move { phone.attach(url, pw).await });
+    server.start_automations();
     let stopped = async {
         let mut term =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
