@@ -39,6 +39,25 @@ fn owner_only(path: &Path) {
     let _ = path;
 }
 
+/// How many messages are indexed in one transaction when the search index
+/// is made again: enough to be quick, few enough to hold in memory, tool
+/// results and all.
+const INDEX_BATCH: i64 = 100;
+
+/// How many of the newest events are kept for a client that reconnects to
+/// catch up from. A client further behind loads the sessions afresh, as
+/// every client does when it first connects.
+const KEPT_EVENTS: i64 = 10_000;
+
+/// After how many new events the older ones are removed again: often
+/// enough that the table stays near [`KEPT_EVENTS`], seldom enough to cost
+/// nothing per event.
+const PRUNE_EVERY: u64 = 1_000;
+
+/// Removing more events than this at startup also rewrites the file, to
+/// give their room back: a store from before events had a limit.
+const SHRINK_AFTER: usize = 50_000;
+
 /// A session, as the store keeps it and clients read it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
@@ -140,6 +159,51 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
+/// The text of `message` that search looks in: a prompt, a command, or
+/// what a step said.
+fn searched(message: &Message) -> String {
+    match message {
+        Message::User { text, .. } => text.clone(),
+        Message::Shell(run) => run.command.clone(),
+        Message::Assistant(step) => step
+            .content
+            .iter()
+            .filter_map(|p| match p {
+                harlo_engine::Part::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Message::Synthetic { .. } | Message::Idle { .. } | Message::Compaction(_) => String::new(),
+    }
+}
+
+/// Indexes `message`'s text for search in place of the index's row `old`,
+/// the one it had before; returns its row now, none when it has no text.
+///
+/// The message keeps its row's number (`message.text_row`), because a row
+/// of the index is found quickly by its number alone: looking one up by
+/// its message or session reads the whole index.
+fn index(
+    conn: &Connection,
+    old: Option<i64>,
+    session: &str,
+    message: &Message,
+) -> Result<Option<i64>, Error> {
+    if let Some(old) = old {
+        conn.execute("DELETE FROM message_text WHERE rowid = ?1", [old])?;
+    }
+    let text = searched(message);
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    conn.execute(
+        "INSERT INTO message_text (text, session, message) VALUES (?1, ?2, ?3)",
+        params![text, session, message.id()],
+    )?;
+    Ok(Some(conn.last_insert_rowid()))
+}
+
 impl Store {
     /// Opens (or creates) the store at `path`.
     ///
@@ -169,11 +233,6 @@ impl Store {
     }
 
     fn with(conn: Connection) -> Result<Self, Error> {
-        let indexed: bool = conn.query_row(
-            "SELECT count(*) > 0 FROM sqlite_master WHERE name = 'message_text'",
-            [],
-            |r| r.get(0),
-        )?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
@@ -196,62 +255,66 @@ impl Store {
         Self::make_approvals(&conn)?;
         Self::make_automations(&conn)?;
         Self::make_credentials(&conn)?;
+        // A message knows its row in the search index. A store from before
+        // it did gets the column, and its index made again, once.
+        let numbered: bool = conn.query_row(
+            "SELECT count(*) > 0 FROM pragma_table_info('message') WHERE name = 'text_row'",
+            [],
+            |r| r.get(0),
+        )?;
+        if !numbered {
+            conn.execute_batch("ALTER TABLE message ADD COLUMN text_row INTEGER")?;
+        }
         let store = Self {
             conn: Mutex::new(conn),
         };
-        if !indexed {
+        if !numbered {
             store.index_all()?;
+        }
+        // Events kept from before there was a limit go, and the file gives
+        // their room back. (A store that can't be rewritten, on a full
+        // disk, still opens.)
+        if store.prune_events()? > SHRINK_AFTER
+            && let Err(e) = store.conn().execute_batch("VACUUM")
+        {
+            tracing::warn!(name: "store.shrink.failed", error = %e, "couldn't shrink the store");
         }
         Ok(store)
     }
 
-    /// Indexes every stored message's text for search (a store made
-    /// before search existed).
+    /// Indexes every stored message's text for search again, a few
+    /// hundred at a time.
     fn index_all(&self) -> Result<(), Error> {
-        let bodies: Vec<(String, String)> = {
+        self.conn().execute("DELETE FROM message_text", [])?;
+        let mut after = String::new();
+        loop {
             let conn = self.conn();
-            let mut stmt = conn.prepare("SELECT session, body FROM message")?;
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<_, _>>()?
-        };
-        for (session, body) in bodies {
-            if let Ok(message) = serde_json::from_str::<Message>(&body) {
-                self.index(session.as_str(), &message)?;
+            let rows: Vec<(String, String, String)> = conn
+                .prepare(
+                    "SELECT id, session, body FROM message WHERE id > ?1 ORDER BY id LIMIT ?2",
+                )?
+                .query_map(params![after, INDEX_BATCH], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })?
+                .collect::<Result<_, _>>()?;
+            let Some((last, _, _)) = rows.last() else {
+                return Ok(());
+            };
+            after.clone_from(last);
+            let batch = conn.unchecked_transaction()?;
+            for (id, session, body) in &rows {
+                // (A message this version can't read stays out of the index.)
+                let row = match serde_json::from_str::<Message>(body) {
+                    Ok(message) => index(&batch, None, session, &message)?,
+                    Err(_) => None,
+                };
+                batch.execute(
+                    "UPDATE message SET text_row = ?1 WHERE id = ?2",
+                    params![row, id],
+                )?;
             }
+            batch.commit()?;
         }
-        Ok(())
-    }
-
-    /// Indexes `message`'s text (a prompt, or what a step said) for search.
-    fn index(&self, session: &str, message: &Message) -> Result<(), Error> {
-        let text = match message {
-            Message::User { text, .. } => text.clone(),
-            Message::Shell(run) => run.command.clone(),
-            Message::Assistant(step) => step
-                .content
-                .iter()
-                .filter_map(|p| match p {
-                    harlo_engine::Part::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            Message::Synthetic { .. } | Message::Idle { .. } | Message::Compaction(_) => {
-                String::new()
-            }
-        };
-        let conn = self.conn();
-        conn.execute(
-            "DELETE FROM message_text WHERE message = ?1",
-            [message.id()],
-        )?;
-        if !text.trim().is_empty() {
-            conn.execute(
-                "INSERT INTO message_text (text, session, message) VALUES (?1, ?2, ?3)",
-                params![text, session, message.id()],
-            )?;
-        }
-        Ok(())
     }
 
     /// The messages of `project`'s sessions whose text has every word of
@@ -428,9 +491,16 @@ impl Store {
     /// Fails when the write fails.
     pub fn delete_session(&self, id: &str) -> Result<(), Error> {
         let conn = self.conn();
-        conn.execute("DELETE FROM message_text WHERE session = ?1", [id])?;
-        conn.execute("DELETE FROM message WHERE session = ?1", [id])?;
-        conn.execute("DELETE FROM session WHERE id = ?1", [id])?;
+        let all = conn.unchecked_transaction()?;
+        all.execute(
+            "DELETE FROM message_text WHERE rowid IN
+                 (SELECT text_row FROM message WHERE session = ?1)",
+            [id],
+        )?;
+        all.execute("DELETE FROM message WHERE session = ?1", [id])?;
+        all.execute("DELETE FROM event WHERE aggregate = ?1", [id])?;
+        all.execute("DELETE FROM session WHERE id = ?1", [id])?;
+        all.commit()?;
         Ok(())
     }
 
@@ -473,12 +543,24 @@ impl Store {
     /// Fails when the write fails.
     pub fn put_message(&self, session: &str, message: &Message) -> Result<(), Error> {
         let body = serde_json::to_string(message).map_err(json_error)?;
-        self.conn().execute(
-            "INSERT INTO message (id, session, body) VALUES (?1, ?2, ?3)
-             ON CONFLICT (id) DO UPDATE SET body = excluded.body",
-            params![message.id(), session, body],
+        let conn = self.conn();
+        let both = conn.unchecked_transaction()?;
+        let old: Option<i64> = both
+            .query_row(
+                "SELECT text_row FROM message WHERE id = ?1",
+                [message.id()],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let row = index(&both, old, session, message)?;
+        both.execute(
+            "INSERT INTO message (id, session, body, text_row) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (id) DO UPDATE SET body = excluded.body, text_row = excluded.text_row",
+            params![message.id(), session, body, row],
         )?;
-        self.index(session, message)
+        both.commit()?;
+        Ok(())
     }
 
     /// Whether message `id` is stored.
@@ -552,7 +634,8 @@ impl Store {
     pub fn remove_messages_from(&self, session: &str, from: &str) -> Result<usize, Error> {
         let conn = self.conn();
         conn.execute(
-            "DELETE FROM message_text WHERE session = ?1 AND message >= ?2",
+            "DELETE FROM message_text WHERE rowid IN
+                 (SELECT text_row FROM message WHERE session = ?1 AND id >= ?2)",
             [session, from],
         )?;
         conn.execute(
@@ -601,7 +684,24 @@ impl Store {
             "INSERT INTO event (aggregate, body) VALUES (?1, ?2)",
             params![aggregate, body.to_string()],
         )?;
-        Ok(u64::try_from(conn.last_insert_rowid()).unwrap_or_default())
+        let seq = u64::try_from(conn.last_insert_rowid()).unwrap_or_default();
+        drop(conn);
+        if seq.is_multiple_of(PRUNE_EVERY) {
+            self.prune_events()?;
+        }
+        Ok(seq)
+    }
+
+    /// Removes all but the newest events; how many went.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn prune_events(&self) -> Result<usize, Error> {
+        self.conn().execute(
+            "DELETE FROM event WHERE seq <= (SELECT coalesce(max(seq), 0) FROM event) - ?1",
+            [KEPT_EVENTS],
+        )
     }
 
     /// The events after sequence number `after`, in order.
@@ -660,11 +760,10 @@ mod tests {
         assert_eq!(mode(&path), 0o600);
     }
 
-    #[test]
-    fn sessions_messages_and_events_come_back_in_order() {
-        let store = Store::in_memory().expect("store");
-        let session = Session {
-            id: "ses_1".into(),
+    /// A session `id` of project "p".
+    fn session(id: &str) -> Session {
+        Session {
+            id: id.into(),
             project_id: "p".into(),
             location: Location {
                 directory: "/tmp/p".into(),
@@ -686,7 +785,198 @@ mod tests {
             agent: None,
             parent_id: None,
             fork: None,
+        }
+    }
+
+    fn prompt(id: &str, text: &str) -> Message {
+        Message::User {
+            id: id.into(),
+            time: Created { created: 0 },
+            text: text.into(),
+            skills: Vec::new(),
+            files: Vec::new(),
+        }
+    }
+
+    /// The messages search finds for `word`, and how many rows its index has.
+    fn found(store: &Store, word: &str) -> (Vec<String>, i64) {
+        let mut hits: Vec<String> = store
+            .search("p", &[word.to_owned()], 10)
+            .expect("search")
+            .into_iter()
+            .map(|hit| hit.message)
+            .collect();
+        hits.sort();
+        let rows = store
+            .conn()
+            .query_row("SELECT count(*) FROM message_text", [], |r| r.get(0))
+            .expect("count");
+        (hits, rows)
+    }
+
+    #[test]
+    fn the_search_index_follows_the_messages() {
+        let store = Store::in_memory().expect("store");
+        for id in ["ses_1", "ses_2"] {
+            store.put_session(&session(id)).expect("session");
+        }
+        store
+            .put_message("ses_1", &prompt("msg_1", "apple pie"))
+            .expect("put");
+        store
+            .put_message("ses_1", &prompt("msg_2", "apple tart"))
+            .expect("put");
+        store
+            .put_message("ses_2", &prompt("msg_3", "apple juice"))
+            .expect("put");
+        assert_eq!(
+            found(&store, "apple"),
+            (vec!["msg_1".into(), "msg_2".into(), "msg_3".into()], 3)
+        );
+
+        // A changed message is found by its new text only, once.
+        store
+            .put_message("ses_1", &prompt("msg_1", "cherry pie"))
+            .expect("put");
+        assert_eq!(found(&store, "cherry"), (vec!["msg_1".into()], 3));
+        assert_eq!(found(&store, "apple").0, ["msg_2", "msg_3"]);
+        // One left without text leaves the index, and comes back with text.
+        store
+            .put_message("ses_1", &prompt("msg_1", " "))
+            .expect("put");
+        assert_eq!(found(&store, "cherry"), (Vec::new(), 2));
+        store
+            .put_message("ses_1", &prompt("msg_1", "cherry cake"))
+            .expect("put");
+        assert_eq!(found(&store, "cherry"), (vec!["msg_1".into()], 3));
+
+        // Messages removed leave it too; another session's stay.
+        assert_eq!(
+            store
+                .remove_messages_from("ses_1", "msg_2")
+                .expect("remove"),
+            1
+        );
+        assert_eq!(found(&store, "apple"), (vec!["msg_3".into()], 2));
+        store.delete_session("ses_1").expect("delete");
+        assert_eq!(found(&store, "cherry"), (Vec::new(), 1));
+        assert_eq!(found(&store, "apple").0, ["msg_3"]);
+    }
+
+    #[test]
+    fn a_row_of_the_search_index_is_found_by_its_number() {
+        let store = Store::in_memory().expect("store");
+        let conn = store.conn();
+        // By a row's number the index is looked up ("0:="); by its
+        // message or session it is read from end to end ("0:").
+        let plan = |sql: &str| -> String {
+            conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .expect("plan")
+                .query_map([], |r| r.get::<_, String>(3))
+                .expect("rows")
+                .map(|line| line.expect("line"))
+                .collect::<Vec<_>>()
+                .join("; ")
         };
+        let by_number = "DELETE FROM message_text WHERE rowid IN
+            (SELECT text_row FROM message WHERE session = 'ses_1')";
+        assert!(plan(by_number).contains("message_text VIRTUAL TABLE INDEX 0:=;"));
+        assert!(plan("DELETE FROM message_text WHERE rowid = 1").ends_with("INDEX 0:="));
+    }
+
+    #[test]
+    fn a_store_from_before_messages_knew_their_row_is_indexed_again() {
+        let conn = Connection::open_in_memory().expect("database");
+        conn.execute_batch(
+            "CREATE TABLE message (
+                 id TEXT PRIMARY KEY, session TEXT NOT NULL, body TEXT NOT NULL);
+             CREATE VIRTUAL TABLE message_text
+                 USING fts5(text, session UNINDEXED, message UNINDEXED);",
+        )
+        .expect("the earlier tables");
+        for (id, text) in [("msg_1", "apple pie"), ("msg_2", "apple tart")] {
+            let body = serde_json::to_string(&prompt(id, text)).expect("json");
+            conn.execute(
+                "INSERT INTO message (id, session, body) VALUES (?1, 'ses_1', ?2)",
+                params![id, body],
+            )
+            .expect("message");
+            conn.execute(
+                "INSERT INTO message_text (text, session, message) VALUES (?1, 'ses_1', ?2)",
+                params![text, id],
+            )
+            .expect("its text");
+        }
+        // (Left behind by a message that is gone.)
+        conn.execute(
+            "INSERT INTO message_text (text, session, message)
+             VALUES ('apple crumble', 'ses_1', 'msg_0')",
+            [],
+        )
+        .expect("a stale row");
+
+        let store = Store::with(conn).expect("store");
+        store.put_session(&session("ses_1")).expect("session");
+        assert_eq!(
+            found(&store, "apple"),
+            (vec!["msg_1".into(), "msg_2".into()], 2)
+        );
+        store
+            .put_message("ses_1", &prompt("msg_1", "cherry pie"))
+            .expect("put");
+        assert_eq!(found(&store, "apple"), (vec!["msg_2".into()], 2));
+        store.delete_session("ses_1").expect("delete");
+        assert_eq!(found(&store, "apple"), (Vec::new(), 0));
+    }
+
+    #[test]
+    fn only_the_newest_events_are_kept() {
+        let store = Store::in_memory().expect("store");
+        let count = |store: &Store| -> i64 {
+            store
+                .conn()
+                .query_row("SELECT count(*) FROM event", [], |r| r.get(0))
+                .expect("count")
+        };
+        let extra = 2 * PRUNE_EVERY + 7;
+        let total = u64::try_from(KEPT_EVENTS).expect("positive") + extra;
+        let mut last = 0;
+        for n in 0..total {
+            let aggregate = if n % 2 == 0 { "ses_1" } else { "ses_2" };
+            last = store
+                .append_event(aggregate, &json!({ "n": n }))
+                .expect("append");
+        }
+        assert_eq!(last, total, "numbers go on, never used twice");
+        // Pruned every so often: at most that many more than are kept.
+        let kept = count(&store);
+        assert!(kept >= KEPT_EVENTS, "{kept}");
+        assert!(
+            kept < KEPT_EVENTS + i64::try_from(PRUNE_EVERY).expect("small"),
+            "{kept}"
+        );
+        // What is left is the newest, without a gap.
+        let after = store.events_after(0).expect("events");
+        assert_eq!(after.last().map(|e| e.seq), Some(last));
+        assert_eq!(
+            u64::try_from(after.len()).expect("small"),
+            last - after[0].seq + 1
+        );
+        assert_eq!(store.events_after(last - 1).expect("events").len(), 1);
+
+        // A deleted session's events go with it; the other session's stay.
+        let others = after.iter().filter(|e| e.aggregate == "ses_2").count();
+        store.put_session(&session("ses_1")).expect("session");
+        store.delete_session("ses_1").expect("delete");
+        let left = store.events_after(0).expect("events");
+        assert!(left.iter().all(|e| e.aggregate == "ses_2"));
+        assert_eq!(left.len(), others);
+    }
+
+    #[test]
+    fn sessions_messages_and_events_come_back_in_order() {
+        let store = Store::in_memory().expect("store");
+        let session = session("ses_1");
         store.put_session(&session).expect("put");
         assert_eq!(store.session("ses_1").expect("get"), Some(session));
         for (id, text) in [("msg_2", "second"), ("msg_1", "first")] {
