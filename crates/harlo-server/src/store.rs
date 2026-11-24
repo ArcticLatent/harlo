@@ -56,6 +56,9 @@ pub struct Session {
     /// The session that handed it its work, when it's a subagent's.
     #[serde(rename = "parentID", default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
+    /// The session it was forked from, and where: `{sessionID, boundary}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<Value>,
 }
 
 /// A folder.
@@ -78,6 +81,9 @@ pub struct SessionTime {
     /// When its last run ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle: Option<i64>,
+    /// When it was archived, while it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<i64>,
 }
 
 /// A message that matched a search.
@@ -153,6 +159,7 @@ impl Store {
              CREATE TABLE IF NOT EXISTS note (
                  id TEXT PRIMARY KEY, project TEXT, body TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS project (id TEXT PRIMARY KEY, settings TEXT NOT NULL);
              CREATE VIRTUAL TABLE IF NOT EXISTS message_text
                  USING fts5(text, session UNINDEXED, message UNINDEXED);",
         )?;
@@ -381,6 +388,51 @@ impl Store {
         Ok(out)
     }
 
+    /// Removes session `id` and its messages for good.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn delete_session(&self, id: &str) -> Result<(), Error> {
+        let conn = self.conn();
+        conn.execute("DELETE FROM message_text WHERE session = ?1", [id])?;
+        conn.execute("DELETE FROM message WHERE session = ?1", [id])?;
+        conn.execute("DELETE FROM session WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Project `id`'s own settings (`name`, `icon`, `commands`), as an
+    /// object; empty when it has none.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn project_settings(&self, id: &str) -> Result<Value, Error> {
+        let settings: Option<String> = self
+            .conn()
+            .query_row("SELECT settings FROM project WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        Ok(settings
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new())))
+    }
+
+    /// Saves project `id`'s own settings.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn put_project_settings(&self, id: &str, settings: &Value) -> Result<(), Error> {
+        self.conn().execute(
+            "INSERT INTO project (id, settings) VALUES (?1, ?2)
+             ON CONFLICT (id) DO UPDATE SET settings = excluded.settings",
+            params![id, settings.to_string()],
+        )?;
+        Ok(())
+    }
+
     /// Saves a message of session `session`, new or changed.
     ///
     /// # Errors
@@ -572,6 +624,7 @@ mod tests {
                 updated: 1,
                 busy: None,
                 idle: None,
+                archived: None,
             },
             cost: 0.0,
             tokens: Tokens::default(),
@@ -581,6 +634,7 @@ mod tests {
             model: None,
             agent: None,
             parent_id: None,
+            fork: None,
         };
         store.put_session(&session).expect("put");
         assert_eq!(store.session("ses_1").expect("get"), Some(session));

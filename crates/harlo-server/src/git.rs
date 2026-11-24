@@ -144,6 +144,59 @@ pub async fn branches(directory: &str) -> (Option<String>, Option<String>) {
     (current, default)
 }
 
+/// The main checkout of the repository `directory` is in, shared by its
+/// worktrees; `directory` itself outside git.
+pub async fn canonical(directory: &str) -> String {
+    let common = git(
+        directory,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .await;
+    if let Some(parent) = common
+        .as_deref()
+        .map(str::trim)
+        .and_then(|c| c.strip_suffix("/.git"))
+    {
+        return parent.to_owned();
+    }
+    toplevel(directory)
+        .await
+        .unwrap_or_else(|| directory.to_owned())
+}
+
+/// The extra worktrees of the repository whose main checkout is `main`.
+pub async fn worktrees(main: &str) -> Vec<String> {
+    let listed = git(main, &["worktree", "list", "--porcelain"])
+        .await
+        .unwrap_or_default();
+    listed
+        .lines()
+        .filter_map(|l| l.strip_prefix("worktree "))
+        .filter(|w| *w != main)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Runs git with `args` in `directory`.
+///
+/// # Errors
+///
+/// What git said when it failed, or why it didn't start.
+pub async fn run(directory: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| format!("Couldn't run git: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
 async fn git(directory: &str, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .args(args)

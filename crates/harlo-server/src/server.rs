@@ -131,14 +131,27 @@ pub enum Refusal {
     Settled(String),
     /// The store failed.
     Store(String),
+    /// What's to be made is there already.
+    Exists(String),
+    /// A worktree couldn't be made or removed; `force` when removing it
+    /// with force would.
+    Worktree {
+        /// What went wrong.
+        message: String,
+        /// Whether forcing would remove it.
+        force: bool,
+    },
 }
 
 impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotFound(why) | Self::Bad(why) | Self::Settled(why) | Self::Store(why) => {
-                f.write_str(why)
-            }
+            Self::NotFound(why)
+            | Self::Bad(why)
+            | Self::Settled(why)
+            | Self::Store(why)
+            | Self::Exists(why)
+            | Self::Worktree { message: why, .. } => f.write_str(why),
         }
     }
 }
@@ -292,6 +305,7 @@ impl Server {
                 updated: created,
                 busy: None,
                 idle: None,
+                archived: None,
             },
             cost: 0.0,
             tokens: harlo_engine::Tokens::default(),
@@ -301,6 +315,7 @@ impl Server {
             model: None,
             agent: None,
             parent_id: None,
+            fork: None,
         };
         self.store.put_session(&session)?;
         self.emit(
@@ -339,6 +354,7 @@ impl Server {
                 updated: created,
                 busy: None,
                 idle: None,
+                archived: None,
             },
             cost: 0.0,
             tokens: harlo_engine::Tokens::default(),
@@ -348,6 +364,7 @@ impl Server {
             model,
             agent: Some(agent.to_owned()),
             parent_id: Some(parent.id.clone()),
+            fork: None,
         };
         self.store.put_session(&session)?;
         self.emit(

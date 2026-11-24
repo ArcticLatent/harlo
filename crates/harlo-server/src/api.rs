@@ -8,7 +8,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -38,10 +38,21 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/info", get(info))
         .route("/api/event", get(events))
         .route("/api/project", get(projects))
-        .route("/api/worktree", get(worktrees))
+        .route("/api/project/{id}", patch(update_project))
+        .route(
+            "/api/worktree",
+            get(worktrees).post(create_worktree).delete(remove_worktree),
+        )
+        .route("/api/session/{id}/fork", post(fork_session))
+        .route("/api/session/{id}/move", post(move_session))
+        .route("/api/experimental/session/{id}/export", get(export_session))
+        .route("/api/experimental/session/import", post(import_session))
         .route("/api/session", get(sessions).post(create_session))
         .route("/api/session/active", get(active))
-        .route("/api/session/{id}", get(session).patch(update_session))
+        .route(
+            "/api/session/{id}",
+            get(session).patch(update_session).delete(delete_session),
+        )
         .route("/api/session/{id}/message", get(messages))
         .route("/api/session/{id}/diff", get(session_diff))
         .route("/api/session/{id}/form", get(forms))
@@ -143,6 +154,14 @@ impl IntoResponse for Refusal {
                 "StoreError",
                 format!("The server's store failed: {m}"),
             ),
+            Self::Exists(m) => (StatusCode::CONFLICT, "ConflictError", m),
+            Self::Worktree { message, force } => {
+                let body = json!({
+                    "_tag": "WorktreeError", "name": "WorktreeError",
+                    "data": { "message": message, "forceRequired": force },
+                });
+                return (StatusCode::BAD_REQUEST, axum::Json(body)).into_response();
+            }
         };
         let body = json!({ "_tag": tag, "message": message });
         (status, axum::Json(body)).into_response()
@@ -251,37 +270,108 @@ async fn events(
 }
 
 async fn projects(State(server): Shared) -> Answer {
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
-    for s in server.store.sessions()?.iter().rev() {
-        if seen.insert(s.project_id.clone()) {
-            let vcs = git::is_repo(&s.location.directory).await.then_some("git");
-            let time = json!({ "created": s.time.created, "updated": s.time.updated, "active": s.time.updated });
-            let mut p = json!({ "id": s.project_id, "canonical": s.location.directory, "time": time, "sandboxes": [] });
-            if let Some(vcs) = vcs {
-                p["vcs"] = json!(vcs);
-            }
-            out.push(p);
-        }
-    }
-    ok(json!(out))
+    ok(json!(server.projects().await?))
+}
+
+async fn update_project(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(change): axum::Json<crate::projects::ProjectChange>,
+) -> Answer {
+    ok(server.update_project(&id, change).await?)
 }
 
 async fn worktrees(State(server): Shared, Query(q): Params) -> Answer {
     let project = q.get("projectID").cloned().unwrap_or_default();
-    let folders: BTreeSet<String> = server
-        .store
-        .sessions()?
-        .into_iter()
-        .filter(|s| s.project_id == project)
-        .map(|s| s.location.directory)
-        .collect();
-    ok(json!(
-        folders
-            .into_iter()
-            .map(|d| json!({ "directory": d }))
-            .collect::<Vec<_>>()
-    ))
+    ok(json!(server.worktree_list(&project).await?))
+}
+
+/// A worktree to make.
+#[derive(Deserialize)]
+struct NewWorktree {
+    #[serde(rename = "projectID")]
+    project: String,
+    name: Option<String>,
+    branch: Option<String>,
+    directory: Option<String>,
+}
+
+async fn create_worktree(
+    State(server): Shared,
+    axum::Json(body): axum::Json<NewWorktree>,
+) -> Answer {
+    let folder = server
+        .create_worktree(&body.project, body.name, body.branch, body.directory)
+        .await?;
+    ok(json!({ "directory": folder }))
+}
+
+/// A worktree to remove.
+#[derive(Deserialize)]
+struct OldWorktree {
+    #[serde(rename = "projectID")]
+    project: String,
+    directory: String,
+    #[serde(default)]
+    force: bool,
+}
+
+async fn remove_worktree(
+    State(server): Shared,
+    axum::Json(body): axum::Json<OldWorktree>,
+) -> Answer {
+    server
+        .remove_worktree(&body.project, &body.directory, body.force)
+        .await?;
+    done()
+}
+
+/// Where a fork ends.
+#[derive(Deserialize)]
+struct ForkAt {
+    before: Option<String>,
+}
+
+async fn fork_session(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<ForkAt>,
+) -> Answer {
+    ok(json!({ "data": server.fork_session(&id, body.before.as_deref())? }))
+}
+
+async fn move_session(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<NewLocation>,
+) -> Answer {
+    server.move_session(&id, &body.directory).await?;
+    done()
+}
+
+async fn delete_session(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.delete_session(&id)?;
+    done()
+}
+
+async fn export_session(State(server): Shared, Path(id): Path<String>) -> Answer {
+    ok(json!({ "data": server.export_session(&id)? }))
+}
+
+/// An exported session to bring back.
+#[derive(Deserialize)]
+struct Import {
+    info: Value,
+    #[serde(default)]
+    messages: Vec<Value>,
+    location: NewLocation,
+}
+
+async fn import_session(State(server): Shared, axum::Json(body): axum::Json<Import>) -> Answer {
+    let session = server
+        .import_session(body.info, body.messages, &body.location.directory)
+        .await?;
+    ok(json!({ "data": session }))
 }
 
 async fn sessions(State(server): Shared, Query(q): Params) -> Answer {
@@ -291,6 +381,11 @@ async fn sessions(State(server): Shared, Query(q): Params) -> Answer {
         .sessions()?
         .into_iter()
         .filter(|s| directory.is_none_or(|d| &s.location.directory == d))
+        .filter(|s| match q.get("archived").map(String::as_str) {
+            Some("false") => s.time.archived.is_none(),
+            Some("true") => s.time.archived.is_some(),
+            _ => true,
+        })
         // `null` asks for top-level sessions; an ID, for its children.
         .filter(|s| match q.get("parentID").map(String::as_str) {
             None => true,
@@ -333,6 +428,7 @@ async fn session(State(server): Shared, Path(id): Path<String>) -> Answer {
 struct SessionChange {
     permissions: Option<Vec<Rule>>,
     title: Option<String>,
+    archived: Option<bool>,
 }
 
 async fn update_session(
@@ -341,6 +437,9 @@ async fn update_session(
     axum::Json(body): axum::Json<SessionChange>,
 ) -> Answer {
     server.update_session(&id, body.permissions, body.title)?;
+    if let Some(archived) = body.archived {
+        server.archive_session(&id, archived)?;
+    }
     done()
 }
 

@@ -17,11 +17,13 @@ mod fs;
 mod git;
 mod memory;
 mod phone;
+mod projects;
 mod server;
 mod shell;
 mod stale;
 mod store;
 mod subagents;
+mod transfer;
 mod undo;
 mod watch;
 
