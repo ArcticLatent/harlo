@@ -137,6 +137,13 @@ pub enum Kind {
         /// The pictures it returned, such as a picture it read.
         pictures: Vec<crate::types::Picture>,
     },
+    /// A session's goal was set, changed, or cleared (`None`).
+    GoalChanged {
+        /// The session.
+        session_id: String,
+        /// The goal now, or `None` once it's cleared.
+        goal: Option<crate::types::Goal>,
+    },
     /// A subagent the session started reported back.
     ///
     /// The report waits in the session's inbox until the agent reads it, as
@@ -267,6 +274,7 @@ impl Kind {
             | Self::ToolEnded { session_id, .. }
             | Self::ToolProgress { session_id, .. }
             | Self::SubagentReported { session_id, .. }
+            | Self::GoalChanged { session_id, .. }
             | Self::StepEnded { session_id, .. }
             | Self::UsageUpdated { session_id, .. }
             | Self::StepFailed { session_id, .. }
@@ -600,6 +608,10 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
         "form.replied" | "form.cancelled" => Kind::FormSettled {
             session_id: data["sessionID"].as_str().unwrap_or_default().to_owned(),
             form_id: data["id"].as_str().unwrap_or_default().to_owned(),
+        },
+        "rpc.opencode.goal.changed" => Kind::GoalChanged {
+            session_id: session_of(&data),
+            goal: crate::types::Goal::from_json(&data["goal"]),
         },
         "session.inbox.enqueued" => {
             let mut item = data["item"].clone();

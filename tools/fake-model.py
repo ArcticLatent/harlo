@@ -27,6 +27,9 @@ list of steps, each a list of [word, text] parts (so " | " and ";;" can be
 part of an answer). The transcript then shows the prompt a person would
 type.
 
+A goal's reviewer (/goal) gets the verdict kept in scripts.json under
+"<reviewer>", or one that finds the goal met.
+
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
 gets a filled-in summary in OpenCode's template. Every request body is appended to the log, so a
@@ -52,6 +55,12 @@ SUMMARIZE = "You MUST summarize the conversation"
 
 # The line OpenCode puts before the prompt it gives a subagent.
 SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
+
+# How OpenCode asks the model to review a goal (/goal).
+REVIEWER = "Stop acting as the assistant. You are now the reviewer for the session's goal."
+
+# The verdict a goal's reviewer gives unless scripts.json keeps another.
+MET = '{"verdict":"done","reason":"The work is done and shown."}'
 
 # How a side question (/btw) starts; the question follows a blank line.
 ASIDE_PREAMBLE = "The user is asking a quick side question about the conversation so far."
@@ -117,6 +126,8 @@ def plan(messages):
     if any(text_of(m.get("content")).lstrip().startswith(SUMMARIZE) for m in messages):
         return [("say", SUMMARY)]
     script = text_of(messages[last_user].get("content")).strip()
+    if script.startswith(REVIEWER):
+        return [("say", stored_scripts().get("<reviewer>", MET))]
     if script.startswith(SUBAGENT_PREAMBLE):
         script = script[len(SUBAGENT_PREAMBLE) :].strip()
     if script.startswith(ASIDE_PREAMBLE):

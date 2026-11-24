@@ -2,7 +2,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::server::Delivery;
+use harlo_core::server::{Delivery, Goal, GoalStatus};
 use harlo_core::theme::Tokens;
 use harlo_core::timeline::{TodoStatus, todo_counts};
 use lucide_icons::Icon;
@@ -71,12 +71,15 @@ pub fn header(app: &App, id: &str, state: &State<'_>) {
     state.set_session_placeholder(if busy { PLACEHOLDER_BUSY } else { PLACEHOLDER }.into());
 }
 
-/// The lines above session `id`'s composer: what the agent does, its
-/// todos, subagents at work, and prompts waiting for it.
+/// The lines above session `id`'s composer: its goal, what the agent
+/// does, its todos, subagents at work, and prompts waiting for it.
 #[must_use]
 pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
     let t = &app.tokens;
     let mut rows = Vec::new();
+    if let Some(goal) = app.goal(id) {
+        rows.push(goal_row(t, goal));
+    }
     // While a card asks the user, it says what the agent waits for.
     if let Some(activity) = app.activity(id).filter(|_| !app.needs_user(id)) {
         rows.push(activity_row(app, activity));
@@ -174,6 +177,45 @@ pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
 }
 
 /// The line saying what the agent is doing, breathing until the run ends.
+/// The session's goal: what it is, where it stands and why, and what
+/// can be done to it. The action and the row's ID are the `/goal` words
+/// they send.
+fn goal_row(t: &Tokens, goal: &Goal) -> InboxRow {
+    let (icon, note, tone, action) = match goal.status {
+        GoalStatus::Active => (Icon::Goal, "Active", t.text_interactive_base, "pause"),
+        GoalStatus::Paused => (Icon::CirclePause, "Paused", t.icon_warning_base, "resume"),
+        GoalStatus::Complete => (Icon::CircleCheck, "Reached", t.icon_success_base, "clear"),
+    };
+    let detail = match (&goal.reason, goal.status) {
+        (Some(reason), _) => reason.clone(),
+        (None, GoalStatus::Active) if goal.rounds > 0 => {
+            format!("Round {} of {}", goal.rounds, goal.max_rounds)
+        }
+        (None, _) => String::new(),
+    };
+    InboxRow {
+        kind: 4,
+        id: action.into(),
+        glyph: glyph(icon),
+        glyph_color: color(tone),
+        strong: "Goal".into(),
+        text: goal.objective.as_str().into(),
+        detail: detail.into(),
+        note: note.into(),
+        note_color: color(tone),
+        working: goal.status == GoalStatus::Active,
+        action: match goal.status {
+            GoalStatus::Active => "Pause",
+            GoalStatus::Paused => "Resume",
+            GoalStatus::Complete => "Dismiss",
+        }
+        .into(),
+        // A reached goal has nothing left to stop; Dismiss clears it.
+        cancel: goal.status != GoalStatus::Complete,
+        ..InboxRow::default()
+    }
+}
+
 fn activity_row(app: &App, activity: Activity) -> InboxRow {
     let t: &Tokens = &app.tokens;
     let agent = app.agent_name();

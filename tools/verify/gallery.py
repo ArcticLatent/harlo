@@ -867,6 +867,39 @@ def scene_btw(g):
     h.key("Escape")
 
 
+def keep_reviewer(h, verdict):
+    """Has the scripted model's goal reviewer answer `verdict`, or find
+    goals met for None."""
+    path = os.path.join(h.info["sandbox"], "scripts.json")
+    try:
+        with open(path) as f:
+            scripts = json.load(f)
+    except (OSError, ValueError):
+        scripts = {}
+    scripts.pop("<reviewer>", None)
+    if verdict:
+        scripts["<reviewer>"] = json.dumps(verdict)
+    with open(path, "w") as f:
+        json.dump(scripts, f)
+
+
+def scene_goal(g):
+    """A goal above the composer: paused by the reviewer with why, then
+    resumed and reached."""
+    h = g.h
+    open_project_session(h, title="Release")
+    keep_reviewer(h, {"verdict": "blocked", "reason": "It needs the release date from you."})
+    send(h, "/goal Write the release notes for 0.4 and tag it")
+    h.wait("Resume", timeout=30)
+    h.settle(0.8)
+    g.cap("paused", "A goal the reviewer paused, with why, above the composer")
+    keep_reviewer(h, None)
+    h.click("Resume")
+    h.wait("Dismiss", timeout=30)
+    h.settle(0.8)
+    g.cap("reached", "The goal reached, with the reviewer's evidence")
+
+
 SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approval),
           ("question", scene_question), ("busy", scene_busy), ("states", scene_states),
           ("menus", scene_menus),
@@ -874,6 +907,7 @@ SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approva
           ("settings", scene_settings), ("fonts", scene_fonts), ("pages", scene_pages), ("phone", scene_phone),
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
           ("codemode", scene_codemode), ("btw", scene_btw),
+          ("goal", scene_goal),
           # These two leave a subagent's or a worktree's session open, so they come last.
           ("subagents", scene_subagents), ("worktrees", scene_worktrees),
           ("window", scene_window)]

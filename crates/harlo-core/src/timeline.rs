@@ -384,6 +384,11 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
                 key: id.clone(),
                 report: report.clone(),
             }),
+            Message::Note { id, text } => rows.push(Entry::Note {
+                key: id.clone(),
+                text: text.clone(),
+                warning: false,
+            }),
             Message::Idle { .. } | Message::Other { .. } => {}
         }
     }

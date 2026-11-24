@@ -130,6 +130,8 @@ component InboxLine inherits Rectangle {
                         Logic.open-panel(Panels.todos);
                     } else if root.item.kind == 2 {
                         Logic.open-session(root.item.id);
+                    } else if root.item.kind == 4 {
+                        Logic.goal-command(root.item.id);
                     } else {
                         Logic.steer-queued(root.item.id);
                     }
@@ -139,10 +141,16 @@ component InboxLine inherits Rectangle {
         if root.item.cancel: VerticalLayout {
             alignment: center;
             Press {
-                label: "Cancel";
+                label: root.item.kind == 4 ? "Clear goal" : "Cancel";
                 width: 20px;
                 height: 20px;
-                clicked => { Logic.cancel-queued(root.item.id); }
+                clicked => {
+                    if root.item.kind == 4 {
+                        Logic.goal-command("clear");
+                    } else {
+                        Logic.cancel-queued(root.item.id);
+                    }
+                }
                 Icon {
                     text: Icons.close;
                     font-size: 12px;

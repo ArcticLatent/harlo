@@ -429,6 +429,14 @@ pub enum Message {
         /// What it said.
         report: Report,
     },
+    /// A note OpenCode added that it describes for people, such as a
+    /// goal's start; the note itself is for the agent.
+    Note {
+        /// Message ID (`msg_…`).
+        id: String,
+        /// What it says, for people.
+        text: String,
+    },
     /// A message kind Harlo doesn't show yet (agent switch, shell, …).
     Other {
         /// Message ID (`msg_…`).
@@ -449,6 +457,7 @@ impl Message {
             | Self::Compaction { id, .. }
             | Self::Skill { id, .. }
             | Self::Report { id, .. }
+            | Self::Note { id, .. }
             | Self::Other { id, .. } => id,
         }
     }
@@ -513,9 +522,75 @@ impl Message {
             },
             "synthetic" => match Report::from_json(&value) {
                 Some(report) => Self::Report { id, report },
-                None => Self::Other { id, kind },
+                // A described note shows as one line; the rest, such as a
+                // goal's continuations, are the agent's alone.
+                None => match value["description"].as_str().map(str::trim) {
+                    Some(text) if !text.is_empty() => Self::Note {
+                        id,
+                        text: text.to_owned(),
+                    },
+                    _ => Self::Other { id, kind },
+                },
             },
             _ => Self::Other { id, kind },
+        })
+    }
+}
+
+/// A session's goal: an objective OpenCode's `/goal` command keeps the
+/// agent working toward, round after round, until a reviewer finds it met.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Goal {
+    /// The goal's ID; a new goal gets a new one.
+    pub id: String,
+    /// What the agent works toward, as the user wrote it.
+    pub objective: String,
+    /// Whether it's being worked on, paused or reached.
+    pub status: GoalStatus,
+    /// Why it last changed: the reviewer's reason, or what paused it.
+    pub reason: Option<String>,
+    /// Rounds since it was set or last resumed.
+    pub rounds: u32,
+    /// The most rounds it gets before it pauses.
+    pub max_rounds: u32,
+}
+
+/// Where a goal stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GoalStatus {
+    /// The agent works toward it.
+    Active,
+    /// Paused, by the user or because it stopped making progress.
+    Paused,
+    /// The reviewer found it met.
+    Complete,
+}
+
+impl Goal {
+    /// Reads a goal as OpenCode's goal plugin sends it; `None` for `null`.
+    pub(crate) fn from_json(value: &Value) -> Option<Self> {
+        let status = match value["status"].as_str()? {
+            "active" => GoalStatus::Active,
+            "paused" => GoalStatus::Paused,
+            "complete" => GoalStatus::Complete,
+            _ => return None,
+        };
+        let count = |key: &str| {
+            value[key]
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or_default()
+        };
+        Some(Self {
+            id: value["id"].as_str()?.to_owned(),
+            objective: value["objective"].as_str().unwrap_or_default().to_owned(),
+            status,
+            reason: value["reason"]
+                .as_str()
+                .filter(|r| !r.trim().is_empty())
+                .map(str::to_owned),
+            rounds: count("rounds"),
+            max_rounds: count("maxRounds"),
         })
     }
 }

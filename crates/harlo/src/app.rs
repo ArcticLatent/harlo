@@ -36,6 +36,7 @@ mod computers;
 mod context;
 mod files;
 mod git_settings;
+mod goals;
 mod hosting;
 mod line_comments;
 mod local_models;
@@ -70,6 +71,7 @@ pub use context::{
 };
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use git_settings::{GitEvent, GitSettings};
+pub use goals::{GoalAction, GoalEvent};
 pub use hosting::{HostingEvent, HostingState, SigningIn};
 pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
 pub use local_models::{EngineState, Getting, LocalEvent, LocalModels, ServerState};
@@ -264,6 +266,15 @@ pub enum Status {
     },
 }
 
+/// What Harlo keeps for each session beside its history, by session ID.
+#[derive(Debug, Default)]
+struct PerSession {
+    /// Side questions asked about it.
+    asides: HashMap<String, Vec<Aside>>,
+    /// Its goal, once read and while it has one.
+    goals: HashMap<String, harlo_core::server::Goal>,
+}
+
 /// Something the user did, or something the server reported.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -316,6 +327,8 @@ pub enum Message {
     Pictures(PictureEvent),
     /// Something happened to a side question.
     Aside(AsideEvent),
+    /// Something happened to a session's goal.
+    Goal(GoalEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -567,8 +580,8 @@ pub struct App {
     pub maximized: Option<Panel>,
     /// The terminals, shown under the center or hidden.
     pub terminals: Terminals,
-    /// Side questions asked about each session, by its ID.
-    asides: HashMap<String, Vec<Aside>>,
+    /// Side questions and goals, by session.
+    per_session: PerSession,
     /// The pages over the window: shortcuts, stats and settings.
     pub sheets: Sheets,
     /// The window's width, which decides which panels fit.
@@ -754,7 +767,7 @@ impl App {
             panel: layout.panel.as_deref().and_then(Panel::named),
             maximized: None,
             terminals: Terminals::default(),
-            asides: HashMap::new(),
+            per_session: PerSession::default(),
             sheets: Sheets::default(),
             width: fit::WINDOW.0,
             height: fit::WINDOW.1,
@@ -996,6 +1009,7 @@ impl App {
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Sheet(event) => return self.sheet_event(event),
             Message::Aside(event) => return self.aside_event(event),
+            Message::Goal(event) => return self.goal_event(event),
             message @ (Message::Claude(_)
             | Message::OwnTools(_)
             | Message::Voice(_)
@@ -1071,9 +1085,7 @@ impl App {
             Message::Timeline(id, event) => return self.timeline_event(id, event),
             Message::Server(update) => return self.server(update),
             Message::Fetched(Ok(result)) => return self.fetched(result),
-            Message::Branch(folder, branch) => {
-                self.branches.insert(folder, branch);
-            }
+            Message::Branch(folder, branch) => _ = self.branches.insert(folder, branch),
             // A failed fetch leaves the row as it was until the next event or
             // resync corrects it; after a fade, only the window's next showing
             // changes.
@@ -1325,6 +1337,7 @@ impl App {
                 self.refresh();
                 self.changes_event(&event.kind);
                 self.context_event(&event.kind);
+                self.goal_changed(&event.kind);
                 let files = self.files_event(&event.kind);
                 // A worktree's branch, as OpenCode sees it change.
                 if let EventKind::BranchChanged { directory, branch } = &event.kind
@@ -1486,6 +1499,7 @@ impl App {
                 Fetch::Forms(id.clone()),
                 Fetch::Children(id.clone()),
             ]),
+            self.load_goal(id.clone()),
             self.load_history(id),
         ])
     }

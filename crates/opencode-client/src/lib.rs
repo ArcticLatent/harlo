@@ -68,10 +68,10 @@ pub use setup::{CommandSetup, Setup};
 pub use tool_host::{ToolHost, ToolOutcome, ToolRun, ToolSpec};
 #[doc(inline)]
 pub use types::{
-    Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, InboxItem,
-    Message, ModelRef, PROJECT_COLORS, Part, Permission, PermissionReply, Picture, Project,
-    ProjectChange, Report, Revert, Rule, ScriptCall, ServerInfo, Session, SessionContext, Tokens,
-    ToolCall, ToolStatus,
+    Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, Goal,
+    GoalStatus, InboxItem, Message, ModelRef, PROJECT_COLORS, Part, Permission, PermissionReply,
+    Picture, Project, ProjectChange, Report, Revert, Rule, ScriptCall, ServerInfo, Session,
+    SessionContext, Tokens, ToolCall, ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

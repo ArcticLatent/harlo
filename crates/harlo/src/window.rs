@@ -1375,6 +1375,10 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_link, |url| Message::OpenLink(url.to_string()));
     send!(on_steer_queued, |id| Message::SteerQueued(id.to_string()));
     send!(on_cancel_queued, |id| Message::CancelQueued(id.to_string()));
+    send_with!(on_goal_command, |_app, word| crate::app::GoalAction::named(
+        &word
+    )
+    .map(|action| Message::Goal(crate::app::GoalEvent::Act(action))));
 
     // The cards for what the open session waits on.
     send!(on_undo_keep, |session| Message::UndoKeep(

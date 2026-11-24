@@ -57,7 +57,10 @@ impl App {
     /// The side questions asked about `session`, oldest first.
     #[must_use]
     pub fn asides(&self, session: &str) -> &[Aside] {
-        self.asides.get(session).map_or(&[], Vec::as_slice)
+        self.per_session
+            .asides
+            .get(session)
+            .map_or(&[], Vec::as_slice)
     }
 
     /// How many of the open session's side questions are still being
@@ -89,7 +92,7 @@ impl App {
         self.send_error = None;
         self.menu = None;
         self.composer.set("");
-        let list = self.asides.entry(session.clone()).or_default();
+        let list = self.per_session.asides.entry(session.clone()).or_default();
         list.push(Aside {
             question: question.to_owned(),
             answer: Answer::Waiting,
@@ -109,7 +112,12 @@ impl App {
                 index,
                 result,
             } => {
-                if let Some(aside) = self.asides.get_mut(&session).and_then(|l| l.get_mut(index)) {
+                if let Some(aside) = self
+                    .per_session
+                    .asides
+                    .get_mut(&session)
+                    .and_then(|l| l.get_mut(index))
+                {
                     aside.answer = match result {
                         Ok(text) => Answer::Given(text),
                         Err(why) => Answer::Failed(why),
@@ -121,7 +129,11 @@ impl App {
                 let Some(session) = self.active.clone() else {
                     return Task::none();
                 };
-                let Some(aside) = self.asides.get_mut(&session).and_then(|l| l.get_mut(index))
+                let Some(aside) = self
+                    .per_session
+                    .asides
+                    .get_mut(&session)
+                    .and_then(|l| l.get_mut(index))
                 else {
                     return Task::none();
                 };

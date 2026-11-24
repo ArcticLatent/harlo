@@ -16,8 +16,8 @@ use crate::prompt::Prompt;
 use crate::settings::{Integration, McpServer, Plugin, Provider, Stats, WebSearch};
 use crate::setup::Setup;
 use crate::types::{
-    Answer, Delivery, FileDiff, Form, InboxItem, Message, ModelRef, Permission, PermissionReply,
-    Project, ProjectChange, Revert, Rule, ServerInfo, Session, SessionContext,
+    Answer, Delivery, FileDiff, Form, Goal, InboxItem, Message, ModelRef, Permission,
+    PermissionReply, Project, ProjectChange, Revert, Rule, ServerInfo, Session, SessionContext,
 };
 use crate::{Endpoint, Error, Event};
 
@@ -450,6 +450,36 @@ impl Client {
         )
         .await?;
         Ok(v["data"]["text"].as_str().unwrap_or_default().to_owned())
+    }
+
+    /// Session `session_id`'s goal, set with the `/goal` command, if it has
+    /// one.
+    ///
+    /// The goal plugin serves it over its RPC in the session's folder,
+    /// `directory`, once the folder's plugins have loaded; this waits a
+    /// little for them.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or doesn't run the plugin.
+    pub async fn goal(&self, session_id: &str, directory: &str) -> Result<Option<Goal>, Error> {
+        let started = std::time::Instant::now();
+        loop {
+            let read = Self::json(
+                self.request(Method::POST, "/api/rpc/opencode.goal/get")
+                    .query(&[("location[directory]", directory)])
+                    .json(&json!({ "input": { "sessionID": session_id } })),
+            )
+            .await;
+            match read {
+                // A folder's plugins load on first use; until then their
+                // RPC is unavailable.
+                Err(e) if e.tag() == Some("RpcError") && started.elapsed() < CATALOG_WAIT => {
+                    tokio::time::sleep(CATALOG_POLL).await;
+                }
+                read => return Ok(Goal::from_json(&read?["output"])),
+            }
+        }
     }
 
     /// A model as OpenCode's requests name it.

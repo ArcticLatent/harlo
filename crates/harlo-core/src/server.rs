@@ -28,10 +28,10 @@ use crate::workspace::{Fetch, Fetched, Snapshot};
 pub use opencode_client::{
     Agent, Answer, Attachment, AttemptStatus, Automation, AutomationAction, AutomationStatus,
     AutomationTrigger, Choice, Client, Command, Condition, Connection, Day, Delivery, Effect,
-    Endpoint, Error, Field, FieldKind, FileChange, FileDiff, FileMatch, Form, Integration,
-    McpResource, McpServer, McpStatus, Mention, Model, ModelUsage, NewAutomation, OAuthAttempt,
-    PROJECT_COLORS, PermissionReply, Picture, Plugin, PluginSource, ProjectChange, Prompt,
-    Provider, Pty, PtyInput, PtyOutput, Rule, SavedApproval, ScriptCall, SessionContext,
+    Endpoint, Error, Field, FieldKind, FileChange, FileDiff, FileMatch, Form, Goal, GoalStatus,
+    Integration, McpResource, McpServer, McpStatus, Mention, Model, ModelUsage, NewAutomation,
+    OAuthAttempt, PROJECT_COLORS, PermissionReply, Picture, Plugin, PluginSource, ProjectChange,
+    Prompt, Provider, Pty, PtyInput, PtyOutput, Rule, SavedApproval, ScriptCall, SessionContext,
     SignInMethod, Skill, Stats, Tokens, WebSearch, message_id,
 };
 
