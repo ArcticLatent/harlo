@@ -3,8 +3,9 @@
 //!
 //! What goes out follows Settings → Notifications: the events switched on,
 //! quiet hours, whether to notify while Harlo has focus (never for the
-//! session in view), the sound, and each event's title and message
-//! templates.
+//! session in view), and each event's title and message templates. Each
+//! event's sound plays whether or not it notifies, unless quiet hours hold
+//! it back.
 
 // Rust guideline compliant 2026-10-09
 
@@ -28,9 +29,6 @@ pub(super) const APP_NAME: &str = "Harlo";
 
 /// The freedesktop icon shown with a notification.
 const NOTICE_ICON: &str = "dialog-information";
-
-/// The freedesktop sound a notification plays, when sounds are on.
-const NOTICE_SOUND: &str = "message-new-instant";
 
 /// How long a click on a notification still opens its session; the desktop
 /// may keep it in its list long after it shows.
@@ -131,7 +129,7 @@ impl App {
                     text.push_str(": ");
                     text.push_str(detail);
                 }
-                (Kind::Asks, &asked.session_id, text)
+                (Kind::Approval, &asked.session_id, text)
             }
             EventKind::FormCreated(form) => {
                 let question = form
@@ -144,21 +142,35 @@ impl App {
             }
             _ => return Task::none(),
         };
+        let minute = local_minute(self.now);
+        let sound = self.preferences.notifications.sound(kind, minute);
+        let chime = sound.map_or_else(Task::none, |sound| self.play(sound));
         let settings = &self.preferences.notifications;
-        if !settings.allows(kind, local_minute(self.now)) {
-            return Task::none();
+        if !settings.allows(kind, minute) {
+            return chime;
         }
         if self.notices.focused
             && (!settings.while_focused || self.active.as_deref() == Some(session.as_str()))
         {
-            return Task::none();
+            return chime;
         }
         let values = Values {
             last_message: summary(&said, LAST_MESSAGE_CHARS),
             ..self.values(session)
         };
         let session = session.clone();
-        self.send_notice(kind, Some(session), values)
+        Task::batch([chime, self.send_notice(kind, Some(session), values)])
+    }
+
+    /// Plays `sound`, such as an event's or one chosen in Settings, while
+    /// notifications are shown.
+    pub(super) fn play(&mut self, sound: &'static str) -> Task<Message> {
+        self.last_sound = Some(sound);
+        if self.notices.enabled {
+            Task::effect(Effect::Play(sound))
+        } else {
+            Task::none()
+        }
     }
 
     /// A notification as a finished run with made-up details, whatever the
@@ -212,7 +224,7 @@ impl App {
                     .unwrap_or_default();
             }
             let (title, body) = settings.render(kind, &values);
-            let clicked = show(&title, &body, settings.sound).await;
+            let clicked = show(&title, &body).await;
             clicked
                 .then_some(session_id)
                 .flatten()
@@ -286,11 +298,12 @@ fn uses_branch(settings: &Notifications, kind: Kind) -> bool {
     .any(|t| t.contains("{branch}"))
 }
 
-/// Shows a notification, and returns whether it was clicked.
+/// Shows a notification, and returns whether it was clicked. It's silent:
+/// Harlo plays the event's own sound.
 ///
 /// Without a notification service there's nothing to show it on; the
 /// session still shows what happened.
-async fn show(title: &str, body: &str, sound: bool) -> bool {
+async fn show(title: &str, body: &str) -> bool {
     let mut notice = notify_rust::Notification::new();
     notice
         .appname(APP_NAME)
@@ -299,11 +312,7 @@ async fn show(title: &str, body: &str, sound: bool) -> bool {
         .icon(NOTICE_ICON)
         // Clicking the notification itself.
         .action("default", "Open");
-    if sound {
-        notice.sound_name(NOTICE_SOUND);
-    } else {
-        notice.hint(notify_rust::Hint::SuppressSound(true));
-    }
+    notice.hint(notify_rust::Hint::SuppressSound(true));
     let Ok(handle) = notice.show_async().await else {
         return false;
     };

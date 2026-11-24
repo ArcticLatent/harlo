@@ -659,6 +659,9 @@ pub struct App {
     notices: notices::Notices,
     /// The last notification Harlo meant to show, whether or not it could.
     pub last_notice: Option<Notice>,
+    /// The sound last asked for, an event's or a preview, by id; it plays
+    /// only while notifications are shown, which tests leave off.
+    pub last_sound: Option<&'static str>,
     /// Where the layout is saved; `None` keeps it in memory only.
     store: Option<Store>,
     /// Harlo's own settings.
@@ -781,6 +784,7 @@ impl App {
             context: ContextView::default(),
             notices: notices::Notices::new(false),
             last_notice: None,
+            last_sound: None,
             store: None,
             other_tabs: layout.tabs.clone(),
             restore: None,

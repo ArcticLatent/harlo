@@ -508,7 +508,8 @@ impl Presenter {
             | Picker::Folder
             | Picker::Model
             | Picker::ScheduleFolder
-            | Picker::VoiceLanguage => String::new(),
+            | Picker::VoiceLanguage
+            | Picker::Sound(_) => String::new(),
         };
         state.set_menu_note(note.into());
     }

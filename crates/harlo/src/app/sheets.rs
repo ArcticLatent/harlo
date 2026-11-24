@@ -212,8 +212,6 @@ pub enum Setting {
     Notify,
     /// Whether it notifies while its window has focus.
     NotifyFocused,
-    /// Whether notifications play a sound.
-    NotifySound,
     /// Whether an event notifies.
     NotifyOn(Kind),
     /// Whether Claude plan limits notify.
@@ -245,10 +243,10 @@ impl Setting {
         Self::KeepInTray,
         Self::Notify,
         Self::NotifyFocused,
-        Self::NotifySound,
         Self::NotifyOn(Kind::Finished),
-        Self::NotifyOn(Kind::Failed),
+        Self::NotifyOn(Kind::Approval),
         Self::NotifyOn(Kind::Asks),
+        Self::NotifyOn(Kind::Failed),
         Self::NotifyLimits,
         Self::Quiet,
         Self::QuietQuestions,
@@ -309,17 +307,19 @@ pub enum Field {
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 35] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
         Self::QuietTo,
         Self::Title(Kind::Finished),
         Self::Message(Kind::Finished),
-        Self::Title(Kind::Failed),
-        Self::Message(Kind::Failed),
+        Self::Title(Kind::Approval),
+        Self::Message(Kind::Approval),
         Self::Title(Kind::Asks),
         Self::Message(Kind::Asks),
+        Self::Title(Kind::Failed),
+        Self::Message(Kind::Failed),
         Self::ProjectName,
         Self::StartCommand,
         Self::NewWorktree,
@@ -530,6 +530,12 @@ pub enum Event {
     ThemeLicence,
     /// Show the names a notification template fills in, or hide them.
     TemplateWords,
+    /// Show the event sounds' licence on About, or hide it.
+    SoundLicence,
+    /// Have an event play this sound, from
+    /// [`harlo_core::notifications::SOUNDS`], or none; it plays once as
+    /// it's chosen.
+    Sound(Kind, Option<&'static str>),
     /// Use this font family for the interface, or for code when `code`;
     /// empty for Harlo's own.
     Font {
@@ -635,6 +641,8 @@ pub struct Sheets {
     pub theme_licence: bool,
     /// Whether Notifications lists the names its templates fill in.
     pub template_words: bool,
+    /// Whether About shows the event sounds' licence.
+    pub sound_licence: bool,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -730,7 +738,9 @@ impl App {
             event @ (Event::SystemFonts(_)
             | Event::Font { .. }
             | Event::ThemeLicence
-            | Event::TemplateWords) => {
+            | Event::TemplateWords
+            | Event::SoundLicence
+            | Event::Sound(..)) => {
                 return self.look_event(event);
             }
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
@@ -802,6 +812,17 @@ impl App {
             Event::TemplateWords => {
                 self.sheets.template_words = !self.sheets.template_words;
                 Task::none()
+            }
+            Event::SoundLicence => {
+                self.sheets.sound_licence = !self.sheets.sound_licence;
+                Task::none()
+            }
+            Event::Sound(kind, sound) => {
+                // Chosen from a menu, which closes.
+                self.picker = None;
+                self.preferences.notifications.sounds.set(kind, sound);
+                let preview = sound.map_or_else(Task::none, |sound| self.play(sound));
+                Task::batch([preview, self.save_preferences()])
             }
             Event::SystemFonts(fonts) => {
                 self.system_fonts = Some(fonts);
@@ -912,7 +933,6 @@ impl App {
         let flag = match setting {
             Setting::Notify => &mut notices.enabled,
             Setting::NotifyFocused => &mut notices.while_focused,
-            Setting::NotifySound => &mut notices.sound,
             Setting::NotifyOn(kind) => &mut notices.template_mut(kind).on,
             Setting::NotifyLimits => &mut notices.limits,
             Setting::Quiet => &mut notices.quiet.on,

@@ -212,6 +212,7 @@ fn perform(window: &AppWindow, effect: Effect) {
             // Fails only once the event loop has ended, which is the aim.
             let _ = slint::quit_event_loop();
         }
+        Effect::Play(sound) => crate::sounds::play(sound),
     }
 }
 
@@ -730,6 +731,13 @@ pub const THEME_LICENCE: i32 = 76;
 /// The Notifications button that shows or hides the names a template fills in.
 pub const TEMPLATE_WORDS: i32 = 77;
 
+/// The Settings button that opens the menu of sounds for the event
+/// numbered by its item, in [`harlo_core::notifications::Kind::ALL`].
+pub const CHOOSE_SOUND: i32 = 78;
+
+/// The About button that shows or hides the event sounds' licence.
+pub const SOUND_LICENCE: i32 = 79;
+
 /// The pages About links to: the source, its releases and a new issue.
 pub const ABOUT_LINKS: [&str; 3] = [
     env!("CARGO_PKG_REPOSITORY"),
@@ -841,6 +849,11 @@ fn look_action(number: i32, item: i32) -> Option<Message> {
             .map(|url| Message::OpenLink((*url).to_owned())),
         THEME_LICENCE => Some(Message::Sheet(SheetEvent::ThemeLicence)),
         TEMPLATE_WORDS => Some(Message::Sheet(SheetEvent::TemplateWords)),
+        SOUND_LICENCE => Some(Message::Sheet(SheetEvent::SoundLicence)),
+        CHOOSE_SOUND => {
+            let kind = harlo_core::notifications::Kind::ALL.get(usize::try_from(item).ok()?)?;
+            Some(Message::TogglePicker(Picker::Sound(*kind)))
+        }
         _ => None,
     }
 }
@@ -862,7 +875,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     };
     match number {
         CHOOSE_DEFAULT_MODEL => Some(Message::TogglePicker(Picker::DefaultModel)),
-        CHOOSE_INTERFACE_FONT..=TEMPLATE_WORDS => look_action(number, item),
+        CHOOSE_INTERFACE_FONT..=SOUND_LICENCE => look_action(number, item),
         OPEN_SETUP => Some(Message::Sheet(SheetEvent::OpenSetup)),
         INSTALL_OPENCODE => Some(Message::Sheet(SheetEvent::InstallOpenCode)),
         TEST_NOTICE => Some(Message::Sheet(SheetEvent::TestNotice)),

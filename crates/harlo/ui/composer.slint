@@ -24,6 +24,8 @@ export global Pickers {
     out property <int> voice-language: 11;
     out property <int> interface-font: 12;
     out property <int> code-font: 13;
+    /// The sound of an event; one per event, from 14 on.
+    out property <int> first-sound: 14;
     /// Menus from 5 on open from Settings, so they show above it.
     out property <int> first-in-settings: 5;
 }
@@ -622,7 +624,7 @@ export component PickerMenu inherits Rectangle {
     property <length> step: (State.picker == Pickers.shield
         ? Size.menu-row + Size.two-line-extra : Size.menu-row) + 2px;
     property <length> card-width: State.picker == Pickers.variant
-        || State.picker == Pickers.voice-language ? 200px
+        || State.picker == Pickers.voice-language || State.picker >= Pickers.first-sound ? 200px
         : State.picker == Pickers.agent || State.picker == Pickers.folder ? 260px : 320px;
 
     TouchArea {

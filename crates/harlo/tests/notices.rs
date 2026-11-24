@@ -14,6 +14,7 @@ use harlo_core::notifications::{Kind, local_minute};
 use harlo_core::server::Update;
 use harlo_core::workspace::{Event, EventKind, Permission};
 
+use i_slint_backend_testing::AccessibleRole;
 use support::tasks::Tasks;
 use support::{Ui, demo, ui};
 
@@ -116,8 +117,9 @@ fn an_approval_asked_for_notifies() {
         call: None,
     }))));
     let notice = last(&ui).expect("a notice");
-    assert_eq!(notice.kind, Kind::Asks);
-    assert_eq!(notice.title, "Build needs you");
+    assert_eq!(notice.kind, Kind::Approval);
+    assert_eq!(notice.title, "Build wants approval");
+    assert_eq!(ui.app().last_sound, Some("staplebops-02"), "its sound");
     assert!(
         notice.body.starts_with("hi how are you: Wants to "),
         "{}",
@@ -239,16 +241,16 @@ fn settings_change_templates_times_and_send_a_test() {
     );
 
     // Quiet hours, back up, with a time that isn't one.
-    ui.wheel("Agent needs you", 20);
+    ui.wheel("Questions", 20);
     ui.send(Message::Sheet(SheetEvent::Switch(
         harlo::app::Setting::Quiet,
     )));
+    ui.wheel("Sounds", -6);
     assert!(ui.shows("From"));
     ui.send(Message::Sheet(SheetEvent::Text(
         Field::QuietFrom,
         "7:5".into(),
     )));
-    ui.wheel("Quiet hours", -4);
     assert!(ui.shows("“7:5” isn't a time; use one like 22:00."));
     ui.send(Message::Sheet(SheetEvent::Text(
         Field::QuietFrom,
@@ -257,9 +259,61 @@ fn settings_change_templates_times_and_send_a_test() {
     assert_eq!(ui.app().preferences.notifications.quiet.from, 7 * 60 + 30);
     assert!(!ui.shows("“7:5” isn't a time; use one like 22:00."));
 
-    // Off hides the rest.
+    // Off hides the desktop's rows; sounds stay.
     ui.send(Message::Sheet(SheetEvent::Switch(
         harlo::app::Setting::Notify,
     )));
-    assert!(!ui.shows("Run finished"));
+    assert!(!ui.shows("While Harlo is focused"));
+}
+
+#[test]
+fn each_event_plays_its_sound_and_one_is_heard_as_its_chosen() {
+    let ui = ui(demo::app());
+    // Focused, so nothing notifies; the sound plays all the same.
+    run(&ui, SESSION, "Done", "succeeded");
+    assert_eq!(last(&ui), None);
+    assert_eq!(ui.app().last_sound, Some("staplebops-01"));
+    run(&ui, SESSION, "Broke", "failed");
+    assert_eq!(ui.app().last_sound, Some("nope-03"));
+
+    // Sounds don't need the desktop's notifications.
+    ui.send(Message::Sheet(SheetEvent::Switch(
+        harlo::app::Setting::Notify,
+    )));
+    ui.send(Message::Sheet(SheetEvent::Open(Section::Notifications)));
+    assert!(!ui.shows("While Harlo is focused"));
+    assert!(ui.shows("Staplebops 02"), "the approvals' sound");
+    // Each sound's Change button, in the events' order.
+    let change = |n: usize| {
+        ui.find("Change")
+            .into_iter()
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .nth(n)
+            .expect("a Change button")
+            .invoke_accessible_default_action();
+    };
+    change(1);
+    assert_eq!(
+        ui.app().picker,
+        Some(harlo::model::Picker::Sound(Kind::Approval))
+    );
+    assert!(ui.shows("None"));
+    ui.press("Alert 03");
+    assert_eq!(ui.app().picker, None);
+    assert_eq!(
+        ui.app().last_sound,
+        Some("alert-03"),
+        "heard as it's chosen"
+    );
+    assert!(ui.shows("Alert 03"));
+    assert_eq!(
+        ui.app().preferences.notifications.sounds.approval,
+        "alert-03"
+    );
+
+    // None is silent.
+    change(0);
+    ui.press("None");
+    run(&ui, SESSION, "Done", "succeeded");
+    assert_eq!(ui.app().last_sound, Some("alert-03"), "nothing new played");
 }

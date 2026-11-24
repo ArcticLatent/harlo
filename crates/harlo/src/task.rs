@@ -36,6 +36,9 @@ pub enum Effect {
     ShowInFolder(std::path::PathBuf),
     /// Quit Harlo, even while the tray keeps it running.
     Quit,
+    /// Play the event sound with this id, from
+    /// [`harlo_core::notifications::SOUNDS`].
+    Play(&'static str),
 }
 
 /// What a task produces: a message for the app, or an effect on the window.

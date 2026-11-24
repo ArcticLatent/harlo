@@ -19,6 +19,8 @@ ksni = { workspace = true, features = ["async-io", "blocking"] }
 shell-words = { workspace = true }
 # The microphone, for dictation.
 cpal = { workspace = true }
+# The event sounds Settings → Notifications picks.
+rodio = { workspace = true }
 resvg = { workspace = true }
 harlo-core = { workspace = true }
 # The pairing QR code in Settings → Phone.

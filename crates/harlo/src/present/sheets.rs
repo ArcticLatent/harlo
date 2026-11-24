@@ -34,7 +34,7 @@ use crate::theme::color;
 use crate::ui::{DayBar, SettingsSection, SheetRow, StatTile, State, ThemeCard};
 use harlo_core::git::Identity;
 use harlo_core::hosting::{Account, Service};
-use harlo_core::notifications::{Kind, VARIABLES, clock};
+use harlo_core::notifications::{Kind, VARIABLES, clock, sound_name};
 
 /// How many days of activity the bars show.
 const DAYS: usize = 30;
@@ -1482,9 +1482,6 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
         "When a run ends or an agent needs you.",
         notices.enabled,
     )];
-    if !notices.enabled {
-        return rows;
-    }
     let mut test = pair(
         "Test notification",
         "Preview a notification on this desktop",
@@ -1492,43 +1489,26 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
     );
     test.action = "Try it".into();
     test.setting = crate::window::TEST_NOTICE;
-    rows.extend([
-        switch(
-            Setting::NotifyFocused,
-            "While Harlo is focused",
-            "Skip the session you're currently viewing.",
-            notices.while_focused,
-        ),
-        switch(
-            Setting::NotifySound,
-            "Sound",
-            "Play the desktop's message sound.",
-            notices.sound,
-        ),
-        test,
-        heading("Events"),
-    ]);
-    for kind in Kind::ALL {
-        let (name, what) = event_name(kind);
-        rows.push(switch(
-            Setting::NotifyOn(kind),
-            name,
-            what,
-            notices.template(kind).on,
-        ));
+    // Off, only the desktop's notifications stop: sounds still play.
+    if notices.enabled {
+        rows.extend(desktop_rows(notices, test));
+    }
+    rows.push(heading("Sounds"));
+    for (number, kind) in (0..).zip(Kind::ALL) {
+        let (name, _) = event_name(kind);
+        let sound = notices.sounds.of(kind).unwrap_or_default();
+        let mut row = pair(name, &sound_name(sound), 0);
+        row.action = "Change".into();
+        row.setting = crate::window::CHOOSE_SOUND;
+        row.choice = number;
+        rows.push(row);
     }
     rows.extend([
-        switch(
-            Setting::NotifyLimits,
-            "Plan limits",
-            "A Claude plan limit is reached, or a nearly used limit resets.",
-            notices.limits,
-        ),
         heading("Quiet hours"),
         switch(
             Setting::Quiet,
             "Quiet hours",
-            "Pause notifications between these times.",
+            "Pause notifications and sounds between these times.",
             notices.quiet.on,
         ),
     ]);
@@ -1552,7 +1532,43 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
             notices.quiet.questions,
         ));
     }
-    rows.extend(template_rows(app));
+    if notices.enabled {
+        rows.extend(template_rows(app));
+    }
+    rows
+}
+
+/// Notifications' desktop rows: while focused, a test, and each event's
+/// switch.
+fn desktop_rows(
+    notices: &harlo_core::notifications::Notifications,
+    test: SheetRow,
+) -> Vec<SheetRow> {
+    let mut rows = vec![
+        switch(
+            Setting::NotifyFocused,
+            "While Harlo is focused",
+            "Skip the session you're currently viewing.",
+            notices.while_focused,
+        ),
+        test,
+        heading("Desktop notifications"),
+    ];
+    for kind in Kind::ALL {
+        let (name, what) = event_name(kind);
+        rows.push(switch(
+            Setting::NotifyOn(kind),
+            name,
+            what,
+            notices.template(kind).on,
+        ));
+    }
+    rows.push(switch(
+        Setting::NotifyLimits,
+        "Plan limits",
+        "A Claude plan limit is reached, or a nearly used limit resets.",
+        notices.limits,
+    ));
     rows
 }
 
@@ -1591,8 +1607,9 @@ fn template_rows(app: &App) -> Vec<SheetRow> {
 fn event_name(kind: Kind) -> (&'static str, &'static str) {
     match kind {
         Kind::Finished => ("Run finished", "An agent finished what you asked."),
+        Kind::Approval => ("Approvals", "An agent wants an action approved."),
+        Kind::Asks => ("Questions", "An agent asks you something."),
         Kind::Failed => ("Run failed", "A run stopped with an error."),
-        Kind::Asks => ("Agent needs you", "A question or an action to approve."),
     }
 }
 
@@ -1650,15 +1667,34 @@ fn about_rows(app: &App) -> Vec<SheetRow> {
     themes.setting = crate::window::THEME_LICENCE;
     rows.push(themes);
     if app.sheets.theme_licence {
-        rows.extend(
-            harlo_core::theme::TINTED_LICENSE
-                .split("\n\n")
-                .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
-                .filter(|paragraph| !paragraph.is_empty())
-                .map(|paragraph| note(&paragraph)),
-        );
+        rows.extend(licence_notes(harlo_core::theme::TINTED_LICENSE));
+    }
+    let mut sounds = link(
+        Icon::Volume2,
+        "Sounds",
+        "Event sounds from OpenCode.",
+        if app.sheets.sound_licence {
+            "Hide licence"
+        } else {
+            "Licence"
+        },
+        0,
+    );
+    sounds.setting = crate::window::SOUND_LICENCE;
+    rows.push(sounds);
+    if app.sheets.sound_licence {
+        rows.extend(licence_notes(crate::sounds::LICENSE));
     }
     rows
+}
+
+/// A licence's paragraphs as notes, each on one line.
+fn licence_notes(licence: &str) -> impl Iterator<Item = SheetRow> + '_ {
+    licence
+        .split("\n\n")
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|paragraph| !paragraph.is_empty())
+        .map(|paragraph| note(&paragraph))
 }
 
 /// A row of About: an icon, a name, a line under it, and a button that

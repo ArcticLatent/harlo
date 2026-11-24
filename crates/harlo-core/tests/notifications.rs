@@ -4,7 +4,7 @@
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::notifications::{
-    Kind, Notifications, Quiet, Values, clock, parse_clock, render, summary,
+    Kind, Notifications, Quiet, SOUNDS, Values, clock, parse_clock, render, sound_name, summary,
 };
 
 fn values() -> Values {
@@ -120,6 +120,50 @@ fn quiet_hours_span_midnight_and_can_let_questions_through() {
     );
     notifications.enabled = false;
     assert!(!notifications.allows(Kind::Asks, Some(12 * 60)), "all off");
+}
+
+#[test]
+fn each_event_plays_its_sound_unless_quiet_hours_hush_it() {
+    let mut notifications = Notifications::default();
+    assert_eq!(
+        notifications.sound(Kind::Finished, Some(12 * 60)),
+        Some("staplebops-01")
+    );
+    assert_eq!(notifications.sound(Kind::Failed, None), Some("nope-03"));
+    // Sounds don't follow the notification switches.
+    notifications.enabled = false;
+    notifications.finished.on = false;
+    assert!(notifications.sound(Kind::Finished, None).is_some());
+
+    notifications.sounds.set(Kind::Approval, None);
+    assert_eq!(
+        notifications.sound(Kind::Approval, None),
+        None,
+        "none chosen"
+    );
+    notifications.sounds.set(Kind::Approval, Some("yup-02"));
+    assert_eq!(notifications.sound(Kind::Approval, None), Some("yup-02"));
+    notifications.sounds.set(Kind::Asks, Some("no-such-sound"));
+    assert_eq!(notifications.sound(Kind::Asks, None), None, "unknown id");
+
+    notifications.quiet = Quiet {
+        on: true,
+        ..Quiet::default()
+    };
+    assert_eq!(notifications.sound(Kind::Approval, Some(23 * 60)), None);
+    notifications.quiet.questions = true;
+    assert!(
+        notifications.sound(Kind::Approval, Some(23 * 60)).is_some(),
+        "approvals get through with questions"
+    );
+}
+
+#[test]
+fn sounds_are_named_as_settings_lists_them() {
+    assert_eq!(sound_name("staplebops-01"), "Staplebops 01");
+    assert_eq!(sound_name("bip-bop-10"), "Bip-bop 10");
+    assert_eq!(sound_name(""), "None");
+    assert_eq!(SOUNDS.len(), 45);
 }
 
 #[test]

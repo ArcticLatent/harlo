@@ -112,6 +112,8 @@ tar = { version = "0.4.46", default-features = false }
 ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
 transcribe-rs = { version = "0.3.12", default-features = false }
 cpal = { version = "0.18.2", default-features = false }
+# Event sounds: MP3 decoding (Symphonia) and playback through cpal.
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3"] }
 anyhow = { version = "1.0.100", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 

@@ -116,7 +116,7 @@ fn preferences_load_back_beside_the_layout() {
         keep_in_tray: false,
         setup_done: true,
         notifications: harlo_core::notifications::Notifications {
-            sound: false,
+            while_focused: true,
             quiet: harlo_core::notifications::Quiet {
                 on: true,
                 ..harlo_core::notifications::Quiet::default()

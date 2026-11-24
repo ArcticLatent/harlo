@@ -19,6 +19,7 @@ pub mod model;
 pub mod options;
 pub mod present;
 pub mod runtime;
+pub mod sounds;
 pub mod task;
 pub mod term;
 pub mod text;

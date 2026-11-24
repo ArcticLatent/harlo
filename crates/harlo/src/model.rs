@@ -10,6 +10,7 @@ use crate::app::SettingChoice;
 use std::fmt;
 
 use harlo_core::approvals::Shield;
+use harlo_core::notifications::{Kind, SOUNDS, sound_name};
 use harlo_core::theme::Rgba;
 use lucide_icons::Icon;
 
@@ -75,6 +76,8 @@ pub enum Picker {
     InterfaceFont,
     /// The font for code, diffs and the terminal.
     CodeFont,
+    /// The sound an event plays, from Settings → Notifications.
+    Sound(Kind),
 }
 
 impl Picker {
@@ -96,6 +99,7 @@ impl Picker {
             Self::VoiceLanguage => 11,
             Self::InterfaceFont => 12,
             Self::CodeFont => 13,
+            Self::Sound(kind) => 14 + kind_number(kind),
         }
     }
 
@@ -132,6 +136,7 @@ impl Picker {
             11 => Self::VoiceLanguage,
             12 => Self::InterfaceFont,
             13 => Self::CodeFont,
+            14.. => Self::Sound(*Kind::ALL.get(usize::try_from(index - 14).ok()?)?),
             _ => return None,
         })
     }
@@ -304,6 +309,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
         Picker::ScheduleFolder | Picker::ScheduleSession => schedule_items(app, picker),
         Picker::Provider => provider_items(app),
         Picker::VoiceLanguage => language_items(app),
+        Picker::Sound(kind) => sound_items(app, kind),
         Picker::InterfaceFont | Picker::CodeFont => font_items(app, picker),
         Picker::Agent => {
             let current = app.current_agent();
@@ -437,6 +443,33 @@ pub const OWN_INTERFACE_FONT: &str = "Geist";
 
 /// The font Harlo's code uses unless another is chosen.
 pub const OWN_CODE_FONT: &str = "JetBrains Mono";
+
+/// The number of `kind` in [`Kind::ALL`].
+fn kind_number(kind: Kind) -> i32 {
+    match kind {
+        Kind::Finished => 0,
+        Kind::Approval => 1,
+        Kind::Asks => 2,
+        Kind::Failed => 3,
+    }
+}
+
+/// The sounds an event can play, after "None"; choosing one plays it.
+fn sound_items(app: &App, kind: Kind) -> Vec<Item> {
+    let chosen = app.preferences.notifications.sounds.of(kind);
+    std::iter::once(None)
+        .chain(SOUNDS.iter().copied().map(Some))
+        .map(|sound| Item {
+            selected: sound == chosen,
+            label: sound_name(sound.unwrap_or_default()),
+            detail: None,
+            below: None,
+            dot: None,
+            glyph: None,
+            message: Message::Sheet(SheetEvent::Sound(kind, sound)),
+        })
+        .collect()
+}
 
 /// The languages dictation can listen for.
 fn language_items(app: &App) -> Vec<Item> {

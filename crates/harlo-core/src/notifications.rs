@@ -33,15 +33,23 @@ pub const VARIABLES: [&str; 7] = [
 pub enum Kind {
     /// A run finished.
     Finished,
+    /// The agent wants an action approved.
+    Approval,
+    /// The agent asks a question.
+    Asks,
     /// A run failed.
     Failed,
-    /// The agent asks something or wants an action approved.
-    Asks,
 }
 
 impl Kind {
     /// Every kind, in the order Settings lists them.
-    pub const ALL: [Self; 3] = [Self::Finished, Self::Failed, Self::Asks];
+    pub const ALL: [Self; 4] = [Self::Finished, Self::Approval, Self::Asks, Self::Failed];
+
+    /// Whether it waits for the user: an approval or a question.
+    #[must_use]
+    pub fn waits(self) -> bool {
+        matches!(self, Self::Approval | Self::Asks)
+    }
 
     /// The default title and message.
     #[must_use]
@@ -52,7 +60,14 @@ impl Kind {
                 "{agent_name} stopped with an error",
                 "{session_name}: {last_message}",
             ),
-            Self::Asks => ("{agent_name} needs you", "{session_name}: {last_message}"),
+            Self::Approval => (
+                "{agent_name} wants approval",
+                "{session_name}: {last_message}",
+            ),
+            Self::Asks => (
+                "{agent_name} has a question",
+                "{session_name}: {last_message}",
+            ),
         }
     }
 }
@@ -76,6 +91,124 @@ impl Default for Template {
             title: String::new(),
             message: String::new(),
         }
+    }
+}
+
+/// The sounds an event can play, by id, in the order their menu lists
+/// them. They ship with Harlo, from OpenCode's own set.
+pub const SOUNDS: [&str; 45] = [
+    "alert-01",
+    "alert-02",
+    "alert-03",
+    "alert-04",
+    "alert-05",
+    "alert-06",
+    "alert-07",
+    "alert-08",
+    "alert-09",
+    "alert-10",
+    "bip-bop-01",
+    "bip-bop-02",
+    "bip-bop-03",
+    "bip-bop-04",
+    "bip-bop-05",
+    "bip-bop-06",
+    "bip-bop-07",
+    "bip-bop-08",
+    "bip-bop-09",
+    "bip-bop-10",
+    "staplebops-01",
+    "staplebops-02",
+    "staplebops-03",
+    "staplebops-04",
+    "staplebops-05",
+    "staplebops-06",
+    "staplebops-07",
+    "nope-01",
+    "nope-02",
+    "nope-03",
+    "nope-04",
+    "nope-05",
+    "nope-06",
+    "nope-07",
+    "nope-08",
+    "nope-09",
+    "nope-10",
+    "nope-11",
+    "nope-12",
+    "yup-01",
+    "yup-02",
+    "yup-03",
+    "yup-04",
+    "yup-05",
+    "yup-06",
+];
+
+/// A sound's name in Settings, such as "Staplebops 01" for `staplebops-01`,
+/// or "None" for no sound.
+#[must_use]
+pub fn sound_name(id: &str) -> String {
+    let Some((family, number)) = id.rsplit_once('-') else {
+        return "None".to_owned();
+    };
+    let mut name = String::with_capacity(id.len());
+    let mut chars = family.chars();
+    if let Some(first) = chars.next() {
+        name.extend(first.to_uppercase());
+        name.push_str(chars.as_str());
+    }
+    name.push(' ');
+    name.push_str(number);
+    name
+}
+
+/// Which sound each event plays, by id from [`SOUNDS`]; empty plays none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sounds {
+    /// A run finished.
+    pub finished: String,
+    /// The agent wants an action approved.
+    pub approval: String,
+    /// The agent asks a question.
+    pub asks: String,
+    /// A run failed.
+    pub failed: String,
+}
+
+impl Default for Sounds {
+    fn default() -> Self {
+        Self {
+            finished: "staplebops-01".to_owned(),
+            approval: "staplebops-02".to_owned(),
+            asks: "staplebops-05".to_owned(),
+            failed: "nope-03".to_owned(),
+        }
+    }
+}
+
+impl Sounds {
+    /// The sound `kind` plays, if any.
+    #[must_use]
+    pub fn of(&self, kind: Kind) -> Option<&'static str> {
+        let id = match kind {
+            Kind::Finished => &self.finished,
+            Kind::Approval => &self.approval,
+            Kind::Asks => &self.asks,
+            Kind::Failed => &self.failed,
+        };
+        SOUNDS.iter().copied().find(|s| s == id)
+    }
+
+    /// Sets the sound `kind` plays; `None` plays none.
+    pub fn set(&mut self, kind: Kind, sound: Option<&str>) {
+        let id = match kind {
+            Kind::Finished => &mut self.finished,
+            Kind::Approval => &mut self.approval,
+            Kind::Asks => &mut self.asks,
+            Kind::Failed => &mut self.failed,
+        };
+        sound.unwrap_or_default().clone_into(id);
     }
 }
 
@@ -123,24 +256,22 @@ impl Quiet {
 /// The user's choices for desktop notifications.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent switches in Settings, saved as they are"
-)]
 pub struct Notifications {
     /// Whether Harlo notifies at all.
     pub enabled: bool,
     /// Whether it notifies while its window has focus; never for the
     /// session in view.
     pub while_focused: bool,
-    /// Whether notifications play the desktop's message sound.
-    pub sound: bool,
+    /// The sound each event plays, whether or not it notifies.
+    pub sounds: Sounds,
     /// A run finished.
     pub finished: Template,
+    /// The agent wants an action approved.
+    pub approval: Template,
+    /// The agent asks a question.
+    pub asks: Template,
     /// A run failed.
     pub failed: Template,
-    /// The agent asks something.
-    pub asks: Template,
     /// Whether Claude plan limits notify when used up and when they reset.
     pub limits: bool,
     /// Hours without notifications.
@@ -152,10 +283,11 @@ impl Default for Notifications {
         Self {
             enabled: true,
             while_focused: false,
-            sound: true,
+            sounds: Sounds::default(),
             finished: Template::default(),
-            failed: Template::default(),
+            approval: Template::default(),
             asks: Template::default(),
+            failed: Template::default(),
             limits: true,
             quiet: Quiet::default(),
         }
@@ -168,8 +300,9 @@ impl Notifications {
     pub fn template(&self, kind: Kind) -> &Template {
         match kind {
             Kind::Finished => &self.finished,
-            Kind::Failed => &self.failed,
+            Kind::Approval => &self.approval,
             Kind::Asks => &self.asks,
+            Kind::Failed => &self.failed,
         }
     }
 
@@ -177,8 +310,9 @@ impl Notifications {
     pub fn template_mut(&mut self, kind: Kind) -> &mut Template {
         match kind {
             Kind::Finished => &mut self.finished,
-            Kind::Failed => &mut self.failed,
+            Kind::Approval => &mut self.approval,
             Kind::Asks => &mut self.asks,
+            Kind::Failed => &mut self.failed,
         }
     }
 
@@ -186,7 +320,16 @@ impl Notifications {
     /// at any time when the local time isn't known.
     #[must_use]
     pub fn allows(&self, kind: Kind, minute: Option<u16>) -> bool {
-        self.enabled && self.template(kind).on && !self.hushed(minute, kind == Kind::Asks)
+        self.enabled && self.template(kind).on && !self.hushed(minute, kind.waits())
+    }
+
+    /// The sound `kind` plays at local time `minute`, unless quiet hours
+    /// hold it back; it plays whether or not the event notifies.
+    #[must_use]
+    pub fn sound(&self, kind: Kind, minute: Option<u16>) -> Option<&'static str> {
+        self.sounds
+            .of(kind)
+            .filter(|_| !self.hushed(minute, kind.waits()))
     }
 
     /// Whether quiet hours hold notifications back at `minute`; a question
