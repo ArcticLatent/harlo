@@ -18,6 +18,27 @@ use serde_json::Value;
 /// A failure to read or write the store.
 pub type Error = rusqlite::Error;
 
+/// Makes the file at `path`, empty when it isn't there, readable by its
+/// owner alone: it holds sign-ins and keys. Best effort; SQLite reports a
+/// file it can't open.
+fn owner_only(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        if path.exists() {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        } else if path.extension().is_some_and(|e| e == "db") {
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(path);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 /// A session, in OpenCode 2's shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
@@ -126,7 +147,16 @@ impl Store {
     ///
     /// Fails when the file can't be opened or its tables made.
     pub fn open(path: &Path) -> Result<Self, Error> {
-        Self::with(Connection::open(path)?)
+        owner_only(path);
+        let store = Self::with(Connection::open(path)?)?;
+        // (Its journal files take the file's permissions, but were maybe
+        // made before it was owner-only.)
+        for end in ["-wal", "-shm"] {
+            let mut journal = path.as_os_str().to_owned();
+            journal.push(end);
+            owner_only(Path::new(&journal));
+        }
+        Ok(store)
     }
 
     /// A store in memory, for tests.
@@ -611,6 +641,24 @@ mod tests {
     use super::*;
     use harlo_engine::Created;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_file_is_its_owners_alone() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("scratch");
+        let path = dir.path().join("harlo.db");
+        let mode = |p: &Path| std::fs::metadata(p).expect("file").permissions().mode() & 0o777;
+        let store = Store::open(&path).expect("store");
+        store.put_setting("k", "v").expect("written");
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(&dir.path().join("harlo.db-wal")), 0o600);
+        drop(store);
+        // One made before is made owner-only.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        drop(Store::open(&path).expect("store"));
+        assert_eq!(mode(&path), 0o600);
+    }
 
     #[test]
     fn sessions_messages_and_events_come_back_in_order() {
