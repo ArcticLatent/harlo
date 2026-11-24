@@ -401,6 +401,8 @@ pub enum Message {
         id: String,
         /// `succeeded`, `failed` or `interrupted`.
         outcome: String,
+        /// Why it failed, in the provider's words, when it did.
+        error: Option<String>,
     },
     /// The conversation was summarized to free up context.
     Compaction {
@@ -493,6 +495,7 @@ impl Message {
                 Self::Idle {
                     id,
                     outcome: m.outcome.to_string(),
+                    error: m.error.map(|error| error.message),
                 }
             }
             "compaction" => Self::Compaction {

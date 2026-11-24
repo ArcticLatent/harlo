@@ -682,7 +682,7 @@ fn entry_rows(
             .into_iter()
             .map(with)
             .collect(),
-        Entry::Stopped { outcome, .. } => {
+        Entry::Stopped { outcome, error, .. } => {
             let mut row = line(t, key, gap, Icon::CircleStop, t.icon_warning_base);
             row.label = if outcome == "interrupted" {
                 "Stopped"
@@ -690,6 +690,7 @@ fn entry_rows(
                 "The run failed"
             }
             .into();
+            row.detail = error.as_deref().unwrap_or_default().into();
             vec![with(row)]
         }
         Entry::Note { text, warning, .. } => {

@@ -107,6 +107,8 @@ pub enum Entry {
         key: String,
         /// `failed` or `interrupted`.
         outcome: String,
+        /// Why it failed, when OpenCode said.
+        error: Option<String>,
     },
     /// The conversation being summarized to free up context.
     Compaction {
@@ -338,10 +340,11 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
                     }
                 }
             }
-            Message::Idle { id, outcome } if outcome != "succeeded" => {
+            Message::Idle { id, outcome, error } if outcome != "succeeded" => {
                 rows.push(Entry::Stopped {
                     key: id.clone(),
                     outcome: outcome.clone(),
+                    error: error.clone().filter(|why| !why.trim().is_empty()),
                 });
             }
             Message::Compaction {

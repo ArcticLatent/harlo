@@ -203,13 +203,17 @@ pub fn row(entry: &Entry) -> Value {
             );
             json!({ "key": key, "kind": "markdown", "text": clip(&text), "html": clip(&markdown_html(&text)), "state": "done" })
         }
-        Entry::Stopped { key, outcome } => {
-            let text = if outcome == "interrupted" {
-                "Stopped."
-            } else {
-                "The run failed."
+        Entry::Stopped {
+            key,
+            outcome,
+            error,
+        } => {
+            let text = match (outcome.as_str(), error) {
+                ("interrupted", _) => "Stopped.".to_owned(),
+                (_, Some(why)) => format!("The run failed: {why}"),
+                (_, None) => "The run failed.".to_owned(),
             };
-            notice(key, "warning", text)
+            notice(key, "warning", &text)
         }
         Entry::Compaction { key, state } => match state {
             Compaction::Running => notice(key, "info", "Summarizing the conversation…"),

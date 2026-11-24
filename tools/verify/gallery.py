@@ -190,6 +190,7 @@ def scene_pictures(g):
     """A pasted picture in the composer, thumbnails under the prompt and the
     tool that read a picture, the viewer and the session's grid."""
     h = g.h
+    with_sidebar(h)
     shots = os.path.join(ROOT, ".impeccable", "critique", "shots")
     pasted = os.path.join(ROOT, "crates", "harlo", "ui", "images", "avatars", "penguin-glasses.png")
     for root, _, files in os.walk(shots):
@@ -285,6 +286,64 @@ def scene_busy(g):
     h.click("Stop")
     h.settle(1.5)
     g.cap("stopped", "The run stopped")
+
+
+def scene_states(g):
+    """A long session with many kinds of tool call, a run that ends in the
+    provider's error, and the session summarized."""
+    h = g.h
+    with_sidebar(h)
+    open_project_session(h, title="Parser refactor")
+    parser = "\n".join(f"fn rule_{n}(input: &str) -> Option<Token> {{ None }}" for n in range(1, 13))
+    edited = parser.replace("{ None }", "{ lex(input) }", 4)
+    todos = {"todos": [{"content": "Split the lexer out", "status": "completed", "priority": "high"},
+                       {"content": "Give every rule a test", "status": "in_progress", "priority": "high"},
+                       {"content": "Update the docs", "status": "pending", "priority": "low"}]}
+    ask(h, "Refactor the parser: split out the lexer and make every rule use it.",
+        [[("think", "First, where the rules live and what calls them."),
+          ("tool", 'glob {"pattern":"**/*.txt"}')],
+         [("tool", 'grep {"pattern":"alpha"}')],
+         [("tool", 'read {"path":"a.txt"}')],
+         [("tool", 'read {"path":"b.txt"}')],
+         [("tool", "write " + json.dumps({"path": "src/parser.rs", "content": parser}))],
+         [("tool", "edit " + json.dumps({"path": "src/parser.rs", "oldString": parser,
+                                         "newString": edited}))],
+         [("tool", 'read {"path":"src/lexer.rs"}')],
+         [("tool", "todowrite " + json.dumps(todos))],
+         [("say", "Split the lexer out of the parser. The first four rules now call `lex`; "
+                  "the rest keep their stubs until each has a test.\n\n"
+                  "## What changed\n\n- `src/parser.rs` holds the rules\n"
+                  "- `lex` turns input into tokens\n- `src/lexer.rs` doesn't exist yet, "
+                  "so the read failed; I'll create it next.\n\n"
+                  "```rust\nfn rule_1(input: &str) -> Option<Token> { lex(input) }\n```")]])
+    h.wait_says("create it next", timeout=60)
+    h.settle(1)
+    g.cap("long-end", "A long run's end: the tool summary, the todo strip and the answer")
+    summary = h.find(None, role="Button", where=lambda e: e.label.startswith("Tool activity"))
+    if summary:
+        h.click(summary[-1].label)
+        h.settle(0.8)
+        g.cap("long-tools", "The run's tool calls opened: search, reads, a new file, an edit, a failed read")
+        for _ in range(3):
+            h.scroll("Timeline", 250)
+        h.settle(0.6)
+        g.cap("long-tools-edit", "Further down: the edit's diff in the transcript")
+        h.click(summary[-1].label)
+        h.settle(0.5)
+    h.click(None, role="TextInput", where=composer)
+    h.type("/compact")
+    h.settle(0.6)
+    # The first Enter picks the command from the menu, the second sends it.
+    h.key("Return")
+    h.settle(0.6)
+    h.key("Return")
+    h.settle(6)
+    g.cap("summarized", "The session after /compact: the summary in the transcript")
+    ask(h, "Now create the lexer and run its tests.",
+        [[("tool", 'read {"path":"src/lexer.rs"}')],
+         [("fail", "400 The model's provider refused the request: the context is too long.")]])
+    h.settle(6)
+    g.cap("failed-run", "A run that ended in the provider's error, and how it says so")
 
 
 def scene_menus(g):
@@ -591,6 +650,7 @@ def scene_long_list(g):
     """Enough sessions that the sidebar scrolls: its thin bar at rest and
     under the pointer."""
     h = g.h
+    with_sidebar(h)
     for n in range(1, 31):
         created = h.api("POST", "/api/session", {"location": {"directory": h.project}})["data"]
         h.api("PATCH", f"/api/session/{created['id']}", {"title": f"Session number {n}"})
@@ -715,11 +775,13 @@ def scene_subagents(g):
 
 
 SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approval),
-          ("question", scene_question), ("busy", scene_busy), ("menus", scene_menus),
-          ("panels", scene_panels), ("subagents", scene_subagents), ("worktrees", scene_worktrees),
-          ("terminal", scene_terminal), ("editor", scene_editor),
+          ("question", scene_question), ("busy", scene_busy), ("states", scene_states),
+          ("menus", scene_menus),
+          ("panels", scene_panels), ("terminal", scene_terminal), ("editor", scene_editor),
           ("settings", scene_settings), ("fonts", scene_fonts), ("pages", scene_pages), ("phone", scene_phone),
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
+          # These two leave a subagent's or a worktree's session open, so they come last.
+          ("subagents", scene_subagents), ("worktrees", scene_worktrees),
           ("window", scene_window)]
 
 # A sitting of its own: the guide shows only before setup is done.

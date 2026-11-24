@@ -15,6 +15,7 @@ by " | " and run in order:
     tool <name> <json>    a tool call (ends the step with tool_calls)
     long <n>              n blocks of Markdown: prose, a code block, a list
     pace <ms>             delay between streamed chunks from here on
+    fail <code> <text>    an HTTP error with that status and message instead
 
 A subagent's prompt starts with OpenCode's line telling it it's one; the
 script, or the plain words kept in scripts.json, is what follows.
@@ -44,6 +45,9 @@ LOREM = (
     "lines of prose so the reader never scrolls sideways to follow an argument. "
 )
 
+
+# How OpenCode starts its request to summarize a session.
+SUMMARIZE = "You MUST summarize the conversation"
 
 # The line OpenCode puts before the prompt it gives a subagent.
 SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
@@ -105,6 +109,9 @@ def plan(messages):
                      and not (i > 0 and messages[i - 1].get("role") == "tool")), default=-1)
     if last_user < 0:
         return [("say", "ok.")]
+    # A request to summarize, wherever OpenCode puts the instruction.
+    if any(text_of(m.get("content")).lstrip().startswith(SUMMARIZE) for m in messages):
+        return [("say", SUMMARY)]
     script = text_of(messages[last_user].get("content")).strip()
     if script.startswith(SUBAGENT_PREAMBLE):
         script = script[len(SUBAGENT_PREAMBLE) :].strip()
@@ -121,7 +128,7 @@ def plan(messages):
     ):
         return [("say", SUMMARY)]
     steps = [s.strip() for s in script.split(";;") if s.strip()]
-    known = ("think ", "say ", "tool ", "long ", "pace ")
+    known = ("think ", "say ", "tool ", "long ", "pace ", "fail ")
     if not steps or not any(steps[0].startswith(k) for k in known):
         return [("say", "ok.")]
     done = sum(1 for m in messages[last_user + 1 :] if m.get("role") == "tool")
@@ -185,6 +192,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": {"message": "only chat completions"}})
             return
         parts = plan(body.get("messages", []))
+        failed = next((rest for word, rest in parts if word == "fail"), None)
+        if failed is not None:
+            code, _, message = failed.partition(" ")
+            self.send_json(int(code), {"error": {"message": message or "failed",
+                                                 "type": "invalid_request_error"}})
+            return
         if body.get("stream"):
             self.stream(parts)
         else:

@@ -283,7 +283,8 @@ component LineRow inherits Rectangle {
         if root.item.detail != "": Text {
             text: root.item.detail;
             vertical-alignment: center;
-            horizontal-stretch: 1;
+            // Before a button the words keep their width, so the button follows them.
+            horizontal-stretch: root.item.action == "" ? 1 : 0;
             overflow: elide;
             font-size: root.item.mono ? Size.code : Size.small;
             font-family: root.item.mono ? Fonts.mono : Fonts.sans;

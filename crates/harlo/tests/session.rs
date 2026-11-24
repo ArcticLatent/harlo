@@ -254,6 +254,7 @@ fn a_stopped_run_offers_to_continue_and_keeps_the_draft() {
             Entry::Stopped {
                 key: "msg_s".into(),
                 outcome: "interrupted".into(),
+                error: None,
             },
         ]),
     ));
@@ -281,6 +282,37 @@ fn a_stopped_run_offers_to_continue_and_keeps_the_draft() {
             .iter()
             .any(|e| e.accessible_role() == Some(AccessibleRole::Button)),
         "no Continue button while the session works"
+    );
+}
+
+#[test]
+fn a_failed_run_says_why_beside_continue() {
+    let ui = chatting();
+    ui.send(Message::History(
+        PI_UPDATE.into(),
+        Ok(vec![
+            Entry::Prompt {
+                key: "msg_p".into(),
+                text: "Create the lexer".into(),
+                attachments: Vec::new(),
+                pictures: Vec::new(),
+                skills: Vec::new(),
+                agent: None,
+            },
+            Entry::Stopped {
+                key: "msg_f".into(),
+                outcome: "failed".into(),
+                error: Some("The context is too long.".into()),
+            },
+        ]),
+    ));
+    // The provider's reason sits on the row, with the way on after it.
+    assert!(ui.shows("The run failed"));
+    assert!(ui.shows("The context is too long."));
+    assert!(
+        ui.find("Continue")
+            .iter()
+            .any(|e| e.accessible_role() == Some(AccessibleRole::Button))
     );
 }
 

@@ -59,6 +59,7 @@ fn messages_become_rows_in_order() {
         Message::Idle {
             id: "msg_3".into(),
             outcome: "succeeded".into(),
+            error: None,
         },
         Message::Other {
             id: "msg_4".into(),
@@ -77,6 +78,7 @@ fn messages_become_rows_in_order() {
         Message::Idle {
             id: "msg_7".into(),
             outcome: "interrupted".into(),
+            error: None,
         },
     ];
     let rows = entries(&messages);
