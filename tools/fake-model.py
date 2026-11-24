@@ -16,6 +16,8 @@ by " | " and run in order:
     long <n>              n blocks of Markdown: prose, a code block, a list
     pace <ms>             delay between streamed chunks from here on
     fail <code> <text>    an HTTP error with that status and message instead
+    flaky <n> <code> <text>  that error for the step's first n requests, then
+                          the rest of the step
 
 A subagent's prompt starts with OpenCode's line telling it it's one, and a
 side question (/btw) with the lines asking for a quick answer; the
@@ -149,7 +151,7 @@ def plan(messages):
     ):
         return [("say", SUMMARY)]
     steps = [s.strip() for s in script.split(";;") if s.strip()]
-    known = ("think ", "say ", "tool ", "long ", "pace ", "fail ")
+    known = ("think ", "say ", "tool ", "long ", "pace ", "fail ", "flaky ")
     if not steps or not any(steps[0].startswith(k) for k in known):
         return [("say", "ok.")]
     done = sum(1 for m in messages[last_user + 1 :] if m.get("role") == "tool")
@@ -185,6 +187,10 @@ def pieces(text, size=24):
     return [text[i : i + size] for i in range(0, len(text), size)] or [""]
 
 
+# How many requests each flaky step has had, by its request's last message.
+FLAKY = {}
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -212,8 +218,17 @@ class Handler(BaseHTTPRequestHandler):
         if not self.path.rstrip("/").endswith("/chat/completions"):
             self.send_json(404, {"error": {"message": "only chat completions"}})
             return
-        parts = plan(body.get("messages", []))
+        messages = body.get("messages", [])
+        parts = plan(messages)
         failed = next((rest for word, rest in parts if word == "fail"), None)
+        flaky = next((rest for word, rest in parts if word == "flaky"), None)
+        if flaky is not None:
+            times, _, error = flaky.partition(" ")
+            key = json.dumps(messages[-1:], sort_keys=True) + str(len(messages))
+            FLAKY[key] = FLAKY.get(key, 0) + 1
+            if FLAKY[key] <= int(times):
+                failed = error
+            parts = [(w, r) for w, r in parts if w != "flaky"]
         if failed is not None:
             code, _, message = failed.partition(" ")
             self.send_json(int(code), {"error": {"message": message or "failed",

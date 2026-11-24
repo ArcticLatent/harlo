@@ -9,7 +9,7 @@
 // Rust guideline compliant 2026-10-09
 
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
@@ -53,6 +53,9 @@ pub struct Turn {
     /// Where messages that steer the turn come from; none, and nothing
     /// joins it once it started.
     pub steering: Option<std::sync::Arc<dyn Steering>>,
+    /// What the session knows of the files it read and wrote; none, and
+    /// edits aren't checked for changes made since.
+    pub files: Option<std::sync::Arc<dyn crate::stale::Ledger>>,
     /// Where subagents start; none offers no subagent tool.
     pub subagents: Option<std::sync::Arc<dyn crate::subagent::Subagents>>,
     /// The agents a subagent may run as: `(id, what for)`.
@@ -69,6 +72,20 @@ pub struct Turn {
 /// Something that happened during a turn.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    /// The model's server failed before replying; the step asks again at
+    /// `at`.
+    RetryScheduled {
+        /// The step's message ID.
+        message: String,
+        /// The attempt that comes next, from 2.
+        attempt: u32,
+        /// When, in Unix milliseconds.
+        at: i64,
+        /// Why the last attempt failed.
+        error: String,
+        /// The HTTP status it failed with, if any.
+        status: Option<u16>,
+    },
     /// The engine added a message of its own to the history, such as the
     /// instructions of a folder the agent read in.
     Noted {
@@ -501,6 +518,61 @@ async fn track(shadow: &crate::snapshot::Shadow) -> Option<String> {
     }
 }
 
+/// How many times a step asks the model before its failure stands.
+const ATTEMPTS: u32 = 8;
+/// The longest wait between attempts.
+const MAX_WAIT: Duration = Duration::from_secs(30);
+
+/// The wait before `attempt`: two seconds before the second, doubling
+/// after.
+fn backoff(attempt: u32) -> Duration {
+    Duration::from_secs(2_u64.saturating_mul(1 << attempt.saturating_sub(2).min(5)))
+}
+
+/// Streams the reply to `body` for step `message`, asking again after a
+/// failure that may pass; notes when the first token came.
+async fn stream_retrying(
+    endpoint: Endpoint<'_>,
+    body: &Value,
+    message: &str,
+    sink: &impl Sink,
+    stop: &CancellationToken,
+    first_token: &mut Option<i64>,
+) -> Result<chat::Reply, Error> {
+    let mut attempt = 1;
+    loop {
+        let got = {
+            let mut on = |piece: Piece| {
+                if piece == Piece::FirstToken {
+                    *first_token = Some(now());
+                }
+                sink.emit(translate(message, piece));
+            };
+            chat::stream(endpoint, body, stop, &mut on).await
+        };
+        // Only a request that failed before any of the reply came is asked
+        // again, so nothing shown is shown twice.
+        match got {
+            Err(e) if e.is_retryable() && first_token.is_none() && attempt < ATTEMPTS => {
+                attempt += 1;
+                let wait = e.wait().unwrap_or_else(|| backoff(attempt)).min(MAX_WAIT);
+                sink.emit(Event::RetryScheduled {
+                    message: message.to_owned(),
+                    attempt,
+                    at: now() + i64::try_from(wait.as_millis()).unwrap_or(i64::MAX),
+                    error: e.to_string(),
+                    status: e.status(),
+                });
+                tokio::select! {
+                    () = stop.cancelled() => return Err(Error::stopped()),
+                    () = tokio::time::sleep(wait) => {}
+                }
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Streams the model's reply into a new step; returns it with the places
 /// of its tool calls in its content.
 async fn ask_model(
@@ -553,15 +625,7 @@ async fn ask_model(
         headers: &headers,
     };
     let mut first_token = None;
-    let reply = {
-        let mut on = |piece: Piece| {
-            if piece == Piece::FirstToken {
-                first_token = Some(now());
-            }
-            sink.emit(translate(&message, piece));
-        };
-        chat::stream(endpoint, &body, stop, &mut on).await
-    };
+    let reply = stream_retrying(endpoint, &body, &message, sink, stop, &mut first_token).await;
     assistant.time.first_token = first_token;
     let reply = match reply {
         Ok(reply) => reply,
@@ -771,6 +835,11 @@ async fn call_tool(
         Ok(plan) => plan,
         Err(why) => return Called::Ran(failed(input, "tool", why), Vec::new()),
     };
+    if let (Some(ledger), Some((path, shown, now))) = (&turn.files, changing(&plan))
+        && let Err(why) = crate::stale::check(ledger.as_ref(), path, shown, now.as_bytes())
+    {
+        return Called::Ran(failed(input, "stale", why), Vec::new());
+    }
     let permission = plan.permission();
     let layers: Vec<(&str, &[Rule])> = turn
         .rules
@@ -850,7 +919,53 @@ async fn call_tool(
     if let Plan::Question { questions } = plan {
         return ask_questions(input, questions, message, call, gate, stop).await;
     }
-    ran(input, run_plan(turn, plan, message, call, stop).await)
+    ran(input, run_noted(turn, plan, message, call, stop).await)
+}
+
+/// Runs a checked call, noting what a read saw or a write left.
+async fn run_noted(
+    turn: &Turn,
+    plan: Plan,
+    message: &str,
+    call: &str,
+    stop: &CancellationToken,
+) -> Result<tools::Output, String> {
+    let touched = touched(&plan);
+    let result = run_plan(turn, plan, message, call, stop).await;
+    if let (Ok(_), Some(ledger), Some((path, wrote))) = (&result, &turn.files, touched)
+        && let Ok(bytes) = std::fs::read(&path)
+    {
+        ledger.note(&path, crate::stale::fingerprint(&bytes), wrote);
+    }
+    result
+}
+
+/// The existing file a call changes, as shown, with what it holds now.
+fn changing(plan: &Plan) -> Option<(&std::path::Path, &str, &str)> {
+    match plan {
+        Plan::Edit {
+            path,
+            shown,
+            before,
+            ..
+        }
+        | Plan::Write {
+            path,
+            shown,
+            before: Some(before),
+            ..
+        } => Some((path, shown, before)),
+        _ => None,
+    }
+}
+
+/// The file a call reads or writes, and whether it writes it.
+fn touched(plan: &Plan) -> Option<(PathBuf, bool)> {
+    match plan {
+        Plan::Read { path, .. } => Some((path.clone(), false)),
+        Plan::Edit { path, .. } | Plan::Write { path, .. } => Some((path.clone(), true)),
+        _ => None,
+    }
 }
 
 /// A call that ran, from what it returned.

@@ -18,6 +18,7 @@ mod git;
 mod memory;
 mod phone;
 mod server;
+mod stale;
 mod store;
 mod subagents;
 mod undo;

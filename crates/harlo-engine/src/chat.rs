@@ -250,12 +250,22 @@ pub(crate) async fn stream(
     }
     let response = tokio::select! {
         () = stop.cancelled() => return Err(Error::stopped()),
-        r = req.send() => r.map_err(|e| Error::provider(format!("Couldn't reach {}: {e}", to.base_url)))?,
+        r = req.send() => r.map_err(|e| Error::unreachable(format!("Couldn't reach {}: {e}", to.base_url)))?,
     };
     let status = response.status();
     if !status.is_success() {
+        let wait = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(std::time::Duration::from_secs);
         let text = response.text().await.unwrap_or_default();
-        return Err(Error::provider(refusal(status.as_u16(), &text)));
+        return Err(Error::refused(
+            status.as_u16(),
+            refusal(status.as_u16(), &text),
+            wait,
+        ));
     }
     let mut events = SseByteStream::new(response.bytes_stream());
     let mut reply = Assembler::default();

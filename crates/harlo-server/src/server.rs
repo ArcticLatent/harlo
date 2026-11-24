@@ -36,6 +36,10 @@ fn wakes(message: &Message) -> bool {
 
 /// How full, in percent of the model's context, a session gets before its
 /// next step starts from a summary.
+/// The instructions for text written outside a session.
+const WRITE_SYSTEM: &str = "Write what the request asks for, and only that: no preamble, no \
+    explanation, no quotes around it.";
+
 const COMPACT_PERCENT: u64 = 85;
 /// Events a slow client may fall behind by before it must reconnect.
 const BACKLOG: usize = 4096;
@@ -76,6 +80,8 @@ pub(crate) struct Live {
     pub(crate) jobs: HashMap<String, Value>,
     /// Files clients watch.
     pub(crate) watches: crate::watch::Watches,
+    /// The files sessions read and wrote.
+    pub(crate) known: crate::stale::Known,
 }
 
 /// The server.
@@ -894,8 +900,12 @@ impl Server {
                 ("session".to_owned(), session.permissions.clone()),
             ],
             history,
-            shadow: Some(self.shadow(&directory)),
+            shadow: folder.config.snapshots.then(|| self.shadow(&directory)),
             memory: self.memory_for(session),
+            files: Some(Arc::new(crate::stale::SessionFiles {
+                server: Arc::clone(self),
+                session: session.id.clone(),
+            })),
             subagents: Some(Arc::new(crate::subagents::SessionSubagents {
                 server: Arc::clone(self),
                 session: session.id.clone(),
@@ -922,6 +932,81 @@ impl Server {
             Outcome::Interrupted => ("interrupted", None),
             Outcome::Failed(e) => ("failed", Some(e.to_string())),
         }
+    }
+
+    /// Answers `prompt` from session `id`'s conversation, leaving the
+    /// session as it was: no tools, nothing stored.
+    ///
+    /// # Errors
+    ///
+    /// When there's no such session or model, or the model fails.
+    pub(crate) async fn aside(&self, id: &str, prompt: &str) -> Result<Value, Refusal> {
+        let session = self.session(id)?;
+        let folder = self.folder(&session.location.directory);
+        let agent = folder.agent(session.agent.as_deref());
+        let model = agent
+            .model
+            .clone()
+            .or_else(|| session.model.clone())
+            .or_else(|| folder.config.default_model())
+            .ok_or_else(|| Refusal::Bad("No model is set up.".to_owned()))?;
+        let (provider, spec) = folder.config.resolve(&model).ok_or_else(|| {
+            Refusal::Bad(format!(
+                "The model {}/{} isn't in the configuration.",
+                model.provider, model.model
+            ))
+        })?;
+        let mut system = self
+            .system_prompt(&session.location.directory, &folder)
+            .await;
+        if let Some(own) = &agent.system {
+            system = format!("{own}\n\n{system}");
+        }
+        let stored = self.store.messages(id)?;
+        let mut history = harlo_engine::compaction::since_summary(&stored).to_vec();
+        history.push(harlo_engine::generate::user(prompt));
+        let answer = harlo_engine::generate::answer(
+            provider,
+            &model,
+            &system,
+            &history,
+            &CancellationToken::new(),
+        )
+        .await
+        .map_err(|e| Refusal::Bad(e.to_string()))?;
+        let cost = spec.cost(&answer.tokens);
+        Ok(json!({ "text": answer.text, "tokens": answer.tokens, "cost": cost }))
+    }
+
+    /// Answers `prompt` with `model`, or the default one, outside any
+    /// session, such as a commit message.
+    ///
+    /// # Errors
+    ///
+    /// When there's no such model, or the model fails.
+    pub(crate) async fn write_text(
+        &self,
+        prompt: &str,
+        model: Option<harlo_engine::ModelRef>,
+    ) -> Result<String, Refusal> {
+        let model = model
+            .or_else(|| self.config.default_model())
+            .ok_or_else(|| Refusal::Bad("No model is set up.".to_owned()))?;
+        let (provider, _) = self.config.resolve(&model).ok_or_else(|| {
+            Refusal::NotFound(format!(
+                "The model {}/{} isn't in the configuration.",
+                model.provider, model.model
+            ))
+        })?;
+        harlo_engine::generate::generate(
+            provider,
+            &model,
+            WRITE_SYSTEM,
+            prompt,
+            &CancellationToken::new(),
+        )
+        .await
+        .map_err(|e| Refusal::Bad(e.to_string()))
     }
 
     /// The system prompt for a session in `directory`, as OpenCode orders
@@ -1202,6 +1287,14 @@ impl Sink for Hooks {
             Event::StepStarted { message, agent, model, time } => self.send(
                 "session.step.started",
                 json!({ "agent": agent, "model": model, "assistantMessageID": message, "started": time }),
+                true,
+            ),
+            Event::RetryScheduled { message, attempt, at, error, status } => self.send(
+                "session.retry.scheduled",
+                json!({
+                    "assistantMessageID": message, "attempt": attempt, "at": at,
+                    "error": { "type": "provider", "message": error, "status": status },
+                }),
                 true,
             ),
             Event::FirstToken { message } => self.send("session.step.first-token", json!({ "assistantMessageID": message }), true),

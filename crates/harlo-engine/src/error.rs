@@ -3,6 +3,7 @@
 // Rust guideline compliant 2026-10-09
 
 use std::fmt;
+use std::time::Duration;
 
 /// Something the engine couldn't do.
 ///
@@ -12,6 +13,12 @@ use std::fmt;
 pub struct Error {
     kind: Kind,
     message: String,
+    /// The HTTP status the model's server refused with.
+    status: Option<u16>,
+    /// Whether asking again may work.
+    retryable: bool,
+    /// How long the server asked to wait before asking again.
+    wait: Option<Duration>,
 }
 
 /// What sort of failure an [`Error`] is.
@@ -26,25 +33,63 @@ enum Kind {
 }
 
 impl Error {
-    pub(crate) fn config(message: impl Into<String>) -> Self {
+    fn new(kind: Kind, message: impl Into<String>) -> Self {
         Self {
-            kind: Kind::Config,
+            kind,
             message: message.into(),
+            status: None,
+            retryable: false,
+            wait: None,
         }
     }
 
+    pub(crate) fn config(message: impl Into<String>) -> Self {
+        Self::new(Kind::Config, message)
+    }
+
     pub(crate) fn provider(message: impl Into<String>) -> Self {
+        Self::new(Kind::Provider, message)
+    }
+
+    /// The model's server couldn't be reached: asking again may work.
+    pub(crate) fn unreachable(message: impl Into<String>) -> Self {
         Self {
-            kind: Kind::Provider,
-            message: message.into(),
+            retryable: true,
+            ..Self::new(Kind::Provider, message)
+        }
+    }
+
+    /// The model's server refused with `status`; a timeout, a conflict, a
+    /// rate limit or a server error may pass when asked again.
+    pub(crate) fn refused(status: u16, message: impl Into<String>, wait: Option<Duration>) -> Self {
+        Self {
+            status: Some(status),
+            retryable: matches!(status, 408 | 409 | 429) || status >= 500,
+            wait,
+            ..Self::new(Kind::Provider, message)
         }
     }
 
     pub(crate) fn stopped() -> Self {
-        Self {
-            kind: Kind::Stopped,
-            message: "Stopped.".to_owned(),
-        }
+        Self::new(Kind::Stopped, "Stopped.")
+    }
+
+    /// The HTTP status the model's server refused with, if it did.
+    #[must_use]
+    pub fn status(&self) -> Option<u16> {
+        self.status
+    }
+
+    /// Whether asking the model again may work.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        self.retryable
+    }
+
+    /// How long the model's server asked to wait before asking again.
+    #[must_use]
+    pub fn wait(&self) -> Option<Duration> {
+        self.wait
     }
 
     /// Whether the turn ended because it was stopped, not because it failed.

@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use crate::Error;
 use crate::chat::{self, Block, Endpoint};
 use crate::config::{ModelRef, ProviderSpec};
-use crate::message::{Created, Message};
+use crate::message::{Created, Message, Tokens};
 
 /// What `model` answers to `prompt` with `system` as its instructions, as
 /// plain text.
@@ -23,34 +23,69 @@ pub async fn generate(
     prompt: &str,
     stop: &CancellationToken,
 ) -> Result<String, Error> {
-    let history = [Message::User {
+    let history = [user(prompt)];
+    Ok(answer(provider, model, system, &history, stop).await?.text)
+}
+
+/// A prompt from the person, as a message of its own.
+#[must_use]
+pub fn user(prompt: &str) -> Message {
+    Message::User {
         id: String::new(),
         time: Created { created: 0 },
         text: prompt.to_owned(),
         skills: Vec::new(),
         files: Vec::new(),
-    }];
+    }
+}
+
+/// A model's answer outside a turn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Answer {
+    /// What it wrote.
+    pub text: String,
+    /// What the request used.
+    pub tokens: Tokens,
+}
+
+/// What `model` answers after `history`, with `system` as its
+/// instructions and no tools.
+///
+/// # Errors
+///
+/// When the provider can't be reached or refuses, or `stop` is cancelled.
+pub async fn answer(
+    provider: &ProviderSpec,
+    model: &ModelRef,
+    system: &str,
+    history: &[Message],
+    stop: &CancellationToken,
+) -> Result<Answer, Error> {
     let (extra, headers) = provider
         .models
         .iter()
         .find(|m| m.id == model.model)
         .map(|m| m.request_extras(model.variant.as_deref()))
         .unwrap_or_default();
-    let body = chat::request(&model.model, system, &history, &[], &extra);
+    let body = chat::request(&model.model, system, history, &[], &extra);
     let to = Endpoint {
         base_url: &provider.base_url,
         api_key: provider.api_key.as_deref(),
         headers: &headers,
     };
     let reply = chat::stream(to, &body, stop, &mut |_| {}).await?;
-    Ok(reply
+    let text = reply
         .blocks
         .into_iter()
         .filter_map(|b| match b {
             Block::Text(text) => Some(text),
             _ => None,
         })
-        .collect())
+        .collect();
+    Ok(Answer {
+        text,
+        tokens: reply.tokens,
+    })
 }
 
 /// The instructions for naming a session.

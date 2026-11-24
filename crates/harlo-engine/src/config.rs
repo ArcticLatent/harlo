@@ -29,6 +29,15 @@ pub struct ModelRef {
     pub variant: Option<String>,
 }
 
+impl ModelRef {
+    /// The model a config or request value names: `"provider/model#variant"`
+    /// (the variant optional) or `{ "providerID", "model" or "id", "variant" }`.
+    #[must_use]
+    pub fn from_value(value: &Value) -> Option<Self> {
+        model_ref(value)
+    }
+}
+
 /// A model's prices, in US dollars per million tokens.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Price {
@@ -165,6 +174,9 @@ pub struct Config {
     pub commands: Value,
     /// Agents (`agents`), by ID: new ones, or changes to built-in ones.
     pub agents: Value,
+    /// Whether steps are recorded so undo can put files back
+    /// (`snapshots`, on unless turned off).
+    pub snapshots: bool,
 }
 
 impl Config {
@@ -234,6 +246,7 @@ impl Config {
             todo: value["experimental"]["todo"].as_bool().unwrap_or(false),
             commands: value["commands"].clone(),
             agents: value["agents"].clone(),
+            snapshots: value["snapshots"].as_bool().unwrap_or(true),
         }
     }
 

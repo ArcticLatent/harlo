@@ -29,6 +29,7 @@ pub mod question;
 mod rules;
 pub mod skills;
 pub mod snapshot;
+pub mod stale;
 pub mod subagent;
 pub mod todo;
 pub mod tools;

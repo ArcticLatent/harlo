@@ -76,7 +76,10 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/config", get(config))
         .route("/api/mcp/resource", get(mcp_resources))
         .route("/api/experimental/job", get(jobs))
+        .route("/api/vcs", get(vcs))
         .route("/api/vcs/diff", get(vcs_diff))
+        .route("/api/session/{id}/generate", post(aside))
+        .route("/api/experimental/generate/text", post(write_text))
         .route("/api/rpc/opencode.goal/get", post(no_goal))
         .route("/api/experimental/client-mcp", get(no_client_tools))
         // No web search tool yet: truthfully, no providers.
@@ -361,6 +364,43 @@ async fn session_diff(State(server): Shared, Path(id): Path<String>) -> Answer {
         }
     }
     ok(json!({ "data": git::changes(&session.location.directory, Some(&files)).await }))
+}
+
+/// The version control of a folder: git and its branches, or nothing.
+async fn vcs(Query(q): Params) -> Answer {
+    let directory = directory_of(&q);
+    let data = if !directory.is_empty() && git::is_repo(&directory).await {
+        let (current, default) = git::branches(&directory).await;
+        json!({ "provider": "git", "branch": { "current": current, "default": default } })
+    } else {
+        json!({ "branch": {} })
+    };
+    ok(json!({ "location": location(&q), "data": data }))
+}
+
+/// A prompt to answer.
+#[derive(Deserialize)]
+struct Asked {
+    prompt: String,
+    #[serde(default)]
+    model: Option<Value>,
+}
+
+async fn aside(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<Asked>,
+) -> Answer {
+    ok(json!({ "data": server.aside(&id, &body.prompt).await? }))
+}
+
+async fn write_text(State(server): Shared, axum::Json(body): axum::Json<Asked>) -> Answer {
+    let model = body
+        .model
+        .as_ref()
+        .and_then(harlo_engine::ModelRef::from_value);
+    let text = server.write_text(&body.prompt, model).await?;
+    ok(json!({ "data": { "text": text } }))
 }
 
 async fn vcs_diff(Query(q): Params) -> Answer {

@@ -22,11 +22,13 @@ declare -A SKIP=(
 	[m6]=""
 	[endpoint]=""
 	[events]=""
+	[asides]=""
+	[git]=""
 )
 
 suites=("$@")
 if [ ${#suites[@]} -eq 0 ]; then
-	suites=(m0 m3 m4 m6 endpoint events)
+	suites=(m0 m3 m4 m6 endpoint events asides git)
 fi
 
 cargo build -q -p harlo-server

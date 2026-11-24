@@ -124,6 +124,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         compact_at: None,
         skills: Vec::new(),
         todo: false,
+        files: None,
         subagents: None,
         subagent_agents: Vec::new(),
         history: vec![Message::User {

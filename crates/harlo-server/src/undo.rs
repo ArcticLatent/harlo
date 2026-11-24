@@ -109,6 +109,8 @@ impl Server {
         }
         session.revert = Some(revert.clone());
         self.store.put_session(&session)?;
+        // The files may be as they were: what the session saw no longer holds.
+        self.forget_files(id);
         let public = public(&revert);
         self.emit(
             "session.revert.staged",

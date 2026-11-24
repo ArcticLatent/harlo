@@ -126,6 +126,24 @@ pub(crate) fn split(text: &str) -> Vec<Value> {
 }
 
 /// What `git args` prints in `directory`, when it succeeds.
+/// The branch checked out in `directory`, and the repository's default
+/// branch: the one `origin` points at, else the current one.
+pub async fn branches(directory: &str) -> (Option<String>, Option<String>) {
+    let current = git(directory, &["branch", "--show-current"])
+        .await
+        .map(|b| b.trim().to_owned())
+        .filter(|b| !b.is_empty());
+    let default = git(
+        directory,
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .await
+    .map(|b| b.trim().trim_start_matches("origin/").to_owned())
+    .filter(|b| !b.is_empty())
+    .or_else(|| current.clone());
+    (current, default)
+}
+
 async fn git(directory: &str, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .args(args)
