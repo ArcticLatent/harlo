@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use harlo_engine::codemode::{Answer, Call, Catalog, Namespace, ToolInfo};
+use harlo_engine::codemode::{Answer, Call, Catalog, Direct, Namespace, ToolInfo};
 use harlo_engine::now;
 use serde_json::{Value, json};
 
@@ -18,6 +18,8 @@ pub(crate) struct ServerCatalog {
     pub(crate) server: Arc<Server>,
     /// The session the script runs for, if any.
     pub(crate) session: Option<String>,
+    /// The MCP servers its scripts reach.
+    pub(crate) links: Vec<Arc<crate::mcp::Link>>,
 }
 
 /// A tool of the `automation` namespace.
@@ -67,7 +69,7 @@ impl ServerCatalog {
 
 impl Catalog for ServerCatalog {
     fn namespaces(&self) -> Vec<Namespace> {
-        vec![Namespace {
+        let mut all = vec![Namespace {
             name: "automation".to_owned(),
             description: "Prompts, commands and scripts this server runs on a schedule.".to_owned(),
             tools: vec![
@@ -100,14 +102,22 @@ impl Catalog for ServerCatalog {
                     "({id: string}): {deleted: string}",
                 ),
             ],
-        }]
+        }];
+        all.extend(crate::mcp::namespaces(&self.links));
+        all
+    }
+
+    fn direct(&self) -> Vec<Direct> {
+        crate::mcp::direct(&self.links)
     }
 
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a> {
         Box::pin(async move {
             match namespace {
                 "automation" => self.automation(tool, args),
-                other => Err(format!("There's no namespace {other}.")),
+                other => crate::mcp::call(&self.links, other, tool, args, self.session.as_deref())
+                    .await
+                    .unwrap_or_else(|| Err(format!("There's no namespace {other}."))),
             }
         })
     }

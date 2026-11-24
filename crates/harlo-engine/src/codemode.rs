@@ -58,6 +58,31 @@ pub struct Call {
     pub status: String,
 }
 
+/// A tool offered to the model on its own, outside scripts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Direct {
+    /// The name the model calls it by.
+    pub name: String,
+    /// What it does.
+    pub description: String,
+    /// Its input's JSON Schema.
+    pub parameters: Value,
+    /// The namespace [`Catalog::call`] runs it in.
+    pub namespace: String,
+    /// Its name there.
+    pub tool: String,
+}
+
+impl Direct {
+    /// Its definition, as the model sees it.
+    #[must_use]
+    pub fn definition(&self) -> Value {
+        json!({
+            "name": self.name, "description": self.description, "parameters": self.parameters,
+        })
+    }
+}
+
 /// A tool call's answer, on its way.
 pub type Answer<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 
@@ -65,6 +90,11 @@ pub type Answer<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send 
 pub trait Catalog: Send + Sync + std::fmt::Debug {
     /// The namespaces on offer.
     fn namespaces(&self) -> Vec<Namespace>;
+
+    /// The tools offered to the model on their own, beside `execute`.
+    fn direct(&self) -> Vec<Direct> {
+        Vec::new()
+    }
 
     /// Runs `tool` of `namespace` with `args`.
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a>;

@@ -29,9 +29,6 @@ declare -A SKIP=(
 	[projects]=""
 	[approvals]=""
 	[goals]=""
-	# Web search services and MCP come with their own steps; the plugin
-	# list stays empty, as the engine runs no OpenCode plugins.
-	[m7]="the_set_up_lists_providers_search_mcp_and_plugins"
 	[codemode]=""
 	[automations]=""
 	# The key sign-in also expects a GitHub Copilot browser sign-in, which

@@ -17,6 +17,7 @@ pub mod agents;
 pub mod attachment;
 pub mod catalog;
 mod chat;
+pub mod claude;
 pub mod codemode;
 pub mod commands;
 pub mod compaction;
@@ -39,6 +40,7 @@ pub mod subagent;
 pub mod todo;
 pub mod tools;
 mod turn;
+pub mod web;
 
 pub use config::{
     Config, ModelRef, ModelSpec, Price, ProviderSpec, VariantSpec, merge_config,

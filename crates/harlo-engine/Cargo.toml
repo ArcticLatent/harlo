@@ -16,6 +16,8 @@ shell-words = { workspace = true }
 ignore = { workspace = true }
 regex = { workspace = true, features = ["std", "unicode", "perf"] }
 rquickjs = { workspace = true }
+htmd = { workspace = true }
+markup5ever_rcdom = { workspace = true }
 futures-util = { workspace = true }
 getrandom = { workspace = true, features = ["std"] }
 jsonc-parser = { workspace = true, features = ["serde"] }

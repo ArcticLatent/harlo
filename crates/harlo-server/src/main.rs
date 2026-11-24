@@ -55,6 +55,7 @@ async fn main() -> ExitCode {
     server.start_automations();
     server.start_catalog();
     server.start_refreshing();
+    server.refresh_claude();
     let stopped = async {
         let mut term =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();

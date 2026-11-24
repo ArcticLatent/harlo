@@ -84,8 +84,9 @@ pub fn definitions() -> Vec<Value> {
 /// What a call needs permission for, and what to show while asking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Permission {
-    /// The action: `read`, `edit`, `glob`, `grep` or `shell`.
-    pub action: &'static str,
+    /// The action: `read`, `edit`, `glob`, `grep`, `shell`, or a tool's
+    /// own name.
+    pub action: std::borrow::Cow<'static, str>,
     /// What it acts on: paths relative to the project, or the command.
     pub resources: Vec<String>,
     /// What a person sees before answering, such as the diff.
@@ -112,6 +113,27 @@ pub enum Plan {
     Execute {
         /// The script: an async function's body.
         code: String,
+    },
+    /// Fetches a web page or file.
+    WebFetch {
+        /// Its address.
+        url: String,
+    },
+    /// Searches the web.
+    WebSearch {
+        /// What to find.
+        query: String,
+    },
+    /// Runs a tool a catalog offers on its own, such as an MCP server's.
+    External {
+        /// The name the model called.
+        name: String,
+        /// The catalog's namespace for it.
+        namespace: String,
+        /// Its name there.
+        tool: String,
+        /// Its input.
+        input: Value,
     },
     /// Reads a file.
     Read {
@@ -373,6 +395,8 @@ impl Plan {
                 query: text("query")?,
             }),
             "shell" => shell_call(input),
+            "webfetch" => text("url").map(|url| Self::WebFetch { url }),
+            "websearch" => text("query").map(|query| Self::WebSearch { query }),
             "execute" => Ok(Self::Execute {
                 code: text("code")?,
             }),
@@ -387,7 +411,7 @@ impl Plan {
     pub fn permission(&self) -> Permission {
         match self {
             Self::Read { shown, .. } => Permission {
-                action: "read",
+                action: "read".into(),
                 resources: vec![shown.clone()],
                 metadata: Map::new(),
             },
@@ -397,7 +421,7 @@ impl Plan {
                 after,
                 ..
             } => Permission {
-                action: "edit",
+                action: "edit".into(),
                 resources: vec![shown.clone()],
                 metadata: files_metadata(shown, before.as_deref(), after),
             },
@@ -407,57 +431,72 @@ impl Plan {
                 after,
                 ..
             } => Permission {
-                action: "edit",
+                action: "edit".into(),
                 resources: vec![shown.clone()],
                 metadata: files_metadata(shown, Some(before), after),
             },
             Self::Glob { pattern, .. } => Permission {
-                action: "glob",
+                action: "glob".into(),
                 resources: vec![pattern.clone()],
                 metadata: Map::new(),
             },
             Self::Grep { pattern, .. } => Permission {
-                action: "grep",
+                action: "grep".into(),
                 resources: vec![pattern.clone()],
                 metadata: Map::new(),
             },
             Self::Remember { draft } => Permission {
-                action: "remember",
+                action: "remember".into(),
                 resources: vec![draft.text.clone()],
                 metadata: Map::new(),
             },
             Self::Question { questions } => Permission {
-                action: "question",
+                action: "question".into(),
                 resources: questions.iter().map(|q| q.question.clone()).collect(),
                 metadata: Map::new(),
             },
             Self::Subagent { request } => Permission {
-                action: "subagent",
+                action: "subagent".into(),
                 resources: vec![request.agent.clone()],
                 metadata: Map::new(),
             },
             Self::TodoWrite { .. } => Permission {
-                action: "todowrite",
+                action: "todowrite".into(),
                 resources: vec!["*".to_owned()],
                 metadata: Map::new(),
             },
             Self::Skill { id } => Permission {
-                action: "skill",
+                action: "skill".into(),
                 resources: vec![id.clone()],
                 metadata: Map::new(),
             },
             Self::SearchSessions { query } => Permission {
-                action: "search_sessions",
+                action: "search_sessions".into(),
                 resources: vec![query.clone()],
                 metadata: Map::new(),
             },
             Self::Shell { command, .. } => Permission {
-                action: "shell",
+                action: "shell".into(),
                 resources: vec![command.clone()],
                 metadata: Map::new(),
             },
             Self::Execute { .. } => Permission {
-                action: "execute",
+                action: "execute".into(),
+                resources: vec!["*".to_owned()],
+                metadata: Map::new(),
+            },
+            Self::WebFetch { url } => Permission {
+                action: "webfetch".into(),
+                resources: vec![url.clone()],
+                metadata: Map::new(),
+            },
+            Self::WebSearch { query } => Permission {
+                action: "websearch".into(),
+                resources: vec![query.clone()],
+                metadata: Map::new(),
+            },
+            Self::External { name, .. } => Permission {
+                action: name.clone().into(),
                 resources: vec!["*".to_owned()],
                 metadata: Map::new(),
             },
@@ -539,6 +578,11 @@ impl Plan {
             }
             Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
             Self::Execute { .. } => Err("Code Mode isn't available here.".to_owned()),
+            Self::External { name, .. } => Err(format!("There is no tool called `{name}` here.")),
+            Self::WebFetch { url } => {
+                crate::web::fetch(&url, &std::env::temp_dir().join("harlo-web")).await
+            }
+            Self::WebSearch { .. } => Err("No web search service is set up.".to_owned()),
             Self::Skill { id } => Err(format!("There's no skill {id}.")),
             Self::Subagent { .. } => Err("Subagents can't start here.".to_owned()),
             Self::TodoWrite { todos } => Ok(Output {
@@ -717,7 +761,7 @@ mod tests {
         let ask = plan.permission();
         assert_eq!(
             (ask.action, ask.resources.as_slice()),
-            ("edit", ["a.txt".to_owned()].as_slice())
+            ("edit".into(), ["a.txt".to_owned()].as_slice())
         );
         let file = &ask.metadata["files"][0];
         assert_eq!(

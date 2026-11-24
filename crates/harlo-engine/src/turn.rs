@@ -61,6 +61,8 @@ pub struct Turn {
     pub jobs: Option<std::sync::Arc<dyn crate::jobs::Jobs>>,
     /// The tools Code Mode scripts can call; none leaves `execute` out.
     pub code: Option<std::sync::Arc<dyn crate::codemode::Catalog>>,
+    /// The web search service; none leaves `websearch` out.
+    pub search: Option<crate::web::Search>,
     /// Where subagents start; none offers no subagent tool.
     pub subagents: Option<std::sync::Arc<dyn crate::subagent::Subagents>>,
     /// The agents a subagent may run as: `(id, what for)`.
@@ -326,11 +328,18 @@ fn offered(turn: &Turn) -> Vec<Value> {
     if turn.memory.is_some() {
         definitions.extend(crate::memory::definitions());
     }
+    definitions.extend(crate::web::definitions(turn.search.is_some()));
     if let Some(catalog) = &turn.code {
         let namespaces = catalog.namespaces();
         if !namespaces.is_empty() {
             definitions.push(crate::codemode::definition(&namespaces));
         }
+        definitions.extend(
+            catalog
+                .direct()
+                .iter()
+                .map(crate::codemode::Direct::definition),
+        );
     }
     if turn.todo {
         definitions.push(crate::todo::definition());
@@ -859,6 +868,48 @@ fn always(action: &str, resources: &[String]) -> Vec<Rule> {
         .collect()
 }
 
+/// The plan for a call of `name`: a catalog's own tool, or one of the
+/// engine's.
+fn plan_for(turn: &Turn, name: &str, input: &Map<String, Value>) -> Result<Plan, String> {
+    let direct = turn
+        .code
+        .as_ref()
+        .and_then(|c| c.direct().into_iter().find(|d| d.name == name));
+    match direct {
+        Some(d) => Ok(Plan::External {
+            name: d.name,
+            namespace: d.namespace,
+            tool: d.tool,
+            input: Value::Object(input.clone()),
+        }),
+        None => Plan::new(name, input, &turn.cwd),
+    }
+}
+
+/// Runs tool `tool` of the catalog's `namespace`, until `stop`.
+async fn run_external(
+    catalog: &dyn crate::codemode::Catalog,
+    namespace: &str,
+    tool: &str,
+    input: Value,
+    stop: &CancellationToken,
+) -> Result<tools::Output, String> {
+    let value = tokio::select! {
+        v = catalog.call(namespace, tool, input) => v?,
+        () = stop.cancelled() => return Err("Stopped.".to_owned()),
+    };
+    let text = match value {
+        Value::String(text) => text,
+        other => serde_json::to_string_pretty(&other).unwrap_or_default(),
+    };
+    Ok(tools::Output {
+        text,
+        metadata: Map::new(),
+        changed: Vec::new(),
+        pictures: Vec::new(),
+    })
+}
+
 /// Checks, asks for and runs one call.
 #[expect(
     clippy::too_many_arguments,
@@ -874,7 +925,7 @@ async fn call_tool(
     gate: &impl Gate,
     stop: &CancellationToken,
 ) -> Called {
-    let plan = match Plan::new(name, &input, &turn.cwd) {
+    let plan = match plan_for(turn, name, &input) {
         Ok(Plan::TodoWrite { .. }) if !turn.todo => {
             let why = format!("There is no tool called `{name}`.");
             return Called::Ran(failed(input, "tool", why), Vec::new());
@@ -900,7 +951,7 @@ async fn call_tool(
     let decisions: Vec<_> = permission
         .resources
         .iter()
-        .map(|r| (r, decide(&layers, permission.action, r)))
+        .map(|r| (r, decide(&layers, &permission.action, r)))
         .collect();
     let worst = decisions.iter().max_by_key(|(_, d)| match d.effect {
         Effect::Allow => 0,
@@ -932,9 +983,9 @@ async fn call_tool(
                     id: id::ascending_id("per"),
                     message: message.to_owned(),
                     call: call.to_owned(),
-                    action: permission.action.to_owned(),
+                    action: permission.action.to_string(),
                     resources: permission.resources.clone(),
-                    save: crate::rules::save_patterns(permission.action, &permission.resources),
+                    save: crate::rules::save_patterns(&permission.action, &permission.resources),
                     metadata: permission.metadata.clone(),
                     why: format!("Asks because {why}."),
                 };
@@ -946,7 +997,7 @@ async fn call_tool(
                     Answer::Once => {}
                     Answer::Always => turn.rules.push((
                         "session".to_owned(),
-                        always(permission.action, &permission.resources),
+                        always(&permission.action, &permission.resources),
                     )),
                     Answer::Reject(Some(said)) => {
                         return Called::Refused(failed(
@@ -1110,6 +1161,25 @@ async fn run_plan(
                 changed: Vec::new(),
                 pictures: Vec::new(),
             })
+        }
+        (
+            Plan::External {
+                namespace,
+                tool,
+                input,
+                ..
+            },
+            _,
+        ) if turn.code.is_some() => {
+            let catalog = turn.code.as_ref().ok_or_else(String::new)?;
+            run_external(catalog.as_ref(), &namespace, &tool, input, stop).await
+        }
+        (Plan::WebSearch { query }, _) if turn.search.is_some() => {
+            let search = turn.search.as_ref().ok_or_else(String::new)?;
+            tokio::select! {
+                found = crate::web::search(search, &query) => found,
+                () = stop.cancelled() => Err("Stopped.".to_owned()),
+            }
         }
         (Plan::Execute { code }, _) if turn.code.is_some() => {
             let catalog = turn.code.as_ref().ok_or_else(String::new)?;

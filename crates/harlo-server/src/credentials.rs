@@ -282,6 +282,14 @@ impl Server {
                 "connections": connections(&p.id, &[]),
             }));
         }
+        // The web search services sign in with a key.
+        for (id, name, env) in harlo_engine::web::SERVICES {
+            list.push(json!({
+                "id": id, "name": name,
+                "methods": [{ "type": "key" }, { "type": "env", "names": [env] }],
+                "connections": connections(id, &[(*env).to_owned()]),
+            }));
+        }
         list.push(json!({
             "id": CLAUDE_AGENT, "name": "Claude Agent",
             "methods": [{
@@ -303,13 +311,21 @@ impl Server {
     pub(crate) fn connect_key(&self, id: &str, sign_in: KeySignIn) -> Result<(), Refusal> {
         let catalog = self.catalog();
         let Some(entry) = catalog.get(id) else {
-            // A provider the config adds keeps its key as typed.
+            // A provider the config adds, or a search service, keeps its
+            // key as typed.
             let (global, _) = self.global();
-            let provider = global
+            let name = global
                 .provider(id)
+                .map(|p| p.name.clone())
+                .or_else(|| {
+                    harlo_engine::web::SERVICES
+                        .iter()
+                        .find(|(s, ..)| *s == id)
+                        .map(|(_, name, _)| (*name).to_owned())
+                })
                 .ok_or_else(|| Refusal::NotFound(format!("Integration not found: {id}")))?;
             let value = json!({ "type": "key", "key": sign_in.key });
-            let label = sign_in.label.unwrap_or_else(|| provider.name.clone());
+            let label = sign_in.label.unwrap_or(name);
             self.store.put_credential(id, &label, &value)?;
             self.integrations_changed();
             return Ok(());
@@ -341,7 +357,7 @@ impl Server {
     ///
     /// When there's no such integration or method, or the store fails.
     pub(crate) fn connect_external(
-        &self,
+        self: &Arc<Self>,
         id: &str,
         sign_in: ExternalSignIn,
     ) -> Result<(), Refusal> {
@@ -358,6 +374,7 @@ impl Server {
         let label = sign_in.label.unwrap_or_else(|| "Claude Agent".to_owned());
         self.store.put_credential(id, &label, &value)?;
         self.integrations_changed();
+        self.refresh_claude();
         Ok(())
     }
 
@@ -395,10 +412,43 @@ impl Server {
 
     /// The catalog providers signed in with a credential or a key in the
     /// environment, that `configured` doesn't already have.
+    /// The web search service `folder` uses: the one its config names
+    /// (`websearch.provider`) when it has a key, otherwise the first with
+    /// one.
+    pub(crate) fn search_for(
+        &self,
+        folder: &crate::folder::Folder,
+    ) -> Option<harlo_engine::web::Search> {
+        let credentials = self.store.credentials().unwrap_or_default();
+        let key = |id: &str, env: &str| {
+            credentials
+                .iter()
+                .find(|c| c["integrationID"] == id && c["value"]["type"] == "key")
+                .and_then(|c| c["value"]["key"].as_str().map(str::to_owned))
+                .or_else(|| from_env(&[env.to_owned()]).map(|(_, v)| v))
+        };
+        let keyed: Vec<(&str, String)> = harlo_engine::web::SERVICES
+            .iter()
+            .filter_map(|(id, _, env)| key(id, env).map(|k| (*id, k)))
+            .collect();
+        let chosen = folder.config.websearch.as_deref();
+        let (service, key) = keyed
+            .iter()
+            .find(|(id, _)| Some(*id) == chosen)
+            .or_else(|| keyed.first())?;
+        Some(harlo_engine::web::Search {
+            service: (*service).to_owned(),
+            key: key.clone(),
+            base: std::env::var("HARLO_WEBSEARCH_BASE")
+                .ok()
+                .filter(|b| !b.is_empty()),
+        })
+    }
+
     pub(crate) fn signed_in(&self, configured: &[ProviderSpec]) -> Vec<ProviderSpec> {
         let catalog = self.catalog();
         let credentials = self.store.credentials().unwrap_or_default();
-        catalog
+        let mut out: Vec<ProviderSpec> = catalog
             .entries
             .iter()
             .filter(|e| !configured.iter().any(|p| p.id == e.id))
@@ -419,6 +469,8 @@ impl Server {
                     e.provider(Some(key), &Map::new())
                 }
             })
-            .collect()
+            .collect();
+        out.extend(self.claude_provider());
+        out
     }
 }

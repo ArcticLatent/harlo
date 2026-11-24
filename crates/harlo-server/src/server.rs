@@ -132,6 +132,10 @@ pub struct Server {
     pub(crate) catalog: Mutex<Arc<harlo_engine::catalog::Catalog>>,
     /// Browser sign-ins under way.
     pub(crate) attempts: crate::oauth::Attempts,
+    /// MCP server connections.
+    pub(crate) mcp: crate::mcp::Mcp,
+    /// The models Claude Code last listed.
+    pub(crate) claude_models: Mutex<Vec<harlo_engine::ModelSpec>>,
     pub(crate) config_dir: PathBuf,
     pub(crate) password: Option<String>,
     /// Phone access, hosted here.
@@ -226,6 +230,8 @@ impl Server {
             global: Mutex::new(global),
             catalog: Mutex::new(Arc::new(harlo_engine::catalog::Catalog::bundled())),
             attempts: Mutex::default(),
+            mcp: crate::mcp::Mcp::default(),
+            claude_models: Mutex::default(),
             config_dir: config_home.join("opencode"),
             password,
             phone,
@@ -971,6 +977,18 @@ impl Server {
             Err(e) => return ("failed", Some(format!("Couldn't read the session: {e}"))),
         };
         let directory = session.location.directory.clone();
+        let rules = vec![
+            ("agent".to_owned(), agent.rules.clone()),
+            ("config".to_owned(), folder.config.permissions.clone()),
+            ("saved".to_owned(), self.saved_rules(&session.project_id)),
+            ("session".to_owned(), session.permissions.clone()),
+        ];
+        if provider.id == harlo_engine::claude::PROVIDER {
+            return self
+                .run_claude(session, model, &agent.id, rules, &history, stop)
+                .await;
+        }
+        let links = self.mcp_ready(&directory).await;
         let mut system = self.system_prompt(&directory, &folder).await;
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
@@ -981,12 +999,7 @@ impl Server {
             model,
             provider: provider.clone(),
             system,
-            rules: vec![
-                ("agent".to_owned(), agent.rules.clone()),
-                ("config".to_owned(), folder.config.permissions.clone()),
-                ("saved".to_owned(), self.saved_rules(&session.project_id)),
-                ("session".to_owned(), session.permissions.clone()),
-            ],
+            rules,
             history,
             shadow: folder.config.snapshots.then(|| self.shadow(&directory)),
             memory: self.memory_for(session),
@@ -1003,9 +1016,11 @@ impl Server {
                 session: session.id.clone(),
             })),
             subagent_agents: folder.subagents(),
+            search: self.search_for(&folder),
             code: Some(Arc::new(crate::code::ServerCatalog {
                 server: Arc::clone(self),
                 session: Some(session.id.clone()),
+                links,
             })),
             // Near the model's context limit, the next step starts from a summary.
             compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
@@ -1017,12 +1032,7 @@ impl Server {
                 directory: directory.clone(),
             })),
         };
-        let hooks = Hooks {
-            server: Arc::clone(self),
-            session: session.id.clone(),
-            directory,
-            streaming: Mutex::default(),
-        };
+        let hooks = Hooks::new(self, &session.id, &directory);
         match harlo_engine::run(turn, &hooks, &hooks, stop).await {
             Outcome::Succeeded => ("succeeded", None),
             Outcome::Interrupted => ("interrupted", None),
@@ -1265,7 +1275,7 @@ struct Streaming {
 }
 
 /// The engine's sink and gate for one session's run.
-struct Hooks {
+pub(crate) struct Hooks {
     server: Arc<Server>,
     session: String,
     directory: String,
@@ -1273,6 +1283,16 @@ struct Hooks {
 }
 
 impl Hooks {
+    /// Hooks for a turn of session `session` in `directory`.
+    pub(crate) fn new(server: &Arc<Server>, session: &str, directory: &str) -> Self {
+        Self {
+            server: Arc::clone(server),
+            session: session.to_owned(),
+            directory: directory.to_owned(),
+            streaming: Mutex::default(),
+        }
+    }
+
     /// Follows the step being streamed, and saves it now and then.
     fn follow(&self, event: &Event) {
         let mut s = lock(&self.streaming);

@@ -155,7 +155,20 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/model", get(models))
         .route("/api/model/default", get(default_model))
         .route("/api/config", get(config))
+        .route("/api/mcp", get(mcp_list))
         .route("/api/mcp/resource", get(mcp_resources))
+        .route(
+            "/api/experimental/mcp/{server}",
+            axum::routing::put(mcp_add).delete(mcp_remove),
+        )
+        .route("/api/experimental/mcp/{server}/connect", post(mcp_connect))
+        .route(
+            "/api/experimental/mcp/{server}/disconnect",
+            post(mcp_disconnect),
+        )
+        .route("/api/plugin", get(plugin_list))
+        .route("/api/plugin/check", post(plugin_check))
+        .route("/api/plugin/update", post(plugin_update))
         .route("/api/experimental/session/stats", get(stats))
         .route("/api/provider", get(providers))
         .route("/api/pty", get(pty_list).post(create_pty))
@@ -177,9 +190,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/session/{id}/generate", post(aside))
         .route("/api/experimental/generate/text", post(write_text))
         .route("/api/rpc/opencode.goal/get", post(read_goal))
-        .route("/api/experimental/client-mcp", get(no_client_tools))
-        // No web search tool yet: truthfully, no providers.
-        .route("/api/websearch/provider", get(located_empty))
+        .route("/api/experimental/client-mcp", get(host_tools))
+        .route("/api/websearch/provider", get(search_services))
         .fallback(not_here)
         .layer(middleware::from_fn_with_state(
             Arc::clone(&server),
@@ -288,7 +300,7 @@ async fn info(headers: HeaderMap) -> Answer {
         "urls": [format!("http://{host}")],
         "paths": { "tmp": std::env::temp_dir() },
         "capabilities": {
-            "server": "harlo", "persistentPty": false, "clientTools": false, "phone": true, "memory": true,
+            "server": "harlo", "persistentPty": false, "clientTools": true, "phone": true, "memory": true,
         },
     }))
 }
@@ -905,12 +917,128 @@ async fn config(State(server): Shared, Query(q): Params) -> Answer {
     ok(json!(server.folder(&directory_of(&q)).entries()))
 }
 
-async fn mcp_resources(Query(q): Params) -> Answer {
-    ok(json!({ "location": location(&q), "data": { "resources": [], "templates": [] } }))
+async fn mcp_resources(State(server): Shared, Query(q): Params) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    ok(json!({ "location": location(&q), "data": server.mcp_resources(&directory) }))
 }
 
-async fn located_empty(Query(q): Params) -> Answer {
-    ok(json!({ "location": location(&q), "data": [] }))
+async fn mcp_list(State(server): Shared, Query(q): Params) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    ok(json!({ "location": location(&q), "data": server.mcp_servers(&directory) }))
+}
+
+async fn mcp_connect(State(server): Shared, Path(name): Path<String>, Query(q): Params) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    server.mcp_connect(&directory, &name)?;
+    done()
+}
+
+async fn mcp_disconnect(
+    State(server): Shared,
+    Path(name): Path<String>,
+    Query(q): Params,
+) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    server.mcp_disconnect(&directory, &name)?;
+    done()
+}
+
+/// A server to add while running.
+#[derive(Deserialize)]
+struct McpAdd {
+    config: Value,
+}
+
+async fn mcp_add(
+    State(server): Shared,
+    Path(name): Path<String>,
+    Query(q): Params,
+    axum::Json(body): axum::Json<McpAdd>,
+) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    server.mcp_add(&directory, &name, body.config);
+    done()
+}
+
+async fn mcp_remove(State(server): Shared, Path(name): Path<String>) -> Answer {
+    server.mcp_remove(&name);
+    done()
+}
+
+/// The engine's own parts, as built-in plugins: it loads no others.
+fn plugins() -> Vec<Value> {
+    let parts = [
+        "harlo.agent",
+        "harlo.command",
+        "harlo.skill",
+        "harlo.memory",
+        "harlo.goal",
+        "harlo.codemode",
+        "harlo.automation",
+        "harlo.mcp",
+        "harlo.vcs.git",
+    ];
+    parts
+        .iter()
+        .map(|id| {
+            json!({
+                "id": id, "source": { "type": "builtin" }, "features": { "server": true },
+                "state": { "status": "active" },
+            })
+        })
+        .collect()
+}
+
+async fn plugin_list(Query(q): Params) -> Answer {
+    ok(json!({ "location": location(&q), "data": plugins() }))
+}
+
+/// Nothing to check: the engine has no package plugins.
+async fn plugin_check(Query(q): Params) -> Answer {
+    ok(json!({ "location": location(&q), "data": plugins() }))
+}
+
+/// What's to update.
+#[derive(Deserialize)]
+struct PluginTargets {
+    #[serde(default)]
+    targets: Vec<String>,
+}
+
+/// Nothing to update; a named package isn't one the engine has.
+async fn plugin_update(axum::Json(body): axum::Json<PluginTargets>) -> Answer {
+    match body.targets.first() {
+        Some(target) => Err(Refusal::NotFound(format!(
+            "There's no package plugin {target}."
+        ))),
+        None => done(),
+    }
+}
+
+/// A client's MCP server, hosted over a WebSocket, whose tools agents get
+/// while it stays open.
+async fn host_tools(
+    State(server): Shared,
+    Query(q): Params,
+    upgrade: axum::extract::ws::WebSocketUpgrade,
+) -> Answer {
+    let name = q
+        .get("name")
+        .cloned()
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| Refusal::Bad("Name the tools' server.".to_owned()))?;
+    Ok(upgrade
+        .on_upgrade(move |socket| server.host_mcp(name, socket))
+        .into_response())
+}
+
+/// The web search services agents can use.
+async fn search_services(Query(q): Params) -> Answer {
+    let data: Vec<Value> = harlo_engine::web::SERVICES
+        .iter()
+        .map(|(id, name, _)| json!({ "id": id, "name": name }))
+        .collect();
+    ok(json!({ "location": location(&q), "data": data }))
 }
 
 async fn jobs(State(server): Shared, Query(q): Params) -> Answer {
@@ -1159,18 +1287,6 @@ async fn user_shell(
 ) -> Answer {
     server.run_user_shell(&id, &body.command).await?;
     done()
-}
-
-/// Client tools aren't taken yet: a plain "unavailable", so a client stops
-/// asking and shows why, rather than an empty success that would look like
-/// its tools were registered.
-async fn no_client_tools() -> Response {
-    let body = json!({
-        "_tag": "CapabilityUnavailableError",
-        "message": "This server doesn't offer clients' tools to its agents yet.",
-        "data": { "capability": "clientTools" },
-    });
-    (StatusCode::NOT_IMPLEMENTED, axum::Json(body)).into_response()
 }
 
 #[derive(Deserialize)]

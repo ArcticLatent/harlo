@@ -494,9 +494,19 @@ impl Server {
     /// Runs `automation`'s Code Mode script; keeps the state it returns,
     /// stops it when it says it's done, and sends what it asks to send.
     async fn run_code(self: &Arc<Self>, automation: &mut Value, runs: u64) -> (bool, String) {
+        let session = automation["sessionID"].as_str().map(str::to_owned);
+        let directory = session
+            .as_deref()
+            .and_then(|s| self.store.session(s).ok().flatten())
+            .map(|s| s.location.directory);
+        let links = match directory {
+            Some(directory) => self.mcp_ready(&directory).await,
+            None => Vec::new(),
+        };
         let catalog = crate::code::ServerCatalog {
             server: Arc::clone(self),
-            session: automation["sessionID"].as_str().map(str::to_owned),
+            session,
+            links,
         };
         let input = json!({
             "state": automation.get("state").cloned().unwrap_or(Value::Null),
