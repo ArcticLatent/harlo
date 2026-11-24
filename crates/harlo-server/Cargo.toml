@@ -1,0 +1,33 @@
+[package]
+name = "harlo-server"
+version = "0.1.0"
+description = "Harlo's background server: runs harlo-engine sessions and serves them over HTTP and SSE."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = { workspace = true, features = ["http1", "tokio", "json", "query"] }
+base64 = { workspace = true, features = ["std"] }
+dirs = { workspace = true }
+futures-util = { workspace = true }
+harlo-engine = { workspace = true }
+hex = { workspace = true }
+jsonc-parser = { workspace = true, features = ["serde"] }
+rusqlite = { workspace = true, features = ["bundled"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "sync", "process", "time", "signal"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+opencode-client = { workspace = true }
+reqwest = { workspace = true, features = ["stream", "native-tls"] }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -134,8 +134,8 @@ pub enum Event {
     },
     /// The model's reply is complete; its calls are about to be checked.
     StepStreamed {
-        /// The step's message ID.
-        message: String,
+        /// The step as it stands, its calls still running.
+        step: Box<Assistant>,
     },
     /// A call is checked and waits for permission or runs.
     ToolCalled {
@@ -359,11 +359,11 @@ async fn ask_model(
     assistant.tokens = reply.tokens;
     assistant.finish = Some(finish_name(reply.finish.as_deref()).to_owned());
     assistant.raw_finish = reply.finish;
-    sink.emit(Event::StepStreamed {
-        message: message.clone(),
-    });
 
     let calls = fill(&mut assistant, reply.blocks, sink);
+    sink.emit(Event::StepStreamed {
+        step: Box::new(assistant.clone()),
+    });
     Ok((assistant, calls))
 }
 

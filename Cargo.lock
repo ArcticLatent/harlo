@@ -2455,6 +2455,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "harlo-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "dirs",
+ "futures-util",
+ "harlo-engine",
+ "hex",
+ "jsonc-parser",
+ "opencode-client",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
