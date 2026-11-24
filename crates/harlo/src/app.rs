@@ -51,6 +51,7 @@ mod plugins;
 mod projects;
 mod providers;
 mod schedules;
+mod session_menu;
 mod sheets;
 mod subagents;
 mod terminal;
@@ -90,6 +91,7 @@ pub use schedules::{
     Draft as ScheduleDraft, Page as SchedulePage, ScheduleEvent, Schedules,
     session_of as schedule_session,
 };
+pub use session_menu::SessionAction;
 pub use sheets::{
     Autostart, Event as SheetEvent, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
     SettingChoice, Sheet, Sheets, Step,
@@ -339,6 +341,8 @@ pub enum Message {
     Goal(GoalEvent),
     /// Something happened to a session's background jobs.
     Job(JobEvent),
+    /// Something done from the open session's menu, or what came of it.
+    SessionMenu(SessionAction),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -1000,6 +1004,10 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one short arm per message kind, each handing it on"
+    )]
     fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Quit => return Task::effect(Effect::Quit),
@@ -1020,6 +1028,7 @@ impl App {
             Message::Sheet(event) => return self.sheet_event(event),
             Message::Aside(event) => return self.aside_event(event),
             Message::Job(event) => return self.job_event(event),
+            Message::SessionMenu(action) => return self.session_menu(action),
             Message::Goal(event) => return self.goal_event(event),
             message @ (Message::Claude(_)
             | Message::OwnTools(_)

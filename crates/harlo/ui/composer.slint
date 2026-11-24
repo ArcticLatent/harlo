@@ -28,6 +28,10 @@ export global Pickers {
     out property <int> first-sound: 14;
     /// Menus from 5 on open from Settings, so they show above it.
     out property <int> first-in-settings: 5;
+    /// The open session's menu, and its delete confirmation: the window's
+    /// again.
+    out property <int> session-menu: 100;
+    out property <int> delete-session: 101;
 }
 
 /// An attached file or image, with a button to remove it. A new one
@@ -622,10 +626,13 @@ export component PickerMenu inherits Rectangle {
     /// The rows shown before the list scrolls.
     property <int> shown: min(State.menu-items.length, 8);
     property <length> step: (State.picker == Pickers.shield
+        || State.picker == Pickers.delete-session
         ? Size.menu-row + Size.two-line-extra : Size.menu-row) + 2px;
     property <length> card-width: State.picker == Pickers.variant
-        || State.picker == Pickers.voice-language || State.picker >= Pickers.first-sound ? 200px
-        : State.picker == Pickers.agent || State.picker == Pickers.folder ? 260px : 320px;
+        || State.picker == Pickers.voice-language
+        || (State.picker >= Pickers.first-sound && State.picker < Pickers.session-menu) ? 200px
+        : State.picker == Pickers.agent || State.picker == Pickers.folder
+        || State.picker == Pickers.session-menu ? 260px : 320px;
 
     TouchArea {
         clicked => { Logic.close-picker(); }
@@ -636,7 +643,8 @@ export component PickerMenu inherits Rectangle {
         // A composer menu stays off the right rail; one over Settings may
         // use the whole window.
         x: Requests.anchor-x.clamp(8px, root.width - self.width - 8px
-            - (State.picker < Pickers.first-in-settings ? Size.rail : 0));
+            - (State.picker < Pickers.first-in-settings
+            || State.picker >= Pickers.session-menu ? Size.rail : 0));
         y: self.below + self.height > root.height - 8px
             ? max(8px, Requests.anchor-y - self.height - 6px) : self.below;
         width: root.card-width;

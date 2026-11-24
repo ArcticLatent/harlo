@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::app::SessionAction;
 use crate::app::SettingChoice;
 use std::fmt;
 
@@ -78,6 +79,10 @@ pub enum Picker {
     CodeFont,
     /// The sound an event plays, from Settings → Notifications.
     Sound(Kind),
+    /// What can be done to the open session: fork, move, export, delete.
+    SessionMenu,
+    /// Whether to delete the open session for good.
+    DeleteSession,
 }
 
 impl Picker {
@@ -100,6 +105,8 @@ impl Picker {
             Self::InterfaceFont => 12,
             Self::CodeFont => 13,
             Self::Sound(kind) => 14 + kind_number(kind),
+            Self::SessionMenu => SESSION_MENU,
+            Self::DeleteSession => SESSION_MENU + 1,
         }
     }
 
@@ -136,6 +143,8 @@ impl Picker {
             11 => Self::VoiceLanguage,
             12 => Self::InterfaceFont,
             13 => Self::CodeFont,
+            SESSION_MENU => Self::SessionMenu,
+            DELETE_SESSION => Self::DeleteSession,
             14.. => Self::Sound(*Kind::ALL.get(usize::try_from(index - 14).ok()?)?),
             _ => return None,
         })
@@ -237,6 +246,90 @@ fn shield_items(app: &App) -> Vec<Item> {
         .collect()
 }
 
+/// The open session's menu's number in the UI; the window's own menus
+/// from here on show over the session, not Settings.
+const SESSION_MENU: i32 = 100;
+/// The delete confirmation's number in the UI.
+const DELETE_SESSION: i32 = SESSION_MENU + 1;
+
+/// What can be done to the open session.
+fn session_menu_items(app: &App) -> Vec<Item> {
+    let item = |label: String, glyph, below: Option<&str>, action| Item {
+        label,
+        detail: None,
+        below: below.map(str::to_owned),
+        dot: None,
+        glyph: Some(glyph),
+        selected: false,
+        message: Message::SessionMenu(action),
+    };
+    let mut items = vec![item(
+        "Fork".to_owned(),
+        Icon::GitFork,
+        None,
+        SessionAction::Fork,
+    )];
+    items.extend(app.move_targets().into_iter().map(|(folder, name)| {
+        item(
+            format!("Move to {name}"),
+            Icon::FolderGit2,
+            None,
+            SessionAction::MoveTo(folder),
+        )
+    }));
+    items.extend([
+        item(
+            "Export…".to_owned(),
+            Icon::Download,
+            None,
+            SessionAction::Export,
+        ),
+        item(
+            "Import a session…".to_owned(),
+            Icon::Upload,
+            None,
+            SessionAction::Import,
+        ),
+        item(
+            "Archive".to_owned(),
+            Icon::Archive,
+            None,
+            SessionAction::Archive,
+        ),
+        item(
+            "Delete…".to_owned(),
+            Icon::Trash2,
+            None,
+            SessionAction::AskDelete,
+        ),
+    ]);
+    items
+}
+
+/// The choices when deleting the open session.
+fn delete_items() -> Vec<Item> {
+    vec![
+        Item {
+            label: "Delete for good".to_owned(),
+            detail: None,
+            below: Some("Gone for every app using this server.".to_owned()),
+            dot: None,
+            glyph: Some(Icon::Trash2),
+            selected: false,
+            message: Message::SessionMenu(SessionAction::Delete),
+        },
+        Item {
+            label: "Keep it".to_owned(),
+            detail: None,
+            below: None,
+            dot: None,
+            glyph: None,
+            selected: true,
+            message: Message::ClosePicker,
+        },
+    ]
+}
+
 /// `text` with its first letter a capital, as a menu lists a choice.
 fn capitalised(text: &str) -> String {
     let mut chars = text.chars();
@@ -308,6 +401,8 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
             .collect(),
         Picker::ScheduleFolder | Picker::ScheduleSession => schedule_items(app, picker),
         Picker::Provider => provider_items(app),
+        Picker::SessionMenu => session_menu_items(app),
+        Picker::DeleteSession => delete_items(),
         Picker::VoiceLanguage => language_items(app),
         Picker::Sound(kind) => sound_items(app, kind),
         Picker::InterfaceFont | Picker::CodeFont => font_items(app, picker),

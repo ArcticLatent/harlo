@@ -510,6 +510,10 @@ impl Presenter {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }
             Picker::Variant => "How much reasoning the model uses before it answers.".to_owned(),
+            Picker::DeleteSession => "Its subagents' sessions are deleted with it.".to_owned(),
+            Picker::SessionMenu => {
+                "These change the session on the server, for every app using it.".to_owned()
+            }
             Picker::InterfaceFont | Picker::CodeFont if app.system_fonts.is_none() => {
                 "Looking for this computer's fonts…".to_owned()
             }

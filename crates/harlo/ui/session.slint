@@ -6,7 +6,7 @@ import { Theme, Size } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, Requests, InboxRow } from "data.slint";
 import { Icon, Press, HLine, Breathing, Spinner, ErrorLine } from "widgets.slint";
-import { Composer, PickerChip } from "composer.slint";
+import { Composer, PickerChip, Pickers } from "composer.slint";
 import { Timeline, TimelineScrollbar, PromptRail } from "timeline.slint";
 import { WaitingCards } from "waiting.slint";
 import { PictureViewer, PictureGrid } from "pictures.slint";
@@ -180,7 +180,7 @@ component HeaderLink inherits Press {
             font-size: 13px;
             color: Theme.icon-quiet;
         }
-        Text {
+        if root.text != "": Text {
             text: root.text;
             vertical-alignment: center;
             font-size: Size.label;
@@ -336,6 +336,20 @@ component Header inherits Rectangle {
                     text: "Changes";
                     glyph: Icons.git-compare;
                     clicked => { Logic.open-panel(Panels.changes); }
+                }
+                // Fork, move, export or delete the session.
+                HeaderLink {
+                    text: "";
+                    label: "Session actions";
+                    glyph: Icons.more;
+                    selected: State.picker == Pickers.session-menu
+                        || State.picker == Pickers.delete-session;
+                    clicked => {
+                        Requests.anchor-x = self.absolute-position.x;
+                        Requests.anchor-y = self.absolute-position.y;
+                        Requests.anchor-height = self.height;
+                        Logic.toggle-picker(Pickers.session-menu);
+                    }
                 }
             }
         }

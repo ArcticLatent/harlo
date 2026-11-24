@@ -1116,6 +1116,9 @@ export global Logic {
     /// Stop a background job, named by its ID or, for a subagent, by its
     /// child session's.
     callback stop-job(string);
+    /// Start a new session with the history before the prompt with this
+    /// key, that prompt in its composer.
+    callback fork-from(string);
 
     callback undo-keep(string);
     callback undo-cancel(string);

@@ -1396,6 +1396,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_link, |url| Message::OpenLink(url.to_string()));
     send!(on_steer_queued, |id| Message::SteerQueued(id.to_string()));
     send!(on_cancel_queued, |id| Message::CancelQueued(id.to_string()));
+    send!(on_fork_from, |key| Message::SessionMenu(
+        crate::app::SessionAction::ForkBefore(key.to_string())
+    ));
     send!(on_stop_job, |id| Message::Job(crate::app::JobEvent::Stop(
         id.to_string()
     )));

@@ -178,7 +178,7 @@ def scene_chat(g):
     if prompt:
         h.hover(prompt[-1].label, role="Groupbox")
         h.settle(0.6)
-        g.cap("prompt-hover", "A prompt under the pointer, with its Undo button")
+        g.cap("prompt-hover", "A prompt under the pointer, with its Fork and Undo buttons")
         if h.find("Undo", role="Button"):
             h.click("Undo")
             h.settle(0.8)
@@ -906,6 +906,25 @@ def scene_shell(g):
     h.wait_gone("In the background", role=None, timeout=20)
 
 
+def scene_session_menu(g):
+    """The session's menu: fork, move, export, import, archive, delete; and
+    deleting asking first."""
+    h = g.h
+    open_project_session(h, title="Release notes")
+    ask(h, "Draft the release notes.", [[("say", "Here are the notes for 2.4.")]])
+    h.wait_says("notes for 2.4", timeout=60)
+    h.click("Session actions", role=None)
+    h.wait("Export…", role=None, timeout=10)
+    h.settle(0.6)
+    g.cap("menu", "The session's menu under its header")
+    h.click("Delete…", role=None)
+    h.wait("Delete for good", role=None, timeout=10)
+    h.settle(0.6)
+    g.cap("delete", "Deleting asks first, and says it's for every app using the server")
+    h.click("Keep it", role=None)
+    h.wait_gone("Delete for good", role=None, timeout=10)
+
+
 def keep_reviewer(h, verdict):
     """Has the scripted model's goal reviewer answer `verdict`, or find
     goals met for None."""
@@ -947,6 +966,7 @@ SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approva
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
           ("codemode", scene_codemode), ("btw", scene_btw),
           ("goal", scene_goal), ("shell", scene_shell),
+          ("session-menu", scene_session_menu),
           # These two leave a subagent's or a worktree's session open, so they come last.
           ("subagents", scene_subagents), ("worktrees", scene_worktrees),
           ("window", scene_window)]

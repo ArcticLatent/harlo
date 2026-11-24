@@ -29,6 +29,7 @@ mod pty;
 mod settings;
 mod setup;
 mod tool_host;
+mod transfer;
 mod types;
 
 #[doc(inline)]

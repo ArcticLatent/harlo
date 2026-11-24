@@ -168,9 +168,9 @@ component PromptRow inherits Rectangle {
                 padding-top: 11px;
                 padding-bottom: 11px;
                 padding-left: 14px;
-                // Room for Undo, so it never covers the words and they don't
-                // move when it shows.
-                padding-right: root.item.undo ? 76px : 16px;
+                // Room for Fork and Undo, so they never cover the words and
+                // the words don't move when they show.
+                padding-right: root.item.undo ? 148px : 16px;
                 spacing: 8px;
                 if root.item.label != "": HorizontalLayout {
                     spacing: 12px;
@@ -227,11 +227,37 @@ component PromptRow inherits Rectangle {
             }
         }
 
-        if root.item.undo && hover.has-hover: Press {
-            x: parent.width - self.width - 6px;
-            y: 6px;
+        if root.item.undo && hover.has-hover: HorizontalLayout {
+          x: parent.width - self.preferred-width - 6px;
+          y: 6px;
+          height: 22px;
+          spacing: 4px;
+          // A new session with what came before, this prompt in its composer.
+          Press {
+            width: fork-label.preferred-width;
+            label: "Fork from here";
+            rest: Theme.card;
+            hover: Theme.chip-hover;
+            outlined: true;
+            clicked => { Logic.fork-from(root.item.key); }
+            fork-label := HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 5px;
+                Icon {
+                    text: Icons.fork;
+                    font-size: 12px;
+                }
+                Text {
+                    text: "Fork";
+                    vertical-alignment: center;
+                    font-size: Size.small;
+                    color: Theme.text-base;
+                }
+            }
+          }
+          Press {
             width: undo-label.preferred-width;
-            height: 22px;
             label: "Undo";
             rest: Theme.card;
             hover: Theme.chip-hover;
@@ -252,6 +278,7 @@ component PromptRow inherits Rectangle {
                     color: Theme.text-base;
                 }
             }
+          }
         }
     }
 }
