@@ -10,6 +10,10 @@ repository = "https://github.com/ArcticLatent/harlo"
 publish = false
 
 [workspace.dependencies]
+# The relay's notifications to the iOS app (crates/harlo-relay).
+harlo-apns = { path = "crates/harlo-apns" }
+# APNs' ES256 token, in harlo-apns.
+ring = "0.17.14"
 frizbee = { version = "0.13.0", default-features = false }
 regex = { version = "1.13.2", default-features = false }
 ignore = { version = "0.4.35", default-features = false }
