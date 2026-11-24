@@ -183,6 +183,9 @@ export struct DiffLine {
     text: string,
     /// 0 unchanged, 1 added, 2 removed, 3 a gap between hunks.
     kind: int,
+    /// The digits of the largest number in its diff, which its number
+    /// column fits.
+    digits: int,
 }
 
 /// One of the session's prompts, on the rail that jumps to it.

@@ -162,7 +162,7 @@ component PatchView inherits VerticalLayout {
                 line: line;
             }
             if root.file.more != "": HorizontalLayout {
-                padding-left: Column.diff-number;
+                padding-left: Column.diff-digit * max(1, root.file.lines[0].digits) + 4px;
                 padding-top: 4px;
                 Text {
                     text: root.file.more;

@@ -14,7 +14,10 @@ use harlo_core::server::{Field, FieldKind};
 use harlo_core::workspace::{FileDiff, Form, Permission};
 use slint::{Model as _, ModelRc, SharedString, VecModel};
 
-use super::{sync, timeline::diff_line};
+use super::{
+    sync,
+    timeline::{diff_line, digits},
+};
 use crate::app::{App, StagedUndo};
 use crate::ui::{Answer, ApprovalCard, CardFile, Choice, Question, QuestionCard, State, UndoCard};
 
@@ -312,7 +315,14 @@ fn card_file(file: &FileDiff, limit: usize) -> CardFile {
         name: file.file.as_str().into(),
         added: count(file.additions),
         removed: count(file.deletions),
-        lines: model(lines.iter().take(limit).map(diff_line).collect()),
+        lines: model({
+            let width = digits(&lines);
+            lines
+                .iter()
+                .take(limit)
+                .map(|line| diff_line(line, width))
+                .collect()
+        }),
         more: if hidden > 0 {
             format!("… {hidden} more lines").into()
         } else {

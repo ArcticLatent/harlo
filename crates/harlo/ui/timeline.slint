@@ -24,9 +24,9 @@ export global Column {
     out property <length> line: 24px;
     /// A diff line's height.
     out property <length> diff-line: 19px;
-    /// A diff line's number column: five digits of the code font, as the
-    /// window measures them.
-    in-out property <length> diff-number: 42px;
+    /// One digit of the code font, as the window measures it: a diff's
+    /// number column fits its largest number's digits.
+    in-out property <length> diff-digit: 7.5px;
 }
 
 /// The agent whose turn starts here, before the turn's first line: its
@@ -367,6 +367,8 @@ component GroupRow inherits Press {
 /// One line of a diff: its number, + or −, and its text, tinted.
 export component PatchLine inherits Rectangle {
     in property <DiffLine> line;
+    /// The number column: its diff's digits, and a little room before them.
+    out property <length> number-width: Column.diff-digit * max(1, root.line.digits) + 4px;
 
     height: Column.diff-line;
     background: root.line.kind == 1 ? Theme.added-line
@@ -375,12 +377,12 @@ export component PatchLine inherits Rectangle {
         padding-right: 8px;
         spacing: 10px;
         Text {
-            width: Column.diff-number;
+            width: root.number-width;
             text: root.line.number;
             horizontal-alignment: right;
             vertical-alignment: center;
             font-family: Fonts.mono;
-            font-size: Size.small;
+            font-size: Size.code;
             color: Theme.text-weaker;
         }
         Text {
@@ -449,7 +451,7 @@ component DiffRow inherits Rectangle {
                     line: line;
                 }
                 if root.item.more != "": HorizontalLayout {
-                    padding-left: Column.diff-number;
+                    padding-left: Column.diff-digit * max(1, root.item.lines[0].digits) + 4px;
                     padding-top: 4px;
                     alignment: start;
                     LinkButton {

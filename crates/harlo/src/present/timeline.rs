@@ -934,6 +934,7 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
         } else {
             shown.chunks(DIFF_CHUNK).collect()
         };
+        let width = digits(lines);
         let last = chunks.len() - 1;
         for (at, chunk) in chunks.into_iter().enumerate() {
             let mut row = blank(Shape::Diff, key, if at == 0 { 6.0 } else { 0.0 });
@@ -947,7 +948,10 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
                 row.removed = count(file.deletions);
             }
             row.lines = ModelRc::new(VecModel::from(
-                chunk.iter().map(diff_line).collect::<Vec<_>>(),
+                chunk
+                    .iter()
+                    .map(|line| diff_line(line, width))
+                    .collect::<Vec<_>>(),
             ));
             if at == last {
                 row.more = if hidden > 0 {
@@ -1061,7 +1065,19 @@ fn tool_icon(name: &str) -> Icon {
     }
 }
 
-pub(super) fn diff_line(line: &diff::Line) -> DiffLine {
+/// The digits of the largest number in `lines`, which a diff's number
+/// column fits; at least 1.
+pub(super) fn digits(lines: &[diff::Line]) -> i32 {
+    let largest = lines
+        .iter()
+        .filter_map(|line| line.number)
+        .max()
+        .unwrap_or(0);
+    i32::try_from(largest.to_string().len()).unwrap_or(1)
+}
+
+/// A diff line for the UI, in a diff whose numbers have `digits` digits.
+pub(super) fn diff_line(line: &diff::Line, digits: i32) -> DiffLine {
     let (mark, kind) = match line.kind {
         LineKind::Added => ("+", 1),
         LineKind::Removed => ("−", 2),
@@ -1077,6 +1093,7 @@ pub(super) fn diff_line(line: &diff::Line) -> DiffLine {
         mark: mark.into(),
         text: line.text().replace('\t', "    ").into(),
         kind,
+        digits,
     }
 }
 

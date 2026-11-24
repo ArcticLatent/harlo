@@ -128,8 +128,9 @@ pub enum Event {
     Select(String),
     /// Light a hunk of the selected file, by its place in the diff.
     Hunk(usize),
-    /// How many characters of code fit on a diff's line: in the panel's
-    /// diffs, or the maximized panel's diff when `whole`.
+    /// How many characters of code fit on a diff's line, its number and
+    /// text together: in the panel's diffs, or the maximized panel's diff
+    /// when `whole`.
     Columns {
         /// Whether it's the maximized panel's diff.
         whole: bool,

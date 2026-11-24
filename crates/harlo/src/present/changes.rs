@@ -11,7 +11,10 @@ use std::rc::Rc;
 use harlo_core::diff::{Line, LineKind};
 use slint::{SharedString, VecModel};
 
-use super::{sync, timeline::diff_line};
+use super::{
+    sync,
+    timeline::{diff_line, digits},
+};
 use crate::app::{App, ChangedFile, Changes, GitAction, List, Panel};
 use crate::file_icons;
 use crate::ui::{ChangeRow, ChangesFoot, DiffLine, State};
@@ -277,6 +280,7 @@ impl<'a> Builder<'a> {
             return;
         }
         let whole = changes.whole.contains(&key);
+        let width = digits(&file.lines);
         let lines = changed_lines(&file.lines);
         let total = lines
             .iter()
@@ -307,9 +311,12 @@ impl<'a> Builder<'a> {
                 }
                 Shown::Line(at, line) => {
                     shown += 1;
-                    for (piece, part) in wrapped(diff_line(line), changes.columns[0])
-                        .into_iter()
-                        .enumerate()
+                    for (piece, part) in wrapped(
+                        diff_line(line, width),
+                        text_columns(changes.columns[0], width),
+                    )
+                    .into_iter()
+                    .enumerate()
                     {
                         self.push(kind::LINE, height::LINE, 0.0, |row| {
                             row.key = key.as_str().into();
@@ -318,7 +325,8 @@ impl<'a> Builder<'a> {
                             row.clickable = piece == 0 && commentable(line);
                         });
                     }
-                    for row in under_line(changes, &key, &file.path, line) {
+                    for mut row in under_line(changes, &key, &file.path, line) {
+                        row.line.digits = width;
                         self.y += row.height;
                         self.rows.push(row);
                     }
@@ -329,6 +337,7 @@ impl<'a> Builder<'a> {
             let more = total - shown;
             self.push(kind::MORE, height::MORE, 0.0, |row| {
                 row.key = key.as_str().into();
+                row.line.digits = width;
                 row.text = format!("{more} more lines").into();
             });
         }
@@ -347,6 +356,7 @@ fn whole_diff(changes: &Changes, key: &str, file: &ChangedFile) -> (Vec<ChangeRo
     let mut started = false;
     // Unchanged lines skipped inside a hunk: a space before the next change.
     let mut skipped = false;
+    let width = digits(&file.lines);
     for (at, line) in file.lines.iter().enumerate() {
         if line.kind == LineKind::Gap {
             if started {
@@ -372,9 +382,12 @@ fn whole_diff(changes: &Changes, key: &str, file: &ChangedFile) -> (Vec<ChangeRo
             reveal = y + gap;
         }
         started = true;
-        for (piece, part) in wrapped(diff_line(line), changes.columns[1])
-            .into_iter()
-            .enumerate()
+        for (piece, part) in wrapped(
+            diff_line(line, width),
+            text_columns(changes.columns[1], width),
+        )
+        .into_iter()
+        .enumerate()
         {
             // The space before a change goes above its first piece.
             let gap = if piece == 0 { gap } else { 0.0 };
@@ -392,12 +405,24 @@ fn whole_diff(changes: &Changes, key: &str, file: &ChangedFile) -> (Vec<ChangeRo
                 ..ChangeRow::default()
             });
         }
-        for row in under_line(changes, key, &file.path, line) {
+        for mut row in under_line(changes, key, &file.path, line) {
+            row.line.digits = width;
             y += row.height;
             rows.push(row);
         }
     }
     (rows, (reveal - height::MARGIN).max(0.0))
+}
+
+/// The characters left for a line's text when `columns` fit its number and
+/// text together and its numbers have `digits` digits; 0 while unmeasured.
+fn text_columns(columns: usize, digits: i32) -> usize {
+    if columns == 0 {
+        return 0;
+    }
+    columns
+        .saturating_sub(usize::try_from(digits).unwrap_or(0))
+        .max(8)
 }
 
 /// `line` in pieces of at most `columns` characters, so a long line wraps
@@ -433,6 +458,7 @@ fn wrapped(line: DiffLine, columns: usize) -> Vec<DiffLine> {
             },
             text: chars[start..end].iter().collect::<String>().into(),
             kind: line.kind,
+            digits: line.digits,
         });
         start = end;
     }
@@ -616,6 +642,7 @@ mod tests {
             mark: "+".into(),
             text: text.into(),
             kind: 1,
+            digits: 1,
         }
     }
 
@@ -641,6 +668,29 @@ mod tests {
             pieces.iter().all(|p| p.kind == 1),
             "each piece keeps its colour"
         );
+    }
+
+    #[test]
+    fn a_files_digits_leave_the_rest_of_the_width_to_its_text() {
+        use super::text_columns;
+        assert_eq!(text_columns(0, 3), 0, "unmeasured stays unwrapped");
+        assert_eq!(text_columns(50, 2), 48);
+        assert_eq!(text_columns(50, 5), 45);
+        assert_eq!(text_columns(10, 5), 8, "never narrower than 8");
+    }
+
+    #[test]
+    fn the_number_column_fits_the_largest_number() {
+        use crate::present::timeline::digits;
+        use harlo_core::diff::{Line, LineKind};
+        let line = |number| Line {
+            kind: LineKind::Added,
+            number,
+            spans: Vec::new(),
+        };
+        assert_eq!(digits(&[line(Some(9)), line(Some(58))]), 2);
+        assert_eq!(digits(&[line(Some(10_231)), line(None)]), 5);
+        assert_eq!(digits(&[line(None)]), 1);
     }
 
     #[test]

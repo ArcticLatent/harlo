@@ -131,7 +131,7 @@ component LineRow inherits Rectangle {
     in property <ChangeRow> entry;
     in property <bool> marks;
 
-    PatchLine {
+    patch := PatchLine {
         x: root.marks ? 3px : 0;
         width: parent.width - self.x;
         line: root.entry.line;
@@ -148,7 +148,7 @@ component LineRow inherits Rectangle {
     // Exactly over the number, which it stands in for while hovered.
     if root.entry.clickable: number := TouchArea {
         x: root.marks ? 3px : 0;
-        width: Column.diff-number + 4px;
+        width: max(22px, patch.number-width + 4px);
         mouse-cursor: MouseCursor.pointer;
         accessible-role: button;
         accessible-label: "Comment on line " + root.entry.line.number;
@@ -177,7 +177,7 @@ component CommentRow inherits Rectangle {
 
     background: Theme.surface-inset-base;
     HorizontalLayout {
-        padding-left: Column.diff-number + 18px;
+        padding-left: Column.diff-digit * max(1, root.entry.line.digits) + 22px;
         padding-right: 6px;
         padding-top: 2px;
         padding-bottom: 2px;
@@ -220,9 +220,10 @@ component CommentRow inherits Rectangle {
 
 /// The field for a comment on the line above: Enter or Add adds it.
 component CommentField inherits Rectangle {
+    in property <ChangeRow> entry;
     background: Theme.surface-inset-base;
     HorizontalLayout {
-        padding-left: Column.diff-number + 18px;
+        padding-left: Column.diff-digit * max(1, root.entry.line.digits) + 22px;
         padding-right: 6px;
         padding-top: 5px;
         padding-bottom: 5px;
@@ -298,11 +299,13 @@ component Row inherits Rectangle {
         if root.entry.kind == 8: CommentRow {
             entry: root.entry;
         }
-        if root.entry.kind == 9: CommentField { }
+        if root.entry.kind == 9: CommentField {
+            entry: root.entry;
+        }
         if root.entry.kind == 6: Rectangle {
             background: Theme.surface-inset-base;
             HorizontalLayout {
-                padding-left: Column.diff-number + 12px;
+                padding-left: Column.diff-digit * max(1, root.entry.line.digits) + 16px;
                 alignment: start;
                 VerticalLayout {
                     alignment: center;
@@ -335,9 +338,11 @@ component Rows inherits Rectangle {
         font-size: Size.code;
     }
     property <length> cell-width: max(1px, metrics.preferred-width / 10);
-    // The sides' padding, the number, the mark, their spaces and the end's
-    // padding (38px), the hunk mark, and room for the scroll bar.
-    property <int> columns: max(8, floor((root.width - 2 * Sides.padding - Column.diff-number
+    // Characters for a line's number and text together, beside the sides'
+    // padding, the room before the number (4px), the mark, its spaces and
+    // the end's padding (38px), the hunk mark and room for the scroll bar.
+    // Rust takes each file's digits from it.
+    property <int> columns: max(12, floor((root.width - 2 * Sides.padding - 4px
         - 38px - (root.marks ? 3px : 0) - 8px) / root.cell-width));
     // Sent after the layout settles, not in its middle.
     report := Timer {

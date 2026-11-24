@@ -50,20 +50,20 @@ export component AppWindow inherits Window {
     /// dark.
     out property <bool> system-dark: Palette.color-scheme != ColorScheme.light;
 
-    // Five digits of the code font, for diffs' number columns: a long
-    // file's numbers fit whichever font and size is chosen.
+    // A digit of the code font, for diffs' number columns: they fit their
+    // numbers in whichever font and size is chosen.
     digits := Text {
         visible: false;
-        text: "00000";
+        text: "0000000000";
         font-family: Fonts.mono;
-        font-size: Size.small;
+        font-size: Size.code;
     }
-    property <length> number-width: ceil(digits.preferred-width / 1px) * 1px + 6px;
-    changed number-width => {
-        Column.diff-number = self.number-width;
+    property <length> digit-width: max(1px, digits.preferred-width / 10);
+    changed digit-width => {
+        Column.diff-digit = self.digit-width;
     }
     init => {
-        Column.diff-number = self.number-width;
+        Column.diff-digit = self.digit-width;
     }
     changed system-dark => {
         Logic.system-dark(self.system-dark);
