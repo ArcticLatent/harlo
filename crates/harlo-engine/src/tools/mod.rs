@@ -1,5 +1,5 @@
 //! The tools a model can call, named and shaped as OpenCode's: `read`,
-//! `write`, `edit` and `shell`.
+//! `write`, `edit`, `glob`, `grep` and `shell`.
 //!
 //! A call is first made into a [`Plan`]: its arguments are checked and,
 //! for an edit or a write, the file's new content and diff are worked out.
@@ -10,6 +10,7 @@
 // Rust guideline compliant 2026-10-09
 
 mod edit_match;
+mod search;
 mod shell;
 
 use std::fmt::Write as _;
@@ -51,6 +52,23 @@ pub fn definitions() -> Vec<Value> {
             }, "required": ["path", "oldString", "newString"] }
         }),
         json!({
+            "name": "glob",
+            "description": "Finds files by name pattern, such as \"*.rs\" or \"src/**/*.ts\", most recently changed first. Ignored files are left out.",
+            "parameters": { "type": "object", "properties": {
+                "pattern": { "type": "string" },
+                "path": { "type": "string", "description": "The folder to search, relative to the project's folder (default: all of it)." }
+            }, "required": ["pattern"] }
+        }),
+        json!({
+            "name": "grep",
+            "description": "Searches file contents for a regular expression; lists matching lines with their numbers, by file. Ignored files are left out.",
+            "parameters": { "type": "object", "properties": {
+                "pattern": { "type": "string" },
+                "path": { "type": "string", "description": "The folder to search (default: the project's)." },
+                "include": { "type": "string", "description": "Only files whose name matches this glob, such as \"*.rs\"." }
+            }, "required": ["pattern"] }
+        }),
+        json!({
             "name": "shell",
             "description": "Runs a shell command in the project's folder, without a terminal or input. Long output keeps its start and end.",
             "parameters": { "type": "object", "properties": {
@@ -65,7 +83,7 @@ pub fn definitions() -> Vec<Value> {
 /// What a call needs permission for, and what to show while asking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Permission {
-    /// The action: `read`, `edit` or `shell`.
+    /// The action: `read`, `edit`, `glob`, `grep` or `shell`.
     pub action: &'static str,
     /// What it acts on: paths relative to the project, or the command.
     pub resources: Vec<String>,
@@ -121,6 +139,22 @@ pub enum Plan {
         after: String,
         /// How many places changed.
         count: usize,
+    },
+    /// Finds files by name.
+    Glob {
+        /// The pattern.
+        pattern: String,
+        /// The folder searched.
+        base: PathBuf,
+    },
+    /// Searches files' contents.
+    Grep {
+        /// The regular expression.
+        pattern: String,
+        /// The folder searched.
+        base: PathBuf,
+        /// Only files whose name matches this glob.
+        include: Option<String>,
     },
     /// Runs a command.
     Shell {
@@ -198,6 +232,27 @@ impl Plan {
                     count,
                 })
             }
+            "glob" | "grep" => {
+                let pattern = text("pattern")?;
+                let base = input
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .filter(|p| !p.is_empty())
+                    .map_or_else(|| cwd.to_path_buf(), |p| place(p, cwd).0);
+                Ok(if name == "glob" {
+                    Self::Glob { pattern, base }
+                } else {
+                    Self::Grep {
+                        pattern,
+                        base,
+                        include: input
+                            .get("include")
+                            .and_then(Value::as_str)
+                            .filter(|i| !i.is_empty())
+                            .map(str::to_owned),
+                    }
+                })
+            }
             "shell" => Ok(Self::Shell {
                 command: text("command")?,
                 timeout_ms: number("timeout")
@@ -205,7 +260,7 @@ impl Plan {
                     .unwrap_or(SHELL_TIMEOUT_MS),
             }),
             other => Err(format!(
-                "There is no tool called `{other}`. The tools are read, write, edit and shell."
+                "There is no tool called `{other}`. The tools are read, write, edit, glob, grep and shell."
             )),
         }
     }
@@ -238,6 +293,16 @@ impl Plan {
                 action: "edit",
                 resources: vec![shown.clone()],
                 metadata: files_metadata(shown, Some(before), after),
+            },
+            Self::Glob { pattern, .. } => Permission {
+                action: "glob",
+                resources: vec![pattern.clone()],
+                metadata: Map::new(),
+            },
+            Self::Grep { pattern, .. } => Permission {
+                action: "grep",
+                resources: vec![pattern.clone()],
+                metadata: Map::new(),
             },
             Self::Shell { command, .. } => Permission {
                 action: "shell",
@@ -323,11 +388,35 @@ impl Plan {
                     changed: vec![shown],
                 })
             }
+            Self::Glob { .. } | Self::Grep { .. } => self.search(cwd).await,
             Self::Shell {
                 command,
                 timeout_ms,
             } => Ok(shell::run(&command, cwd, timeout_ms, stop).await),
         }
+    }
+}
+
+impl Plan {
+    /// Runs a `glob` or `grep` off the async threads.
+    async fn search(self, cwd: &Path) -> Result<Output, String> {
+        let cwd = cwd.to_path_buf();
+        let text = tokio::task::spawn_blocking(move || match self {
+            Self::Glob { pattern, base } => search::glob(&pattern, &base, &cwd),
+            Self::Grep {
+                pattern,
+                base,
+                include,
+            } => search::grep(&pattern, &base, include.as_deref(), &cwd),
+            _ => Err("not a search".to_owned()),
+        })
+        .await
+        .map_err(|e| format!("The search stopped: {e}"))??;
+        Ok(Output {
+            text,
+            metadata: Map::new(),
+            changed: Vec::new(),
+        })
     }
 }
 

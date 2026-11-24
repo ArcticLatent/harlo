@@ -110,12 +110,14 @@ pub(crate) fn glob(pattern: &str, text: &str) -> bool {
     // Where the last `*` was, and how much text it had taken then.
     let mut star: Option<(usize, usize)> = None;
     while ti < t.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < p.len() && p[pi] == '*' {
+        // A `*` in the pattern is always a wildcard, even against a `*`
+        // in the text (a glob pattern as the resource).
+        if pi < p.len() && p[pi] == '*' {
             star = Some((pi, ti));
             pi += 1;
+        } else if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
         } else if let Some((sp, st)) = star {
             pi = sp + 1;
             ti = st + 1;
@@ -134,6 +136,7 @@ mod tests {
     #[test]
     fn patterns_match_like_opencodes() {
         assert!(glob("*", "anything at/all"));
+        assert!(glob("*", "*.txt") && glob("src/*", "src/**/*.rs"));
         assert!(glob("*.env", "secrets/.env") && glob("*.env", "a.env"));
         assert!(!glob("*.env", "a.env.example"));
         assert!(glob("git *", "git status") && !glob("git *", "gitk"));

@@ -4,6 +4,8 @@ summary that opens; a long answer streams in."""
 
 from _common import open_project_session, send
 
+ENGINE = True
+
 
 def run(h, s):
     open_project_session(h, title="Answers")

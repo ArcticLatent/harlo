@@ -9,6 +9,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+globset = { workspace = true }
+ignore = { workspace = true }
+regex = { workspace = true, features = ["std", "unicode", "perf"] }
 futures-util = { workspace = true }
 getrandom = { workspace = true, features = ["std"] }
 jsonc-parser = { workspace = true, features = ["serde"] }
