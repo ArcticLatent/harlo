@@ -55,6 +55,7 @@ SUMMARIZE = "You MUST summarize the conversation"
 
 # The line OpenCode puts before the prompt it gives a subagent.
 HARLO_SUMMARIZE = "Summarize the conversation so far for the agent"
+HARLO_SUBAGENT_PREAMBLE = "You are a subagent: another session handed you this task."
 SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
 
 # How OpenCode asks the model to review a goal (/goal).
@@ -130,8 +131,9 @@ def plan(messages):
     script = text_of(messages[last_user].get("content")).strip()
     if script.startswith(REVIEWER):
         return [("say", stored_scripts().get("<reviewer>", MET))]
-    if script.startswith(SUBAGENT_PREAMBLE):
-        script = script[len(SUBAGENT_PREAMBLE) :].strip()
+    for preamble in (SUBAGENT_PREAMBLE, HARLO_SUBAGENT_PREAMBLE):
+        if script.startswith(preamble):
+            script = script[len(preamble) :].strip()
     if script.startswith(ASIDE_PREAMBLE):
         script = script.partition("\n\n")[2].strip()
     known_scripts = stored_scripts()

@@ -24,6 +24,16 @@ use tokio_util::sync::CancellationToken;
 use crate::git;
 use crate::store::{Location, Session, SessionTime, Store, StoredEvent};
 
+/// Whether `message` in an inbox calls for a run: a prompt, or a
+/// subagent's answer, but not a notice alone, such as a change of agent.
+fn wakes(message: &Message) -> bool {
+    match message {
+        Message::User { .. } => true,
+        Message::Synthetic { metadata, .. } => metadata.is_some(),
+        _ => false,
+    }
+}
+
 /// How full, in percent of the model's context, a session gets before its
 /// next step starts from a summary.
 const COMPACT_PERCENT: u64 = 85;
@@ -62,6 +72,8 @@ pub(crate) struct Live {
     pub(crate) settled_forms: HashMap<String, Value>,
     /// Prompts not yet delivered to a run, by session.
     pub(crate) inbox: HashMap<String, Vec<(Message, String)>>,
+    /// Background jobs, such as subagents, by ID.
+    pub(crate) jobs: HashMap<String, Value>,
 }
 
 /// The server.
@@ -104,6 +116,16 @@ pub enum Refusal {
     Settled(String),
     /// The store failed.
     Store(String),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(why) | Self::Bad(why) | Self::Settled(why) | Self::Store(why) => {
+                f.write_str(why)
+            }
+        }
+    }
 }
 
 impl From<rusqlite::Error> for Refusal {
@@ -263,6 +285,7 @@ impl Server {
             permissions: Vec::new(),
             model: None,
             agent: None,
+            parent_id: None,
         };
         self.store.put_session(&session)?;
         self.emit(
@@ -272,6 +295,54 @@ impl Server {
                 "projectID": project_id, "location": session.location, "subpath": "",
             }),
             Some(directory),
+            Some(&session.id),
+        );
+        Ok(session)
+    }
+
+    /// Makes a child of session `parent` for a subagent running as `agent`,
+    /// titled `title`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the store fails.
+    pub(crate) fn create_child(
+        &self,
+        parent: &Session,
+        agent: &str,
+        title: &str,
+        model: Option<harlo_engine::ModelRef>,
+    ) -> Result<Session, Refusal> {
+        let created = now();
+        let session = Session {
+            id: descending_id("ses"),
+            project_id: parent.project_id.clone(),
+            location: parent.location.clone(),
+            title: Some(title.to_owned()),
+            time: SessionTime {
+                created,
+                updated: created,
+                busy: None,
+                idle: None,
+            },
+            cost: 0.0,
+            tokens: harlo_engine::Tokens::default(),
+            outcome: None,
+            revert: None,
+            permissions: Vec::new(),
+            model,
+            agent: Some(agent.to_owned()),
+            parent_id: Some(parent.id.clone()),
+        };
+        self.store.put_session(&session)?;
+        self.emit(
+            "session.created",
+            json!({
+                "sessionID": session.id, "slug": session.id, "version": env!("CARGO_PKG_VERSION"),
+                "projectID": session.project_id, "parentID": parent.id,
+                "location": session.location, "subpath": "", "title": title, "agent": agent,
+            }),
+            Some(&session.location.directory),
             Some(&session.id),
         );
         Ok(session)
@@ -385,7 +456,7 @@ impl Server {
 
     /// Puts `message` in session `id`'s inbox, and starts a run when none
     /// is going.
-    fn enqueue(self: &Arc<Self>, id: &str, message: Message, delivery: &str) {
+    pub(crate) fn enqueue(self: &Arc<Self>, id: &str, message: Message, delivery: &str) {
         let start = {
             let mut live = lock(&self.live);
             live.inbox
@@ -446,8 +517,9 @@ impl Server {
                         Message::User { id, text, time, .. } => json!({
                             "id": id, "type": "user", "payload": { "text": text }, "delivery": delivery, "time": time,
                         }),
-                        Message::Synthetic { id, text, time, .. } => json!({
-                            "id": id, "type": "synthetic", "payload": { "text": text }, "delivery": delivery, "time": time,
+                        Message::Synthetic { id, text, time, description, metadata } => json!({
+                            "id": id, "type": "synthetic", "delivery": delivery, "time": time,
+                            "payload": { "text": text, "description": description, "metadata": metadata },
                         }),
                         Message::Compaction(c) => json!({
                             "id": c.id, "type": "compaction", "payload": {}, "delivery": delivery, "time": c.time,
@@ -626,9 +698,7 @@ impl Server {
                     _ => None,
                 })
                 .collect();
-            let prompted = delivered
-                .iter()
-                .any(|(m, _)| matches!(m, Message::User { .. }));
+            let prompted = delivered.iter().any(|(m, _)| wakes(m));
             let mut ended = ("succeeded", None);
             for pending in asked {
                 ended = self.run_compaction(&session, pending, &stop).await;
@@ -645,10 +715,13 @@ impl Server {
             // (Notices alone, such as a change of agent, wait for a prompt.)
             let more = live.inbox.get(&id).is_some_and(|q| {
                 q.iter()
-                    .any(|(m, _)| !matches!(m, Message::Synthetic { .. }))
+                    .any(|(m, _)| wakes(m) || matches!(m, Message::Compaction(_)))
             });
             if !more || stop.is_cancelled() {
                 live.runs.remove(&id);
+                drop(live);
+                // A subagent's answer goes to the session that asked.
+                self.report_to_parent(&id, word);
                 break;
             }
         }
@@ -759,6 +832,11 @@ impl Server {
             history,
             shadow: Some(self.shadow(&directory)),
             memory: self.memory_for(session),
+            subagents: Some(Arc::new(crate::subagents::SessionSubagents {
+                server: Arc::clone(self),
+                session: session.id.clone(),
+            })),
+            subagent_agents: self.subagent_agents(),
             // Near the model's context limit, the next step starts from a summary.
             compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
             skills: self.skills_for(&session.location.directory).await,

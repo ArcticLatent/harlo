@@ -70,7 +70,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/model/default", get(default_model))
         .route("/api/config", get(config))
         .route("/api/mcp/resource", get(mcp_resources))
-        .route("/api/experimental/job", get(empty_data))
+        .route("/api/experimental/job", get(jobs))
         .route("/api/vcs/diff", get(vcs_diff))
         .route("/api/rpc/opencode.goal/get", post(no_goal))
         .route("/api/experimental/client-mcp", get(no_client_tools))
@@ -578,8 +578,8 @@ async fn located_empty(Query(q): Params) -> Answer {
     ok(json!({ "location": location(&q), "data": [] }))
 }
 
-async fn empty_data() -> Answer {
-    ok(json!({ "data": [] }))
+async fn jobs(State(server): Shared) -> Answer {
+    ok(json!({ "data": server.jobs() }))
 }
 
 /// Client tools aren't taken yet: a plain "unavailable", so a client stops

@@ -53,6 +53,9 @@ pub struct Session {
     /// The agent it runs as, when one was chosen for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// The session that handed it its work, when it's a subagent's.
+    #[serde(rename = "parentID", default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
 }
 
 /// A folder.
@@ -576,6 +579,7 @@ mod tests {
             permissions: Vec::new(),
             model: None,
             agent: None,
+            parent_id: None,
         };
         store.put_session(&session).expect("put");
         assert_eq!(store.session("ses_1").expect("get"), Some(session));

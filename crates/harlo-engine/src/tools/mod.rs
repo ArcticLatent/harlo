@@ -166,6 +166,11 @@ pub enum Plan {
         /// The questions.
         questions: Vec<crate::question::Question>,
     },
+    /// Hands a task to a subagent; started by the turn.
+    Subagent {
+        /// The task.
+        request: crate::subagent::Request,
+    },
     /// Writes the session's todo list.
     TodoWrite {
         /// The whole list.
@@ -283,6 +288,9 @@ impl Plan {
                 questions: crate::question::parse(input)?,
             }),
             "skill" => Ok(Self::Skill { id: text("id")? }),
+            "subagent" => Ok(Self::Subagent {
+                request: crate::subagent::parse(input)?,
+            }),
             "todowrite" => Ok(Self::TodoWrite {
                 todos: crate::todo::parse(input)?,
             }),
@@ -348,6 +356,11 @@ impl Plan {
             Self::Question { questions } => Permission {
                 action: "question",
                 resources: questions.iter().map(|q| q.question.clone()).collect(),
+                metadata: Map::new(),
+            },
+            Self::Subagent { request } => Permission {
+                action: "subagent",
+                resources: vec![request.agent.clone()],
                 metadata: Map::new(),
             },
             Self::TodoWrite { .. } => Permission {
@@ -455,6 +468,7 @@ impl Plan {
             }
             Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
             Self::Skill { id } => Err(format!("There's no skill {id}.")),
+            Self::Subagent { .. } => Err("Subagents can't start here.".to_owned()),
             Self::TodoWrite { todos } => Ok(Output {
                 text: crate::todo::summary(&todos),
                 metadata: json!({ "todos": todos, "truncated": false })

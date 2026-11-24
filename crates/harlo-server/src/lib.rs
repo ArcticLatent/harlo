@@ -18,6 +18,7 @@ mod memory;
 mod phone;
 mod server;
 mod store;
+mod subagents;
 mod undo;
 
 use std::path::PathBuf;

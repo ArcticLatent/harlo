@@ -105,6 +105,7 @@ impl Server {
                 time: Created { created: now() },
                 text: text.clone(),
                 description: None,
+                metadata: None,
             };
             self.emit(
                 "session.inbox.enqueued",

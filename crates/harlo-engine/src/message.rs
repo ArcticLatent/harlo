@@ -43,6 +43,9 @@ pub enum Message {
         /// One line for people, when they should see it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
+        /// Where it came from, such as a subagent's answer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<serde_json::Value>,
     },
     /// One model step.
     Assistant(Box<Assistant>),

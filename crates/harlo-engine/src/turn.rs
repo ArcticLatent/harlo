@@ -53,6 +53,10 @@ pub struct Turn {
     /// Where messages that steer the turn come from; none, and nothing
     /// joins it once it started.
     pub steering: Option<std::sync::Arc<dyn Steering>>,
+    /// Where subagents start; none offers no subagent tool.
+    pub subagents: Option<std::sync::Arc<dyn crate::subagent::Subagents>>,
+    /// The agents a subagent may run as: `(id, what for)`.
+    pub subagent_agents: Vec<(String, String)>,
     /// Whether the model keeps a todo list (`experimental.todo`).
     pub todo: bool,
     /// The skills the model may load, and people may have attached.
@@ -300,6 +304,22 @@ pub async fn run(
     if turn.todo {
         definitions.push(crate::todo::definition());
     }
+    if turn.subagents.is_some() {
+        let layers: Vec<(&str, &[Rule])> = turn
+            .rules
+            .iter()
+            .map(|(n, r)| (n.as_str(), r.as_slice()))
+            .collect();
+        let allowed: Vec<(String, String)> = turn
+            .subagent_agents
+            .iter()
+            .filter(|(id, _)| decide(&layers, "subagent", id).effect != Effect::Deny)
+            .cloned()
+            .collect();
+        if !allowed.is_empty() {
+            definitions.push(crate::subagent::definition(&allowed));
+        }
+    }
     let mut compacted = false;
     for _ in 0..MAX_STEPS {
         if stop.is_cancelled() {
@@ -335,6 +355,7 @@ pub async fn run(
                     time: Created { created: now() },
                     text: crate::compaction::CARRY_ON.to_owned(),
                     description: None,
+                    metadata: None,
                 });
             }
         }
@@ -758,7 +779,7 @@ async fn call_tool(
     if let Plan::Question { questions } = plan {
         return ask_questions(input, questions, message, call, gate, stop).await;
     }
-    ran(input, run_plan(turn, plan, message, stop).await)
+    ran(input, run_plan(turn, plan, message, call, stop).await)
 }
 
 /// A call that ran, from what it returned.
@@ -823,6 +844,7 @@ async fn run_plan(
     turn: &Turn,
     plan: Plan,
     message: &str,
+    call: &str,
     stop: &CancellationToken,
 ) -> Result<tools::Output, String> {
     match (plan, turn.memory.as_ref()) {
@@ -843,6 +865,21 @@ async fn run_plan(
                 changed: Vec::new(),
             })
         }
+        (Plan::Subagent { request }, _) => match &turn.subagents {
+            Some(subagents) => subagents
+                .start(message, call, request)
+                .await
+                .map(|session| tools::Output {
+                    text: crate::subagent::started(&session),
+                    metadata:
+                        json!({ "sessionID": session, "status": "running", "truncated": false })
+                            .as_object()
+                            .cloned()
+                            .unwrap_or_default(),
+                    changed: Vec::new(),
+                }),
+            None => Err("There is no tool called `subagent`.".to_owned()),
+        },
         (Plan::Skill { id }, _) => turn
             .skills
             .iter()

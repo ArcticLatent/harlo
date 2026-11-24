@@ -124,6 +124,8 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         compact_at: None,
         skills: Vec::new(),
         todo: false,
+        subagents: None,
+        subagent_agents: Vec::new(),
         history: vec![Message::User {
             id: "msg_0".into(),
             time: Created { created: 0 },
