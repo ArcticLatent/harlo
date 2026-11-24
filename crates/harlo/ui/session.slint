@@ -132,6 +132,8 @@ component InboxLine inherits Rectangle {
                         Logic.open-session(root.item.id);
                     } else if root.item.kind == 4 {
                         Logic.goal-command(root.item.id);
+                    } else if root.item.kind == 5 {
+                        Logic.stop-job(root.item.id);
                     } else {
                         Logic.steer-queued(root.item.id);
                     }
@@ -141,12 +143,14 @@ component InboxLine inherits Rectangle {
         if root.item.cancel: VerticalLayout {
             alignment: center;
             Press {
-                label: root.item.kind == 4 ? "Clear goal" : "Cancel";
+                label: root.item.kind == 4 ? "Clear goal" : root.item.kind == 2 ? "Stop" : "Cancel";
                 width: 20px;
                 height: 20px;
                 clicked => {
                     if root.item.kind == 4 {
                         Logic.goal-command("clear");
+                    } else if root.item.kind == 2 {
+                        Logic.stop-job(root.item.id);
                     } else {
                         Logic.cancel-queued(root.item.id);
                     }

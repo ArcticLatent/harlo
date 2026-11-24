@@ -18,6 +18,9 @@ pub const COMPACT: &str = "compact";
 /// session's context, without adding to the conversation.
 pub const ASIDE: &str = "btw";
 
+/// What starts a shell command: `!ls` runs `ls` in the session's folder.
+pub const SHELL: char = '!';
+
 /// Which menu a typed word opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
@@ -333,13 +336,16 @@ pub enum Outgoing {
     /// Ask a side question, possibly empty: answered from the session's
     /// context without adding to the conversation.
     Aside(String),
+    /// Run a shell command in the session's folder, with no model; its
+    /// output joins the conversation.
+    Shell(String),
 }
 
 /// Turns the composer's text and draft into what's sent.
 ///
 /// `folder` is the session's folder; mentioned files are sent by their path
 /// in it. A leading `/name` runs a command, loads a skill, compacts, or
-/// asks a side question.
+/// asks a side question; a leading `!` runs the rest as a shell command.
 #[must_use]
 pub fn outgoing(
     text: &str,
@@ -349,6 +355,11 @@ pub fn outgoing(
     delivery: Delivery,
 ) -> Outgoing {
     let text = text.trim();
+    if let Some(command) = text.strip_prefix(SHELL).map(str::trim)
+        && !command.is_empty()
+    {
+        return Outgoing::Shell(command.to_owned());
+    }
     let mut skills = Vec::new();
     let mut body = text.to_owned();
     if let Some(rest) = text.strip_prefix('/') {

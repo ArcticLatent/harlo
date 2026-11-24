@@ -38,6 +38,7 @@ mod files;
 mod git_settings;
 mod goals;
 mod hosting;
+mod jobs;
 mod line_comments;
 mod local_models;
 mod mcp;
@@ -73,6 +74,7 @@ pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile
 pub use git_settings::{GitEvent, GitSettings};
 pub use goals::{GoalAction, GoalEvent};
 pub use hosting::{HostingEvent, HostingState, SigningIn};
+pub use jobs::JobEvent;
 pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
 pub use local_models::{EngineState, Getting, LocalEvent, LocalModels, ServerState};
 pub use mcp::{McpEvent, McpServers, McpView};
@@ -276,6 +278,9 @@ struct PerSession {
     asides: HashMap<String, Vec<Aside>>,
     /// Its goal, once read and while it has one.
     goals: HashMap<String, harlo_core::server::Goal>,
+    /// Its background jobs, once read: the running ones and the latest
+    /// ended.
+    jobs: HashMap<String, Vec<harlo_core::server::Job>>,
 }
 
 /// Something the user did, or something the server reported.
@@ -332,6 +337,8 @@ pub enum Message {
     Aside(AsideEvent),
     /// Something happened to a session's goal.
     Goal(GoalEvent),
+    /// Something happened to a session's background jobs.
+    Job(JobEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -1012,6 +1019,7 @@ impl App {
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Sheet(event) => return self.sheet_event(event),
             Message::Aside(event) => return self.aside_event(event),
+            Message::Job(event) => return self.job_event(event),
             Message::Goal(event) => return self.goal_event(event),
             message @ (Message::Claude(_)
             | Message::OwnTools(_)
@@ -1341,6 +1349,7 @@ impl App {
                 self.changes_event(&event.kind);
                 self.context_event(&event.kind);
                 self.goal_changed(&event.kind);
+                self.job_changed(&event.kind);
                 let files = self.files_event(&event.kind);
                 // A worktree's branch, as OpenCode sees it change.
                 if let EventKind::BranchChanged { directory, branch } = &event.kind
@@ -1503,6 +1512,7 @@ impl App {
                 Fetch::Children(id.clone()),
             ]),
             self.load_goal(id.clone()),
+            self.load_jobs(id.clone()),
             self.load_history(id),
         ])
     }
@@ -1769,13 +1779,16 @@ impl App {
                 .or_else(|| self.project_model(&folder)),
             rules: self.new_shield.rules().filter(|rules| !rules.is_empty()),
         });
-        Task::batch([
-            Task::perform(
-                send(client, target, folder, new, outgoing, delivery),
-                Message::Sent,
-            ),
-            scroll,
-        ])
+        let command = match &outgoing {
+            Outgoing::Shell(command) => Some(command.clone()),
+            _ => None,
+        };
+        let sent = send(client.clone(), target, folder, new, outgoing, delivery);
+        let task = match command {
+            None => Task::perform(sent, Message::Sent),
+            Some(command) => shell(client, sent, command),
+        };
+        Task::batch([task, scroll])
     }
 
     /// Sends "Continue" to the open session, keeping what the composer
@@ -2473,6 +2486,35 @@ struct NewChoices {
 /// Sends `outgoing` to `target`, or creates a session in `folder` and sends it there.
 ///
 /// A new session first gets the choices in `new`.
+/// Runs `command` once `sent` has the session ready.
+///
+/// A command can run for long, and OpenCode answers only once it ends, so
+/// the send is done as soon as the session is there, and the composer is
+/// free meanwhile. The command's row comes from the server's events.
+fn shell(
+    client: Client,
+    sent: impl Future<Output = Result<Box<Session>, String>> + Send + 'static,
+    command: String,
+) -> Task<Message> {
+    use futures_util::StreamExt as _;
+    let steps = futures_util::stream::once(sent).flat_map(move |result| {
+        let run = result.as_ref().ok().map(|session| {
+            let (client, id, command) = (client.clone(), session.id.clone(), command.clone());
+            async move {
+                Message::Acted(
+                    client
+                        .run_shell(&id, &command)
+                        .await
+                        .map_err(|e| format!("Couldn't run the command: {e}")),
+                )
+            }
+        });
+        futures_util::stream::once(std::future::ready(Message::Sent(result)))
+            .chain(futures_util::stream::iter(run).then(|run| run))
+    });
+    Task::stream(steps)
+}
+
 async fn send(
     client: Client,
     target: Option<String>,
@@ -2520,8 +2562,9 @@ async fn send(
                 .await
         }
         Outgoing::Compact => client.compact(&session.id).await,
-        // Asked apart, never sent as a prompt.
-        Outgoing::Aside(_) => Ok(()),
+        // A side question is asked apart, and a command runs once the
+        // session is there (see `shell`).
+        Outgoing::Aside(_) | Outgoing::Shell(_) => Ok(()),
     }
     .map_err(failed)?;
     Ok(Box::new(session))

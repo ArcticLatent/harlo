@@ -23,6 +23,7 @@ mod event;
 mod generated;
 mod id;
 mod integration;
+mod job;
 mod prompt;
 mod pty;
 mod settings;
@@ -54,6 +55,8 @@ pub use id::message_id;
 #[doc(inline)]
 pub use integration::{AttemptStatus, OAuthAttempt, SignInMethod};
 #[doc(inline)]
+pub use job::{Job, JobKind, JobStatus};
+#[doc(inline)]
 pub use prompt::{Attachment, Mention, Prompt};
 #[doc(inline)]
 pub use pty::{Pty, PtyInput, PtyOutput};
@@ -71,7 +74,7 @@ pub use types::{
     Answer, Choice, Condition, Delivery, Effect, Field, FieldKind, FileDiff, Form, Goal,
     GoalStatus, InboxItem, Message, ModelRef, PROJECT_COLORS, Part, Permission, PermissionReply,
     Picture, Project, ProjectChange, Report, Revert, Rule, ScriptCall, ServerInfo, Session,
-    SessionContext, Tokens, ToolCall, ToolStatus,
+    SessionContext, ShellRun, ShellStatus, Tokens, ToolCall, ToolStatus,
 };
 
 /// The OpenCode release whose schema this crate is built from.

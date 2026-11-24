@@ -209,6 +209,12 @@ fn a_leading_slash_runs_a_command_compacts_or_loads_a_skill() {
         Outgoing::Aside("what does the lexer return?".into())
     );
     assert_eq!(send("/btw"), Outgoing::Aside(String::new()));
+    // A leading `!` runs the rest as a shell command; a lone one is a prompt.
+    assert_eq!(
+        send("! cargo test -q"),
+        Outgoing::Shell("cargo test -q".into())
+    );
+    assert!(matches!(send("!"), Outgoing::Prompt(_)));
     let Outgoing::Prompt(prompt) = send("/browser open the docs") else {
         panic!("a skill is a prompt");
     };

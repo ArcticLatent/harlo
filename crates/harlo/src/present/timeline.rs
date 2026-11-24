@@ -14,6 +14,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 
 use harlo_core::diff::{self, LineKind};
+use harlo_core::server::{ShellRun, ShellStatus};
 use harlo_core::theme::{Rgba, Tokens};
 use harlo_core::timeline::{Compaction, Entry, summarize};
 use harlo_core::workspace::{Report, ToolStatus};
@@ -715,6 +716,10 @@ fn entry_rows(
             vec![with(row)]
         }
         Entry::Compaction { state, .. } => vec![with(compaction_row(t, key, gap, state))],
+        Entry::Shell { run, .. } => shell_rows(t, key, gap, run, view.whole, highlighter)
+            .into_iter()
+            .map(with)
+            .collect(),
         Entry::Subagent {
             agent,
             task,
@@ -736,6 +741,96 @@ fn entry_rows(
         }
         Entry::Report { report, .. } => vec![with(report_row(t, key, gap, crew, report))],
     }
+}
+
+/// A shell command the user ran: the command and how it ended, then
+/// what it printed, its last lines unless shown whole.
+fn shell_rows(
+    t: &Tokens,
+    key: &str,
+    gap: f32,
+    run: &ShellRun,
+    whole: bool,
+    highlighter: &Highlighter,
+) -> Vec<TimelineRow> {
+    let failed = match run.status {
+        ShellStatus::Running => None,
+        ShellStatus::Exited => run
+            .exit
+            .filter(|code| *code != 0)
+            .map(|code| format!("Exit {code}")),
+        ShellStatus::Timeout => Some("Timed out".to_owned()),
+        ShellStatus::Killed => Some("Stopped".to_owned()),
+    };
+    let mut head = match (run.status, &failed) {
+        (ShellStatus::Running, _) => line(t, key, gap, Icon::LoaderCircle, t.text_interactive_base),
+        (_, Some(_)) => line(t, key, gap, Icon::Terminal, t.icon_critical_base),
+        (_, None) => line(t, key, gap, Icon::Terminal, crate::theme::quiet_icon(t)),
+    };
+    head.label = "Ran".into();
+    head.detail = run.command.as_str().into();
+    head.mono = true;
+    head.working = run.status == ShellStatus::Running;
+    head.note = failed.as_deref().unwrap_or_default().into();
+    if failed.is_some() || run.status == ShellStatus::Running {
+        head.note_color = color(if head.working {
+            t.text_interactive_base
+        } else {
+            t.icon_critical_base
+        });
+    }
+    let printed = plain(&run.output);
+    let printed = printed.trim_end();
+    if printed.is_empty() {
+        return vec![head];
+    }
+    // The end of the output says the most: what failed, or the result.
+    let lines: Vec<&str> = printed.lines().collect();
+    let shown = if whole {
+        lines.len()
+    } else {
+        lines.len().min(SCRIPT_LINES)
+    };
+    let hidden = lines.len() - shown;
+    let mut text = lines[hidden..].join("\n");
+    if run.truncated && whole {
+        text.insert_str(0, "…\n");
+    }
+    let mut output = blank(Shape::Code, key, 6.0);
+    output.text = styled(&highlighter.markup("text", &text));
+    output.label = printed.into();
+    output.file = -1;
+    output.more = if hidden > 0 {
+        format!("… {hidden} earlier lines").into()
+    } else if whole && lines.len() > SCRIPT_LINES {
+        "Show less".into()
+    } else {
+        SharedString::new()
+    };
+    vec![head, output]
+}
+
+/// `output` without terminal colour and cursor codes.
+fn plain(output: &str) -> String {
+    let mut out = String::with_capacity(output.len());
+    let mut chars = output.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            if c != '\r' {
+                out.push(c);
+            }
+            continue;
+        }
+        // CSI: ESC [ parameters, then one final letter.
+        if chars.next_if_eq(&'[').is_some() {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() || c == '~' {
+                    break;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The row for summarizing the conversation.

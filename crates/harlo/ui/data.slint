@@ -268,7 +268,7 @@ export struct TimelineRow {
 /// subagent at work, or a queued prompt.
 export struct InboxRow {
     /// 0 activity, 1 todos, 2 a subagent, 3 a queued prompt, 4 the
-    /// session's goal.
+    /// session's goal, 5 a background job.
     kind: int,
     /// The queued prompt's or the subagent session's ID; for the goal,
     /// the `/goal` word its action sends.
@@ -1113,6 +1113,9 @@ export global Logic {
     /// Pause, resume or clear the open session's goal, by the `/goal`
     /// word.
     callback goal-command(string);
+    /// Stop a background job, named by its ID or, for a subagent, by its
+    /// child session's.
+    callback stop-job(string);
 
     callback undo-keep(string);
     callback undo-cancel(string);

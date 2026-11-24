@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 
+use crate::server::{ShellRun, ShellStatus};
 use crate::timeline::{Change, Compaction, Entry, Live};
 use crate::workspace::{EventKind, Message, ToolStatus};
 
@@ -134,6 +135,22 @@ fn notice(key: &str, level: &str, text: &str) -> Value {
     json!({ "key": key, "kind": "notice", "title": level, "text": text, "label": text })
 }
 
+/// A shell command the user ran, as the phone shows a tool: the command,
+/// how it ended, and what it printed.
+fn shell_row(key: &str, run: &ShellRun) -> Value {
+    let (state, result) = match (run.status, run.exit) {
+        (ShellStatus::Running, _) => ("running", String::new()),
+        (ShellStatus::Exited, Some(0) | None) => ("done", String::new()),
+        (ShellStatus::Exited, Some(code)) => ("error", format!("Exit {code}")),
+        (ShellStatus::Timeout, _) => ("error", "Timed out".to_owned()),
+        (ShellStatus::Killed, _) => ("error", "Stopped".to_owned()),
+    };
+    json!({
+        "key": key, "kind": "tool", "title": "Ran", "subtitle": run.command,
+        "state": state, "result": result, "output": clip(&run.output),
+    })
+}
+
 /// Returns one row as the phone reads it (the phone's `Row`).
 #[must_use]
 pub fn row(entry: &Entry) -> Value {
@@ -230,6 +247,7 @@ pub fn row(entry: &Entry) -> Value {
         Entry::Note { key, text, warning } => {
             notice(key, if *warning { "warning" } else { "info" }, text)
         }
+        Entry::Shell { key, run } => shell_row(key, run),
     }
 }
 

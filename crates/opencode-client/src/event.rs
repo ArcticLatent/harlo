@@ -10,8 +10,10 @@
 use serde_json::Value;
 
 use crate::generated as g;
+use crate::job::Job;
 use crate::types::{
-    Delivery, FileDiff, Form, InboxItem, ModelRef, Permission, Report, Revert, Rule, Tokens,
+    Delivery, FileDiff, Form, InboxItem, ModelRef, Permission, Report, Revert, Rule, ShellRun,
+    Tokens,
 };
 
 /// One server event.
@@ -34,32 +36,57 @@ pub enum Kind {
     /// The stream is open. Everything before it may have been missed.
     Connected,
     /// A session was created.
-    SessionCreated { session_id: String },
+    SessionCreated {
+        session_id: String,
+    },
     /// A session's title changed.
-    SessionRenamed { session_id: String, title: String },
+    SessionRenamed {
+        session_id: String,
+        title: String,
+    },
     /// A session was deleted.
-    SessionDeleted { session_id: String },
+    SessionDeleted {
+        session_id: String,
+    },
     /// A session moved to another folder or project.
-    SessionMoved { session_id: String },
+    SessionMoved {
+        session_id: String,
+    },
     /// A session was archived.
-    SessionArchived { session_id: String },
+    SessionArchived {
+        session_id: String,
+    },
     /// A session was brought back from the archive.
-    SessionUnarchived { session_id: String },
+    SessionUnarchived {
+        session_id: String,
+    },
     /// A session switched model.
-    ModelSelected { session_id: String, model: ModelRef },
+    ModelSelected {
+        session_id: String,
+        model: ModelRef,
+    },
     /// A project's details changed, or a project appeared.
-    ProjectUpdated { project_id: String },
+    ProjectUpdated {
+        project_id: String,
+    },
     /// A project's worktrees changed.
-    WorktreesChanged { project_id: String },
+    WorktreesChanged {
+        project_id: String,
+    },
     /// The branch checked out in `directory` changed, or became known.
     BranchChanged {
         directory: String,
         branch: Option<String>,
     },
     /// A session started working.
-    Busy { session_id: String },
+    Busy {
+        session_id: String,
+    },
     /// A session stopped working, with `succeeded`, `failed` or `interrupted`.
-    Done { session_id: String, outcome: String },
+    Done {
+        session_id: String,
+        outcome: String,
+    },
     /// A model step started, as a new assistant message.
     StepStarted {
         session_id: String,
@@ -199,9 +226,15 @@ pub enum Kind {
     /// The agent asked a question.
     FormCreated(Form),
     /// A question was answered or cancelled, here or by another client.
-    FormSettled { session_id: String, form_id: String },
+    FormSettled {
+        session_id: String,
+        form_id: String,
+    },
     /// A prompt or other item was added to a session's inbox.
-    InboxAdded { session_id: String, item: InboxItem },
+    InboxAdded {
+        session_id: String,
+        item: InboxItem,
+    },
     /// An inbox item left the inbox: delivered into the session, or cancelled.
     InboxRemoved {
         session_id: String,
@@ -215,17 +248,34 @@ pub enum Kind {
         delivery: Delivery,
     },
     /// The session started summarizing itself to free up context.
-    CompactionStarted { session_id: String },
+    CompactionStarted {
+        session_id: String,
+    },
     /// More of the summary was written.
-    CompactionDelta { session_id: String, text: String },
+    CompactionDelta {
+        session_id: String,
+        text: String,
+    },
     /// The summary is done.
-    CompactionEnded { session_id: String, summary: String },
+    CompactionEnded {
+        session_id: String,
+        summary: String,
+    },
     /// Summarizing failed.
-    CompactionFailed { session_id: String, error: String },
+    CompactionFailed {
+        session_id: String,
+        error: String,
+    },
     /// A skill was loaded into the session.
-    SkillActivated { session_id: String, name: String },
+    SkillActivated {
+        session_id: String,
+        name: String,
+    },
     /// The session switched agents.
-    AgentSelected { session_id: String, agent: String },
+    AgentSelected {
+        session_id: String,
+        agent: String,
+    },
     /// The models, agents, commands or skills on offer changed.
     CatalogChanged,
     /// A file in a folder was added, changed or removed.
@@ -241,13 +291,34 @@ pub enum Kind {
         change: FileChange,
     },
     /// An undo was staged.
-    RevertStaged { session_id: String, revert: Revert },
+    RevertStaged {
+        session_id: String,
+        revert: Revert,
+    },
     /// A staged undo was cancelled.
-    RevertCleared { session_id: String },
+    RevertCleared {
+        session_id: String,
+    },
     /// A staged undo was kept.
-    RevertCommitted { session_id: String },
+    RevertCommitted {
+        session_id: String,
+    },
     /// Any other event, by its OpenCode type name.
-    Other { kind: String },
+    /// The user's shell command started in a session.
+    ShellStarted {
+        session_id: String,
+        run: ShellRun,
+    },
+    /// The user's shell command ended, with its output.
+    ShellEnded {
+        session_id: String,
+        run: ShellRun,
+    },
+    /// A background job started, moved to the background, or ended.
+    JobUpdated(Job),
+    Other {
+        kind: String,
+    },
 }
 
 impl Kind {
@@ -293,7 +364,10 @@ impl Kind {
             | Self::RevertStaged { session_id, .. }
             | Self::RevertCleared { session_id }
             | Self::RevertCommitted { session_id }
-            | Self::SessionPermissions { session_id, .. } => Some(session_id),
+            | Self::SessionPermissions { session_id, .. }
+            | Self::ShellStarted { session_id, .. }
+            | Self::ShellEnded { session_id, .. } => Some(session_id),
+            Self::JobUpdated(job) => Some(&job.session_id),
             Self::PermissionAsked(p) => Some(&p.session_id),
             Self::FormCreated(f) => Some(&f.session_id),
             Self::Connected
@@ -491,6 +565,20 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
                 Delivery::Queue
             } else {
                 Delivery::Steer
+            },
+        },
+        "session.shell.started" => Kind::ShellStarted {
+            session_id: session_of(&data),
+            run: ShellRun::from_json(&data["shell"], &Value::Null),
+        },
+        "session.shell.ended" => Kind::ShellEnded {
+            session_id: session_of(&data),
+            run: ShellRun::from_json(&data["shell"], &data["output"]),
+        },
+        "experimental.job.updated" => match Job::from_json(&data["info"]) {
+            Some(job) => Kind::JobUpdated(job),
+            None => Kind::Other {
+                kind: kind.to_owned(),
             },
         },
         "session.compaction.started" => Kind::CompactionStarted {

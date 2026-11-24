@@ -2,7 +2,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::server::{Delivery, Goal, GoalStatus};
+use harlo_core::server::{Delivery, Goal, GoalStatus, Job, JobKind};
 use harlo_core::theme::Tokens;
 use harlo_core::timeline::{TodoStatus, todo_counts};
 use lucide_icons::Icon;
@@ -114,6 +114,7 @@ pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
     }
     // Subagents still at work, or asking the user, each a click away.
     for child in app.active_children(id) {
+        let stoppable = app.subagent_job(id, &child.id).is_some();
         let (note, note_color, working) = match child.state {
             ChildState::Waiting => ("Needs you", t.icon_warning_base, false),
             ChildState::Working | ChildState::Idle => ("Working", t.text_interactive_base, true),
@@ -129,9 +130,13 @@ pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
             note_color: color(note_color),
             working,
             action: "Open".into(),
+            // One in the background can be stopped from here.
+            cancel: stoppable,
             ..InboxRow::default()
         });
     }
+    // Work it sent to the background, each with a way to stop it.
+    rows.extend(app.jobs(id).filter_map(|job| job_row(t, job)));
     // OpenCode's own notes to the agent aren't the user's to see or cancel.
     let busy = app.is_busy(id);
     let waiting = app
@@ -177,6 +182,35 @@ pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
 }
 
 /// The line saying what the agent is doing, breathing until the run ends.
+/// A job the session sent to the background, with Stop; `None` for a
+/// subagent, which shows in the subagents' rows with its own Stop.
+fn job_row(t: &Tokens, job: &Job) -> Option<InboxRow> {
+    let (icon, strong, text) = match &job.kind {
+        JobKind::Subagent { .. } => return None,
+        JobKind::Shell { command } => (Icon::Terminal, "Command", command.clone()),
+        JobKind::Script => (
+            Icon::Code,
+            "Script",
+            job.title.clone().unwrap_or_else(|| "Code Mode".to_owned()),
+        ),
+        JobKind::Image { path } => (Icon::Image, "Picture", path.clone()),
+        JobKind::Video { path } => (Icon::Film, "Video", path.clone()),
+    };
+    Some(InboxRow {
+        kind: 5,
+        id: job.id.as_str().into(),
+        glyph: glyph(icon),
+        glyph_color: color(t.icon_base),
+        strong: strong.into(),
+        text: text.into(),
+        note: "In the background".into(),
+        note_color: color(t.text_interactive_base),
+        working: true,
+        action: "Stop".into(),
+        ..InboxRow::default()
+    })
+}
+
 /// The session's goal: what it is, where it stands and why, and what
 /// can be done to it. The action and the row's ID are the `/goal` words
 /// they send.

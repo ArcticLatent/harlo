@@ -881,6 +881,31 @@ def scene_btw(g):
     h.key("Escape")
 
 
+def scene_shell(g):
+    """A shell command typed with `!`, what it printed, and a command the
+    agent sent to the background, stoppable above the composer."""
+    h = g.h
+    session = open_project_session(h, title="Build")
+    h.api("PATCH", f"/api/session/{session}",
+          {"permissions": [{"action": "shell", "resource": "*", "effect": "allow"}]})
+    send(h, "!git log --oneline -3; ls")
+    h.wait("Ran", role=None, timeout=20)
+    h.settle(0.8)
+    g.cap("ran", "A shell command run with !: the command, then what it printed")
+    send(h, "!ls missing-folder")
+    h.wait("Exit 2", role=None, timeout=20)
+    h.settle(0.8)
+    g.cap("failed", "A command that failed says its exit code")
+    ask(h, "Start the dev server in the background.",
+        [[("tool", 'shell {"command":"sleep 600","background":true}')],
+         [("say", "The dev server runs in the background.")]])
+    h.wait("In the background", role=None, timeout=30)
+    h.settle(0.8)
+    g.cap("background", "A command the agent sent to the background, with Stop")
+    h.click("Stop", role=None)
+    h.wait_gone("In the background", role=None, timeout=20)
+
+
 def keep_reviewer(h, verdict):
     """Has the scripted model's goal reviewer answer `verdict`, or find
     goals met for None."""
@@ -921,7 +946,7 @@ SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approva
           ("settings", scene_settings), ("fonts", scene_fonts), ("pages", scene_pages), ("phone", scene_phone),
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
           ("codemode", scene_codemode), ("btw", scene_btw),
-          ("goal", scene_goal),
+          ("goal", scene_goal), ("shell", scene_shell),
           # These two leave a subagent's or a worktree's session open, so they come last.
           ("subagents", scene_subagents), ("worktrees", scene_worktrees),
           ("window", scene_window)]

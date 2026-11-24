@@ -437,7 +437,14 @@ pub enum Message {
         /// What it says, for people.
         text: String,
     },
-    /// A message kind Harlo doesn't show yet (agent switch, shell, …).
+    /// A shell command the user ran in the session, with no model.
+    Shell {
+        /// Message ID (`msg_…`).
+        id: String,
+        /// The command and how it went.
+        run: ShellRun,
+    },
+    /// A message kind Harlo doesn't show yet, such as an agent switch.
     Other {
         /// Message ID (`msg_…`).
         id: String,
@@ -458,6 +465,7 @@ impl Message {
             | Self::Skill { id, .. }
             | Self::Report { id, .. }
             | Self::Note { id, .. }
+            | Self::Shell { id, .. }
             | Self::Other { id, .. } => id,
         }
     }
@@ -520,6 +528,23 @@ impl Message {
                 id,
                 name: value["name"].as_str().unwrap_or_default().to_owned(),
             },
+            "shell" => Self::Shell {
+                id,
+                run: ShellRun::from_json(&value, &value["output"]),
+            },
+            // A command that never started says so, by the command.
+            "synthetic"
+                if value["metadata"]["source"] == "shell"
+                    && value["metadata"]["state"] == "error" =>
+            {
+                Self::Note {
+                    id,
+                    text: format!(
+                        "Couldn't start {}",
+                        value["description"].as_str().unwrap_or("the command")
+                    ),
+                }
+            }
             "synthetic" => match Report::from_json(&value) {
                 Some(report) => Self::Report { id, report },
                 // A described note shows as one line; the rest, such as a
@@ -534,6 +559,66 @@ impl Message {
             },
             _ => Self::Other { id, kind },
         })
+    }
+}
+
+/// A shell command the user ran in a session, and how it went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellRun {
+    /// The command's ID (`sh_…`), the same in its message and its events.
+    pub shell_id: String,
+    /// The command.
+    pub command: String,
+    /// Whether it still runs, and how it ended.
+    pub status: ShellStatus,
+    /// Its exit code, once it exited.
+    pub exit: Option<i64>,
+    /// What it printed, once it ended: its last part when it printed a lot.
+    pub output: String,
+    /// Whether `output` is only the last part.
+    pub truncated: bool,
+}
+
+/// Where a shell command is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellStatus {
+    /// Still running.
+    Running,
+    /// It exited by itself.
+    Exited,
+    /// It ran out of time and was stopped.
+    Timeout,
+    /// It was stopped.
+    Killed,
+}
+
+impl ShellRun {
+    /// Reads a command from a shell message or `Shell.Info`, with its
+    /// output from `output` (`{ output, truncated }`), when there is one.
+    pub(crate) fn from_json(shell: &Value, output: &Value) -> Self {
+        Self {
+            shell_id: shell["shellID"]
+                .as_str()
+                .or_else(|| shell["id"].as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            command: shell["command"].as_str().unwrap_or_default().to_owned(),
+            status: match shell["status"].as_str() {
+                Some("exited") => ShellStatus::Exited,
+                Some("timeout") => ShellStatus::Timeout,
+                Some("killed") => ShellStatus::Killed,
+                _ => ShellStatus::Running,
+            },
+            #[expect(clippy::cast_possible_truncation, reason = "exit codes are small")]
+            exit: shell["exit"].as_i64().or_else(|| {
+                shell["exit"]
+                    .as_f64()
+                    .filter(|f| f.is_finite())
+                    .map(|f| f as i64)
+            }),
+            output: output["output"].as_str().unwrap_or_default().to_owned(),
+            truncated: output["truncated"].as_bool().unwrap_or_default(),
+        }
     }
 }
 

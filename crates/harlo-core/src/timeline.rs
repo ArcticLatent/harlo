@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use opencode_client::{
-    EventKind, FileDiff, Message, Part, Picture, Report, ScriptCall, ToolCall, ToolStatus,
+    EventKind, FileDiff, Message, Part, Picture, Report, ScriptCall, ShellRun, ToolCall, ToolStatus,
 };
 use serde_json::Value;
 
@@ -123,6 +123,14 @@ pub enum Entry {
         /// Where it is.
         state: Compaction,
     },
+    /// A shell command the user ran, with what it printed.
+    Shell {
+        /// Stable row key: the command's ID, the same in its message and
+        /// its events.
+        key: String,
+        /// The command and how it went.
+        run: ShellRun,
+    },
     /// A one-line note: a skill loaded, a retry, a failed step.
     Note {
         /// Stable row key.
@@ -167,6 +175,7 @@ impl Entry {
             | Self::Report { key, .. }
             | Self::Stopped { key, .. }
             | Self::Compaction { key, .. }
+            | Self::Shell { key, .. }
             | Self::Note { key, .. } => key,
         }
     }
@@ -286,10 +295,40 @@ pub fn todo_progress(todos: &[Todo]) -> String {
     format!("{done} of {total} done")
 }
 
+/// Adds a model step's rows: its text, reasoning and tool calls, in order.
+fn step_rows(rows: &mut Vec<Entry>, id: &str, parts: &[Part]) {
+    let (mut texts, mut thoughts) = (0, 0);
+    for part in parts {
+        match part {
+            Part::Text(text) => {
+                let key = text_key(id, texts);
+                texts += 1;
+                if !text.trim().is_empty() {
+                    rows.push(Entry::Answer {
+                        key,
+                        text: text.clone(),
+                    });
+                }
+            }
+            Part::Reasoning(text) => {
+                let key = thought_key(id, thoughts);
+                thoughts += 1;
+                if !text.trim().is_empty() {
+                    rows.push(Entry::Thought {
+                        key,
+                        text: text.clone(),
+                    });
+                }
+            }
+            Part::Tool(call) => rows.push(tool(id, call)),
+        }
+    }
+}
+
 /// Turns a session's messages into timeline rows, oldest first.
 ///
 /// Empty text and reasoning are skipped, as are message kinds the timeline
-/// doesn't show (agent switches, shells) and successful run ends.
+/// doesn't show (agent switches) and successful run ends.
 #[must_use]
 pub fn entries(messages: &[Message]) -> Vec<Entry> {
     let mut rows = Vec::new();
@@ -328,32 +367,7 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
                         *by = Some(agent.clone());
                     }
                 }
-                let (mut texts, mut thoughts) = (0, 0);
-                for part in parts {
-                    match part {
-                        Part::Text(text) => {
-                            let key = text_key(id, texts);
-                            texts += 1;
-                            if !text.trim().is_empty() {
-                                rows.push(Entry::Answer {
-                                    key,
-                                    text: text.clone(),
-                                });
-                            }
-                        }
-                        Part::Reasoning(text) => {
-                            let key = thought_key(id, thoughts);
-                            thoughts += 1;
-                            if !text.trim().is_empty() {
-                                rows.push(Entry::Thought {
-                                    key,
-                                    text: text.clone(),
-                                });
-                            }
-                        }
-                        Part::Tool(call) => rows.push(tool(id, call)),
-                    }
-                }
+                step_rows(&mut rows, id, parts);
             }
             Message::Idle { id, outcome, error } if outcome != "succeeded" => {
                 rows.push(Entry::Stopped {
@@ -388,6 +402,10 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
                 key: id.clone(),
                 text: text.clone(),
                 warning: false,
+            }),
+            Message::Shell { run, .. } => rows.push(Entry::Shell {
+                key: run.shell_id.clone(),
+                run: run.clone(),
             }),
             Message::Idle { .. } | Message::Other { .. } => {}
         }
@@ -776,6 +794,12 @@ impl Live {
                 vec![Change::Put(Entry::Compaction {
                     key: format!("{session_id}/compaction"),
                     state: Compaction::Failed(error.clone()),
+                })]
+            }
+            EventKind::ShellStarted { run, .. } | EventKind::ShellEnded { run, .. } => {
+                vec![Change::Put(Entry::Shell {
+                    key: run.shell_id.clone(),
+                    run: run.clone(),
                 })]
             }
             // A kept undo removed messages.
