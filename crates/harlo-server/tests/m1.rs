@@ -164,12 +164,11 @@ async fn a_reconnecting_client_gets_the_events_it_missed_once_and_in_order() {
     }
 
     // The project's AGENTS.md reached the model, under its path.
-    let log = std::fs::read_to_string(sandbox.dir.path().join("model.jsonl")).expect("model log");
-    let first: serde_json::Value =
-        serde_json::from_str(log.lines().next().expect("a request")).expect("json");
-    let system = first["body"]["messages"][0]["content"]
-        .as_str()
-        .unwrap_or_default();
+    let first = support::turn_requests(sandbox.dir.path())
+        .into_iter()
+        .next()
+        .expect("a request");
+    let system = first["messages"][0]["content"].as_str().unwrap_or_default();
     assert!(system.contains("Answer in lowercase."), "{system}");
     let source = format!("Instructions from: {}", project.join("AGENTS.md").display());
     assert!(system.contains(&source), "{system}");

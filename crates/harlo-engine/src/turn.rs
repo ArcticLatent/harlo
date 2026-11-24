@@ -424,6 +424,12 @@ async fn ask_model(
     };
     assistant.time.streamed = Some(now());
     assistant.tokens = reply.tokens;
+    assistant.cost = turn
+        .provider
+        .models
+        .iter()
+        .find(|m| m.id == turn.model.model)
+        .map_or(0.0, |m| m.cost(&assistant.tokens));
     assistant.finish = Some(finish_name(reply.finish.as_deref()).to_owned());
     assistant.raw_finish = reply.finish;
 

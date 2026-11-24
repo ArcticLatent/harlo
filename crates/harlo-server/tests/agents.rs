@@ -16,12 +16,7 @@ const EDIT: &str =
 
 /// The bodies the scripted model was sent, oldest first.
 fn requests(sandbox: &Sandbox) -> Vec<Value> {
-    std::fs::read_to_string(sandbox.dir.path().join("model.jsonl"))
-        .expect("model log")
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .map(|r| r["body"].clone())
-        .collect()
+    support::turn_requests(sandbox.dir.path())
 }
 
 /// The text of the request's user messages, in order.

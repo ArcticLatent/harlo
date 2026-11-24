@@ -17,6 +17,7 @@ pub mod agents;
 mod chat;
 mod config;
 mod error;
+pub mod generate;
 mod id;
 pub mod instructions;
 pub mod memory;
@@ -27,7 +28,7 @@ pub mod snapshot;
 pub mod tools;
 mod turn;
 
-pub use config::{Config, ModelRef, ModelSpec, ProviderSpec, VariantSpec};
+pub use config::{Config, ModelRef, ModelSpec, Price, ProviderSpec, VariantSpec};
 pub use error::Error;
 pub use id::{ascending_id, descending_id, just_before};
 pub use message::{

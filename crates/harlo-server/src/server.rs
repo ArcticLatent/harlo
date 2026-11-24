@@ -350,7 +350,9 @@ impl Server {
             return Ok(answer);
         }
         if session.title.is_none() {
-            self.update_session(id, None, Some(title_of(text)))?;
+            let first = title_of(text);
+            self.update_session(id, None, Some(first.clone()))?;
+            tokio::spawn(Arc::clone(self).name_session(session.clone(), text.to_owned(), first));
         }
         // A new prompt keeps a staged undo: the undone messages go.
         if session.revert.is_some() {
@@ -509,6 +511,42 @@ impl Server {
         // (The run may have been stopped meanwhile.)
         let _ = pending.answer.send(answer);
         Ok(())
+    }
+
+    /// Asks the session's model for a title from its first message, and
+    /// uses it unless the session was renamed meanwhile.
+    async fn name_session(self: Arc<Self>, session: Session, first: String, provisional: String) {
+        let Some(model) = session
+            .model
+            .clone()
+            .or_else(|| self.config.default_model())
+        else {
+            return;
+        };
+        let Some((provider, _)) = self.config.resolve(&model) else {
+            return;
+        };
+        let asked = harlo_engine::generate::generate(
+            provider,
+            &model,
+            harlo_engine::generate::TITLE_SYSTEM,
+            &harlo_engine::generate::title_prompt(&first),
+            &CancellationToken::new(),
+        )
+        .await;
+        let title = match asked {
+            Ok(raw) => harlo_engine::generate::clean_title(&raw),
+            Err(e) => {
+                tracing::warn!(name: "session.title.failed", error = %e, "couldn't name a session");
+                None
+            }
+        };
+        let renamed = self
+            .session(&session.id)
+            .is_ok_and(|s| s.title.as_deref() != Some(provisional.as_str()));
+        if let Some(title) = title.filter(|_| !renamed) {
+            let _ = self.update_session(&session.id, None, Some(title));
+        }
     }
 
     /// Runs session `id` until its inbox is empty or it's stopped.

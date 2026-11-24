@@ -240,3 +240,20 @@ pub async fn replay(sandbox: &Sandbox, after: u64) -> Vec<(u64, String)> {
     }
     out
 }
+
+/// The bodies of the requests turns sent the scripted model, oldest
+/// first: titles asked for on the side are left out.
+#[must_use]
+pub fn turn_requests(root: &Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(root.join("model.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .map(|r| r["body"].clone())
+        .filter(|b| {
+            !b["messages"][0]["content"]
+                .as_str()
+                .is_some_and(|s| s.starts_with(harlo_engine::generate::TITLE_SYSTEM))
+        })
+        .collect()
+}

@@ -29,6 +29,38 @@ pub struct ModelRef {
     pub variant: Option<String>,
 }
 
+/// A model's prices, in US dollars per million tokens.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Price {
+    /// The context size from which these prices apply; none for the base
+    /// prices.
+    pub from: Option<u64>,
+    /// Input not read from the cache.
+    pub input: f64,
+    /// Output, reasoning included.
+    pub output: f64,
+    /// Input read from the cache.
+    pub cache_read: f64,
+    /// Input written to the cache.
+    pub cache_write: f64,
+}
+
+impl Price {
+    /// What `tokens` cost at these prices, in US dollars.
+    #[must_use]
+    pub fn of(&self, tokens: &crate::message::Tokens) -> f64 {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "token counts are far below 2^52; cents are what matter"
+        )]
+        let dollars = |count: u64, per_million: f64| count as f64 * per_million / 1_000_000.0;
+        dollars(tokens.input, self.input)
+            + dollars(tokens.output, self.output)
+            + dollars(tokens.cache.read, self.cache_read)
+            + dollars(tokens.cache.write, self.cache_write)
+    }
+}
+
 /// A variant of a model: what its requests add.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariantSpec {
@@ -41,7 +73,7 @@ pub struct VariantSpec {
 }
 
 /// One model a provider offers.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModelSpec {
     /// Its ID at the provider.
     pub id: String,
@@ -57,9 +89,23 @@ pub struct ModelSpec {
     pub headers: Vec<(String, String)>,
     /// Its variants, in the order the file lists them.
     pub variants: Vec<VariantSpec>,
+    /// Its prices: the base ones, and any for larger contexts.
+    pub prices: Vec<Price>,
 }
 
 impl ModelSpec {
+    /// What `tokens` of one step cost: at the prices for the step's
+    /// context (all its input), or nothing when no prices are known.
+    #[must_use]
+    pub fn cost(&self, tokens: &crate::message::Tokens) -> f64 {
+        let context = tokens.input + tokens.cache.read + tokens.cache.write;
+        self.prices
+            .iter()
+            .filter(|p| p.from.is_none_or(|from| context > from))
+            .max_by_key(|p| p.from.unwrap_or(0))
+            .map_or(0.0, |p| p.of(tokens))
+    }
+
     /// What a request with `variant` adds: the model's body and headers,
     /// then the variant's over them.
     #[must_use]
@@ -83,7 +129,7 @@ impl ModelSpec {
 }
 
 /// A provider: where its OpenAI-compatible API is and how to sign requests.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProviderSpec {
     /// Its ID, as models name it.
     pub id: String,
@@ -98,7 +144,7 @@ pub struct ProviderSpec {
 }
 
 /// What the engine read from the configuration.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Config {
     /// The file it came from, if one was found.
     pub source: Option<PathBuf>,
@@ -239,6 +285,11 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
                     })
                 })
                 .collect(),
+            prices: m["cost"].as_array().map_or_else(
+                // (A single object is read as the base prices.)
+                || price(&m["cost"]).into_iter().collect(),
+                |list| list.iter().filter_map(price).collect(),
+            ),
         })
         .collect();
     Some(ProviderSpec {
@@ -247,6 +298,19 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
         base_url: base_url.trim_end_matches('/').to_owned(),
         api_key,
         models,
+    })
+}
+
+/// Prices from a config entry: `input`, `output`, `cache.read` and
+/// `cache.write`, with `tier.size` for larger contexts.
+fn price(v: &Value) -> Option<Price> {
+    let number = |v: &Value| v.as_f64().unwrap_or(0.0);
+    v.is_object().then(|| Price {
+        from: v["tier"]["size"].as_u64(),
+        input: number(&v["input"]),
+        output: number(&v["output"]),
+        cache_read: number(&v["cache"]["read"]),
+        cache_write: number(&v["cache"]["write"]),
     })
 }
 
@@ -296,6 +360,11 @@ mod tests {
                     "models": { "fake-coder": {
                         "name": "Fake Coder", "limit": { "context": 128000, "output": 8192 },
                         "body": { "temperature": 0.2 }, "headers": { "X-Team": "a" },
+                        "cost": [
+                            { "input": 3, "output": 15, "cache": { "read": 0.3, "write": 3.75 } },
+                            { "tier": { "type": "context", "size": 200000 }, "input": 6, "output": 22.5,
+                              "cache": { "read": 0.6, "write": 7.5 } }
+                        ],
                         "variants": [
                             { "id": "high", "body": { "reasoning_effort": "high" } },
                             { "id": "low", "body": { "reasoning_effort": "low" }, "headers": { "X-Team": "b" } }
@@ -328,6 +397,26 @@ mod tests {
         );
         assert_eq!(headers.last(), Some(&("X-Team".to_owned(), "b".to_owned())));
         assert_eq!(spec.request_extras(None).0.len(), 1, "no variant");
+
+        let step = |input, read| crate::message::Tokens {
+            input,
+            output: 1_000_000,
+            reasoning: 0,
+            cache: crate::message::Cache { read, write: 0 },
+        };
+        // A million output tokens, plus the input at its tier's price.
+        assert!(
+            (spec.cost(&step(1_000_000, 0)) - 6.0 - 22.5).abs() < 1e-9,
+            "large context"
+        );
+        assert!(
+            (spec.cost(&step(100_000, 0)) - 0.3 - 15.0).abs() < 1e-9,
+            "base prices"
+        );
+        assert!(
+            (spec.cost(&step(0, 100_000)) - 0.03 - 15.0).abs() < 1e-9,
+            "cache reads"
+        );
     }
 
     #[test]

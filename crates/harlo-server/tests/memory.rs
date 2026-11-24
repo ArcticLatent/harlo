@@ -64,15 +64,10 @@ async fn call(
 
 /// The system prompt of the model request that answered `prompt`.
 fn system_prompt_for(sandbox: &Sandbox, prompt: &str) -> String {
-    let log = std::fs::read_to_string(sandbox.dir.path().join("model.jsonl")).expect("model log");
-    log.lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .find(|r| r["body"]["messages"].to_string().contains(prompt))
-        .and_then(|r| {
-            r["body"]["messages"][0]["content"]
-                .as_str()
-                .map(str::to_owned)
-        })
+    support::turn_requests(sandbox.dir.path())
+        .into_iter()
+        .find(|r| r["messages"].to_string().contains(prompt))
+        .and_then(|r| r["messages"][0]["content"].as_str().map(str::to_owned))
         .unwrap_or_else(|| panic!("no request answered {prompt:?}"))
 }
 
