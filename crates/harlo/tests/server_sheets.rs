@@ -1,4 +1,4 @@
-//! The stats and settings pages against a private `opencode serve` with
+//! The stats and settings pages against a private `harlo-server` with
 //! scratch `HOME`/`XDG_*` folders, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -24,8 +24,8 @@ fn window(sandbox: &Sandbox) -> Ui {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(sandbox.project_str());
@@ -77,8 +77,8 @@ fn the_model_for_new_sessions_is_set_in_opencodes_config() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(sandbox.project_str());
@@ -88,22 +88,22 @@ fn the_model_for_new_sessions_is_set_in_opencodes_config() {
     ui.press("General");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Fake Coder · fake")),
-        "OpenCode's default"
+        "the server's default"
     );
     let mut events = tasks
         .block_on(sandbox.client().events())
         .expect("the server's events");
     ui.press("Change");
     assert_eq!(ui.app().picker, Some(Picker::DefaultModel));
-    ui.fill("Filter models", "pickle");
-    assert!(ui.shows("Big Pickle"), "the models, over Settings");
-    ui.press("Big Pickle");
+    ui.fill("Filter models", "writer");
+    assert!(ui.shows("Fake Writer"), "the models, over Settings");
+    ui.press("Fake Writer");
     assert_eq!(ui.app().picker, None);
 
-    // The server reloads its config and says so; Harlo hears each event as
-    // the running app would, and shows the new default.
+    // Harlo loads the models again and shows the new default; it hears
+    // the server's events as the running app would meanwhile.
     let deadline = std::time::Instant::now() + WAIT;
-    while !ui.shows("Big Pickle · opencode") && std::time::Instant::now() < deadline {
+    while !ui.shows("Fake Writer · fake") && std::time::Instant::now() < deadline {
         let next = tasks.block_on(async {
             tokio::time::timeout(std::time::Duration::from_millis(300), events.next()).await
         });
@@ -111,13 +111,13 @@ fn the_model_for_new_sessions_is_set_in_opencodes_config() {
             ui.send(Message::Server(Update::Event(event)));
         }
         let _ = tasks.until(&ui, std::time::Duration::from_millis(100), |ui| {
-            ui.shows("Big Pickle · opencode")
+            ui.shows("Fake Writer · fake")
         });
     }
-    assert!(ui.shows("Big Pickle · opencode"), "the new default");
+    assert!(ui.shows("Fake Writer · fake"), "the new default");
     assert_eq!(
         harlo_core::config::model(&folder).expect("read").as_deref(),
-        Some("opencode/big-pickle")
+        Some("fake/fake-writer")
     );
     let text = std::fs::read_to_string(folder.join("opencode.json")).expect("read");
     assert!(text.contains("\"fake\""), "the rest of the config stays");
@@ -149,8 +149,8 @@ fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_opencodes_config() 
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(sandbox.project_str());
@@ -161,10 +161,10 @@ fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_opencodes_config() 
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Keep snapshots")
             && matches!(&ui.app().sheets.git, Load::Loaded(git) if git.name == "Scratch Person")),
-        "git's name and OpenCode's snapshots"
+        "git's name and the server's snapshots"
     );
     assert!(
-        ui.shows("OpenCode's default"),
+        ui.shows("The server's default"),
         "no commit-message model yet"
     );
     assert!(matches!(
@@ -195,14 +195,14 @@ fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_opencodes_config() 
     );
     ui.press("Change");
     assert_eq!(ui.app().picker, Some(Picker::CommitModel));
-    ui.fill("Filter models", "pickle");
-    ui.press("Big Pickle");
+    ui.fill("Filter models", "writer");
+    ui.press("Fake Writer");
     assert_eq!(ui.app().picker, None);
     assert_eq!(
         ui.app().preferences.commit_model.as_deref(),
-        Some("opencode/big-pickle")
+        Some("fake/fake-writer")
     );
-    assert!(ui.shows("Big Pickle · opencode"));
+    assert!(ui.shows("Fake Writer · fake"));
     ui.press("Use the default");
     assert_eq!(ui.app().preferences.commit_model, None);
 }

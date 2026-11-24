@@ -1,4 +1,4 @@
-//! Settings → Providers' providers against a private `opencode serve` with
+//! Settings → Providers' providers against a private `harlo-server` with
 //! scratch `HOME`/`XDG_*` folders: signing a provider in with a key,
 //! removing it, a form a sign-in needs answered first, and choosing among
 //! the ways to sign in. Never the shared service, and no sign-in reaches a
@@ -46,8 +46,8 @@ fn models(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(sandbox.project_str());
@@ -105,7 +105,7 @@ fn a_provider_signs_in_with_a_key_and_is_removed() {
 
     add(&ui, "302", "302.AI");
     assert!(ui.shows("Sign in with a key"));
-    assert!(ui.shows("Or set 302AI_API_KEY where the OpenCode server runs."));
+    assert!(ui.shows("Or set 302AI_API_KEY where Harlo's server runs."));
     ui.press("Sign in");
     assert!(ui.shows("Paste the key first."));
     ui.fill("API key", "sk-scratch");
@@ -125,7 +125,7 @@ fn a_provider_signs_in_with_a_key_and_is_removed() {
     );
     ui.press("302.AI");
     ui.press("Remove");
-    assert!(ui.shows("Remove it for every app using this server?"));
+    assert!(ui.shows("Remove it from the server?"));
     ui.press("Remove for good");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Removed.")
@@ -160,20 +160,6 @@ fn a_form_is_answered_before_signing_in() {
         tasks.until(&ui, WAIT, |ui| ui.shows("Signed in with a key")),
         "signed in: {:?}",
         ui.app().sheets.providers.error
-    );
-
-    // A choice shows the fields that depend on it.
-    ui.press("All providers");
-    add(&ui, "copilot", "GitHub Copilot");
-    assert!(ui.shows("Open the sign-in page"));
-    assert!(
-        ui.find("Enter your GitHub Enterprise URL or domain")
-            .is_empty()
-    );
-    ui.press("Select GitHub deployment type: GitHub Enterprise");
-    assert!(
-        !ui.find("Enter your GitHub Enterprise URL or domain")
-            .is_empty()
     );
 }
 

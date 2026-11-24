@@ -1,8 +1,6 @@
 """Web search: the first search asks whether to search the web, with which
 service, or not at all; the answer goes back and the turn goes on."""
 
-ENGINE = True
-
 from _common import open_project_session, send
 
 QUESTION = "to search the web for up-to-date information?"

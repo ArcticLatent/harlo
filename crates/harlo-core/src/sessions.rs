@@ -7,14 +7,14 @@ use std::time::Duration;
 /// Sessions a list shows before "Show N more".
 pub const VISIBLE_SESSIONS: usize = 12;
 
-/// A project (a folder OpenCode works in), its worktrees and their sessions.
+/// A project (a folder the server works in), its worktrees and their sessions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     /// The project's main folder; it identifies the project in the sidebar.
     pub directory: String,
     /// The name people see.
     pub name: String,
-    /// Its mark's colour, one of OpenCode's project colours, if chosen.
+    /// Its mark's colour, one of the server's project colours, if chosen.
     pub color: Option<String>,
     /// The URL of an image chosen as its icon, often a `data:` one.
     pub icon: Option<String>,
@@ -38,7 +38,7 @@ pub struct Worktree {
 /// One row in the sidebar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSummary {
-    /// OpenCode's session ID.
+    /// The server's session ID.
     pub id: String,
     /// The title; empty until the server names the session.
     pub title: String,

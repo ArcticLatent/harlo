@@ -1,11 +1,11 @@
 //! How Harlo looks: a dark and a light theme, and which of them shows, as
 //! chosen in Settings → Appearance.
 //!
-//! The choice is Harlo's alone; OpenCode's own theme setting is left as it is.
+//! The choice is Harlo's alone; the server's own theme setting is left as it is.
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::layout::{Appearance, Backend, ChatWidth, Speed, TextSize};
+use harlo_core::layout::{Appearance, ChatWidth, Speed, TextSize};
 use harlo_core::local_models::Engine;
 use harlo_core::theme::{Contrast, DiffColors, Look, Mode, Scheme};
 use harlo_core::voice::{LANGUAGE_CODES, Model};
@@ -131,7 +131,6 @@ impl App {
                 .iter()
                 .position(|d| *d == self.sheets.schedules.draft.does)
                 .unwrap_or_default(),
-            SettingChoice::Backend => usize::from(p.backend == Backend::OpenCode),
         }
     }
 
@@ -158,9 +157,6 @@ impl App {
                 engine.id().clone_into(&mut p.local_engine);
                 true
             }),
-            SettingChoice::Backend => {
-                pick(&[Backend::Harlo, Backend::OpenCode], option, &mut p.backend)
-            }
             // Not Harlo's look: Settings → Projects takes them.
             SettingChoice::ProjectColor
             | SettingChoice::ProjectSessions

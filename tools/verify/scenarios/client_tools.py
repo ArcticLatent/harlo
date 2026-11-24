@@ -1,15 +1,12 @@
-"""Harlo's own tools on harlo-server: the server takes them over one
-connection per folder, which stays open (no retry every few seconds), and
-Settings → Tools for agents shows no refusal. Only on harlo-server; the
-OpenCode run of the same feature is window:own_tools' unit test."""
+"""Harlo's own tools: the server takes them over one connection, for every
+folder, which stays open (no retry every few seconds), and Settings →
+Tools for agents shows no refusal."""
 
 import json
 import os
 import time
 
 from _common import settings
-
-ENGINE = "only"
 
 LOG = f"/tmp/harlo-verify-client-tools.{os.getpid()}.jsonl"
 ENV = {"HARLO_GUI_API_LOG": LOG}
@@ -37,7 +34,7 @@ def run(h, s):
         first = attempts()
         time.sleep(12)
         again = attempts()
-        s.expect(first >= 1, "it connected", f"{first} attempts")
+        s.expect(first == 1, "one connection", f"{first} attempts")
         s.expect(again == first, "no reconnecting", f"{first} then {again}")
     finally:
         if os.path.exists(LOG):

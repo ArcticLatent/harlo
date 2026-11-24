@@ -1,7 +1,7 @@
 //! Code Mode against a private server: a script the model runs with
 //! `execute` reports the tools it called, live and in the history.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09

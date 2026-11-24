@@ -1,8 +1,8 @@
-//! Following OpenCode on another computer over SSH, against a private
-//! `sshd` on a loopback port. Its sessions get a scratch `HOME` and state
-//! folder, no desktop bus, and a stand-in `opencode`; the client uses its
-//! own config, key and known hosts, never the user's `~/.ssh` or agent. The
-//! "other computer's" service is a private `opencode serve`.
+//! Following Harlo's server on another computer over SSH, against a
+//! private `sshd` on a loopback port. Its sessions get a scratch `HOME` and
+//! state folder, no desktop bus, and a stand-in `harlo-server`; the client
+//! uses its own config, key and known hosts, never the user's `~/.ssh` or
+//! agent. The "other computer's" server is a private `harlo-server serve`.
 
 // Rust guideline compliant 2026-10-09
 
@@ -14,7 +14,6 @@ mod remote;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use harlo_core::layout::Backend;
 use harlo_core::server::{Location, Update, follow};
 use harlo_core::ssh;
 use remote::{Remote, free_port, registration};
@@ -46,14 +45,14 @@ async fn a_registered_service_is_followed_through_a_tunnel() {
     };
     let sandbox = Sandbox::start().await;
     assert!(
-        ssh::registered(&remote.target, Backend::OpenCode)
+        ssh::registered(&remote.target)
             .await
             .expect("reached")
             .is_none(),
         "nothing registered yet"
     );
     remote.register(&sandbox.url, &sandbox.password);
-    let service = ssh::registered(&remote.target, Backend::OpenCode)
+    let service = ssh::registered(&remote.target)
         .await
         .expect("reached")
         .expect("registered");
@@ -61,7 +60,6 @@ async fn a_registered_service_is_followed_through_a_tunnel() {
 
     let url = connect(Location::Ssh {
         target: remote.target.clone(),
-        backend: Backend::OpenCode,
     })
     .await
     .expect("connected");
@@ -70,43 +68,10 @@ async fn a_registered_service_is_followed_through_a_tunnel() {
     assert_eq!(
         Location::Ssh {
             target: remote.target.clone(),
-            backend: Backend::Harlo,
         }
         .label(),
         "harlo-remote"
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_service_is_started_there_when_none_runs() {
-    let scratch = tempfile::tempdir().expect("a scratch folder");
-    let Some(remote) = Remote::start(scratch.path()) else {
-        return;
-    };
-    let sandbox = Sandbox::start().await;
-    // The stand-in registers the sandbox, as `opencode service start` would
-    // register the service it starts.
-    let stand_in = format!(
-        "#!/bin/sh\n[ \"$1 $2\" = \"service start\" ] || exit 2\n\
-         mkdir -p \"$XDG_STATE_HOME/opencode\"\n\
-         printf '%s' '{}' > \"$XDG_STATE_HOME/opencode/service.json\"\n",
-        registration(&sandbox.url, &sandbox.password)
-    );
-    let program = remote.root.join("bin/opencode");
-    std::fs::write(&program, stand_in).expect("the stand-in");
-    std::process::Command::new("chmod")
-        .arg("+x")
-        .arg(&program)
-        .status()
-        .expect("chmod");
-
-    connect(Location::Ssh {
-        target: remote.target.clone(),
-        backend: Backend::OpenCode,
-    })
-    .await
-    .expect("connected");
-    assert!(remote.root.join("state/opencode/service.json").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -118,7 +83,6 @@ async fn an_unreachable_computer_says_why() {
     let closed = free_port();
     let why = connect(Location::Ssh {
         target: format!("-p {closed} {}", remote.target),
-        backend: Backend::Harlo,
     })
     .await
     .expect_err("not reached");
@@ -153,13 +117,8 @@ async fn harlos_server_is_started_there_when_none_runs() {
 
     connect(Location::Ssh {
         target: remote.target.clone(),
-        backend: Backend::Harlo,
     })
     .await
     .expect("connected");
     assert!(remote.root.join("state/harlo/service.json").exists());
-    assert!(
-        !remote.root.join("state/opencode/service.json").exists(),
-        "OpenCode's service is left alone"
-    );
 }

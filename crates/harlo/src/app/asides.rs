@@ -1,7 +1,7 @@
 //! Side questions, asked with `/btw`: answered from a session's context
 //! without adding to its conversation.
 //!
-//! OpenCode answers them through the session's `generate` call, which
+//! The server answers them through the session's `generate` call, which
 //! leaves the history as it was and counts the cost toward the session.
 //! The questions and answers live only in this window, per session, and
 //! show in the Side questions panel.
@@ -152,7 +152,7 @@ impl App {
             return Task::done(Message::Aside(AsideEvent::Answered {
                 session,
                 index,
-                result: Err("Not connected to OpenCode yet.".to_owned()),
+                result: Err("Not connected to Harlo's server yet.".to_owned()),
             }));
         };
         let Some(question) = self.asides(&session).get(index).map(|a| a.question.clone()) else {

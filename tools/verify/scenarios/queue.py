@@ -1,8 +1,6 @@
 """A busy session: a message sent while it works waits in the queue, with
 Steer and Cancel; Stop ends the run."""
 
-ENGINE = True
-
 from _common import COMPOSER, open_project_session, send
 
 

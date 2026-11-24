@@ -20,7 +20,7 @@ fn a_sessions_subagents_show_in_their_panel_and_open_from_it() {
     child.title = Some("Find the config".into());
     child.agent = Some("explore".into());
     snapshot.sessions.push(child);
-    let app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let app = App::new(Location::Local, vec![Location::Local], demo::layout());
     let ui = ui(app);
     ui.send(Message::Tick(demo::now()));
     ui.send(demo::connected(snapshot));

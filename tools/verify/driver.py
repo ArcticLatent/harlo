@@ -1,7 +1,7 @@
 """Drives a real Harlo window for the verify scenarios.
 
 Each `Harlo` runs its own sandbox through tools/gui-drive.py (a private
-OpenCode server with the scripted model, an Xvfb display, a private D-Bus,
+Harlo server with the scripted model, an Xvfb display, a private D-Bus,
 scratch HOME and XDG folders) with Harlo built with Slint's MCP server
 (`gui-drive.py start --mcp`). Elements are found by what they say to
 assistive technology: their accessible label and role. That's what a person
@@ -441,7 +441,7 @@ class Harlo:
     # ---- the sandbox -----------------------------------------------------
 
     def api(self, method, path, body=None):
-        """Calls the sandbox's OpenCode server."""
+        """Calls the sandbox's server."""
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(self.info["url"] + path, data, method=method)
         token = base64.b64encode(f"opencode:{self.info['password']}".encode()).decode()

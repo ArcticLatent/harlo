@@ -1408,6 +1408,17 @@ impl Hooks {
         }
     }
 
+    /// The place of the text or reasoning block at `at` among the step's
+    /// blocks of its kind, as clients and the stored history count them.
+    fn ordinal(&self, at: usize) -> usize {
+        let s = lock(&self.streaming);
+        let reasoning = matches!(s.parts.get(&at), Some(Part::Reasoning { .. }));
+        s.parts
+            .range(..at)
+            .filter(|(_, p)| matches!(p, Part::Reasoning { .. }) == reasoning)
+            .count()
+    }
+
     fn send(&self, kind: &str, mut data: Value, durable: bool) {
         data["sessionID"] = json!(self.session);
         self.server.emit(
@@ -1437,21 +1448,21 @@ impl Sink for Hooks {
                 true,
             ),
             Event::FirstToken { message } => self.send("session.step.first-token", json!({ "assistantMessageID": message }), true),
-            Event::TextStarted { message, at } => self.send("session.text.started", json!({ "assistantMessageID": message, "ordinal": at }), true),
+            Event::TextStarted { message, at } => self.send("session.text.started", json!({ "assistantMessageID": message, "ordinal": self.ordinal(at) }), true),
             Event::TextDelta { message, at, delta } => {
-                self.send("session.text.delta", json!({ "assistantMessageID": message, "ordinal": at, "delta": delta }), false);
+                self.send("session.text.delta", json!({ "assistantMessageID": message, "ordinal": self.ordinal(at), "delta": delta }), false);
             }
             Event::TextEnded { message, at, text } => {
-                self.send("session.text.ended", json!({ "assistantMessageID": message, "ordinal": at, "text": text }), true);
+                self.send("session.text.ended", json!({ "assistantMessageID": message, "ordinal": self.ordinal(at), "text": text }), true);
             }
             Event::ReasoningStarted { message, at } => {
-                self.send("session.reasoning.started", json!({ "assistantMessageID": message, "ordinal": at }), true);
+                self.send("session.reasoning.started", json!({ "assistantMessageID": message, "ordinal": self.ordinal(at) }), true);
             }
             Event::ReasoningDelta { message, at, delta } => {
-                self.send("session.reasoning.delta", json!({ "assistantMessageID": message, "ordinal": at, "delta": delta }), false);
+                self.send("session.reasoning.delta", json!({ "assistantMessageID": message, "ordinal": self.ordinal(at), "delta": delta }), false);
             }
             Event::ReasoningEnded { message, at, text } => {
-                self.send("session.reasoning.ended", json!({ "assistantMessageID": message, "ordinal": at, "text": text }), true);
+                self.send("session.reasoning.ended", json!({ "assistantMessageID": message, "ordinal": self.ordinal(at), "text": text }), true);
             }
             Event::ToolInputStarted { message, call, name } => {
                 self.send("session.tool.input.started", json!({ "assistantMessageID": message, "id": call, "name": name }), true);

@@ -1,4 +1,4 @@
-//! Working out a session's instruction files the way OpenCode does, in
+//! Working out a session's instruction files the way the server does, in
 //! scratch folders standing in for home, config and project.
 
 // Rust guideline compliant 2026-10-09

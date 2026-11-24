@@ -4,8 +4,6 @@ reason, which the agent is told. A third is allowed always: the next like
 it runs without asking, and Settings → Agents lists the saved approval
 with Remove."""
 
-ENGINE = True
-
 from _common import open_project_session, send, settings
 
 

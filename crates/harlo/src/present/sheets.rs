@@ -6,7 +6,6 @@
 
 use std::rc::Rc;
 
-use harlo_core::layout::Backend;
 use harlo_core::server::{Day, Location, Stats, Tokens};
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -28,8 +27,8 @@ use harlo_core::claude::{ClaudeCode, Limit, Login, Severity};
 use harlo_core::theme::{Mode, Scheme};
 
 use crate::app::{
-    App, ClaudeAction, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
-    SettingChoice, Sheet, Status, Step, epoch_seconds, resets_in,
+    App, ClaudeAction, Field, Load, Range, Section, SetUp, Setting, SettingChoice, Sheet, Status,
+    Step, epoch_seconds, resets_in,
 };
 use crate::model::{compact as tokens_text, dollars as money};
 use crate::theme::color;
@@ -429,9 +428,6 @@ const THEMES: i32 = 5;
 /// The kind of row with a text field and a button that saves it.
 const FIELD: i32 = 6;
 
-/// The kind of row that shows a command and a button that runs it.
-const COMMAND: i32 = 7;
-
 /// A font's row: the family in use, `own` when none is chosen, and Change,
 /// which opens the menu numbered `setting`.
 fn font_row(name: &str, chosen: &str, own: &str, setting: i32) -> SheetRow {
@@ -639,7 +635,7 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
             app.preferences.keep_in_tray,
         ));
     }
-    let mut guide = pair("Setup guide", "OpenCode, models, Git, and the theme", 3);
+    let mut guide = pair("Setup guide", "The server, models, Git, and the theme", 3);
     guide.action = "Open".into();
     guide.setting = crate::window::OPEN_SETUP;
     rows.extend([heading("Help"), guide]);
@@ -650,7 +646,7 @@ fn general_rows(app: &App) -> Vec<SheetRow> {
 fn model_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![heading("New sessions")];
     let model = app.default_model_choice().map_or_else(
-        || format!("Chosen by {}", server_name(app)),
+        || format!("Chosen by {HARLO_SERVER}"),
         |m| format!("{} · {}", m.name, m.provider_id),
     );
     let mut row = pair("Model", &model, 0);
@@ -664,21 +660,19 @@ fn model_rows(app: &App) -> Vec<SheetRow> {
     }
     rows.push(note(if app.global_config().is_none() {
         "Set in opencode.json on the server's computer."
-    } else if server_name(app) == HARLO_SERVER {
-        "The default for new sessions, kept in opencode.json, which OpenCode reads too."
     } else {
-        "OpenCode's default, shared by every app on this server."
+        "The default for new sessions, kept in opencode.json."
     }));
     rows
 }
 
 /// The Claude subscription: Claude Code on this computer, its account, and
-/// OpenCode's connection, each with the next step.
+/// The server's connection, each with the next step.
 fn claude_rows(app: &App) -> Vec<SheetRow> {
     let claude = &app.claude;
     let mut rows = vec![
         heading("Claude subscription"),
-        note("A Claude Pro or Max plan, through Claude Code, for every app on this server."),
+        note("A Claude Pro or Max plan, through Claude Code."),
     ];
     let local = app.location.is_local();
     if local {
@@ -802,21 +796,21 @@ fn plan_name(plan: &str) -> String {
     format!("{first}{} plan", chars.as_str())
 }
 
-/// Whether OpenCode is connected to Claude Code's sign-in.
+/// Whether the server is connected to Claude Code's sign-in.
 fn connection_row(app: &App) -> SheetRow {
     let claude = &app.claude;
     match claude.busy {
-        Some(ClaudeAction::Connect) => return pair(server_name(app), "Connecting…", 3),
-        Some(ClaudeAction::Disconnect) => return pair(server_name(app), "Disconnecting…", 3),
+        Some(ClaudeAction::Connect) => return pair(HARLO_SERVER, "Connecting…", 3),
+        Some(ClaudeAction::Disconnect) => return pair(HARLO_SERVER, "Disconnecting…", 3),
         _ => {}
     }
     match &claude.agent {
-        Load::Idle | Load::Loading => pair(server_name(app), "Checking…", 3),
-        Load::Failed(why) => acting(pair(server_name(app), why, 2), ClaudeAction::Check),
+        Load::Idle | Load::Loading => pair(HARLO_SERVER, "Checking…", 3),
+        Load::Failed(why) => acting(pair(HARLO_SERVER, why, 2), ClaudeAction::Check),
         // A server that just started may not have loaded it yet.
         Load::Loaded(None) => acting(
             pair(
-                server_name(app),
+                HARLO_SERVER,
                 "Claude Agent isn't available on this server",
                 2,
             ),
@@ -829,26 +823,23 @@ fn connection_row(app: &App) -> SheetRow {
                 .iter()
                 .find_map(|c| c.needs_sign_in.as_ref())
             {
-                let row = pair(server_name(app), &format!("Needs sign-in: {why}"), 2);
+                let row = pair(HARLO_SERVER, &format!("Needs sign-in: {why}"), 2);
                 if app.location.is_local() {
                     acting(row, ClaudeAction::SignIn)
                 } else {
                     row
                 }
             } else if stored {
-                acting(
-                    pair(server_name(app), "Connected", 1),
-                    ClaudeAction::Disconnect,
-                )
+                acting(pair(HARLO_SERVER, "Connected", 1), ClaudeAction::Disconnect)
             } else if agent.connections.is_empty() {
                 acting(
-                    pair(server_name(app), "Not connected", 3),
+                    pair(HARLO_SERVER, "Not connected", 3),
                     ClaudeAction::Connect,
                 )
             } else {
                 // Connected through an environment variable, which only
                 // the server's own set-up can remove.
-                pair(server_name(app), "Connected", 1)
+                pair(HARLO_SERVER, "Connected", 1)
             }
         }
     }
@@ -929,17 +920,13 @@ fn server_rows(app: &App) -> Vec<SheetRow> {
         other => other.label(),
     };
     let mut rows = vec![pair("Address", &address, 0), status_row(app)];
-    rows.push(note(match app.location.backend() {
-        Some(Backend::Harlo) => "Harlo's own server. It keeps running when Harlo closes.",
-        _ => "Shared with other apps. It keeps running when Harlo closes.",
+    rows.push(note(match app.location {
+        Location::Server { .. } => "Harlo follows this server. It keeps running when Harlo closes.",
+        Location::Local | Location::Ssh { .. } => {
+            "Harlo's own server. It keeps running when Harlo closes."
+        }
     }));
-    rows.push(choice(
-        app,
-        SettingChoice::Backend,
-        "Open on",
-        "Where Harlo starts. Sessions stay on the server they were made on.",
-    ));
-    if matches!(app.location, Location::Engine) {
+    if matches!(app.location, Location::Local) {
         rows.push(heading("From OpenCode"));
         let mut row = pair(
             "Sessions made on OpenCode",
@@ -966,7 +953,6 @@ fn computer_rows(app: &App, rows: &mut Vec<SheetRow>) {
     for (index, target) in app.preferences.computers.iter().enumerate() {
         let location = Location::Ssh {
             target: target.clone(),
-            backend: app.preferences.backend,
         };
         let mut row = if matches!(&app.location, Location::Ssh { target: t, .. } if t == target) {
             pair(&location.label(), "Following", 1)
@@ -1026,7 +1012,7 @@ fn status_row(app: &App) -> SheetRow {
 /// A step of the setup guide.
 fn step_rows(app: &App, step: Step) -> Vec<SheetRow> {
     match step {
-        Step::OpenCode => opencode_rows(app),
+        Step::Server => server_status_rows(app),
         Step::Providers => {
             let mut rows = model_rows(app);
             rows.extend(section_rows(app, Section::Providers));
@@ -1053,31 +1039,10 @@ fn step_rows(app: &App, step: Step) -> Vec<SheetRow> {
     }
 }
 
-/// The server, how the connection stands, and OpenCode's installer when
-/// the service on this computer can't be reached.
-fn opencode_rows(app: &App) -> Vec<SheetRow> {
+/// The server, and how the connection stands.
+fn server_status_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = vec![pair("Server", &app.location.label(), 0), status_row(app)];
-    if app.offers_install() {
-        rows.extend([
-            heading("Install OpenCode"),
-            note(
-                "If OpenCode isn't on this computer yet, its installer sets it up. Harlo then \
-                 starts the background service and connects on its own.",
-            ),
-            SheetRow {
-                kind: COMMAND,
-                value: OPENCODE_INSTALL.into(),
-                action: "Install".into(),
-                setting: crate::window::INSTALL_OPENCODE,
-                ..SheetRow::default()
-            },
-        ]);
-    } else if matches!(app.location, Location::Shared) {
-        rows.push(note(
-            "Harlo attaches to OpenCode's background service and leaves it running when it \
-             closes.",
-        ));
-    } else if matches!(app.location, Location::Engine) {
+    if matches!(app.location, Location::Local) {
         rows.push(note(
             "Harlo starts its own server when none runs and leaves it running when it closes.",
         ));
@@ -1097,13 +1062,11 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
     rows.push(heading("Undo a turn"));
     let shared = app.global_config().is_some();
     match &app.sheets.git_settings.snapshots {
-        _ if !shared => rows.push(note(
-            "Set in opencode.json on the server's computer.",
-        )),
+        _ if !shared => rows.push(note("Set in opencode.json on the server's computer.")),
         Load::Loaded(on) => rows.push(switch(
             Setting::Snapshots,
             "Keep snapshots",
-            "Undo restores files too, not only the conversation. Shared by every app on this server.",
+            "Undo restores files too, not only the conversation.",
             *on,
         )),
         Load::Failed(why) => rows.push(pair("Snapshots", why, 2)),
@@ -1118,7 +1081,7 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
     let mut model = pair(
         "Model",
         &chosen.as_ref().map_or_else(
-            || default_of(app).to_owned(),
+            || "The server's default".to_owned(),
             |m| format!("{} · {}", m.name, m.provider_id),
         ),
         0,
@@ -1127,7 +1090,7 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
     model.setting = crate::window::CHOOSE_COMMIT_MODEL;
     rows.push(model);
     if chosen.is_some() {
-        let mut reset = pair("", &format!("Let {} choose again", server_name(app)), 3);
+        let mut reset = pair("", &format!("Let {HARLO_SERVER} choose again"), 3);
         reset.action = "Use the default".into();
         reset.setting = crate::window::DEFAULT_COMMIT_MODEL;
         rows.push(reset);
@@ -1359,10 +1322,10 @@ fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
     // The name, colour and icon live on the server, so every app shows them.
     rows.push(heading("Shared on this server"));
     if server.is_none() {
-        rows.push(note(&format!(
-            "{} learns about the project with its first session; these wait until then.",
-            server_name(app)
-        )));
+        rows.push(note(
+            "Harlo's server learns about the project with its first session; these wait \
+             until then.",
+        ));
     } else {
         let name = server.and_then(|p| p.name.clone()).unwrap_or_default();
         rows.push(field(
@@ -1397,7 +1360,7 @@ fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
     let mut model = pair(
         "Model",
         &chosen.as_ref().map_or_else(
-            || default_of(app).to_owned(),
+            || "The server's default".to_owned(),
             |m| format!("{} · {}", m.name, m.provider_id),
         ),
         0,
@@ -1406,7 +1369,7 @@ fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
     model.setting = crate::window::CHOOSE_PROJECT_MODEL;
     rows.push(model);
     if chosen.is_some() {
-        let mut reset = pair("", &format!("Let {} choose again", server_name(app)), 3);
+        let mut reset = pair("", &format!("Let {HARLO_SERVER} choose again"), 3);
         reset.action = "Use the default".into();
         reset.setting = crate::window::DEFAULT_PROJECT_MODEL;
         rows.push(reset);
@@ -1466,7 +1429,7 @@ fn worktree_rows(app: &App, project: &harlo_core::sessions::Project) -> Vec<Shee
         Field::NewWorktree,
         "New",
         "",
-        "Its name, or empty for one OpenCode picks",
+        "Its name, or empty for one the server picks",
     );
     make.action = "Make".into();
     rows.push(make);
@@ -1528,7 +1491,7 @@ fn project_list(app: &App, marks: &Marks) -> Vec<SheetRow> {
     rows
 }
 
-/// The shown project's colour as swatches: none, then OpenCode's colours.
+/// The shown project's colour as swatches: none, then the server's colours.
 fn swatches(app: &App) -> SheetRow {
     let mut row = choice(app, SettingChoice::ProjectColor, "Colour", "");
     row.kind = SWATCHES;
@@ -1808,7 +1771,7 @@ fn about_rows(app: &App) -> Vec<SheetRow> {
     let mut sounds = link(
         Icon::Volume2,
         "Sounds",
-        "Event sounds from OpenCode.",
+        "Event sounds.",
         if app.sheets.sound_licence {
             "Hide licence"
         } else {
@@ -2165,24 +2128,6 @@ fn note(text: &str) -> SheetRow {
 
 /// What Settings calls Harlo's own server.
 const HARLO_SERVER: &str = "Harlo's server";
-
-/// The server Harlo follows, by what it is: Harlo's own or OpenCode.
-fn server_name(app: &App) -> &'static str {
-    let harlo = match &app.status {
-        crate::app::Status::Connected { server, .. } => server == "Harlo",
-        _ => app.location.backend() == Some(Backend::Harlo),
-    };
-    if harlo { HARLO_SERVER } else { "OpenCode" }
-}
-
-/// What a model choice left to the server shows.
-fn default_of(app: &App) -> &'static str {
-    if server_name(app) == HARLO_SERVER {
-        "The server's default"
-    } else {
-        "OpenCode's default"
-    }
-}
 
 #[cfg(test)]
 mod tests {

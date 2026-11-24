@@ -47,7 +47,9 @@ pub(super) fn local_rows(app: &App) -> Vec<SheetRow> {
     )));
 
     rows.push(heading("Ollama"));
-    rows.push(note("Gets models by name. OpenCode finds it by itself."));
+    rows.push(note(
+        "Gets models by name. Harlo's server finds it by itself.",
+    ));
     engine_rows(app, Engine::Ollama, &mut rows);
 
     rows.push(heading("llama.cpp"));
@@ -175,21 +177,21 @@ fn server_rows(app: &App, engine: Engine, item: i32, rows: &mut Vec<SheetRow>) {
     rows.push(server);
 }
 
-/// Whether OpenCode's config has llama.cpp's server, with Add or Remove.
+/// Whether the server's config has llama.cpp's server, with Add or Remove.
 fn provider_rows(app: &App, rows: &mut Vec<SheetRow>) {
     let local = &app.local;
     if app.global_config().is_none() || app.served().is_none() {
         return;
     }
     let mut row = if local.in_opencode {
-        pair("In OpenCode", "Added", 1)
+        pair("In the model menu", "Added", 1)
     } else {
-        pair("In OpenCode", "Not added", 3)
+        pair("In the model menu", "Not added", 3)
     };
     row.action = if local.in_opencode {
         "Take out"
     } else {
-        "Add to OpenCode"
+        "Add to the model menu"
     }
     .into();
     row.setting = window::LOCAL_PROVIDER;

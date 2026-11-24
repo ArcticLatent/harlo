@@ -163,7 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .unwrap_or_else(|| "stress-slint.json".into());
     let window = AppWindow::new()?;
-    let app = App::new(Location::Shared, vec![Location::Shared], Layout::default());
+    let app = App::new(Location::Local, vec![Location::Local], Layout::default());
     let driver = Driver::new(&window, app, WINDOW);
     let loaded = Instant::now();
     driver.send(Message::Tick(SystemTime::now()));
@@ -426,8 +426,8 @@ fn snapshot() -> Snapshot {
 fn connected(snapshot: Snapshot) -> Message {
     Message::Server(Update::Connected(Arc::new(Connected {
         client: Client::new(Endpoint::new("http://127.0.0.1:9", None)),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     })))
 }

@@ -1,12 +1,12 @@
 //! Unified diffs as lines to show, with the changed words in each line marked.
 //!
-//! OpenCode reports every change as a unified diff: an edit's result, an
+//! The server reports every change as a unified diff: an edit's result, an
 //! approval's proposed change, a turn's changes, the working tree. [`lines`]
 //! turns one into numbered rows without the file headers. Where a removed
 //! line is followed by the line that replaced it, the words that differ are
 //! marked as [`Span::changed`], so a one-word edit in a long line stands out.
 //!
-//! [`written`] makes a diff for a file written whole, which OpenCode's write
+//! [`written`] makes a diff for a file written whole, which the server's write
 //! tool reports only as its content.
 
 // Rust guideline compliant 2026-10-09

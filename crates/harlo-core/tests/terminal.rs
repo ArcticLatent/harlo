@@ -1,7 +1,7 @@
 //! A terminal whose shell runs on the server: output, input and size go both
 //! ways, and the stream ends with the shell.
 //!
-//! Runs against a private `opencode serve` with scratch `HOME`/`XDG_*` folders,
+//! Runs against a private `harlo-server` with scratch `HOME`/`XDG_*` folders,
 //! never the shared service.
 
 // Rust guideline compliant 2026-10-09

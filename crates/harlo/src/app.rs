@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use harlo_core::approvals::{self, Shield};
 use harlo_core::composer::{self as compose, Attached, Choice, Draft, MenuItem, Outgoing, Trigger};
-use harlo_core::layout::{Backend, Layout, Preferences, Store, Tabs};
+use harlo_core::layout::{Layout, Preferences, Store, Tabs};
 use harlo_core::server::{
     self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
 };
@@ -95,8 +95,8 @@ pub use schedules::{
 };
 pub use session_menu::SessionAction;
 pub use sheets::{
-    Autostart, Event as SheetEvent, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
-    SettingChoice, Sheet, Sheets, Step,
+    Autostart, Event as SheetEvent, Field, Load, Range, Section, SetUp, Setting, SettingChoice,
+    Sheet, Sheets, Step,
 };
 pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
@@ -263,7 +263,7 @@ pub enum Status {
     },
     /// Connected; the sidebar is live.
     Connected {
-        /// What the server is: `OpenCode`, or `Harlo` for Harlo's own.
+        /// What the server is: `The server`, or `Harlo` for Harlo's own.
         server: String,
         /// Its version.
         version: String,
@@ -545,7 +545,7 @@ pub enum Message {
 /// would only be noise.
 const PASTE_NOTICE: Duration = Duration::from_millis(150);
 
-/// A send on its way to OpenCode.
+/// A send on its way to the server.
 #[derive(Debug)]
 struct Sending {
     /// The session it goes to, or `None` for a new one.
@@ -627,7 +627,7 @@ pub struct App {
     /// The home folder: where sessions outside a project work. Tests set a
     /// scratch folder.
     pub home: String,
-    /// OpenCode's global config folder on this computer, which Settings may
+    /// The server's global config folder on this computer, which Settings may
     /// change for the background service. Only the running app sets it;
     /// tests give a scratch folder or none.
     pub opencode_folder: Option<std::path::PathBuf>,
@@ -652,7 +652,7 @@ pub struct App {
     pub composer: TextBox,
     /// Why the last send failed, shown under the composer.
     pub send_error: Option<String>,
-    /// The send on its way to OpenCode, if any.
+    /// The send on its way to the server, if any.
     sending: Option<Sending>,
     /// When reading an image from the clipboard started, while it's going on.
     pasting: Option<Instant>,
@@ -878,13 +878,13 @@ impl App {
     pub fn with_preferences(mut self, preferences: Preferences) -> Self {
         self.preferences = preferences;
         self.retheme();
-        // The computers added in Settings → Server join the picker, each
-        // with Harlo's server and OpenCode's there.
+        // The computers added in Settings → Server join the picker.
         for target in &self.preferences.computers {
-            for location in computer_locations(target) {
-                if !self.locations.contains(&location) {
-                    self.locations.push(location);
-                }
+            let location = Location::Ssh {
+                target: target.clone(),
+            };
+            if !self.locations.contains(&location) {
+                self.locations.push(location);
             }
         }
         self
@@ -1373,7 +1373,7 @@ impl App {
                 self.goal_changed(&event.kind);
                 self.job_changed(&event.kind);
                 let files = self.files_event(&event.kind);
-                // A worktree's branch, as OpenCode sees it change.
+                // A worktree's branch, as the server sees it change.
                 if let EventKind::BranchChanged { directory, branch } = &event.kind
                     && self.branches.contains_key(directory)
                 {
@@ -1770,7 +1770,7 @@ impl App {
             return Task::none();
         }
         let Some(client) = self.client.clone() else {
-            self.send_error = Some("Not connected to OpenCode yet.".to_owned());
+            self.send_error = Some("Not connected to Harlo's server yet.".to_owned());
             return Task::none();
         };
         let folder = self.folder();
@@ -2238,7 +2238,7 @@ impl App {
     }
 
     /// The model new sessions in the current folder use unless one is
-    /// picked for them: OpenCode's configured default.
+    /// picked for them: The server's configured default.
     #[must_use]
     pub fn default_model_choice(&self) -> Option<ModelChoice> {
         let model = self.catalog()?.default_model.as_ref()?;
@@ -2510,7 +2510,7 @@ struct NewChoices {
 /// A new session first gets the choices in `new`.
 /// Runs `command` once `sent` has the session ready.
 ///
-/// A command can run for long, and OpenCode answers only once it ends, so
+/// A command can run for long, and the server answers only once it ends, so
 /// the send is done as soon as the session is there, and the composer is
 /// free meanwhile. The command's row comes from the server's events.
 fn shell(
@@ -2590,14 +2590,4 @@ async fn send(
     }
     .map_err(failed)?;
     Ok(Box::new(session))
-}
-
-/// The servers on computer `target` the picker offers: Harlo's, then
-/// OpenCode's.
-#[must_use]
-pub fn computer_locations(target: &str) -> [Location; 2] {
-    [Backend::Harlo, Backend::OpenCode].map(|backend| Location::Ssh {
-        target: target.to_owned(),
-        backend,
-    })
 }

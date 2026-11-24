@@ -1,7 +1,7 @@
 //! Goals against a private server: `/goal` sets one, the server reports
 //! its changes, and the reviewer's verdict settles it.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09

@@ -1,7 +1,5 @@
-"""Questions: the agent asks with OpenCode's question tool; the card shows
+"""Questions: the agent asks with the question tool; the card shows
 the question and its options, and the chosen answer goes back to it."""
-
-ENGINE = True
 
 import json
 

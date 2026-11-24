@@ -16,7 +16,7 @@ impl App {
 
     /// Whether agents in the current folder have the todo tool.
     ///
-    /// OpenCode leaves it off unless the configuration turns on
+    /// The server leaves it off unless the configuration turns on
     /// `experimental.todo`; Harlo only reads that setting.
     #[must_use]
     pub fn todo_tool(&self) -> bool {

@@ -24,7 +24,7 @@ fn start_shows_the_design_content() {
     for text in [
         "Harlo",
         "Add a project",
-        "Local · OpenCode",
+        "Local",
         "New session",
         "Ctrl+N",
         "ArcticLatent.github.io",
@@ -124,11 +124,11 @@ fn the_composer_accepts_text() {
 #[test]
 fn before_connecting_the_sidebar_says_so() {
     let ui = ui(App::new(
-        Location::Shared,
-        vec![Location::Shared],
+        Location::Local,
+        vec![Location::Local],
         Layout::default(),
     ));
-    assert!(ui.shows("Connecting to OpenCode…"));
+    assert!(ui.shows("Connecting to Harlo's server…"));
 
     ui.send(Message::Server(Update::Lost {
         reason: "can't reach the server".into(),
@@ -143,15 +143,12 @@ fn before_connecting_the_sidebar_says_so() {
 #[test]
 fn the_location_picker_shows_servers_and_the_connection() {
     let ui = ui(demo::app());
-    ui.press("Location: Local · OpenCode");
+    ui.press("Location: Local");
     assert!(ui.app().picking_location);
-    assert!(ui.shows(&format!(
-        "Connected · OpenCode {}",
-        harlo_core::OPENCODE_VERSION
-    )));
-    assert!(ui.shows("OpenCode's service on this computer"));
+    assert!(ui.shows(&format!("Connected · Harlo {}", env!("CARGO_PKG_VERSION"))));
+    assert!(ui.shows("Harlo's server on this computer"));
 
-    ui.press("Location: Local · OpenCode");
+    ui.press("Location: Local");
     assert!(!ui.app().picking_location);
 }
 
@@ -162,8 +159,8 @@ fn picking_another_server_switches_and_reconnects() {
         password: None,
     };
     let app = App::new(
-        Location::Shared,
-        vec![Location::Shared, server.clone()],
+        Location::Local,
+        vec![Location::Local, server.clone()],
         demo::layout(),
     );
     let ui = ui(app);
@@ -179,7 +176,6 @@ fn picking_another_server_switches_and_reconnects() {
 
 #[test]
 fn status_text_covers_every_state() {
-    let pinned = harlo_core::OPENCODE_VERSION;
     assert_eq!(
         status_text(&Status::Connecting { attempt: 1 }),
         "Connecting…"
@@ -190,10 +186,10 @@ fn status_text_covers_every_state() {
     );
     assert_eq!(
         status_text(&Status::Connected {
-            server: "OpenCode".into(),
+            server: "Harlo".into(),
             version: "9.9.9".into()
         }),
-        format!("Connected · OpenCode 9.9.9. Harlo is tested with {pinned}.")
+        "Connected · Harlo 9.9.9"
     );
     assert_eq!(
         status_text(&Status::Lost {
@@ -258,7 +254,7 @@ fn worktree_sessions_sit_with_the_projects_marked_with_the_worktree() {
     snapshot.sessions[0].directory = worktree.into();
     snapshot.sessions[0].title = Some("Working in the worktree".into());
     let id = snapshot.sessions[0].id.clone();
-    let app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let app = App::new(Location::Local, vec![Location::Local], demo::layout());
     let ui = ui(app);
     ui.send(Message::Tick(demo::now()));
     ui.send(demo::connected(snapshot));
@@ -296,7 +292,7 @@ fn worktree_sessions_sit_with_the_projects_marked_with_the_worktree() {
     ));
     assert_eq!(marked()[0].2, "helper-temperature");
     assert!(ui.shows("Worktree feature-x · branch helper-temperature"));
-    // OpenCode says when the branch there changes.
+    // The server says when the branch there changes.
     ui.send(Message::Server(Update::Event(ServerEvent {
         id: "evt".into(),
         seq: None,

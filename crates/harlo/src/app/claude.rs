@@ -1,10 +1,10 @@
-//! A Claude subscription for OpenCode: Settings → Providers checks Claude Code
-//! on this computer and OpenCode's Claude Agent integration, and offers the
+//! A Claude subscription for the server: Settings → Providers checks Claude Code
+//! on this computer and the server's Claude Agent integration, and offers the
 //! next step.
 //!
 //! Claude Code keeps the sign-in. Installing it and signing in run in a
 //! Harlo terminal, where the user sees and answers them. Connecting and
-//! disconnecting go through OpenCode's API and apply to every client of
+//! disconnecting go through the server's API and apply to every client of
 //! the server. A server on another computer uses that computer's Claude
 //! Code, so only the connection is checked from here.
 //!
@@ -36,7 +36,7 @@ const READING_EVERY: Duration = Duration::from_mins(10);
 const RESET_SOUND: &str = "desktop-login";
 
 /// How many times the integration is asked for before it's taken as
-/// missing: OpenCode loads integrations once a request first needs them, and
+/// missing: The server loads integrations once a request first needs them, and
 /// answers "not found" until it has.
 const AGENT_TRIES: u32 = 6;
 
@@ -54,7 +54,7 @@ pub(super) const KEEP_OPEN: &str = "printf '\\n%s' 'Press Enter to close this te
 pub struct Claude {
     /// Claude Code on this computer; stays idle for a server elsewhere.
     pub code: Load<ClaudeCode>,
-    /// OpenCode's Claude Agent integration, or `None` when the server has
+    /// The server's Claude Agent integration, or `None` when the server has
     /// none.
     pub agent: Load<Option<Integration>>,
     /// How much of the plan's limits is used, or `None` when there are no
@@ -91,9 +91,9 @@ pub enum Action {
     Install,
     /// Sign Claude Code in, or switch its account, in a terminal.
     SignIn,
-    /// Connect OpenCode to Claude Code's sign-in.
+    /// Connect the server to Claude Code's sign-in.
     Connect,
-    /// Remove OpenCode's connection.
+    /// Remove the server's connection.
     Disconnect,
     /// Check everything again.
     Check,
@@ -117,7 +117,7 @@ pub enum Event {
 }
 
 impl App {
-    /// Uses `program` as Claude Code instead of the one OpenCode would run.
+    /// Uses `program` as Claude Code instead of the one the server would run.
     #[must_use]
     pub fn with_claude_program(mut self, program: impl Into<OsString>) -> Self {
         self.claude.program = program.into();
@@ -249,10 +249,10 @@ impl App {
         Task::future(async move { Message::Claude(Event::Usage(claude::usage(program).await)) })
     }
 
-    /// Reads OpenCode's Claude Agent integration.
+    /// Reads the server's Claude Agent integration.
     fn read_claude_agent(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
-            self.claude.agent = Load::Failed("Not connected to OpenCode yet.".to_owned());
+            self.claude.agent = Load::Failed("Not connected to Harlo's server yet.".to_owned());
             return Task::none();
         };
         if !matches!(self.claude.agent, Load::Loaded(_)) {
@@ -291,7 +291,7 @@ impl App {
         )
     }
 
-    /// Connects OpenCode to Claude Code's sign-in, or removes its
+    /// Connects the server to Claude Code's sign-in, or removes its
     /// connections.
     fn change_claude(&mut self, action: Action) -> Task<Message> {
         let Some(client) = self.client.clone() else {

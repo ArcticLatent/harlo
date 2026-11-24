@@ -2,8 +2,6 @@
 output; a command the agent sends to the background shows above the
 composer with Stop, and stopping it ends it."""
 
-ENGINE = True
-
 import json
 import os
 

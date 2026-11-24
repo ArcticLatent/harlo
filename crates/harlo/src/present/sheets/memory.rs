@@ -26,7 +26,7 @@ pub(super) fn memory_rows(app: &App) -> Vec<SheetRow> {
     };
     if !kept.supported {
         return vec![note(
-            "Notes between sessions need Harlo's own server. This server doesn't keep them.",
+            "This server doesn't keep notes between sessions; a newer Harlo server does.",
         )];
     }
     let mut rows = vec![

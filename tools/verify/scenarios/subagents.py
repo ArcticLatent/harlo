@@ -2,8 +2,6 @@
 parent shows the subagent's card and its answer, and the child opens from
 it."""
 
-ENGINE = True
-
 import json
 
 from _common import open_project_session, send

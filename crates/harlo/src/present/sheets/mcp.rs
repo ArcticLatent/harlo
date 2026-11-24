@@ -27,7 +27,7 @@ pub(super) fn page_rows(app: &App, setup: Option<&SetUp>) -> Option<Vec<SheetRow
 pub(super) fn list_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
     rows.push(heading("MCP servers"));
     rows.push(note(
-        "Tools from programs and services, shared by every app on this server.",
+        "Tools from programs and services, for every session on this server.",
     ));
     outcome(app, rows);
     match &setup.mcp {
@@ -54,7 +54,7 @@ pub(super) fn list_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
         rows.push(add);
     } else {
         rows.push(note(
-            "Add MCP servers in OpenCode's config on the server's computer.",
+            "Add MCP servers in opencode.json on the server's computer.",
         ));
     }
 }
@@ -113,7 +113,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         .and_then(|setup| setup.mcp.as_ref().ok())
         .and_then(|servers| servers.iter().find(|s| s.name == name));
     let title = server.and_then(|s| s.title.as_deref()).unwrap_or(name);
-    let mut back = pair(title, "An MCP server of the OpenCode server", 3);
+    let mut back = pair(title, "An MCP server of Harlo's server", 3);
     back.action = "All servers".into();
     back.setting = window::ALL_MCP;
     let mut rows = vec![back];
@@ -129,23 +129,19 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         )),
     }
     if let Some(server) = server {
-        connection_row(
-            server,
-            super::server_name(app) == super::HARLO_SERVER,
-            &mut rows,
-        );
+        connection_row(server, &mut rows);
     }
     rows.push(note(
-        "Connecting and disconnecting last until the OpenCode server restarts; its config \
+        "Connecting and disconnecting last until Harlo's server restarts; its config \
          decides what starts then.",
     ));
 
     if let Some(entry) = page.saved(name) {
-        rows.push(heading("In OpenCode's config"));
+        rows.push(heading("In opencode.json"));
         let mut starts = if entry.disabled {
-            pair("Starts with OpenCode", "Turned off", 3)
+            pair("Starts with the server", "Turned off", 3)
         } else {
-            pair("Starts with OpenCode", "On", 1)
+            pair("Starts with the server", "On", 1)
         };
         starts.action = if entry.disabled {
             "Turn on"
@@ -156,7 +152,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         starts.setting = window::TURN_OFF_MCP;
         starts.choice = int(usize::from(!entry.disabled));
         rows.push(starts);
-        // OpenCode's Code Mode: agents call these tools from short scripts,
+        // The server's Code Mode: agents call these tools from short scripts,
         // so their definitions don't fill every request.
         let mut scripts = if entry.codemode {
             pair("Agents use its tools", "Through scripts", 1)
@@ -173,9 +169,9 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         scripts.choice = int(usize::from(!entry.codemode));
         rows.push(scripts);
         let mut remove = if page.removing {
-            pair("Remove", "Remove it for every app using this server?", 4)
+            pair("Remove", "Remove it from the server?", 4)
         } else {
-            pair("Remove", "Takes it out of OpenCode's config", 3)
+            pair("Remove", "Takes it out of opencode.json", 3)
         };
         remove.action = if page.removing {
             "Remove for good"
@@ -186,16 +182,14 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         remove.risky = true;
         remove.setting = window::REMOVE_MCP;
         rows.push(remove);
-        rows.push(note(
-            "These change OpenCode's config, for every app using this server.",
-        ));
+        rows.push(note("These change opencode.json, which the server reads."));
     }
     rows
 }
 
 /// How `server` stands, with the step it can take; `harlo` when it's on
 /// Harlo's own server.
-fn connection_row(server: &McpServer, harlo: bool, rows: &mut Vec<SheetRow>) {
+fn connection_row(server: &McpServer, rows: &mut Vec<SheetRow>) {
     let (words, tone) = status_words(&server.status);
     let mut row = pair("Connection", &words, tone);
     match &server.status {
@@ -215,16 +209,10 @@ fn connection_row(server: &McpServer, harlo: bool, rows: &mut Vec<SheetRow>) {
         }
         McpStatus::NeedsAuth(_) => {
             rows.push(row);
-            rows.push(note(&if harlo {
+            rows.push(note(
                 "Its entry turns sign-in off (\"oauth\": false): give it the key it needs in \
-                 its headers."
-                    .to_owned()
-            } else {
-                format!(
-                    "Sign in with opencode mcp auth {} where the OpenCode server runs.",
-                    server.name
-                )
-            }));
+                 its headers.",
+            ));
             return;
         }
         McpStatus::Pending => {}
@@ -237,7 +225,7 @@ fn add_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.mcp;
     let mut back = pair(
         "Add an MCP server",
-        "Saved in OpenCode's config, for every app using this server",
+        "Saved in opencode.json, which the server reads",
         3,
     );
     back.action = "All servers".into();
@@ -297,7 +285,7 @@ fn add_rows(app: &App) -> Vec<SheetRow> {
     }
     if matches!(page.saved, Load::Failed(_)) {
         rows.push(note(
-            "OpenCode's config couldn't be read, so nothing can be added.",
+            "opencode.json couldn't be read, so nothing can be added.",
         ));
     }
     rows

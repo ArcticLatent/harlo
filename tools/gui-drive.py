@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Drives the real Harlo window in a private X display, for hands-on UI checks.
 
-Everything runs in scratch folders: a private OpenCode server with the
-scripted model (tools/oc-sandbox.sh), an invisible Xvfb display, and Harlo
+Everything runs in scratch folders: a private Harlo server with the
+scripted model (tools/sandbox.sh), an invisible Xvfb display, and Harlo
 with HOME and every XDG folder inside the scratch folder, and a private D-Bus
-session bus. The desktop session, its notifications and portals, the shared
-OpenCode service and the real config are never touched. Notifications sent on
+session bus. The desktop session, its notifications and portals, the
+background service and the real config are never touched. Notifications sent on
 the private bus are logged instead of shown.
 
     tools/gui-drive.py start [--size 1588x947] [--mcp]
@@ -26,7 +26,7 @@ the private bus are logged instead of shown.
     tools/gui-drive.py clip-image PNG            puts an image on the display's clipboard
     tools/gui-drive.py clip-read                 prints the display's clipboard text
     tools/gui-drive.py resize W H                resizes the Harlo window
-    tools/gui-drive.py api METHOD PATH [JSON]    calls the private OpenCode API
+    tools/gui-drive.py api METHOD PATH [JSON]    calls the private server's API
     tools/gui-drive.py file PATH TEXT            writes a file in the sandbox project
     tools/gui-drive.py env                       prints the sandbox's URL, folders and display
     tools/gui-drive.py log [N]                   the last N lines of Harlo's output
@@ -45,10 +45,10 @@ start as that JSON (any field left out keeps its default).
 With HARLO_GUI_API_LOG=<file> at `start`, Harlo reaches the server through
 tools/api-log.py, which records every request, response and event in <file>.
 
-With HARLO_GUI_SHARED=1 at `start`, Harlo takes the sandbox for the shared
-background service on this computer (and opens there, as "Local · OpenCode") (a registration in Harlo's scratch state
-folder) and the sandbox's config folder for OpenCode's own, so settings that
-only apply to that service can be driven. Nothing outside the scratch
+With HARLO_GUI_SHARED=1 at `start`, Harlo takes the sandbox for Harlo's
+server on this computer (and opens there, as "Local") (a registration in
+Harlo's scratch state folder) and the sandbox's config folder as its own, so
+settings that only apply to the server on this computer can be driven. Nothing outside the scratch
 folders is touched either way.
 
 State lives in $HARLO_GUI_STATE (default /tmp/harlo-gui.json). Each process
@@ -127,6 +127,14 @@ def free_display():
     fail("no free X display number")
 
 
+def silent_alsa(root):
+    """An ALSA configuration whose every sound goes nowhere."""
+    path = f"{root}/alsa-silent.conf"
+    with open(path, "w") as f:
+        f.write("pcm.!default { type null }\nctl.!default { type hw card 0 }\n")
+    return path
+
+
 def harlo_env(state):
     root = state["gui_root"]
     env = x_env(state)
@@ -152,6 +160,10 @@ def harlo_env(state):
         HARLO_RELAY="http://127.0.0.1:9",
         DBUS_SESSION_BUS_ADDRESS=state["bus"],
         RUST_BACKTRACE="1",
+        # Silent: sounds go to a null device, never the desktop's speakers.
+        ALSA_CONFIG_PATH=silent_alsa(root),
+        PULSE_SERVER=f"unix:{root}/no-pulse",
+        PIPEWIRE_REMOTE=f"{root}/no-pipewire",
     )
     if state.get("mcp_port"):
         env["SLINT_MCP_PORT"] = str(state["mcp_port"])
@@ -172,9 +184,9 @@ def start_harlo(state):
     url = state.get("harlo_url") or state["url"]
     argv = [state["binary"], "--server", url]
     if state.get("shared"):
-        # The sandbox registered as the background service, where Harlo
-        # looks for it, and its config folder as OpenCode's.
-        registry = f"{state['gui_root']}/state/opencode"
+        # The sandbox registered as Harlo's server on this computer, where
+        # Harlo looks for it, and its config folder as the global one.
+        registry = f"{state['gui_root']}/state/harlo"
         os.makedirs(registry, exist_ok=True)
         with open(f"{registry}/service.json", "w") as f:
             json.dump({"url": url, "password": state["password"]}, f)
@@ -211,8 +223,12 @@ def cmd_start(args):
         build = subprocess.run(scoped(cargo), cwd=REPO)
         if build.returncode != 0:
             fail("cargo build failed")
+        # The sandbox's server, from the default target folder.
+        server = subprocess.run(scoped(["cargo", "build", "-q", "-p", "harlo-server"]), cwd=REPO)
+        if server.returncode != 0:
+            fail("cargo build -p harlo-server failed")
     sandbox = subprocess.run(
-        [f"{REPO}/tools/oc-sandbox.sh"], capture_output=True, text=True, check=True
+        [f"{REPO}/tools/sandbox.sh"], capture_output=True, text=True, check=True
     ).stdout
     values = dict(line.split("=", 1) for line in sandbox.split() if "=" in line)
     gui_root = tempfile.mkdtemp(prefix="harlo-gui.")
@@ -274,12 +290,6 @@ def cmd_start(args):
         time.sleep(0.3)
     save(state)
     prefs = os.environ.get("HARLO_GUI_PREFS")
-    if state.get("shared"):
-        # Harlo opens on its own server unless told otherwise; here the
-        # sandbox stands in for OpenCode's service, so it opens there.
-        merged = json.loads(prefs or "{}")
-        merged.setdefault("backend", "opencode")
-        prefs = json.dumps(merged)
     if prefs:
         seed_preferences(gui_root, prefs)
     start_harlo(state)
@@ -543,7 +553,7 @@ def cmd_revive(_args):
 
 def cmd_server_restart(_args):
     state = load()
-    subprocess.run([f"{REPO}/tools/oc-sandbox.sh", "restart", state["sandbox"]], check=True,
+    subprocess.run([f"{REPO}/tools/sandbox.sh", "restart", state["sandbox"]], check=True,
                    stdout=subprocess.DEVNULL)
     print("server restarted")
 
@@ -556,7 +566,7 @@ def cmd_stop(_args):
     ]:
         if pid:
             kill(pid)
-    subprocess.run([f"{REPO}/tools/oc-sandbox.sh", "stop", state["sandbox"]], check=False)
+    subprocess.run([f"{REPO}/tools/sandbox.sh", "stop", state["sandbox"]], check=False)
     time.sleep(0.3)
     if os.path.basename(state["gui_root"]).startswith("harlo-gui."):
         shutil.rmtree(state["gui_root"], ignore_errors=True)

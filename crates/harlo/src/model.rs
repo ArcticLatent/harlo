@@ -37,7 +37,7 @@ pub const MENU_LIST: &str = "picker-menu-list";
 /// The name of the model menu's filter field.
 pub const MENU_FILTER: &str = "picker-menu-filter";
 
-/// The setting that turns on OpenCode's todo list.
+/// The setting that turns on the server's todo list.
 pub const TODO_SETTING: &str = "\"experimental\": {\n  \"todo\": true\n}";
 
 /// How many lines of a report show under its row.
@@ -59,7 +59,7 @@ pub enum Picker {
     Model,
     /// How much the session may do without asking.
     Shield,
-    /// The model new sessions use, set in OpenCode's config from Settings.
+    /// The model new sessions use, set in the server's config from Settings.
     DefaultModel,
     /// The model new sessions in the project shown in Settings start with.
     ProjectModel,
@@ -291,14 +291,6 @@ fn session_menu_items(app: &App) -> Vec<Item> {
             SessionAction::Import,
         ),
     ]);
-    if matches!(app.location, harlo_core::server::Location::Shared) {
-        items.push(item(
-            "Copy to Harlo's server".to_owned(),
-            Icon::Copy,
-            None,
-            SessionAction::CopyToHarlo,
-        ));
-    }
     items.extend([
         item(
             "Archive".to_owned(),
@@ -322,7 +314,7 @@ fn delete_items() -> Vec<Item> {
         Item {
             label: "Delete for good".to_owned(),
             detail: None,
-            below: Some("Gone for every app using this server.".to_owned()),
+            below: Some("Gone from the server for good.".to_owned()),
             dot: None,
             glyph: Some(Icon::Trash2),
             selected: false,
@@ -670,17 +662,7 @@ pub fn status_text(status: &Status) -> String {
     match status {
         Status::Connecting { attempt: 1 } => "Connecting…".to_owned(),
         Status::Connecting { attempt } => format!("Reconnecting (attempt {attempt})…"),
-        // Harlo's own server goes with Harlo; OpenCode is checked against
-        // the version Harlo was tested with.
-        Status::Connected { server, version }
-            if server != "OpenCode" || version == harlo_core::OPENCODE_VERSION =>
-        {
-            format!("Connected · {server} {version}")
-        }
-        Status::Connected { version, .. } => format!(
-            "Connected · OpenCode {version}. Harlo is tested with {}.",
-            harlo_core::OPENCODE_VERSION
-        ),
+        Status::Connected { server, version } => format!("Connected · {server} {version}"),
         Status::Lost { reason, retry_in } => format!(
             "Can't connect: {reason}. Trying again in {} s.",
             retry_in.as_secs().max(1)

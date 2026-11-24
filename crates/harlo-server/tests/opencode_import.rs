@@ -1,5 +1,6 @@
 //! A session made on OpenCode comes over to Harlo's server whole: exported
-//! from a private OpenCode (the pinned release) and imported into a private
+//! from a private OpenCode (`HARLO_IMPORT_OPENCODE`, else the last release
+//! checked, where the dev setup keeps it) and imported into a private
 //! `harlo-server`, its history reads the same and its next turn carries on
 //! from it. Importing it again is refused, so nothing is doubled, and
 //! copying several brings over only the new ones.
@@ -10,7 +11,27 @@
 mod oc;
 mod support;
 
+use std::path::PathBuf;
+use std::sync::LazyLock;
+
 use opencode_client::{Delivery, Message, Prompt};
+
+/// Where the dev setup keeps the last OpenCode release the import was
+/// checked against.
+static OPENCODE: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::env::var_os("HARLO_IMPORT_OPENCODE").map_or_else(
+        || {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                .join(".local/share/harlo-dev/opencode/2.4.1/opencode")
+        },
+        PathBuf::from,
+    )
+});
+
+/// The OpenCode program to export from, when it's there.
+fn opencode() -> Option<PathBuf> {
+    OPENCODE.is_file().then(|| OPENCODE.clone())
+}
 
 /// Sends `script` to session `id` on `client` and waits for its turn.
 async fn turn(client: &opencode_client::Client, id: &str, script: &str) {
@@ -23,11 +44,11 @@ async fn turn(client: &opencode_client::Client, id: &str, script: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_opencode_session_imports_whole_and_carries_on() {
-    if std::env::var_os("HARLO_OPENCODE_BIN").is_some() {
-        // Pointed at Harlo's own server, there's no OpenCode to export from.
+    let Some(program) = opencode() else {
+        eprintln!("skipped: no OpenCode at {}", OPENCODE.display());
         return;
-    }
-    let opencode = oc::Sandbox::start().await;
+    };
+    let opencode = oc::Sandbox::start_program(&program).await;
     std::fs::write(opencode.project().join("a.txt"), "alpha\n").expect("file");
     let from = opencode.client();
     let made = from

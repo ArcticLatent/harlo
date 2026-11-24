@@ -2,7 +2,7 @@
 //! Claude Code's own sign-in, signing a provider in with a key (and the
 //! answers its form needs), and removing the connections again.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and a stand-in path for `claude`, never the shared service or the
 //! real Claude Code login.
 
@@ -13,7 +13,7 @@ mod support;
 use opencode_client::{Answer, Client, FieldKind, Integration, SignInMethod};
 use support::{Sandbox, WAIT};
 
-/// OpenCode's integration for Claude subscriptions.
+/// The server's integration for Claude subscriptions.
 const CLAUDE_AGENT: &str = "claude-agent";
 
 /// Its method that uses Claude Code's sign-in.
@@ -113,9 +113,6 @@ async fn a_provider_signs_in_with_a_key_and_is_removed() {
     assert_eq!(form[0].key, "resourceName");
     assert!(form[0].required);
     assert!(matches!(form[0].kind, FieldKind::Text { .. }));
-    assert!(all.iter().any(|i| i.methods.iter().any(
-        |m| matches!(m, SignInMethod::OAuth { label, .. } if label == "Login with GitHub Copilot")
-    )));
 
     client
         .connect_key("302ai", "sk-scratch", &[])

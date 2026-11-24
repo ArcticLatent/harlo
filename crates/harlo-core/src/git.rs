@@ -4,7 +4,7 @@
 //! library: commits then go through the repository's own hooks and signing
 //! settings, and pushes use the credential helpers and SSH setup `git`
 //! already has. They need the folder on this computer, so Harlo offers them
-//! only when it is. Reading what changed works anywhere, through OpenCode
+//! only when it is. Reading what changed works anywhere, through the server
 //! (see `opencode_client::Client::working_changes`).
 //!
 //! `git` never prompts: `GIT_TERMINAL_PROMPT=0` makes a push that needs a

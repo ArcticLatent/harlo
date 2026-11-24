@@ -1,8 +1,8 @@
-//! OpenCode's automations against a private server: refused while
+//! The server's automations against a private server: refused while
 //! `automations` is off, then created, listed, paused, resumed, run and
 //! deleted.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -139,7 +139,7 @@ async fn automations_are_created_paused_resumed_run_and_deleted() {
 async fn a_shell_command_and_code_run_with_no_model() {
     let sandbox = Sandbox::start().await;
     let client = sandbox.client();
-    // OpenCode checks their permissions in the session they belong to.
+    // The server checks their permissions in the session they belong to.
     let session = client
         .create_session(&sandbox.project_str())
         .await

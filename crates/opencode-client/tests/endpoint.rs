@@ -1,4 +1,4 @@
-//! Finding the shared OpenCode service and keeping its password out of logs.
+//! Finding the shared the server service and keeping its password out of logs.
 //!
 //! These tests read registration files written into scratch folders only.
 

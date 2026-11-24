@@ -1,8 +1,8 @@
-//! The phone bridge against a private OpenCode server: pairing, the sealed
+//! The phone bridge against a private server: pairing, the sealed
 //! channel, the session list, a session's rows as they stream, messages,
 //! approvals and new sessions, as the phone app sees them.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service. The phone is a
 //! stand-in that speaks the phone app's protocol.
 
@@ -158,7 +158,7 @@ async fn a_phone_follows_a_session_sends_and_approves() {
     let row = listed(&mut p, &session.id).await;
     assert_eq!(row["project"], "project");
     assert_eq!(row["status"], "idle");
-    assert_eq!(row["harness"], "opencode");
+    assert_eq!(row["harness"], "harlo");
 
     // Opening it: the reply, then its (empty) rows and status.
     let opened = p.call(json!({ "op": "open", "key": session.id })).await;

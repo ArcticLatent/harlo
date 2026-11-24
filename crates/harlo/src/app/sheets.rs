@@ -39,9 +39,9 @@ pub enum Sheet {
 /// A step of the setup guide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Step {
-    /// OpenCode, which runs the agents.
+    /// Harlo's server, which runs the agents.
     #[default]
-    OpenCode,
+    Server,
     /// The models agents use, and the providers that serve them.
     Providers,
     /// Git, and the name and email on commits.
@@ -52,13 +52,13 @@ pub enum Step {
 
 impl Step {
     /// Every step, in order.
-    pub const ALL: [Self; 4] = [Self::OpenCode, Self::Providers, Self::Git, Self::Theme];
+    pub const ALL: [Self; 4] = [Self::Server, Self::Providers, Self::Git, Self::Theme];
 
     /// Its title.
     #[must_use]
     pub fn title(self) -> &'static str {
         match self {
-            Self::OpenCode => "OpenCode",
+            Self::Server => "Server",
             Self::Providers => "Providers",
             Self::Git => "Git",
             Self::Theme => "Theme",
@@ -69,13 +69,13 @@ impl Step {
     #[must_use]
     pub fn about(self) -> &'static str {
         match self {
-            Self::OpenCode => {
-                "OpenCode runs the agents, in a background service on this computer. Harlo \
+            Self::Server => {
+                "Harlo's server runs the agents, in the background on this computer. Harlo \
                  shows them, the work they do and what they ask you."
             }
             Self::Providers => {
-                "Agents need a model. OpenCode's own free models work without signing in; \
-                 a provider or a subscription adds more."
+                "Agents need a model: from a provider, a subscription, or one running on \
+                 this computer."
             }
             Self::Git => {
                 "Harlo shows each project's changes and commits them with git, under your \
@@ -94,9 +94,6 @@ impl Step {
             .unwrap_or_default()
     }
 }
-
-/// The command that installs OpenCode, from its docs.
-pub const OPENCODE_INSTALL: &str = "curl -fsSL https://opencode.ai/v2/install | bash";
 
 /// A section of Settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -122,7 +119,7 @@ pub enum Section {
     Models,
     /// Engines and models on this computer.
     LocalModels,
-    /// OpenCode's agents and the approvals it saved.
+    /// The server's agents and the approvals it saved.
     Agents,
     /// MCP servers, plugins and skills, each on a tab.
     Extensions,
@@ -236,10 +233,10 @@ pub enum Setting {
     Quiet,
     /// Whether questions get through quiet hours.
     QuietQuestions,
-    /// Whether OpenCode keeps snapshots for undo: its config, not a
+    /// Whether the server keeps snapshots for undo: its config, not a
     /// preference.
     Snapshots,
-    /// Whether OpenCode allows automations, which schedules are: its
+    /// Whether the server allows automations, which schedules are: its
     /// config, not a preference.
     Automations,
     /// [`Preferences::own_tools`].
@@ -421,13 +418,11 @@ pub enum SettingChoice {
     ExtensionsTab,
     /// What a new schedule does: a prompt, a shell command or code.
     ScheduleDoes,
-    /// [`Preferences::backend`].
-    Backend,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 24] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -452,7 +447,6 @@ impl SettingChoice {
         Self::LocalEngine,
         Self::ExtensionsTab,
         Self::ScheduleDoes,
-        Self::Backend,
     ];
 
     /// The options, as Settings names them, in order.
@@ -466,7 +460,7 @@ impl SettingChoice {
             Self::ChatWidth => &["Narrow", "Normal", "Wide", "Full"],
             Self::TextSize => &["Small", "Normal", "Large", "Larger"],
             Self::CodeSize => &["Small", "Normal", "Large"],
-            // None, then OpenCode's colours.
+            // None, then the server's colours.
             Self::ProjectColor => &[
                 "None", "Orange", "Yellow", "Cyan", "Green", "Red", "Pink", "Blue", "Purple",
                 "Gray",
@@ -481,7 +475,6 @@ impl SettingChoice {
             Self::LocalEngine => &["Ollama", "llama.cpp"],
             Self::ExtensionsTab => &["MCP servers", "Plugins", "Skills"],
             Self::ScheduleDoes => &["A prompt", "A shell command", "Code"],
-            Self::Backend => &["Harlo's server", "OpenCode"],
         }
     }
 }
@@ -532,7 +525,7 @@ pub struct SetUp {
     pub providers: Result<Vec<Provider>, String>,
     /// The web search services.
     pub search: Result<Vec<WebSearch>, String>,
-    /// The service OpenCode's config chooses, or `random`; `None` when the
+    /// The service the server's config chooses, or `random`; `None` when the
     /// first search asks, or the config couldn't be read.
     pub search_choice: Option<String>,
     /// The MCP servers.
@@ -560,7 +553,7 @@ pub enum Event {
     Theme(String),
     /// Take option `.1` (counted from 0) of a choice.
     Choose(SettingChoice, usize),
-    /// Make this the model new sessions use, in OpenCode's global config.
+    /// Make this the model new sessions use, in the server's global config.
     DefaultModel(ModelChoice),
     /// The computer's font families were read.
     SystemFonts(harlo_core::fonts::SystemFonts),
@@ -613,8 +606,6 @@ pub enum Event {
     Next,
     /// Go back a step.
     Back,
-    /// Install OpenCode on this computer, in a terminal.
-    InstallOpenCode,
     /// Git's setup on this computer arrived.
     Git(git::Setup),
     /// Save this text from a field.
@@ -677,7 +668,7 @@ pub struct Sheets {
     pub schedules: super::Schedules,
     /// The model providers, and signing in to them.
     pub providers: super::Providers,
-    /// The approvals OpenCode saved for "Allow always".
+    /// The approvals the server saved for "Allow always".
     pub approvals: super::Approvals,
     /// The MCP servers' pages.
     pub mcp: super::McpServers,
@@ -797,13 +788,12 @@ impl App {
             | Event::ToggleModel(..)) => {
                 return self.look_event(event);
             }
-            Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
+            Event::DefaultModelSet(result) => self.default_model_set(result),
             Event::Choose(choice, option) => return self.choose_option(choice, option),
             event @ (Event::OpenSetup
             | Event::Step(_)
             | Event::Next
             | Event::Back
-            | Event::InstallOpenCode
             | Event::Git(_)
             | Event::IdentitySet(..)) => return self.apply_guide(event),
             Event::Text(field, value) => return self.take_text(field, &value),
@@ -920,7 +910,7 @@ impl App {
     }
 
     /// Flips a switch: Harlo's own preference, starting at login, or
-    /// OpenCode's snapshots.
+    /// The server's snapshots.
     fn flip(&mut self, setting: Setting) -> Task<Message> {
         match setting {
             Setting::StartAtLogin => return self.toggle_autostart(),
@@ -980,19 +970,18 @@ impl App {
         }
     }
 
-    /// OpenCode's global config folder, when Harlo may change it: only for
-    /// a server on this computer, which reads it (Harlo's reads it in place).
+    /// The global config folder (`~/.config/opencode`), when Harlo may
+    /// change it: only for the server on this computer, which reads it.
     #[must_use]
     pub fn global_config(&self) -> Option<&Path> {
-        self.location
-            .is_here()
+        matches!(self.location, Location::Local)
             .then_some(self.opencode_folder.as_deref())
             .flatten()
     }
 
-    /// Sets `model` as the one new sessions use, in OpenCode's global
-    /// config, off the UI thread. The server reloads the file and says so,
-    /// which reloads the models here.
+    /// Sets `model` as the one new sessions use, in the server's global
+    /// config, off the UI thread. Once it's written, the models load
+    /// again.
     fn set_default_model(&mut self, model: &ModelChoice) -> Task<Message> {
         let Some(folder) = self.global_config().map(Path::to_path_buf) else {
             return Task::none();
@@ -1001,9 +990,18 @@ impl App {
         let id = format!("{}/{}", model.provider_id, model.id);
         Task::perform(config::set_model_later(folder, Some(id)), |result| {
             Message::Sheet(Event::DefaultModelSet(
-                result.map_err(|e| format!("Couldn't change OpenCode's config: {e}")),
+                result.map_err(|e| format!("Couldn't change opencode.json: {e}")),
             ))
         })
+    }
+
+    /// The default model is written, or why not. The server rereads the
+    /// file on its next request, so the models load again to show it.
+    fn default_model_set(&mut self, result: Result<(), String>) {
+        if result.is_ok() {
+            self.forget_catalogs();
+        }
+        self.sheets.model_error = result.err();
     }
 
     /// Turns a notification setting on or off.
@@ -1117,7 +1115,6 @@ impl App {
                     self.sheets.step = Step::ALL[back];
                 }
             }
-            Event::InstallOpenCode => return self.install_opencode(),
             Event::Git(setup) => self.sheets.git = Load::Loaded(setup),
             Event::IdentitySet(identity, result) => match result {
                 Ok(value) => {
@@ -1189,40 +1186,13 @@ impl App {
     /// Opens the setup guide at its first step, and reads what it shows.
     fn open_setup(&mut self) -> Task<Message> {
         self.sheets.open = Some(Sheet::Setup);
-        self.sheets.step = Step::OpenCode;
+        self.sheets.step = Step::Server;
         Task::batch([self.load_git(), self.load_setup()])
     }
 
     /// Reads what Settings shows from the server and this computer.
     fn open_settings(&mut self) -> Task<Message> {
         Task::batch([self.load_git(), self.load_setup(), self.load_schedules()])
-    }
-
-    /// Whether the guide offers to install OpenCode: when the background
-    /// service on this computer can't be reached.
-    #[must_use]
-    pub fn offers_install(&self) -> bool {
-        matches!(self.location, Location::Shared)
-            && matches!(self.status, super::Status::Lost { .. })
-    }
-
-    /// Runs OpenCode's installer in a terminal, and opens the guide again
-    /// once it ends. Harlo then starts the service and connects as usual.
-    fn install_opencode(&mut self) -> Task<Message> {
-        if !self.offers_install() {
-            return Task::none();
-        }
-        // The terminal opens under the window, so the guide steps aside.
-        self.sheets.open = None;
-        self.run_in_terminal(
-            "Install OpenCode",
-            "/bin/sh",
-            vec![
-                "-c".to_owned(),
-                format!("{OPENCODE_INSTALL}; {}", super::claude::KEEP_OPEN),
-            ],
-            Message::Sheet(Event::OpenSetup),
-        )
     }
 
     /// Saves `value` as the name or email on commits, in git's global
@@ -1284,7 +1254,7 @@ impl App {
     /// Asks for the stats over the chosen range.
     fn load_stats(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
-            self.sheets.stats = Load::Failed("Not connected to OpenCode yet.".to_owned());
+            self.sheets.stats = Load::Failed("Not connected to Harlo's server yet.".to_owned());
             return Task::none();
         };
         self.sheets.serial += 1;
@@ -1309,7 +1279,7 @@ impl App {
     /// Asks for the server's set-up in the current folder.
     pub(super) fn load_setup(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else {
-            self.sheets.setup = Load::Failed("Not connected to OpenCode yet.".to_owned());
+            self.sheets.setup = Load::Failed("Not connected to Harlo's server yet.".to_owned());
             return Task::none();
         };
         self.sheets.serial += 1;

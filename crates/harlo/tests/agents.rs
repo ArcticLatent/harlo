@@ -1,4 +1,4 @@
-//! Settings → Agents against a private `opencode serve` with scratch
+//! Settings → Agents against a private `harlo-server` with scratch
 //! `HOME`/`XDG_*` folders: the project's agents, and an approval saved with
 //! "Allow always" listed with its project and removed. Never the shared
 //! service.
@@ -72,8 +72,8 @@ fn agents_and_saved_approvals_are_shown_and_an_approval_removed() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     }))));
     app.new_folder = Some(sandbox.project_str());

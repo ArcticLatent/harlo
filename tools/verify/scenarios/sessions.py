@@ -2,8 +2,6 @@
 shows in the sidebar and a tab; a second opens beside it; tabs switch and
 close; the filter finds a session by its title."""
 
-ENGINE = True
-
 from _common import COMPOSER, COMPOSER_NEW, open_project_session, send, sidebar
 
 

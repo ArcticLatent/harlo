@@ -3,14 +3,11 @@ a streaming answer. Harlo reconnects by itself, the session keeps its
 history (with what had streamed of the cut-short answer), isn't left
 looking busy, and answers the next prompt.
 
-Runs on both servers: window:reconnect on OpenCode, engine:reconnect on
-harlo-server. Only the sandbox's own server restarts."""
+Only the sandbox's own server restarts."""
 
 import json
 
 from _common import open_project_session, send
-
-ENGINE = True
 
 
 def run(h, s):

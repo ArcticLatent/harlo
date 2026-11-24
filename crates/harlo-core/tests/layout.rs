@@ -146,7 +146,6 @@ fn preferences_load_back_beside_the_layout() {
         phone_relay: true,
         phone_paused: true,
         avatar: "scarf".to_owned(),
-        backend: harlo_core::layout::Backend::OpenCode,
         appearance: Appearance::Light,
         project_models: [(
             "/home/u/code/harlo".to_owned(),

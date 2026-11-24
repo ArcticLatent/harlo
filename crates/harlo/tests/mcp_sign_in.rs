@@ -1,6 +1,5 @@
 //! Signing in to a remote MCP server from Settings → Extensions, against a
-//! private server with scratch `HOME`/`XDG_*` folders (OpenCode, or
-//! harlo-server with `HARLO_OPENCODE_BIN`) and a stand-in for the MCP
+//! private `harlo-server` with scratch `HOME`/`XDG_*` folders and a stand-in for the MCP
 //! server and its authorization server. No browser opens: the test follows
 //! the sign-in page's address itself.
 
@@ -59,8 +58,8 @@ fn a_remote_server_signs_in_from_its_page() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(folder.clone());

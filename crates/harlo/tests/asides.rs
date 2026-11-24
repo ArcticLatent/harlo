@@ -1,6 +1,6 @@
 //! Side questions: `/btw` in the composer asks one about the open session,
 //! and the Side questions panel shows it and its answer, against a private
-//! `opencode serve` with scratch `HOME`/`XDG_*` folders and the scripted
+//! `harlo-server` with scratch `HOME`/`XDG_*` folders and the scripted
 //! model. Never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -55,8 +55,8 @@ fn btw_asks_about_the_session_and_its_panel_shows_the_answer() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     }))));
     let ui = ui(app);

@@ -1,9 +1,9 @@
-//! Which instruction files OpenCode gives a session's agent from the start,
+//! Which instruction files the server gives a session's agent from the start,
 //! worked out for a folder on this computer.
 //!
-//! OpenCode doesn't list them, so this follows its rule (as of 2.3):
+//! The server doesn't list them, so this follows its rule (as of 2.3):
 //!
-//! - **Global:** `AGENTS.md` in OpenCode's config folder, and
+//! - **Global:** `AGENTS.md` in the server's config folder, and
 //!   `~/.claude/CLAUDE.md`.
 //! - **Project:** when the session's folder is inside its project, each
 //!   folder from the session's up to the home folder (or up to the project's
@@ -11,7 +11,7 @@
 //!   its `CLAUDE.md` when it has no `AGENTS.md`.
 //!
 //! Files the agent picks up later, such as a subfolder's `AGENTS.md` once it
-//! reads a file there, come from OpenCode itself (see
+//! reads a file there, come from the server itself (see
 //! `opencode_client::SessionContext::loaded`). Paths from a config file's
 //! `instructions` setting aren't followed here.
 

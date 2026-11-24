@@ -1,7 +1,7 @@
 //! M6 endpoints against a private server: what a session's model sees, its
 //! running usage, and each model's context limit.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -143,7 +143,7 @@ async fn agents_say_how_they_can_be_used() {
     )
     .expect("agent file");
     let client = sandbox.client();
-    // A folder's first requests can come before OpenCode has loaded it, and
+    // A folder's first requests can come before the server has loaded it, and
     // get no agents, or only the built-in ones; ask until the file's is there.
     let folder = sandbox.project_str();
     let agents = wait_for("the project's agent", || async {

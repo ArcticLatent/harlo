@@ -99,7 +99,7 @@ pub fn entry(program: &Path) -> String {
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=Harlo\n\
-         Comment=Coding agents run by OpenCode\n\
+         Comment=Coding agents on your computer\n\
          Exec={}\n\
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n",

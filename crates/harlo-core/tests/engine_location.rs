@@ -22,7 +22,7 @@ fn built_server() -> Option<PathBuf> {
 
 /// Follows Harlo's server until it connects; its URL and what it says it is.
 async fn connect() -> (String, String) {
-    let mut updates = follow(Location::Engine);
+    let mut updates = follow(Location::Local);
     loop {
         match tokio::time::timeout(Duration::from_secs(60), updates.next()).await {
             Ok(Some(Update::Connected(connected))) => {

@@ -6,9 +6,9 @@
 
 // Rust guideline compliant 2026-10-09
 
-use opencode_client::Client;
+use std::path::PathBuf;
 
-use crate::layout::Backend;
+use opencode_client::{Client, read_registration, registration_path};
 
 /// What an import did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -55,8 +55,8 @@ pub async fn copy_sessions(from: &Client, to: &Client, ids: &[String]) -> Import
 /// When either server can't be reached, or OpenCode's sessions can't be
 /// listed.
 pub async fn from_opencode(ids: Option<Vec<String>>) -> Result<Imported, String> {
-    let from = crate::server::reach_here(Backend::OpenCode).await?;
-    let to = crate::server::reach_here(Backend::Harlo).await?;
+    let from = opencode().await?;
+    let to = crate::server::reach_local().await?;
     let ids = match ids {
         Some(ids) => ids,
         None => from
@@ -68,4 +68,56 @@ pub async fn from_opencode(ids: Option<Vec<String>>) -> Result<Imported, String>
             .collect(),
     };
     Ok(copy_sessions(&from, &to, &ids).await)
+}
+
+/// A client for OpenCode's background service on this computer, started
+/// once when none answers, as OpenCode's own clients do. Harlo never stops
+/// it.
+async fn opencode() -> Result<Client, String> {
+    if let Some(client) = registered().await? {
+        return Ok(client);
+    }
+    start_opencode().await?;
+    registered()
+        .await?
+        .ok_or_else(|| "OpenCode's background service isn't running".to_owned())
+}
+
+/// A client for OpenCode's registered service, if it answers.
+async fn registered() -> Result<Option<Client>, String> {
+    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
+    let home = std::env::var_os("HOME").map_or_else(PathBuf::new, PathBuf::from);
+    let path = registration_path(state.as_deref(), &home);
+    let service =
+        read_registration(&path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
+    let Some(service) = service else {
+        return Ok(None);
+    };
+    let client = Client::new(service.endpoint);
+    Ok(client.info().await.is_ok().then_some(client))
+}
+
+/// Starts OpenCode's background service.
+async fn start_opencode() -> Result<(), String> {
+    let output = tokio::process::Command::new("opencode")
+        .args(["service", "start"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                "OpenCode isn't installed (no `opencode` on PATH), so there's nothing to import"
+                    .to_owned()
+            }
+            _ => format!("couldn't start OpenCode's background service: {e}"),
+        })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "couldn't start OpenCode's background service: {}",
+            stderr.trim()
+        ))
+    }
 }

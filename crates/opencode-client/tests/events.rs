@@ -1,4 +1,4 @@
-//! Server events decoded as Harlo uses them, from the JSON OpenCode sends.
+//! Server events decoded as Harlo uses them, from the JSON the server sends.
 
 // Rust guideline compliant 2026-10-09
 

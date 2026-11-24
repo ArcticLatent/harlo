@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 
-/// The names of the global file, the one OpenCode prefers first.
+/// The names of the global file, the one the server prefers first.
 const NAMES: [&str; 2] = ["opencode.jsonc", "opencode.json"];
 
 /// The key naming the model new sessions use, as `provider/model`.
@@ -24,17 +24,17 @@ const MODEL: &str = "model";
 /// The key that turns off the snapshots undo uses, when `false`.
 const SNAPSHOTS: &str = "snapshots";
 
-/// The object holding OpenCode's experimental switches.
+/// The object holding the server's experimental switches.
 const EXPERIMENTAL: &str = "experimental";
 
-/// OpenCode's switch for automations, inside `experimental`.
+/// The server's switch for automations, inside `experimental`.
 const AUTOMATIONS: &str = "automations";
 
 /// The object holding MCP settings, and its object of servers by name.
 const MCP: &str = "mcp";
 /// The servers inside [`MCP`].
 const SERVERS: &str = "servers";
-/// The object of providers OpenCode adds to its catalog, by ID.
+/// The object of providers the server adds to its catalog, by ID.
 const PROVIDERS: &str = "providers";
 /// The package OpenCode's docs give for a server with the `OpenAI` API.
 pub const OPENAI_COMPATIBLE: &str = "@opencode/ai/providers/openai-compatible";
@@ -84,7 +84,7 @@ impl std::error::Error for Error {
     }
 }
 
-/// OpenCode's global config folder on this computer, such as
+/// The server's global config folder on this computer, such as
 /// `~/.config/opencode`.
 ///
 /// Returns `None` when neither the config folder nor the home folder can be
@@ -127,7 +127,7 @@ pub fn model(folder: &Path) -> Result<Option<String>, Error> {
 }
 
 /// Sets the model new sessions use, as `provider/model`, in the global file
-/// in `folder`; `None` removes the setting so OpenCode picks again.
+/// in `folder`; `None` removes the setting so the server picks again.
 ///
 /// The rest of the file stays as it was. A missing file or folder is
 /// created.
@@ -140,7 +140,7 @@ pub fn set_model(folder: &Path, model: Option<&str>) -> Result<(), Error> {
     set(folder, MODEL, model.map(CstInputValue::from))
 }
 
-/// Whether OpenCode keeps snapshots of a project's files before each turn,
+/// Whether the server keeps snapshots of a project's files before each turn,
 /// so undoing a turn can put them back: on unless the global file in
 /// `folder` turns them off.
 ///
@@ -161,7 +161,7 @@ pub fn snapshots(folder: &Path) -> Result<bool, Error> {
     Ok(!off)
 }
 
-/// Turns OpenCode's snapshots on or off in the global file in `folder`.
+/// Turns the server's snapshots on or off in the global file in `folder`.
 /// On, the default, removes the setting.
 ///
 /// # Errors
@@ -185,7 +185,7 @@ pub async fn set_snapshots_later(folder: PathBuf, on: bool) -> Result<(), Error>
     later(folder, move |folder| set_snapshots(folder, on)).await
 }
 
-/// Whether OpenCode runs automations (Harlo's schedules): the top-level
+/// Whether the server runs automations (Harlo's schedules): the top-level
 /// `automations` in the global file in `folder`, on unless set to `false`.
 ///
 /// # Errors
@@ -205,11 +205,11 @@ pub fn automations(folder: &Path) -> Result<bool, Error> {
     Ok(!off)
 }
 
-/// Turns OpenCode's automations on or off in the global file in `folder`.
+/// Turns the server's automations on or off in the global file in `folder`.
 ///
 /// On, the default, removes the setting; off writes `"automations": false`.
 /// Either way the `experimental.automations` of older releases goes, since
-/// OpenCode now warns about it.
+/// The server now warns about it.
 ///
 /// # Errors
 ///
@@ -233,7 +233,7 @@ pub async fn set_automations_later(folder: PathBuf, on: bool) -> Result<(), Erro
     later(folder, move |folder| set_automations(folder, on)).await
 }
 
-/// How OpenCode runs an MCP server.
+/// How the server runs an MCP server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpRun {
     /// A program on the server's computer, spoken to over its input and
@@ -256,13 +256,13 @@ pub enum McpRun {
 /// An MCP server in the global file: `mcp.servers.<name>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpEntry {
-    /// Its name, which OpenCode puts before its tools' names.
+    /// Its name, which the server puts before its tools' names.
     pub name: String,
     /// How it runs.
     pub run: McpRun,
-    /// Whether it's turned off, so OpenCode doesn't start it.
+    /// Whether it's turned off, so the server doesn't start it.
     pub disabled: bool,
-    /// Whether agents reach its tools through Code Mode scripts, OpenCode's
+    /// Whether agents reach its tools through Code Mode scripts, the server's
     /// default, rather than as tools listed one by one.
     pub codemode: bool,
 }
@@ -341,7 +341,7 @@ impl McpEntry {
 }
 
 /// The MCP servers the global file in `folder` sets up, in its order.
-/// Entries OpenCode wouldn't read are left out.
+/// Entries the server wouldn't read are left out.
 ///
 /// # Errors
 ///
@@ -370,7 +370,7 @@ pub fn mcp_servers(folder: &Path) -> Result<Vec<McpEntry>, Error> {
 }
 
 /// Adds `entry` to the global file in `folder`, or replaces the server of
-/// that name. OpenCode starts it when it reloads the file.
+/// that name. The server starts it when it reloads the file.
 ///
 /// # Errors
 ///
@@ -409,7 +409,7 @@ pub fn set_mcp_disabled(folder: &Path, name: &str, disabled: bool) -> Result<(),
 
 /// Sets how agents reach MCP server `name`'s tools.
 ///
-/// Through Code Mode scripts, OpenCode's default, removes `codemode`; as
+/// Through Code Mode scripts, the server's default, removes `codemode`; as
 /// tools listed one by one writes `codemode: false`. A server the file
 /// doesn't have is left alone.
 ///
@@ -500,7 +500,7 @@ pub async fn set_mcp_disabled_later(
     .await
 }
 
-/// A model server on this computer, added to OpenCode as a provider that
+/// A model server on this computer, added to the server as a provider that
 /// speaks the `OpenAI` API: `providers.<id>`, with its models listed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalProvider {
@@ -564,7 +564,7 @@ pub fn has_provider(folder: &Path, id: &str) -> Result<bool, Error> {
 }
 
 /// Adds `provider` to the global file in `folder`, or replaces the one with
-/// its ID. OpenCode lists its models when it reloads the file.
+/// its ID. The server lists its models when it reloads the file.
 ///
 /// # Errors
 ///

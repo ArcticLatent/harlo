@@ -1,31 +1,29 @@
 #!/usr/bin/env bash
-# Starts a private OpenCode server (or, with HARLO_BACKEND=engine, harlo-server)
+# Starts a private Harlo server (target/debug/harlo-server, or HARLO_SERVER_BIN)
 # and the scripted model in a scratch folder.
 #
-#   tools/oc-sandbox.sh [dir]     prints KEY=VALUE lines (URL, PASSWORD, DIR, PROJECT, …)
-#   tools/oc-sandbox.sh stop dir  stops both and removes the folder
-#   tools/oc-sandbox.sh restart dir  restarts the server only, on the same port
+#   tools/sandbox.sh [dir]        prints KEY=VALUE lines (URL, PASSWORD, DIR, PROJECT, …)
+#   tools/sandbox.sh stop dir     stops both and removes the folder
+#   tools/sandbox.sh restart dir  restarts the server only, on the same port
 #                                 and password (the sandbox's own server, never
-#                                 the shared service)
+#                                 the background service)
 #
-# Never touches the real ~/.config/opencode, ~/.local/state/opencode or the shared
-# service: HOME and every XDG folder point inside the scratch folder.
+# Never touches the real config, state or background service: HOME and every
+# XDG folder point inside the scratch folder.
 # The server also gets a session bus that leads nowhere, so it never reaches the
 # desktop keyring (it keeps credentials there when it can).
 set -euo pipefail
 
-VERSION=$(cat "$(dirname "$0")/../crates/opencode-client/OPENCODE_VERSION" 2>/dev/null || echo 2.3.2)
-BIN=${HARLO_OPENCODE_BIN:-$HOME/.local/share/harlo-dev/opencode/$VERSION/opencode}
 TOOLS=$(cd "$(dirname "$0")" && pwd)
-# HARLO_BACKEND=engine starts Harlo's own server (target/debug/harlo-server,
-# built beforehand) in OpenCode's place, with the same config and project.
-if [[ ${HARLO_BACKEND:-opencode} == engine ]]; then
-  BIN=${HARLO_SERVER_BIN:-$TOOLS/../target/debug/harlo-server}
+BIN=${HARLO_SERVER_BIN:-$TOOLS/../target/debug/harlo-server}
+if [[ ${1:-} != stop && ! -x $BIN ]]; then
+  echo "no harlo-server at $BIN: cargo build -p harlo-server" >&2
+  exit 1
 fi
 
 if [[ ${1:-} == restart ]]; then
   dir=$2
-  pid=$(cat "$dir/opencode.pid")
+  pid=$(cat "$dir/server.pid")
   kill "$pid" 2>/dev/null || true
   for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.05; done
   kill -9 "$pid" 2>/dev/null || true
@@ -42,22 +40,22 @@ fi
 
 if [[ ${1:-} == stop ]]; then
   dir=$2
-  for f in "$dir"/opencode.pid "$dir"/model.pid; do
+  for f in "$dir"/server.pid "$dir"/model.pid; do
     [[ -f $f ]] && kill "$(cat "$f")" 2>/dev/null || true
   done
   sleep 0.3
-  [[ $dir == /tmp/harlo-oc.* ]] && rm -rf "$dir"
+  [[ $dir == /tmp/harlo-sandbox.* ]] && rm -rf "$dir"
   exit 0
 fi
 
-dir=${1:-$(mktemp -d /tmp/harlo-oc.XXXXXX)}
+dir=${1:-$(mktemp -d /tmp/harlo-sandbox.XXXXXX)}
 mkdir -p "$dir"/{home,config/opencode,data,state,cache,project}
 free_port() { python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 model_port=$(free_port)
 port=$(free_port)
 password=$(python3 -I -c 'import secrets; print(secrets.token_hex(16))')
 
-# OC_SANDBOX_TODO=1 turns on OpenCode's todo tool (experimental.todo).
+# OC_SANDBOX_TODO=1 turns on the todo tool (experimental.todo).
 experimental=""
 if [ "${OC_SANDBOX_TODO:-}" = 1 ]; then
   experimental='"experimental": { "todo": true },'
@@ -103,8 +101,8 @@ env $unset_claude HOME=$(printf %q "$dir/home") XDG_CONFIG_HOME=$(printf %q "$di
   XDG_CACHE_HOME=$(printf %q "$dir/cache") OPENCODE_PASSWORD=$(printf %q "$password") \\
   OPENCODE_CLAUDE_PATH=$(printf %q "$dir/bin/claude") \\
   DBUS_SESSION_BUS_ADDRESS=$(printf %q "unix:path=$dir/no-bus") \\
-  setsid $(printf %q "$BIN") serve --hostname 127.0.0.1 --port $port >> $(printf %q "$dir/opencode.log") 2>&1 < /dev/null &
-echo \$! > $(printf %q "$dir/opencode.pid")
+  setsid $(printf %q "$BIN") serve --hostname 127.0.0.1 --port $port >> $(printf %q "$dir/server.log") 2>&1 < /dev/null &
+echo \$! > $(printf %q "$dir/server.pid")
 EOF
 bash "$dir/server.sh"
 

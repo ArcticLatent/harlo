@@ -1,5 +1,5 @@
-//! One phone's connection: its hello, then its requests as OpenCode calls
-//! and OpenCode's events as the phone's.
+//! One phone's connection: its hello, then its requests as the server calls
+//! and the server's events as the phone's.
 
 // Rust guideline compliant 2026-10-09
 
@@ -20,6 +20,10 @@ use super::requests;
 use super::rows::{self, Rows};
 use super::{Hub, Sealed, Server, key_bytes, lock, now_secs, random_id};
 use crate::workspace::{Event, EventKind, Message};
+
+/// What the phone calls the agent behind every session: Harlo's own,
+/// which the phone app names and draws as Harlo.
+const HARNESS: &str = "harlo";
 
 /// The largest message a phone may send: a few photos.
 const MAX_MESSAGE: usize = 32 * 1024 * 1024;
@@ -281,7 +285,7 @@ fn summaries(server: &Server) -> Vec<Value> {
                 "key": summary.id,
                 "title": if summary.title.is_empty() { "New session" } else { summary.title.as_str() },
                 "project": project.name,
-                "harness": "opencode",
+                "harness": HARNESS,
                 "status": status(server, &summary.id),
                 "modified": modified,
                 "where": tilde(&directory),
@@ -478,7 +482,7 @@ impl Conn {
         }
     }
 
-    /// The events for the phone that an OpenCode event makes.
+    /// The events for the phone that a server event makes.
     fn event(&mut self, event: &Event) -> Vec<Value> {
         let Some(open) = &mut self.open else {
             return Vec::new();
@@ -661,7 +665,7 @@ impl Conn {
             dirty: false,
             reloading: false,
         });
-        (json!({ "key": key, "harness": "opencode" }), after)
+        (json!({ "key": key, "harness": HARNESS }), after)
     }
 
     /// Answers an approval or a question.
@@ -712,7 +716,7 @@ impl Conn {
         let later = self.later_tx.clone();
         tokio::spawn(async move {
             let mut reply = match start(&server, &m).await {
-                Ok(key) => json!({ "key": key, "harness": "opencode" }),
+                Ok(key) => json!({ "key": key, "harness": HARNESS }),
                 Err(e) => error(e),
             };
             reply["id"] = m["id"].clone();

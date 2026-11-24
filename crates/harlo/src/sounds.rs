@@ -1,7 +1,7 @@
 //! The event sounds Settings → Notifications picks: MP3s built into Harlo,
 //! decoded and played with rodio on the default output device.
 //!
-//! The sounds are OpenCode's, under the MIT licence in [`LICENSE`].
+//! The sounds are the server's, under the MIT licence in [`LICENSE`].
 
 // Rust guideline compliant 2026-10-09
 

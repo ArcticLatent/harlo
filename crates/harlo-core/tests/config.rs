@@ -1,5 +1,5 @@
 //! Setting the model new sessions use, whether undo keeps snapshots and
-//! whether automations are allowed, in OpenCode's global config file, each
+//! whether automations are allowed, in the server's global config file, each
 //! test in its own scratch folder.
 
 // Rust guideline compliant 2026-10-09
@@ -118,7 +118,7 @@ fn snapshots_are_on_unless_turned_off() {
     );
     assert!(!config::snapshots(folder).expect("read"));
 
-    // On again takes the setting away: on is OpenCode's default.
+    // On again takes the setting away: on is the server's default.
     config::set_snapshots(folder, true).expect("on");
     let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
     assert!(!text.contains("snapshots"), "{text}");
@@ -215,7 +215,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
     );
     config::set_mcp_disabled(folder, "missing", true).expect("left alone");
 
-    // Code Mode is OpenCode's default; off lists the tools one by one.
+    // Code Mode is the server's default; off lists the tools one by one.
     config::set_mcp_codemode(folder, "browser", false).expect("listed");
     let json: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(folder.join("opencode.json"))

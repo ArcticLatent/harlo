@@ -1,4 +1,4 @@
-//! Harlo, drawn with Slint: a desktop app for coding agents run by OpenCode.
+//! Harlo, drawn with Slint: a desktop app for coding agents run by the server.
 //!
 //! The UI is declared in `ui/*.slint` and compiled into [`ui`]. Rust keeps
 //! the app's state and pushes what the window shows into it.

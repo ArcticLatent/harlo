@@ -1,7 +1,7 @@
 //! What the Git settings rest on, against a private server: text written
-//! with no session (commit messages), and OpenCode's `snapshots` switch.
+//! with no session (commit messages), and the server's `snapshots` switch.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -38,7 +38,7 @@ async fn text_is_written_with_no_session() {
     assert_eq!(text.trim(), "ok.");
 }
 
-/// With `snapshots` off in OpenCode's config, undoing a turn can't put the
+/// With `snapshots` off in the server's config, undoing a turn can't put the
 /// agent's files back; on (the default), it can.
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshots_off_leaves_files_as_they_are_on_undo() {

@@ -1,6 +1,6 @@
 //! Local models: engines installed from (fake) GitHub releases into scratch
 //! folders, checked and unpacked; Ollama pulls and Hugging Face files from
-//! local servers; the models that fit; and the provider entry for OpenCode.
+//! local servers; the models that fit; and the provider entry for the server.
 
 // Rust guideline compliant 2026-10-09
 

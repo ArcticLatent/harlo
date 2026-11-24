@@ -1,10 +1,10 @@
-//! Settings → Schedules: OpenCode's automations that send a prompt to a
+//! Settings → Schedules: The server's automations that send a prompt to a
 //! session, or run a shell command or code, at a time, every so often or
 //! on a cron schedule. The server
 //! keeps and runs them, so they run with Harlo closed; Harlo lists them,
 //! makes new ones, and pauses, resumes and deletes them.
 //!
-//! OpenCode runs automations unless `automations` is `false` in its
+//! The server runs automations unless `automations` is `false` in its
 //! config. The switch here changes that in the global config, only when
 //! the user asks, and the page says it changes every client's server.
 
@@ -26,7 +26,7 @@ use super::{App, Message};
 /// Something that happened in Settings → Schedules.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScheduleEvent {
-    /// Whether OpenCode's config allows automations, as read.
+    /// Whether the server's config allows automations, as read.
     Allowed(Result<bool, String>),
     /// Allow them, or stop allowing them.
     ToggleAllowed,
@@ -111,7 +111,7 @@ pub fn session_of(automation: &Automation) -> Option<&str> {
 /// Settings → Schedules' state.
 #[derive(Debug, Default)]
 pub struct Schedules {
-    /// Whether OpenCode's global config allows automations.
+    /// Whether the server's global config allows automations.
     pub allowed: Load<bool>,
     /// Why allowing them couldn't change.
     pub allow_error: Option<String>,
@@ -262,7 +262,7 @@ impl App {
         Task::none()
     }
 
-    /// Reads whether OpenCode allows automations, where Harlo may change
+    /// Reads whether the server allows automations, where Harlo may change
     /// that, and lists the schedules.
     pub(super) fn load_schedules(&mut self) -> Task<Message> {
         let list = match self.client.clone() {
@@ -301,7 +301,7 @@ impl App {
             .or_else(|| self.projects.first().map(|p| p.directory.clone()))
     }
 
-    /// Allows automations in OpenCode's global config, or stops allowing
+    /// Allows automations in the server's global config, or stops allowing
     /// them.
     fn toggle_allowed(&mut self) -> Task<Message> {
         let folder = self.global_config().map(Path::to_path_buf);
@@ -315,7 +315,7 @@ impl App {
             schedule_message(ScheduleEvent::AllowedSet(
                 result
                     .map(|()| on)
-                    .map_err(|e| format!("Couldn't change OpenCode's config: {e}")),
+                    .map_err(|e| format!("Couldn't change opencode.json: {e}")),
             ))
         })
     }

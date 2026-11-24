@@ -15,7 +15,7 @@ use crate::theme::color;
 use crate::timeline::Activity;
 use crate::ui::{InboxRow, State};
 
-/// The kind of queued item OpenCode adds itself, as a note to the agent.
+/// The kind of queued item the server adds itself, as a note to the agent.
 const SYNTHETIC: &str = "synthetic";
 
 /// What the composer says while the session works, and while it waits.
@@ -137,7 +137,7 @@ pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
     }
     // Work it sent to the background, each with a way to stop it.
     rows.extend(app.jobs(id).filter_map(|job| job_row(t, job)));
-    // OpenCode's own notes to the agent aren't the user's to see or cancel.
+    // The server's own notes to the agent aren't the user's to see or cancel.
     let busy = app.is_busy(id);
     let waiting = app
         .inbox(id)
@@ -170,7 +170,7 @@ pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
         } else {
             row.cancel = true;
             if !busy {
-                // Once it stops, OpenCode holds what's waiting until the next prompt.
+                // Once it stops, the server holds what's waiting until the next prompt.
                 row.note = "Sends before your next message".into();
             } else if !steering {
                 row.action = "Steer".into();

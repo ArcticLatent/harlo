@@ -3,7 +3,7 @@
 # adds `default`. Paths are the repository's, changed since the last green
 # run (target/verify/last-green.json), or since main without one.
 
-default = ["lint:*", "unit:*", "window:*", "engine:*"]
+default = ["lint:*", "unit:*", "window:*"]
 
 [[rule]]
 paths = ["*.md", "docs/**", "packaging/**", ".github/**", "LICENSE*", "*.txt"]
@@ -11,11 +11,11 @@ checks = []
 
 [[rule]]
 paths = ["crates/opencode-client/**"]
-checks = ["lint:*", "unit:*", "window:*", "engine:*"]
+checks = ["lint:*", "unit:*", "window:*"]
 
 [[rule]]
 paths = ["crates/harlo-engine/**", "crates/harlo-server/**"]
-checks = ["lint:*", "unit:harlo-engine", "unit:harlo-server", "engine:*"]
+checks = ["lint:*", "unit:harlo-engine", "unit:harlo-server", "window:*"]
 
 [[rule]]
 paths = ["crates/harlo-core/**"]
@@ -27,11 +27,11 @@ checks = ["unit:harlo-core", "unit:harlo", "window:phone"]
 
 [[rule]]
 paths = ["crates/harlo/**"]
-checks = ["lint:*", "unit:harlo", "window:*", "engine:*"]
+checks = ["lint:*", "unit:harlo", "window:*"]
 
 [[rule]]
 paths = ["Cargo.toml", "Cargo.lock"]
-checks = ["lint:*", "unit:*", "window:*", "engine:*"]
+checks = ["lint:*", "unit:*", "window:*"]
 
 [[rule]]
 paths = ["tools/verify/scenarios/real_*"]
@@ -42,9 +42,5 @@ paths = ["tools/verify/scenarios/*"]
 checks = ["window:*"]
 
 [[rule]]
-paths = ["tools/verify/*", "tools/gui-drive.py", "tools/oc-sandbox.sh", "tools/fake-model.py"]
+paths = ["tools/verify/*", "tools/gui-drive.py", "tools/sandbox.sh", "tools/fake-model.py"]
 checks = ["window:*"]
-
-[[rule]]
-paths = ["tools/opencode-bump.sh", "crates/opencode-client/OPENCODE_VERSION"]
-checks = ["lint:*", "unit:*", "window:*", "real:*"]

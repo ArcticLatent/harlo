@@ -230,10 +230,10 @@ fn boot(options: &Options) -> App {
         .as_ref()
         .and_then(|store| store.load_preferences().ok())
         .unwrap_or_default();
-    // The server given with `--server`, else the chosen one on this computer.
+    // The server given with `--server`, else Harlo's on this computer.
     let location = match locations.last() {
         Some(server @ Location::Server { .. }) => server.clone(),
-        _ => Location::here(preferences.backend),
+        _ => Location::Local,
     };
     let mut app = App::new(location, locations, layout)
         .with_preferences(preferences)
@@ -391,7 +391,7 @@ fn raise(window: &AppWindow) {
 /// every message the window sends: for UI tests.
 ///
 /// The window's callbacks and the shown state are the real ones; the
-/// requests to OpenCode and the disk that the app's tasks would make
+/// requests to the server and the disk that the app's tasks would make
 /// don't happen unless the test takes the tasks and runs them.
 #[derive(Clone)]
 pub struct Driver {
@@ -516,9 +516,6 @@ pub const CHOOSE_DEFAULT_MODEL: i32 = 10;
 /// The Settings button that opens the setup guide.
 pub const OPEN_SETUP: i32 = 11;
 
-/// The setup guide's button that installs OpenCode.
-pub const INSTALL_OPENCODE: i32 = 12;
-
 /// The Settings button that sends a test notification.
 pub const TEST_NOTICE: i32 = 13;
 
@@ -526,7 +523,7 @@ pub const TEST_NOTICE: i32 = 13;
 /// project's new sessions.
 pub const CHOOSE_PROJECT_MODEL: i32 = 14;
 
-/// The Settings button that lets OpenCode choose the shown project's model
+/// The Settings button that lets the server choose the shown project's model
 /// again.
 pub const DEFAULT_PROJECT_MODEL: i32 = 15;
 
@@ -703,7 +700,7 @@ pub const STOP_LOCAL_MODEL: i32 = 66;
 /// item.
 pub const SERVE_LOCAL_MODEL: i32 = 67;
 
-/// The Settings button that adds llama.cpp's server to OpenCode's config
+/// The Settings button that adds llama.cpp's server to the server's config
 /// (item 1) or takes it out (item 0).
 pub const LOCAL_PROVIDER: i32 = 68;
 
@@ -771,7 +768,7 @@ pub const IMPORT_OPENCODE: i32 = 86;
 pub const MODEL_SWITCHES: i32 = 10_000;
 
 /// The pages Settings links to: About's source, releases and new issue,
-/// then OpenCode's page on adding skills.
+/// then the server's page on adding skills.
 pub const ABOUT_LINKS: [&str; 4] = [
     env!("CARGO_PKG_REPOSITORY"),
     concat!(env!("CARGO_PKG_REPOSITORY"), "/releases"),
@@ -840,7 +837,7 @@ fn mcp_action(app: &App, number: i32, item: i32) -> Option<Message> {
         ADD_OFFERED_MCP => McpEvent::AddOffered(usize::try_from(item).ok()?),
         SAVE_MCP => McpEvent::Save,
         SIGN_IN_MCP => {
-            // The server signs in through OpenCode's integration for it,
+            // The server signs in through the server's integration for it,
             // on Models' sign-in page.
             let Load::Loaded(setup) = &app.sheets.setup else {
                 return None;
@@ -924,7 +921,6 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         CHOOSE_DEFAULT_MODEL => Some(Message::TogglePicker(Picker::DefaultModel)),
         CHOOSE_INTERFACE_FONT..=SOUND_LICENCE => look_action(number, item),
         OPEN_SETUP => Some(Message::Sheet(SheetEvent::OpenSetup)),
-        INSTALL_OPENCODE => Some(Message::Sheet(SheetEvent::InstallOpenCode)),
         TEST_NOTICE => Some(Message::Sheet(SheetEvent::TestNotice)),
         CHOOSE_PROJECT_MODEL => Some(Message::TogglePicker(Picker::ProjectModel)),
         DEFAULT_PROJECT_MODEL => project(ProjectEvent::Model(None)),

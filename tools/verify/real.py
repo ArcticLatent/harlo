@@ -1,4 +1,4 @@
-"""Real models for the real:* scenarios: Claude, through OpenCode's Claude
+"""Real models for the real:* scenarios: Claude, through the server's Claude
 Agent, signed in with the user's own Claude Code sign-in.
 
 Safety, since the sign-in is the user's real one:
@@ -13,10 +13,6 @@ Safety, since the sign-in is the user's real one:
   the real Claude Code out.
 - Checks run only while the token has REQUIRED_MINUTES left; Claude Code
   refreshes it on its own schedule, and the next run picks up the new one.
-
-GPT isn't used: its sign-in in OpenCode can only be used by refreshing it
-once it has expired, which would sign the real OpenCode out. It's checked
-and reported as the reason for the skip.
 """
 
 import json
@@ -25,7 +21,6 @@ import shutil
 import time
 
 CREDENTIALS = os.path.expanduser("~/.claude/.credentials.json")
-OPENCODE_AUTH = os.path.expanduser("~/.local/share/opencode/auth.json")
 REQUIRED_MINUTES = 30
 
 # The cheapest model the Claude Agent offers; every check is a short turn.
@@ -62,23 +57,6 @@ def minutes_left():
         return None
 
 
-def gpt_state():
-    """Why GPT checks don't run: what OpenCode's own sign-in says."""
-    try:
-        with open(OPENCODE_AUTH) as f:
-            openai = json.load(f).get("openai")
-    except (OSError, ValueError):
-        openai = None
-    if not openai:
-        return "no ChatGPT sign-in in OpenCode"
-    expires = openai.get("expires")
-    if expires and expires / 1000 < time.time():
-        hours = round((time.time() - expires / 1000) / 3600)
-        return (f"the ChatGPT sign-in expired {hours} h ago; using it would mean refreshing it, "
-                "which signs OpenCode out; sign in again there to add GPT checks")
-    return "GPT checks aren't written yet"
-
-
 class Setup:
     """The real Claude Code, put into each scenario's sandbox."""
 
@@ -102,14 +80,14 @@ class Setup:
         return Setup(os.path.realpath(claude), left), None
 
     def describe(self):
-        return f"Claude ({MODEL}) through OpenCode's Claude Agent; sign-in good for {round(self.left)} min"
+        return f"Claude ({MODEL}) through the server's Claude Agent; sign-in good for {round(self.left)} min"
 
     def env(self):
         return {}
 
     def prepare(self, h):
         """Puts the wrapper where the sandbox server runs `claude`, then
-        connects OpenCode's Claude Agent from Settings → Providers."""
+        connects the server's Claude Agent from Settings → Providers."""
         sandbox = h.info["sandbox"]
         home = os.path.join(sandbox, "home")
         os.makedirs(os.path.join(sandbox, "bin"), exist_ok=True)

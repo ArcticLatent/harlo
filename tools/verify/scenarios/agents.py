@@ -3,8 +3,6 @@ says so on the tool card; back on Build the same edit runs."""
 
 from _common import open_project_session, send
 
-ENGINE = True
-
 EDIT = 'tool edit {"path":"a.txt","oldString":"alpha","newString":"alpha beta"} ;; say Done.'
 
 

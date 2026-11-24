@@ -733,7 +733,7 @@ def scene_worktrees(g):
     g.cap("settings", "Settings → Projects: the project's worktree, Make for another, and its setup command")
     h.press("Close")
     h.wait_gone("Search settings", role="TextInput")
-    # A session in the worktree, made through OpenCode and titled, as the
+    # A session in the worktree, made through the server and titled, as the
     # other scenes give theirs: the scripted model names none.
     projects = h.api("GET", "/api/project")
     projects = projects.get("data", projects) if isinstance(projects, dict) else projects
@@ -972,7 +972,7 @@ SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approva
           ("window", scene_window)]
 
 # A sitting of its own: the guide shows only before setup is done.
-GUIDE = ["OpenCode", "Providers", "Git", "Theme"]
+GUIDE = ["Server", "Providers", "Git", "Theme"]
 
 
 def guide_sitting(folder, mode, size):
@@ -1052,7 +1052,7 @@ def write_index(root, label, sittings):
 
 
 def main():
-    # The Todos panel has a list to show only with OpenCode's todo tool on.
+    # The Todos panel has a list to show only with the todo tool on.
     os.environ["OC_SANDBOX_TODO"] = "1"
     args = sys.argv[1:]
     opts = {"--modes": ",".join(MODES), "--sizes": ",".join(SIZES), "--only": ""}

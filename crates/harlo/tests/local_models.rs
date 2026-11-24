@@ -1,6 +1,6 @@
 //! Settings → Local models: llama.cpp installs from a (fake) GitHub
 //! release, a model downloads from a (fake) Hugging Face, the server Harlo
-//! starts answers and is added to OpenCode's config; Ollama's server,
+//! starts answers and is added to the server's config; Ollama's server,
 //! already running, pulls a model. Everything is local: scratch folders,
 //! loopback servers, and a stand-in `llama-server`.
 
@@ -243,13 +243,13 @@ fn llama_cpp_installs_serves_a_model_and_joins_opencode() {
     assert!(ui.shows("Tiny-Coder"));
     assert_eq!(ui.app().preferences.local_servers, ["llamacpp"]);
 
-    ui.press("Add to OpenCode");
+    ui.press("Add to the model menu");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Added")),
         "{:?}",
         ui.app().local.error
     );
-    assert!(ui.shows("Tiny-Coder is in OpenCode's model menu."));
+    assert!(ui.shows("Tiny-Coder is in the model menu."));
     let file = harlo_core::config::file(&scratch.path().join("opencode"));
     let text = std::fs::read_to_string(file).expect("OpenCode's config");
     let config: Value = serde_json::from_str(&text).expect("JSON");

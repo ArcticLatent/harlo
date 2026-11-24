@@ -24,7 +24,6 @@ use std::rc::Rc;
 
 use harlo_core::approvals::Shield;
 use harlo_core::composer::Choice;
-use harlo_core::layout::Backend;
 use harlo_core::server::Location;
 use harlo_core::sessions::{SessionSummary, VISIBLE_SESSIONS, compact_age, visible};
 use harlo_core::theme::{Rgba, Tokens};
@@ -493,8 +492,7 @@ impl Presenter {
                 .and_then(|agent| agent.description)
                 .unwrap_or_default(),
             Picker::DefaultModel => {
-                "Sets OpenCode's default, for new sessions in every app using this server."
-                    .to_owned()
+                "Sets the server's default, for new sessions in every project.".to_owned()
             }
             Picker::ProjectModel => {
                 "For new sessions in this project, from Harlo on this computer.".to_owned()
@@ -503,18 +501,13 @@ impl Presenter {
                 "Writes commit messages in the Changes panel, from Harlo on this computer."
                     .to_owned()
             }
-            Picker::Provider => {
-                "Signing in stores the credential in OpenCode, for every app using this server."
-                    .to_owned()
-            }
+            Picker::Provider => "Signing in stores the credential on Harlo's server.".to_owned(),
             Picker::ScheduleSession => {
                 "Each run sends the prompt to this session, as if typed there.".to_owned()
             }
             Picker::Variant => "How much reasoning the model uses before it answers.".to_owned(),
             Picker::DeleteSession => "Its subagents' sessions are deleted with it.".to_owned(),
-            Picker::SessionMenu => {
-                "These change the session on the server, for every app using it.".to_owned()
-            }
+            Picker::SessionMenu => "These change the session on the server.".to_owned(),
             Picker::InterfaceFont | Picker::CodeFont if app.system_fonts.is_none() => {
                 "Looking for this computer's fonts…".to_owned()
             }
@@ -573,7 +566,7 @@ fn status_color(t: &Tokens, status: &Status) -> Rgba {
 /// The icon for a location: this computer, or another server.
 fn location_icon(location: &Location) -> Icon {
     match location {
-        Location::Shared | Location::Engine => Icon::Monitor,
+        Location::Local => Icon::Monitor,
         Location::Server { .. } => Icon::Server,
         Location::Ssh { .. } => Icon::MonitorCloud,
     }
@@ -582,27 +575,18 @@ fn location_icon(location: &Location) -> Icon {
 /// What a location is, under its name.
 fn location_detail(location: &Location) -> &'static str {
     match location {
-        Location::Engine => "Harlo's server on this computer",
-        Location::Shared => "OpenCode's service on this computer",
+        Location::Local => "Harlo's server on this computer",
         Location::Server { .. } => "Server given with --server",
-        Location::Ssh {
-            backend: Backend::Harlo,
-            ..
-        } => "Harlo's server there, over SSH",
-        Location::Ssh {
-            backend: Backend::OpenCode,
-            ..
-        } => "OpenCode's service there, over SSH",
+        Location::Ssh { .. } => "Harlo's server there, over SSH",
     }
 }
 
 /// What the list says when it has no projects to show.
 fn empty_text(status: &Status, location: &Location) -> String {
     match status {
-        Status::Connecting { .. } => match location.backend() {
-            Some(Backend::Harlo) => "Connecting to Harlo's server…".to_owned(),
-            Some(Backend::OpenCode) => "Connecting to OpenCode…".to_owned(),
-            None => "Connecting…".to_owned(),
+        Status::Connecting { .. } => match location {
+            Location::Server { .. } => "Connecting…".to_owned(),
+            Location::Local | Location::Ssh { .. } => "Connecting to Harlo's server…".to_owned(),
         },
         Status::Lost { reason, .. } => format!("Can't connect: {reason}."),
         Status::Connected { .. } => "No projects yet.\nAdd a folder with + Project.".to_owned(),
@@ -731,7 +715,7 @@ fn session_rows(
     true
 }
 
-/// The logo of a session's model maker, by OpenCode provider ID, and its
+/// The logo of a session's model maker, by the server provider ID, and its
 /// tone. Providers that serve one maker's models under several IDs, such
 /// as `zai` and `zai-coding-plan`, share a logo.
 fn maker(t: &Tokens, provider: Option<&str>) -> (i32, Rgba) {
@@ -772,7 +756,7 @@ fn chips(app: &App, t: &Tokens) -> Vec<Chip> {
         });
     }
     if app.variant_choices().len() > 1 {
-        // OpenCode's variants are mostly how hard the model thinks; a bare
+        // The server's variants are mostly how hard the model thinks; a bare
         // "default" said nothing.
         let label = format!(
             "Effort: {}",

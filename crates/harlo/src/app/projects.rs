@@ -34,7 +34,7 @@ pub enum ProjectEvent {
     /// Go back to the plain mark.
     ClearIcon,
     /// Start new sessions in the shown project with this model, or with
-    /// OpenCode's default.
+    /// The server's default.
     Model(Option<ModelChoice>),
     /// A change to the project was saved, or why it couldn't be.
     Saved(Result<(), String>),
@@ -157,7 +157,7 @@ impl App {
     fn change_project(&mut self, change: ProjectChange) -> Task<Message> {
         let (Some(client), Some(id)) = (self.client.clone(), self.shown_project_id()) else {
             self.sheets.projects.error =
-                Some("OpenCode doesn't know this project until it has a session.".to_owned());
+                Some("Harlo's server doesn't know this project until it has a session.".to_owned());
             return Task::none();
         };
         self.sheets.projects.error = None;
@@ -209,7 +209,7 @@ impl App {
     }
 
     /// Makes a worktree of the shown project, named `name`, or named by
-    /// OpenCode when it's empty.
+    /// The server when it's empty.
     pub(super) fn make_worktree(&mut self, name: &str) -> Task<Message> {
         let (Some(client), Some(id)) = (self.client.clone(), self.shown_project_id()) else {
             return Task::none();

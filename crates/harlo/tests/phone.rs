@@ -1,7 +1,7 @@
 //! Settings → Phone: turning phone access on, pairing a stand-in phone with
 //! the code shown, seeing it connected, and removing it.
 //!
-//! Phone access follows a private `opencode serve` with scratch folders and
+//! Phone access follows a private `harlo-server` with scratch folders and
 //! keeps its key and paired phones in a scratch folder; it listens on a free
 //! loopback port. The relay stays off: nothing leaves this computer.
 

@@ -1,6 +1,6 @@
 //! A real session's history, turned into timeline rows.
 //!
-//! Runs against a private `opencode serve` with scratch `HOME`/`XDG_*` folders
+//! Runs against a private `harlo-server` with scratch `HOME`/`XDG_*` folders
 //! and a scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09

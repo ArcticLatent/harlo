@@ -119,24 +119,24 @@ impl Remote {
         })
     }
 
-    /// Registers the server at `url` as the remote computer's shared
-    /// service.
+    /// Registers the server at `url` as the remote computer's Harlo
+    /// server.
     pub fn register(&self, url: &str, password: &str) {
-        std::fs::create_dir_all(self.root.join("state/opencode")).expect("a folder");
+        std::fs::create_dir_all(self.root.join("state/harlo")).expect("a folder");
         std::fs::write(
-            self.root.join("state/opencode/service.json"),
+            self.root.join("state/harlo/service.json"),
             registration(url, password),
         )
         .expect("service.json");
     }
 }
 
-/// A registration for the server at `url`, as OpenCode writes it.
+/// A registration for the server at `url`, as `harlo-server` writes it.
 pub fn registration(url: &str, password: &str) -> String {
     serde_json::json!({
         "url": url,
         "password": password,
-        "version": harlo_core::OPENCODE_VERSION,
+        "version": env!("CARGO_PKG_VERSION"),
     })
     .to_string()
 }

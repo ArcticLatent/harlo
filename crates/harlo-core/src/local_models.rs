@@ -3,8 +3,8 @@
 //!
 //! Harlo installs the engines from their GitHub releases into its own data
 //! folder, checked against the published SHA-256, and runs their servers
-//! while it's open. OpenCode finds Ollama's models on its own; a llama.cpp
-//! server is added to OpenCode's config as a provider when asked.
+//! while it's open. The server finds Ollama's models on its own; a llama.cpp
+//! server is added to the server's config as a provider when asked.
 
 // Rust guideline compliant 2026-10-09
 
@@ -49,7 +49,7 @@ impl Engine {
         }
     }
 
-    /// The port its server listens on, the one OpenCode looks at for
+    /// The port its server listens on, the one the server looks at for
     /// Ollama.
     #[must_use]
     pub fn port(self) -> u16 {

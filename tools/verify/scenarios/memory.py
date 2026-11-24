@@ -1,13 +1,9 @@
-"""Settings → Memory: notes between sessions. On harlo-server: turned on
-there, a note the agent keeps shows with the session it came from, and is
-corrected and then forgotten from Settings. On OpenCode the page says notes
-need Harlo's own server."""
+"""Settings → Memory: notes between sessions. Turned on, a note the agent
+keeps shows with the session it came from, and is corrected and then
+forgotten from Settings."""
 
 from _common import close_sheet, open_project_session, send, settings
 
-ENGINE = True
-
-UNSUPPORTED = "Notes between sessions need Harlo's own server. This server doesn't keep them."
 
 
 def edit_button(e):
@@ -17,12 +13,8 @@ def edit_button(e):
 def run(h, s):
     s.step("Settings → Memory")
     settings(h, "Memory")
-    shown = h.until("the Memory page",
-                    lambda: h.says(UNSUPPORTED) or h.find("Keep notes between sessions",
-                                                          role="Checkbox"))
-    if shown == UNSUPPORTED:
-        h.shot("unsupported")
-        return
+    h.until("the Memory page",
+            lambda: h.find("Keep notes between sessions", role="Checkbox"))
     s.expect(h.says("None yet."), "no notes yet")
 
     s.step("turned on, the agent keeps a note")

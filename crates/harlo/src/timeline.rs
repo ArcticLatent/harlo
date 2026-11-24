@@ -87,7 +87,7 @@ struct Row {
     diffs: Vec<Vec<diff::Line>>,
     /// Built from live events rather than loaded.
     live: bool,
-    /// A prompt Harlo sent that OpenCode's copy hasn't replaced yet; reloads keep it.
+    /// A prompt Harlo sent that the server's copy hasn't replaced yet; reloads keep it.
     unsaved: bool,
     /// Changes whenever the entry does, so the window rebuilds only changed rows.
     stamp: u64,
@@ -191,7 +191,7 @@ impl Timeline {
     /// Rows whose key and content are unchanged keep their parsed Markdown;
     /// measured heights are kept by key, so a reload doesn't make it jump.
     /// While the session works, streamed rows the history doesn't have yet
-    /// stay at the end: OpenCode stores them once they're done.
+    /// stay at the end: The server stores them once they're done.
     pub fn set(&mut self, entries: Vec<Entry>) {
         let old = std::mem::take(&mut self.rows);
         let mut in_flight = Vec::new();
@@ -247,7 +247,7 @@ impl Timeline {
                     if let Some(&index) = self.index.get(entry.key()) {
                         structure |=
                             self.rows[index].entry.is_running_tool() != entry.is_running_tool();
-                        // OpenCode's copy replaces a prompt Harlo showed while sending it;
+                        // The server's copy replaces a prompt Harlo showed while sending it;
                         // a fade under way carries on.
                         let stamp = self.stamp();
                         let appeared = self.rows[index].appeared;
@@ -303,14 +303,14 @@ impl Timeline {
         reload
     }
 
-    /// Shows a prompt that's on its way to OpenCode.
+    /// Shows a prompt that's on its way to the server.
     ///
-    /// It stays, marked as sending, until OpenCode's copy (with the same key)
+    /// It stays, marked as sending, until the server's copy (with the same key)
     /// replaces it, [`Timeline::sent`] marks it sent, or
     /// [`Timeline::unpend`] takes it away.
     pub fn pend(&mut self, entry: Entry) {
         if self.index.contains_key(entry.key()) {
-            // OpenCode's copy is already here.
+            // The server's copy is already here.
             return;
         }
         self.index.insert(entry.key().to_owned(), self.rows.len());
@@ -600,7 +600,7 @@ pub struct RowView<'a> {
     pub undo: bool,
     /// Whether it's inside an open group, and indented.
     pub nested: bool,
-    /// Whether it's a prompt still on its way to OpenCode.
+    /// Whether it's a prompt still on its way to the server.
     pub sending: bool,
     /// Whether it's a prompt that just arrived, which fades in.
     pub fresh: bool,

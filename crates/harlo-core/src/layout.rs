@@ -4,7 +4,7 @@
 //! The layout covers the project folders in the sidebar, which panels and
 //! lists are open and how big the user made them, and the open tabs for
 //! each server. The preferences are what the user chose in Settings that
-//! belongs to Harlo rather than to the OpenCode server. Both are saved after
+//! belongs to the window rather than to the server. Both are saved after
 //! each change, off the UI thread, and read once at start. Notes are kept one
 //! per folder on each server.
 
@@ -28,7 +28,7 @@ const PREFERENCES_KEY: &str = "preferences";
 
 /// Harlo's own settings, as the user chose them in Settings.
 ///
-/// Settings that belong to the OpenCode server aren't here; Harlo reads and
+/// Settings that belong to the server aren't here; Harlo reads and
 /// changes those through the server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -106,8 +106,8 @@ pub struct Preferences {
     pub local_servers: Vec<String>,
     /// The model file llama.cpp's server serves.
     pub llamacpp_model: String,
-    /// Other computers whose shared OpenCode service Harlo follows over
-    /// SSH, each as what follows `ssh` to reach it.
+    /// Other computers whose Harlo server Harlo follows over SSH, each as
+    /// what follows `ssh` to reach it.
     pub computers: Vec<String>,
     /// Whether paired phones can reach Harlo while it runs.
     pub phone: bool,
@@ -118,27 +118,12 @@ pub struct Preferences {
     pub phone_paused: bool,
     /// The user's picture on the rail, by name, such as `classic`.
     pub avatar: String,
-    /// The server Harlo opens on at start; the other stays in the picker.
-    pub backend: Backend,
-}
-
-/// The server software a location runs.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Backend {
-    /// Harlo's own server, `harlo-server`.
-    #[default]
-    #[serde(rename = "harlo")]
-    Harlo,
-    /// OpenCode's background service.
-    #[serde(rename = "opencode")]
-    OpenCode,
 }
 
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             reopen_tabs: true,
-            backend: Backend::default(),
             keep_in_tray: true,
             setup_done: false,
             notifications: crate::notifications::Notifications::default(),

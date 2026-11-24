@@ -1,4 +1,4 @@
-//! Session goals, set with OpenCode's `/goal` command: an objective the
+//! Session goals, set with the server's `/goal` command: an objective the
 //! agent keeps working toward, round after round, until a reviewer finds
 //! it met.
 //!

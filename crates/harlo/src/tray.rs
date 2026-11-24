@@ -52,7 +52,7 @@ pub enum Choice {
 /// A session the tray lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// OpenCode's session ID.
+    /// The server's session ID.
     pub id: String,
     /// Its title, as the sidebar shows it.
     pub title: String,

@@ -1,7 +1,7 @@
 //! Harlo offers its own tools to the agents of every folder it shows while
 //! connected, and the switch in Tools for agents takes them away and back.
 //!
-//! Runs against a private `opencode serve` with scratch `HOME`/`XDG_*`
+//! Runs against a private `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders, never the shared service; Harlo's home folder is a scratch one.
 
 // Rust guideline compliant 2026-10-09
@@ -65,15 +65,15 @@ fn harlos_tools_reach_agents_while_switched_on() {
         .block_on(client.set_title(&earlier.id, "Plan the release"))
         .expect("title");
 
-    let mut app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
+    let mut app = App::new(Location::Local, vec![Location::Local], demo::layout());
     app.home = home.clone();
     let _ = app.update(Message::Tick(demo::now()));
     let ui = ui(app);
     let snapshot = tasks.block_on(load(&client)).expect("snapshot");
     ui.send(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     }))));
     assert!(

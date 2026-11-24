@@ -2,7 +2,7 @@
 //! computer: the terminal connects once the shell has started, shows what it
 //! prints, and closing the tab removes the shell from the server.
 //!
-//! Runs against a private `opencode serve` with scratch `HOME`/`XDG_*`
+//! Runs against a private `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -28,8 +28,8 @@ fn window(sandbox: &Sandbox) -> Ui {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(project);

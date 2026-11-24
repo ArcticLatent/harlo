@@ -1,4 +1,4 @@
-//! Settings → Agents' rows: OpenCode's agents in the open project, and the
+//! Settings → Agents' rows: The server's agents in the open project, and the
 //! approvals it saved when someone chose "Always allow".
 
 // Rust guideline compliant 2026-10-09
@@ -20,7 +20,7 @@ pub(super) fn agent_rows(app: &App) -> Vec<SheetRow> {
     rows
 }
 
-/// The open project's agents, as OpenCode defines them.
+/// The open project's agents, as the server defines them.
 fn agents(app: &App, rows: &mut Vec<SheetRow>) {
     rows.push(heading("Agents"));
     rows.push(note(

@@ -1,4 +1,4 @@
-//! Other computers, whose shared OpenCode service Harlo follows over SSH:
+//! Other computers, whose shared the server service Harlo follows over SSH:
 //! adding one in Settings → Server follows it, and the location picker
 //! offers it from then on.
 
@@ -40,15 +40,12 @@ impl App {
         if !self.preferences.computers.iter().any(|t| t == target) {
             self.preferences.computers.push(target.to_owned());
         }
-        for location in super::computer_locations(target) {
-            if !self.locations.contains(&location) {
-                self.locations.push(location);
-            }
-        }
         let location = Location::Ssh {
             target: target.to_owned(),
-            backend: self.preferences.backend,
         };
+        if !self.locations.contains(&location) {
+            self.locations.push(location.clone());
+        }
         Task::batch([self.save_preferences(), self.pick_location(location)])
     }
 
@@ -99,13 +96,13 @@ impl App {
                     return Task::none();
                 }
                 let target = self.preferences.computers.remove(index);
-                let gone = super::computer_locations(&target);
-                self.locations.retain(|l| !gone.contains(l));
+                let gone = Location::Ssh { target };
+                self.locations.retain(|l| *l != gone);
                 let mut tasks = vec![self.save_preferences()];
                 // Back to the first in the picker: Harlo's server on this
                 // computer, or the server Harlo was started with.
-                if gone.contains(&self.location) {
-                    let first = self.locations.first().cloned().unwrap_or(Location::Engine);
+                if self.location == gone {
+                    let first = self.locations.first().cloned().unwrap_or(Location::Local);
                     tasks.push(self.pick_location(first));
                 }
                 Task::batch(tasks)

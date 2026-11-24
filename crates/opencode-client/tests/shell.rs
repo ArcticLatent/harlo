@@ -2,7 +2,7 @@
 //! a command runs with no model and joins the conversation; a command the
 //! agent sends to the background is listed, reported and stopped.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09

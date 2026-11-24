@@ -2,8 +2,6 @@
 argument filled in, and a project skill attached with "/" reaches the
 agent."""
 
-ENGINE = True
-
 from _common import composer, open_project_session, send
 
 

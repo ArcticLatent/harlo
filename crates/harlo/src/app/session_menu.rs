@@ -2,7 +2,7 @@
 //! project, export it to a file or import one, archive it, or delete it;
 //! and forking from one of its prompts.
 //!
-//! OpenCode does each; Harlo asks for the file or the confirmation, and
+//! The server does each; Harlo asks for the file or the confirmation, and
 //! opens what comes of it.
 
 // Rust guideline compliant 2026-10-09
@@ -45,11 +45,6 @@ pub enum SessionAction {
     AskDelete,
     /// Delete the open session and its subagents' sessions for good.
     Delete,
-    /// Copy the open session, made on OpenCode's service here, to Harlo's
-    /// server here.
-    CopyToHarlo,
-    /// What copying it did.
-    Copied(Result<harlo_core::import::Imported, String>),
 }
 
 impl App {
@@ -87,9 +82,6 @@ impl App {
     pub(super) fn session_menu(&mut self, action: SessionAction) -> Task<Message> {
         if let SessionAction::Made(made, text) = action {
             return self.made(made, text);
-        }
-        if let SessionAction::Copied(done) = action {
-            return self.copied(done);
         }
         // Each choice closes the menu; deleting asks first, in its place.
         self.picker = matches!(action, SessionAction::AskDelete).then_some(Picker::DeleteSession);
@@ -132,14 +124,7 @@ impl App {
             SessionAction::Archive => {
                 self.act(|client, id| async move { client.set_archived(&id, true).await })
             }
-            SessionAction::CopyToHarlo => {
-                Task::perform(harlo_core::import::from_opencode(Some(vec![id])), |done| {
-                    Message::SessionMenu(SessionAction::Copied(done))
-                })
-            }
-            SessionAction::AskDelete | SessionAction::Made(..) | SessionAction::Copied(_) => {
-                Task::none()
-            }
+            SessionAction::AskDelete | SessionAction::Made(..) => Task::none(),
             SessionAction::Delete => {
                 self.act(|client, id| async move { client.delete_session(&id).await })
             }
@@ -237,30 +222,6 @@ fn import(client: Client, path: PathBuf, folder: String) -> Task<Message> {
 }
 
 impl App {
-    /// Switches to Harlo's server, where the copied session now is; or
-    /// says why it didn't come over.
-    fn copied(&mut self, done: Result<harlo_core::import::Imported, String>) -> Task<Message> {
-        match done {
-            Ok(imported) if imported.failed.is_empty() => {
-                let copied = self.active.clone();
-                let switch = self.pick_location(harlo_core::server::Location::Engine);
-                // It opens there once connected, with the tabs left open there.
-                if let Some(id) = copied {
-                    let tabs = self.restore.get_or_insert_with(Default::default);
-                    if !tabs.open.contains(&id) {
-                        tabs.open.push(id.clone());
-                    }
-                    tabs.active = Some(id);
-                }
-                switch
-            }
-            other => {
-                self.send_error = Some(super::computers::imported_text(&other));
-                Task::none()
-            }
-        }
-    }
-
     /// Opens a fork or an import that was made, with `text` in the
     /// composer when there is some; or says why it wasn't.
     fn made(&mut self, made: Result<Box<Session>, String>, text: Option<String>) -> Task<Message> {

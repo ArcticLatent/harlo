@@ -1,5 +1,5 @@
 //! ✦ in the Changes panel: a commit message written from the uncommitted
-//! files' diffs by the model chosen in Settings → Git, through OpenCode's
+//! files' diffs by the model chosen in Settings → Git, through the server's
 //! one-off text generation (no tools, and no session kept).
 
 // Rust guideline compliant 2026-10-09

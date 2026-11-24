@@ -1,6 +1,6 @@
 //! The Claude subscription in Settings → Providers, with Claude Code's checks,
 //! the plan's usage
-//! and OpenCode's answers fed in as messages. The real flow, against a
+//! and the server's answers fed in as messages. The real flow, against a
 //! private server and a stand-in Claude Code, is in `server_claude.rs`.
 
 // Rust guideline compliant 2026-10-09

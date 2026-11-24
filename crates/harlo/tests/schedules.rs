@@ -1,5 +1,5 @@
-//! Settings → Schedules against a private `opencode serve` with scratch
-//! `HOME`/`XDG_*` folders: allowing them in the sandbox's OpenCode config,
+//! Settings → Schedules against a private `harlo-server` with scratch
+//! `HOME`/`XDG_*` folders: allowing them in the sandbox's the server config,
 //! making one, pausing, resuming and deleting it, and a time the server
 //! can't read. Never the shared service or the real config.
 
@@ -30,8 +30,8 @@ fn schedules(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(sandbox.project_str());
@@ -79,7 +79,7 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
     let ui = schedules(&sandbox, &mut tasks);
-    // OpenCode runs automations unless its config says otherwise.
+    // The server runs automations unless its config says otherwise.
     assert_eq!(ui.app().sheets.schedules.allowed, Load::Loaded(true));
     let switch = || {
         ui.find("Allow schedules")
@@ -158,7 +158,7 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
     assert!(ui.shows("Morning check"), "in the list");
     ui.press("Morning check");
     ui.press("Delete");
-    assert!(ui.shows("Delete it for every app using this server?"));
+    assert!(ui.shows("Delete it for good?"));
     ui.press("Delete for good");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("No schedules yet.")),
@@ -190,7 +190,9 @@ fn a_time_the_server_cant_read_says_why_and_leaves_no_session() {
     ui.fill("Prompt", "Check the build.");
     ui.press("Create schedule");
     assert!(
-        tasks.until(&ui, WAIT, |ui| ui.shows("Invalid time: tomorrow-ish")),
+        tasks.until(&ui, WAIT, |ui| ui.shows(
+            "Invalid time \"tomorrow-ish\": say \"in 10 minutes\" or 2026-10-27T09:00."
+        )),
         "the server's reason: {:?}",
         ui.app().sheets.schedules.error
     );

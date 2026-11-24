@@ -1,8 +1,6 @@
 """Todos: with `experimental.todo` on, the agent writes its todo list with
 todowrite, and the session shows it."""
 
-ENGINE = True
-
 import json
 import os
 

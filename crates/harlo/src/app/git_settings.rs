@@ -1,5 +1,5 @@
 //! Settings → Git: git's name and email on commits (shared with the setup
-//! guide), whether OpenCode keeps the snapshots undoing a turn needs, and
+//! guide), whether the server keeps the snapshots undoing a turn needs, and
 //! the model that writes commit messages.
 
 // Rust guideline compliant 2026-10-09
@@ -17,7 +17,7 @@ use super::{App, Message};
 /// Something that happened in Settings → Git.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitEvent {
-    /// OpenCode's snapshot setting, as read from its config.
+    /// The server's snapshot setting, as read from its config.
     Snapshots(Result<bool, String>),
     /// Turn the snapshots on or off.
     ToggleSnapshots,
@@ -31,7 +31,7 @@ pub enum GitEvent {
 /// Settings → Git's state.
 #[derive(Debug, Default)]
 pub struct GitSettings {
-    /// Whether OpenCode keeps snapshots, once read.
+    /// Whether the server keeps snapshots, once read.
     pub snapshots: Load<bool>,
     /// Why the snapshots couldn't be turned on or off.
     pub error: Option<String>,
@@ -59,7 +59,7 @@ impl App {
                     git_message(GitEvent::SnapshotsSet(
                         result
                             .map(|()| on)
-                            .map_err(|e| format!("Couldn't change OpenCode's config: {e}")),
+                            .map_err(|e| format!("Couldn't change opencode.json: {e}")),
                     ))
                 });
             }
@@ -74,7 +74,7 @@ impl App {
         Task::none()
     }
 
-    /// Reads git's version and name on commits, and OpenCode's snapshot
+    /// Reads git's version and name on commits, and the server's snapshot
     /// setting where Harlo may change it, for the setup guide and
     /// Settings → Git.
     pub(super) fn load_git(&mut self) -> Task<Message> {

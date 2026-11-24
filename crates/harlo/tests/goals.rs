@@ -1,4 +1,4 @@
-//! A session's goal above its composer, against a private `opencode serve`
+//! A session's goal above its composer, against a private `harlo-server`
 //! with scratch `HOME`/`XDG_*` folders and the scripted model: read when
 //! the session opens, followed as it changes, and resumed and dismissed
 //! from its line. Never the shared service.
@@ -89,8 +89,8 @@ fn a_goal_shows_above_the_composer_and_resumes_and_dismisses_from_there() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     }))));
     let ui = ui(app);

@@ -1,6 +1,6 @@
 //! Settings → Tools for agents' MCP servers: connecting and disconnecting
 //! them on the server, and adding, turning off and removing them in
-//! OpenCode's global config, from the catalog or by hand.
+//! The server's global config, from the catalog or by hand.
 
 // Rust guideline compliant 2026-10-09
 
@@ -14,7 +14,7 @@ use crate::task::Task;
 use super::sheets::{Event as SheetEvent, Field, Load};
 use super::{App, Message};
 
-/// How long OpenCode takes to notice a config change and start or stop a
+/// How long the server takes to notice a config change and start or stop a
 /// server, before its status is asked again.
 const SETTLE: Duration = Duration::from_millis(1500);
 
@@ -67,7 +67,7 @@ pub enum McpEvent {
 pub struct McpServers {
     /// What shows.
     pub view: McpView,
-    /// The servers OpenCode's global config on this computer sets up;
+    /// The servers the server's global config on this computer sets up;
     /// [`Load::Idle`] when Harlo can't change it.
     pub saved: Load<Vec<McpEntry>>,
     /// The new server's name.
@@ -215,7 +215,7 @@ impl App {
         let problem = if name.is_empty() {
             Some("Give it a name first.".to_owned())
         } else if name.contains(char::is_whitespace) {
-            Some("A name has no spaces; OpenCode puts it before its tools' names.".to_owned())
+            Some("A name has no spaces; the server puts it before its tools' names.".to_owned())
         } else if page.saved(&name).is_some() {
             Some(format!("There's already a server named {name}."))
         } else {
@@ -409,7 +409,7 @@ impl App {
     }
 }
 
-/// Asks how the servers stand once OpenCode has had time to act on a
+/// Asks how the servers stand once the server has had time to act on a
 /// change.
 pub(super) fn settle() -> Task<Message> {
     Task::future(async {

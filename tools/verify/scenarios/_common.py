@@ -17,7 +17,7 @@ def sidebar(e):
 
 
 def open_project_session(h, title=None):
-    """Makes a session in the sandbox's project through OpenCode and opens
+    """Makes a session in the sandbox's project through the server and opens
     it from the sidebar; returns its ID."""
     created = h.api("POST", "/api/session", {"location": {"directory": h.project}})["data"]
     if title:

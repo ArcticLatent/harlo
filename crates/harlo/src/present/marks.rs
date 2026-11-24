@@ -1,4 +1,4 @@
-//! A project's mark: the colour OpenCode keeps for it, and the icon image
+//! A project's mark: the colour the server keeps for it, and the icon image
 //! chosen for it, decoded once and kept while the same image is in use.
 
 // Rust guideline compliant 2026-10-09
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
 
-/// The colour Harlo draws OpenCode's project colour `name` in, one tone
+/// The colour Harlo draws the server's project colour `name` in, one tone
 /// that reads on light and dark backgrounds; `None` for a name it doesn't
 /// know.
 #[must_use]

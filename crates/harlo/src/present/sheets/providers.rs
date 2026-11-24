@@ -1,4 +1,4 @@
-//! Settings → Providers: the ones OpenCode uses and how each is signed in,
+//! Settings → Providers: the ones the server uses and how each is signed in,
 //! the best-known ones to connect, and the page that signs in to one.
 
 // Rust guideline compliant 2026-10-09
@@ -12,7 +12,7 @@ use crate::app::{App, Field, Load, SettingChoice, SignInAttempt};
 use crate::ui::SheetRow;
 use crate::window;
 
-/// The best-known providers, by OpenCode's id, in the order Popular lists
+/// The best-known providers, by the server's id, in the order Popular lists
 /// the ones not yet connected, each with a line on what it offers and
 /// whether it's recommended.
 const POPULAR: [(&str, &str, bool); 8] = [
@@ -50,14 +50,14 @@ const POPULAR: [(&str, &str, bool); 8] = [
     ),
 ];
 
-/// The providers OpenCode uses and how each is signed in, then
+/// The providers the server uses and how each is signed in, then
 /// `after_connected`, the best-known ones not yet connected, and a button
 /// that lists them all.
 pub(super) fn provider_rows(app: &App, after_connected: Vec<SheetRow>) -> Vec<SheetRow> {
     let page = &app.sheets.providers;
     let mut rows = vec![
         heading("Connected"),
-        note("Sign-ins are shared by every app on this server."),
+        note("Sign-ins are kept on the server, for every session."),
     ];
     let integrations = match &page.list {
         Load::Loaded(list) => list.as_slice(),
@@ -180,7 +180,7 @@ pub(super) fn sign_in_rows(app: &App) -> Vec<SheetRow> {
         back.setting = window::ALL_PROVIDERS;
         return vec![back];
     };
-    let mut back = pair(&integration.name, "Signs in on the OpenCode server", 3);
+    let mut back = pair(&integration.name, "Signs in on Harlo's server", 3);
     back.action = "All providers".into();
     back.setting = window::ALL_PROVIDERS;
     let mut rows = vec![back];
@@ -233,7 +233,7 @@ pub(super) fn sign_in_rows(app: &App) -> Vec<SheetRow> {
         .collect();
     if !names.is_empty() {
         rows.push(note(&format!(
-            "Or set {} where the OpenCode server runs.",
+            "Or set {} where Harlo's server runs.",
             names.join(" or ")
         )));
     }
@@ -264,11 +264,7 @@ fn connection_rows(app: &App, integration: &Integration, rows: &mut Vec<SheetRow
         };
         let asked = page.removing.as_deref() == Some(credential.as_str());
         let mut row = if asked {
-            pair(
-                &connection.label,
-                "Remove it for every app using this server?",
-                4,
-            )
+            pair(&connection.label, "Remove it from the server?", 4)
         } else {
             pair(&connection.label, &words, tone)
         };
@@ -432,7 +428,7 @@ fn form_rows(app: &App) -> Vec<SheetRow> {
                 "",
             )),
             FieldKind::Multiselect { .. } | FieldKind::External { .. } => {
-                rows.push(pair(title, "Answer it with OpenCode's own sign-in", 3));
+                rows.push(pair(title, "Answer it in the sign-in page", 3));
                 continue;
             }
         }

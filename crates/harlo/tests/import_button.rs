@@ -39,7 +39,7 @@ fn import_all_says_why_nothing_came_over() {
         std::env::set_var("HARLO_SERVER_BIN", root.join("bin/harlo-server"));
     }
     let mut app = demo::new_app();
-    app.location = Location::Engine;
+    app.location = Location::Local;
     let ui = ui(app);
     let mut tasks = Tasks::new();
     ui.send(Message::Sheet(SheetEvent::Open(Section::Server)));

@@ -1,14 +1,9 @@
 """One whole turn: with "Ask before edits and commands" on, an edit waits
 for approval and shows its diff; allowed once, the file changes, the agent
 answers, and the change is listed in Changes. After a restart Harlo
-reopens the same session with its history.
-
-Runs on both servers: window:turn on OpenCode, engine:turn on
-harlo-server."""
+reopens the same session with its history."""
 
 from _common import open_project_session, send
-
-ENGINE = True
 
 EDIT = 'tool edit {"path":"a.txt","oldString":"alpha","newString":"omega"} ;; say Changed alpha to omega.'
 

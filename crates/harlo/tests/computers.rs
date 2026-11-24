@@ -1,8 +1,8 @@
-//! Settings → Server's other computers: adding one follows OpenCode's
-//! shared service there over SSH, and removing it goes back. The "other
-//! computer" is a private `sshd` on a loopback port (scratch keys, configs
-//! and `HOME`), and its service a private `opencode serve`; nothing reaches
-//! the user's `~/.ssh`, agent or shared service.
+//! Settings → Server's other computers: adding one follows Harlo's server
+//! there over SSH, and removing it goes back. The "other computer" is a
+//! private `sshd` on a loopback port (scratch keys, configs and `HOME`),
+//! and its server a private `harlo-server serve`; nothing reaches the
+//! user's `~/.ssh`, agent or background service.
 
 // Rust guideline compliant 2026-10-09
 
@@ -15,7 +15,6 @@ mod support;
 use std::time::Duration;
 
 use harlo::app::{Message, Section, SheetEvent, Status};
-use harlo_core::layout::Backend;
 use harlo_core::server::Location;
 use remote::Remote;
 use server::Sandbox;
@@ -46,8 +45,6 @@ fn a_computer_is_added_followed_over_ssh_and_removed() {
     let mut app = demo::new_app();
     app.location = here.clone();
     app.locations = vec![here.clone()];
-    // The other computer stands in for OpenCode's service there.
-    app.preferences.backend = Backend::OpenCode;
     let ui = ui(app);
     ui.send(Message::Sheet(SheetEvent::Open(Section::Server)));
     assert!(ui.shows("Other computers"));
@@ -61,7 +58,6 @@ fn a_computer_is_added_followed_over_ssh_and_removed() {
     ui.press("Add and follow Computer");
     let there = Location::Ssh {
         target: remote.target.clone(),
-        backend: Backend::OpenCode,
     };
     assert_eq!(ui.app().location, there);
     assert!(
@@ -124,7 +120,6 @@ fn the_ssh_configs_hosts_are_offered_and_one_click_follows() {
         ui.app().location,
         Location::Ssh {
             target: "nano".into(),
-            backend: Backend::Harlo,
         },
         "Harlo's server there, as chosen"
     );

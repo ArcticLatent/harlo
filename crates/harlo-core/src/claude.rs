@@ -1,14 +1,14 @@
-//! Claude subscriptions through OpenCode's Claude Agent integration.
+//! Claude subscriptions through the server's Claude Agent integration.
 //!
-//! OpenCode's `claude-agent` integration runs Claude Code (`claude`) through
+//! The server's `claude-agent` integration runs Claude Code (`claude`) through
 //! Anthropic's Agent SDK, so a Claude subscription pays for its models. Claude
-//! Code keeps the sign-in; OpenCode only records that it should use it.
+//! Code keeps the sign-in; the server only records that it should use it.
 //!
 //! This module checks the Claude Code on this computer: whether it's
 //! installed, which account it's signed in to (`claude auth status`), and how
 //! much of the plan's limits is used ([`usage`], the answer Claude Code's own
-//! `/usage` shows, asked over the stream protocol OpenCode also uses).
-//! Connecting and disconnecting go through OpenCode's API
+//! `/usage` shows, asked over the stream protocol the server also uses).
+//! Connecting and disconnecting go through the server's API
 //! ([`Client::connect_external`](crate::server::Client::connect_external)).
 
 // Rust guideline compliant 2026-10-09
@@ -22,13 +22,13 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::Command;
 
-/// OpenCode's integration for Claude subscriptions.
+/// The server's integration for Claude subscriptions.
 pub const INTEGRATION: &str = "claude-agent";
 
 /// The integration's method that uses Claude Code's own sign-in.
 pub const LOGIN_METHOD: &str = "claude-login";
 
-/// The variable OpenCode reads for the `claude` program to run.
+/// The variable the server reads for the `claude` program to run.
 pub const PROGRAM_VARIABLE: &str = "OPENCODE_CLAUDE_PATH";
 
 /// How long a `claude` check may take before it counts as failed.
@@ -54,7 +54,7 @@ const BUSY_TRIES: u32 = 20;
 /// How long it waits between those tries.
 const BUSY_PAUSE: Duration = Duration::from_millis(50);
 
-/// The `claude` program OpenCode runs: the one [`PROGRAM_VARIABLE`] names,
+/// The `claude` program the server runs: the one [`PROGRAM_VARIABLE`] names,
 /// else `claude` on the `PATH`.
 #[must_use]
 pub fn program() -> OsString {

@@ -36,6 +36,3 @@ pub mod timeline;
 pub mod undo;
 pub mod voice;
 pub mod workspace;
-
-/// The OpenCode release Harlo is built and tested against.
-pub const OPENCODE_VERSION: &str = opencode_client::OPENCODE_VERSION;

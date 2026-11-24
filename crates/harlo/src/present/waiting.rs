@@ -115,7 +115,7 @@ fn undo_card(app: &App, staged: StagedUndo<'_>) -> UndoCard {
     let quote = prompt.map_or_else(String::new, |p| {
         format!("“{}”", p.split_whitespace().collect::<Vec<_>>().join(" "))
     });
-    // OpenCode puts the files back as soon as an undo is staged, so the card
+    // The server puts the files back as soon as an undo is staged, so the card
     // says that first; only the conversation waits for the answer.
     let (title, note) = if restores.is_empty() {
         (

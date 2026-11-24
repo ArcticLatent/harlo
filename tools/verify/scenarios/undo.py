@@ -1,14 +1,9 @@
 """Undo a turn from the window: the agent edits a file next to the
 person's uncommitted work; Undo on the prompt puts the file back and shows
 what it restored; Cancel undo brings the agent's edit back; Undo again
-and keep it: the prompt and its answer go, the person's work stays.
-
-Runs on both servers: window:undo on OpenCode, engine:undo on
-harlo-server."""
+and keep it: the prompt and its answer go, the person's work stays."""
 
 from _common import open_project_session, send
-
-ENGINE = True
 
 EDIT = 'tool edit {"path":"a.txt","oldString":"alpha","newString":"omega"} ;; say Changed alpha to omega.'
 

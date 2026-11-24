@@ -1,6 +1,6 @@
 //! Extensions' plugins: package plugins listed one by one with their
 //! updates, built-in ones in a line, and Check for updates and Update asked
-//! of a private `opencode serve` (scratch `HOME`/`XDG_*`, never the shared
+//! of a private `harlo-server` (scratch `HOME`/`XDG_*`, never the shared
 //! service), which has no package plugins and no network to reach.
 
 // Rust guideline compliant 2026-10-09
@@ -68,7 +68,7 @@ fn packages_show_their_updates_and_built_in_ones_are_counted() {
     assert!(ui.shows("1.2.0 · update available"));
     assert!(ui.shows("2.0.0"));
     assert!(ui.shows("Failed: syntax error"));
-    assert!(ui.shows("2 plugins that come with OpenCode"));
+    assert!(ui.shows("2 plugins that come with the server"));
     assert!(!ui.shows("opencode.agent"), "built-in ones aren't listed");
     assert!(ui.shows("Update all 2"));
     assert_eq!(ui.find("Update").len(), 2, "one per outdated package");
@@ -83,8 +83,8 @@ fn checking_and_updating_ask_the_server() {
     let ui = ui(app);
     ui.send(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     ui.press("Settings");

@@ -156,8 +156,8 @@ fn a_subagents_run_doesnt_notify_on_its_own() {
     let mut snapshot = demo::snapshot();
     snapshot.sessions[1].parent_id = Some(SESSION.to_owned());
     let mut app = App::new(
-        harlo_core::server::Location::Shared,
-        vec![harlo_core::server::Location::Shared],
+        harlo_core::server::Location::Local,
+        vec![harlo_core::server::Location::Local],
         demo::layout(),
     );
     let _ = app.update(Message::Tick(demo::now()));

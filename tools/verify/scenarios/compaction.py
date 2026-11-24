@@ -1,8 +1,6 @@
 """Compaction: /compact summarizes the conversation; the row says so, and
 the next prompt is answered as usual."""
 
-ENGINE = True
-
 from _common import composer, open_project_session, send
 
 

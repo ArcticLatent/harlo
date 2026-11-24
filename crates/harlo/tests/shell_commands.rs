@@ -1,5 +1,5 @@
 //! Shell commands and background jobs in the window, against a private
-//! `opencode serve` with scratch `HOME`/`XDG_*` folders and the scripted
+//! `harlo-server` with scratch `HOME`/`XDG_*` folders and the scripted
 //! model: `!command` in the composer runs it and shows what it printed; a
 //! command the agent sent to the background shows above the composer and
 //! stops from there. Never the shared service.
@@ -89,8 +89,8 @@ fn a_shell_command_shows_what_it_printed_and_a_background_one_stops() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     }))));
     let ui = ui(app);

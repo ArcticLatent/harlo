@@ -1,7 +1,7 @@
-//! Harlo's own tools for OpenCode's agents: finding past sessions on the
-//! server and reading one, which OpenCode's own tools don't do.
+//! Harlo's own tools for the server's agents: finding past sessions on the
+//! server and reading one, which the server's own tools don't do.
 //!
-//! Harlo offers them over OpenCode's client MCP connection while it's open
+//! Harlo offers them over the server's client MCP connection while it's open
 //! ([`Client::host_tools`]); agents call them in Code Mode as
 //! `tools.harlo.past_sessions` and `tools.harlo.read_session`.
 

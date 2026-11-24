@@ -2,7 +2,7 @@
 //! name, colour, icon and worktree command; making and removing worktrees;
 //! archiving sessions.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -12,7 +12,7 @@ mod support;
 use opencode_client::{Client, Project, ProjectChange};
 use support::{Sandbox, wait_for};
 
-/// The sandbox's project, once OpenCode knows it from a session there.
+/// The sandbox's project, once the server knows it from a session there.
 async fn project(sandbox: &Sandbox, client: &Client) -> Project {
     client
         .create_session(&sandbox.project_str())

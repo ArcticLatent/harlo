@@ -1,5 +1,5 @@
-//! OpenCode's approvals and questions as the phone asks them, and the
-//! phone's answers back as OpenCode's.
+//! The server's approvals and questions as the phone asks them, and the
+//! phone's answers back as the server's.
 //!
 //! An approval is a `select` with Allow once, Allow always and Deny. A
 //! question with one field is an `input`, a `select` or a `confirm`; one with

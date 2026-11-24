@@ -1,13 +1,11 @@
-"""Schedules: one made in Settings → Schedules is on OpenCode's server,
-pauses, resumes and is deleted."""
+"""Schedules: one made in Settings → Schedules is on the server, pauses,
+resumes and is deleted."""
 
 from _common import open_project_session, settings
 
-# OpenCode's own config folder is where schedules are allowed, so Harlo
-# attaches as to the shared server.
+# The global config folder is where schedules are allowed, so Harlo
+# attaches as to the server on this computer.
 SHARED = True
-ENGINE = True
-
 
 def run(h, s):
     # A project to send it to: the sandbox's, once it has a session.

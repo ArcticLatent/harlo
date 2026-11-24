@@ -1,5 +1,5 @@
 //! Extensions' MCP servers: one's own server added to a private
-//! `opencode serve` (scratch `HOME`/`XDG_*` folders, never the shared
+//! `harlo-server` (scratch `HOME`/`XDG_*` folders, never the shared
 //! service), connected, disconnected, turned off and removed; and a catalog
 //! server added to a scratch config without a server, so nothing reaches
 //! the network.
@@ -55,10 +55,10 @@ fn status(ui: &Ui) -> Option<McpStatus> {
     }
 }
 
-/// The shown server's tools: through scripts, OpenCode's Code Mode and
+/// The shown server's tools: through scripts, the server's Code Mode and
 /// its default, or listed one by one, and back.
 fn lists_and_scripts(ui: &Ui, tasks: &mut Tasks, folder: &std::path::Path) {
-    // OpenCode's Code Mode is the default; its tools can be listed instead.
+    // The server's Code Mode is the default; its tools can be listed instead.
     assert!(ui.shows("Through scripts"));
     ui.press("List them");
     assert!(
@@ -86,8 +86,8 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: tasks.block_on(load(&sandbox.client())).expect("snapshot"),
     }))));
     app.new_folder = Some(sandbox.project_str());
@@ -121,7 +121,7 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].name, "probe");
 
-    // OpenCode starts it from its config.
+    // The server starts it from its config.
     assert_eq!(ui.app().sheets.mcp.view, McpView::List);
     assert!(
         tasks.until(&ui, WAIT, |ui| status(ui) == Some(McpStatus::Connected)),
@@ -170,7 +170,7 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     lists_and_scripts(&ui, &mut tasks, &folder);
 
     ui.press("Remove");
-    assert!(ui.shows("Remove it for every app using this server?"));
+    assert!(ui.shows("Remove it from the server?"));
     ui.press("Remove for good");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Removed probe.")),

@@ -1,8 +1,8 @@
-//! Harlo's own tools reach agents over OpenCode's client MCP connection:
+//! Harlo's own tools reach agents over the server's client MCP connection:
 //! the scripted model finds an earlier session by its title and reads it,
 //! through Code Mode, and the tools go away when the connection drops.
 //!
-//! Runs against a private `opencode serve` with scratch `HOME`/`XDG_*`
+//! Runs against a private `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -114,18 +114,12 @@ async fn agents_find_and_read_past_sessions_through_harlos_tools() {
     )
     .await;
 
-    // Another folder's sessions get them once Harlo attaches for it too:
-    // OpenCode gives a client's tools to the folder it attached for.
+    // Another folder's sessions get them too: the server offers a
+    // client's tools to every folder.
     let other = sandbox.root().join("other");
     std::fs::create_dir_all(&other).expect("other folder");
     let other = other.display().to_string();
     let now = client.create_session(&other).await.expect("session");
-    let before = run(&client, &sandbox, &now.id, find).await;
-    assert!(
-        before.contains("Unknown tool"),
-        "not attached there yet: {before}"
-    );
-    let serving_other = serve(&client, other);
     let found = run_until(&client, &sandbox, &now.id, find, "Fix the parser crash").await;
     assert!(found.contains(&earlier.id), "{found}");
     assert!(
@@ -141,11 +135,9 @@ async fn agents_find_and_read_past_sessions_through_harlos_tools() {
     assert!(text.contains("# Fix the parser crash"), "{text}");
     assert!(text.contains("The parser fix is in lexer.rs."), "{text}");
 
-    // Dropping the connections takes them away.
+    // Dropping the connection takes them away.
     serving.abort();
-    serving_other.abort();
     let _ = serving.await;
-    let _ = serving_other.await;
     wait_for("the tools to go away", || async {
         let hello = Prompt::new("say hello", Delivery::Queue);
         client.prompt(&now.id, &hello).await.ok()?;

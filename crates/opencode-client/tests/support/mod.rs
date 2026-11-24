@@ -1,9 +1,13 @@
-//! A private OpenCode server and scripted model for integration tests.
+//! A private Harlo server and scripted model for integration tests.
 //!
 //! Each [`Sandbox`] gets its own scratch folder with `HOME` and every XDG folder
 //! inside it, a git project, a random password and a free port. It never
-//! touches the user's OpenCode config, sessions or shared background service.
-//! Dropping it stops both processes and removes the folder.
+//! touches the user's config, sessions or background service. Dropping it
+//! stops both processes and removes the folder.
+//!
+//! The server is `harlo-server`, built from this workspace the first time a
+//! sandbox starts (or the program `HARLO_SERVER_BIN` names). The import
+//! tests start a private the server too, with [`Sandbox::start_program`].
 
 // Rust guideline compliant 2026-10-09
 
@@ -15,44 +19,62 @@
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use opencode_client::{Client, Endpoint};
 
 /// How long to wait for the server to answer after starting it.
 ///
-/// OpenCode needs a few seconds on first start to set up its database.
+/// A busy machine running many tests at once can take several seconds.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a test waits for something it expects to happen.
 pub const WAIT: Duration = Duration::from_secs(20);
 
-/// A running private OpenCode server with the scripted model.
+/// A running private server with the scripted model.
 #[derive(Debug)]
 pub struct Sandbox {
     dir: tempfile::TempDir,
+    program: PathBuf,
     server: Child,
     model: Child,
     pub url: String,
     pub password: String,
 }
 
-/// Returns the pinned OpenCode binary for tests.
-fn binary() -> PathBuf {
-    if let Some(bin) = std::env::var_os("HARLO_OPENCODE_BIN") {
-        return bin.into();
-    }
-    let home = std::env::var_os("HOME").expect("HOME is set");
-    Path::new(&home)
-        .join(".local/share/harlo-dev/opencode")
-        .join(opencode_client::OPENCODE_VERSION)
-        .join("opencode")
+/// The `harlo-server` the tests run: `HARLO_SERVER_BIN`, else this
+/// workspace's, built once per test program.
+pub fn binary() -> PathBuf {
+    static BUILT: OnceLock<PathBuf> = OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            if let Some(bin) = std::env::var_os("HARLO_SERVER_BIN").filter(|v| !v.is_empty()) {
+                return bin.into();
+            }
+            let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+            let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let built = Command::new(cargo)
+                .args(["build", "-q", "-p", "harlo-server"])
+                .current_dir(&workspace)
+                .status()
+                .expect("run cargo build");
+            assert!(built.success(), "harlo-server didn't build");
+            // This test program is target/<profile>/deps/<name>.
+            let exe = std::env::current_exe().expect("the test program");
+            let debug = exe
+                .parent()
+                .and_then(Path::parent)
+                .expect("target/<profile>/deps");
+            debug.join("harlo-server")
+        })
+        .clone()
 }
 
-/// Starts `opencode serve` for the sandbox in `root`.
-fn spawn_server(root: &Path, port: u16, password: &str) -> Child {
+/// Starts `program serve` for the sandbox in `root`.
+fn spawn_server(program: &Path, root: &Path, port: u16, password: &str) -> Child {
     let project = root.join("project");
-    let mut server = Command::new(binary());
+    let mut server = Command::new(program);
     scratch_env(&mut server, root, password);
     server
         .args([
@@ -68,12 +90,12 @@ fn spawn_server(root: &Path, port: u16, password: &str) -> Child {
             std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(root.join("opencode.log"))
+                .open(root.join("server.log"))
                 .expect("log"),
         )
         .stderr(Stdio::null())
         .spawn()
-        .expect("start opencode serve")
+        .expect("start the server")
 }
 
 fn free_port() -> u16 {
@@ -85,14 +107,15 @@ fn free_port() -> u16 {
 }
 
 impl Sandbox {
-    /// Starts the scripted model and a private `opencode serve`.
+    /// Starts the scripted model and a private `harlo-server`.
     pub async fn start() -> Self {
-        let bin = binary();
-        assert!(
-            bin.exists(),
-            "pinned OpenCode binary missing: {}",
-            bin.display()
-        );
+        Self::start_program(&binary()).await
+    }
+
+    /// Starts the scripted model and a private `program serve`, which
+    /// takes `harlo-server`'s arguments: OpenCode for the import tests.
+    pub async fn start_program(program: &Path) -> Self {
+        assert!(program.exists(), "no server at {}", program.display());
         let dir = tempfile::Builder::new()
             .prefix("harlo-oc.")
             .tempdir()
@@ -124,10 +147,11 @@ impl Sandbox {
             .spawn()
             .expect("start the scripted model");
 
-        let server = spawn_server(root, port, &password);
+        let server = spawn_server(program, root, port, &password);
         let url = format!("http://127.0.0.1:{port}");
         let sandbox = Self {
             dir,
+            program: program.to_owned(),
             server,
             model,
             url,
@@ -141,7 +165,10 @@ impl Sandbox {
         let client = self.client();
         let started = Instant::now();
         while client.info().await.is_err() {
-            assert!(started.elapsed() < START_TIMEOUT, "OpenCode did not start");
+            assert!(
+                started.elapsed() < START_TIMEOUT,
+                "the server did not start"
+            );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
@@ -158,7 +185,7 @@ impl Sandbox {
             .next()
             .and_then(|p| p.parse().ok())
             .expect("the URL ends in a port");
-        self.server = spawn_server(self.dir.path(), port, &self.password);
+        self.server = spawn_server(&self.program, self.dir.path(), port, &self.password);
         self.wait_until_up().await;
     }
 
@@ -177,9 +204,10 @@ impl Sandbox {
         self.project().to_string_lossy().into_owned()
     }
 
-    /// Runs the real `opencode` CLI against this server, as a second client would.
+    /// Runs the server's program as a command line against this server,
+    /// as a second client would: the `opencode` CLI, for the import tests.
     pub fn cli(&self, args: &[&str]) -> String {
-        let mut cmd = Command::new(binary());
+        let mut cmd = Command::new(&self.program);
         scratch_env(&mut cmd, self.dir.path(), &self.password);
         let out = cmd
             .args(args)
@@ -189,10 +217,10 @@ impl Sandbox {
             .current_dir(self.project())
             .stdin(Stdio::null())
             .output()
-            .expect("run the opencode CLI");
+            .expect("run the command line");
         assert!(
             out.status.success(),
-            "opencode {args:?} failed: {}",
+            "{args:?} failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
         String::from_utf8_lossy(&out.stdout).into_owned()
@@ -210,7 +238,7 @@ impl Sandbox {
     }
 }
 
-/// Writes the scratch OpenCode config and a git project with two committed files.
+/// Writes the scratch config and a git project with two committed files.
 fn prepare(root: &Path, model_port: u16) {
     let config = serde_json::json!({
         "model": "fake/fake-coder",
@@ -218,7 +246,10 @@ fn prepare(root: &Path, model_port: u16) {
             "name": "Fake",
             "package": "@opencode/ai/providers/openai-compatible",
             "settings": { "baseURL": format!("http://127.0.0.1:{model_port}/v1"), "apiKey": "fake-key" },
-            "models": { "fake-coder": { "name": "Fake Coder", "limit": { "context": 128_000, "output": 8_192 } } }
+            "models": {
+                "fake-coder": { "name": "Fake Coder", "limit": { "context": 128_000, "output": 8_192 } },
+                "fake-writer": { "name": "Fake Writer", "limit": { "context": 128_000, "output": 8_192 } }
+            }
         }},
         "permissions": [ { "action": "shell", "resource": "*", "effect": "ask" } ]
     });

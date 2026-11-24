@@ -1,7 +1,7 @@
-//! Settings → Providers: the model providers OpenCode is signed in to, signing
+//! Settings → Providers: the model providers the server is signed in to, signing
 //! in to another (with a key, in a browser, by a program, or with what's
-//! already on the server's computer), and removing a sign-in. OpenCode keeps
-//! the credentials, so a sign-in applies to every app using the server.
+//! already on the server's computer), and removing a sign-in. The server keeps
+//! the credentials, so a sign-in applies to every session on the server.
 
 // Rust guideline compliant 2026-10-09
 

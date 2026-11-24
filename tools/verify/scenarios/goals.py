@@ -2,8 +2,6 @@
 finds it blocked and it pauses with why; Resume sends the agent back and
 the goal is reached; Dismiss clears it."""
 
-ENGINE = True
-
 import json
 import os
 

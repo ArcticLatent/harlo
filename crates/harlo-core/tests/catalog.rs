@@ -1,6 +1,6 @@
-//! Loading a folder's catalog from OpenCode.
+//! Loading a folder's catalog from the server.
 //!
-//! Each test runs its own private `opencode serve` with a scratch home and a
+//! Each test runs its own private `harlo-server` with a scratch home and a
 //! scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -14,7 +14,7 @@ use support::Sandbox;
 #[tokio::test(flavor = "multi_thread")]
 async fn the_first_catalog_for_a_new_folder_has_its_agents() {
     let sandbox = Sandbox::start().await;
-    // A folder OpenCode hasn't seen: this request also starts its instance.
+    // A folder the server hasn't seen: this request also starts its instance.
     // (The server runs in the project folder, whose instance is already up.)
     let fresh = sandbox.root().join("fresh");
     std::fs::create_dir_all(&fresh).expect("a new folder");

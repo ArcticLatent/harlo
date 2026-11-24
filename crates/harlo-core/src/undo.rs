@@ -1,7 +1,7 @@
 //! Undoing turns: what a staged undo restores, and which of the user's own
 //! edits that restore overwrites.
 //!
-//! OpenCode undoes a turn by putting every file the agent touched back to
+//! The server undoes a turn by putting every file the agent touched back to
 //! how it was before the turn. Edits the user made to those files since are
 //! overwritten with it. Staging the undo with files applies the restore
 //! right away, but cancelling puts every file back, so staging is safe.

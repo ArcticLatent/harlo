@@ -17,17 +17,15 @@ The checks:
     unit:<crate>            the crate's tests; each test file is reported
                             as unit:<crate>:<file>
     window:<scenario>       a scenario in tools/verify/scenarios/ driving
-                            the real window, with the scripted model
-    engine:<scenario>       the same scenario on harlo-server instead of
-                            OpenCode (scenarios marked ENGINE = True; those
-                            marked ENGINE = "only" run there alone)
+                            the real window on harlo-server, with the
+                            scripted model
     real:<scenario>         a scenario with a real model (Claude, through
-                            OpenCode's Claude Agent and Claude Code)
+                            the server's Claude Agent and Claude Code)
 
 Each run writes target/verify/<date-time>/ (report.html, results.jsonl,
 logs, screenshots) and points target/verify/latest at it; a run with
 nothing failed is remembered in target/verify/last-green.json for
-`changed`. Every check runs in scratch folders: its own `opencode serve`,
+`changed`. Every check runs in scratch folders: its own `harlo-server`,
 HOME and XDG folders, display and D-Bus; nothing of the user's sessions,
 settings or shared service is opened.
 
@@ -57,7 +55,7 @@ HERE = os.path.join(ROOT, "tools", "verify")
 SCENARIOS = os.path.join(HERE, "scenarios")
 RUNS = os.environ.get("VERIFY_RUNS") or os.path.join(ROOT, "target", "verify")
 CRATES = ["opencode-client", "harlo-core", "harlo", "harlo-engine", "harlo-server"]
-KINDS = ["build", "lint", "unit", "window", "engine", "real"]
+KINDS = ["build", "lint", "unit", "window", "real"]
 
 sys.path.insert(0, HERE)
 sys.path.insert(0, SCENARIOS)
@@ -73,32 +71,20 @@ def load_items():
 
 
 def scenario_names(kind):
-    """The scenarios of `kind` (window, engine or real), by file name.
-    Engine scenarios are window scenarios marked ENGINE = True."""
+    """The scenarios of `kind` (window or real), by file name."""
     prefix = "real_" if kind == "real" else ""
     names = []
     for f in sorted(os.listdir(SCENARIOS)):
         if not f.endswith(".py") or f.startswith("_"):
             continue
         name = f[:-3]
-        with open(os.path.join(SCENARIOS, f)) as source:
-            marker = re.search(r'^ENGINE = (True|"only")$', source.read(), re.M)
-        if kind == "engine":
-            # HARLO_VERIFY_ENGINE_ALL=1 surveys every window scenario on
-            # harlo-server, to see what the engine still lacks.
-            surveying = os.environ.get("HARLO_VERIFY_ENGINE_ALL") == "1"
-            if not name.startswith("real_") and (marker or surveying):
-                names.append(name)
-        elif kind == "window" and marker and marker.group(1) == '"only"':
-            continue
-        elif (kind == "real") == name.startswith("real_"):
+        if (kind == "real") == name.startswith("real_"):
             names.append(name[len(prefix):])
     return names
 
 
 def load_scenario(kind, name):
     file = os.path.join(SCENARIOS, ("real_" if kind == "real" else "") + name + ".py")
-    # (An engine scenario is a window scenario, run on harlo-server.)
     spec = importlib.util.spec_from_file_location(f"scenario_{kind}_{name}", file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -180,7 +166,6 @@ class Plan:
         self.lint = []
         self.unit = []
         self.window = []
-        self.engine = []
         self.real = []
         self.why = []
 
@@ -197,7 +182,7 @@ class Plan:
             for c in CRATES if crate in ("", "*") else [crate]:
                 if c not in self.unit:
                     self.unit.append(c)
-        elif kind in ("window", "engine", "real"):
+        elif kind in ("window", "real"):
             target = getattr(self, kind)
             for sc in scenario_names(kind):
                 if fnmatch.fnmatchcase(sc, name or "*") and sc not in target:
@@ -208,19 +193,18 @@ class Plan:
     def skip(self, skipped):
         for s in skipped:
             kind, _, name = s.partition(":")
-            if kind in ("lint", "unit", "window", "engine", "real"):
+            if kind in ("lint", "unit", "window", "real"):
                 target = getattr(self, kind)
                 target[:] = [] if not name else [x for x in target if not fnmatch.fnmatchcase(x, name)]
             elif s == "build":
                 self.build = False
 
     def empty(self):
-        return not (self.lint or self.unit or self.window or self.engine or self.real)
+        return not (self.lint or self.unit or self.window or self.real)
 
     def summary(self):
         return (f"build: {'yes' if self.build else 'no'}; lint: {', '.join(self.lint) or '-'}; "
                 f"unit: {', '.join(self.unit) or '-'}; window: {len(self.window)} scenarios; "
-                f"engine: {len(self.engine)} scenarios; "
                 f"real: {len(self.real)} scenarios")
 
 
@@ -250,7 +234,7 @@ def plan(mode, args):
     items = load_items()
     p = Plan()
     if mode == "all":
-        for kind in ("lint", "unit", "window", "engine", "real"):
+        for kind in ("lint", "unit", "window", "real"):
             p.add(f"{kind}:*")
     elif mode == "item":
         known = {it["id"]: it for it in items}
@@ -289,10 +273,8 @@ def scoped(cmd, memory="12G"):
 
 
 def t_build(run, p):
-    steps = [("build", scoped(["cargo", "build", "-q", "-j", "6", "-p", "harlo"]))]
-    if p.engine:
-        steps.append(("build:server", scoped(["cargo", "build", "-q", "-j", "6", "-p", "harlo-server"])))
-    if p.window or p.engine or p.real:
+    steps = [("build", scoped(["cargo", "build", "-q", "-j", "6", "-p", "harlo", "-p", "harlo-server"]))]
+    if p.window or p.real:
         steps.append(("build:mcp", scoped(["cargo", "build", "-q", "-j", "6", "-p", "harlo",
                                            "--features", "slint/mcp",
                                            "--target-dir", os.path.join(ROOT, "target", "mcp")])))
@@ -397,8 +379,6 @@ def run_scenario(run, kind, name, setup=None):
     shots_dir = os.path.join(run.dir, "shots", kind, name)
     steps = Steps()
     env = dict(getattr(module, "ENV", {}))
-    if kind == "engine":
-        env["HARLO_BACKEND"] = "engine"
     if setup:
         env.update(setup.env())
     h = Harlo(f"{kind}-{name}", shots_dir, size=getattr(module, "SIZE", (1588, 947)),
@@ -485,7 +465,6 @@ def known_checks():
                 checks.append(f"unit:{crate}:{name[:-3]}")
     checks += [f"window:{name}" for name in scenario_names("window")]
     checks += [f"real:{name}" for name in scenario_names("real")]
-    checks += [f"engine:{name}" for name in scenario_names("engine")]
     return checks
 
 
@@ -539,15 +518,13 @@ def main():
     run = Run(mode, rest, p)
     print(f"verify {mode}: {p.summary()}\n  run: {run.dir}", flush=True)
     if p.build and not t_build(run, p):
-        p.lint = p.unit = p.window = p.engine = p.real = []
+        p.lint = p.unit = p.window = p.real = []
     if p.lint:
         t_lint(run, p.lint)
     if p.unit:
         t_unit(run, p.unit)
     if p.window:
         t_scenarios(run, "window", p.window)
-    if p.engine:
-        t_scenarios(run, "engine", p.engine)
     if p.real:
         t_real(run, p.real)
     run.meta["finished"] = time.time()

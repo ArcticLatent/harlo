@@ -13,7 +13,7 @@ fn at(url: &str) -> Location {
 
 #[test]
 fn loopback_addresses_are_local_and_others_are_not() {
-    assert!(Location::Shared.is_local());
+    assert!(Location::Local.is_local());
     for url in [
         "http://127.0.0.1:4096",
         "http://localhost:4096/",

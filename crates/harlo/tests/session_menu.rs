@@ -1,4 +1,4 @@
-//! The open session's menu, against a private `opencode serve` with scratch
+//! The open session's menu, against a private `harlo-server` with scratch
 //! `HOME`/`XDG_*` folders and the scripted model: forking it whole or from
 //! a prompt, exporting it, deleting it after asking, importing it back,
 //! archiving it and moving it to a worktree. Never the shared service.
@@ -96,8 +96,8 @@ fn lexer(tasks: &mut Tasks, sandbox: &Sandbox) -> (Ui, String) {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     }))));
     let ui = ui(app);
@@ -119,16 +119,7 @@ fn the_session_menu_forks_it_whole_or_from_a_prompt() {
     // Fork: a new session with the whole history.
     ui.press("Session actions");
     assert_eq!(ui.app().picker, Some(Picker::SessionMenu));
-    // On OpenCode's service it can also be copied to Harlo's; never pressed
-    // here, as that reaches the servers on this computer.
-    for item in [
-        "Fork",
-        "Export…",
-        "Import a session…",
-        "Copy to Harlo's server",
-        "Archive",
-        "Delete…",
-    ] {
+    for item in ["Fork", "Export…", "Import a session…", "Archive", "Delete…"] {
         assert!(ui.shows(item), "{item}");
     }
     ui.press("Fork");
@@ -184,7 +175,7 @@ fn the_session_menu_exports_deletes_imports_archives_and_moves_it() {
     ui.press("Session actions");
     ui.press("Delete…");
     assert_eq!(ui.app().picker, Some(Picker::DeleteSession));
-    assert!(ui.shows("Gone for every app using this server."));
+    assert!(ui.shows("Gone from the server for good."));
     assert!(ui.shows("Its subagents' sessions are deleted with it."));
     ui.press("Keep it");
     assert_eq!(ui.app().picker, None);

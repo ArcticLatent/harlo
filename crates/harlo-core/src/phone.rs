@@ -1,4 +1,4 @@
-//! The phone: pairing, its encrypted channel, and the bridge to OpenCode.
+//! The phone: pairing, its encrypted channel, and the bridge to the server.
 //!
 //! A phone pairs by scanning a QR code ([`Offer`]) and from then on reaches
 //! Harlo's sessions over an end-to-end encrypted channel: directly on the
@@ -11,9 +11,9 @@
 //! and sends events (`{ ev, … }`) as sessions change.
 //!
 //! Harlo speaks this protocol, which the phone app already knows, and
-//! translates it to OpenCode: [`Phone`] follows the same server the window
+//! translates it to the server: [`Phone`] follows the same server the window
 //! does, with its own connection, and every phone's requests become calls to
-//! OpenCode's API.
+//! The server's API.
 
 // Rust guideline compliant 2026-10-09
 
@@ -141,7 +141,7 @@ pub struct Settings {
     pub folder: PathBuf,
     /// This computer's name, as phones show it.
     pub name: String,
-    /// The OpenCode server phones see.
+    /// The server phones see.
     pub location: Location,
     /// Project folders the user removed from the sidebar, which phones don't list.
     pub hidden: Vec<String>,
@@ -243,7 +243,7 @@ impl Drop for Online {
     }
 }
 
-/// Phone access while it's on: the direct WebSocket and the bridge to OpenCode.
+/// Phone access while it's on: the direct WebSocket and the bridge to the server.
 ///
 /// Dropping it disconnects every phone and stops following the server.
 pub struct Phone {

@@ -1,4 +1,4 @@
-//! What Harlo knows of one OpenCode server: projects, worktrees and sessions.
+//! What Harlo knows of one server: projects, worktrees and sessions.
 //!
 //! A [`Workspace`] is rebuilt from a [`Snapshot`] on every (re)connection and
 //! then kept current by live events. Events that only name a session or

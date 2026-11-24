@@ -3,7 +3,7 @@
 //! A stand-in relay on a loopback port speaks the relay's protocol: Harlo
 //! hosts on `/host`, phones connect to `/ws?id=…`, and `POST /push` records
 //! the notifications instead of sending them to Apple. Each test runs its
-//! own `opencode serve` with scratch folders and the scripted model.
+//! own `harlo-server` with scratch folders and the scripted model.
 
 // Rust guideline compliant 2026-10-09
 

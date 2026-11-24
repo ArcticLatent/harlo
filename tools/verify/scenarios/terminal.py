@@ -1,8 +1,6 @@
 """The terminal: it opens under the session, runs what's typed in the
 project's folder, hides and comes back with its shell still there."""
 
-ENGINE = True
-
 
 def run(h, s):
     s.step("the terminal opens")

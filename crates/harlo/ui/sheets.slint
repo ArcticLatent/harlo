@@ -715,41 +715,6 @@ component RowBody inherits VerticalLayout {
             }
         }
     }
-    if root.entry.kind == 7: HorizontalLayout {
-        padding-top: 4px;
-        padding-bottom: 4px;
-        spacing: 12px;
-        Rectangle {
-            horizontal-stretch: 1;
-            min-height: 32px;
-            border-radius: Size.radius;
-            background: Theme.surface-inset-base;
-            clip: true;
-            HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 10px;
-                // Selectable, so it can be copied to run by hand.
-                TextInput {
-                    text: root.entry.value;
-                    read-only: true;
-                    single-line: true;
-                    font-family: Fonts.mono;
-                    font-size: Size.small;
-                    color: Theme.text-strong;
-                    vertical-alignment: center;
-                    accessible-role: AccessibleRole.text;
-                    accessible-label: root.entry.value;
-                }
-            }
-        }
-        VerticalLayout {
-            alignment: center;
-            ActionButton {
-                text: root.entry.action;
-                clicked => { Logic.settings-action(root.entry.setting, root.entry.choice); }
-            }
-        }
-    }
     if root.entry.kind == 3: HorizontalLayout {
         padding-top: 6px;
         padding-bottom: 6px;

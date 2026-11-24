@@ -18,7 +18,7 @@ pub(super) fn plugin_rows(
 ) {
     let page = &app.sheets.plugins;
     rows.push(heading("Plugins"));
-    rows.push(note("Add tools, providers and hooks to OpenCode."));
+    rows.push(note("Add tools, providers and hooks to Harlo's server."));
     if let Some(done) = &page.done {
         rows.push(pair("", done, 1));
     }
@@ -74,7 +74,7 @@ pub(super) fn plugin_rows(
     if built_in > 0 {
         rows.push(pair(
             "Built in",
-            &format!("{built_in} plugins that come with OpenCode"),
+            &format!("{built_in} plugins that come with the server"),
             3,
         ));
     }

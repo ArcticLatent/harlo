@@ -1,6 +1,6 @@
-//! A Claude subscription against a private `opencode serve`: Settings →
+//! A Claude subscription against a private `harlo-server`: Settings →
 //! Models checks Claude Code, signs it in through a terminal, and connects
-//! and disconnects OpenCode's Claude Agent.
+//! and disconnects the server's Claude Agent.
 //!
 //! Claude Code is a stand-in script in the sandbox's scratch folder, at the
 //! path the sandbox server runs for `claude`; the real Claude Code and its
@@ -23,7 +23,7 @@ use support::tasks::Tasks;
 use support::{Ui, demo, ui};
 
 /// A stand-in Claude Code: signed out until `auth login` runs, then signed
-/// in to a Max plan; asked for its models the way OpenCode's Claude Agent
+/// in to a Max plan; asked for its models the way the server's Claude Agent
 /// asks, it offers Opus and Sonnet, and asked for the plan's usage, the
 /// session's limit is 42% used.
 const STAND_IN: &str = r#"#!/usr/bin/env python3
@@ -80,8 +80,8 @@ fn window(sandbox: &Sandbox, claude: &Path) -> Ui {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot: demo::snapshot(),
     }))));
     app.new_folder = Some(sandbox.project_str());
@@ -146,7 +146,7 @@ fn a_claude_subscription_signs_in_connects_and_disconnects() {
     ui.press("Connect");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Disconnect")),
-        "OpenCode is connected"
+        "the server is connected"
     );
     let project = sandbox.project_str();
     // Claude Agent's models, with Claude Code's effort levels, are offered.
@@ -170,6 +170,6 @@ fn a_claude_subscription_signs_in_connects_and_disconnects() {
     ui.press("Disconnect");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Not connected")),
-        "OpenCode is disconnected"
+        "the server is disconnected"
     );
 }

@@ -1,6 +1,6 @@
 //! Undoing a turn: staging it, then keeping or cancelling it.
 //!
-//! Undo on a prompt first asks OpenCode for the agent's own changes from
+//! Undo on a prompt first asks the server for the agent's own changes from
 //! that turn on, then stages the undo with files. That restores the files at
 //! once, but cancelling puts every file back, so nothing is lost until the
 //! user keeps it. The card above the composer shows what was restored and,
@@ -36,7 +36,7 @@ pub type Staged = (Vec<FileDiff>, Revert);
 /// The open session's staged undo, as its card shows it.
 #[derive(Debug, Clone, Copy)]
 pub struct StagedUndo<'a> {
-    /// What OpenCode staged.
+    /// What the server staged.
     pub revert: &'a Revert,
     /// The undone prompt's text, if it's shown.
     pub prompt: Option<&'a str>,

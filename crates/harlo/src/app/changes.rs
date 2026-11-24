@@ -1,10 +1,10 @@
 //! The Changes panel: what the open session changed, and the folder's
 //! uncommitted changes to commit and push.
 //!
-//! The session's changes come from OpenCode, which compares the agent's own
-//! snapshots. The uncommitted ones come from `git status` when the folder is
-//! on this computer, with each file's diff from OpenCode; elsewhere, only
-//! OpenCode's list shows, and nothing can be committed. A commit takes every
+//! The session's changes come from the server, which compares the agent's
+//! own snapshots. The uncommitted ones come from `git status` when the folder
+//! is on this computer, with each file's diff from the server; elsewhere,
+//! only the server's list shows, and nothing can be committed. A commit takes every
 //! uncommitted file.
 //!
 //! Diffs are parsed into lines in the background, with the load, so a large
@@ -12,7 +12,7 @@
 //!
 //! A file in an agent's edit opens the panel on that turn's changes, with
 //! the file selected and the edited hunk lit: the turn's list comes first,
-//! from OpenCode's diff of that turn alone.
+//! from the server's diff of that turn alone.
 //!
 //! The panel loads when it opens, when it switches to another session or
 //! folder, and when something in the folder may have changed: a tool that
@@ -33,7 +33,7 @@ use harlo_core::workspace::EventKind;
 
 use super::{App, Message, Panel};
 
-/// How many more times to ask OpenCode for the uncommitted diffs when it
+/// How many more times to ask the server for the uncommitted diffs when it
 /// answers with none while `git status` lists changes.
 const DIFF_RETRIES: u32 = 4;
 
@@ -56,7 +56,7 @@ pub struct ChangedFile {
 }
 
 impl ChangedFile {
-    /// A file from OpenCode's diff of it.
+    /// A file from the server's diff of it.
     #[must_use]
     pub fn from_diff(file: &FileDiff) -> Self {
         Self {
@@ -80,8 +80,8 @@ pub struct Loaded {
 
 impl Loaded {
     /// Parses what a load found: the reviewed turn's changes, the session's,
-    /// OpenCode's uncommitted changes, and `git status` when the folder is
-    /// on this computer. Without a status, the uncommitted list is OpenCode's
+    /// The server's uncommitted changes, and `git status` when the folder is
+    /// on this computer. Without a status, the uncommitted list is the server's
     /// alone and can't be committed.
     #[must_use]
     pub fn new(
@@ -544,7 +544,7 @@ impl App {
                     .working_changes(&folder)
                     .await
                     .map_err(|e| e.to_string());
-                // OpenCode answers a folder it's still starting up for with
+                // The server answers a folder it's still starting up for with
                 // no diffs at all; git knows better, so ask again.
                 for _ in 0..DIFF_RETRIES {
                     if !changed || !matches!(&tree, Ok(diffs) if diffs.is_empty()) {
@@ -670,8 +670,8 @@ pub fn hunk_of(lines: &[diff::Line], text: &str) -> Option<usize> {
     None
 }
 
-/// The uncommitted files: `git status`'s, with OpenCode's diffs, or
-/// OpenCode's alone when there's no status.
+/// The uncommitted files: `git status`'s, with the server's diffs, or
+/// The server's alone when there's no status.
 fn tree_files(diffs: &[FileDiff], status: Option<&git::Status>) -> Vec<ChangedFile> {
     let Some(status) = status else {
         return diffs.iter().map(ChangedFile::from_diff).collect();
@@ -680,7 +680,7 @@ fn tree_files(diffs: &[FileDiff], status: Option<&git::Status>) -> Vec<ChangedFi
         .files
         .iter()
         .map(|state| {
-            // OpenCode's paths may be from the folder rather than the root.
+            // The server's paths may be from the folder rather than the root.
             let local = state.path.strip_prefix(status.prefix.as_str());
             let diff = diffs
                 .iter()

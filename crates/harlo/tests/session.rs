@@ -217,7 +217,7 @@ fn a_busy_session_queues_steers_and_stops() {
     ui.press("Stop");
     assert!(ui.messages().iter().any(|m| matches!(m, Message::Stop)));
 
-    // Stopped, OpenCode holds what's waiting until the next prompt.
+    // Stopped, the server holds what's waiting until the next prompt.
     ui.send(event(
         EventKind::Done {
             session_id: PI_UPDATE.into(),
@@ -368,7 +368,7 @@ fn a_call_waiting_for_approval_holds_still() {
         Ok(vec![bash_call("call_1", ToolStatus::Running, None)]),
     ));
     assert_eq!(line_rows(&ui), [("Bash".to_owned(), true)]);
-    // OpenCode asks on the call's behalf: it hasn't started, so it doesn't turn.
+    // The server asks on the call's behalf: it hasn't started, so it doesn't turn.
     ui.send(event(
         EventKind::PermissionAsked(Box::new(Permission {
             call: Some(("msg_a".into(), "call_1".into())),

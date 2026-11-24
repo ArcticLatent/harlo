@@ -1,4 +1,4 @@
-//! Settings → Agents: OpenCode's agents, and the approvals it saved when
+//! Settings → Agents: The server's agents, and the approvals it saved when
 //! someone chose "Allow always".
 
 // Rust guideline compliant 2026-10-09

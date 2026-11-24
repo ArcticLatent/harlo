@@ -2,7 +2,7 @@
 //! the session has used and cost, and the instructions its agent was given.
 //!
 //! The totals follow the session's usage events. The window's fill, the
-//! model and agent, and instructions loaded on the way come from OpenCode's
+//! model and agent, and instructions loaded on the way come from the server's
 //! view of the session's context, loaded when the panel is shown for a
 //! session and again after each step, compaction or change of model. The
 //! instruction files given from the start are worked out here, for folders

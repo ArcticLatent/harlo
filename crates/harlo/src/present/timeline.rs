@@ -1311,11 +1311,11 @@ fn standing(
     }
 }
 
-/// The line OpenCode puts before the work it hands a subagent.
+/// The line the server puts before the work it hands a subagent.
 const SUBAGENT_PREAMBLE: &str = "You are a subagent spawned by another session.";
 
 /// A prompt's words and who it's from when that isn't the user: the work a
-/// parent's agent handed a subagent, without the line OpenCode puts before
+/// parent's agent handed a subagent, without the line the server puts before
 /// it.
 fn prompt_from<'a>(text: &'a str, crew: &'a Crew) -> (&'a str, Option<&'a str>) {
     match text

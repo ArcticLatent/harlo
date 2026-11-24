@@ -1,8 +1,6 @@
 """Files and the editor: the Files panel lists the project, a file opens
 in an editor tab, an edit marks it unsaved, and Ctrl+S saves it to disk."""
 
-ENGINE = True
-
 from _common import open_project_session, send
 
 

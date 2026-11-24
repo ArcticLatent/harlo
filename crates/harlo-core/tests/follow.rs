@@ -1,6 +1,6 @@
-//! Following a real OpenCode server: connect, snapshot, live events, fetches.
+//! Following a real server: connect, snapshot, live events, fetches.
 //!
-//! Runs against a private `opencode serve` with scratch `HOME`/`XDG_*` folders,
+//! Runs against a private `harlo-server` with scratch `HOME`/`XDG_*` folders,
 //! never the shared service.
 
 // Rust guideline compliant 2026-10-09
@@ -48,7 +48,7 @@ async fn follow_loads_a_snapshot_and_applies_live_sessions() {
         _ => None,
     })
     .await;
-    assert_eq!(connected.version, opencode_client::OPENCODE_VERSION);
+    assert_eq!(connected.server, "Harlo");
 
     let mut ws = Workspace::new(Vec::new());
     ws.resync(connected.snapshot.clone());
@@ -163,6 +163,5 @@ fn location_debug_hides_the_password() {
     let shown = format!("{location:?}");
     assert!(!shown.contains("s3cret"), "{shown}");
     assert_eq!(location.label(), "127.0.0.1:1");
-    assert_eq!(Location::Engine.label(), "Local");
-    assert_eq!(Location::Shared.label(), "Local · OpenCode");
+    assert_eq!(Location::Local.label(), "Local");
 }

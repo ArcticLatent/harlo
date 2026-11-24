@@ -251,7 +251,7 @@ impl<'a> Builder<'a> {
         let open = !self.wide && changes.open.contains(&key) && !file.lines.is_empty();
         let (folder, name) = file.path.rsplit_once('/').unwrap_or(("", &file.path));
         let icon = file_icons::icon(name);
-        // A file deleted outside OpenCode's view has nothing to count.
+        // A file deleted outside the server's view has nothing to count.
         let deleted = file.git.is_none() && file.lines.is_empty() && file.additions == 0;
         if selected && (self.wide || changes.hunk.is_none_or(|h| h == 0) || !open) {
             self.reveal = Some(self.y);

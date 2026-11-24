@@ -1,4 +1,4 @@
-//! The setup guide: its steps, the name and email on commits, OpenCode's
+//! The setup guide: its steps, the name and email on commits, the server's
 //! installer, and that it's done with once finished or skipped.
 //!
 //! Git's setup is fed in as its result; reading and writing git's config
@@ -42,18 +42,15 @@ fn the_steps_go_on_and_back_and_finishing_is_remembered() {
     let ui = guide(fresh_git());
     assert_eq!(ui.app().sheets.open, Some(Sheet::Setup));
     assert!(ui.shows("Set up Harlo"));
-    assert!(ui.shows("OpenCode runs the agents, in a background service on this computer. Harlo shows them, the work they do and what they ask you."));
-    assert!(ui.shows(&format!(
-        "Connected · OpenCode {}",
-        harlo_core::OPENCODE_VERSION
-    )));
+    assert!(ui.shows("Harlo's server runs the agents, in the background on this computer. Harlo shows them, the work they do and what they ask you."));
+    assert!(ui.shows(&format!("Connected · Harlo {}", env!("CARGO_PKG_VERSION"))));
     assert!(!ui.shows("Back"), "nothing before the first step");
 
     ui.press("Next");
     assert_eq!(ui.app().sheets.step, Step::Providers);
     assert!(ui.shows("New sessions"), "the model for new sessions");
     ui.press("Back");
-    assert_eq!(ui.app().sheets.step, Step::OpenCode);
+    assert_eq!(ui.app().sheets.step, Step::Server);
 
     // The list jumps to any step.
     ui.press("Theme");
@@ -87,7 +84,7 @@ fn settings_opens_it_again() {
     ui.press("General");
     ui.press("Open");
     assert_eq!(ui.app().sheets.open, Some(Sheet::Setup));
-    assert_eq!(ui.app().sheets.step, Step::OpenCode);
+    assert_eq!(ui.app().sheets.step, Step::Server);
 }
 
 #[test]
@@ -163,20 +160,13 @@ fn without_git_it_says_how_to_get_it() {
 }
 
 #[test]
-fn an_unreachable_service_offers_opencodes_installer() {
+fn an_unreachable_server_says_why() {
     let ui = guide(fresh_git());
-    assert!(
-        !ui.shows("Install OpenCode"),
-        "connected: nothing to install"
-    );
     ui.send(Message::Server(Update::Lost {
-        reason: "OpenCode isn't installed (no `opencode` on PATH)".to_owned(),
+        reason: "Harlo's server isn't installed (no `harlo-server` beside Harlo or on PATH)"
+            .to_owned(),
         retry_in: Duration::from_secs(5),
     }));
-    assert!(ui.shows("OpenCode isn't installed (no `opencode` on PATH)"));
-    assert!(ui.shows("Install OpenCode"));
-    assert!(ui.shows("curl -fsSL https://opencode.ai/v2/install | bash"));
-    // Pressing it would run the installer for real; that the button is
-    // there is enough here.
-    assert!(ui.shows("Install"));
+    assert!(ui.shows("Harlo's server isn't installed (no `harlo-server` beside Harlo or on PATH)"));
+    assert!(!ui.shows("Install OpenCode"));
 }

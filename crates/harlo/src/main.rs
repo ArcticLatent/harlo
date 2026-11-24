@@ -1,4 +1,4 @@
-//! Harlo: a desktop app for coding agents run by OpenCode.
+//! Harlo: a desktop app for coding agents run by the server.
 
 // Rust guideline compliant 2026-10-09
 

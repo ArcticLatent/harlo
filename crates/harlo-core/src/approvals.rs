@@ -3,7 +3,7 @@
 //! The [`Shield`] is how much a session may do without asking, kept as the
 //! session's own permission rules on the server. A [`Draft`] holds the answers
 //! being filled into a question, checks them, and turns them into the typed
-//! answers OpenCode takes. [`describe`] puts an approval request into words.
+//! answers the server takes. [`describe`] puts an approval request into words.
 
 // Rust guideline compliant 2026-10-09
 
@@ -109,7 +109,7 @@ pub fn describe(asked: &Permission) -> Described {
 /// What "Always allow" on `asked` would cover, in words, such as
 /// "commands starting with “cargo test”".
 ///
-/// OpenCode saves the request's patterns (`save`), where `*` stands for
+/// The server saves the request's patterns (`save`), where `*` stands for
 /// anything. A pattern ending in `*` covers what starts with the rest, one
 /// ending in a folder covers everything in it, and one without a `*`
 /// covers just itself; any other is quoted as written. No patterns, or
@@ -367,7 +367,7 @@ impl Draft {
         }
     }
 
-    /// Checks the answers and returns them as OpenCode takes them, by field key.
+    /// Checks the answers and returns them as the server takes them, by field key.
     ///
     /// Fields whose conditions don't hold are left out; hidden fields send
     /// their defaults.

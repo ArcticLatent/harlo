@@ -1,6 +1,8 @@
-//! Schedules: OpenCode's automations that send a prompt to a session, as
-//! Harlo names and describes them. The server keeps and runs them (see
-//! [`crate::server::Automation`]); this is how their times read.
+//! Schedules: how the server's automations read in Harlo.
+//!
+//! An automation sends a prompt to a session at a time. The server keeps
+//! and runs them (see [`crate::server::Automation`]); this is how their
+//! times read.
 
 // Rust guideline compliant 2026-10-09
 
@@ -80,7 +82,7 @@ pub enum Does {
     Prompt,
     /// Runs a shell command in the project's folder, with no model.
     Shell,
-    /// Runs JavaScript in OpenCode's Code Mode, with no model.
+    /// Runs JavaScript in the server's Code Mode, with no model.
     Code,
 }
 

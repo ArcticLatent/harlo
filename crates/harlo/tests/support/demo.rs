@@ -143,8 +143,8 @@ pub fn snapshot() -> Snapshot {
 pub fn connected(snapshot: Snapshot) -> Message {
     Message::Server(Update::Connected(Arc::new(Connected {
         client: Client::new(Endpoint::new("http://127.0.0.1:9", None)),
-        server: "OpenCode".into(),
-        version: harlo_core::OPENCODE_VERSION.to_owned(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
         snapshot,
     })))
 }
@@ -161,7 +161,7 @@ pub fn layout() -> Layout {
 /// tools stay off: offered, they'd attach for the real home folder on the
 /// test's server. Their own test turns them on with a scratch home.
 pub fn new_app() -> App {
-    let mut app = App::new(Location::Shared, vec![Location::Shared], layout());
+    let mut app = App::new(Location::Local, vec![Location::Local], layout());
     app.preferences.own_tools = false;
     // Never the real speech models' folder.
     app.voice.models = None;

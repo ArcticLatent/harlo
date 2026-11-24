@@ -1,7 +1,7 @@
 //! The real thing, by hand: installs this computer's llama.cpp build from
 //! GitHub, downloads a small model from Hugging Face, serves it, adds it to
-//! a private OpenCode server (scratch `HOME`/`XDG_*`) as a provider, and
-//! has OpenCode answer with it.
+//! a private server (scratch `HOME`/`XDG_*`) as a provider, and
+//! has the server answer with it.
 //!
 //! `HARLO_TEST_LOCAL_MODELS=<scratch folder, kept between runs>
 //! cargo test -p harlo-core --test local_models_real -- --ignored --nocapture`

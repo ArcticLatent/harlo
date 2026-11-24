@@ -13,7 +13,7 @@ use crate::task::Task;
 /// What the server says about notes.
 #[derive(Debug, Clone, Default)]
 pub struct Kept {
-    /// Whether the server keeps notes at all (OpenCode doesn't).
+    /// Whether the server keeps notes at all (the server doesn't).
     pub supported: bool,
     /// Whether notes are on.
     pub on: bool,

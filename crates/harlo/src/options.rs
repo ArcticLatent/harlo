@@ -32,10 +32,10 @@ impl std::fmt::Debug for Options {
 pub const USAGE: &str = "\
 Usage: harlo [--server <url>] [--setup]
 
-  --server <url>  Follow the OpenCode server at <url> instead of the shared
+  --server <url>  Follow the Harlo server at <url> instead of the one on
                   background service. Its password is read from
                   HARLO_OPENCODE_PASSWORD.
-  --setup         Open the setup guide: OpenCode, models, Git, and the theme.
+  --setup         Open the setup guide: the server, models, Git, and the theme.
                   A Harlo already running opens it in its window.
   -h, --help      Show this help.";
 
@@ -88,11 +88,11 @@ impl Options {
         Ok(options)
     }
 
-    /// The servers the location picker offers: Harlo's and OpenCode's on
-    /// this computer, and the one given with `--server`.
+    /// The servers the location picker offers: Harlo's on this computer,
+    /// and the one given with `--server`.
     #[must_use]
     pub fn locations(&self) -> Vec<Location> {
-        let mut locations = vec![Location::Engine, Location::Shared];
+        let mut locations = vec![Location::Local];
         if let Some(url) = &self.server {
             locations.push(Location::Server {
                 url: url.clone(),

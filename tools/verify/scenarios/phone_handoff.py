@@ -5,8 +5,7 @@ again, reconnects to a finished turn.
 
 Asserts one file edit, one completed tool call and one approval decision,
 and that the server's event history replays in order with one ask and one
-answer. Only on harlo-server: on OpenCode, phone access lives in the
-window, so it ends with the window's process.
+answer.
 
 The phone is a stand-in (crates/harlo-core/examples/phone_stub.rs) that
 speaks the phone app's encrypted protocol over loopback. The relay stays
@@ -21,8 +20,6 @@ import urllib.request
 import base64
 
 from _common import open_project_session, send, settings, close_sheet
-
-ENGINE = "only"
 
 # Phone access on, on a free port, relay off.
 PREFERENCES = {"phone": True, "phone_relay": False}

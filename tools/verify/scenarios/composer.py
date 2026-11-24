@@ -1,8 +1,6 @@
 """The composer: "/" lists commands and skills, "@" files; the agent and
 model menus open and close."""
 
-ENGINE = True
-
 from _common import composer, open_project_session
 
 

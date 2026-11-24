@@ -1,9 +1,10 @@
-//! Offering Harlo's own tools to OpenCode's agents while Harlo is connected.
+//! Offering Harlo's own tools to the server's agents while Harlo is
+//! connected.
 //!
-//! OpenCode makes a client's tools available to the sessions of the folder
-//! the client attached for, so Harlo attaches once for each folder it shows:
-//! the home folder, each project and each worktree. A connection that breaks
-//! while the server stays reachable is made again after a pause. A server
+//! The server makes a client's tools available to every session, whatever
+//! its folder, and keeps one connection per name: Harlo attaches once,
+//! for its home folder. A connection that breaks while the server stays
+//! reachable is made again after a pause. A server
 //! that says it can't take client tools at all isn't asked again until
 //! Harlo connects anew, and Settings says why.
 
@@ -83,8 +84,9 @@ impl App {
         }
     }
 
-    /// The folders Harlo's tools should be offered for now: none when
-    /// they're off or Harlo isn't connected.
+    /// The folder Harlo's tools are attached for now (the home folder;
+    /// every session gets them): none when they're off or Harlo isn't
+    /// connected.
     fn own_tools_folders(&self) -> BTreeSet<String> {
         if !self.preferences.own_tools
             || self.own_tools_hold == Hold::Unavailable
@@ -93,12 +95,7 @@ impl App {
         {
             return BTreeSet::new();
         }
-        let mut folders = BTreeSet::from([self.home.clone()]);
-        for project in &self.projects {
-            folders.insert(project.directory.clone());
-            folders.extend(project.worktrees.iter().map(|w| w.directory.clone()));
-        }
-        folders
+        BTreeSet::from([self.home.clone()])
     }
 
     /// Attaches for the folders that should have Harlo's tools and doesn't
@@ -158,7 +155,7 @@ impl App {
         self.own_tools_hold == Hold::Unavailable
     }
 
-    /// How many folders Harlo's tools are offered for right now.
+    /// How many connections offer Harlo's tools right now: 0 or 1.
     #[must_use]
     pub fn own_tools_offered(&self) -> usize {
         self.own_tools.len()

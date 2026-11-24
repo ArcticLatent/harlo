@@ -22,7 +22,7 @@ use crate::task::{Handle, Task};
 /// takes a while to load.
 const START_WAIT: Duration = Duration::from_secs(180);
 
-/// The provider ID llama.cpp's server has in OpenCode's config.
+/// The provider ID llama.cpp's server has in the server's config.
 pub const LLAMACPP_PROVIDER: &str = "llamacpp";
 
 /// Something that happened to local models.
@@ -60,9 +60,9 @@ pub enum LocalEvent {
     Getting(Download),
     /// Have llama.cpp serve suggestion `n`, restarting its server.
     Serve(usize),
-    /// Add llama.cpp's server to OpenCode's config, or take it out.
+    /// Add llama.cpp's server to the server's config, or take it out.
     Provider(bool),
-    /// OpenCode's config was changed, or why not.
+    /// The server's config was changed, or why not.
     Saved(Result<String, String>),
 }
 
@@ -138,9 +138,9 @@ pub struct LocalModels {
     get: Option<Handle>,
     /// Why the last download or pull failed.
     pub get_error: Option<String>,
-    /// Whether OpenCode's config has llama.cpp's server.
+    /// Whether the server's config has llama.cpp's server.
     pub in_opencode: bool,
-    /// What the last change to OpenCode's config did.
+    /// What the last change to the server's config did.
     pub done: Option<String>,
     /// Why it failed.
     pub error: Option<String>,
@@ -226,7 +226,7 @@ impl App {
     /// computer reaches them.
     #[must_use]
     pub fn local_models_apply(&self) -> bool {
-        self.location.is_here()
+        matches!(self.location, harlo_core::server::Location::Local)
     }
 
     /// The suggestion llama.cpp serves, if it's one of them.
@@ -663,7 +663,7 @@ impl App {
     }
 
     /// Has llama.cpp serve suggestion `index`: remembers its file, starts
-    /// the server again, and names it in OpenCode's config if it's there.
+    /// the server again, and names it in the server's config if it's there.
     fn serve(&mut self, index: usize) -> Task<Message> {
         let Some(suggestion) = self.local.suggestions.get(index) else {
             return Task::none();
@@ -683,7 +683,7 @@ impl App {
         Task::batch(tasks)
     }
 
-    /// Adds llama.cpp's server, with the model it serves, to OpenCode's
+    /// Adds llama.cpp's server, with the model it serves, to the server's
     /// config; or takes it out.
     fn change_provider(&mut self, add: bool) -> Task<Message> {
         let Some(folder) = self.global_config().map(ToOwned::to_owned) else {
@@ -695,7 +695,7 @@ impl App {
                 |result| {
                     Message::Local(LocalEvent::Saved(
                         result
-                            .map(|()| "Taken out of OpenCode's config.".to_owned())
+                            .map(|()| "Taken out of the model menu.".to_owned())
                             .map_err(|e| e.to_string()),
                     ))
                 },
@@ -716,7 +716,7 @@ impl App {
             move |result| {
                 Message::Local(LocalEvent::Saved(
                     result
-                        .map(|()| format!("{} is in OpenCode's model menu.", served.title))
+                        .map(|()| format!("{} is in the model menu.", served.title))
                         .map_err(|e| e.to_string()),
                 ))
             },

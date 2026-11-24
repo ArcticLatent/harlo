@@ -53,7 +53,7 @@ impl App {
             .and_then(|s| self.catalogs.get(&s.directory))
         {
             // Without a choice of its own, a session runs the first
-            // primary agent, as OpenCode does.
+            // primary agent, as the server does.
             if crew.current.is_none() {
                 crew.current = catalog.primary_agents().next().map(|a| a.id.clone());
             }

@@ -2,8 +2,6 @@
 Archive takes a session out of the list (the server keeps it), and Delete
 for good removes it from the server."""
 
-ENGINE = True
-
 from _common import open_project_session, send, sidebar
 
 

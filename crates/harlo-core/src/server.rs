@@ -1,8 +1,8 @@
-//! Connecting to an OpenCode server and following it.
+//! Connecting to Harlo's server and following it.
 //!
 //! [`follow`] keeps one server connected for as long as its stream is polled.
 //! Every (re)connection opens the event stream first, drains it on a task of
-//! its own (OpenCode drops slow readers), loads a [`Snapshot`], and only then
+//! its own (the server drops slow readers), loads a [`Snapshot`], and only then
 //! forwards the events that arrived meanwhile. When the connection breaks it
 //! waits a little and starts over. Dropping the stream detaches: the server
 //! itself is never stopped, restarted or reconfigured.
@@ -17,11 +17,10 @@ use std::time::Duration;
 
 use futures_util::Stream;
 use futures_util::future::try_join_all;
-use opencode_client::{Event, read_registration, registration_path};
+use opencode_client::{Event, read_registration};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::layout::Backend;
 use crate::ssh;
 use crate::workspace::{Fetch, Fetched, Snapshot};
 
@@ -46,11 +45,9 @@ const MAX_BACKOFF: Duration = Duration::from_secs(10);
 /// Its `Debug` output leaves the password out.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Location {
-    /// OpenCode's background service on this computer, found through its registration file.
-    Shared,
-    /// Harlo's own server on this computer, found through its registration
+    /// Harlo's server on this computer, found through its registration
     /// file and started when none runs.
-    Engine,
+    Local,
     /// A server at an explicit address, as given with `--server`.
     Server {
         /// Base URL, such as `http://127.0.0.1:4096`.
@@ -58,68 +55,34 @@ pub enum Location {
         /// The server password, if it has one.
         password: Option<String>,
     },
-    /// The background service on another computer, reached over SSH.
+    /// Harlo's server on another computer, reached over SSH.
     Ssh {
         /// The computer, as `ssh` takes it: what follows `ssh`, such as
         /// `buildbox` or `me@10.0.0.5`.
         target: String,
-        /// Which server there.
-        backend: Backend,
     },
 }
 
 impl std::fmt::Debug for Location {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Shared => f.write_str("Shared"),
-            Self::Engine => f.write_str("Engine"),
+            Self::Local => f.write_str("Local"),
             Self::Server { url, password } => f
                 .debug_struct("Server")
                 .field("url", url)
                 .field("password", &password.as_ref().map(|_| "…"))
                 .finish(),
-            Self::Ssh { target, backend } => f
-                .debug_struct("Ssh")
-                .field("target", target)
-                .field("backend", backend)
-                .finish(),
+            Self::Ssh { target } => f.debug_struct("Ssh").field("target", target).finish(),
         }
     }
 }
 
 impl Location {
-    /// The `backend` service on this computer.
-    #[must_use]
-    pub fn here(backend: Backend) -> Self {
-        match backend {
-            Backend::Harlo => Self::Engine,
-            Backend::OpenCode => Self::Shared,
-        }
-    }
-
-    /// The server software it runs, when known; `None` for a `--server`.
-    #[must_use]
-    pub fn backend(&self) -> Option<Backend> {
-        match self {
-            Self::Shared => Some(Backend::OpenCode),
-            Self::Engine => Some(Backend::Harlo),
-            Self::Server { .. } => None,
-            Self::Ssh { backend, .. } => Some(*backend),
-        }
-    }
-
-    /// Whether it's a background service on this computer, Harlo's or
-    /// OpenCode's.
-    #[must_use]
-    pub fn is_here(&self) -> bool {
-        matches!(self, Self::Shared | Self::Engine)
-    }
-
     /// Returns whether the server runs on this computer, so its folders are here too.
     #[must_use]
     pub fn is_local(&self) -> bool {
         match self {
-            Self::Shared | Self::Engine => true,
+            Self::Local => true,
             Self::Server { url, .. } => {
                 let rest = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
                 let host = match rest.strip_prefix('[') {
@@ -136,21 +99,13 @@ impl Location {
     #[must_use]
     pub fn label(&self) -> String {
         match self {
-            Self::Engine => "Local".to_owned(),
-            Self::Shared => "Local · OpenCode".to_owned(),
+            Self::Local => "Local".to_owned(),
             Self::Server { url, .. } => url
                 .trim_start_matches("http://")
                 .trim_start_matches("https://")
                 .trim_end_matches('/')
                 .to_owned(),
-            Self::Ssh {
-                target,
-                backend: Backend::Harlo,
-            } => crate::ssh::destination(target),
-            Self::Ssh {
-                target,
-                backend: Backend::OpenCode,
-            } => format!("{} · OpenCode", crate::ssh::destination(target)),
+            Self::Ssh { target } => crate::ssh::destination(target),
         }
     }
 }
@@ -160,7 +115,7 @@ impl Location {
 pub struct Connected {
     /// A client for further calls.
     pub client: Client,
-    /// What the server is: `OpenCode`, or `Harlo` for Harlo's own.
+    /// What the server calls itself, such as `Harlo`.
     pub server: String,
     /// Its version.
     pub version: String,
@@ -335,50 +290,31 @@ async fn reach(
             Client::new(Endpoint::new(url.clone(), password.clone())),
             None,
         )),
-        Location::Shared => {
-            if let Some(client) = shared().await? {
-                return Ok((client, None));
-            }
-            // Starting the shared service when none runs is what OpenCode's own
-            // clients do; Harlo never stops or restarts one.
-            if !*started_service {
-                *started_service = true;
-                start_service().await?;
-                if let Some(client) = shared().await? {
-                    return Ok((client, None));
-                }
-            }
-            Err("OpenCode's background service isn't running".to_owned())
-        }
-        Location::Engine => {
-            if let Some(client) = engine().await? {
+        Location::Local => {
+            if let Some(client) = local().await? {
                 return Ok((client, None));
             }
             // Started once when none answers; never stopped.
             if !*started_service {
                 *started_service = true;
-                start_engine().await?;
-                if let Some(client) = engine().await? {
+                start_local().await?;
+                if let Some(client) = local().await? {
                     return Ok((client, None));
                 }
             }
             Err("Harlo's server isn't running".to_owned())
         }
-        Location::Ssh { target, backend } => {
-            let mut service = ssh::registered(target, *backend).await?;
+        Location::Ssh { target } => {
+            let mut service = ssh::registered(target).await?;
             // Started there as here, once; never stopped.
             if service.is_none() && !*started_service {
                 *started_service = true;
-                ssh::start_service(target, *backend).await?;
-                service = ssh::registered(target, *backend).await?;
+                ssh::start_service(target).await?;
+                service = ssh::registered(target).await?;
             }
             let Some(service) = service else {
-                let what = match backend {
-                    Backend::Harlo => "Harlo's server",
-                    Backend::OpenCode => "OpenCode's background service",
-                };
                 return Err(format!(
-                    "{what} isn't running on {}",
+                    "Harlo's server isn't running on {}",
                     ssh::destination(target)
                 ));
             };
@@ -389,33 +325,21 @@ async fn reach(
     }
 }
 
-/// A client for the `backend` server on this computer, started when none
-/// runs, as following it would.
+/// A client for Harlo's server on this computer, started when none runs,
+/// as following it would.
 ///
 /// # Errors
 ///
 /// When it isn't running and can't be started.
-pub async fn reach_here(backend: Backend) -> Result<Client, String> {
-    reach(&Location::here(backend), &mut false)
+pub async fn reach_local() -> Result<Client, String> {
+    reach(&Location::Local, &mut false)
         .await
         .map(|(client, _)| client)
 }
 
-/// Returns a client for the registered shared service, if it answers.
-async fn shared() -> Result<Option<Client>, String> {
-    let path = registration_file();
-    let service =
-        read_registration(&path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
-    let Some(service) = service else {
-        return Ok(None);
-    };
-    let client = Client::new(service.endpoint);
-    Ok(client.info().await.is_ok().then_some(client))
-}
-
 /// Returns a client for Harlo's registered server, if it answers.
-async fn engine() -> Result<Option<Client>, String> {
-    let path = engine_registration();
+async fn local() -> Result<Option<Client>, String> {
+    let path = registration();
     let service =
         read_registration(&path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
     let Some(service) = service else {
@@ -426,7 +350,7 @@ async fn engine() -> Result<Option<Client>, String> {
 }
 
 /// `$XDG_STATE_HOME/harlo/service.json`, where Harlo's server registers.
-fn engine_registration() -> PathBuf {
+fn registration() -> PathBuf {
     std::env::var_os("XDG_STATE_HOME")
         .filter(|v| !v.is_empty())
         .map_or_else(
@@ -443,7 +367,7 @@ fn engine_registration() -> PathBuf {
 /// The `harlo-server` program: `HARLO_SERVER_BIN`, else the one beside
 /// this program, else the one on `PATH`.
 #[must_use]
-pub fn engine_program() -> PathBuf {
+pub fn server_program() -> PathBuf {
     if let Some(program) = std::env::var_os("HARLO_SERVER_BIN").filter(|v| !v.is_empty()) {
         return PathBuf::from(program);
     }
@@ -455,8 +379,8 @@ pub fn engine_program() -> PathBuf {
 }
 
 /// Starts Harlo's server, unless one answers.
-async fn start_engine() -> Result<(), String> {
-    let program = engine_program();
+async fn start_local() -> Result<(), String> {
+    let program = server_program();
     let output = tokio::process::Command::new(&program)
         .args(["service", "start"])
         .stdin(std::process::Stdio::null())
@@ -474,35 +398,6 @@ async fn start_engine() -> Result<(), String> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(format!("couldn't start Harlo's server: {}", stderr.trim()))
-    }
-}
-
-fn registration_file() -> PathBuf {
-    let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
-    let home = std::env::var_os("HOME").map_or_else(PathBuf::new, PathBuf::from);
-    registration_path(state.as_deref(), &home)
-}
-
-async fn start_service() -> Result<(), String> {
-    let output = tokio::process::Command::new("opencode")
-        .args(["service", "start"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .await
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                "OpenCode isn't installed (no `opencode` on PATH)".to_owned()
-            }
-            _ => format!("couldn't start OpenCode's background service: {e}"),
-        })?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!(
-            "couldn't start OpenCode's background service: {}",
-            stderr.trim()
-        ))
     }
 }
 
@@ -635,7 +530,7 @@ impl Catalog {
 /// Fails when the server can't be reached or a list doesn't decode.
 pub async fn catalog(client: &Client, directory: &str) -> Result<Catalog, Error> {
     let mut catalog = load_catalog(client, directory).await?;
-    // The first request for a folder can arrive while OpenCode is still
+    // The first request for a folder can arrive while the server is still
     // starting that folder's instance, and gets an empty agent list. There's
     // always a primary agent once it's up, so empty means "ask again".
     for _ in 0..CATALOG_RETRIES {

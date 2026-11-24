@@ -37,13 +37,13 @@ fn list_rows(app: &App) -> Vec<SheetRow> {
         Load::Loaded(on) => rows.push(switch(
             Setting::Automations,
             "Allow schedules",
-            "Shared by every app on this server.",
+            "For every project on this server.",
             *on,
         )),
-        Load::Failed(why) => rows.push(pair("OpenCode's config", why, 2)),
+        Load::Failed(why) => rows.push(pair("opencode.json", why, 2)),
         // Another computer's server reads its own config.
         Load::Idle => rows.push(note(
-            "Schedules run unless automations is set to false in OpenCode's config on the \
+            "Schedules run unless automations is set to false in opencode.json on the \
              server's computer.",
         )),
         Load::Loading => {}
@@ -154,7 +154,7 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
     let mut delete = pair(
         "Delete",
         if asked {
-            "Delete it for every app using this server?"
+            "Delete it for good?"
         } else {
             "The session and its history are kept."
         },
@@ -231,7 +231,7 @@ fn action_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
 fn new_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.schedules;
     let draft = &page.draft;
-    let mut back = pair("New schedule", "Runs on the OpenCode server", 3);
+    let mut back = pair("New schedule", "Runs on Harlo's server", 3);
     back.action = "Cancel".into();
     back.setting = window::ALL_SCHEDULES;
     let mut rows = vec![

@@ -1,8 +1,6 @@
 """The Keyboard shortcuts and Stats pages open from the rail and close
 with Escape."""
 
-ENGINE = True
-
 
 def rail(e):
     return e.x < 60

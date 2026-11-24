@@ -1,7 +1,7 @@
 //! Saved approvals against a private server: "Allow always" saves one for
 //! the project, it's listed, and removing it makes the server ask again.
 //!
-//! Each test runs its own `opencode serve` with scratch `HOME`/`XDG_*`
+//! Each test runs its own `harlo-server` with scratch `HOME`/`XDG_*`
 //! folders and the scripted model, never the shared service.
 
 // Rust guideline compliant 2026-10-09

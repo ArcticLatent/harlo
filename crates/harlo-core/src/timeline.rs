@@ -113,7 +113,7 @@ pub enum Entry {
         key: String,
         /// `failed` or `interrupted`.
         outcome: String,
-        /// Why it failed, when OpenCode said.
+        /// Why it failed, when the server said.
         error: Option<String>,
     },
     /// The conversation being summarized to free up context.

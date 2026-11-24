@@ -80,7 +80,7 @@ impl Suggestion {
         format!("hf.co/{}:{}", self.repo, self.quant)
     }
 
-    /// The model's ID in OpenCode, lower case.
+    /// The model's ID in the server, lower case.
     #[must_use]
     pub fn id(&self) -> String {
         self.title.to_lowercase()

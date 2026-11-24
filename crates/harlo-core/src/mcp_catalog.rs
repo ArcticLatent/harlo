@@ -1,6 +1,6 @@
 //! Well-known MCP servers Settings offers to add with one click. Each entry
 //! is how its maker's own documentation says to connect; adding one writes
-//! it to OpenCode's global config, as any other server.
+//! it to the server's global config, as any other server.
 
 // Rust guideline compliant 2026-10-09
 
@@ -18,7 +18,7 @@ pub enum Reach {
 /// An MCP server offered in the catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Offered {
-    /// The name it's added under, which OpenCode puts before its tools.
+    /// The name it's added under, which the server puts before its tools.
     pub name: &'static str,
     /// Its name for people.
     pub title: &'static str,

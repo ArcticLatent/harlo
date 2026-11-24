@@ -196,10 +196,7 @@ fn settings_list_their_sections_and_open_with_ctrl_comma() {
 
     ui.press("Server");
     assert_eq!(ui.app().sheets.section, Section::Server);
-    assert!(ui.shows(&format!(
-        "Connected · OpenCode {}",
-        harlo_core::OPENCODE_VERSION
-    )));
+    assert!(ui.shows(&format!("Connected · Harlo {}", env!("CARGO_PKG_VERSION"))));
     assert!(!ui.shows("Reopen tabs"), "only the section shown");
 
     key(&ui, ',', true);
@@ -246,13 +243,13 @@ fn the_reopen_tabs_switch_turns_off_reopening() {
     let opened = |reopen_tabs: bool| {
         let mut layout = demo::layout();
         layout.tabs = BTreeMap::from([(
-            Location::Shared.label(),
+            Location::Local.label(),
             Tabs {
                 open: vec!["ses_demo_03".into()],
                 active: Some("ses_demo_03".into()),
             },
         )]);
-        let mut app = App::new(Location::Shared, vec![Location::Shared], layout).with_preferences(
+        let mut app = App::new(Location::Local, vec![Location::Local], layout).with_preferences(
             Preferences {
                 reopen_tabs,
                 ..Preferences::default()
@@ -373,9 +370,9 @@ fn settings_show_the_servers_set_up_and_about() {
     ui.press("About");
     assert!(
         ui.shows(&format!(
-            "Version {} · OpenCode {}",
+            "Version {} · Harlo {}",
             env!("CARGO_PKG_VERSION"),
-            harlo_core::OPENCODE_VERSION
+            env!("CARGO_PKG_VERSION")
         )),
         "Harlo's version and the server's"
     );
