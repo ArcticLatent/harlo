@@ -127,6 +127,10 @@ impl App {
                 .iter()
                 .position(|w| *w == self.sheets.schedules.draft.when)
                 .unwrap_or_default(),
+            SettingChoice::ScheduleDoes => harlo_core::schedules::Does::ALL
+                .iter()
+                .position(|d| *d == self.sheets.schedules.draft.does)
+                .unwrap_or_default(),
         }
     }
 
@@ -157,6 +161,7 @@ impl App {
             SettingChoice::ProjectColor
             | SettingChoice::ProjectSessions
             | SettingChoice::ScheduleWhen
+            | SettingChoice::ScheduleDoes
             | SettingChoice::SignInAnswer(_)
             | SettingChoice::McpKind
             | SettingChoice::ExtensionsTab => false,

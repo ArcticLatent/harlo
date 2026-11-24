@@ -656,6 +656,20 @@ def scene_schedules(g):
     h.wait("New schedule", timeout=10)
     h.settle(0.6)
     g.cap("list", "The schedules list")
+    h.click("New schedule")
+    h.fill("Name", "Disk check", where=lambda e: e.role == "TextInput")
+    h.click("Runs: Every")
+    h.fill("Time", "1 hour")
+    h.click("Does: A shell command")
+    h.fill("Command", "df -h .")
+    h.settle(0.6)
+    g.cap("shell-form", "A schedule that runs a shell command, in a session of its own")
+    h.click("Create schedule")
+    h.wait_gone("Create schedule", role="Button", timeout=15)
+    h.wait("Disk check", where=lambda e: e.x > h.size[0] * 0.3 and e.role != "TextInput",
+           timeout=15)
+    h.settle(0.6)
+    g.cap("shell-detail", "A shell command's schedule: what it runs and the session that allows it")
     g.recover()
 
 

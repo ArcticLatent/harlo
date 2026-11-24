@@ -9,7 +9,9 @@
 
 mod support;
 
-use opencode_client::{AutomationAction, AutomationStatus, AutomationTrigger, NewAutomation};
+use opencode_client::{
+    AutomationAction, AutomationStatus, AutomationTrigger, Effect, NewAction, NewAutomation, Rule,
+};
 use support::{Sandbox, wait_for};
 
 /// Turns automations on or off in the sandbox's global config; the server
@@ -32,9 +34,10 @@ async fn automations_are_created_paused_resumed_run_and_deleted() {
         .expect("a session");
     let new = |trigger| NewAutomation {
         name: "Weekday check".into(),
-        session_id: session.id.clone(),
+        session_id: Some(session.id.clone()),
+        directory: None,
         trigger,
-        prompt: "Check the build.".into(),
+        action: NewAction::Prompt("Check the build.".into()),
     };
 
     // On unless the config turns them off.
@@ -130,4 +133,88 @@ async fn automations_are_created_paused_resumed_run_and_deleted() {
         .map(|a| a.id)
         .collect();
     assert_eq!(left, [soon.id]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shell_command_and_code_run_with_no_model() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    // OpenCode checks their permissions in the session they belong to.
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("a session");
+    let soon = |name: &str, action| NewAutomation {
+        name: name.into(),
+        session_id: Some(session.id.clone()),
+        directory: None,
+        trigger: AutomationTrigger::At("in 2 seconds".into()),
+        action,
+    };
+    // Created through the API, nobody is there to approve the command
+    // or the code: the session they belong to allows them beforehand.
+    let refused = client
+        .create_automation(&soon("Where", NewAction::Shell("pwd".into())))
+        .await
+        .expect_err("not allowed yet");
+    assert!(refused.to_string().contains("shell"), "{refused}");
+    client
+        .set_permissions(
+            &session.id,
+            &[
+                Rule {
+                    action: "shell".into(),
+                    resource: "pwd".into(),
+                    effect: Effect::Allow,
+                },
+                Rule::any("execute", Effect::Allow),
+            ],
+        )
+        .await
+        .expect("allowed");
+    let shell = client
+        .create_automation(&soon("Where", NewAction::Shell("pwd".into())))
+        .await
+        .expect("created");
+    assert_eq!(shell.session_id.as_deref(), Some(session.id.as_str()));
+    assert_eq!(shell.directory, sandbox.project_str());
+    assert_eq!(
+        shell.action,
+        AutomationAction::Shell {
+            command: "pwd".into()
+        }
+    );
+    let code = client
+        .create_automation(&soon("Count", NewAction::Code("return;".into())))
+        .await
+        .expect("created");
+    assert_eq!(
+        code.action,
+        AutomationAction::Code {
+            code: "return;".into()
+        }
+    );
+
+    let done = |id: String| {
+        let client = client.clone();
+        async move {
+            client
+                .automations()
+                .await
+                .ok()?
+                .into_iter()
+                // Its outcome is written just after it's marked done.
+                .find(|a| {
+                    a.id == id && a.status == AutomationStatus::Done && a.last_outcome.is_some()
+                })
+        }
+    };
+    let ran = wait_for("the command to run", || done(shell.id.clone())).await;
+    assert_eq!(ran.last_outcome.as_deref(), Some("fired"));
+    let output = ran.last_output.unwrap_or_default();
+    assert!(output.contains("/project"), "{output}");
+    let ran = wait_for("the code to run", || done(code.id.clone())).await;
+    assert_eq!(ran.last_outcome.as_deref(), Some("fired"));
+    // Neither asked the model anything.
+    assert_eq!(sandbox.model_requests(), 0);
 }

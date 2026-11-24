@@ -160,14 +160,27 @@ impl From<g::AutomationInfo> for Automation {
 pub struct NewAutomation {
     /// The short label lists show.
     pub name: String,
-    /// The session that gets the prompt; the automation runs in its
-    /// folder.
-    pub session_id: String,
+    /// The session it belongs to: a prompt goes there, and it runs in
+    /// that session's folder.
+    pub session_id: Option<String>,
+    /// The folder it runs in when no session gives one.
+    pub directory: Option<String>,
     /// When it runs: [`Trigger::At`], [`Trigger::Every`] or
     /// [`Trigger::Cron`].
     pub trigger: Trigger,
-    /// The prompt.
-    pub prompt: String,
+    /// What it does.
+    pub action: NewAction,
+}
+
+/// What a new automation does each time it runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NewAction {
+    /// Sends this prompt to the automation's session.
+    Prompt(String),
+    /// Runs this Code Mode JavaScript, with no model.
+    Code(String),
+    /// Runs this shell command in the automation's folder, with no model.
+    Shell(String),
 }
 
 impl NewAutomation {
@@ -181,12 +194,19 @@ impl NewAutomation {
                 json!({ "type": "event", "server": server, "event": event })
             }
         };
-        json!({
-            "name": self.name,
-            "sessionID": self.session_id,
-            "trigger": trigger,
-            "action": { "type": "prompt", "prompt": self.prompt },
-        })
+        let action = match &self.action {
+            NewAction::Prompt(prompt) => json!({ "type": "prompt", "prompt": prompt }),
+            NewAction::Code(code) => json!({ "type": "code", "code": code }),
+            NewAction::Shell(command) => json!({ "type": "shell", "command": command }),
+        };
+        let mut body = json!({ "name": self.name, "trigger": trigger, "action": action });
+        if let Some(id) = &self.session_id {
+            body["sessionID"] = json!(id);
+        }
+        if let Some(directory) = &self.directory {
+            body["directory"] = json!(directory);
+        }
+        body
     }
 }
 

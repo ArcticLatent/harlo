@@ -203,3 +203,95 @@ fn a_time_the_server_cant_read_says_why_and_leaves_no_session() {
         "the session made for it is archived: {sessions:?}"
     );
 }
+
+#[test]
+fn a_shell_command_runs_on_time_in_a_session_that_allows_just_it() {
+    let mut tasks = Tasks::new();
+    let sandbox = tasks.block_on(Sandbox::start());
+    let ui = schedules(&sandbox, &mut tasks);
+    ui.press("New schedule");
+    ui.fill("Name", "Where am I");
+    ui.fill("Time", "in 2 seconds");
+    ui.press("Does: A shell command");
+    // No session to choose: it gets one of its own.
+    assert!(ui.find("Goes to").is_empty());
+    assert!(ui.shows(
+        "Runs in the project's folder with no model, in a session of its own that allows \
+         exactly this command. Its output shows on the schedule's page."
+    ));
+    ui.press("Create schedule");
+    assert!(ui.shows("Write the command it runs."));
+    ui.fill("Command", "pwd");
+    ui.press("Create schedule");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| status(ui).is_some()),
+        "created: {:?}",
+        ui.app().sheets.schedules.error
+    );
+    assert!(ui.shows("A shell command, with no model"));
+    assert!(ui.shows("Where am I"), "its session, named after it");
+
+    // The session allows exactly that command.
+    let client = sandbox.client();
+    let sessions = tasks
+        .block_on(client.root_sessions())
+        .expect("the sessions");
+    let session = sessions
+        .iter()
+        .find(|s| s.title.as_deref() == Some("Where am I"))
+        .expect("its session");
+    let ran = tasks.block_on(async {
+        for _ in 0..100 {
+            let list = client.automations().await.expect("the list");
+            if let Some(done) = list
+                .into_iter()
+                .find(|a| a.status == AutomationStatus::Done)
+            {
+                return done;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        panic!("it never ran")
+    });
+    assert_eq!(ran.session_id.as_deref(), Some(session.id.as_str()));
+    ui.send(Message::Sheet(harlo::app::SheetEvent::Schedule(
+        harlo::app::ScheduleEvent::Refresh,
+    )));
+    assert!(
+        tasks.until(&ui, WAIT, |ui| status(ui) == Some(AutomationStatus::Done)),
+        "reloaded"
+    );
+    assert!(
+        ui.shows(&format!("{}/project", sandbox.root().display())),
+        "its output"
+    );
+
+    // Its session opens from its page, closing Settings, once the
+    // sidebar has it as the server announced it.
+    ui.send(Message::Server(Update::Event(
+        harlo_core::workspace::Event {
+            id: "evt_new".into(),
+            seq: None,
+            time: 1.0,
+            kind: harlo_core::workspace::EventKind::SessionCreated {
+                session_id: session.id.clone(),
+            },
+        },
+    )));
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui
+            .app()
+            .projects
+            .iter()
+            .flat_map(|p| &p.sessions)
+            .any(|s| s.id == session.id)),
+        "in the sidebar"
+    );
+    ui.press("Open");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui.app().active.as_deref()
+            == Some(session.id.as_str())),
+        "opened"
+    );
+    assert!(ui.app().sheets.open.is_none());
+}

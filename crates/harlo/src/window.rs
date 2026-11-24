@@ -747,6 +747,9 @@ pub const FOLLOW_SSH_HOST: i32 = 80;
 /// through scripts (item 1) or as tools listed one by one (item 0).
 pub const MCP_SCRIPTS: i32 = 81;
 
+/// Settings → Schedules: open the shown schedule's session.
+pub const OPEN_SCHEDULE_SESSION: i32 = 82;
+
 /// The first number of Settings → Models' switches: the one for the model
 /// at place `n` of [`App::models`] is numbered this plus `n`.
 pub const MODEL_SWITCHES: i32 = 10_000;
@@ -885,7 +888,6 @@ fn look_action(number: i32, item: i32) -> Option<Message> {
 /// The step the Settings button numbered `number` takes for item `item`.
 fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     let project = |event| Some(Message::Sheet(SheetEvent::Project(event)));
-    let schedule = |event| Some(Message::Sheet(SheetEvent::Schedule(event)));
     let worktree = || {
         let folder = app.sheets.projects.shown.as_deref()?;
         let project = app.projects.iter().find(|p| p.directory == folder)?;
@@ -937,28 +939,9 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         OPEN_SIGN_IN_PAGE => Some(Message::Sheet(SheetEvent::Hosting(
             app::HostingEvent::OpenPage,
         ))),
-        NEW_SCHEDULE => schedule(ScheduleEvent::New),
-        ALL_SCHEDULES => schedule(ScheduleEvent::Back),
-        CREATE_SCHEDULE => schedule(ScheduleEvent::Create),
-        PICK_SCHEDULE => {
-            let Load::Loaded(list) = &app.sheets.schedules.list else {
-                return None;
-            };
-            let id = list.get(usize::try_from(item).ok()?)?.id.clone();
-            schedule(ScheduleEvent::Open(id))
+        NEW_SCHEDULE..=CHOOSE_SCHEDULE_FOLDER | OPEN_SCHEDULE_SESSION => {
+            schedule_action(app, number, item)
         }
-        PAUSE_SCHEDULE | RESUME_SCHEDULE | DELETE_SCHEDULE => {
-            let SchedulePage::Shown(id) = &app.sheets.schedules.page else {
-                return None;
-            };
-            let id = id.clone();
-            schedule(match number {
-                PAUSE_SCHEDULE => ScheduleEvent::Pause(id),
-                RESUME_SCHEDULE => ScheduleEvent::Resume(id),
-                _ => ScheduleEvent::Delete(id),
-            })
-        }
-        CHOOSE_SCHEDULE_FOLDER => Some(Message::TogglePicker(Picker::ScheduleFolder)),
         OPEN_PROVIDER
         | ALL_PROVIDERS
         | USE_SIGN_IN_METHOD
@@ -982,6 +965,44 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         ))),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
+    }
+}
+
+/// What a Settings → Schedules button does.
+fn schedule_action(app: &App, number: i32, item: i32) -> Option<Message> {
+    let schedule = |event| Some(Message::Sheet(SheetEvent::Schedule(event)));
+    match number {
+        NEW_SCHEDULE => schedule(ScheduleEvent::New),
+        ALL_SCHEDULES => schedule(ScheduleEvent::Back),
+        CREATE_SCHEDULE => schedule(ScheduleEvent::Create),
+        PICK_SCHEDULE => {
+            let Load::Loaded(list) = &app.sheets.schedules.list else {
+                return None;
+            };
+            let id = list.get(usize::try_from(item).ok()?)?.id.clone();
+            schedule(ScheduleEvent::Open(id))
+        }
+        PAUSE_SCHEDULE | RESUME_SCHEDULE | DELETE_SCHEDULE => {
+            let SchedulePage::Shown(id) = &app.sheets.schedules.page else {
+                return None;
+            };
+            let id = id.clone();
+            schedule(match number {
+                PAUSE_SCHEDULE => ScheduleEvent::Pause(id),
+                RESUME_SCHEDULE => ScheduleEvent::Resume(id),
+                _ => ScheduleEvent::Delete(id),
+            })
+        }
+        CHOOSE_SCHEDULE_FOLDER => Some(Message::TogglePicker(Picker::ScheduleFolder)),
+        OPEN_SCHEDULE_SESSION => {
+            let SchedulePage::Shown(id) = &app.sheets.schedules.page else {
+                return None;
+            };
+            let automation = app.sheets.schedules.get(id)?;
+            let session = app::schedule_session(automation)?.to_owned();
+            schedule(ScheduleEvent::OpenSession(session))
+        }
+        _ => None,
     }
 }
 

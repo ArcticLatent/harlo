@@ -84,7 +84,10 @@ pub use pictures::{PictureEvent, PicturesState, Pixels, Sent, Thumb, Viewing};
 pub use plugins::{PluginEvent, Plugins, is_outdated};
 pub use projects::{ProjectEvent, Projects, icon_url};
 pub use providers::{Attempt as SignInAttempt, FORM_FIELDS, ProviderEvent, Providers};
-pub use schedules::{Draft as ScheduleDraft, Page as SchedulePage, ScheduleEvent, Schedules};
+pub use schedules::{
+    Draft as ScheduleDraft, Page as SchedulePage, ScheduleEvent, Schedules,
+    session_of as schedule_session,
+};
 pub use sheets::{
     Autostart, Event as SheetEvent, Field, Load, OPENCODE_INSTALL, Range, Section, SetUp, Setting,
     SettingChoice, Sheet, Sheets, Step,

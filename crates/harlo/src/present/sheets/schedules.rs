@@ -3,12 +3,12 @@
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::schedules::{describe_now, moment_now};
+use harlo_core::schedules::{Does, describe_now, moment_now};
 use harlo_core::server::{Automation, AutomationAction, AutomationStatus};
 use lucide_icons::Icon;
 
 use super::{PROJECT, choice, glyph, heading, home_relative, int, live_field, note, pair, switch};
-use crate::app::{App, Field, Load, SchedulePage, Setting, SettingChoice};
+use crate::app::{App, Field, Load, SchedulePage, Setting, SettingChoice, schedule_session};
 use crate::model::session_label;
 use crate::ui::SheetRow;
 use crate::window;
@@ -112,35 +112,7 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
         3,
     ));
 
-    rows.push(heading("What it sends"));
-    rows.push(pair(
-        "Project",
-        &project_name(app, &automation.directory),
-        0,
-    ));
-    match &automation.action {
-        AutomationAction::Prompt {
-            prompt,
-            session,
-            subagent,
-        } => {
-            let to = match (session, subagent) {
-                (Some(id), _) => session_name(app, id),
-                (None, Some(agent)) => format!("A new {agent} subagent each time"),
-                (None, None) => String::new(),
-            };
-            rows.push(pair("Goes to", &to, 0));
-            rows.push(note(prompt));
-        }
-        AutomationAction::Code { code } => {
-            rows.push(pair("Runs", "Code, with no model", 0));
-            rows.push(note(code));
-        }
-        AutomationAction::Shell { command } => {
-            rows.push(pair("Runs", "A shell command", 0));
-            rows.push(note(command));
-        }
-    }
+    rows.extend(action_rows(app, automation));
 
     rows.push(heading("Runs so far"));
     let last = match (automation.last_run_at, &automation.last_outcome) {
@@ -195,6 +167,66 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
     rows
 }
 
+/// What a schedule does: its project, its prompt, command or code, and
+/// the session it belongs to, which opens from its row.
+fn action_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
+    let mut rows = Vec::new();
+    rows.push(heading("What it does"));
+    rows.push(pair(
+        "Project",
+        &project_name(app, &automation.directory),
+        0,
+    ));
+    // The session it belongs to opens from its row.
+    let opens = |mut row: SheetRow| {
+        if schedule_session(automation).is_some() {
+            row.action = "Open".into();
+            row.setting = window::OPEN_SCHEDULE_SESSION;
+        }
+        row
+    };
+    let maker = automation
+        .session_id
+        .as_deref()
+        .map(|id| session_name(app, id));
+    match &automation.action {
+        AutomationAction::Prompt {
+            prompt,
+            session,
+            subagent,
+        } => {
+            // With no session named, the prompt goes to the one that
+            // made the schedule.
+            let to = match (session, subagent) {
+                (Some(id), _) => session_name(app, id),
+                (None, Some(agent)) => format!("A new {agent} subagent each time"),
+                (None, None) => maker.clone().unwrap_or_default(),
+            };
+            let row = pair("Goes to", &to, 0);
+            rows.push(if subagent.is_some() { row } else { opens(row) });
+            if let (Some(maker), Some(_)) = (&maker, subagent) {
+                rows.push(opens(pair("Session", maker, 0)));
+            }
+            rows.push(note(prompt));
+        }
+        AutomationAction::Code { code } => {
+            rows.push(pair("Runs", "Code, with no model", 0));
+            if let Some(maker) = &maker {
+                rows.push(opens(pair("Session", maker, 0)));
+            }
+            rows.push(note(code));
+        }
+        AutomationAction::Shell { command } => {
+            rows.push(pair("Runs", "A shell command, with no model", 0));
+            if let Some(maker) = &maker {
+                rows.push(opens(pair("Session", maker, 0)));
+            }
+            rows.push(note(command));
+        }
+    }
+    rows
+}
+
 /// The form for a new schedule.
 fn new_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.schedules;
@@ -223,7 +255,7 @@ fn new_rows(app: &App) -> Vec<SheetRow> {
             time
         },
         note(draft.when.help()),
-        heading("What it sends"),
+        heading("What it does"),
     ];
     let folder = draft
         .folder
@@ -238,20 +270,26 @@ fn new_rows(app: &App) -> Vec<SheetRow> {
         project.setting = window::CHOOSE_SCHEDULE_FOLDER;
         rows.push(project);
     }
-    let to = draft.session.as_deref().map_or_else(
-        || "A new session named after the schedule".to_owned(),
-        |id| session_name(app, id),
-    );
-    let mut session = pair("Goes to", &to, 0);
-    session.action = "Change".into();
-    session.setting = window::CHOOSE_SCHEDULE_SESSION;
-    rows.push(session);
+    rows.push(choice(app, SettingChoice::ScheduleDoes, "Does", ""));
+    if draft.does == Does::Prompt {
+        let to = draft.session.as_deref().map_or_else(
+            || "A new session named after the schedule".to_owned(),
+            |id| session_name(app, id),
+        );
+        let mut session = pair("Goes to", &to, 0);
+        session.action = "Change".into();
+        session.setting = window::CHOOSE_SCHEDULE_SESSION;
+        rows.push(session);
+    }
     rows.push(live_field(
         Field::SchedulePrompt,
-        "Prompt",
+        draft.does.label(),
         &draft.prompt,
-        "What the agent should do each time",
+        draft.does.hint(),
     ));
+    if !draft.does.help().is_empty() {
+        rows.push(note(draft.does.help()));
+    }
     let mut create = pair("", "", 3);
     if let Some(why) = &page.error {
         create.value = why.as_str().into();

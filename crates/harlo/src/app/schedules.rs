@@ -1,5 +1,6 @@
 //! Settings → Schedules: OpenCode's automations that send a prompt to a
-//! session at a time, every so often or on a cron schedule. The server
+//! session, or run a shell command or code, at a time, every so often or
+//! on a cron schedule. The server
 //! keeps and runs them, so they run with Harlo closed; Harlo lists them,
 //! makes new ones, and pauses, resumes and deletes them.
 //!
@@ -12,8 +13,10 @@
 use std::path::Path;
 
 use harlo_core::config;
-use harlo_core::schedules::When;
-use harlo_core::server::{Automation, NewAutomation};
+use harlo_core::schedules::{Does, When};
+use harlo_core::server::{
+    Automation, AutomationAction, Effect as RuleEffect, NewAction, NewAutomation, Rule,
+};
 
 use crate::task::Task;
 
@@ -57,6 +60,8 @@ pub enum ScheduleEvent {
     Delete(String),
     /// A schedule was deleted, or why not.
     Deleted(String, Result<(), String>),
+    /// Close Settings and open a schedule's session, by ID.
+    OpenSession(String),
 }
 
 /// Which page Settings → Schedules shows.
@@ -80,13 +85,27 @@ pub struct Draft {
     pub when: When,
     /// The time, as typed.
     pub time: String,
+    /// What it does each time.
+    pub does: Does,
     /// The project folder it runs in.
     pub folder: Option<String>,
     /// The session its prompt goes to; `None` for a new one named after
     /// the schedule.
     pub session: Option<String>,
-    /// The prompt.
+    /// The prompt, command or code, by what it does.
     pub prompt: String,
+}
+
+/// The session a schedule belongs to: the one its prompt goes to, or the
+/// one that made it, such as an agent's.
+#[must_use]
+pub fn session_of(automation: &Automation) -> Option<&str> {
+    match &automation.action {
+        AutomationAction::Prompt {
+            session: Some(id), ..
+        } => Some(id),
+        _ => automation.session_id.as_deref(),
+    }
 }
 
 /// Settings → Schedules' state.
@@ -221,6 +240,12 @@ impl App {
                     Err(why) => page.error = Some(why),
                 }
             }
+            ScheduleEvent::OpenSession(id) => {
+                return Task::batch([
+                    Task::done(Message::Sheet(SheetEvent::Close)),
+                    Task::done(Message::OpenSession(id)),
+                ]);
+            }
         }
         Task::none()
     }
@@ -308,7 +333,7 @@ impl App {
         } else if draft.time.trim().is_empty() {
             Some("Say when it runs.")
         } else if draft.prompt.trim().is_empty() {
-            Some("Write the prompt it sends.")
+            Some(draft.does.missing())
         } else if draft.folder.is_none() {
             Some("Choose a project.")
         } else {
@@ -326,18 +351,43 @@ impl App {
         let name = draft.name.trim().to_owned();
         Task::perform(
             async move {
-                let (session, made) = if let Some(id) = draft.session {
+                let text = draft.prompt.trim().to_owned();
+                let trigger = draft.when.trigger(&draft.time);
+                // Nobody is there to approve a command or code when it's
+                // created, so it gets a session of its own whose rules
+                // allow it: the user asked for it here.
+                let (action, allowed) = match draft.does {
+                    Does::Shell => (
+                        NewAction::Shell(text.clone()),
+                        Some(Rule {
+                            action: "shell".to_owned(),
+                            resource: text,
+                            effect: RuleEffect::Allow,
+                        }),
+                    ),
+                    Does::Code => (
+                        NewAction::Code(text),
+                        Some(Rule::any("execute", RuleEffect::Allow)),
+                    ),
+                    Does::Prompt => (NewAction::Prompt(text), None),
+                };
+                let (session, made) = if let Some(id) = draft.session.filter(|_| allowed.is_none())
+                {
                     (id, false)
                 } else {
                     let session = client.create_session(&folder).await?;
                     client.set_title(&session.id, &name).await?;
+                    if let Some(rule) = allowed {
+                        client.set_permissions(&session.id, &[rule]).await?;
+                    }
                     (session.id, true)
                 };
                 let new = NewAutomation {
                     name,
-                    session_id: session.clone(),
-                    trigger: draft.when.trigger(&draft.time),
-                    prompt: draft.prompt.trim().to_owned(),
+                    session_id: Some(session.clone()),
+                    directory: None,
+                    trigger,
+                    action,
                 };
                 let created = client.create_automation(&new).await;
                 if created.is_err() && made {

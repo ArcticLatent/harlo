@@ -72,6 +72,70 @@ impl When {
     }
 }
 
+/// What a new schedule does each time it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Does {
+    /// Sends a prompt to a session.
+    #[default]
+    Prompt,
+    /// Runs a shell command in the project's folder, with no model.
+    Shell,
+    /// Runs JavaScript in OpenCode's Code Mode, with no model.
+    Code,
+}
+
+impl Does {
+    /// Every kind, in the order the form lists them.
+    pub const ALL: [Self; 3] = [Self::Prompt, Self::Shell, Self::Code];
+
+    /// The name of the field that holds it.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Prompt => "Prompt",
+            Self::Shell => "Command",
+            Self::Code => "Code",
+        }
+    }
+
+    /// What the field shows while empty.
+    #[must_use]
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Prompt => "What the agent should do each time",
+            Self::Shell => "cargo test --quiet",
+            Self::Code => "return { send: { prompt: \"Check the build.\" } }",
+        }
+    }
+
+    /// What it means, under the field; empty for a prompt.
+    #[must_use]
+    pub fn help(self) -> &'static str {
+        match self {
+            Self::Prompt => "",
+            Self::Shell => {
+                "Runs in the project's folder with no model, in a session of its own that \
+                 allows exactly this command. Its output shows on the schedule's page."
+            }
+            Self::Code => {
+                "JavaScript that OpenCode's Code Mode runs with no model, in a session of its \
+                 own that allows it. Returning { send: { prompt } } prompts that session; \
+                 { done: true } ends the schedule. Tools it calls must already be allowed."
+            }
+        }
+    }
+
+    /// What the form says when the field is empty.
+    #[must_use]
+    pub fn missing(self) -> &'static str {
+        match self {
+            Self::Prompt => "Write the prompt it sends.",
+            Self::Shell => "Write the command it runs.",
+            Self::Code => "Write the code it runs.",
+        }
+    }
+}
+
 /// When `trigger` runs, in words, with times shown in `zone` against
 /// `now`.
 #[must_use]

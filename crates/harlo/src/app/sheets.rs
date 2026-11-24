@@ -407,11 +407,13 @@ pub enum SettingChoice {
     LocalEngine,
     /// Which of Extensions' tabs shows: MCP servers, plugins or skills.
     ExtensionsTab,
+    /// What a new schedule does: a prompt, a shell command or code.
+    ScheduleDoes,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -435,6 +437,7 @@ impl SettingChoice {
         Self::VoiceLanguage,
         Self::LocalEngine,
         Self::ExtensionsTab,
+        Self::ScheduleDoes,
     ];
 
     /// The options, as Settings names them, in order.
@@ -462,6 +465,7 @@ impl SettingChoice {
             Self::VoiceLanguage => &harlo_core::voice::LANGUAGE_NAMES,
             Self::LocalEngine => &["Ollama", "llama.cpp"],
             Self::ExtensionsTab => &["MCP servers", "Plugins", "Skills"],
+            Self::ScheduleDoes => &["A prompt", "A shell command", "Code"],
         }
     }
 }
@@ -1132,6 +1136,12 @@ impl App {
             SettingChoice::ScheduleWhen => {
                 if let Some(&when) = harlo_core::schedules::When::ALL.get(option) {
                     self.sheets.schedules.draft.when = when;
+                }
+                Task::none()
+            }
+            SettingChoice::ScheduleDoes => {
+                if let Some(&does) = harlo_core::schedules::Does::ALL.get(option) {
+                    self.sheets.schedules.draft.does = does;
                 }
                 Task::none()
             }

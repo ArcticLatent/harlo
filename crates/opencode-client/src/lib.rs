@@ -34,7 +34,7 @@ mod types;
 pub use approval::SavedApproval;
 #[doc(inline)]
 pub use automation::{
-    Action as AutomationAction, Automation, NewAutomation, Status as AutomationStatus,
+    Action as AutomationAction, Automation, NewAction, NewAutomation, Status as AutomationStatus,
     Trigger as AutomationTrigger,
 };
 #[doc(inline)]
