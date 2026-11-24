@@ -196,6 +196,8 @@ enum Later {
 /// The session a phone has open.
 struct Open {
     key: String,
+    /// How full its context is, for the phone's context bar.
+    context: ContextFill,
     rows: Rows,
     /// The rows the phone has.
     sent: Vec<Value>,
@@ -301,13 +303,52 @@ fn summaries(hub: &Hub, server: &Server) -> Vec<Value> {
 }
 
 /// A session's title, model and cost (the phone's `SessionInfo`).
-fn meta(server: &Server, key: &str) -> Value {
+/// How full a session's context is: the latest step's tokens, and the
+/// model's window (0 when unknown).
+#[derive(Debug, Clone, Copy, Default)]
+struct ContextFill {
+    tokens: u64,
+    window: u64,
+}
+
+/// Returns how full session `key`'s context is now.
+async fn context_fill(server: &Server, key: &str) -> ContextFill {
+    let tokens = server
+        .client
+        .context(key)
+        .await
+        .ok()
+        .and_then(|c| c.last_step)
+        .map_or(0, harlo_client::Tokens::total);
+    let (directory, model) = {
+        let workspace = lock(&server.workspace);
+        let Some(session) = workspace.session(key) else {
+            return ContextFill::default();
+        };
+        (session.directory.clone(), session.model.clone())
+    };
+    let window = match model {
+        Some(m) => crate::server::catalog(&server.client, &directory)
+            .await
+            .ok()
+            .and_then(|c| {
+                c.model(&m.provider_id, &m.id)
+                    .and_then(|known| known.context)
+            })
+            .unwrap_or(0),
+        None => 0,
+    };
+    ContextFill { tokens, window }
+}
+
+fn meta(server: &Server, key: &str, context: ContextFill) -> Value {
     let workspace = lock(&server.workspace);
     let Some(session) = workspace.session(key) else {
         return json!({ "ev": "meta", "key": key });
     };
     let model = session.model.clone();
     json!({
+        "contextTokens": context.tokens, "contextWindow": context.window,
         "ev": "meta", "key": key,
         "title": session.title.clone().unwrap_or_default(),
         "model": model.as_ref().map(|m| m.id.clone()).unwrap_or_default(),
@@ -494,6 +535,10 @@ impl Conn {
         }
         let key = open.key.clone();
         let reload = open.rows.apply(&event.kind, event.time);
+        if let EventKind::StepEnded { tokens, .. } = &event.kind {
+            open.context.tokens = tokens.total();
+        }
+        let context = open.context;
         open.dirty = true;
         let mut out = Vec::new();
         let server = self.hub.current();
@@ -522,9 +567,10 @@ impl Conn {
             }
             EventKind::SessionRenamed { .. }
             | EventKind::ModelSelected { .. }
-            | EventKind::UsageUpdated { .. } => {
+            | EventKind::UsageUpdated { .. }
+            | EventKind::StepEnded { .. } => {
                 if let Some(s) = &server {
-                    out.push(meta(s, &key));
+                    out.push(meta(s, &key, context));
                 }
             }
             EventKind::InboxAdded { .. }
@@ -676,10 +722,11 @@ impl Conn {
         };
         let rows = Rows::from_messages(&messages);
         let (now, earlier) = rows.for_phone();
+        let context = context_fill(server, key).await;
         let mut after = vec![
             json!({ "ev": "reset", "key": key, "rows": now, "earlier": earlier }),
             json!({ "ev": "status", "key": key, "status": status(server, key) }),
-            meta(server, key),
+            meta(server, key, context),
             queue(server, key),
         ];
         after.extend(
@@ -689,6 +736,7 @@ impl Conn {
         );
         self.open = Some(Open {
             key: key.to_owned(),
+            context,
             rows,
             sent: now,
             earlier,
@@ -815,6 +863,11 @@ async fn start(server: &Server, m: &Value) -> Result<String, String> {
             .await
             .map_err(|e| e.to_string())?;
     }
+    // The approval mode picked on the phone, before its first message runs.
+    let approval = m["approval"].as_str().unwrap_or_default();
+    if !approval.is_empty() {
+        super::work::put_in_mode(server, &session.id, approval).await?;
+    }
     send(server, &session.id, m).await?;
     Ok(session.id)
 }
@@ -854,10 +907,17 @@ async fn choices(server: &Server) -> Value {
         .primary_agents()
         .map(|a| (a.id.clone(), Value::from(models.clone())))
         .collect();
+    // A new session starts with no rules of its own: the agent's ("write").
+    let approvals: serde_json::Map<String, Value> = catalog
+        .primary_agents()
+        .map(|a| (a.id.clone(), Value::from("write")))
+        .collect();
     let list: Vec<Value> = projects
         .iter()
         .enumerate()
-        .map(|(i, p)| json!({ "id": i, "name": p.name, "where": tilde(&p.directory) }))
+        .map(|(i, p)| {
+            json!({ "id": i, "name": p.name, "where": tilde(&p.directory), "approvals": approvals })
+        })
         .collect();
     json!({
         "projects": list,
@@ -865,6 +925,7 @@ async fn choices(server: &Server) -> Value {
         "defaultAgent": catalog.primary_agents().next().map(|a| a.id.clone()).unwrap_or_default(),
         "models": [],
         "agentModels": agent_models,
+        "approvals": approvals,
     })
 }
 

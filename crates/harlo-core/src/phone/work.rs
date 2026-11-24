@@ -459,20 +459,31 @@ fn modes(server: &Server, key: &str) -> Value {
 /// Puts the session in approval mode `m.approval`.
 async fn set_modes(server: &Server, key: &str, m: &Value) -> Value {
     if let Some(wanted) = m["approval"].as_str() {
-        let Some(rules) = MODES
-            .iter()
-            .find(|(name, _)| *name == wanted)
-            .and_then(|(_, shield)| shield.rules())
-        else {
-            return error("Harlo has no such approval mode.");
-        };
-        if let Err(e) = server.client.set_permissions(key, &rules).await {
-            return error(e.to_string());
+        if let Err(e) = put_in_mode(server, key, wanted).await {
+            return error(e);
         }
         // The server's event updates the session a moment later.
         return json!({ "approval": wanted, "approvals": MODES.map(|(name, _)| name) });
     }
     modes(server, key)
+}
+
+/// Puts session `key` in the approval mode named `wanted`.
+///
+/// # Errors
+///
+/// Returns why when there's no such mode or the server refuses it.
+pub(super) async fn put_in_mode(server: &Server, key: &str, wanted: &str) -> Result<(), String> {
+    let rules = MODES
+        .iter()
+        .find(|(name, _)| *name == wanted)
+        .and_then(|(_, shield)| shield.rules())
+        .ok_or_else(|| "Harlo has no such approval mode.".to_owned())?;
+    server
+        .client
+        .set_permissions(key, &rules)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// The waiting message of `queue` (`steering` or `followUp`) with `text`.

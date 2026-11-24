@@ -101,27 +101,26 @@ pub fn folder() -> Option<PathBuf> {
     )
 }
 
-/// Returns where phones on this computer's networks reach Harlo's port:
-/// `ws://address:port/ws` for each address that isn't this computer's own
-/// loopback, IPv4 first.
+/// Returns where phones on this computer's networks reach Harlo's port.
+///
+/// That's `ws://address:port/ws` for each IPv4 address that isn't
+/// loopback or link-local. Phone access listens on IPv4 only, so an IPv6
+/// address would be one a phone can't reach Harlo at.
 #[must_use]
 pub fn local_endpoints(port: u16) -> Vec<String> {
-    let mut addresses: Vec<std::net::IpAddr> = if_addrs::get_if_addrs()
+    let mut addresses: Vec<std::net::Ipv4Addr> = if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
-        .map(|i| i.ip())
-        .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
-        .filter(|ip| match ip {
-            std::net::IpAddr::V4(v4) => !v4.is_link_local(),
-            // Only addresses a phone can be given: not link-local ones.
-            std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) != 0xfe80,
+        .filter_map(|i| match i.ip() {
+            std::net::IpAddr::V4(v4) => Some(v4),
+            std::net::IpAddr::V6(_) => None,
         })
+        .filter(|v4| !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local())
         .collect();
-    addresses.sort_by_key(std::net::IpAddr::is_ipv6);
     addresses.dedup();
     addresses
         .into_iter()
-        .map(|ip| format!("ws://{}/ws", SocketAddr::new(ip, port)))
+        .map(|ip| format!("ws://{}/ws", SocketAddr::new(ip.into(), port)))
         .collect()
 }
 

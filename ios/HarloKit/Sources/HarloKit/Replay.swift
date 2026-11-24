@@ -2,7 +2,7 @@ import Foundation
 
 // A connection to harlo recorded, and played back without one: the app's
 // UI tests and screenshots show what a real harlo sent (recorded by
-// harlo-probe against harlo, scripts/ios-record.sh), at named points of it
+// harlo-probe against harlo, tools/ios-record.sh), at named points of it
 // (scenes), with no harlo to connect to.
 //
 // A recording is JSON lines, in the order they happened:

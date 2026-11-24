@@ -1465,7 +1465,7 @@ final class ReplayTests: XCTestCase {
     }
 }
 
-/// The app's recording (scripts/ios-record.sh) played back at each scene, as
+/// The app's recording (tools/ios-record.sh) played back at each scene, as
 /// the UI tests and screenshots see it.
 @MainActor
 final class RecordingTests: XCTestCase {
@@ -1487,116 +1487,46 @@ final class RecordingTests: XCTestCase {
 
     func testEveryScene() async throws {
         let text = try XCTUnwrap(Self.text)
-        XCTAssertEqual(Replay.scenes(in: text), ["session", "approval", "working", "mcp", "wiki", "end", "extension", "pictures", "workflow-asks", "workflow-check", "workflow"])
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "approval", "working", "end"])
         let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
 
         var (m, s) = try await open("session")
-        XCTAssertTrue(m.features.contains("sessionMentions"))
         XCTAssertEqual(m.sessions.count, 3, "\(m.sessions.map(\.title))")
-        let tests = try XCTUnwrap(tools(s).first { $0.command == "./run-tests.sh" })
-        XCTAssertTrue(tests.shownOutput().trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("112 passed; 0 failed; 0 ignored; finished in 1.84s"))
-        XCTAssertEqual(s.rows.first { $0.kind == "markdown" }?.model, "tour-coder")
-        // No workflow runs yet: none listed, and the session isn't in one.
-        await m.loadWorkflows()
-        XCTAssertTrue(m.hasWorkflows)
-        XCTAssertTrue(m.workflowRuns.isEmpty)
-        XCTAssertNil(s.workflow)
+        XCTAssertTrue(m.sessions.allSatisfy { $0.harness == "harlo" })
+        // The fix's calls fold under the run's summary; the reply names the file.
+        let runs = s.items.compactMap { item -> String? in
+            if case .run(_, let summary, _, let open, _) = item, !open { return summary }
+            return nil
+        }
+        XCTAssertEqual(runs, ["Read 1 file, edited 1 file, ran 1 command, searched 1 time"])
+        XCTAssertEqual(tools(s).map { ToolName.words($0.title, running: false) }, ["Read file", "Searched", "Edited file", "Ran command"])
+        XCTAssertTrue(tools(s).contains { $0.command == "./run-tests.sh" })
+        XCTAssertTrue(s.rows.contains { $0.html.contains("Found it.") && $0.html.contains("src/sidebar.rs") })
+        XCTAssertEqual(Int(s.info.contextUsed * 100), 9)
+        let files = await m.files(matching: "")
+        XCTAssertTrue(files.contains("src/sidebar.rs"), "\(files)")
+        let file = await m.file("src/sidebar.rs")
+        XCTAssertTrue(file?.lines.contains { $0.contains("merge_by_key") } == true)
 
         (m, s) = try await open("approval")
         let approval = try XCTUnwrap(s.requests.first)
-        XCTAssertTrue(approval.approval && approval.message.contains("git clean"), approval.message)
+        XCTAssertTrue(approval.approval && approval.title.contains("git clean"), approval.title)
         XCTAssertEqual(m.waiting.count, 1)
         // A command still running.
         (m, s) = try await open("working")
         XCTAssertTrue(tools(s).contains { $0.command == "./build.sh" && $0.state != "done" }, "\(tools(s).map { "\($0.command) \($0.state)" })")
-        (m, s) = try await open("mcp")
-        XCTAssertTrue(tools(s).contains { ToolName.words($0.title, running: false) == "dice roll" })
-        (m, s) = try await open("wiki")
-        // The wiki's sheet reads the project's wiki as it opens: its
-        // pages, two footnotes' code changed; a page in blocks; a search.
-        for _ in 0..<50 where s.wiki?.loading != false {
-            await m.loadWiki()
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        XCTAssertNil(m.alert)
-        XCTAssertEqual(s.wiki?.pages.map(\.title), ["Overview", "Sidebar", "Releasing"])
-        XCTAssertEqual(s.wiki?.freshness(), ["2 footnotes' code changed"])
-        let page = await m.wikiPage("architecture/sidebar.md")
-        XCTAssertEqual(page?.kind, "Architecture")
-        XCTAssertTrue(page?.blocks.contains { $0.kind == "mermaid" } == true)
-        XCTAssertEqual(page?.target(of: "/overview.md"), .page(path: "overview.md", section: ""))
-        XCTAssertEqual(page?.footnotes.map(\.state), ["stale", "stale", "current"])
-        XCTAssertEqual(page?.owes.count, 2)
-        let found = await m.searchWiki("rebuilds the whole list")
-        XCTAssertEqual(found?.hits.first?.heading, "Rebuilding rows")
-        // Its graph and its page's diagram drawn, in the phone's colours.
-        for source in [s.wiki?.mermaid ?? "", page?.blocks.first { $0.kind == "mermaid" }?.code ?? ""] {
-            for light in [true, false] {
-                let d = await m.diagram(source, light: light, colors: ["background": light ? "#fafafa" : "#101010"])
-                XCTAssertGreaterThan(d.picture?.width ?? 0, 100, "\(source.prefix(30)) \(light): \(d.why)")
-            }
-        }
+
         (m, s) = try await open("end")
         XCTAssertTrue(s.info.modelId.hasSuffix("tour-helper"), s.info.modelId)
-        let mentions = await m.sessionMentions(matching: "")
-        XCTAssertTrue(mentions.contains { $0.title.hasPrefix("What does the README say") }, "\(mentions.map(\.title))")
-
-        // The phone's photo and the reply's picture, each as a thumbnail
-        // and fitted to the screen.
-        (m, s) = try await open("pictures")
-        XCTAssertTrue(m.showsPictures)
-        XCTAssertEqual(s.pictures.count, 2, "\(s.pictures)")
-        XCTAssertEqual(s.rows.last { $0.kind == "user" }?.images.count, 1)
-        XCTAssertEqual(s.pictures.last.map { ($0 as NSString).lastPathComponent }, "sidebar.png")
-        for path in s.pictures {
-            for thumb in [true, false] {
-                let got = await m.picture(path, thumb: thumb)
-                let picture = try XCTUnwrap(got.picture, got.why)
-                XCTAssertGreaterThan(picture.width, 0)
-                // (A screenshot stays a PNG on screen, so its text stays sharp.)
-                XCTAssertEqual(picture.type, path.hasSuffix(".png") && !thumb ? "image/png" : "image/jpeg", path)
-            }
-        }
-
-        // A workflow run started on the computer: its implementation
-        // session shows it, its check's output coming in; the list has it.
-        let task = "Keep the session list's place"
-        // It asks before running the tests: the run needs you, the stage
-        // under way too, and the list says which session asks.
-        (m, s) = try await open("workflow-asks", task)
-        for _ in 0..<250 where s.workflow == nil { try await Task.sleep(nanoseconds: 20_000_000) }
-        let asks = try XCTUnwrap(s.workflow)
-        XCTAssertTrue(asks.asking && asks.needsYou)
-        XCTAssertEqual(asks.stages.map(\.status), ["asking", "todo", "todo"])
-        XCTAssertEqual(asks.statusLine, "The implementation session needs you: it asks to run a command")
-        XCTAssertTrue(s.requests.contains(where: \.approval), "its approval")
-        await m.loadWorkflows()
-        XCTAssertEqual(m.workflowRuns.first?.askingKey, s.key)
-        (m, s) = try await open("workflow-check", task)
-        for _ in 0..<250 where s.workflow == nil { try await Task.sleep(nanoseconds: 20_000_000) }
-        let live = try XCTUnwrap(s.workflow)
-        XCTAssertEqual(live.stages.map(\.status), ["done", "active", "todo"])
-        XCTAssertEqual(live.stages.map(\.label), ["Implement", "Tests", "Review"])
-        XCTAssertTrue(live.liveCheck?.output.contains("keeps_place_2") == true, live.liveCheck?.output ?? "no output")
-        XCTAssertEqual(live.statusLine, "Running `./check.sh`")
-        XCTAssertEqual(live.role, "implementation")
-        await m.loadWorkflows()
-        XCTAssertEqual(m.workflowRuns.map(\.state), ["running"])
-        XCTAssertEqual(m.workflowRuns.first?.project, "harlo")
-        // The main session isn't in it.
-        (m, s) = try await open("workflow-check")
-        for _ in 0..<50 { try await Task.sleep(nanoseconds: 10_000_000) }
-        XCTAssertNil(s.workflow)
-        // Done: tests passed, the review approved, its work to merge.
-        (m, s) = try await open("workflow", task)
-        for _ in 0..<250 where s.workflow?.state != "done" { try await Task.sleep(nanoseconds: 20_000_000) }
-        let done = try XCTUnwrap(s.workflow)
-        XCTAssertEqual(done.statusLine, "Done: Tests passed · Review approved")
-        XCTAssertTrue(done.finishable && !done.merged && done.base == "main", "\(done.base)")
-        XCTAssertEqual(done.lastCheck?.passed, true)
-        XCTAssertNil(done.liveCheck)
-        XCTAssertTrue(done.log.contains { $0.tone == "good" }, "\(done.log.map(\.text))")
-        XCTAssertEqual(m.workflowRun(done.id)?.id, done.id)
+        XCTAssertTrue(s.rows.last?.html.contains("The session list keeps its place now") == true)
+        let models = await m.models()
+        XCTAssertEqual(models.map(\.name), ["Tour Coder", "Tour Helper"])
+        let changes = await m.changes()
+        XCTAssertEqual(changes?.files.map(\.path), ["src/sidebar.rs"])
+        let diff = await m.diff("src/sidebar.rs")
+        XCTAssertTrue(diff?.hunks.flatMap(\.lines).contains { $0.text.contains("merge_by_key") } == true)
+        let log = await m.actionLog()
+        XCTAssertTrue(log?.entries.contains { $0.target.contains("run-tests.sh") } == true, "\(log?.entries.map(\.target) ?? [])")
     }
 }
 

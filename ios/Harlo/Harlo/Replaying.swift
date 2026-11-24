@@ -4,7 +4,7 @@ import HarloKit
 /// The app on a recording of harlo instead of a harlo (its UI tests and
 /// screenshots): launched with `-replay <scene>`, it shows what a real harlo
 /// sent up to that scene (ios/fixtures/recording.jsonl, in Debug builds'
-/// bundle; scripts/ios-record.sh makes it). Nothing is paired or kept, and
+/// bundle; tools/ios-record.sh makes it). Nothing is paired or kept, and
 /// it asks for no notifications.
 enum Replaying {
     static let scene: String? = {

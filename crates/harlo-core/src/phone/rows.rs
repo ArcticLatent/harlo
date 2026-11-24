@@ -99,7 +99,9 @@ impl Rows {
     #[must_use]
     pub fn for_phone(&self) -> (Vec<Value>, usize) {
         let earlier = self.entries.len().saturating_sub(PHONE_ROWS);
-        (self.entries[earlier..].iter().map(row).collect(), earlier)
+        let mut rows: Vec<Value> = self.entries[earlier..].iter().map(row).collect();
+        group_runs(&mut rows);
+        (rows, earlier)
     }
 }
 
@@ -181,37 +183,7 @@ pub fn row(entry: &Entry) -> Value {
         Entry::Thought { key, text } => {
             json!({ "key": key, "kind": "thinking", "text": clip(text), "state": "done" })
         }
-        Entry::Tool {
-            key,
-            label,
-            detail,
-            status,
-            took,
-            files,
-            error,
-            ..
-        } => {
-            let diff: String = files
-                .iter()
-                .map(|f| f.patch.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            let (added, removed) = files
-                .iter()
-                .fold((0, 0), |(a, r), f| (a + f.additions, r + f.deletions));
-            let result = if let Some(why) = error {
-                why.clone()
-            } else if files.is_empty() {
-                String::new()
-            } else {
-                format!("+{added} −{removed}")
-            };
-            json!({
-                "key": key, "kind": "tool", "title": label, "subtitle": detail, "state": state(*status),
-                "diff": clip(&diff), "result": result,
-                "runMs": took.map_or(0, |t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX)),
-            })
-        }
+        Entry::Tool { .. } => tool_row(entry),
         Entry::Subagent {
             key,
             agent,
@@ -257,6 +229,127 @@ pub fn row(entry: &Entry) -> Value {
     }
 }
 
+/// A tool call's row: what it did, its diff and how long it took.
+fn tool_row(entry: &Entry) -> Value {
+    let Entry::Tool {
+        key,
+        name,
+        detail,
+        status,
+        took,
+        files,
+        error,
+        ..
+    } = entry
+    else {
+        return Value::Null;
+    };
+    let diff: String = files
+        .iter()
+        .map(|f| f.patch.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (added, removed) = files
+        .iter()
+        .fold((0, 0), |(a, r), f| (a + f.additions, r + f.deletions));
+    let result = if let Some(why) = error {
+        why.clone()
+    } else if files.is_empty() {
+        String::new()
+    } else {
+        format!("+{added} −{removed}")
+    };
+    let command = if is_command(name) {
+        detail.as_str()
+    } else {
+        ""
+    };
+    json!({
+        "key": key, "kind": "tool", "tool": name, "title": name, "subtitle": detail,
+        "command": command, "state": state(*status), "diff": clip(&diff), "result": result,
+        "runMs": took.map_or(0, |t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX)),
+    })
+}
+
+/// Whether tool `name` runs a command.
+fn is_command(name: &str) -> bool {
+    matches!(name, "bash" | "shell")
+}
+
+/// Folds each run of two or more tool calls in a row (with the model's
+/// thoughts between them) under one group, as the phone shows it: the
+/// group is its first row's key, which carries the run's summary ("Read 1
+/// file, ran 2 commands") and, once it's done, how long it took; the run
+/// stays open while a call in it runs.
+fn group_runs(rows: &mut [Value]) {
+    let mut i = 0;
+    while i < rows.len() {
+        if rows[i]["kind"] != "tool" {
+            i += 1;
+            continue;
+        }
+        // The run: tools, and thoughts followed by another tool.
+        let mut end = i + 1;
+        let mut last_tool = i;
+        while end < rows.len() {
+            match rows[end]["kind"].as_str() {
+                Some("tool") => last_tool = end,
+                Some("thinking") => {}
+                _ => break,
+            }
+            end += 1;
+        }
+        let run = &mut rows[i..=last_tool];
+        let tools = run.iter().filter(|r| r["kind"] == "tool").count();
+        if tools >= 2 {
+            let group = run[0]["key"].clone();
+            let open = run.iter().any(|r| r["state"] == "running");
+            let took: u64 = run.iter().filter_map(|r| r["runMs"].as_u64()).sum();
+            for r in run.iter_mut() {
+                r["group"] = group.clone();
+                r["groupOpen"] = Value::Bool(open);
+            }
+            run[0]["summary"] = Value::String(summary(run));
+            if !open {
+                run[0]["runMs"] = Value::from(took);
+            }
+        }
+        i = last_tool + 1;
+    }
+}
+
+/// A run's tool calls in words: "Read 2 files, edited 1 file, ran 1 command".
+fn summary(run: &[Value]) -> String {
+    let (mut read, mut edited, mut ran, mut searched, mut other) = (0, 0, 0, 0, 0);
+    for r in run.iter().filter(|r| r["kind"] == "tool") {
+        match r["tool"].as_str().unwrap_or_default() {
+            "read" => read += 1,
+            "edit" | "write" | "apply_patch" | "multiedit" => edited += 1,
+            name if is_command(name) => ran += 1,
+            "grep" | "glob" | "list" | "codesearch" => searched += 1,
+            _ => other += 1,
+        }
+    }
+    let count =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let parts: Vec<String> = [
+        (read, "read", ("file", "files")),
+        (edited, "edited", ("file", "files")),
+        (ran, "ran", ("command", "commands")),
+        (searched, "searched", ("time", "times")),
+        (other, "used", ("other tool", "other tools")),
+    ]
+    .into_iter()
+    .filter(|(n, ..)| *n > 0)
+    .map(|(n, verb, (one, many))| format!("{verb} {}", count(n, one, many)))
+    .collect();
+    let mut text = parts.join(", ");
+    if let Some(first) = text.get(..1) {
+        text.replace_range(..1, &first.to_uppercase());
+    }
+    text
+}
+
 /// Returns the changes that turn the phone's rows `sent` into `now`
 /// (`{ op: update | remove | insert, at, … }`), as few as it takes when only
 /// the end changed.
@@ -279,4 +372,51 @@ pub fn changes(sent: &[Value], now: &[Value]) -> Vec<Value> {
         out.push(json!({ "op": "insert", "at": at, "rows": now[at..] }));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    fn tool(key: &str, name: &str, state: &str, ms: u64) -> Value {
+        json!({ "key": key, "kind": "tool", "tool": name, "state": state, "runMs": ms })
+    }
+
+    #[test]
+    fn runs_of_tool_calls_fold_under_their_summary() {
+        let mut rows = vec![
+            json!({ "key": "u", "kind": "user" }),
+            json!({ "key": "t0", "kind": "thinking" }),
+            tool("a", "read", "done", 10),
+            json!({ "key": "t1", "kind": "thinking" }),
+            tool("b", "grep", "done", 5),
+            tool("c", "edit", "done", 1),
+            tool("d", "shell", "done", 100),
+            tool("e", "shell", "done", 20),
+            json!({ "key": "m", "kind": "markdown" }),
+            tool("f", "read", "done", 3),
+            json!({ "key": "n", "kind": "markdown" }),
+            tool("g", "read", "done", 1),
+            tool("h", "write", "running", 0),
+        ];
+        super::group_runs(&mut rows);
+        let groups: Vec<&str> = rows
+            .iter()
+            .map(|r| r["group"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            groups,
+            ["", "", "a", "a", "a", "a", "a", "a", "", "", "", "g", "g"]
+        );
+        assert_eq!(
+            rows[2]["summary"],
+            "Read 1 file, edited 1 file, ran 2 commands, searched 1 time"
+        );
+        assert_eq!(rows[2]["runMs"], 136);
+        assert_eq!(rows[2]["groupOpen"], false);
+        // A lone call stays on its own; a run still working stays open.
+        assert!(rows[9].get("summary").is_none());
+        assert_eq!(rows[11]["groupOpen"], true);
+        assert_eq!(rows[11]["summary"], "Read 1 file, edited 1 file");
+    }
 }

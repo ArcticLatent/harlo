@@ -114,6 +114,20 @@ SUMMARY = """## Objective
 """
 
 
+# How the server asks for a session's title.
+TITLE_REQUEST = "The conversation's first message:"
+
+# How the server opens the message that carries a tool's pictures.
+TOOL_PICTURES = "The pictures the tools returned:"
+
+
+def chat_usage():
+    """A step's tokens: 10 in and 5 out, or the prompt's from scripts.json's
+    "<prompt_tokens>" (a context bar with something in it)."""
+    prompt = stored_scripts().get("<prompt_tokens>", 10)
+    return {"prompt_tokens": prompt, "completion_tokens": 5, "total_tokens": prompt + 5}
+
+
 def stored_scripts():
     """The scripts kept by prompt in scripts.json beside the log."""
     path = os.path.join(os.path.dirname(os.path.abspath(LOG)), "scripts.json")
@@ -129,7 +143,8 @@ def plan(messages):
     # A user message right after a tool's result carries what the tool
     # returned, such as a picture it read; the prompt is the one before.
     last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"
-                     and not (i > 0 and messages[i - 1].get("role") == "tool")), default=-1)
+                     and not (i > 0 and messages[i - 1].get("role") == "tool"
+                              and text_of(m.get("content")).startswith(TOOL_PICTURES))), default=-1)
     if last_user < 0:
         return [("say", "ok.")]
     # A request to summarize, wherever the server puts the instruction.
@@ -137,6 +152,11 @@ def plan(messages):
            for m in messages):
         return [("say", SUMMARY)]
     script = text_of(messages[last_user].get("content")).strip()
+    # A request to name the session (unless a script answers it): its
+    # first message is its title.
+    if script.startswith(TITLE_REQUEST) and "<message>" in script and script not in stored_scripts():
+        first = script.split("<message>", 1)[1].split("</message>", 1)[0].strip()
+        return [("say", first.splitlines()[0] if first else "New session")]
     if script.startswith((REVIEWER, HARLO_REVIEWER)):
         return [("say", stored_scripts().get("<reviewer>", MET))]
     for preamble in (SUBAGENT_PREAMBLE, HARLO_SUBAGENT_PREAMBLE):
@@ -290,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {
             "id": "fake", "object": "chat.completion", "model": "fake-coder",
             "choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if calls else "stop"}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "usage": chat_usage(),
         })
 
     @staticmethod
@@ -328,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.send(chunk({"tool_calls": [{"index": calls, "function": {"arguments": p}}]}), pace)
                     calls += 1
             self.send(chunk(finish="tool_calls" if calls else "stop"))
-            self.send(chunk(usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}))
+            self.send(chunk(usage=chat_usage()))
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):

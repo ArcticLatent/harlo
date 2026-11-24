@@ -6,7 +6,7 @@
 # driving the app on its recording of harlo (ios/fixtures/recording.jsonl)
 # on several phones, appearances and text sizes at once (a job each), as
 # `ui-tests-<run>` artifacts: a folder per run with each screen's picture,
-# its accessibility audit, and what failed. scripts/ios-ui-tests.sh runs it
+# its accessibility audit, and what failed. tools/ios-ui-tests.sh runs it
 # and fetches them.
 #
 # Secrets: APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the .p8's
