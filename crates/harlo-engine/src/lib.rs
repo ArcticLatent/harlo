@@ -1,0 +1,33 @@
+//! Harlo's agent engine: the loop that sends a session's history to a
+//! model, runs the tools it calls, and goes on until it answers.
+//!
+//! The engine is a library, so the daemon (`harlo-server`) and tests run
+//! the same code. It owns no storage and no wire format: a turn reads the
+//! history it is given, reports what happens through a [`Sink`], asks a
+//! [`Gate`] before any tool that needs permission, and stops when its
+//! [`CancellationToken`](tokio_util::sync::CancellationToken) is cancelled.
+//!
+//! Messages follow OpenCode 2's shape (one assistant message per model
+//! step, tool results inside their tool part), so a server can store them
+//! as they are and clients that read OpenCode's sessions read these too.
+
+// Rust guideline compliant 2026-10-09
+
+mod chat;
+mod config;
+mod error;
+mod id;
+mod message;
+mod rules;
+pub mod tools;
+mod turn;
+
+pub use config::{Config, ModelRef, ModelSpec, ProviderSpec};
+pub use error::Error;
+pub use id::{ascending_id, descending_id};
+pub use message::{
+    Assistant, Cache, Created, ErrorInfo, Message, Part, Snapshot, StepTime, Tokens, ToolState,
+    ToolTime,
+};
+pub use rules::{Decision, Effect, Rule, agent_rules, decide};
+pub use turn::{Answer, Ask, Event, Gate, Outcome, Sink, Turn, now, run};

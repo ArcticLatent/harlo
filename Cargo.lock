@@ -2436,6 +2436,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "harlo-engine"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "getrandom 0.4.3",
+ "jsonc-parser",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "similar",
+ "sse-stream",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3430,6 +3449,7 @@ version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ecded084f9b9a718d39668a42657c32253663d1f6afb3fbb9134f0305f73f48"
 dependencies = [
+ "serde",
  "serde_json",
 ]
 

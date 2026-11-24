@@ -37,6 +37,9 @@ the private bus are logged instead of shown.
 With HARLO_GUI_PREFS='{"setup_done": true}' at `start`, Harlo's saved preferences
 start as that JSON (any field left out keeps its default).
 
+With HARLO_GUI_API_LOG=<file> at `start`, Harlo reaches the server through
+tools/api-log.py, which records every request, response and event in <file>.
+
 With HARLO_GUI_SHARED=1 at `start`, Harlo takes the sandbox for the shared
 background service on this computer (a registration in Harlo's scratch state
 folder) and the sandbox's config folder for OpenCode's own, so settings that
@@ -160,14 +163,16 @@ def start_harlo(state):
         with open(f"{ssh}/config", "w") as f:
             f.write("Host buildbox\n    HostName 192.0.2.10\n"
                     "Host gpu-box\n    HostName 192.0.2.11\n")
-    argv = [state["binary"], "--server", state["url"]]
+    # Through the API log's proxy when there is one.
+    url = state.get("harlo_url") or state["url"]
+    argv = [state["binary"], "--server", url]
     if state.get("shared"):
         # The sandbox registered as the background service, where Harlo
         # looks for it, and its config folder as OpenCode's.
         registry = f"{state['gui_root']}/state/opencode"
         os.makedirs(registry, exist_ok=True)
         with open(f"{registry}/service.json", "w") as f:
-            json.dump({"url": state["url"], "password": state["password"]}, f)
+            json.dump({"url": url, "password": state["password"]}, f)
         os.chmod(f"{registry}/service.json", 0o600)
         env["XDG_CONFIG_HOME"] = f"{state['sandbox']}/config"
         argv = [state["binary"]]
@@ -252,6 +257,16 @@ def cmd_start(args):
          "type='method_call',interface='org.freedesktop.Notifications',member='Notify'"],
         dict(os.environ), f"{gui_root}/notifications.log",
     )
+    if os.environ.get("HARLO_GUI_API_LOG"):
+        # Every request Harlo makes, and every event, recorded on the way.
+        port = free_port()
+        state["proxy_pid"] = spawn(
+            [sys.executable, "-I", f"{REPO}/tools/api-log.py", str(port), state["url"],
+             os.environ["HARLO_GUI_API_LOG"]],
+            dict(os.environ), f"{gui_root}/api-log.log",
+        )
+        state["harlo_url"] = f"http://127.0.0.1:{port}"
+        time.sleep(0.3)
     save(state)
     if os.environ.get("HARLO_GUI_PREFS"):
         seed_preferences(gui_root, os.environ["HARLO_GUI_PREFS"])
@@ -487,7 +502,7 @@ def cmd_stop(_args):
     state = load()
     for pid in [
         state.get("harlo_pid"), *state.get("clip_pids", []), state.get("xvfb_pid"),
-        state.get("monitor_pid"), state.get("bus_pid"),
+        state.get("monitor_pid"), state.get("bus_pid"), state.get("proxy_pid"),
     ]:
         if pid:
             kill(pid)

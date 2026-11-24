@@ -1,0 +1,664 @@
+//! The loop: send the history to the model, run the tools it calls, and
+//! go on until it answers without calling any.
+//!
+//! Each model step becomes one assistant message. Before a tool runs, the
+//! permission rules decide; when they say ask, the [`Gate`] waits for a
+//! person. Everything that happens is reported to the [`Sink`] as it
+//! happens, so a server can store it and pass it on.
+
+// Rust guideline compliant 2026-10-09
+
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::{Map, Value, json};
+use tokio_util::sync::CancellationToken;
+
+use crate::chat::{self, Block, Endpoint, Piece};
+use crate::config::{ModelRef, ProviderSpec};
+use crate::message::{
+    Assistant, ErrorInfo, Message, Part, Snapshot, StepTime, ToolState, ToolTime,
+};
+use crate::rules::{Effect, Rule, decide};
+use crate::tools::{self, Plan};
+use crate::{Error, id};
+
+/// The most model steps one turn takes before it stops itself.
+const MAX_STEPS: usize = 200;
+
+/// Everything a turn needs.
+#[derive(Debug, Clone)]
+pub struct Turn {
+    /// The project folder tools run in.
+    pub cwd: PathBuf,
+    /// The agent's name, such as `build`.
+    pub agent: String,
+    /// The model to ask.
+    pub model: ModelRef,
+    /// Where that model is served.
+    pub provider: ProviderSpec,
+    /// The system prompt.
+    pub system: String,
+    /// Permission rules in named layers, applied in order.
+    pub rules: Vec<(String, Vec<Rule>)>,
+    /// The session so far, ending with the message being answered.
+    pub history: Vec<Message>,
+}
+
+/// Something that happened during a turn.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Event {
+    /// A model step began; its assistant message has ID `message`.
+    StepStarted {
+        /// The step's message ID.
+        message: String,
+        /// The agent.
+        agent: String,
+        /// The model.
+        model: ModelRef,
+        /// When, in Unix milliseconds.
+        time: i64,
+    },
+    /// The model's first token came.
+    FirstToken {
+        /// The step's message ID.
+        message: String,
+    },
+    /// A text block began at `at` in the step's content.
+    TextStarted {
+        /// The step's message ID.
+        message: String,
+        /// Its place in the step's content.
+        at: usize,
+    },
+    /// More text.
+    TextDelta {
+        /// The step's message ID.
+        message: String,
+        /// Its place in the step's content.
+        at: usize,
+        /// The new text.
+        delta: String,
+    },
+    /// A text block is complete.
+    TextEnded {
+        /// The step's message ID.
+        message: String,
+        /// Its place in the step's content.
+        at: usize,
+        /// All of it.
+        text: String,
+    },
+    /// A reasoning block began.
+    ReasoningStarted {
+        /// The step's message ID.
+        message: String,
+        /// Its place in the step's content.
+        at: usize,
+    },
+    /// More reasoning.
+    ReasoningDelta {
+        /// The step's message ID.
+        message: String,
+        /// Its place in the step's content.
+        at: usize,
+        /// The new text.
+        delta: String,
+    },
+    /// A reasoning block is complete.
+    ReasoningEnded {
+        /// The step's message ID.
+        message: String,
+        /// Its place in the step's content.
+        at: usize,
+        /// All of it.
+        text: String,
+    },
+    /// The model began writing a tool call.
+    ToolInputStarted {
+        /// The step's message ID.
+        message: String,
+        /// The call's ID.
+        call: String,
+        /// The tool.
+        name: String,
+    },
+    /// The call's arguments are written.
+    ToolInputEnded {
+        /// The step's message ID.
+        message: String,
+        /// The call's ID.
+        call: String,
+        /// The arguments as the model wrote them.
+        text: String,
+    },
+    /// The model's reply is complete; its calls are about to be checked.
+    StepStreamed {
+        /// The step's message ID.
+        message: String,
+    },
+    /// A call is checked and waits for permission or runs.
+    ToolCalled {
+        /// The step's message ID.
+        message: String,
+        /// The call's ID.
+        call: String,
+        /// The tool.
+        name: String,
+        /// Its arguments.
+        input: Map<String, Value>,
+    },
+    /// A call ended: done, failed or refused.
+    ToolEnded {
+        /// The step's message ID.
+        message: String,
+        /// The call's ID.
+        call: String,
+        /// How it ended, with its result.
+        state: ToolState,
+    },
+    /// A step is complete, with everything in it.
+    StepEnded {
+        /// The step's message.
+        step: Box<Assistant>,
+    },
+}
+
+/// Where a turn reports what happens.
+pub trait Sink: Send + Sync {
+    /// Takes one event; called in order.
+    fn emit(&self, event: Event);
+}
+
+/// A request for a person's permission.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ask {
+    /// Its ID, such as `per_…`.
+    pub id: String,
+    /// The step's message ID.
+    pub message: String,
+    /// The tool call's ID.
+    pub call: String,
+    /// The action, such as `edit`.
+    pub action: String,
+    /// What it acts on.
+    pub resources: Vec<String>,
+    /// What "always" would allow from now on.
+    pub save: Vec<String>,
+    /// What to show while asking, such as the diff.
+    pub metadata: Map<String, Value>,
+    /// Why it asks: the rule that decided, for a person.
+    pub why: String,
+}
+
+/// A person's answer to an [`Ask`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Answer {
+    /// Run this call.
+    Once,
+    /// Run it, and allow the same from now on in this session.
+    Always,
+    /// Don't run it. With a message the model reads it and goes on;
+    /// without one the turn stops.
+    Reject(Option<String>),
+}
+
+/// Where a turn asks for permission.
+pub trait Gate: Send + Sync {
+    /// Waits for a person's answer to `ask`.
+    fn ask(&self, ask: Ask) -> impl Future<Output = Answer> + Send;
+}
+
+/// How a turn ended.
+#[derive(Debug)]
+pub enum Outcome {
+    /// The model answered.
+    Succeeded,
+    /// It was stopped, or a person refused a call without saying why.
+    Interrupted,
+    /// Something failed.
+    Failed(Error),
+}
+
+/// The time now, in Unix milliseconds.
+#[must_use]
+pub fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// Runs a turn until the model answers, it fails, or `stop` is cancelled.
+pub async fn run(
+    mut turn: Turn,
+    sink: &impl Sink,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Outcome {
+    let definitions = tools::definitions();
+    for _ in 0..MAX_STEPS {
+        if stop.is_cancelled() {
+            return Outcome::Interrupted;
+        }
+        let (assistant, go_on) = match step(&mut turn, &definitions, sink, gate, stop).await {
+            Ok(done) => done,
+            Err(e) if e.is_stopped() => return Outcome::Interrupted,
+            Err(e) => return Outcome::Failed(e),
+        };
+        turn.history.push(Message::Assistant(Box::new(assistant)));
+        match go_on {
+            Next::Model => {}
+            Next::Done => return Outcome::Succeeded,
+            Next::Halt => return Outcome::Interrupted,
+        }
+    }
+    Outcome::Failed(Error::provider(format!(
+        "Stopped after {MAX_STEPS} model steps without an answer."
+    )))
+}
+
+/// What follows a step.
+enum Next {
+    /// Its tool results go back to the model.
+    Model,
+    /// The model answered.
+    Done,
+    /// A person refused a call; the turn ends.
+    Halt,
+}
+
+/// One model step and its tool calls. A failed or stopped step is still
+/// reported, with its error, before the error returns.
+async fn step(
+    turn: &mut Turn,
+    definitions: &[Value],
+    sink: &impl Sink,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Result<(Assistant, Next), Error> {
+    let (mut assistant, calls) = ask_model(turn, definitions, sink, stop).await?;
+    let next = run_calls(turn, &mut assistant, calls, sink, gate, stop).await;
+    sink.emit(Event::StepEnded {
+        step: Box::new(assistant.clone()),
+    });
+    if stop.is_cancelled() {
+        return Err(Error::stopped());
+    }
+    Ok((assistant, next))
+}
+
+/// Streams the model's reply into a new step; returns it with the places
+/// of its tool calls in its content.
+async fn ask_model(
+    turn: &Turn,
+    definitions: &[Value],
+    sink: &impl Sink,
+    stop: &CancellationToken,
+) -> Result<(Assistant, Vec<usize>), Error> {
+    let message = id::ascending_id("msg");
+    let created = now();
+    sink.emit(Event::StepStarted {
+        message: message.clone(),
+        agent: turn.agent.clone(),
+        model: turn.model.clone(),
+        time: created,
+    });
+    let mut assistant = Assistant {
+        id: message.clone(),
+        time: StepTime {
+            created,
+            ..StepTime::default()
+        },
+        agent: turn.agent.clone(),
+        model: turn.model.clone(),
+        content: Vec::new(),
+        finish: None,
+        raw_finish: None,
+        cost: 0.0,
+        tokens: crate::message::Tokens::default(),
+        error: None,
+        snapshot: None,
+    };
+    let body = chat::request(&turn.model.model, &turn.system, &turn.history, definitions);
+    let endpoint = Endpoint {
+        base_url: &turn.provider.base_url,
+        api_key: turn.provider.api_key.as_deref(),
+    };
+    let mut first_token = None;
+    let reply = {
+        let mut on = |piece: Piece| {
+            if piece == Piece::FirstToken {
+                first_token = Some(now());
+            }
+            sink.emit(translate(&message, piece));
+        };
+        chat::stream(endpoint, &body, stop, &mut on).await
+    };
+    assistant.time.first_token = first_token;
+    let reply = match reply {
+        Ok(reply) => reply,
+        Err(e) => {
+            assistant.error = Some(ErrorInfo {
+                kind: if e.is_stopped() {
+                    "aborted"
+                } else {
+                    "provider"
+                }
+                .to_owned(),
+                message: e.to_string(),
+            });
+            assistant.finish = Some(if e.is_stopped() { "unknown" } else { "error" }.to_owned());
+            assistant.time.completed = Some(now());
+            sink.emit(Event::StepEnded {
+                step: Box::new(assistant),
+            });
+            return Err(e);
+        }
+    };
+    assistant.time.streamed = Some(now());
+    assistant.tokens = reply.tokens;
+    assistant.finish = Some(finish_name(reply.finish.as_deref()).to_owned());
+    assistant.raw_finish = reply.finish;
+    sink.emit(Event::StepStreamed {
+        message: message.clone(),
+    });
+
+    let calls = fill(&mut assistant, reply.blocks, sink);
+    Ok((assistant, calls))
+}
+
+/// Puts a reply's blocks into the step and reports its calls; returns the
+/// calls' places in its content.
+fn fill(assistant: &mut Assistant, blocks: Vec<Block>, sink: &impl Sink) -> Vec<usize> {
+    let message = assistant.id.clone();
+    let mut calls = Vec::new();
+    for block in blocks {
+        match block {
+            Block::Text(text) => assistant.content.push(Part::Text { text }),
+            Block::Reasoning(text) => assistant.content.push(Part::Reasoning { text }),
+            Block::Call {
+                id,
+                name,
+                arguments,
+            } => {
+                calls.push(assistant.content.len());
+                let parsed = serde_json::from_str::<Value>(if arguments.trim().is_empty() {
+                    "{}"
+                } else {
+                    &arguments
+                });
+                let (input, state) = match parsed {
+                    Ok(Value::Object(input)) => (
+                        input.clone(),
+                        ToolState::Running {
+                            input,
+                            metadata: Map::new(),
+                        },
+                    ),
+                    _ => (
+                        Map::new(),
+                        failed(
+                            Map::new(),
+                            "tool",
+                            format!("The arguments weren't a JSON object: {arguments}"),
+                        ),
+                    ),
+                };
+                sink.emit(Event::ToolCalled {
+                    message: message.clone(),
+                    call: id.clone(),
+                    name: name.clone(),
+                    input,
+                });
+                assistant.content.push(Part::Tool {
+                    id,
+                    name,
+                    state,
+                    time: ToolTime {
+                        created: now(),
+                        ..ToolTime::default()
+                    },
+                });
+            }
+        }
+    }
+    calls
+}
+
+/// Checks, asks for and runs the step's calls, in order; returns what
+/// follows the step.
+async fn run_calls(
+    turn: &mut Turn,
+    assistant: &mut Assistant,
+    calls: Vec<usize>,
+    sink: &impl Sink,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Next {
+    let message = assistant.id.clone();
+    let mut next = if calls.is_empty() {
+        Next::Done
+    } else {
+        Next::Model
+    };
+    let mut changed: Vec<String> = Vec::new();
+    for at in calls {
+        let Part::Tool {
+            id: call,
+            name,
+            state,
+            time,
+        } = &mut assistant.content[at]
+        else {
+            continue;
+        };
+        if !matches!(state, ToolState::Running { .. }) {
+            sink.emit(Event::ToolEnded {
+                message: message.clone(),
+                call: call.clone(),
+                state: state.clone(),
+            });
+            continue;
+        }
+        let input = state.input().clone();
+        let ended = if matches!(next, Next::Halt) {
+            failed(
+                input,
+                "skipped",
+                "Not run: an earlier call in this step was refused.".to_owned(),
+            )
+        } else if stop.is_cancelled() {
+            failed(input, "aborted", "Stopped before it ran.".to_owned())
+        } else {
+            match call_tool(turn, &message, call, name, input, time, gate, stop).await {
+                Called::Ran(state, files) => {
+                    changed.extend(files);
+                    state
+                }
+                Called::Refused(state) => state,
+                Called::Halted(state) => {
+                    next = Next::Halt;
+                    state
+                }
+            }
+        };
+        time.completed = Some(now());
+        *state = ended;
+        sink.emit(Event::ToolEnded {
+            message: message.clone(),
+            call: call.clone(),
+            state: state.clone(),
+        });
+    }
+    changed.dedup();
+    assistant.time.completed = Some(now());
+    assistant.snapshot = Some(Snapshot {
+        start: None,
+        end: None,
+        files: changed,
+    });
+    next
+}
+
+/// How one call went.
+enum Called {
+    /// It ran (well or not), changing these files.
+    Ran(ToolState, Vec<String>),
+    /// The rules or a person refused it, with a reason the model reads.
+    Refused(ToolState),
+    /// A person refused it without a reason: the turn stops.
+    Halted(ToolState),
+}
+
+/// Checks, asks for and runs one call.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one call's whole context, passed down from the step"
+)]
+async fn call_tool(
+    turn: &mut Turn,
+    message: &str,
+    call: &str,
+    name: &str,
+    input: Map<String, Value>,
+    time: &mut ToolTime,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Called {
+    let plan = match Plan::new(name, &input, &turn.cwd) {
+        Ok(plan) => plan,
+        Err(why) => return Called::Ran(failed(input, "tool", why), Vec::new()),
+    };
+    let permission = plan.permission();
+    let layers: Vec<(&str, &[Rule])> = turn
+        .rules
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.as_slice()))
+        .collect();
+    let decisions: Vec<_> = permission
+        .resources
+        .iter()
+        .map(|r| (r, decide(&layers, permission.action, r)))
+        .collect();
+    let worst = decisions.iter().max_by_key(|(_, d)| match d.effect {
+        Effect::Allow => 0,
+        Effect::Ask => 1,
+        Effect::Deny => 2,
+    });
+    if let Some((resource, decision)) = worst {
+        let why = decision.because.as_ref().map_or_else(
+            || "no rule covers it".to_owned(),
+            |(layer, rule)| {
+                format!(
+                    "the {layer} rule \"{} {}\" says {:?}",
+                    rule.action, rule.resource, rule.effect
+                )
+                .to_lowercase()
+            },
+        );
+        match decision.effect {
+            Effect::Allow => {}
+            Effect::Deny => {
+                let text = format!(
+                    "Refused: {} on {resource} isn't allowed ({why}).",
+                    permission.action
+                );
+                return Called::Refused(failed(input, "denied", text));
+            }
+            Effect::Ask => {
+                let ask = Ask {
+                    id: id::ascending_id("per"),
+                    message: message.to_owned(),
+                    call: call.to_owned(),
+                    action: permission.action.to_owned(),
+                    resources: permission.resources.clone(),
+                    save: vec!["*".to_owned()],
+                    metadata: permission.metadata.clone(),
+                    why: format!("Asks because {why}."),
+                };
+                let answer = tokio::select! {
+                    a = gate.ask(ask) => a,
+                    () = stop.cancelled() => return Called::Refused(failed(input, "aborted", "Stopped while waiting for permission.".to_owned())),
+                };
+                match answer {
+                    Answer::Once => {}
+                    Answer::Always => turn.rules.push((
+                        "session".to_owned(),
+                        vec![Rule::any(permission.action, Effect::Allow)],
+                    )),
+                    Answer::Reject(Some(said)) => {
+                        return Called::Refused(failed(
+                            input,
+                            "rejected",
+                            format!("The person declined this call and said: {said}"),
+                        ));
+                    }
+                    Answer::Reject(None) => {
+                        return Called::Halted(failed(
+                            input,
+                            "rejected",
+                            "The person declined this call.".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    time.ran = Some(now());
+    match plan.run(&turn.cwd, stop).await {
+        Ok(out) => {
+            let state = ToolState::Completed {
+                input,
+                content: vec![json!({ "type": "text", "text": out.text })],
+                metadata: out.metadata,
+            };
+            Called::Ran(state, out.changed)
+        }
+        Err(why) => Called::Ran(failed(input, "tool", why), Vec::new()),
+    }
+}
+
+fn failed(input: Map<String, Value>, kind: &str, message: String) -> ToolState {
+    ToolState::Error {
+        input,
+        error: ErrorInfo {
+            kind: kind.to_owned(),
+            message,
+        },
+        metadata: Map::new(),
+    }
+}
+
+/// OpenCode's name for a chat completions finish reason.
+fn finish_name(raw: Option<&str>) -> &'static str {
+    match raw {
+        Some("stop") => "stop",
+        Some("tool_calls" | "function_call") => "tool-calls",
+        Some("length") => "length",
+        Some("content_filter") => "content-filter",
+        _ => "unknown",
+    }
+}
+
+fn translate(message: &str, piece: Piece) -> Event {
+    let message = message.to_owned();
+    match piece {
+        Piece::FirstToken => Event::FirstToken { message },
+        Piece::TextStarted { at } => Event::TextStarted { message, at },
+        Piece::TextDelta { at, delta } => Event::TextDelta { message, at, delta },
+        Piece::TextEnded { at, text } => Event::TextEnded { message, at, text },
+        Piece::ReasoningStarted { at } => Event::ReasoningStarted { message, at },
+        Piece::ReasoningDelta { at, delta } => Event::ReasoningDelta { message, at, delta },
+        Piece::ReasoningEnded { at, text } => Event::ReasoningEnded { message, at, text },
+        Piece::CallStarted { id, name } => Event::ToolInputStarted {
+            message,
+            call: id,
+            name,
+        },
+        Piece::CallEnded { id, arguments } => Event::ToolInputEnded {
+            message,
+            call: id,
+            text: arguments,
+        },
+    }
+}
