@@ -1,0 +1,9 @@
+Harlo.xcodeproj/
+Harlo/Info.plist
+build/
+HarloNotifications/Info.plist
+# Made by XcodeGen from project.yml.
+Harlo/Harlo.entitlements
+HarloNotifications/HarloNotifications.entitlements
+HarloWidgets/Info.plist
+HarloWidgets/HarloWidgets.entitlements

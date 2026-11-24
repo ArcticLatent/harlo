@@ -1,0 +1,1447 @@
+import Foundation
+import Observation
+
+/// How the app is doing with harlo.
+public enum LinkState: Equatable, Sendable {
+    /// No harlo yet: scan its QR code.
+    case unpaired
+    case connecting
+    case connected
+    /// harlo can't be reached right now (asleep, another network): trying
+    /// again, with why the last try failed.
+    case waiting(String)
+}
+
+/// What the transcript shows: rows, and runs of tool calls and thoughts
+/// folded under their summary (as on the desktop).
+public enum TranscriptItem: Identifiable, Equatable, Sendable {
+    case row(Row)
+    /// `active`: still going (a call runs or waits).
+    case run(group: String, summary: String, rows: [Row], open: Bool, active: Bool)
+
+    public var id: String {
+        switch self {
+        case .row(let r): return r.key
+        case .run(let group, _, _, _, _): return "run:" + group
+        }
+    }
+
+    /// Groups rows into runs; `opened` holds runs opened (true) or folded
+    /// (false) by hand.
+    public static func build(_ rows: [Row], opened: [String: Bool]) -> [TranscriptItem] {
+        var out: [TranscriptItem] = []
+        var i = 0
+        while i < rows.count {
+            let group = rows[i].group
+            guard !group.isEmpty else {
+                out.append(.row(rows[i]))
+                i += 1
+                continue
+            }
+            var j = i
+            while j < rows.count, rows[j].group == group { j += 1 }
+            let run = Array(rows[i..<j])
+            let active = run.contains { $0.groupOpen }
+            let summary = run.first { !$0.summary.isEmpty }?.summary ?? ""
+            out.append(.run(group: group, summary: summary, rows: run, open: opened[group] ?? active, active: active))
+            i = j
+        }
+        return out
+    }
+}
+
+/// The session the phone has open.
+@MainActor @Observable
+public final class OpenSession {
+    /// Its key in harlo's list.
+    public let key: String
+    /// Its live key once harlo opened it (events carry this one).
+    public internal(set) var liveKey = ""
+    public internal(set) var harness: String
+    public internal(set) var title: String
+    public internal(set) var model = ""
+    /// Its model, thinking level and usage.
+    public internal(set) var info = SessionInfo()
+    /// Its approval mode and Plan (nil until harlo said).
+    public internal(set) var modes: Modes?
+    public internal(set) var commands: [SlashCommand] = []
+    /// Messages waiting for the agent.
+    public internal(set) var steering: [String] = []
+    public internal(set) var followUp: [String] = []
+    public internal(set) var todos: [TodoPhase] = []
+    /// pi extensions' views (widgets, footer, a screen open on the
+    /// computer, their drawing of tool calls and messages), oldest first.
+    public internal(set) var extViews: [ExtView] = []
+    /// "busy", "idle", "input", …
+    public internal(set) var status = ""
+    public internal(set) var rows: [Row] = []
+    /// Every picture the conversation shows, in order, each once (the
+    /// viewer steps through them).
+    public var pictures: [String] {
+        var seen = Set<String>()
+        return rows.flatMap(\.images).filter { seen.insert($0).inserted }
+    }
+    /// Its folder (`~/…`), when the phone knows it: a picture in it is
+    /// named by its path there.
+    public internal(set) var folder = ""
+    /// A picture's name as people say it, as on the desktop: where it came
+    /// from for one harlo keeps under a made-up name ("You sent", "From
+    /// Screenshot", "In a reply", numbered when a row has several), the
+    /// words a reply gave it, or its path in the session's folder. A name
+    /// two messages share gets each message's first words ("You sent · And
+    /// this one?").
+    public func pictureName(_ path: String) -> String {
+        let base = pictureOrigin(path)
+        guard let row = rows.first(where: { $0.images.contains(path) }) else { return base }
+        let twins = pictures.filter { $0 != path && pictureOrigin($0) == base }
+        guard twins.contains(where: { twin in !row.images.contains(twin) }) else { return base }
+        let words = PictureNames.firstWords(messageText(row))
+        return words.isEmpty ? base : base + " · " + words
+    }
+
+    /// Where a picture came from, before names two messages share are told
+    /// apart.
+    func pictureOrigin(_ path: String) -> String {
+        let name = PictureNames.name(path)
+        let row = rows.first(where: { $0.images.contains(path) })
+        // The words a reply gave it, shown in its place ("The sidebar"):
+        // harlo sends a reply's pictures as a row after its text, with the
+        // same message key (`m44:0:pics` after `m44:0:0`).
+        if let row, row.kind != "user", row.kind != "tool" {
+            for r in messageRows(row) {
+                for (src, alt) in RichText.pictureWords(RichText.parse(r.html)) where !alt.isEmpty && PictureNames.match(src, in: [path]) != nil {
+                    return alt
+                }
+            }
+        }
+        guard PictureNames.isMadeUp(name) else { return PictureNames.inFolder(path, folder) ?? name }
+        guard let row else { return "Picture" }
+        let madeUp = row.images.filter { PictureNames.isMadeUp(PictureNames.name($0)) }
+        let n = madeUp.count > 1 ? " \((madeUp.firstIndex(of: path) ?? 0) + 1)" : ""
+        switch row.kind {
+        case "user": return "You sent" + n
+        case "tool": return "From " + PictureNames.toolWords(row.title, row.subtitle) + n
+        default: return "In a reply" + n
+        }
+    }
+
+    /// The rows of the message `row` is in (a reply's pictures come in a
+    /// row of their own).
+    func messageRows(_ row: Row) -> [Row] {
+        let message = row.key.split(separator: ":").dropLast().joined(separator: ":")
+        return row.kind == "images" && !message.isEmpty ? rows.filter { $0.key.hasPrefix(message + ":") } : [row]
+    }
+
+    /// The words of the message a picture is in.
+    func messageText(_ row: Row) -> String {
+        messageRows(row).map { $0.text.isEmpty ? RichText.plainText(RichText.parse($0.html)) : $0.text }.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+    }
+    /// Rows before these, only in harlo (a long session's phone gets its
+    /// latest).
+    public internal(set) var earlier = 0
+    /// Questions and approvals waiting, oldest first.
+    public internal(set) var requests: [UIRequest] = []
+    /// Its plan limit, from 90% (nil: under it, or harlo doesn't say).
+    public internal(set) var limit: SessionLimit?
+    /// When it continues on its own after its limit resets (unix ms, 0 if
+    /// it isn't going to).
+    public internal(set) var resumesAt: Int64 = 0
+    /// Its repository's wiki (nil: not asked yet).
+    public internal(set) var wiki: Wiki?
+    /// The workflow run it's part of (nil: none, or harlo hasn't said).
+    public internal(set) var workflow: WorkflowRun?
+    /// Your messages a turn can be undone to (row key → snapshot).
+    public internal(set) var undoable: [String: String] = [:]
+    /// Its folder is a git repository (or holds some): its changes have
+    /// diffs. Until harlo says, taken as one.
+    public internal(set) var git = true
+    /// Review comments on the session's changes, until sent.
+    public var review: [ReviewComment] = []
+    public internal(set) var loading = true
+    public internal(set) var error: String?
+    /// Runs opened (true) or folded (false) by hand.
+    public internal(set) var opened: [String: Bool] = [:]
+    /// While it works, a message steers the run (true) or waits for it to
+    /// end (false).
+    public var steer = false
+    /// What's typed and not sent yet (edit & resend puts a message back here).
+    public var draft = ""
+    /// Photos of messages stopped before they were sent, for the composer
+    /// to take back (it empties this).
+    public var returnedPhotos: [Photo] = []
+    /// When each waiting question or approval came (unix ms).
+    @ObservationIgnored var asked: [String: Int64] = [:]
+    /// Events that came before harlo said which live key is this one's.
+    @ObservationIgnored var early: [Event] = []
+
+    public init(key: String, title: String = "", harness: String = "") {
+        self.key = key
+        self.title = title
+        self.harness = harness
+    }
+
+    public var busy: Bool { status == "busy" }
+
+    /// What it's doing now, and since when (unix ms; 0 unknown), while it
+    /// works or waits for you.
+    public struct Activity: Equatable, Sendable {
+        public var text: String
+        public var since: Int64
+    }
+
+    public var activity: Activity? {
+        if let r = requests.first {
+            return Activity(text: r.approval ? "Waiting for your approval" : "Waiting for your answer", since: asked[r.id] ?? 0)
+        }
+        guard busy else { return nil }
+        // This turn: since your latest message (a call left running from an
+        // earlier one, such as a background subagent, isn't what it does now).
+        let turn = rows.lastIndex(where: { $0.isSent }).map { rows.index(after: $0) } ?? rows.startIndex
+        if let last = rows.last, last.state == "streaming", last.kind != "tool" {
+            return Activity(text: last.kind == "thinking" ? "Thinking" : "Writing", since: last.time)
+        }
+        if let tool = rows[turn...].last(where: { $0.kind == "tool" && $0.state == "running" }) {
+            let what = tool.subtitle.isEmpty ? tool.title : "\(tool.title) \(tool.subtitle)"
+            return Activity(text: "Running \(what)", since: tool.time)
+        }
+        return Activity(text: "Working", since: turn > rows.startIndex ? rows[rows.index(before: turn)].time : 0)
+    }
+
+    /// Messages waiting for the agent, steering first.
+    public var queued: [QueuedMessage] { QueuedMessage.list(steering: steering, followUp: followUp) }
+
+    /// The agent lets a waiting message be taken back (the demo's).
+    public var canUnqueue: Bool { harness == "demo" }
+
+    /// The agent can branch at one of the user's messages (edit & resend).
+    public var canBranch: Bool { harness == "pi" }
+    public var items: [TranscriptItem] { TranscriptItem.build(rows, opened: opened) }
+
+    /// Opens a folded run, or folds an open one (`open`: how it shows now).
+    public func toggleRun(_ group: String, open: Bool) {
+        opened[group] = !open
+    }
+
+    func opened(liveKey: String, harness: String) {
+        self.liveKey = liveKey
+        if !harness.isEmpty { self.harness = harness }
+        // Opening again (back from the background, a new connection):
+        // harlo sends what's current, so what was shown before goes.
+        todos = []
+        let waiting = early
+        early = []
+        for ev in waiting { take(ev) }
+    }
+
+    func take(_ ev: Event) {
+        guard let k = ev.sessionKey else { return }
+        if liveKey.isEmpty {
+            early.append(ev)
+            return
+        }
+        guard k == liveKey else { return }
+        switch ev {
+        case .reset(_, let r, let e):
+            rows = r
+            earlier = e
+            loading = false
+        case .rows(_, let changes):
+            rows.apply(changes)
+            loading = false
+        case .status(_, let s):
+            status = s
+        case .meta(_, let i):
+            if !i.title.isEmpty { title = i.title }
+            model = i.model
+            info = i
+        case .request(_, let r):
+            if !requests.contains(where: { $0.id == r.id }) {
+                requests.append(r)
+                asked[r.id] = Int64(Date.now.timeIntervalSince1970 * 1000)
+            }
+        case .cleared(_, let id):
+            requests.removeAll { $0.id == id }
+        case .commands(_, let c):
+            commands = c
+        case .queue(_, let st, let fu):
+            steering = st
+            followUp = fu
+        case .todos(_, let t):
+            todos = t
+        case .ext(_, let change):
+            extViews.apply(change)
+        case .unsent(_, let text, let photos):
+            // Above what's typed meanwhile, not over it.
+            if !text.isEmpty {
+                draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : text + "\n\n" + draft
+            }
+            returnedPhotos += photos
+        default:
+            break
+        }
+    }
+}
+
+/// The app's state: the harlo it's paired with, the connection (kept up
+/// while the app is in front), the session list and the open session.
+@MainActor @Observable
+public final class HarloModel {
+    public internal(set) var host: PairedHarlo?
+    public internal(set) var state: LinkState
+    public internal(set) var sessions: [SessionSummary] = [] {
+        didSet {
+            // Answered ones are gone once harlo says so.
+            let still = Set(sessions.flatMap { $0.requests.map(\.id) })
+            answered.formIntersection(still)
+            writeWidget()
+        }
+    }
+    /// The home screen widget's sessions changed (the app reloads it).
+    @ObservationIgnored public var widgetChanged: (() -> Void)?
+    @ObservationIgnored var lastWidget: WidgetSnapshot?
+    /// The plan limits widget's accounts changed (the app reloads it).
+    @ObservationIgnored public var limitsWidgetChanged: (() -> Void)?
+    @ObservationIgnored var lastLimitsWidget: LimitsSnapshot?
+    /// Requests answered from the list that harlo still lists (hidden).
+    var answered: Set<String> = []
+    /// Requests whose answer is on its way to harlo: their buttons wait, so
+    /// a second tap can't send another answer.
+    public private(set) var answering: Set<String> = []
+    public internal(set) var session: OpenSession?
+    /// Pairing in progress.
+    public private(set) var pairing = false
+    /// Something to tell the user once (a failed pairing or send).
+    public var alert: String?
+    /// The desktop's colours (kept for the next launch).
+    public private(set) var theme: Theme?
+    /// Where this phone's notifications go, and what it wants (kept; harlo
+    /// gets it on each connection).
+    public private(set) var push: PushRegistration?
+    /// What the harlo it's connected to does beyond the first app's (see
+    /// `Ready.features`).
+    public internal(set) var features: Set<String> = []
+    /// Plan limits on harlo's computer and each machine (empty until harlo
+    /// says, or when it doesn't).
+    public internal(set) var limits = PlanLimits() {
+        didSet { writeLimitsWidget() }
+    }
+    /// Answers without a harlo (screenshots of the app, the demo).
+    @ObservationIgnored public var samples: Samples?
+    /// The demo: sample sessions, no harlo (see Demo.swift).
+    public internal(set) var demo = false
+    /// Connected to a recording, not a harlo (Replay.swift): it stays
+    /// connected, whatever the app's state or the network.
+    @ObservationIgnored public internal(set) var replaying = false
+    @ObservationIgnored var demoCount = 0
+    @ObservationIgnored var demoServers: [ModelServers] = []
+    /// Sessions marked unread here (kept), until opened.
+    public private(set) var unreadMarks: Set<String> = []
+
+    @ObservationIgnored let store: SecretStore
+    @ObservationIgnored let identity: KeyPair
+    @ObservationIgnored let deviceName: String
+    @ObservationIgnored var client: HarloClient?
+    @ObservationIgnored var loop: Task<Void, Never>?
+    @ObservationIgnored var better: Task<Void, Never>?
+    @ObservationIgnored var active = false
+    /// Seconds before the next try: 1, doubling to 15.
+    @ObservationIgnored var retry: Double = 1
+    /// How long to wait for harlo: on its own address, through a relay.
+    @ObservationIgnored public var timeouts: (direct: Double, remote: Double) = (4, 10)
+    /// How long pairing keeps trying while the phone says it's offline: the
+    /// first try at a LAN address fails that way while iOS asks for Local
+    /// Network access.
+    @ObservationIgnored public var offlineWait: Double = 45
+
+    public init(store: SecretStore, deviceName: String) {
+        self.store = store
+        self.deviceName = deviceName
+        if let secret = store.load("identity"), let key = try? KeyPair(secret: secret) {
+            identity = key
+        } else {
+            identity = KeyPair.generate()
+            store.save("identity", identity.secret)
+        }
+        theme = store.load("theme").flatMap { try? JSONDecoder().decode(Theme.self, from: $0) }
+        push = store.load("push").flatMap { try? JSONDecoder().decode(PushRegistration.self, from: $0) }
+        unreadMarks = store.load("unread").flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) } ?? []
+        lastWidget = WidgetSnapshot.load(store)
+        lastLimitsWidget = LimitsSnapshot.load(store)
+        let saved = store.load("host").flatMap { try? JSONDecoder().decode(PairedHarlo.self, from: $0) }
+        host = saved
+        state = saved == nil ? .unpaired : .connecting
+    }
+
+    /// This phone's key, as harlo's Settings → Phone could show it.
+    public var fingerprint: String { HarloKit.fingerprint(Base64.encode(identity.publicKey)) }
+
+    // ---- the connection ---------------------------------------------------------
+
+    /// The app is in front: connect, and keep reconnecting.
+    public func resume() {
+        guard !demo, !replaying else { return }
+        active = true
+        if loop == nil, host != nil { startLoop(with: nil) }
+        // Connected in the background (a notification's Allow): the open
+        // session wasn't reopened then.
+        if let c = client, state == .connected, let s = session, openedOn !== c {
+            Task { await reopen(s) }
+        }
+        watchForBetter()
+    }
+
+    /// The app went to the background: hang up (iOS would cut it anyway).
+    public func suspend() {
+        guard !demo, !replaying else { return }
+        active = false
+        better?.cancel()
+        better = nil
+        hangUp()
+        if host != nil { state = .waiting("") }
+    }
+
+    /// Try again now (pull to refresh): reconnects if it isn't connected,
+    /// else reloads the list.
+    public func reconnect() async {
+        guard !demo else { return }
+        if let c = client, state == .connected {
+            if let s = try? await c.sessions() { sessions = s }
+            return
+        }
+        retry = 1
+        if host != nil {
+            active = true
+            startLoop(with: nil)
+        }
+    }
+
+    /// The phone's network changed (Wi-Fi to mobile data, a VPN up or
+    /// down): a connection that no longer answers is dropped at once
+    /// (rather than at the next ping), and a wait for the next try ends.
+    public func networkChanged() async {
+        guard active, host != nil, !demo, !replaying else { return }
+        if let c = client, state == .connected {
+            if await c.alive(timeout: 3) {
+                // Still there: but a better way in may be back (home Wi-Fi).
+                await moveToBetter()
+                return
+            }
+            if client === c { await c.close() }
+        } else if case .waiting = state {
+            retry = 1
+            startLoop(with: nil)
+        }
+    }
+
+    /// How often a connection on a lesser way in (Tailscale, Funnel, a
+    /// relay) looks for a better one.
+    @ObservationIgnored public var betterEvery: Double = 60
+    @ObservationIgnored var moving = false
+
+    /// Connected through a lesser way in while a better one answers (back on
+    /// home Wi-Fi, harlo's own address over Tailscale instead of the
+    /// relay): moves there, reopening the session, without a gap. True if
+    /// it moved.
+    @discardableResult
+    public func moveToBetter() async -> Bool {
+        guard !moving, !replaying, let old = client, state == .connected, var h = host, let now = h.lastEndpoint else { return false }
+        let better = h.tryOrder.filter { Endpoints.rank($0) < Endpoints.rank(now) }
+        guard !better.isEmpty else { return false }
+        moving = true
+        defer { moving = false }
+        let (key, identity, name) = (h.key, identity, deviceName)
+        guard let (c, ready) = try? await Race.first(better, headStart: 0, { url in
+            try await HarloClient.connect(to: url, identity: identity, harloKey: key, deviceName: name, timeout: 3)
+        }) else { return false }
+        // Still connected the old way (nothing changed meanwhile)?
+        guard client === old, state == .connected, active else {
+            await c.close()
+            return false
+        }
+        h.lastEndpoint = ready.endpoint
+        if !ready.harloName.isEmpty { h.name = ready.harloName }
+        h.learn(ready.endpoints)
+        setHost(h)
+        features = ready.features
+        startLoop(with: c)
+        await old.close()
+        return true
+    }
+
+    /// Now and then, while on a lesser way in, looks for a better one.
+    private func watchForBetter() {
+        better?.cancel()
+        better = Task { [weak self] in
+            while !Task.isCancelled {
+                let every = self?.betterEvery ?? 60
+                try? await Task.sleep(for: .seconds(every))
+                guard let self, !Task.isCancelled else { return }
+                if self.active { await self.moveToBetter() }
+            }
+        }
+    }
+
+    /// Closes the connection as if the network dropped (tests): the loop
+    /// reconnects.
+    public func dropConnection() async {
+        await client?.close()
+    }
+
+    func hangUp() {
+        loop?.cancel()
+        loop = nil
+        let old = client
+        client = nil
+        Task { await old?.close() }
+    }
+
+    func startLoop(with first: HarloClient?) {
+        loop?.cancel()
+        loop = Task { [weak self] in await self?.run(first) }
+    }
+
+    private func run(_ first: HarloClient?) async {
+        var next = first
+        while !Task.isCancelled, host != nil {
+            let c: HarloClient
+            if let n = next {
+                c = n
+                next = nil
+            } else {
+                // While waiting, keep saying why (rather than flashing "connecting").
+                if case .waiting = state {} else { state = .connecting }
+                do {
+                    c = try await connectAny()
+                } catch HarloError.denied(let reason) {
+                    // Removed in harlo (or harlo was reset): pair again.
+                    forgetHost()
+                    alert = reason
+                    return
+                } catch {
+                    if Task.isCancelled { return }
+                    state = .waiting(Self.describe(error))
+                    try? await Task.sleep(for: .seconds(retry))
+                    retry = min(retry * 2, 15)
+                    continue
+                }
+            }
+            if Task.isCancelled {
+                await c.close()
+                return
+            }
+            client = c
+            retry = 1
+            state = .connected
+            await connected(c)
+            for await ev in c.events { handle(ev) }
+            if client === c { client = nil }
+            if Task.isCancelled || host == nil { return }
+            state = .waiting(await c.closeReason ?? "")
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    /// Tries harlo's addresses all at once (the one that worked last a
+    /// moment first) and keeps the first that answers: at home its local
+    /// address, elsewhere Tailscale, Funnel or the relay.
+    private func connectAny() async throws -> HarloClient {
+        guard var h = host else { throw HarloError.notConnected }
+        let (key, identity, name, timeouts) = (h.key, identity, deviceName, timeouts)
+        let (c, ready) = try await Race.first(h.tryOrder, headStart: 0.3) { url in
+            try await HarloClient.connect(to: url, identity: identity, harloKey: key, deviceName: name,
+                                          timeout: url.scheme == "ws" ? timeouts.direct : timeouts.remote)
+        }
+        h.lastEndpoint = ready.endpoint
+        if !ready.harloName.isEmpty { h.name = ready.harloName }
+        h.learn(ready.endpoints)
+        setHost(h)
+        features = ready.features
+        return c
+    }
+
+    private func connected(_ c: HarloClient) async {
+        if let p = push { _ = try? await c.call("push", p.json) }
+        if let s = try? await c.sessions() { sessions = s }
+        if !features.contains("limits") {
+            limits = PlanLimits()
+        } else if let l = try? await c.limits() {
+            limits = l
+        }
+        // In the background (a notification's Allow) only what's asked: the
+        // open session comes back when the app does.
+        if active, let s = session { await reopen(s) }
+        if let t = try? await c.theme(), t != theme {
+            theme = t
+            store.save("theme", try? JSONEncoder().encode(t))
+        }
+    }
+
+    private func handle(_ ev: Event) {
+        switch ev {
+        case .sessions(let s):
+            sessions = s
+        case .revoked:
+            forgetHost()
+            alert = "This phone was removed in harlo. Pair it again to use it."
+        case .limits(let l):
+            limits = l
+            if let s = session { Task { await refreshLimit(s) } }
+        case .workflow(let key):
+            if let s = session, s.liveKey == key { Task { await refreshWorkflow(s) } }
+            if watchingRuns { Task { await loadWorkflows() } }
+        case .meta(_, let info):
+            // Another model can be another plan's.
+            let before = session?.info.modelId
+            session?.take(ev)
+            if let s = session, before != info.modelId || info.limitRefused { Task { await refreshLimit(s) } }
+        default:
+            session?.take(ev)
+        }
+    }
+
+    private func setHost(_ h: PairedHarlo?) {
+        host = h
+        store.save("host", h.flatMap { try? JSONEncoder().encode($0) })
+    }
+
+    private func forgetHost() {
+        hangUp()
+        setHost(nil)
+        sessions = []
+        limits = PlanLimits()
+        session = nil
+        state = .unpaired
+    }
+
+    static func describe(_ error: Error) -> String {
+        if let e = error as? HarloError { return e.description }
+        return (error as NSError).localizedDescription
+    }
+
+    // ---- notifications ----------------------------------------------------------
+
+    /// iOS gave the app its push token (each launch): harlo gets it.
+    public func setPushToken(_ token: Data, sandbox: Bool) async {
+        var p = push ?? PushRegistration(token: "", sandbox: sandbox)
+        p.token = PushRegistration.hex(token)
+        p.sandbox = sandbox
+        await savePush(p)
+    }
+
+    /// Which notifications this phone wants (`limits` nil: as it was).
+    public func setPushWants(asks: Bool, done: Bool, limits: Bool? = nil) async {
+        guard var p = push else { return }
+        p.asks = asks
+        p.done = done
+        if let l = limits { p.limits = l }
+        await savePush(p)
+    }
+
+    private func savePush(_ p: PushRegistration) async {
+        guard p != push else { return }
+        push = p
+        store.save("push", try? JSONEncoder().encode(p))
+        if let c = client, state == .connected { _ = try? await c.call("push", p.json) }
+    }
+
+    /// Connected within `timeout` seconds (connecting if the app isn't in
+    /// front: a notification's action in the background).
+    public func waitConnected(timeout: Double = 20) async -> Bool {
+        guard host != nil else { return false }
+        if state == .connected, client != nil { return true }
+        if loop == nil { startLoop(with: nil) }
+        let end = Date.now.addingTimeInterval(timeout)
+        while Date.now < end {
+            if state == .connected, client != nil { return true }
+            if host == nil { return false }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return false
+    }
+
+    /// Allow or Deny from a notification: connects if needed, answers, and
+    /// hangs up again if the app isn't in front. False (and the alert) when
+    /// it couldn't.
+    @discardableResult
+    public func answer(fromNotification content: PushContent, allow: Bool) async -> Bool {
+        guard let req = content.request else { return false }
+        guard await waitConnected() else {
+            alert = "Couldn't reach harlo to answer."
+            if !active { suspend() }
+            return false
+        }
+        let ok = await answer(req, req.approval(allow), in: content.session)
+        if !active { suspend() }
+        return ok
+    }
+
+    // ---- pairing ------------------------------------------------------------------
+
+    /// Pairs from a scanned (or pasted) link. Scanning another of the same
+    /// harlo's codes (its Tailscale address, its relay) adds that address.
+    @discardableResult
+    public func pair(_ scanned: String) async -> Bool {
+        let offer: PairingOffer
+        do { offer = try PairingOffer(scanned: scanned) } catch {
+            alert = Self.describe(error)
+            return false
+        }
+        guard let endpoint = offer.endpoint else {
+            alert = "That code has no address to reach harlo at. Scan the QR code in harlo's Pair a device."
+            return false
+        }
+        pairing = true
+        defer { pairing = false }
+        do {
+            let (c, ready) = try await pairingConnect(endpoint, offer)
+            let same = host?.key == offer.key
+            var h = same ? host! : PairedHarlo(key: offer.key, name: "", endpoints: [])
+            for u in offer.endpoints { h.add(u) }
+            h.lastEndpoint = endpoint
+            h.learn(ready.endpoints)
+            h.name = ready.harloName.isEmpty ? offer.name : ready.harloName
+            hangUp()
+            if !same {
+                sessions = []
+                session = nil
+            }
+            setHost(h)
+            features = ready.features
+            active = true
+            retry = 1
+            startLoop(with: c)
+            return true
+        } catch {
+            alert = Self.describe(error)
+            return false
+        }
+    }
+
+    /// Connects with the pairing code, trying again while the phone reports
+    /// itself offline (the code isn't spent: nothing reached harlo).
+    private func pairingConnect(_ endpoint: URL, _ offer: PairingOffer) async throws -> (HarloClient, Ready) {
+        let end = Date.now.addingTimeInterval(offlineWait)
+        while true {
+            do {
+                return try await HarloClient.connect(to: endpoint, identity: identity, harloKey: offer.key, code: offer.code,
+                                                     deviceName: deviceName, timeout: timeouts.remote)
+            } catch HarloError.offline(let why) {
+                guard Date.now < end else {
+                    throw HarloError.offline(endpoint.scheme == "ws"
+                        ? "\(why) If you turned off Local Network for harlo, turn it on in Settings › Privacy & Security › Local Network."
+                        : why)
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    /// Forgets harlo here (it keeps this phone in its list until removed
+    /// there).
+    public func forget() {
+        if demo { return endDemo() }
+        forgetHost()
+    }
+
+    // ---- sessions ---------------------------------------------------------------
+
+    public func open(_ s: SessionSummary) {
+        if unreadMarks.contains(s.key) { markUnread(s, false) }
+        if demo { return demoOpen(s) }
+        let open = OpenSession(key: s.key, title: s.title, harness: s.harness)
+        open.folder = s.location
+        session = open
+        Task { await reopen(open) }
+    }
+
+    public func close() {
+        session = nil
+    }
+
+    /// The connection the open session was opened on.
+    @ObservationIgnored weak var openedOn: HarloClient?
+
+    private func reopen(_ s: OpenSession) async {
+        guard let c = client else { return }
+        openedOn = c
+        s.liveKey = ""
+        s.early = []
+        s.requests = []
+        s.error = nil
+        do {
+            let r = try await c.open(s.key)
+            guard session === s else { return }
+            s.opened(liveKey: r.key, harness: r.harness)
+            s.modes = try? await c.modes(r.key)
+            await refreshLimit(s)
+            await refreshWorkflow(s)
+        } catch {
+            s.error = Self.describe(error)
+            s.loading = false
+        }
+    }
+
+    /// Sends a message: a new turn, or while it works, a follow-up it takes
+    /// when done (steering, with the session's switch). `stopping`: while it
+    /// works, the run stops and this message starts the next.
+    @discardableResult
+    public func send(_ text: String, photos: [Photo] = [], stopping: Bool = false) async -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty || !photos.isEmpty else { return false }
+        if demo { return demoSend(t) }
+        guard let s = session, let c = client, !s.liveKey.isEmpty else {
+            alert = "Not connected to harlo."
+            return false
+        }
+        do {
+            try await c.send(s.liveKey, text: t, mode: Self.mode(busy: s.busy, steer: s.steer, stopping: stopping), photos: photos)
+            return true
+        } catch {
+            alert = Self.describe(error)
+            return false
+        }
+    }
+
+    /// How a message goes: while it works, stopping it, steering it or
+    /// after it; otherwise a new turn.
+    static func mode(busy: Bool, steer: Bool, stopping: Bool) -> SendMode {
+        guard busy else { return .normal }
+        if stopping { return .stopAndSend }
+        return steer ? .steer : .followUp
+    }
+
+    /// Runs `body` with the connection (and the open session's live key when
+    /// `needsSession`); a failure becomes the alert.
+    private func with<T>(session needsSession: Bool = true, _ body: (HarloClient, String) async throws -> T) async -> T? {
+        // (The demo's answers are its own; the rest does nothing.)
+        if demo { return nil }
+        guard let c = client else {
+            alert = "Not connected to harlo."
+            return nil
+        }
+        let key = session?.liveKey ?? ""
+        if needsSession && key.isEmpty {
+            alert = "The session isn't open yet."
+            return nil
+        }
+        do { return try await body(c, key) } catch {
+            alert = Self.describe(error)
+            return nil
+        }
+    }
+
+    // ---- diagrams and helpers ------------------------------------------------------
+
+    /// harlo draws diagrams for the phone (an older one doesn't).
+    public var drawsDiagrams: Bool { demo || samples != nil || features.contains("diagrams") }
+
+    /// Opens a session by its key (false: it isn't in the list).
+    @discardableResult
+    public func openSession(_ key: String) -> Bool {
+        guard let row = sessions.first(where: { $0.key == key }) else { return false }
+        open(row)
+        return true
+    }
+
+    // ---- workflow runs ------------------------------------------------------------
+
+    /// harlo runs workflows and shows them to the phone.
+    public var hasWorkflows: Bool { features.contains("workflows") }
+
+    /// Every run harlo keeps, newest first (for the Runs list).
+    public internal(set) var workflowRuns: [WorkflowRun] = []
+    /// Views on screen that list runs: while there's one, a change reloads
+    /// the list.
+    @ObservationIgnored var runWatchers = 0
+    var watchingRuns: Bool { runWatchers > 0 }
+
+    /// A view listing runs came (true) or went (false).
+    public func watchRuns(_ on: Bool) {
+        runWatchers = max(0, runWatchers + (on ? 1 : -1))
+    }
+
+    /// A run by its id: the open session's, or one in the list.
+    public func workflowRun(_ id: String) -> WorkflowRun? {
+        if let r = session?.workflow, r.id == id { return r }
+        return workflowRuns.first { $0.id == id }
+    }
+
+    /// The run the open session is part of, from harlo.
+    func refreshWorkflow(_ s: OpenSession) async {
+        guard hasWorkflows, let c = client, !s.liveKey.isEmpty else { return }
+        // (nil is no run: a run that's gone leaves the card; a failed call
+        // keeps it.)
+        guard let run = try? await Optional(c.workflow(s.liveKey)), session === s, run != s.workflow else { return }
+        s.workflow = run
+    }
+
+    /// Every run, from harlo.
+    public func loadWorkflows() async {
+        guard hasWorkflows, let c = client, let runs = try? await c.workflows(), runs != workflowRuns else { return }
+        workflowRuns = runs
+    }
+
+    /// Pauses, resumes or stops a run, or merges, publishes or removes its
+    /// work: true when harlo did (else `alert` says why).
+    @discardableResult
+    public func workflowAction(_ run: WorkflowRun, _ action: WorkflowAction) async -> Bool {
+        guard await with(session: false, { c, _ in try await c.workflowAction(run.id, action) }) != nil else { return false }
+        if let s = session { await refreshWorkflow(s) }
+        if watchingRuns { await loadWorkflows() }
+        return true
+    }
+
+    /// harlo has the project wiki for the phone.
+    public var hasWiki: Bool { demo || samples != nil || features.contains("wiki") }
+
+    /// The open session's repository's wiki. Quietly: it's extra on the
+    /// plan's sheet, and an alert there (a wiki on a host that's gone, say)
+    /// could close the sheet it opens with.
+    public func loadWiki() async {
+        guard let s = session else { return }
+        if demo || samples != nil { s.wiki = Self.sampleWiki; return }
+        guard features.contains("wiki"), let c = client, !s.liveKey.isEmpty else { return }
+        if let wiki = try? await c.wiki(s.liveKey), session === s { s.wiki = wiki }
+    }
+
+    /// A page of the open session's wiki (nil: it couldn't be asked; a
+    /// page that can't be read says why in its `error`).
+    /// The wiki page read last, by wiki (its root): its graph rings it.
+    public var wikiReadLast: [String: String] = [:]
+
+    public func wikiPage(_ path: String) async -> WikiPageText? {
+        if demo || samples != nil { return Self.sampleWikiPage(path) }
+        guard features.contains("wiki") else { return nil }
+        return await with { c, k in try await c.wikiPage(k, page: path) }
+    }
+
+    /// A search of the open session's wiki.
+    public func searchWiki(_ query: String) async -> WikiHits? {
+        if demo || samples != nil { return Self.sampleWikiHits(query) }
+        guard features.contains("wiki") else { return nil }
+        return await with { c, k in try await c.wikiSearch(k, query: query) }
+    }
+
+    /// A declaration's card from the open session's code index (nil: it
+    /// couldn't be asked).
+    public func lookupCode(_ code: WikiHits.Code) async -> String? {
+        if demo || samples != nil { return Self.sampleCodeCard(code) }
+        guard features.contains("wiki") else { return nil }
+        return await with { c, k in try await c.wikiLookup(k, name: code.name, path: code.path) }
+    }
+
+    /// Marks a page of the open session's wiki reviewed by the person at
+    /// the computer: true when it was (an alert says why not).
+    public func reviewWiki(_ page: String) async -> Bool {
+        if demo || samples != nil { return true }
+        guard await with({ c, k in try await c.wikiReview(k, page: page) }) != nil else { return false }
+        await loadWiki()
+        return true
+    }
+
+    /// Starts a wiki session on the computer ("create", "update", or
+    /// "page:<path>"): true when it started (or harlo found nothing to do).
+    public func runWiki(_ mode: String) async -> Bool {
+        if demo || samples != nil {
+            session?.wiki?.running = true
+            return true
+        }
+        guard await with({ c, k in try await c.wikiRun(k, mode: mode) }) != nil else { return false }
+        await loadWiki()
+        return true
+    }
+
+    /// Diagrams drawn this run (by source, mode and colours).
+    @ObservationIgnored var diagrams: [String: DiagramPicture] = [:]
+
+    /// A Mermaid diagram drawn by harlo in these colours (nil: it can't be,
+    /// `why` says why).
+    public func diagram(_ source: String, light: Bool, colors: [String: String]) async -> (picture: DiagramPicture?, why: String) {
+        let key = "\(light)|\(colors.sorted { $0.key < $1.key })|\(source)"
+        if let d = diagrams[key] { return (d, "") }
+        if demo || samples != nil { return (nil, "harlo draws diagrams on your computer.") }
+        guard features.contains("diagrams") else { return (nil, "This harlo doesn't draw diagrams for the phone.") }
+        guard let c = client else { return (nil, "Not connected to harlo.") }
+        do {
+            let d = try await c.diagram(source, light: light, colors: colors)
+            diagrams[key] = d
+            return (d, "")
+        } catch {
+            return (nil, Self.describe(error))
+        }
+    }
+
+    /// harlo sends the conversation's pictures to the phone (an older one
+    /// doesn't).
+    public var showsPictures: Bool { features.contains("pictures") }
+
+    /// Pictures fetched this run (by size and path; the newest last), and
+    /// the ones on their way.
+    @ObservationIgnored var pictures: [String: Picture] = [:]
+    @ObservationIgnored var pictureOrder: [String] = []
+    @ObservationIgnored var pictureLoads: [String: Task<(Picture?, String), Never>] = [:]
+    /// Screen-sized pictures kept at once (thumbnails are small: all kept).
+    static let keptPictures = 24
+
+    /// A picture the open session shows (`Row.images`), or a picture file in
+    /// its folder, from harlo: a thumbnail or fitted to the screen (nil: it
+    /// can't be had, `why` says why). Kept for the run, so opening one again
+    /// is instant; asked for once however many views want it.
+    public func picture(_ path: String, thumb: Bool) async -> (picture: Picture?, why: String) {
+        let id = (thumb ? "thumb|" : "screen|") + path
+        if let p = pictures[id] { return (p, "") }
+        if demo || samples != nil { return (nil, "harlo shows pictures from your computer.") }
+        guard showsPictures else { return (nil, "The harlo on your computer is older than pictures on the phone. Update or restart it to see them here.") }
+        guard let c = client, let key = session?.liveKey, !key.isEmpty else { return (nil, "Not connected to harlo.") }
+        if let t = pictureLoads[id] { return await t.value }
+        let t = Task { () -> (Picture?, String) in
+            do { return (try await c.picture(path, of: key, thumb: thumb), "") } catch { return (nil, Self.describe(error)) }
+        }
+        pictureLoads[id] = t
+        let got = await t.value
+        pictureLoads[id] = nil
+        if let p = got.0 {
+            pictures[id] = p
+            pictureOrder.removeAll { $0 == id }
+            pictureOrder.append(id)
+            let screens = pictureOrder.filter { $0.hasPrefix("screen|") }
+            for old in screens.dropLast(Self.keptPictures) {
+                pictures[old] = nil
+                pictureOrder.removeAll { $0 == old }
+            }
+        }
+        return got
+    }
+
+    /// harlo shows mockups to the phone (an older one doesn't).
+    public var showsMockups: Bool { features.contains("visuals") }
+
+    /// Mockups' pictures taken lately (by session and source): looked at
+    /// again after a while, since the agent may have changed the file.
+    @ObservationIgnored var mockups: [String: (at: Date, pictures: MockupPictures)] = [:]
+
+    /// A ```mockup block of the open session, as harlo shows it (nil: it
+    /// can't, `why` says why).
+    public func mockup(_ source: String) async -> (pictures: MockupPictures?, why: String) {
+        if demo || samples != nil { return (nil, "harlo shows mockups on your computer.") }
+        guard showsMockups else { return (nil, "This harlo doesn't show mockups on the phone.") }
+        guard let c = client, let key = session?.liveKey, !key.isEmpty else { return (nil, "Not connected to harlo.") }
+        let id = key + "|" + source
+        if let m = mockups[id], Date.now.timeIntervalSince(m.at) < 10 { return (m.pictures, "") }
+        do {
+            let m = try await c.mockup(source, of: key)
+            mockups[id] = (Date.now, m)
+            return (m, "")
+        } catch {
+            return (nil, Self.describe(error))
+        }
+    }
+
+    // ---- plan limits ------------------------------------------------------------
+
+    /// The open session's plan limit, as harlo works it out.
+    func refreshLimit(_ s: OpenSession) async {
+        guard features.contains("limits"), let c = client, !s.liveKey.isEmpty,
+              let r = try? await c.limit(of: s.liveKey), session === s else { return }
+        s.limit = r.limit
+        s.resumesAt = r.resumesAt
+    }
+
+    /// Stop and continue (or, when it's stopped, just continue) once the
+    /// open session's used-up limit resets.
+    public func continueAtReset() async {
+        guard let s = session else { return }
+        if let at = await with({ c, k in try await c.continueAtReset(k) }) { s.resumesAt = at }
+    }
+
+    /// The open session doesn't continue at the reset after all.
+    public func cancelContinue() async {
+        guard let s = session else { return }
+        if await with({ c, k in try await c.cancelContinue(k) }) != nil { s.resumesAt = 0 }
+    }
+
+    // ---- the queue, and branching -------------------------------------------------
+
+    /// Takes back a waiting message (one of `OpenSession.queued`).
+    public func unqueue(_ message: QueuedMessage) async {
+        _ = await with { c, k in try await c.unqueue(k, queue: message.queue, text: message.text) }
+    }
+
+    /// Sends a waiting follow-up now, as steering.
+    public func sendNow(_ message: QueuedMessage) async {
+        guard !message.isSteering else { return }
+        _ = await with { c, k in try await c.promote(k, text: message.text) }
+    }
+
+    /// Edit & resend: the session goes back to before one of your messages
+    /// (`row`: its key); its text comes back to edit and send again. nil: it
+    /// couldn't (the alert says why) or was cancelled.
+    public func editMessage(_ row: String) async -> String? {
+        await with { c, k in try await c.branch(k, row: row, fork: false) } ?? nil
+    }
+
+    /// Edit & resend, from the app: the message goes back in the box.
+    public func editInComposer(_ row: String) async {
+        if let text = await editMessage(row) { session?.draft = text }
+    }
+
+    /// Asks again with another model: back to before the message, then the
+    /// same message to `model`.
+    @discardableResult
+    public func retry(_ row: String, with model: ModelChoice) async -> Bool {
+        guard let text = await editMessage(row) else { return false }
+        await setModel(model)
+        return await send(text)
+    }
+
+    // ---- new sessions -------------------------------------------------------------
+
+    /// Projects, agents and models to start a session with.
+    public func newSessionChoices() async -> NewSessionChoices? {
+        if let s = samples { return s.choices }
+        return await with(session: false) { c, _ in try await c.newSessionChoices() }
+    }
+
+    /// Starts a session and opens it.
+    @discardableResult
+    /// (`host`: without a project, that machine's home folder.)
+    public func startSession(project: Project?, host: String = "", agent: String, model: String, approval: String = "", text: String, photos: [Photo] = []) async -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty || !photos.isEmpty else { return false }
+        if demo { return demoStart(project: project, agent: agent, model: model, text: t) }
+        guard let r = await with(session: false, { c, _ in
+            try await c.newSession(project: project?.id ?? -1, host: project == nil ? host : "", agent: agent, model: model, approval: approval, text: t, photos: photos)
+        }) else { return false }
+        let title = String(t.split(separator: "\n").first ?? "").prefix(80)
+        let open = OpenSession(key: r.key, title: String(title), harness: r.harness)
+        open.folder = project?.location ?? ""
+        session = open
+        await reopen(open)
+        return true
+    }
+
+    // ---- the open session's settings ------------------------------------------------
+
+    public func setApproval(_ mode: String) async {
+        guard let s = session else { return }
+        if demo { s.modes?.approval = mode; return }
+        if let m = await with({ c, k in try await c.setModes(k, approval: mode) }) { s.modes = m }
+    }
+
+    /// The models the open session can switch to.
+    public func models() async -> [ModelChoice] {
+        if let s = samples { return s.models }
+        return await with { c, k in try await c.models(k) } ?? []
+    }
+
+    public func setModel(_ model: ModelChoice) async {
+        if demo, let s = session {
+            s.model = model.name
+            s.info.model = model.name
+            s.info.modelId = model.id
+            return
+        }
+        _ = await with { c, k in try await c.setModel(k, model) }
+    }
+
+    public func thinkingLevels() async -> [String] {
+        if samples != nil { return ["off", "low", "medium", "high"] }
+        return await with { c, k in try await c.thinkingLevels(k) } ?? []
+    }
+
+    public func setThinking(_ level: String) async {
+        if demo { session?.info.thinking = level; return }
+        _ = await with { c, k in try await c.setThinking(k, level) }
+    }
+
+    /// Which of your messages in the open session a turn can be undone to.
+    public func loadUndo() async {
+        guard !demo, let s = session, let c = client, !s.liveKey.isEmpty else { return }
+        if let r = try? await c.undoTargets(s.liveKey), session === s {
+            s.undoable = r.targets
+            s.git = r.git ?? true
+        }
+    }
+
+    /// What undoing from one of your messages would do (nil: the alert says why).
+    public func undoPlan(_ row: String) async -> UndoPlan? {
+        await with { c, k in try await c.undo(k, row: row, apply: false) }
+    }
+
+    /// Puts the session folder's files back as they were before one of your
+    /// messages: what it did (nil: the alert says why).
+    public func undo(_ row: String) async -> UndoPlan? {
+        let done = await with { c, k in try await c.undo(k, row: row, apply: true) }
+        if done != nil { await loadUndo() }
+        return done
+    }
+
+    /// The open session's changed files.
+    public func changes() async -> Changes? {
+        if let s = samples { return s.changes }
+        return await with { c, k in try await c.changes(k) }
+    }
+
+    /// The open session as Markdown (to share).
+    public func markdown() async -> String? {
+        if let s = samples { return s.markdown }
+        return await with { c, k in try await c.markdown(k) }
+    }
+
+    /// What the open session ran and touched.
+    public func actionLog() async -> ActionLog? {
+        if let s = samples { return s.actions }
+        return await with { c, k in try await c.actions(k) }
+    }
+
+    public func diff(_ path: String) async -> FileDiff? {
+        if let s = samples { return s.diff }
+        return await with { c, k in try await c.diff(k, path: path) }
+    }
+
+    // ---- files, branches, Live Activities ------------------------------------------
+
+    /// The open session's files matching what's typed after `@`.
+    public func files(matching query: String) async -> [String] {
+        if let s = samples { return s.files.filter { query.isEmpty || $0.localizedStandardContains(query) } }
+        guard let c = client, let k = session?.liveKey, !k.isEmpty else { return [] }
+        return (try? await c.files(k, query: query)) ?? []
+    }
+
+    /// The open session folder's other sessions matching what's typed after
+    /// `@` (none from a harlo too old to have them).
+    public func sessionMentions(matching query: String) async -> [SessionMention] {
+        if let s = samples {
+            return s.sessionMentions.filter { query.isEmpty || $0.title.localizedStandardContains(query) || $0.mention.dropFirst(9).hasPrefix(query.lowercased()) }
+        }
+        guard features.contains("sessionMentions"), let c = client, let k = session?.liveKey, !k.isEmpty else { return [] }
+        return (try? await c.sessionMentions(k, query: query)) ?? []
+    }
+
+    /// A file the open session's replies mention (nil: the alert says why).
+    public func file(_ path: String) async -> FileText? {
+        if let s = samples { return s.file }
+        return await with { c, k in try await c.file(k, path: path) }
+    }
+
+    /// The open session's branches (nil: not a repository, or not connected).
+    public func branches() async -> Branches? {
+        if let s = samples { return s.branches }
+        guard let c = client, let k = session?.liveKey, !k.isEmpty else { return nil }
+        return try? await c.branches(k)
+    }
+
+    /// Switches the open session's repository to another branch: what git
+    /// did, or nil (the alert says why).
+    public func switchBranch(to name: String, remote: Bool, stash: Bool) async -> String? {
+        await with { c, k in try await c.switchBranch(k, to: name, remote: remote, stash: stash) }
+    }
+
+    /// A Live Activity's push token for a session (its live key): harlo sends
+    /// it updates from then on; "" when it ended on the phone.
+    public func setActivityToken(_ token: String, for key: String) async {
+        guard let c = client, state == .connected else { return }
+        _ = try? await c.activity(key, token: token, sandbox: push?.sandbox ?? false)
+    }
+
+    /// Picks your penguin: harlo on the computer takes it too (its left
+    /// rail), so both show the same. Shown at once; harlo's answer settles it.
+    public func setAvatar(_ name: String) async {
+        guard Theme.avatars.contains(name) else { return }
+        var t = theme ?? .standard
+        t.avatar = name
+        theme = t
+        if demo { return }
+        if let c = client, state == .connected, let back = try? await c.setAvatar(name) { theme = back }
+        store.save("theme", try? JSONEncoder().encode(theme))
+    }
+
+    // ---- the list -------------------------------------------------------------
+
+    public func rename(_ s: SessionSummary, to name: String) async {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        if demo, let i = sessions.firstIndex(where: { $0.key == s.key }) { sessions[i].title = n }
+        _ = await with(session: false) { c, _ in try await c.rename(s.key, to: n) }
+        if session?.key == s.key || session?.liveKey == s.key { session?.title = n }
+    }
+
+    public func archive(_ s: SessionSummary) async {
+        if demo { sessions.removeAll { $0.key == s.key }; return }
+        _ = await with(session: false) { c, _ in try await c.archive(s.key) }
+    }
+
+    public func pin(_ s: SessionSummary, _ on: Bool) async {
+        if demo, let i = sessions.firstIndex(where: { $0.key == s.key }) { sessions[i].pinned = on; return }
+        _ = await with(session: false) { c, _ in try await c.pin(s.key, on) }
+    }
+
+    /// harlo can put a settled session back (an older one can't).
+    public var canPutBack: Bool { demo || samples != nil || features.contains("putBack") }
+
+    /// A settled session back among its project's others.
+    public func putBack(_ s: SessionSummary) async {
+        if demo, let i = sessions.firstIndex(where: { $0.key == s.key }) { sessions[i].settled = ""; return }
+        _ = await with(session: false) { c, _ in try await c.putBack(s.key) }
+    }
+
+    // ---- other machines and model servers --------------------------------------------
+
+    /// harlo can connect its machines and start its model servers from here
+    /// (an older one can't).
+    public var canConnect: Bool { demo || samples != nil || features.contains("connect") }
+    public var hasModelServers: Bool { demo || samples != nil || features.contains("modelServers") }
+
+    /// Connects harlo to one of its other machines: what's there (nil: it
+    /// didn't connect, and `alert` says why).
+    public func connect(_ host: String) async -> RemoteMachine? {
+        if demo || samples != nil {
+            try? await Task.sleep(for: .milliseconds(600))
+            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["pi"])
+        }
+        return await with(session: false) { c, _ in try await c.connect(host) }
+    }
+
+    /// Which of an agent's models on harlo's computer are on a model server
+    /// that's stopped: model → that server's name (none from an older harlo).
+    public func stoppedModels(agent: String, models: [String]) async -> [String: String] {
+        guard !models.isEmpty else { return [:] }
+        if demo || samples != nil { return models.contains("openai/gpt-5") ? ["openai/gpt-5": "ollama"] : [:] }
+        guard features.contains("stoppedModels"), let c = client else { return [:] }
+        return (try? await c.stoppedModels(agent: agent, models: models)) ?? [:]
+    }
+
+    /// The model servers on harlo's computer and each machine connected.
+    public func modelServers() async -> [ModelServers]? {
+        if demo { return demoServers }
+        if samples != nil { return Self.sampleServers }
+        return await with(session: false) { c, _ in try await c.modelServers() }
+    }
+
+    /// Starts a model server (until it serves) or stops it: whether it runs
+    /// now (nil: it went wrong, and `alert` says why).
+    public func setServer(host: String, url: String, running: Bool) async -> Bool? {
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            for (i, m) in demoServers.enumerated() where m.host == host {
+                for (j, s) in m.servers.enumerated() where s.url == url { demoServers[i].servers[j].running = running }
+            }
+            return running
+        }
+        return await with(session: false) { c, _ in try await c.setServer(host: host, url: url, running: running) }
+    }
+
+    /// Unread: finished since you looked (harlo says), or marked so here.
+    public func isUnread(_ s: SessionSummary) -> Bool {
+        s.status == "unread" || unreadMarks.contains(s.key)
+    }
+
+    /// Marks a session unread (or not) on this phone, until it's opened.
+    public func markUnread(_ s: SessionSummary, _ on: Bool) {
+        if on { unreadMarks.insert(s.key) } else { unreadMarks.remove(s.key) }
+        // Only sessions still listed.
+        let listed = Set(sessions.map(\.key))
+        if !listed.isEmpty { unreadMarks.formIntersection(listed) }
+        store.save("unread", try? JSONEncoder().encode(unreadMarks))
+        writeWidget()
+    }
+
+    public func stop() async {
+        if demo { session?.status = ""; return }
+        guard let s = session, let c = client, !s.liveKey.isEmpty else { return }
+        try? await c.abort(s.liveKey)
+    }
+
+    /// Everything waiting on you, the session it's in, oldest first.
+    public var waiting: [(session: SessionSummary, request: UIRequest)] {
+        sessions
+            .flatMap { s in s.requests.filter { !answered.contains($0.id) }.map { (session: s, request: $0) } }
+            .sorted { $0.request.asked < $1.request.asked }
+    }
+
+    /// Answers a request from the list, without opening its session.
+    @discardableResult
+    public func answer(_ req: UIRequest, _ answer: JSON, in key: String) async -> Bool {
+        guard answering.insert(req.id).inserted else { return false }
+        defer { answering.remove(req.id) }
+        let open = session.flatMap { $0.liveKey == key || $0.key == key ? $0 : nil }
+        if demo {
+            demoAnswered(req, answer, in: key)
+        } else {
+            let target = open?.liveKey ?? key
+            guard !target.isEmpty else { alert = "The session isn't open yet."; return false }
+            guard await with(session: false, { c, _ in try await c.answer(target, requestId: req.id, answer: answer) }) != nil else { return false }
+        }
+        open?.requests.removeAll { $0.id == req.id }
+        answered.insert(req.id)
+        return true
+    }
+
+    @discardableResult
+    public func answer(_ req: UIRequest, _ answer: JSON) async -> Bool {
+        guard let s = session else {
+            alert = "Not connected to harlo."
+            return false
+        }
+        return await self.answer(req, answer, in: s.key)
+    }
+}
+
+extension Event {
+    /// The session an event is about (nil: not one session's).
+    public var sessionKey: String? {
+        switch self {
+        case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .unsent(let k, _, _), .workflow(let k), .ext(let k, _): return k
+        case .sessions, .limits, .revoked: return nil
+        }
+    }
+}
+
+extension UIRequest {
+    /// An approval's tool: "Allow tool: bash" → "bash" ("" not one).
+    public var tool: String {
+        let first = title.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        return first.hasPrefix("Allow tool: ") ? String(first.dropFirst("Allow tool: ".count)).trimmingCharacters(in: .whitespaces) : ""
+    }
+
+    /// Why an approval asks, from the lines after its tool's: a `Reason:`
+    /// ("This can't be undone: …"), or "Outside the sandbox" ("" none;
+    /// other lines, such as `Command:`, are its details).
+    public var note: String {
+        guard !tool.isEmpty else { return "" }
+        let lines = title.split(separator: "\n").dropFirst().map { $0.trimmingCharacters(in: .whitespaces) }
+        let notes: [String] = lines.compactMap { line in
+            if line == "Outside the sandbox" { return line }
+            guard line.hasPrefix("Reason:") else { return nil }
+            let why = line.dropFirst("Reason:".count).trimmingCharacters(in: .whitespaces)
+            return why.isEmpty ? nil : why.prefix(1).uppercased() + why.dropFirst()
+        }
+        return notes.joined(separator: " · ")
+    }
+
+    /// How an option button looks: the go-ahead, the refusal, or neither.
+    public enum OptionRole: Sendable { case allow, deny, plain }
+
+    public static func role(of option: String) -> OptionRole {
+        let words = Set(option.lowercased().split { !$0.isLetter }.map(String.init))
+        if !words.isDisjoint(with: ["approve", "allow", "yes", "accept"]) { return .allow }
+        if !words.isDisjoint(with: ["deny", "reject", "no", "decline"]) { return .deny }
+        return .plain
+    }
+
+    /// The answer for Allow / Deny: the matching option when it has them
+    /// (Approve / Deny), else a confirmation.
+    public func approval(_ allow: Bool) -> JSON {
+        if let o = options.first(where: { Self.role(of: $0) == (allow ? .allow : .deny) }) { return ["value": .string(o)] }
+        return ["confirmed": .bool(allow)]
+    }
+
+    /// The answer for one of `select`'s options.
+    public static func choose(_ option: String) -> JSON { ["value": .string(option)] }
+
+    /// The answer for typed text (`input`, `editor`).
+    public static func typed(_ text: String) -> JSON { ["value": .string(text)] }
+
+    public static let dismissed: JSON = ["cancelled": true]
+}
