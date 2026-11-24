@@ -68,6 +68,10 @@ pub struct Server {
     pub(crate) password: Option<String>,
     /// Phone access, hosted here.
     pub phone: Arc<crate::PhoneHost>,
+    /// Where the projects' shadow repositories are kept.
+    pub(crate) snapshots: PathBuf,
+    /// The shadow repositories in use, by folder.
+    shadows: Mutex<HashMap<String, harlo_engine::snapshot::Shadow>>,
     events: broadcast::Sender<Outgoing>,
     emitting: Mutex<()>,
     live: Mutex<Live>,
@@ -113,6 +117,7 @@ impl Server {
         config_home: &std::path::Path,
         password: Option<String>,
         phone: Arc<crate::PhoneHost>,
+        snapshots: PathBuf,
     ) -> Self {
         let config_text = config
             .source
@@ -127,10 +132,28 @@ impl Server {
             config_dir: config_home.join("opencode"),
             password,
             phone,
+            snapshots,
+            shadows: Mutex::default(),
             events,
             emitting: Mutex::new(()),
             live: Mutex::default(),
         }
+    }
+
+    /// The shadow repository recording the files of the project in
+    /// `directory`.
+    pub(crate) fn shadow(&self, directory: &str) -> harlo_engine::snapshot::Shadow {
+        use sha2::Digest as _;
+        lock(&self.shadows)
+            .entry(directory.to_owned())
+            .or_insert_with(|| {
+                let key = hex::encode(&sha2::Sha256::digest(directory.as_bytes())[..16]);
+                harlo_engine::snapshot::Shadow::new(
+                    &self.snapshots.join(key),
+                    std::path::Path::new(directory),
+                )
+            })
+            .clone()
     }
 
     /// The server's password, if it has one.
@@ -225,6 +248,7 @@ impl Server {
             cost: 0.0,
             tokens: harlo_engine::Tokens::default(),
             outcome: None,
+            revert: None,
             permissions: Vec::new(),
             model: None,
         };
@@ -318,6 +342,10 @@ impl Server {
         }
         if session.title.is_none() {
             self.update_session(id, None, Some(title_of(text)))?;
+        }
+        // A new prompt keeps a staged undo: the undone messages go.
+        if session.revert.is_some() {
+            self.commit_revert(id)?;
         }
         let message = Message::User {
             id: message_id.clone(),
@@ -553,6 +581,7 @@ impl Server {
                 ("session".to_owned(), session.permissions.clone()),
             ],
             history,
+            shadow: Some(self.shadow(&directory)),
         };
         let hooks = Hooks {
             server: Arc::clone(self),

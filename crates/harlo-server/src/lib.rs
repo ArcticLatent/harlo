@@ -13,6 +13,7 @@ mod git;
 mod phone;
 mod server;
 mod store;
+mod undo;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,5 +78,9 @@ pub fn open(places: &Places, password: Option<String>) -> Result<Arc<Server>, St
         &places.config_home,
         password,
         phone,
+        places
+            .database
+            .parent()
+            .map_or_else(|| PathBuf::from("snapshot"), |d| d.join("snapshot")),
     )))
 }

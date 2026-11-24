@@ -50,6 +50,9 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/session/{id}/permission/{request}/reply", post(reply))
         .route("/api/session/{id}/prompt", post(prompt))
         .route("/api/session/{id}/interrupt", post(interrupt))
+        .route("/api/session/{id}/revert", delete(cancel_revert))
+        .route("/api/session/{id}/revert/stage", post(stage_revert))
+        .route("/api/session/{id}/revert/commit", post(commit_revert))
         .route("/api/agent", get(agents))
         .route("/api/model", get(models))
         .route("/api/model/default", get(default_model))
@@ -449,6 +452,34 @@ async fn no_client_tools() -> Response {
         "data": { "capability": "clientTools" },
     });
     (StatusCode::NOT_IMPLEMENTED, axum::Json(body)).into_response()
+}
+
+#[derive(Deserialize)]
+struct Stage {
+    #[serde(rename = "messageID")]
+    message_id: String,
+    files: Option<bool>,
+}
+
+async fn stage_revert(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<Stage>,
+) -> Answer {
+    let revert = server
+        .stage_revert(&id, &body.message_id, body.files.unwrap_or(false))
+        .await?;
+    ok(json!({ "data": revert }))
+}
+
+async fn commit_revert(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.commit_revert(&id)?;
+    done()
+}
+
+async fn cancel_revert(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.cancel_revert(&id).await?;
+    done()
 }
 
 #[derive(Deserialize)]

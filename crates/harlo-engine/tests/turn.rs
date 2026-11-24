@@ -107,6 +107,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         },
         system: "You are a coding agent.".into(),
         rules,
+        shadow: None,
         history: vec![Message::User {
             id: "msg_0".into(),
             time: Created { created: 0 },

@@ -39,6 +39,10 @@ pub struct Session {
     /// How its last run ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
+    /// The undo staged in it, as OpenCode shapes it: `messageID`, the
+    /// `files` restoring changed, and Harlo's `snapshot` and `report`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revert: Option<serde_json::Value>,
     /// Its own permission rules, applied after the agent's and the config's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<Rule>,
@@ -252,6 +256,18 @@ impl Store {
         )
     }
 
+    /// Removes `session`'s messages from `from` on.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn remove_messages_from(&self, session: &str, from: &str) -> Result<usize, Error> {
+        self.conn().execute(
+            "DELETE FROM message WHERE session = ?1 AND id >= ?2",
+            [session, from],
+        )
+    }
+
     /// A session's messages, oldest first.
     ///
     /// # Errors
@@ -336,6 +352,7 @@ mod tests {
             cost: 0.0,
             tokens: Tokens::default(),
             outcome: None,
+            revert: None,
             permissions: Vec::new(),
             model: None,
         };

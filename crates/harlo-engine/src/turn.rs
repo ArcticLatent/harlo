@@ -43,6 +43,9 @@ pub struct Turn {
     pub rules: Vec<(String, Vec<Rule>)>,
     /// The session so far, ending with the message being answered.
     pub history: Vec<Message>,
+    /// Records the project's files around each step that runs tools, so
+    /// the step can be undone; none, and steps aren't recorded.
+    pub shadow: Option<crate::snapshot::Shadow>,
 }
 
 /// Something that happened during a turn.
@@ -277,7 +280,19 @@ async fn step(
     stop: &CancellationToken,
 ) -> Result<(Assistant, Next), Error> {
     let (mut assistant, calls) = ask_model(turn, definitions, sink, stop).await?;
+    // The files as the calls find them, and as they leave them.
+    let start = match (&turn.shadow, calls.is_empty()) {
+        (Some(shadow), false) => track(shadow).await,
+        _ => None,
+    };
     let next = run_calls(turn, &mut assistant, calls, sink, gate, stop).await;
+    if let (Some(shadow), Some(start)) = (&turn.shadow, start) {
+        let end = track(shadow).await;
+        if let Some(snapshot) = assistant.snapshot.as_mut() {
+            snapshot.start = Some(start);
+            snapshot.end = end;
+        }
+    }
     sink.emit(Event::StepEnded {
         step: Box::new(assistant.clone()),
     });
@@ -285,6 +300,18 @@ async fn step(
         return Err(Error::stopped());
     }
     Ok((assistant, next))
+}
+
+/// Records the project's files; `None`, logged, when that fails, and the
+/// step simply can't be undone.
+async fn track(shadow: &crate::snapshot::Shadow) -> Option<String> {
+    match shadow.track().await {
+        Ok(id) => Some(id),
+        Err(why) => {
+            tracing::warn!(name: "snapshot.failed", why, "couldn't record the project's files");
+            None
+        }
+    }
 }
 
 /// Streams the model's reply into a new step; returns it with the places

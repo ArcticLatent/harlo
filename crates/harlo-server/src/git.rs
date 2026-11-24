@@ -86,7 +86,7 @@ pub async fn changes(directory: &str, only: Option<&[String]>) -> Vec<Value> {
 }
 
 /// `git diff` output, split into one entry per file.
-fn split(text: &str) -> Vec<Value> {
+pub(crate) fn split(text: &str) -> Vec<Value> {
     let mut out = Vec::new();
     for chunk in text.split("diff --git ").skip(1) {
         let patch = format!("diff --git {chunk}");
