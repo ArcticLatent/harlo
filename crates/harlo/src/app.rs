@@ -28,6 +28,7 @@ use crate::timeline::{self, Activity, Timeline};
 mod agents;
 mod appearance;
 mod arrange;
+mod asides;
 mod changes;
 mod claude;
 mod commit_message;
@@ -57,6 +58,7 @@ mod voice;
 
 pub use agents::{ApprovalEvent, Approvals};
 pub use arrange::{Document, Edge};
+pub use asides::{Answer, Aside, AsideEvent};
 pub use changes::{
     ChangedFile, Changes, Event as ChangesEvent, GitAction, List, Loaded as ChangesLoaded,
 };
@@ -167,17 +169,20 @@ pub enum Panel {
     Files,
     /// The project's notes.
     Notes,
+    /// Side questions asked with `/btw`, and their answers.
+    Asides,
 }
 
 impl Panel {
     /// Every panel, in rail order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Context,
         Self::Todos,
         Self::Subagents,
         Self::Changes,
         Self::Files,
         Self::Notes,
+        Self::Asides,
     ];
 
     /// The widget ID of the panel's rail button.
@@ -190,6 +195,7 @@ impl Panel {
             Self::Changes => "panel-changes",
             Self::Files => "panel-files",
             Self::Notes => "panel-notes",
+            Self::Asides => "panel-asides",
         }
     }
 
@@ -203,6 +209,7 @@ impl Panel {
             Self::Changes => "Changes",
             Self::Files => "Files",
             Self::Notes => "Notes",
+            Self::Asides => "Side questions",
         }
     }
 
@@ -307,6 +314,8 @@ pub enum Message {
     Phone(PhoneEvent),
     /// Something happened to pictures: a thumbnail, the viewer, the grid.
     Pictures(PictureEvent),
+    /// Something happened to a side question.
+    Aside(AsideEvent),
     /// The composer was edited.
     Compose(Edit),
     /// Open or close the location picker.
@@ -558,6 +567,8 @@ pub struct App {
     pub maximized: Option<Panel>,
     /// The terminals, shown under the center or hidden.
     pub terminals: Terminals,
+    /// Side questions asked about each session, by its ID.
+    asides: HashMap<String, Vec<Aside>>,
     /// The pages over the window: shortcuts, stats and settings.
     pub sheets: Sheets,
     /// The window's width, which decides which panels fit.
@@ -743,6 +754,7 @@ impl App {
             panel: layout.panel.as_deref().and_then(Panel::named),
             maximized: None,
             terminals: Terminals::default(),
+            asides: HashMap::new(),
             sheets: Sheets::default(),
             width: fit::WINDOW.0,
             height: fit::WINDOW.1,
@@ -983,6 +995,7 @@ impl App {
             | Message::CycleTab { .. }) => return self.arrange(message),
             Message::Terminal(event) => return self.terminal_event(event),
             Message::Sheet(event) => return self.sheet_event(event),
+            Message::Aside(event) => return self.aside_event(event),
             message @ (Message::Claude(_)
             | Message::OwnTools(_)
             | Message::Voice(_)
@@ -1720,6 +1733,9 @@ impl App {
             &folder,
             delivery,
         );
+        if let Outgoing::Aside(question) = &outgoing {
+            return self.ask_aside(question);
+        }
         let target = self.active.clone();
         if target.is_none() && outgoing == Outgoing::Compact {
             self.send_error = Some("There's nothing to summarize yet.".to_owned());
@@ -2017,7 +2033,7 @@ impl App {
                 .mention(insert.trim_end().to_owned(), item.choice.clone()),
             // `/compact` is complete; Enter now sends it.
             Choice::Compact => self.dismissed = Some((trigger.line, trigger.start)),
-            Choice::Command(_) | Choice::Skill(_) => {}
+            Choice::Command(_) | Choice::Skill(_) | Choice::Aside => {}
         }
         self.composer.move_to(Cursor {
             position: Position {
@@ -2487,6 +2503,8 @@ async fn send(
                 .await
         }
         Outgoing::Compact => client.compact(&session.id).await,
+        // Asked apart, never sent as a prompt.
+        Outgoing::Aside(_) => Ok(()),
     }
     .map_err(failed)?;
     Ok(Box::new(session))

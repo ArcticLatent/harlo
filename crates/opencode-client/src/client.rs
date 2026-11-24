@@ -433,6 +433,25 @@ impl Client {
         }
     }
 
+    /// Answers `prompt` from session `session_id`'s context, leaving its
+    /// history as it was.
+    ///
+    /// OpenCode counts the tokens and cost toward the session's totals.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist, the model fails, or the
+    /// server can't be reached.
+    pub async fn ask_aside(&self, session_id: &str, prompt: &str) -> Result<String, Error> {
+        let path = format!("/api/session/{session_id}/generate");
+        let v = Self::json(
+            self.request(Method::POST, &path)
+                .json(&json!({ "prompt": prompt })),
+        )
+        .await?;
+        Ok(v["data"]["text"].as_str().unwrap_or_default().to_owned())
+    }
+
     /// A model as OpenCode's requests name it.
     fn model_reference(model: &ModelRef) -> Value {
         let mut reference = json!({ "id": model.id, "providerID": model.provider_id });

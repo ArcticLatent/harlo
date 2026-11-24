@@ -442,6 +442,16 @@ export struct SubagentRow {
     detail: string,
 }
 
+/// A side question asked with `/btw`, and its answer.
+export struct AsideRow {
+    question: string,
+    /// The answer, Markdown drawn; empty while waiting or after a failure.
+    answer: styled-text,
+    waiting: bool,
+    /// Why there's no answer, when it failed.
+    failed: string,
+}
+
 /// One row of the Changes panel's list: a section's title, a note, a file,
 /// or a line of a file's open diff. Rust gives each its height, so it knows
 /// where every row sits.
@@ -715,7 +725,7 @@ export global State {
     // The shell.
     in property <bool> sidebar-shown: true;
     in property <length> sidebar-width: 288px;
-    in property <[bool]> panels-shown: [false, false, false, false, false, false];
+    in property <[bool]> panels-shown: [false, false, false, false, false, false, false];
     /// The tool panel on screen, by number, or -1; with `maximized` it
     /// covers the space between the rails.
     in property <int> panel: -1;
@@ -791,6 +801,12 @@ export global State {
     /// How many of the open session's subagents work or wait, counted on
     /// the panel's rail button.
     in property <int> subagents-working;
+    /// The Side questions panel's rows, and its words when it has none.
+    in property <[AsideRow]> aside-rows;
+    in property <string> asides-note;
+    /// How many of the open session's side questions wait for an answer,
+    /// counted on the panel's rail button.
+    in property <int> asides-waiting;
     /// The Changes panel: a note instead of its lists while loading, the
     /// lists, the selected file's path and diff (maximized), its foot, the
     /// commit message, and where the selected rows sit in each list.
@@ -950,6 +966,8 @@ export global Logic {
     callback show-picture-in-folder();
     /// Turn the viewer's picture a quarter turn, clockwise or not.
     callback turn-picture(bool);
+    /// Ask the open session's side question at this place again.
+    callback retry-aside(int);
     callback toggle-panel(int);
     callback toggle-terminal();
     callback new-terminal();

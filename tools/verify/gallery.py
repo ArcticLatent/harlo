@@ -831,13 +831,49 @@ def scene_codemode(g):
     h.settle(0.5)
 
 
+def scene_btw(g):
+    """A side question: the /btw entry in the slash menu, the question
+    waiting, then answered in the Side questions panel."""
+    h = g.h
+    open_project_session(h, title="Lexer")
+    ask(h, "What does the lexer return?",
+        [[("say", "The lexer returns a list of tokens, each with its span.")]])
+    h.wait_says("each with its span", timeout=60)
+    question = "Which file holds the token kinds?"
+    path = os.path.join(h.info["sandbox"], "scripts.json")
+    try:
+        with open(path) as f:
+            scripts = json.load(f)
+    except (OSError, ValueError):
+        scripts = {}
+    scripts[question] = [[["pace", "400"], ["say", "They're in `src/token.rs`, as the "
+                                                     "**`Kind`** enum:\n\n- `Ident` and "
+                                                     "`Number`\n- one per operator"]]]
+    with open(path, "w") as f:
+        json.dump(scripts, f)
+    send(h, "/btw " + question)
+    h.settle(0.5)
+    g.cap("waiting", "The Side questions panel opens with the question being answered")
+    for _ in range(60):
+        if not h.find("Answering…", role=None):
+            break
+        time.sleep(0.5)
+    h.settle(0.8)
+    g.cap("answered", "The answer, kept out of the conversation")
+    h.click(None, role="TextInput", where=composer)
+    h.type("/bt")
+    h.settle(0.6)
+    g.cap("menu", "The slash menu offers /btw for a side question")
+    h.key("Escape")
+
+
 SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approval),
           ("question", scene_question), ("busy", scene_busy), ("states", scene_states),
           ("menus", scene_menus),
           ("panels", scene_panels), ("terminal", scene_terminal), ("editor", scene_editor),
           ("settings", scene_settings), ("fonts", scene_fonts), ("pages", scene_pages), ("phone", scene_phone),
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
-          ("codemode", scene_codemode),
+          ("codemode", scene_codemode), ("btw", scene_btw),
           # These two leave a subagent's or a worktree's session open, so they come last.
           ("subagents", scene_subagents), ("worktrees", scene_worktrees),
           ("window", scene_window)]

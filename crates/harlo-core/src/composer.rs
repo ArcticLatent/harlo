@@ -14,6 +14,10 @@ use crate::server::{Catalog, Command, FileMatch};
 /// The built-in command that summarizes the conversation.
 pub const COMPACT: &str = "compact";
 
+/// The built-in command that asks a side question: answered from the
+/// session's context, without adding to the conversation.
+pub const ASIDE: &str = "btw";
+
 /// Which menu a typed word opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
@@ -73,6 +77,8 @@ pub enum Choice {
     Skill(String),
     /// Summarize the conversation.
     Compact,
+    /// Ask a side question.
+    Aside,
     /// A file or folder, relative to the session's folder.
     File {
         /// The path as the server listed it.
@@ -153,6 +159,14 @@ pub fn slash_options(catalog: &Catalog, query: &str) -> Vec<MenuItem> {
             choice: Choice::Compact,
             label: format!("/{COMPACT}"),
             detail: "Summarize the conversation to free up context".to_owned(),
+            runner: None,
+        });
+    }
+    if !catalog.commands.iter().any(|c| c.name == ASIDE) {
+        options.push(MenuItem {
+            choice: Choice::Aside,
+            label: format!("/{ASIDE}"),
+            detail: "Ask a side question, kept out of the chat".to_owned(),
             runner: None,
         });
     }
@@ -240,6 +254,7 @@ pub fn insertion(choice: &Choice, catalog: &Catalog) -> String {
     match choice {
         Choice::Command(name) => format!("/{name} "),
         Choice::Compact => format!("/{COMPACT}"),
+        Choice::Aside => format!("/{ASIDE} "),
         Choice::Skill(id) => {
             let name = catalog
                 .skills
@@ -315,12 +330,16 @@ pub enum Outgoing {
     },
     /// Summarize the conversation.
     Compact,
+    /// Ask a side question, possibly empty: answered from the session's
+    /// context without adding to the conversation.
+    Aside(String),
 }
 
 /// Turns the composer's text and draft into what's sent.
 ///
 /// `folder` is the session's folder; mentioned files are sent by their path
-/// in it. A leading `/name` runs a command, loads a skill, or compacts.
+/// in it. A leading `/name` runs a command, loads a skill, compacts, or
+/// asks a side question.
 #[must_use]
 pub fn outgoing(
     text: &str,
@@ -344,6 +363,9 @@ pub fn outgoing(
         }
         if name == COMPACT && arguments.is_empty() {
             return Outgoing::Compact;
+        }
+        if name == ASIDE {
+            return Outgoing::Aside(arguments.to_owned());
         }
         if let Some(skill) = catalog
             .skills
@@ -381,7 +403,7 @@ pub fn outgoing(
                 name: Some(name.clone()),
                 mention: Some(mention),
             }),
-            Choice::Command(_) | Choice::Skill(_) | Choice::Compact => {}
+            Choice::Command(_) | Choice::Skill(_) | Choice::Compact | Choice::Aside => {}
         }
     }
     prompt

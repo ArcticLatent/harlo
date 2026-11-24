@@ -167,6 +167,8 @@ impl Presenter {
                     .count(),
             )
         }));
+        // So does Side questions, for those still being answered.
+        state.set_asides_waiting(offset(app.asides_waiting()));
         Self::sides(app, &state);
         self.sidebar(app, &state);
         self.center(app, &state);
@@ -848,7 +850,7 @@ fn can_refresh(app: &App, panel: Panel) -> bool {
     match panel {
         Panel::Context => app.active.is_some(),
         Panel::Changes | Panel::Files => true,
-        Panel::Todos | Panel::Subagents | Panel::Notes => false,
+        Panel::Todos | Panel::Subagents | Panel::Notes | Panel::Asides => false,
     }
 }
 

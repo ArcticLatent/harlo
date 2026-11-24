@@ -365,6 +365,7 @@ export component RightRail inherits Rectangle {
                 { glyph: Icons.changes, label: "Changes" },
                 { glyph: Icons.files, label: "Files" },
                 { glyph: Icons.notes, label: "Notes" },
+                { glyph: Icons.aside, label: "Side questions" },
             ]: HorizontalLayout {
                 alignment: center;
                 RailButton {
@@ -372,8 +373,9 @@ export component RightRail inherits Rectangle {
                     label: panel.label;
                     leftward: true;
                     selected: State.panels-shown[index];
-                    // Subagents counts those at work.
-                    count: index == 2 ? State.subagents-working : 0;
+                    // Subagents counts those at work; Side questions those
+                    // still being answered.
+                    count: index == 2 ? State.subagents-working : index == 6 ? State.asides-waiting : 0;
                     clicked => { Logic.toggle-panel(index); }
                 }
             }

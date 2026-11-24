@@ -36,6 +36,7 @@ const ICONS: &[(&str, Icon)] = &[
     ("fork", Icon::GitFork),
     ("files", Icon::Files),
     ("notes", Icon::FileText),
+    ("aside", Icon::MessageCircleQuestionMark),
     ("terminal", Icon::SquareTerminal),
     ("stats", Icon::ChartColumn),
     ("settings", Icon::Settings),

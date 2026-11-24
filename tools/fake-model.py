@@ -17,7 +17,8 @@ by " | " and run in order:
     pace <ms>             delay between streamed chunks from here on
     fail <code> <text>    an HTTP error with that status and message instead
 
-A subagent's prompt starts with OpenCode's line telling it it's one; the
+A subagent's prompt starts with OpenCode's line telling it it's one, and a
+side question (/btw) with the lines asking for a quick answer; the
 script, or the plain words kept in scripts.json, is what follows.
 
 A prompt can also be plain words, with its script in scripts.json beside
@@ -51,6 +52,9 @@ SUMMARIZE = "You MUST summarize the conversation"
 
 # The line OpenCode puts before the prompt it gives a subagent.
 SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
+
+# How a side question (/btw) starts; the question follows a blank line.
+ASIDE_PREAMBLE = "The user is asking a quick side question about the conversation so far."
 
 
 def text_of(content):
@@ -115,6 +119,8 @@ def plan(messages):
     script = text_of(messages[last_user].get("content")).strip()
     if script.startswith(SUBAGENT_PREAMBLE):
         script = script[len(SUBAGENT_PREAMBLE) :].strip()
+    if script.startswith(ASIDE_PREAMBLE):
+        script = script.partition("\n\n")[2].strip()
     known_scripts = stored_scripts()
     if script in known_scripts:
         script = known_scripts[script]

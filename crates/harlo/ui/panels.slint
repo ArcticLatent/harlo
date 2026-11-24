@@ -4,7 +4,8 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, SubagentRow } from "data.slint";
+import { State, Logic, SubagentRow, AsideRow } from "data.slint";
+import { LinkButton } from "timeline.slint";
 import { Icon, QuietBar, Press, Spinner } from "widgets.slint";
 import { ChangesPanel } from "changes.slint";
 import { FilesPanel } from "files.slint";
@@ -372,6 +373,77 @@ component SubagentsPanel inherits Rectangle {
     }
 }
 
+/// A side question and its answer, or where that stands.
+component AsideItem inherits VerticalLayout {
+    in property <AsideRow> entry;
+    in property <int> index;
+    spacing: 6px;
+    Text {
+        text: root.entry.question;
+        wrap: word-wrap;
+        font-size: Size.label;
+        font-weight: 500;
+        color: Theme.text-strong;
+    }
+    if root.entry.waiting: HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        Spinner { }
+        Text {
+            text: "Answering…";
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+    }
+    if root.entry.failed != "": VerticalLayout {
+        spacing: 4px;
+        alignment: start;
+        Text {
+            text: root.entry.failed;
+            wrap: word-wrap;
+            font-size: Size.small;
+            color: Theme.icon-critical-base;
+        }
+        HorizontalLayout {
+            alignment: start;
+            LinkButton {
+                text: "Retry";
+                clicked => { Logic.retry-aside(root.index); }
+            }
+        }
+    }
+    if !root.entry.waiting && root.entry.failed == "": StyledText {
+        text: root.entry.answer;
+        default-font-size: Size.label;
+        default-font-family: Fonts.sans;
+        default-color: Theme.text-base;
+        link-color: Theme.link-ink;
+        selectable: true;
+        selection-background-color: Theme.selection;
+        link-clicked(url) => { Logic.link(url); }
+    }
+}
+
+/// The Side questions panel: questions asked with `/btw` about the open
+/// session, answered without adding to its conversation.
+component AsidesPanel inherits Rectangle {
+    if State.asides-note != "": Note { text: State.asides-note; }
+    if State.asides-note == "": Body {
+        Weak {
+            text: "Answered from the session's context. They stay out of its conversation and are kept until Harlo closes.";
+        }
+        for entry[index] in State.aside-rows: VerticalLayout {
+            spacing: 16px;
+            Divider { }
+            AsideItem {
+                entry: entry;
+                index: index;
+            }
+        }
+    }
+}
+
 /// The shown tool panel's body, by its number in the rail's order.
 ///
 /// `panel` is the one shown, the open one unless a closing panel is still
@@ -387,4 +459,5 @@ export component PanelBody inherits Rectangle {
     }
     if root.panel == 4: FilesPanel { }
     if root.panel == 5: NotesPanel { }
+    if root.panel == 6: AsidesPanel { }
 }

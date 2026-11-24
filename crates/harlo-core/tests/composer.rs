@@ -91,15 +91,19 @@ fn menus_open_on_the_word_at_the_cursor() {
 }
 
 #[test]
-fn the_slash_menu_lists_commands_compact_and_skills() {
+fn the_slash_menu_lists_commands_compact_btw_and_skills() {
     let labels = |query| {
         slash_options(&catalog(), query)
             .into_iter()
             .map(|o| o.label)
             .collect::<Vec<_>>()
     };
-    assert_eq!(labels(""), ["/init", "/review", "/compact", "/browser"]);
+    assert_eq!(
+        labels(""),
+        ["/init", "/review", "/compact", "/btw", "/browser"]
+    );
     assert_eq!(labels("r"), ["/review", "/browser"], "prefix matches first");
+    assert_eq!(labels("bt"), ["/btw"]);
     assert_eq!(labels("COMP"), ["/compact"]);
     assert!(labels("zzz").is_empty());
 }
@@ -200,6 +204,11 @@ fn a_leading_slash_runs_a_command_compacts_or_loads_a_skill() {
         }
     );
     assert_eq!(send("/compact"), Outgoing::Compact);
+    assert_eq!(
+        send("/btw  what does the lexer return?"),
+        Outgoing::Aside("what does the lexer return?".into())
+    );
+    assert_eq!(send("/btw"), Outgoing::Aside(String::new()));
     let Outgoing::Prompt(prompt) = send("/browser open the docs") else {
         panic!("a skill is a prompt");
     };

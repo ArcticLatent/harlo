@@ -1,6 +1,6 @@
 //! The tool panels' bodies: Context (how full the context window is, what
 //! the session used and cost, its instruction files) and Todos (the agent's
-//! list as its last todo call wrote it).
+//! list as its last todo call wrote it), Subagents and Side questions.
 //!
 //! Each is filled only while it's on screen.
 
@@ -17,10 +17,13 @@ use slint::VecModel;
 use harlo_core::sessions::{SessionSummary, compact_age};
 
 use super::sync;
-use crate::app::{App, ContextFacts, Panel, capitalized};
+use crate::app::{Answer, App, ContextFacts, Panel, capitalized};
+use crate::markdown;
 use crate::model::{TODO_SETTING, compact, dollars};
 use crate::theme::color;
-use crate::ui::{ContextCard, Fact, InstructionFile, State, SubagentRow, TodoRow, TodosCard};
+use crate::ui::{
+    AsideRow, ContextCard, Fact, InstructionFile, State, SubagentRow, TodoRow, TodosCard,
+};
 
 /// How full the window gets before its bar warns, from 0 to 1.
 ///
@@ -34,6 +37,7 @@ pub struct Lists {
     files: Rc<VecModel<InstructionFile>>,
     todos: Rc<VecModel<TodoRow>>,
     subagents: Rc<VecModel<SubagentRow>>,
+    asides: Rc<VecModel<AsideRow>>,
 }
 
 impl std::fmt::Debug for Lists {
@@ -50,7 +54,9 @@ impl Lists {
             files: Rc::new(VecModel::default()),
             todos: Rc::new(VecModel::default()),
             subagents: Rc::new(VecModel::default()),
+            asides: Rc::new(VecModel::default()),
         };
+        state.set_aside_rows(Rc::clone(&lists.asides).into());
         state.set_subagent_rows(Rc::clone(&lists.subagents).into());
         state.set_context_facts(Rc::clone(&lists.facts).into());
         state.set_context_files(Rc::clone(&lists.files).into());
@@ -69,6 +75,31 @@ impl Lists {
         if app.panel_shown(Panel::Subagents) {
             self.subagents(app, state);
         }
+        if app.panel_shown(Panel::Asides) {
+            self.asides(app, state);
+        }
+    }
+
+    /// The Side questions panel: the open session's, oldest first.
+    fn asides(&self, app: &App, state: &State<'_>) {
+        let asides = app.active.as_deref().map(|id| app.asides(id));
+        let note = match asides {
+            None => "No session selected.",
+            Some([]) => {
+                "No side questions yet. Type /btw and a question to ask about this session \
+                 without adding to it."
+            }
+            Some(_) => "",
+        };
+        state.set_asides_note(note.into());
+        sync(
+            &self.asides,
+            asides
+                .unwrap_or_default()
+                .iter()
+                .map(|aside| aside_row(&app.tokens, &aside.question, &aside.answer))
+                .collect(),
+        );
     }
 
     /// The Subagents panel: the session's subagents, newest first, each
@@ -333,4 +364,22 @@ fn todo(todo: &Todo) -> TodoRow {
 /// A count as the UI's `int`.
 fn count(n: usize) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
+}
+
+/// A side question's row: the question, then its answer or where that stands.
+fn aside_row(t: &harlo_core::theme::Tokens, question: &str, answer: &Answer) -> AsideRow {
+    let mut row = AsideRow {
+        question: question.into(),
+        ..AsideRow::default()
+    };
+    match answer {
+        Answer::Waiting => row.waiting = true,
+        Answer::Given(text) => {
+            // Markup the window can't draw reads as its plain words.
+            row.answer = slint::StyledText::from_markdown(&markdown::painted(t, text))
+                .unwrap_or_else(|_| slint::StyledText::from_plain_text(&markdown::plain(text)));
+        }
+        Answer::Failed(why) => row.failed = why.as_str().into(),
+    }
+    row
 }

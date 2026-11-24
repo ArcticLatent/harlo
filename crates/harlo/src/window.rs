@@ -1122,6 +1122,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_pick_avatar, |index| Message::PickAvatar(
         usize::try_from(index).unwrap_or(0)
     ));
+    send_with!(on_retry_aside, |_app, index| usize::try_from(index)
+        .ok()
+        .map(|index| Message::Aside(crate::app::AsideEvent::Retry(index))));
     send_with!(on_toggle_panel, |_app, number| present::panel_of(number)
         .map(Message::TogglePanel));
     send!(on_toggle_terminal, || Message::Terminal(
@@ -1525,6 +1528,6 @@ fn refresh(panel: Panel) -> Option<Message> {
         Panel::Context => Some(Message::Context(ContextEvent::Refresh)),
         Panel::Changes => Some(Message::Changes(ChangesEvent::Refresh)),
         Panel::Files => Some(Message::Files(FilesEvent::Refresh)),
-        Panel::Todos | Panel::Subagents | Panel::Notes => None,
+        Panel::Todos | Panel::Subagents | Panel::Notes | Panel::Asides => None,
     }
 }
