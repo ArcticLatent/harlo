@@ -35,6 +35,8 @@ the private bus are logged instead of shown.
     tools/gui-drive.py kill                      ends Harlo's process at once (SIGKILL) and
                                                  waits until it's gone; the sandbox stays
     tools/gui-drive.py revive                    starts Harlo again after kill
+    tools/gui-drive.py server-restart            restarts the sandbox's server (same port and
+                                                 password); Harlo stays running
     tools/gui-drive.py stop                      stops everything and removes the scratch folders
 
 With HARLO_GUI_PREFS='{"setup_done": true}' at `start`, Harlo's saved preferences
@@ -532,6 +534,13 @@ def cmd_revive(_args):
     print("revived")
 
 
+def cmd_server_restart(_args):
+    state = load()
+    subprocess.run([f"{REPO}/tools/oc-sandbox.sh", "restart", state["sandbox"]], check=True,
+                   stdout=subprocess.DEVNULL)
+    print("server restarted")
+
+
 def cmd_stop(_args):
     state = load()
     for pid in [
@@ -556,6 +565,7 @@ COMMANDS = {
     "api": cmd_api, "file": cmd_file, "env": cmd_env, "log": cmd_log,
     "notifications": cmd_notifications,
     "restart": cmd_restart, "stop": cmd_stop, "kill": cmd_kill, "revive": cmd_revive,
+    "server-restart": cmd_server_restart,
 }
 
 if __name__ == "__main__":

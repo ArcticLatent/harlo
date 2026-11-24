@@ -258,6 +258,44 @@ fn new_sessions_are_fetched_and_new_projects_adopted() {
 }
 
 #[test]
+fn a_rename_right_after_creation_is_kept() {
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    let created = ws.apply(
+        &EventKind::SessionCreated {
+            session_id: "s9".into(),
+        },
+        NOW_MS,
+    );
+    assert_eq!(created, [Fetch::Session("s9".into())]);
+    // Renamed before that fetch came back: fetched again.
+    let renamed = ws.apply(
+        &EventKind::SessionRenamed {
+            session_id: "s9".into(),
+            title: "Named".into(),
+        },
+        NOW_MS,
+    );
+    assert_eq!(renamed, [Fetch::Session("s9".into())]);
+    // The second fetch answers first; the first, older one lands after it.
+    let fresh = Session {
+        title: Some("Named".into()),
+        ..session("s9", "p_app", "/code/app", 0.0)
+    };
+    let stale = Session {
+        title: None,
+        updated: fresh.updated - 5.0,
+        ..fresh.clone()
+    };
+    let _ = ws.fetched(Fetched::Session("s9".into(), Some(Box::new(fresh))));
+    let _ = ws.fetched(Fetched::Session("s9".into(), Some(Box::new(stale))));
+    assert_eq!(
+        ws.session("s9").and_then(|s| s.title.as_deref()),
+        Some("Named")
+    );
+}
+
+#[test]
 fn a_resync_replaces_everything_but_keeps_the_order() {
     let mut ws = Workspace::new(Vec::new());
     ws.resync(snapshot());

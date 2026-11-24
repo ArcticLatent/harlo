@@ -182,6 +182,43 @@ pub enum Part {
     },
 }
 
+impl Assistant {
+    /// Ends a step that never ended, as stopped: its running calls fail
+    /// with `why` and so does the step. Returns whether it changed.
+    ///
+    /// A step is left unfinished when the server stops during it; what it
+    /// had streamed stays.
+    pub fn end_unfinished(&mut self, time: i64, why: &str) -> bool {
+        if self.time.completed.is_some() {
+            return false;
+        }
+        let aborted = || ErrorInfo {
+            kind: "aborted".to_owned(),
+            message: why.to_owned(),
+        };
+        for part in &mut self.content {
+            if let Part::Tool { state, time: t, .. } = part
+                && let ToolState::Running { input, metadata } = state
+            {
+                *state = ToolState::Error {
+                    input: std::mem::take(input),
+                    error: aborted(),
+                    metadata: std::mem::take(metadata),
+                };
+                t.completed = Some(time);
+            }
+        }
+        if self.error.is_none() {
+            self.error = Some(aborted());
+        }
+        if self.finish.is_none() {
+            self.finish = Some("unknown".to_owned());
+        }
+        self.time.completed = Some(time);
+        true
+    }
+}
+
 /// A tool call's times.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolTime {

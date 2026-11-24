@@ -4,6 +4,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::future::IntoFuture as _;
 use std::process::ExitCode;
 
 #[tokio::main]
@@ -59,13 +60,35 @@ async fn main() -> ExitCode {
             () = async { match term.as_mut() { Some(t) => { t.recv().await; } None => std::future::pending().await } } => {}
         }
     };
-    if let Err(e) = axum::serve(listener, harlo_server::router(server))
-        .with_graceful_shutdown(stopped)
-        .await
-    {
-        return fail(&format!("The server stopped: {e}"));
+    // Event streams never end by themselves, so a graceful stop alone would
+    // wait for every client to leave. Requests get a moment to finish, then
+    // the server exits and clients see their connections close.
+    let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+    let signal = std::sync::Arc::clone(&stop);
+    let serving = axum::serve(listener, harlo_server::router(server))
+        .with_graceful_shutdown(async move { signal.notified().await })
+        .into_future();
+    tokio::pin!(serving);
+    tokio::select! {
+        result = &mut serving => return finished(result),
+        () = stopped => {}
     }
-    ExitCode::SUCCESS
+    stop.notify_one();
+    match tokio::time::timeout(STOP_GRACE, &mut serving).await {
+        Ok(result) => finished(result),
+        Err(_elapsed) => ExitCode::SUCCESS,
+    }
+}
+
+/// How long requests get to finish once the server is told to stop.
+const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The exit code for how serving ended.
+fn finished(result: std::io::Result<()>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(&format!("The server stopped: {e}")),
+    }
 }
 
 fn fail(message: &str) -> ExitCode {

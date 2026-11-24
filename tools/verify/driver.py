@@ -145,6 +145,11 @@ class Harlo:
         self.gui("revive")
         self._come_back()
 
+    def restart_server(self):
+        """Restarts the sandbox's server on the same port; Harlo keeps
+        running and has to reconnect."""
+        self.gui("server-restart")
+
     def restart(self):
         """Restarts Harlo only; its saved layout and settings stay."""
         self.gui("restart")

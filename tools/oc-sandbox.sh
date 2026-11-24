@@ -4,6 +4,9 @@
 #
 #   tools/oc-sandbox.sh [dir]     prints KEY=VALUE lines (URL, PASSWORD, DIR, PROJECT, …)
 #   tools/oc-sandbox.sh stop dir  stops both and removes the folder
+#   tools/oc-sandbox.sh restart dir  restarts the server only, on the same port
+#                                 and password (the sandbox's own server, never
+#                                 the shared service)
 #
 # Never touches the real ~/.config/opencode, ~/.local/state/opencode or the shared
 # service: HOME and every XDG folder point inside the scratch folder.
@@ -18,6 +21,23 @@ TOOLS=$(cd "$(dirname "$0")" && pwd)
 # built beforehand) in OpenCode's place, with the same config and project.
 if [[ ${HARLO_BACKEND:-opencode} == engine ]]; then
   BIN=${HARLO_SERVER_BIN:-$TOOLS/../target/debug/harlo-server}
+fi
+
+if [[ ${1:-} == restart ]]; then
+  dir=$2
+  pid=$(cat "$dir/opencode.pid")
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.05; done
+  kill -9 "$pid" 2>/dev/null || true
+  bash "$dir/server.sh"
+  # shellcheck disable=SC1091
+  source "$dir/server.env"
+  for _ in $(seq 1 100); do
+    if curl -s -o /dev/null -u "opencode:$password" "http://127.0.0.1:$port/api/info"; then break; fi
+    sleep 0.1
+  done
+  echo "restarted"
+  exit 0
 fi
 
 if [[ ${1:-} == stop ]]; then
@@ -69,19 +89,24 @@ EOF
 setsid python3 -I "$TOOLS/fake-model.py" "$model_port" "$dir/model.jsonl" > "$dir/model.log" 2>&1 < /dev/null &
 echo $! > "$dir/model.pid"
 
-cd "$dir/project"
+# The server's start, kept so `restart` can run it again the same way.
 # A Claude Code session's own variables stay out of the sandbox.
-unset_claude=()
+unset_claude=""
 while IFS='=' read -r name _; do
-  [[ $name == CLAUDE* ]] && unset_claude+=(-u "$name")
+  [[ $name == CLAUDE* ]] && unset_claude+=" -u $name"
 done < <(env)
-env "${unset_claude[@]}" HOME="$dir/home" XDG_CONFIG_HOME="$dir/config" XDG_DATA_HOME="$dir/data" \
-  XDG_STATE_HOME="$dir/state" XDG_CACHE_HOME="$dir/cache" OPENCODE_PASSWORD="$password" \
-  OPENCODE_CLAUDE_PATH="$dir/bin/claude" \
-  DBUS_SESSION_BUS_ADDRESS="unix:path=$dir/no-bus" \
-  setsid "$BIN" serve --hostname 127.0.0.1 --port "$port" > "$dir/opencode.log" 2>&1 < /dev/null &
-echo $! > "$dir/opencode.pid"
-cd - > /dev/null
+printf 'port=%q\npassword=%q\n' "$port" "$password" > "$dir/server.env"
+cat > "$dir/server.sh" <<EOF
+cd $(printf %q "$dir/project")
+env $unset_claude HOME=$(printf %q "$dir/home") XDG_CONFIG_HOME=$(printf %q "$dir/config") \\
+  XDG_DATA_HOME=$(printf %q "$dir/data") XDG_STATE_HOME=$(printf %q "$dir/state") \\
+  XDG_CACHE_HOME=$(printf %q "$dir/cache") OPENCODE_PASSWORD=$(printf %q "$password") \\
+  OPENCODE_CLAUDE_PATH=$(printf %q "$dir/bin/claude") \\
+  DBUS_SESSION_BUS_ADDRESS=$(printf %q "unix:path=$dir/no-bus") \\
+  setsid $(printf %q "$BIN") serve --hostname 127.0.0.1 --port $port >> $(printf %q "$dir/opencode.log") 2>&1 < /dev/null &
+echo \$! > $(printf %q "$dir/opencode.pid")
+EOF
+bash "$dir/server.sh"
 
 for _ in $(seq 1 100); do
   if curl -s -o /dev/null -u "opencode:$password" "http://127.0.0.1:$port/api/info"; then break; fi

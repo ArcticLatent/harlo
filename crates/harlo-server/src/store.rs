@@ -281,6 +281,22 @@ impl Store {
             .collect()
     }
 
+    /// A session's newest message, if it has any.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn last_message(&self, session: &str) -> Result<Option<Message>, Error> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT body FROM message WHERE session = ?1 ORDER BY id DESC LIMIT 1")?;
+        let mut rows = stmt.query_map([session], |r| r.get::<_, String>(0))?;
+        rows.next()
+            .transpose()?
+            .map(|b| serde_json::from_str(&b).map_err(json_error))
+            .transpose()
+    }
+
     /// Appends an event and returns its sequence number.
     ///
     /// # Errors

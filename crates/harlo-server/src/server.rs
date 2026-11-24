@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harlo_engine::{
-    Answer, Ask, Assistant, Config, Created, ErrorInfo, Event, Gate, Message, Outcome, Rule, Sink,
-    ToolState, Turn, agent_rules, ascending_id, descending_id, now,
+    Answer, Ask, Assistant, Config, Created, ErrorInfo, Event, Gate, Message, Outcome, Part, Rule,
+    Sink, StepTime, ToolState, Turn, agent_rules, ascending_id, descending_id, now,
 };
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, oneshot};
@@ -125,6 +125,7 @@ impl Server {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|t| jsonc_value(&t));
         let (events, _) = broadcast::channel(BACKLOG);
+        end_unfinished(&store);
         Self {
             store,
             config,
@@ -587,6 +588,7 @@ impl Server {
             server: Arc::clone(self),
             session: session.id.clone(),
             directory,
+            streaming: Mutex::default(),
         };
         match harlo_engine::run(turn, &hooks, &hooks, stop).await {
             Outcome::Succeeded => ("succeeded", None),
@@ -685,11 +687,139 @@ impl Server {
     }
 }
 
+/// What a step that stopped midway is told on the server's next start.
+const STOPPED_MIDWAY: &str = "The server stopped before this step ended.";
+
+/// Ends, as stopped, each run and step that never ended: the server
+/// stopped during it. What the step had streamed stays.
+fn end_unfinished(store: &Store) {
+    let Ok(sessions) = store.sessions() else {
+        return;
+    };
+    for mut session in sessions {
+        let (busy, idle) = (session.time.busy, session.time.idle);
+        if busy.is_some_and(|b| idle.is_none_or(|i| i < b)) {
+            session.time.idle = Some(now());
+            session.outcome = Some("interrupted".to_owned());
+            if let Err(e) = store.put_session(&session) {
+                tracing::error!(name: "session.store.failed", error = %e, "couldn't end a run");
+            }
+        }
+        if let Ok(Some(Message::Assistant(mut step))) = store.last_message(&session.id)
+            && step.end_unfinished(now(), STOPPED_MIDWAY)
+            && let Err(e) = store.put_message(&session.id, &Message::Assistant(step))
+        {
+            tracing::error!(name: "message.store.failed", error = %e, "couldn't end a step");
+        }
+    }
+}
+
+/// How often a streaming step is saved, so a server that stops keeps
+/// most of what was streamed.
+const SAVE_STREAMING: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The step being streamed, as far as it has come.
+#[derive(Default)]
+struct Streaming {
+    /// The step, without its calls (they're saved once it's streamed).
+    step: Option<Assistant>,
+    /// Its text and reasoning, by place in its content.
+    parts: std::collections::BTreeMap<usize, Part>,
+    /// When it was last saved.
+    saved: Option<std::time::Instant>,
+}
+
 /// The engine's sink and gate for one session's run.
 struct Hooks {
     server: Arc<Server>,
     session: String,
     directory: String,
+    streaming: Mutex<Streaming>,
+}
+
+impl Hooks {
+    /// Follows the step being streamed, and saves it now and then.
+    fn follow(&self, event: &Event) {
+        let mut s = lock(&self.streaming);
+        match event {
+            Event::StepStarted {
+                message,
+                agent,
+                model,
+                time,
+            } => {
+                *s = Streaming {
+                    step: Some(Assistant {
+                        id: message.clone(),
+                        time: StepTime {
+                            created: *time,
+                            ..StepTime::default()
+                        },
+                        agent: agent.clone(),
+                        model: model.clone(),
+                        content: Vec::new(),
+                        finish: None,
+                        raw_finish: None,
+                        cost: 0.0,
+                        tokens: harlo_engine::Tokens::default(),
+                        error: None,
+                        snapshot: None,
+                    }),
+                    parts: std::collections::BTreeMap::new(),
+                    saved: Some(std::time::Instant::now()),
+                };
+                return;
+            }
+            Event::FirstToken { .. } => {
+                if let Some(step) = s.step.as_mut() {
+                    step.time.first_token = Some(now());
+                }
+                return;
+            }
+            Event::TextStarted { at, .. } => {
+                s.parts.insert(
+                    *at,
+                    Part::Text {
+                        text: String::new(),
+                    },
+                );
+            }
+            Event::ReasoningStarted { at, .. } => {
+                s.parts.insert(
+                    *at,
+                    Part::Reasoning {
+                        text: String::new(),
+                    },
+                );
+            }
+            Event::TextDelta { at, delta, .. } | Event::ReasoningDelta { at, delta, .. } => {
+                if let Some(Part::Text { text } | Part::Reasoning { text }) = s.parts.get_mut(at) {
+                    text.push_str(delta);
+                }
+            }
+            Event::TextEnded { at, text, .. } | Event::ReasoningEnded { at, text, .. } => {
+                if let Some(Part::Text { text: t } | Part::Reasoning { text: t }) =
+                    s.parts.get_mut(at)
+                {
+                    t.clone_from(text);
+                }
+            }
+            Event::StepStreamed { .. } | Event::StepEnded { .. } => {
+                *s = Streaming::default();
+                return;
+            }
+            _ => return,
+        }
+        if s.saved.is_some_and(|t| t.elapsed() < SAVE_STREAMING) {
+            return;
+        }
+        s.saved = Some(std::time::Instant::now());
+        let parts: Vec<Part> = s.parts.values().cloned().collect();
+        if let Some(step) = s.step.as_mut() {
+            step.content = parts;
+            self.server.store_step(&self.session, step, false);
+        }
+    }
 }
 
 impl Hooks {
@@ -706,6 +836,7 @@ impl Hooks {
 
 impl Sink for Hooks {
     fn emit(&self, event: Event) {
+        self.follow(&event);
         match event {
             Event::StepStarted { message, agent, model, time } => self.send(
                 "session.step.started",

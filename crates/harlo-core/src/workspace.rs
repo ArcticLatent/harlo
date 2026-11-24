@@ -150,8 +150,12 @@ impl Workspace {
             EventKind::SessionRenamed { session_id, title } => {
                 if let Some(s) = self.sessions.get_mut(session_id) {
                     s.title = Some(title.clone());
+                    Vec::new()
+                } else {
+                    // Renamed before its creation's fetch came back, which
+                    // may have been answered before the rename: fetch again.
+                    vec![Fetch::Session(session_id.clone())]
                 }
-                Vec::new()
             }
             EventKind::SessionDeleted { session_id }
             | EventKind::SessionArchived { session_id } => {
@@ -336,6 +340,15 @@ impl Workspace {
             self.sessions.remove(&session.id);
             self.busy.remove(&session.id);
             self.inboxes.remove(&session.id);
+            return Vec::new();
+        }
+        // Two fetches of one session can come back out of order; the
+        // older answer doesn't replace the newer.
+        if self
+            .sessions
+            .get(&session.id)
+            .is_some_and(|known| known.updated > session.updated)
+        {
             return Vec::new();
         }
         let unknown_project = !self.projects.contains_key(&session.project_id);
