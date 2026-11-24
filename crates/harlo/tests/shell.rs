@@ -190,6 +190,7 @@ fn status_text_covers_every_state() {
     );
     assert_eq!(
         status_text(&Status::Connected {
+            server: "OpenCode".into(),
             version: "9.9.9".into()
         }),
         format!("Connected · OpenCode 9.9.9. Harlo is tested with {pinned}.")

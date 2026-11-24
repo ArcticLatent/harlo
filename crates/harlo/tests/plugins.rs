@@ -83,6 +83,7 @@ fn checking_and_updating_ask_the_server() {
     let ui = ui(app);
     ui.send(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot: demo::snapshot(),
     }))));

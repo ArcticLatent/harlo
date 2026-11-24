@@ -111,7 +111,13 @@ impl Client {
     /// Fails when the server can't be reached or rejects the password.
     pub async fn info(&self) -> Result<ServerInfo, Error> {
         let v = Self::json(self.request(Method::GET, "/api/info")).await?;
-        Ok(serde_json::from_value::<g::ServerInfo>(v)?.into())
+        // Harlo's own server says so among its capabilities.
+        let harlo = v["capabilities"]["server"] == "harlo";
+        let mut info: ServerInfo = serde_json::from_value::<g::ServerInfo>(v)?.into();
+        if harlo {
+            "Harlo".clone_into(&mut info.name);
+        }
+        Ok(info)
     }
 
     /// Lists sessions, newest first, optionally only those in `directory`.

@@ -55,6 +55,7 @@ fn btw_asks_about_the_session_and_its_panel_shows_the_answer() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot,
     }))));

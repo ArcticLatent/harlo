@@ -86,6 +86,7 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot: tasks.block_on(load(&sandbox.client())).expect("snapshot"),
     }))));

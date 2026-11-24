@@ -981,7 +981,7 @@ fn computer_rows(app: &App, rows: &mut Vec<SheetRow>) {
 /// How the connection to the server stands.
 fn status_row(app: &App) -> SheetRow {
     let (status, tone) = match &app.status {
-        Status::Connected { version } => (format!("Connected · OpenCode {version}"), 1),
+        Status::Connected { server, version } => (format!("Connected · {server} {version}"), 1),
         Status::Connecting { .. } => ("Connecting…".to_owned(), 3),
         Status::Lost { reason, .. } => (reason.clone(), 2),
     };
@@ -1712,8 +1712,8 @@ fn event_name(kind: Kind) -> (&'static str, &'static str) {
 /// Harlo's version and the server's.
 fn about_rows(app: &App) -> Vec<SheetRow> {
     let version = match &app.status {
-        Status::Connected { version } => {
-            format!("Version {} · OpenCode {version}", env!("CARGO_PKG_VERSION"))
+        Status::Connected { server, version } => {
+            format!("Version {} · {server} {version}", env!("CARGO_PKG_VERSION"))
         }
         _ => format!("Version {}", env!("CARGO_PKG_VERSION")),
     };

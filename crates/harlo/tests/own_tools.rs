@@ -72,6 +72,7 @@ fn harlos_tools_reach_agents_while_switched_on() {
     let snapshot = tasks.block_on(load(&client)).expect("snapshot");
     ui.send(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot,
     }))));

@@ -263,7 +263,9 @@ pub enum Status {
     },
     /// Connected; the sidebar is live.
     Connected {
-        /// The server's OpenCode version.
+        /// What the server is: `OpenCode`, or `Harlo` for Harlo's own.
+        server: String,
+        /// Its version.
         version: String,
     },
     /// The connection failed or broke and will be retried.
@@ -1309,6 +1311,7 @@ impl App {
             }
             Update::Connected(connected) => {
                 self.status = Status::Connected {
+                    server: connected.server.clone(),
                     version: connected.version.clone(),
                 };
                 self.client = Some(connected.client.clone());

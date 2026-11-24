@@ -46,6 +46,7 @@ fn models(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot: demo::snapshot(),
     }))));

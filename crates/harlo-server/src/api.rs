@@ -180,7 +180,9 @@ async fn info(headers: HeaderMap) -> Answer {
         "pid": std::process::id(),
         "urls": [format!("http://{host}")],
         "paths": { "tmp": std::env::temp_dir() },
-        "capabilities": { "persistentPty": false, "clientTools": false, "phone": true, "memory": true },
+        "capabilities": {
+            "server": "harlo", "persistentPty": false, "clientTools": false, "phone": true, "memory": true,
+        },
     }))
 }
 

@@ -426,6 +426,7 @@ fn snapshot() -> Snapshot {
 fn connected(snapshot: Snapshot) -> Message {
     Message::Server(Update::Connected(Arc::new(Connected {
         client: Client::new(Endpoint::new("http://127.0.0.1:9", None)),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot,
     })))

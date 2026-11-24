@@ -89,6 +89,7 @@ fn a_goal_shows_above_the_composer_and_resumes_and_dismisses_from_there() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot,
     }))));

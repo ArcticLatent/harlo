@@ -89,6 +89,7 @@ fn a_shell_command_shows_what_it_printed_and_a_background_one_stops() {
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: client.clone(),
+        server: "OpenCode".into(),
         version: harlo_core::OPENCODE_VERSION.to_owned(),
         snapshot,
     }))));

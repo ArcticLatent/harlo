@@ -16,7 +16,9 @@ use crate::generated as g;
 /// The server's version and addresses, from `GET /api/info`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerInfo {
-    /// OpenCode version, such as `2.3.2`.
+    /// What the server is: `OpenCode`, or `Harlo` for Harlo's own server.
+    pub name: String,
+    /// Its version, such as `2.3.2`.
     pub version: String,
     /// Addresses the server listens on.
     pub urls: Vec<String>,
@@ -25,6 +27,7 @@ pub struct ServerInfo {
 impl From<g::ServerInfo> for ServerInfo {
     fn from(v: g::ServerInfo) -> Self {
         Self {
+            name: "OpenCode".to_owned(),
             version: v.version,
             urls: v.urls,
         }

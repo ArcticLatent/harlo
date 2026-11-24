@@ -660,10 +660,14 @@ pub fn status_text(status: &Status) -> String {
     match status {
         Status::Connecting { attempt: 1 } => "Connecting…".to_owned(),
         Status::Connecting { attempt } => format!("Reconnecting (attempt {attempt})…"),
-        Status::Connected { version } if version == harlo_core::OPENCODE_VERSION => {
-            format!("Connected · OpenCode {version}")
+        // Harlo's own server goes with Harlo; OpenCode is checked against
+        // the version Harlo was tested with.
+        Status::Connected { server, version }
+            if server != "OpenCode" || version == harlo_core::OPENCODE_VERSION =>
+        {
+            format!("Connected · {server} {version}")
         }
-        Status::Connected { version } => format!(
+        Status::Connected { version, .. } => format!(
             "Connected · OpenCode {version}. Harlo is tested with {}.",
             harlo_core::OPENCODE_VERSION
         ),

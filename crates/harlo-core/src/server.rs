@@ -114,7 +114,9 @@ impl Location {
 pub struct Connected {
     /// A client for further calls.
     pub client: Client,
-    /// The server's OpenCode version.
+    /// What the server is: `OpenCode`, or `Harlo` for Harlo's own.
+    pub server: String,
+    /// Its version.
     pub version: String,
     /// Projects, worktrees and sessions at the moment of connecting.
     pub snapshot: Snapshot,
@@ -238,8 +240,8 @@ async fn session(
         Ok(reached) => reached,
         Err(reason) => return Ok(Err(reason)),
     };
-    let version = match client.info().await {
-        Ok(info) => info.version,
+    let (server, version) = match client.info().await {
+        Ok(info) => (info.name, info.version),
         Err(e) => return Ok(Err(describe(&e))),
     };
     let mut events = match client.events().await {
@@ -261,6 +263,7 @@ async fn session(
     };
     let connected = Connected {
         client,
+        server,
         version,
         snapshot,
     };
