@@ -29,11 +29,14 @@ declare -A SKIP=(
 	[projects]=""
 	[approvals]=""
 	[goals]=""
+	# Web search services and MCP come with their own steps; the plugin
+	# list stays empty, as the engine runs no OpenCode plugins.
+	[m7]="the_set_up_lists_providers_search_mcp_and_plugins"
 )
 
 suites=("$@")
 if [ ${#suites[@]} -eq 0 ]; then
-	suites=(m0 m3 m4 m6 endpoint events asides git shell transfer projects approvals goals)
+	suites=(m0 m3 m4 m6 endpoint events asides git shell transfer projects approvals goals m7)
 fi
 
 cargo build -q -p harlo-server

@@ -86,6 +86,14 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/model/default", get(default_model))
         .route("/api/config", get(config))
         .route("/api/mcp/resource", get(mcp_resources))
+        .route("/api/experimental/session/stats", get(stats))
+        .route("/api/provider", get(providers))
+        .route("/api/pty", get(pty_list).post(create_pty))
+        .route(
+            "/api/pty/{id}",
+            get(pty_info).put(change_pty).delete(remove_pty),
+        )
+        .route("/api/pty/{id}/connect", get(connect_pty))
         .route("/api/permission/saved", get(saved_approvals))
         .route(
             "/api/permission/saved/{id}",
@@ -853,6 +861,70 @@ async fn located_empty(Query(q): Params) -> Answer {
 async fn jobs(State(server): Shared, Query(q): Params) -> Answer {
     let session = q.get("sessionID").map(String::as_str);
     ok(json!({ "data": server.jobs_of(session) }))
+}
+
+/// The providers set up for a folder: names and states, never their keys.
+async fn providers(State(server): Shared, Query(q): Params) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    let folder = server.folder(&directory);
+    let list: Vec<Value> = folder
+        .config
+        .providers
+        .iter()
+        .map(|p| json!({ "id": p.id, "name": p.name, "activation": "enabled" }))
+        .collect();
+    ok(json!({ "location": location(&q), "data": list }))
+}
+
+async fn stats(State(server): Shared, Query(q): Params) -> Answer {
+    let from = q.get("from").and_then(|f| f.parse().ok());
+    ok(json!({ "data": server.stats(from)? }))
+}
+
+async fn pty_list(State(server): Shared, Query(q): Params) -> Answer {
+    ok(json!({ "location": location(&q), "data": server.ptys() }))
+}
+
+async fn create_pty(
+    State(server): Shared,
+    Query(q): Params,
+    axum::Json(body): axum::Json<crate::pty::NewTerminal>,
+) -> Answer {
+    let directory = q.get("location[directory]").cloned().unwrap_or_default();
+    let info = server.create_pty(&directory, body)?;
+    ok(json!({ "location": location(&q), "data": info }))
+}
+
+async fn pty_info(State(server): Shared, Path(id): Path<String>, Query(q): Params) -> Answer {
+    server.pty(&id)?;
+    let info = server.ptys().into_iter().find(|p| p["id"] == id.as_str());
+    ok(json!({ "location": location(&q), "data": info }))
+}
+
+async fn change_pty(
+    State(server): Shared,
+    Path(id): Path<String>,
+    Query(q): Params,
+    axum::Json(body): axum::Json<crate::pty::TerminalChange>,
+) -> Answer {
+    let info = server.change_pty(&id, body)?;
+    ok(json!({ "location": location(&q), "data": info }))
+}
+
+async fn remove_pty(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.remove_pty(&id)?;
+    done()
+}
+
+async fn connect_pty(
+    State(server): Shared,
+    Path(id): Path<String>,
+    upgrade: axum::extract::ws::WebSocketUpgrade,
+) -> Answer {
+    let term = server.pty(&id)?;
+    Ok(upgrade
+        .on_upgrade(move |socket| crate::pty::serve(term, socket))
+        .into_response())
 }
 
 async fn saved_approvals(State(server): Shared, Query(q): Params) -> Answer {

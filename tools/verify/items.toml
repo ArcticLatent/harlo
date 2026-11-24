@@ -77,7 +77,7 @@ checks = ["window:files_editor", "unit:harlo:files", "unit:harlo-core:files"]
 [[item]]
 id = "terminal"
 title = "The terminal: a shell in the project, tabs, hide and show, copy and paste"
-checks = ["window:terminal", "unit:harlo:terminal", "unit:harlo:server_terminal", "unit:harlo-core:terminal"]
+checks = ["window:terminal", "engine:terminal", "unit:harlo:terminal", "unit:harlo:server_terminal", "unit:harlo-core:terminal"]
 
 [[item]]
 id = "notes"
@@ -102,7 +102,7 @@ checks = ["window:appearance", "unit:harlo:appearance", "unit:harlo-core:theme"]
 [[item]]
 id = "pages"
 title = "The Keyboard shortcuts and Stats pages"
-checks = ["window:pages", "unit:harlo:sheets"]
+checks = ["window:pages", "engine:pages", "unit:harlo:sheets"]
 
 [[item]]
 id = "notifications"

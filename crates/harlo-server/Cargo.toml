@@ -11,7 +11,7 @@ publish.workspace = true
 [dependencies]
 frizbee = { workspace = true }
 ignore = { workspace = true }
-axum = { workspace = true, features = ["http1", "tokio", "json", "query"] }
+axum = { workspace = true, features = ["http1", "tokio", "json", "query", "ws"] }
 base64 = { workspace = true, features = ["std"] }
 dirs = { workspace = true }
 futures-util = { workspace = true }
@@ -19,7 +19,9 @@ harlo-core = { workspace = true }
 harlo-engine = { workspace = true }
 mime_guess = { workspace = true }
 opencode-client = { workspace = true }
+portable-pty = { workspace = true }
 hex = { workspace = true }
+jiff = { workspace = true }
 jsonc-parser = { workspace = true, features = ["serde"] }
 rusqlite = { workspace = true, features = ["bundled"] }
 serde = { workspace = true, features = ["std", "derive"] }

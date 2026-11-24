@@ -89,6 +89,8 @@ pub(crate) struct Live {
     pub(crate) known: crate::stale::Known,
     /// Background commands going, by job ID, to stop them.
     pub(crate) shells: HashMap<String, CancellationToken>,
+    /// The terminals the server runs, by ID.
+    pub(crate) ptys: HashMap<String, Arc<crate::pty::Terminal>>,
 }
 
 /// The server.
