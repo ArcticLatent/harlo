@@ -24,6 +24,9 @@ use tokio_util::sync::CancellationToken;
 use crate::git;
 use crate::store::{Location, Session, SessionTime, Store, StoredEvent};
 
+/// How full, in percent of the model's context, a session gets before its
+/// next step starts from a summary.
+const COMPACT_PERCENT: u64 = 85;
 /// Events a slow client may fall behind by before it must reconnect.
 const BACKLOG: usize = 4096;
 
@@ -369,6 +372,13 @@ impl Server {
             Some(&session.location.directory),
             Some(id),
         );
+        self.enqueue(id, message, delivery);
+        Ok(answer)
+    }
+
+    /// Puts `message` in session `id`'s inbox, and starts a run when none
+    /// is going.
+    fn enqueue(self: &Arc<Self>, id: &str, message: Message, delivery: &str) {
         let start = {
             let mut live = lock(&self.live);
             live.inbox
@@ -393,7 +403,29 @@ impl Server {
         if let Some(stop) = start {
             tokio::spawn(Arc::clone(self).drive(id.to_owned(), stop));
         }
-        Ok(answer)
+    }
+
+    /// Asks for session `id` to be summarized at its next safe point;
+    /// returns the inbox item.
+    ///
+    /// # Errors
+    ///
+    /// When there's no such session.
+    pub(crate) fn compact(self: &Arc<Self>, id: &str) -> Result<Value, Refusal> {
+        let session = self.session(id)?;
+        let pending = harlo_engine::compaction::Compaction::pending(ascending_id("msg"), "manual");
+        let item = json!({
+            "id": pending.id, "sessionID": id, "time": pending.time, "type": "compaction",
+            "payload": {}, "delivery": "steer",
+        });
+        self.emit(
+            "session.inbox.enqueued",
+            json!({ "inboxID": pending.id, "sessionID": id, "item": { "type": "compaction", "payload": {}, "delivery": "steer" } }),
+            Some(&session.location.directory),
+            Some(id),
+        );
+        self.enqueue(id, Message::Compaction(Box::new(pending)), "steer");
+        Ok(json!({ "data": item }))
     }
 
     /// Prompts waiting for session `id`'s run.
@@ -409,6 +441,9 @@ impl Server {
                         }),
                         Message::Synthetic { id, text, time, .. } => json!({
                             "id": id, "type": "synthetic", "payload": { "text": text }, "delivery": delivery, "time": time,
+                        }),
+                        Message::Compaction(c) => json!({
+                            "id": c.id, "type": "compaction", "payload": {}, "delivery": delivery, "time": c.time,
                         }),
                         _ => Value::Null,
                     })
@@ -577,7 +612,26 @@ impl Server {
                     Some(&id),
                 );
             }
-            let (word, error) = self.run_once(&session, &stop).await;
+            let asked: Vec<_> = delivered
+                .iter()
+                .filter_map(|(m, _)| match m {
+                    Message::Compaction(c) if c.status == "pending" => Some((**c).clone()),
+                    _ => None,
+                })
+                .collect();
+            let prompted = delivered
+                .iter()
+                .any(|(m, _)| matches!(m, Message::User { .. }));
+            let mut ended = ("succeeded", None);
+            for pending in asked {
+                ended = self.run_compaction(&session, pending, &stop).await;
+            }
+            // A summary asked for on its own ends the run there.
+            let (word, error) = if prompted && ended.0 == "succeeded" {
+                self.run_once(&session, &stop).await
+            } else {
+                ended
+            };
             self.finish(&id, word, error);
 
             let mut live = lock(&self.live);
@@ -590,6 +644,59 @@ impl Server {
                 live.runs.remove(&id);
                 break;
             }
+        }
+    }
+
+    /// Writes the summary a person asked for; returns how it ended, as
+    /// [`Self::run_once`] does.
+    async fn run_compaction(
+        self: &Arc<Self>,
+        session: &Session,
+        pending: harlo_engine::compaction::Compaction,
+        stop: &CancellationToken,
+    ) -> (&'static str, Option<String>) {
+        let hooks = Hooks {
+            server: Arc::clone(self),
+            session: session.id.clone(),
+            directory: session.location.directory.clone(),
+            streaming: Mutex::default(),
+        };
+        let Some(model) = session
+            .model
+            .clone()
+            .or_else(|| self.config.default_model())
+        else {
+            return (
+                "failed",
+                Some("No model is set up to write the summary.".to_owned()),
+            );
+        };
+        let Some((provider, _)) = self.config.resolve(&model) else {
+            return (
+                "failed",
+                Some(format!(
+                    "The model {}/{} isn't in the configuration.",
+                    model.provider, model.model
+                )),
+            );
+        };
+        let history = match self.store.messages(&session.id) {
+            Ok(h) => h,
+            Err(e) => return ("failed", Some(format!("Couldn't read the session: {e}"))),
+        };
+        let agent = self.agent_for(session.agent.as_deref());
+        let mut system = self.system_prompt(&session.location.directory).await;
+        if let Some(own) = &agent.system {
+            system = format!("{own}\n\n{system}");
+        }
+        let done = harlo_engine::compaction::compact(
+            pending, provider, &model, &system, &history, &hooks, stop,
+        )
+        .await;
+        match (done.status.as_str(), done.error) {
+            ("completed", _) => ("succeeded", None),
+            _ if stop.is_cancelled() => ("interrupted", None),
+            (_, error) => ("failed", error.map(|e| e.message)),
         }
     }
 
@@ -612,7 +719,7 @@ impl Server {
                 ),
             );
         };
-        let Some((provider, _)) = self.config.resolve(&model) else {
+        let Some((provider, spec)) = self.config.resolve(&model) else {
             return (
                 "failed",
                 Some(format!(
@@ -645,6 +752,8 @@ impl Server {
             history,
             shadow: Some(self.shadow(&directory)),
             memory: self.memory_for(session),
+            // Near the model's context limit, the next step starts from a summary.
+            compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
             steering: Some(Arc::new(crate::agents::SessionSteering {
                 server: Arc::clone(self),
                 session: session.id.clone(),
@@ -736,17 +845,21 @@ impl Server {
         {
             tracing::error!(name: "message.store.failed", error = %e, "couldn't store a step");
         }
-        if !count {
-            return;
+        if count {
+            self.add_usage(id, &step.tokens, step.cost);
         }
+    }
+
+    /// Adds tokens and cost to session `id`'s, and says so.
+    fn add_usage(&self, id: &str, tokens: &harlo_engine::Tokens, cost: f64) {
         if let Ok(mut session) = self.session(id) {
-            let (t, s) = (&mut session.tokens, &step.tokens);
+            let (t, s) = (&mut session.tokens, tokens);
             t.input += s.input;
             t.output += s.output;
             t.reasoning += s.reasoning;
             t.cache.read += s.cache.read;
             t.cache.write += s.cache.write;
-            session.cost += step.cost;
+            session.cost += cost;
             session.time.updated = now();
             let _ = self.store.put_session(&session);
             self.emit(
@@ -895,6 +1008,31 @@ impl Hooks {
 }
 
 impl Hooks {
+    /// Stores a finished compaction, counts what it used and says how it
+    /// went.
+    fn compacted(&self, compaction: &harlo_engine::compaction::Compaction) {
+        if let Err(e) = self.server.store.put_message(
+            &self.session,
+            &Message::Compaction(Box::new(compaction.clone())),
+        ) {
+            tracing::error!(name: "message.store.failed", error = %e, "couldn't store a compaction");
+        }
+        self.server
+            .add_usage(&self.session, &compaction.tokens, compaction.cost);
+        match (&compaction.summary, &compaction.error) {
+            (Some(summary), _) if compaction.status == "completed" => self.send(
+                "session.compaction.ended",
+                json!({ "reason": compaction.reason, "model": compaction.model, "text": summary }),
+                true,
+            ),
+            (_, error) => self.send(
+                "session.compaction.failed",
+                json!({ "reason": compaction.reason, "error": error }),
+                true,
+            ),
+        }
+    }
+
     fn send(&self, kind: &str, mut data: Value, durable: bool) {
         data["sessionID"] = json!(self.session);
         self.server.emit(
@@ -960,6 +1098,10 @@ impl Sink for Hooks {
                 ),
                 ToolState::Running { .. } => {}
             },
+            Event::CompactionStarted { id, reason } => {
+                self.send("session.compaction.started", json!({ "reason": reason, "inputID": id }), true);
+            }
+            Event::CompactionEnded { compaction } => self.compacted(&compaction),
             Event::StepEnded { step } => {
                 self.server.store_step(&self.session, &step, true);
                 if let Some(error) = &step.error {

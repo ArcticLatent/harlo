@@ -58,6 +58,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/session/{id}/model", post(set_model))
         .route("/api/session/{id}/agent", post(set_agent))
         .route("/api/session/{id}/interrupt", post(interrupt))
+        .route("/api/session/{id}/compact", post(compact))
         .route("/api/session/{id}/revert", delete(cancel_revert))
         .route("/api/session/{id}/revert/stage", post(stage_revert))
         .route("/api/session/{id}/revert/commit", post(commit_revert))
@@ -427,6 +428,10 @@ async fn prompt(
 ) -> Answer {
     let delivery = body.delivery.unwrap_or_else(|| "queue".to_owned());
     ok(server.prompt(&id, body.id, &body.text, &delivery)?)
+}
+
+async fn compact(State(server): Shared, Path(id): Path<String>) -> Answer {
+    ok(server.compact(&id)?)
 }
 
 async fn interrupt(State(server): Shared, Path(id): Path<String>) -> Answer {

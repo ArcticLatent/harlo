@@ -121,6 +121,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         shadow: None,
         memory: None,
         steering: None,
+        compact_at: None,
         history: vec![Message::User {
             id: "msg_0".into(),
             time: Created { created: 0 },
@@ -320,4 +321,58 @@ async fn questions_wait_for_answers_and_a_dismissal_stops_the_turn() {
         &tool_results(&dismissed)[0],
         ToolState::Error { error, .. } if error.message == "The user dismissed this question"
     ));
+}
+
+#[tokio::test]
+async fn a_full_context_is_summarized_before_the_next_step() {
+    let dir = tempfile::tempdir().expect("dir");
+    let model = Model::start(dir.path()).await;
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).expect("project");
+    std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
+    let mut turn = turn(
+        &model,
+        &project,
+        r#"tool read {"path":"a.txt"} ;; say Read it."#,
+        false,
+    );
+    turn.compact_at = Some(1);
+    let events = Events::default();
+    let person = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+    let outcome = run(turn, &events, &person, &CancellationToken::new()).await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+
+    let ended: Vec<_> = events
+        .0
+        .lock()
+        .expect("events")
+        .iter()
+        .filter_map(|e| match e {
+            Event::CompactionEnded { compaction } => Some(compaction.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        ended.len(),
+        1,
+        "summarized once, though every step is over the limit"
+    );
+    assert_eq!(ended[0].status, "completed");
+    assert_eq!(ended[0].reason, "auto");
+
+    // The step after the summary reads the summary and the note to carry
+    // on, not the history before it.
+    let log = std::fs::read_to_string(dir.path().join("model.jsonl")).expect("model log");
+    let last: serde_json::Value =
+        serde_json::from_str(log.lines().last().expect("a request")).expect("json");
+    let sent = last["body"]["messages"].to_string();
+    assert!(
+        sent.contains("Summary of the conversation so far"),
+        "{sent}"
+    );
+    assert!(sent.contains("Carry on with the work"), "{sent}");
+    assert!(!sent.contains("tool read"), "{sent}");
 }

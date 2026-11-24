@@ -132,9 +132,10 @@ impl Server {
             let Some(queue) = live.inbox.get_mut(id) else {
                 return Vec::new();
             };
-            let (steer, rest): (Vec<_>, Vec<_>) = queue
-                .drain(..)
-                .partition(|(_, delivery)| delivery == "steer");
+            // A compaction waits for the run's end.
+            let (steer, rest): (Vec<_>, Vec<_>) = queue.drain(..).partition(|(m, delivery)| {
+                delivery == "steer" && !matches!(m, Message::Compaction(_))
+            });
             *queue = rest;
             steer.into_iter().map(|(m, _)| m).collect()
         };

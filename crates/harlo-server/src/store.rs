@@ -192,7 +192,9 @@ impl Store {
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
-            Message::Synthetic { .. } | Message::Idle { .. } => String::new(),
+            Message::Synthetic { .. } | Message::Idle { .. } | Message::Compaction(_) => {
+                String::new()
+            }
         };
         let conn = self.conn();
         conn.execute(

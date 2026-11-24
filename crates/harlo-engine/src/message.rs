@@ -43,6 +43,8 @@ pub enum Message {
     },
     /// One model step.
     Assistant(Box<Assistant>),
+    /// A summary of the session so far, which later steps start from.
+    Compaction(Box<crate::compaction::Compaction>),
     /// The end of a run.
     Idle {
         /// Its ID.
@@ -64,6 +66,7 @@ impl Message {
         match self {
             Self::User { id, .. } | Self::Synthetic { id, .. } | Self::Idle { id, .. } => id,
             Self::Assistant(a) => &a.id,
+            Self::Compaction(c) => &c.id,
         }
     }
 }

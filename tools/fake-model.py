@@ -54,6 +54,7 @@ LOREM = (
 SUMMARIZE = "You MUST summarize the conversation"
 
 # The line OpenCode puts before the prompt it gives a subagent.
+HARLO_SUMMARIZE = "Summarize the conversation so far for the agent"
 SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
 
 # How OpenCode asks the model to review a goal (/goal).
@@ -123,7 +124,8 @@ def plan(messages):
     if last_user < 0:
         return [("say", "ok.")]
     # A request to summarize, wherever OpenCode puts the instruction.
-    if any(text_of(m.get("content")).lstrip().startswith(SUMMARIZE) for m in messages):
+    if any(text_of(m.get("content")).lstrip().startswith((SUMMARIZE, HARLO_SUMMARIZE))
+           for m in messages):
         return [("say", SUMMARY)]
     script = text_of(messages[last_user].get("content")).strip()
     if script.startswith(REVIEWER):

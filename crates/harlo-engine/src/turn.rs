@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use crate::chat::{self, Block, Endpoint, Piece};
 use crate::config::{ModelRef, ProviderSpec};
 use crate::message::{
-    Assistant, ErrorInfo, Message, Part, Snapshot, StepTime, ToolState, ToolTime,
+    Assistant, Created, ErrorInfo, Message, Part, Snapshot, StepTime, ToolState, ToolTime,
 };
 use crate::question::Asked;
 use crate::rules::{Effect, Rule, decide};
@@ -53,11 +53,26 @@ pub struct Turn {
     /// Where messages that steer the turn come from; none, and nothing
     /// joins it once it started.
     pub steering: Option<std::sync::Arc<dyn Steering>>,
+    /// The context size, in tokens, from which the next step starts from a
+    /// summary; none never compacts by itself.
+    pub compact_at: Option<u64>,
 }
 
 /// Something that happened during a turn.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    /// The session began summarizing itself.
+    CompactionStarted {
+        /// The compaction's message ID.
+        id: String,
+        /// `manual` or `auto`.
+        reason: String,
+    },
+    /// The summary is written, or failed.
+    CompactionEnded {
+        /// The compaction, completed or failed.
+        compaction: Box<crate::compaction::Compaction>,
+    },
     /// A model step began; its assistant message has ID `message`.
     StepStarted {
         /// The step's message ID.
@@ -261,6 +276,7 @@ pub async fn run(
     if turn.memory.is_some() {
         definitions.extend(crate::memory::definitions());
     }
+    let mut compacted = false;
     for _ in 0..MAX_STEPS {
         if stop.is_cancelled() {
             return Outcome::Interrupted;
@@ -268,6 +284,35 @@ pub async fn run(
         // Between steps is a safe point: what steers the turn joins it here.
         if let Some(steering) = &turn.steering {
             turn.history.extend(steering.take());
+        }
+        if !compacted
+            && turn
+                .compact_at
+                .is_some_and(|limit| crate::compaction::is_full(&turn.history, limit))
+        {
+            // Tried once a turn: a failed summary isn't asked for again each step.
+            compacted = true;
+            let pending = crate::compaction::Compaction::pending(id::ascending_id("msg"), "auto");
+            let done = crate::compaction::compact(
+                pending,
+                &turn.provider,
+                &turn.model,
+                &turn.system,
+                &turn.history,
+                sink,
+                stop,
+            )
+            .await;
+            let written = done.status == "completed";
+            turn.history.push(Message::Compaction(Box::new(done)));
+            if written {
+                turn.history.push(Message::Synthetic {
+                    id: id::ascending_id("msg"),
+                    time: Created { created: now() },
+                    text: crate::compaction::CARRY_ON.to_owned(),
+                    description: None,
+                });
+            }
         }
         let (assistant, go_on) = match step(&mut turn, &definitions, sink, gate, stop).await {
             Ok(done) => done,

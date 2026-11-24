@@ -15,6 +15,7 @@
 
 pub mod agents;
 mod chat;
+pub mod compaction;
 mod config;
 mod error;
 pub mod generate;

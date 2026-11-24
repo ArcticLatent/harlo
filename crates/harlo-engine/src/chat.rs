@@ -111,8 +111,14 @@ pub(crate) fn request(
 /// and calls, then a `tool` message per call with its result.
 fn chat_messages(history: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
-    for message in history {
+    for message in crate::compaction::since_summary(history) {
         match message {
+            Message::Compaction(c) => {
+                if let Some(summary) = c.summary.as_ref().filter(|_| c.status == "completed") {
+                    let text = format!("{}{summary}", crate::compaction::SUMMARY_HEADING);
+                    out.push(json!({ "role": "user", "content": text }));
+                }
+            }
             Message::User { text, .. } | Message::Synthetic { text, .. } => {
                 out.push(json!({ "role": "user", "content": text }));
             }
