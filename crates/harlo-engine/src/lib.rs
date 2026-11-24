@@ -22,6 +22,7 @@ pub mod codemode;
 pub mod commands;
 pub mod compaction;
 mod config;
+pub mod efforts;
 mod error;
 pub mod generate;
 mod id;

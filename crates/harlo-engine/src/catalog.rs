@@ -207,8 +207,9 @@ pub struct Catalog {
     pub entries: Vec<Entry>,
 }
 
-/// A catalog model as a [`ModelSpec`].
-fn model(id: &str, m: &Value) -> ModelSpec {
+/// Catalog model `m` of a provider on package `package`, as a
+/// [`ModelSpec`].
+fn model(id: &str, m: &Value, package: &str) -> ModelSpec {
     let cost = &m["cost"];
     let number = |k: &str| cost[k].as_f64().unwrap_or(0.0);
     ModelSpec {
@@ -227,6 +228,7 @@ fn model(id: &str, m: &Value) -> ModelSpec {
         } else {
             Vec::new()
         },
+        variants: crate::efforts::catalog(package, m),
         ..ModelSpec::default()
     }
 }
@@ -255,7 +257,7 @@ impl Catalog {
                     .as_object()
                     .into_iter()
                     .flatten()
-                    .map(|(mid, m)| model(mid, m))
+                    .map(|(mid, m)| model(mid, m, p["npm"].as_str().unwrap_or_default()))
                     .collect();
                 models.sort_by(|a, b| a.id.cmp(&b.id));
                 Entry {

@@ -362,6 +362,10 @@ fn merge_at(base: &mut Value, over: &Value, key: &str) {
 /// A provider entry, when it has a base URL to send to.
 fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
     let settings = &p["settings"];
+    let package = p["package"]
+        .as_str()
+        .or_else(|| p["npm"].as_str())
+        .unwrap_or_default();
     let base_url = settings["baseURL"]
         .as_str()
         .or_else(|| p["options"]["baseURL"].as_str())?;
@@ -380,18 +384,21 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
             output: m["limit"]["output"].as_u64(),
             body: m["body"].as_object().cloned().unwrap_or_default(),
             headers: headers_of(&m["headers"]),
-            variants: m["variants"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| {
-                    Some(VariantSpec {
-                        id: v["id"].as_str()?.to_owned(),
-                        body: v["body"].as_object().cloned().unwrap_or_default(),
-                        headers: headers_of(&v["headers"]),
-                    })
-                })
-                .collect(),
+            // Those its entry names, or the levels its API offers.
+            variants: m["variants"].as_array().map_or_else(
+                || crate::efforts::configured(package),
+                |list| {
+                    list.iter()
+                        .filter_map(|v| {
+                            Some(VariantSpec {
+                                id: v["id"].as_str()?.to_owned(),
+                                body: v["body"].as_object().cloned().unwrap_or_default(),
+                                headers: headers_of(&v["headers"]),
+                            })
+                        })
+                        .collect()
+                },
+            ),
             prices: m["cost"].as_array().map_or_else(
                 // (A single object is read as the base prices.)
                 || price(&m["cost"]).into_iter().collect(),
@@ -405,12 +412,7 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
         base_url: base_url.trim_end_matches('/').to_owned(),
         api_key,
         models,
-        wire: crate::catalog::Wire::of_package(
-            p["package"]
-                .as_str()
-                .or_else(|| p["npm"].as_str())
-                .unwrap_or_default(),
-        ),
+        wire: crate::catalog::Wire::of_package(package),
     })
 }
 

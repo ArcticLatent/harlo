@@ -85,6 +85,43 @@ async fn a_session_takes_a_model_and_an_agent() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_scripted_model_offers_efforts_and_a_turn_sends_the_chosen_one() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let folder = sandbox.project_str();
+    let models = client.models(&folder).await.expect("models");
+    let fake = models
+        .iter()
+        .find(|m| m.provider_id == "fake" && m.id == "fake-coder")
+        .expect("the scripted model");
+    // An OpenAI-compatible model the config adds, with no variants of its own.
+    assert_eq!(fake.variants, ["low", "medium", "high"]);
+
+    let session = client.create_session(&folder).await.expect("session");
+    let model = ModelRef {
+        provider_id: "fake".into(),
+        id: "fake-coder".into(),
+        variant: Some("high".into()),
+    };
+    client.set_model(&session.id, &model).await.expect("model");
+    client
+        .prompt(
+            &session.id,
+            &Prompt::new("say thought hard", Delivery::Queue),
+        )
+        .await
+        .expect("prompt");
+    wait_idle(&client, &session.id).await;
+    let log = std::fs::read_to_string(sandbox.root().join("model.jsonl")).expect("the log");
+    let sent = log
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|r| r["body"].to_string().contains("thought hard"))
+        .expect("the turn's request");
+    assert_eq!(sent["body"]["reasoning_effort"], "high", "{sent}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn files_and_pasted_images_go_with_a_prompt() {
     let sandbox = Sandbox::start().await;
     let client = sandbox.client();

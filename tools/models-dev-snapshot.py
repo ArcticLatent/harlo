@@ -15,7 +15,7 @@ import urllib.request
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "crates", "harlo-engine", "catalog", "models.json")
 PROVIDER = ("id", "name", "env", "npm", "api")
-MODEL = ("id", "name", "attachment", "reasoning", "tool_call", "limit", "cost", "status")
+MODEL = ("id", "name", "attachment", "reasoning", "reasoning_options", "tool_call", "limit", "cost", "status")
 
 
 def trim(catalog):
