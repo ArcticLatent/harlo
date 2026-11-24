@@ -77,6 +77,9 @@ zbus = { workspace = true }
 # A stand-in phone for Settings → Phone.
 tokio-tungstenite = { workspace = true, features = ["connect"] }
 futures-util = { workspace = true, features = ["std"] }
+# A stand-in remote MCP server that needs OAuth, for Settings → Extensions.
+axum = { workspace = true, features = ["http1", "tokio", "json", "query"] }
+reqwest = { workspace = true }
 
 [lints]
 workspace = true

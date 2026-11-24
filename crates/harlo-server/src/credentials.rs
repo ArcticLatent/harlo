@@ -290,6 +290,7 @@ impl Server {
                 "connections": connections(id, &[(*env).to_owned()]),
             }));
         }
+        list.extend(self.mcp_integrations(|id| connections(id, &[])));
         list.push(json!({
             "id": CLAUDE_AGENT, "name": "Claude Agent",
             "methods": [{
@@ -384,10 +385,24 @@ impl Server {
     ///
     /// When there's no such credential, or the store fails.
     pub(crate) fn remove_credential(&self, id: &str) -> Result<(), Refusal> {
+        let integration = self
+            .store
+            .credentials()?
+            .into_iter()
+            .find(|c| c["id"] == id)
+            .and_then(|c| c["integrationID"].as_str().map(str::to_owned));
         if !self.store.delete_credential(id)? {
             return Err(Refusal::NotFound(format!("There's no credential {id}.")));
         }
         self.integrations_changed();
+        // A remote MCP server signed out connects again, without the sign-in.
+        if let Some(integration) = integration.filter(|i| i.starts_with(crate::mcp_auth::PREFIX)) {
+            for (name, spec) in self.mcp_specs() {
+                if crate::mcp_auth::integration_id(&spec).as_deref() == Some(integration.as_str()) {
+                    self.mcp_signed_in(&name);
+                }
+            }
+        }
         Ok(())
     }
 

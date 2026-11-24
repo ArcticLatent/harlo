@@ -131,8 +131,8 @@ checks = ["unit:harlo:agents"]
 
 [[item]]
 id = "mcp"
-title = "MCP servers: the catalog, one's own server, connect, turn off, remove"
-checks = ["unit:harlo:mcp"]
+title = "MCP servers: the catalog, one's own server, connect, turn off, remove, sign in with OAuth"
+checks = ["unit:harlo:mcp", "unit:harlo:mcp_sign_in", "unit:harlo-server:mcp", "unit:harlo-server:mcp_oauth"]
 
 [[item]]
 id = "own-tools"

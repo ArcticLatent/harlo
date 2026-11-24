@@ -129,7 +129,11 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         )),
     }
     if let Some(server) = server {
-        connection_row(server, &mut rows);
+        connection_row(
+            server,
+            super::server_name(app) == super::HARLO_SERVER,
+            &mut rows,
+        );
     }
     rows.push(note(
         "Connecting and disconnecting last until the OpenCode server restarts; its config \
@@ -189,8 +193,9 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
     rows
 }
 
-/// How `server` stands, with the step it can take.
-fn connection_row(server: &McpServer, rows: &mut Vec<SheetRow>) {
+/// How `server` stands, with the step it can take; `harlo` when it's on
+/// Harlo's own server.
+fn connection_row(server: &McpServer, harlo: bool, rows: &mut Vec<SheetRow>) {
     let (words, tone) = status_words(&server.status);
     let mut row = pair("Connection", &words, tone);
     match &server.status {
@@ -210,10 +215,16 @@ fn connection_row(server: &McpServer, rows: &mut Vec<SheetRow>) {
         }
         McpStatus::NeedsAuth(_) => {
             rows.push(row);
-            rows.push(note(&format!(
-                "Sign in with opencode mcp auth {} where the OpenCode server runs.",
-                server.name
-            )));
+            rows.push(note(&if harlo {
+                "Its entry turns sign-in off (\"oauth\": false): give it the key it needs in \
+                 its headers."
+                    .to_owned()
+            } else {
+                format!(
+                    "Sign in with opencode mcp auth {} where the OpenCode server runs.",
+                    server.name
+                )
+            }));
             return;
         }
         McpStatus::Pending => {}

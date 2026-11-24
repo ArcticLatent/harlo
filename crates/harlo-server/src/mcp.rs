@@ -22,6 +22,7 @@ use rmcp::model::CallToolRequestParams;
 use rmcp::service::{
     NotificationContext, Peer, RoleClient, RunningService, RxJsonRpcMessage, TxJsonRpcMessage,
 };
+use rmcp::transport::auth::{AuthClient, AuthorizationManager};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{ClientHandler, ServiceExt as _};
@@ -395,19 +396,72 @@ async fn start(
                 })
                 .collect();
             let config = StreamableHttpClientTransportConfig::with_uri(url).custom_headers(headers);
-            let transport = StreamableHttpClientTransport::from_config(config);
-            watch.serve_with_ct(transport, cancel).await.map_err(|e| {
+            let read = |e: &dyn fmt::Display| {
                 let said = e.to_string();
-                if said.contains("401") || said.to_lowercase().contains("unauthorized") {
+                if crate::mcp_auth::wants_sign_in(&said) {
                     Status::NeedsAuth(said)
                 } else {
                     Status::Failed(said)
                 }
-            })
+            };
+            if let Some(manager) = signed_in(&watch, spec, url).await? {
+                let client = AuthClient::new(reqwest::Client::default(), manager);
+                let transport = StreamableHttpClientTransport::with_client(client, config);
+                return watch
+                    .serve_with_ct(transport, cancel)
+                    .await
+                    .map_err(|e| read(&e));
+            }
+            let transport = StreamableHttpClientTransport::from_config(config);
+            watch
+                .serve_with_ct(transport, cancel)
+                .await
+                .map_err(|e| read(&e))
         }
         _ => Err(Status::Failed(
             "Its entry is neither local nor remote.".to_owned(),
         )),
+    }
+}
+
+/// The sign-in remote server entry `spec` at `url` has, ready to use,
+/// when one was kept.
+///
+/// # Errors
+///
+/// When the kept sign-in can't be used, which asks for a new one.
+async fn signed_in(
+    watch: &Watch,
+    spec: &Value,
+    url: &str,
+) -> Result<Option<AuthorizationManager>, Status> {
+    let (Some(id), Some(server), Some(link)) = (
+        crate::mcp_auth::integration_id(spec),
+        watch.server.upgrade(),
+        watch.link.upgrade(),
+    ) else {
+        return Ok(None);
+    };
+    if !server.has_credential(&id) {
+        return Ok(None);
+    }
+    let again = |e: &dyn fmt::Display| Status::NeedsAuth(format!("Sign in again: {e}"));
+    let mut manager = AuthorizationManager::new(url)
+        .await
+        .map_err(|e| again(&e))?;
+    manager.set_credential_store(crate::mcp_auth::Kept::new(
+        Arc::downgrade(&server),
+        &id,
+        &link.name,
+    ));
+    if manager
+        .initialize_from_store()
+        .await
+        .map_err(|e| again(&e))?
+    {
+        Ok(Some(manager))
+    } else {
+        Ok(None)
     }
 }
 
@@ -546,7 +600,11 @@ impl Server {
                 } else {
                     self.mcp_link(directory, name, spec).status_json()
                 };
-                json!({ "name": name, "status": status })
+                let mut entry = json!({ "name": name, "status": status });
+                if let Some(id) = crate::mcp_auth::integration_id(spec) {
+                    entry["integrationID"] = json!(id);
+                }
+                entry
             })
             .collect()
     }
@@ -626,6 +684,32 @@ impl Server {
         lock(&self.mcp.off).remove(name);
         let _ = self.mcp_link(directory, name, &spec);
         drop(spec);
+        self.emit("mcp.status.changed", json!({ "server": name }), None, None);
+    }
+
+    /// The entries of the servers added while running, then of those
+    /// connected or connecting, by name.
+    pub(crate) fn mcp_specs(&self) -> Vec<(String, Value)> {
+        let mut specs: Vec<(String, Value)> = lock(&self.mcp.added)
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        specs.extend(lock(&self.mcp.links).keys().filter_map(|k| {
+            let (name, spec) = k.split_once('\n')?;
+            Some((name.to_owned(), serde_json::from_str(spec).ok()?))
+        }));
+        specs
+    }
+
+    /// Connects server `name` again, everywhere, after its sign-in changed.
+    pub(crate) fn mcp_signed_in(&self, name: &str) {
+        lock(&self.mcp.links).retain(|k, l| {
+            let same = k.split('\n').next() == Some(name);
+            if same {
+                l.cancel.cancel();
+            }
+            !same
+        });
         self.emit("mcp.status.changed", json!({ "server": name }), None, None);
     }
 

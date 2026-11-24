@@ -117,6 +117,7 @@ shell-words = { version = "1.1.1", default-features = false, features = ["std"] 
 tempfile = { version = "3.27.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
+async-trait = "0.1.92"
 llmfit-core = { version = "1.1.20", default-features = false }
 # The system's font families for Settings → Appearance (MIT); the version Slint already uses.
 fontdb = { version = "=0.24.0", default-features = false, features = ["std", "fs", "memmap", "fontconfig"] }

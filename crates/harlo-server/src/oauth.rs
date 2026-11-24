@@ -97,9 +97,19 @@ enum Callback {
     Other,
 }
 
-/// Reads the callback address `url` for attempt `state`.
-fn read_callback(url: &reqwest::Url, state: &str) -> Callback {
-    if url.path() != CALLBACK {
+/// Where a browser sign-in comes back, and what it connects.
+#[derive(Debug, Clone)]
+pub(crate) struct Return {
+    /// The path of the address the browser comes back to.
+    pub(crate) path: String,
+    /// What the sign-in connects, as its last page names it.
+    pub(crate) what: String,
+}
+
+/// Reads the callback address `url` for attempt `state`, which comes back
+/// to `path`.
+fn read_callback(url: &reqwest::Url, path: &str, state: &str) -> Callback {
+    if url.path() != path {
         return Callback::Other;
     }
     let q = |k: &str| {
@@ -254,6 +264,9 @@ impl Server {
         id: &str,
         method: &str,
     ) -> Result<Value, Refusal> {
+        if id.starts_with(crate::mcp_auth::PREFIX) {
+            return self.begin_mcp_oauth(id).await;
+        }
         if id != "openai" || method != CHATGPT {
             return Err(Refusal::NotFound(format!(
                 "Integration method not found: {method}"
@@ -298,35 +311,14 @@ impl Server {
             &params,
         )
         .map_err(|e| Refusal::Bad(e.to_string()))?;
-        let attempt = ascending_id("att");
-        let (pasted, taken) = mpsc::unbounded_channel();
-        let cancel = CancellationToken::new();
-        let created = now();
-        lock(&self.attempts).insert(
-            attempt.clone(),
-            Attempt {
-                status: ("pending".to_owned(), None),
-                pasted,
-                cancel: cancel.clone(),
-                created,
-            },
-        );
-        let (server, key) = (Arc::clone(self), attempt.clone());
-        tokio::spawn(async move {
-            let ended = tokio::select! {
-                got = wait(&listener, taken, &flow.state) => match got {
-                    Ok((code, issued)) => server.finish_sign_in(&flow, &code, issued).await,
-                    Err(why) => Err(why),
-                },
-                () = cancel.cancelled() => Err("The sign-in was cancelled.".to_owned()),
-                () = tokio::time::sleep(WAIT) => Err("The sign-in took too long; start it again.".to_owned()),
-            };
-            if let Some(a) = lock(&server.attempts).get_mut(&key) {
-                a.status = match ended {
-                    Ok(()) => ("complete".to_owned(), None),
-                    Err(why) => ("failed".to_owned(), Some(why)),
-                };
-            }
+        let back = Return {
+            path: CALLBACK.to_owned(),
+            what: "your ChatGPT plan".to_owned(),
+        };
+        let server = Arc::clone(self);
+        let (attempt, created) = self.track(move |taken| async move {
+            let (code, issued) = wait(&listener, taken, &flow.state, &back).await?;
+            server.finish_sign_in(&flow, &code, issued).await
         });
         Ok(json!({
             "attemptID": attempt, "url": url.as_str(), "mode": "auto", "paste": true,
@@ -381,6 +373,47 @@ impl Server {
             .map_err(|e| e.to_string())?;
         self.integrations_changed();
         Ok(())
+    }
+
+    /// Runs browser sign-in `run` as a new attempt, which ends when `run`
+    /// does, is cancelled, or takes too long; returns the attempt's ID and
+    /// when it began. `run` is handed what's pasted for it.
+    pub(crate) fn track<F>(
+        self: &Arc<Self>,
+        run: impl FnOnce(mpsc::UnboundedReceiver<String>) -> F,
+    ) -> (String, i64)
+    where
+        F: Future<Output = Result<(), String>> + Send + 'static,
+    {
+        let attempt = ascending_id("att");
+        let (pasted, taken) = mpsc::unbounded_channel();
+        let cancel = CancellationToken::new();
+        let created = now();
+        lock(&self.attempts).insert(
+            attempt.clone(),
+            Attempt {
+                status: ("pending".to_owned(), None),
+                pasted,
+                cancel: cancel.clone(),
+                created,
+            },
+        );
+        let running = run(taken);
+        let (server, key) = (Arc::clone(self), attempt.clone());
+        tokio::spawn(async move {
+            let ended = tokio::select! {
+                got = running => got,
+                () = cancel.cancelled() => Err("The sign-in was cancelled.".to_owned()),
+                () = tokio::time::sleep(WAIT) => Err("The sign-in took too long; start it again.".to_owned()),
+            };
+            if let Some(a) = lock(&server.attempts).get_mut(&key) {
+                a.status = match ended {
+                    Ok(()) => ("complete".to_owned(), None),
+                    Err(why) => ("failed".to_owned(), Some(why)),
+                };
+            }
+        });
+        (attempt, created)
     }
 
     /// How sign-in attempt `attempt` stands.
@@ -491,12 +524,13 @@ impl Server {
     }
 }
 
-/// Waits for the browser's return on `listener`, or a pasted address on
-/// `pasted`; returns the code and any client ID issued.
-async fn wait(
+/// Waits for the browser's return to `back` on `listener`, or a pasted
+/// address on `pasted`; returns the code and any client ID issued.
+pub(crate) async fn wait(
     listener: &tokio::net::TcpListener,
     mut pasted: mpsc::UnboundedReceiver<String>,
     state: &str,
+    back: &Return,
 ) -> Result<(String, Option<String>), String> {
     loop {
         let mut socket = tokio::select! {
@@ -509,7 +543,7 @@ async fn wait(
                 // A bare code, as some pages show it, or the address.
                 let parsed = reqwest::Url::parse(&line).map_or_else(
                     |_bare| Callback::Code(line.clone(), None),
-                    |u| read_callback(&u, state),
+                    |u| read_callback(&u, &back.path, state),
                 );
                 match parsed {
                     Callback::Code(code, issued) => return Ok((code, issued)),
@@ -530,7 +564,7 @@ async fn wait(
         let Ok(url) = reqwest::Url::parse(&format!("http://127.0.0.1{target}")) else {
             continue;
         };
-        match read_callback(&url, state) {
+        match read_callback(&url, &back.path, state) {
             Callback::Other => {
                 let _ = socket
                     .write_all(
@@ -541,7 +575,14 @@ async fn wait(
             Callback::Declined(why) => {
                 let _ = socket
                     .write_all(
-                        page(false, "ChatGPT wasn't connected. You can close this tab.").as_bytes(),
+                        page(
+                            false,
+                            &format!(
+                                "Harlo wasn't connected to {}. You can close this tab.",
+                                back.what
+                            ),
+                        )
+                        .as_bytes(),
                     )
                     .await;
                 return Err(format!("The sign-in was declined ({why})."));
@@ -562,7 +603,10 @@ async fn wait(
                     .write_all(
                         page(
                             true,
-                            "Harlo is connected to your ChatGPT plan. You can close this tab.",
+                            &format!(
+                                "Harlo is connected to {}. You can close this tab.",
+                                back.what
+                            ),
                         )
                         .as_bytes(),
                     )
@@ -586,6 +630,7 @@ mod tests {
         assert_eq!(
             read_callback(
                 &u("http://127.0.0.1:1455/auth/callback?code=c1&state=s1&client_id=app_x"),
+                CALLBACK,
                 "s1"
             ),
             Callback::Code("c1".into(), Some("app_x".into()))
@@ -593,6 +638,7 @@ mod tests {
         assert_eq!(
             read_callback(
                 &u("http://localhost:1455/auth/callback?code=c1&state=old"),
+                CALLBACK,
                 "s1"
             ),
             Callback::Stale
@@ -600,12 +646,13 @@ mod tests {
         assert_eq!(
             read_callback(
                 &u("http://localhost:1455/auth/callback?error=access_denied&state=s1"),
+                CALLBACK,
                 "s1"
             ),
             Callback::Declined("access_denied".into())
         );
         assert_eq!(
-            read_callback(&u("http://localhost:1455/favicon.ico"), "s1"),
+            read_callback(&u("http://localhost:1455/favicon.ico"), CALLBACK, "s1"),
             Callback::Other
         );
     }

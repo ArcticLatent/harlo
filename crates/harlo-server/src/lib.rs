@@ -22,6 +22,7 @@ mod fs;
 mod git;
 mod goals;
 mod mcp;
+mod mcp_auth;
 mod memory;
 mod oauth;
 mod phone;
