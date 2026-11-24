@@ -11,11 +11,14 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use harlo::app::{App, Autostart, Message, Range, Section, SetUp, Sheet, SheetEvent};
+use harlo::app::{
+    App, Autostart, Message, ProviderEvent, Range, Section, SetUp, Sheet, SheetEvent,
+};
 use harlo_core::layout::{Preferences, Tabs};
 use harlo_core::server::Location;
 use harlo_core::server::{
-    Day, McpServer, McpStatus, ModelUsage, Provider, Stats, Tokens, WebSearch,
+    Connection, Day, Integration, McpServer, McpStatus, ModelUsage, Provider, Stats, Tokens,
+    WebSearch,
 };
 use slint::ComponentHandle as _;
 use slint::Model as _;
@@ -318,17 +321,35 @@ fn settings_show_the_servers_set_up_and_about() {
     let serial = ui.app().sheets.serial();
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(setup()))));
     assert!(ui.shows("Exa"));
-    // Each web search service says the key it needs, and how it's set.
-    assert!(ui.shows("EXA_API_KEY"));
+    // Each web search service says whether it has its key, and how to add one.
+    let exa = |connections| Integration {
+        id: "exa".into(),
+        name: "Exa".into(),
+        methods: Vec::new(),
+        connections,
+    };
+    ui.send(Message::Sheet(SheetEvent::Provider(ProviderEvent::Loaded(
+        Ok(vec![exa(Vec::new())]),
+    ))));
+    assert!(ui.shows("No key"));
     assert!(ui.shows(
-        "Each needs its API key, set with /\u{2060}connect in OpenCode or in the environment."
+        "Add a key with /\u{2060}connect in OpenCode, or in the service's environment variable \
+         on the server's computer."
     ));
+    ui.send(Message::Sheet(SheetEvent::Provider(ProviderEvent::Loaded(
+        Ok(vec![exa(vec![Connection {
+            credential: None,
+            label: "EXA_API_KEY".into(),
+            method: None,
+            needs_sign_in: None,
+        }])]),
+    ))));
     let chosen = SetUp {
         search_choice: Some("exa".into()),
         ..setup()
     };
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(chosen))));
-    assert!(ui.shows("In use · EXA_API_KEY"), "the one config chooses");
+    assert!(ui.shows("In use · Key set"), "the one config chooses");
     // A server's row opens its page, and says how it stands.
     let docs = ui
         .find("docs")

@@ -102,7 +102,6 @@ impl Files {
                     } else {
                         icon.glyph.to_string().into()
                     },
-                    icon_color: icon.slint_color(),
                     path: node.path.into(),
                 }
             })

@@ -727,6 +727,9 @@ pub const OPEN_ABOUT_LINK: i32 = 75;
 /// The About button that shows or hides the colour themes' licence.
 pub const THEME_LICENCE: i32 = 76;
 
+/// The Notifications button that shows or hides the names a template fills in.
+pub const TEMPLATE_WORDS: i32 = 77;
+
 /// The pages About links to: the source, its releases and a new issue.
 pub const ABOUT_LINKS: [&str; 3] = [
     env!("CARGO_PKG_REPOSITORY"),
@@ -826,8 +829,9 @@ fn provider_action(app: &App, number: i32, item: i32) -> Option<Message> {
     Some(Message::Sheet(SheetEvent::Provider(event)))
 }
 
-/// The step a button of Appearance or About numbered `number` takes for
-/// item `item`: a font menu, a link, or the themes' licence.
+/// The step a button of Appearance, Notifications or About numbered `number`
+/// takes for item `item`: a font menu, a link, the themes' licence, or the
+/// names a template fills in.
 fn look_action(number: i32, item: i32) -> Option<Message> {
     match number {
         CHOOSE_INTERFACE_FONT => Some(Message::TogglePicker(Picker::InterfaceFont)),
@@ -836,6 +840,7 @@ fn look_action(number: i32, item: i32) -> Option<Message> {
             .get(usize::try_from(item).ok()?)
             .map(|url| Message::OpenLink((*url).to_owned())),
         THEME_LICENCE => Some(Message::Sheet(SheetEvent::ThemeLicence)),
+        TEMPLATE_WORDS => Some(Message::Sheet(SheetEvent::TemplateWords)),
         _ => None,
     }
 }
@@ -857,7 +862,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
     };
     match number {
         CHOOSE_DEFAULT_MODEL => Some(Message::TogglePicker(Picker::DefaultModel)),
-        CHOOSE_INTERFACE_FONT..=THEME_LICENCE => look_action(number, item),
+        CHOOSE_INTERFACE_FONT..=TEMPLATE_WORDS => look_action(number, item),
         OPEN_SETUP => Some(Message::Sheet(SheetEvent::OpenSetup)),
         INSTALL_OPENCODE => Some(Message::Sheet(SheetEvent::InstallOpenCode)),
         TEST_NOTICE => Some(Message::Sheet(SheetEvent::TestNotice)),

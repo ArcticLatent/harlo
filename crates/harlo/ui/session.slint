@@ -283,11 +283,11 @@ component Header inherits Rectangle {
                         color: Theme.icon-warning-base;
                     }
                 }
-                // Only the icon moves: the word stays readable throughout.
                 // Words only: the line above the composer turns while it works.
                 if State.session-busy: HorizontalLayout {
                     Text {
-                        text: "Working";
+                        text: "·  Working";
+                        accessible-label: "Working";
                         font-size: Size.small;
                         color: Theme.text-weak;
                     }

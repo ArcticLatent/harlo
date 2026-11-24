@@ -105,7 +105,7 @@ fn a_failed_run_says_its_error_and_a_stopped_one_says_nothing() {
 #[test]
 fn an_approval_asked_for_notifies() {
     let ui = away();
-    ui.send(event(EventKind::PermissionAsked(Permission {
+    ui.send(event(EventKind::PermissionAsked(Box::new(Permission {
         id: "per_1".into(),
         session_id: SESSION.into(),
         action: "shell".into(),
@@ -113,7 +113,8 @@ fn an_approval_asked_for_notifies() {
         save: Vec::new(),
         message: None,
         files: Vec::new(),
-    })));
+        call: None,
+    }))));
     let notice = last(&ui).expect("a notice");
     assert_eq!(notice.kind, Kind::Asks);
     assert_eq!(notice.title, "Build needs you");
@@ -231,8 +232,7 @@ fn settings_change_templates_times_and_send_a_test() {
 
     // A template, saved from its field further down.
     ui.wheel("Run finished", -20);
-    ui.fill("Run finished title", "{model_name} is done");
-    ui.press("Save Title");
+    ui.enter("Run finished title", "{model_name} is done");
     assert_eq!(
         ui.app().preferences.notifications.finished.title,
         "{model_name} is done"

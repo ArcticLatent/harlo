@@ -575,6 +575,9 @@ fn look(view: &RowView<'_>, gap: f32, crew: &Crew) -> u64 {
     view.stamp.hash(&mut hasher);
     (view.whole, view.undo, view.nested, view.sending, view.fresh).hash(&mut hasher);
     gap.to_bits().hash(&mut hasher);
+    if let Entry::Tool { key, .. } = view.entry {
+        crew.asking.contains(key).hash(&mut hasher);
+    }
     if let Entry::Subagent {
         child: Some(child), ..
     } = view.entry
@@ -678,7 +681,7 @@ fn entry_rows(
             row.detail = summarize(text).into();
             vec![with(row)]
         }
-        Entry::Tool { .. } => tool_rows(t, view, gap, slots)
+        Entry::Tool { key, .. } => tool_rows(t, view, gap, slots, crew.asking.contains(key))
             .into_iter()
             .map(with)
             .collect(),
@@ -884,8 +887,14 @@ fn block_row(
     row
 }
 
-/// A tool's row, then its diffs.
-fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec<TimelineRow> {
+/// A tool's row, then its diffs; `asking` while it waits for the user's approval.
+fn tool_rows(
+    t: &Tokens,
+    view: &RowView<'_>,
+    gap: f32,
+    slots: &mut Slots,
+    asking: bool,
+) -> Vec<TimelineRow> {
     let Entry::Tool {
         key,
         name,
@@ -895,6 +904,7 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
         took,
         files,
         pictures,
+        error,
         ..
     } = view.entry
     else {
@@ -906,6 +916,10 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
         // A question waits on the user, not the agent: it doesn't turn.
         ToolStatus::Running | ToolStatus::Streaming if name == "question" => {
             (Icon::CircleQuestionMark, t.text_weak, false)
+        }
+        // Nor does a call waiting for approval: it hasn't started.
+        ToolStatus::Running | ToolStatus::Streaming if asking => {
+            (Icon::ShieldAlert, t.icon_warning_base, false)
         }
         ToolStatus::Running | ToolStatus::Streaming => {
             (Icon::LoaderCircle, t.text_interactive_base, true)
@@ -924,6 +938,11 @@ fn tool_rows(t: &Tokens, view: &RowView<'_>, gap: f32, slots: &mut Slots) -> Vec
         head.removed = count(files.iter().map(|f| f.deletions).sum());
     }
     let mut rows = vec![head];
+    if let Some(why) = error {
+        let mut row = blank(Shape::Reason, key, 2.0);
+        row.label = why.as_str().into();
+        rows.push(row);
+    }
     if !pictures.is_empty() {
         let mut row = blank(Shape::Pictures, key, 6.0);
         row.label = label.as_str().into();

@@ -1226,14 +1226,15 @@ fn git_rows(app: &App) -> Vec<SheetRow> {
     rows
 }
 
-/// A text field named `name` holding `value`, with `hint` while empty.
+/// A text field named `name` holding `value`, with `hint` while empty,
+/// saved when Enter is pressed or the field is left.
 fn field(field: Field, name: &str, value: &str, hint: &str) -> SheetRow {
     SheetRow {
         kind: FIELD,
         name: name.into(),
         value: value.into(),
         hint: hint.into(),
-        action: "Save".into(),
+        saves: true,
         setting: int(Field::ALL
             .iter()
             .position(|f| *f == field)
@@ -1242,10 +1243,10 @@ fn field(field: Field, name: &str, value: &str, hint: &str) -> SheetRow {
     }
 }
 
-/// A text field that takes what's typed as it's typed, with no button.
+/// A text field that takes what's typed as it's typed.
 fn live_field(which: Field, name: &str, value: &str, hint: &str) -> SheetRow {
     let mut row = field(which, name, value, hint);
-    row.action = "".into();
+    row.saves = false;
     row
 }
 
@@ -1275,7 +1276,8 @@ fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
         rows.push(pair("Not changed", why, 2));
     }
 
-    rows.push(heading("On every app"));
+    // The name, colour and icon live on the server, so every app shows them.
+    rows.push(heading("Shared on this server"));
     if server.is_none() {
         rows.push(note(
             "OpenCode learns about the project with its first session; these wait until then.",
@@ -1307,7 +1309,6 @@ fn project_rows(app: &App, marks: &Marks) -> Vec<SheetRow> {
             clear.setting = crate::window::CLEAR_ICON;
             rows.push(clear);
         }
-        rows.push(note("Shared by every app on this server."));
     }
 
     rows.push(heading("New sessions"));
@@ -1551,14 +1552,28 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
             notices.quiet.questions,
         ));
     }
-    let variables: Vec<String> = VARIABLES.iter().map(|v| format!("{{{v}}}")).collect();
-    rows.extend([
+    rows.extend(template_rows(app));
+    rows
+}
+
+/// Notifications' templates: how to fill them in, and a title and message
+/// for each event.
+fn template_rows(app: &App) -> Vec<SheetRow> {
+    let notices = &app.preferences.notifications;
+    let mut rows = vec![
         heading("Templates"),
-        note(&format!(
-            "Empty uses the default. Variables: {}",
-            variables.join(" ")
-        )),
-    ]);
+        note("Leave one empty for the default."),
+    ];
+    // The names stay folded: most people never write a template.
+    let shown = app.sheets.template_words;
+    let mut words = pair("Names in braces", "Filled in when it's sent", 3);
+    words.action = if shown { "Hide" } else { "Show" }.into();
+    words.setting = crate::window::TEMPLATE_WORDS;
+    rows.push(words);
+    if shown {
+        let variables: Vec<String> = VARIABLES.iter().map(|v| format!("{{{v}}}")).collect();
+        rows.push(note(&variables.join(" ")));
+    }
     for kind in Kind::ALL {
         let template = notices.template(kind);
         let (title, message) = kind.defaults();
@@ -1671,35 +1686,41 @@ const LINK: i32 = 13;
 /// The server's web search, MCP servers and plugins, for Tools.
 fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     let mut rows = Vec::new();
-    search_rows(setup, &mut rows);
+    search_rows(app, setup, &mut rows);
     mcp::list_rows(app, setup, &mut rows);
     mcp::own_tools_rows(app, &mut rows);
     plugins::plugin_rows(app, &setup.plugins, &mut rows);
     rows
 }
 
-/// The web search services: which one is used, and the key each needs.
-fn search_rows(setup: &SetUp, rows: &mut Vec<SheetRow>) {
+/// The web search services: which one is used, and whether each has its key.
+fn search_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
     let choice = setup.search_choice.as_deref();
+    // OpenCode lists each service as an integration, with the keys it has.
+    let services = match &app.sheets.providers.list {
+        Load::Loaded(list) => Some(list.as_slice()),
+        _ => None,
+    };
     section(rows, "Web search", &setup.search, |s| {
-        let key = match s.id.as_str() {
-            "claude-agent" => "Through Claude Agent".to_owned(),
-            id => format!("{}_API_KEY", id.to_uppercase().replace('-', "_")),
+        let (key, tone) = match s.id.as_str() {
+            "claude-agent" => ("Through Claude Agent", 0),
+            id => match services.map(|list| list.iter().find(|i| i.id == id)) {
+                Some(Some(service)) if !service.connections.is_empty() => ("Key set", 0),
+                Some(_) => ("No key", 3),
+                None => ("", 3),
+            },
         };
-        let value = if choice == Some(s.id.as_str()) {
-            format!("In use · {key}")
-        } else {
-            key
+        let value = match (choice == Some(s.id.as_str()), key) {
+            (true, "") => "In use".to_owned(),
+            (true, key) => format!("In use · {key}"),
+            (false, key) => key.to_owned(),
         };
-        if s.id == "claude-agent" {
-            pair(&s.name, &value, 0)
-        } else {
-            code_pair(&s.name, &value, 0)
-        }
+        pair(&s.name, &value, tone)
     });
     if matches!(setup.search, Ok(ref list) if !list.is_empty()) {
         rows.push(note(
-            "Each needs its API key, set with /\u{2060}connect in OpenCode or in the environment.",
+            "Add a key with /\u{2060}connect in OpenCode, or in the service's environment \
+             variable on the server's computer.",
         ));
     }
 }

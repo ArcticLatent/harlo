@@ -94,7 +94,8 @@ component FileRow inherits Press {
         }
         if root.entry.icon != "": FileIcon {
             text: root.entry.icon;
-            color: root.entry.icon-color;
+            // The type's shape in the quiet tone: colour means state here.
+            color: Theme.icon-quiet;
             font-size: 13px;
         }
         if root.entry.icon == "": Icon {

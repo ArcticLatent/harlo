@@ -154,6 +154,8 @@ export enum Shape {
     report,
     /// The pictures a tool returned, as thumbnails.
     pictures,
+    /// Why a tool call failed, under its row.
+    reason,
 }
 
 /// One item of a list in an answer.
@@ -447,9 +449,8 @@ export struct ChangeRow {
     branch: bool,
     /// Whether the title ends the review it names.
     closes: bool,
-    /// A file's icon, from the file-icon font, and its colour.
+    /// A file's icon, from the file-icon font; it's drawn in the quiet tone.
     icon: string,
-    icon-color: color,
     added: int,
     removed: int,
     /// Whether the counts show (not for a deleted file).
@@ -516,9 +517,8 @@ export struct FileRow {
     ignored: bool,
     /// Whether it's the file in the editor.
     selected: bool,
-    /// A file's icon, from the file-icon font, and its colour.
+    /// A file's icon, from the file-icon font; it's drawn in the quiet tone.
     icon: string,
-    icon-color: color,
 }
 
 /// The file in the editor: its path, what shows, how saving stands, and
@@ -606,8 +606,8 @@ export struct SheetRow {
     /// the choice by `choice`, with `value` as a line under its name (8
     /// shows the options as colour swatches), 5
     /// theme cards, dark ones for `setting` 0 and light ones for 1, 6 a
-    /// text field holding `value`, saved by its `action` button as field
-    /// `setting`, or 7 the command `value`, run by its `action` button as
+    /// text field holding `value` as field `setting`, which its `action`
+    /// button takes (see `saves` for one without), or 7 the command `value`, run by its `action` button as
     /// step `setting`, or 9 a project, opened by step `setting`, or 10 the
     /// picture `picture` on white, such as a QR code, named by `name`, or
     /// 11 a shortcut: what it does as `value`, its keys as keycaps in
@@ -651,6 +651,9 @@ export struct SheetRow {
     /// and the line under it), 1 alone in one, 2 at the top, 3 between
     /// others, 4 at the bottom.
     place: int,
+    /// For a text field (kind 6) with no `action`: saved when Enter is
+    /// pressed or the field is left, rather than as it's typed.
+    saves: bool,
 }
 
 /// A theme in Settings → Appearance: its id and name, whether it's the one

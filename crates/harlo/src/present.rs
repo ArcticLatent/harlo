@@ -806,7 +806,7 @@ fn tab(app: &App, document: &Document, index: usize, active: bool) -> Tab {
             let icon = crate::file_icons::icon(app.fs.open.first().map_or("", |f| f.path.as_str()));
             let mut text = SharedString::new();
             text.push_str(icon.glyph.encode_utf8(&mut [0; 4]));
-            (text, true, icon.slint_color())
+            (text, true, color(t.icon_base))
         }
         Document::Home => (glyph(Icon::Plus), false, color(t.icon_base)),
         Document::Session(_) => (glyph(Icon::MessageSquare), false, color(t.icon_base)),

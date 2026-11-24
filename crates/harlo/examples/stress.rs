@@ -468,6 +468,7 @@ fn history() -> Vec<Entry> {
                     }],
                     todos: None,
                     pictures: Vec::new(),
+                    error: None,
                 }
             }
         })

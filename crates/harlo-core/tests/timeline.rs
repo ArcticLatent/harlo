@@ -23,7 +23,37 @@ fn call(name: &str, input: serde_json::Value, took_ms: Option<f64>) -> Part {
         files: Vec::new(),
         child: None,
         pictures: Vec::new(),
+        error: None,
     })
+}
+
+#[test]
+fn a_failed_call_keeps_why() {
+    let Part::Tool(read) = call("read", json!({"filePath": "src/lexer.rs"}), Some(3.0)) else {
+        unreachable!("a tool call")
+    };
+    let failed = ToolCall {
+        status: ToolStatus::Failed,
+        error: Some("  File not found: src/lexer.rs\n".into()),
+        ..read
+    };
+    let rows = entries(&[Message::Assistant {
+        id: "msg_a".into(),
+        agent: "build".into(),
+        parts: vec![
+            Part::Tool(failed.clone()),
+            Part::Tool(ToolCall {
+                id: "call_quiet".into(),
+                error: Some(" ".into()),
+                ..failed
+            }),
+        ],
+        files: Vec::new(),
+    }]);
+    assert!(matches!(&rows[0], Entry::Tool { error: Some(why), .. }
+            if why == "File not found: src/lexer.rs"));
+    // A blank reason says nothing, rather than an empty line.
+    assert!(matches!(&rows[1], Entry::Tool { error: None, .. }));
 }
 
 #[test]
@@ -111,6 +141,7 @@ fn messages_become_rows_in_order() {
             files: Vec::new(),
             todos: None,
             pictures: Vec::new(),
+            error: None,
         }
     );
     assert!(
@@ -257,6 +288,7 @@ fn glob(status: ToolStatus, detail: &str, took_ms: Option<u64>) -> Change {
         files: Vec::new(),
         todos: None,
         pictures: Vec::new(),
+        error: None,
     })
 }
 

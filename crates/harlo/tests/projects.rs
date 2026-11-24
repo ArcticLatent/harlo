@@ -48,7 +48,7 @@ fn the_sidebar_opens_a_projects_settings() {
     assert_eq!(app.sheets.section, Section::Projects);
     assert_eq!(app.sheets.projects.shown.as_deref(), Some(HARLO));
     drop(app);
-    assert!(ui.shows("On every app"));
+    assert!(ui.shows("Shared on this server"));
     assert!(ui.shows("Worktrees"));
 
     // Back to the list, and into another.

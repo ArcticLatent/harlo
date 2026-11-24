@@ -79,6 +79,8 @@ pub enum Entry {
         todos: Option<Vec<Todo>>,
         /// The pictures it returned, such as a picture it read.
         pictures: Vec<Picture>,
+        /// Why it failed, when it did and the tool said.
+        error: Option<String>,
     },
     /// Work handed to a subagent, which runs in a child session.
     Subagent {
@@ -383,7 +385,9 @@ fn thought_key(message: &str, ordinal: impl std::fmt::Display) -> String {
     format!("{message}/thought/{ordinal}")
 }
 
-fn tool_key(message: &str, call: &str) -> String {
+/// The row key of the tool call `call` in the message `message`.
+#[must_use]
+pub fn tool_key(message: &str, call: &str) -> String {
     format!("{message}/tool/{call}")
 }
 
@@ -406,7 +410,16 @@ fn tool(message: &str, call: &ToolCall) -> Entry {
         files: changes(&call.name, call.status, &call.input, &call.files),
         todos: todo_list(&call.name, &call.input),
         pictures: call.pictures.clone(),
+        error: reason(call.error.as_deref()),
     }
+}
+
+/// Why a tool call failed, trimmed, or nothing when it didn't say.
+fn reason(error: Option<&str>) -> Option<String> {
+    error
+        .map(str::trim)
+        .filter(|why| !why.is_empty())
+        .map(str::to_owned)
 }
 
 /// A `subagent` call's row, from its arguments and the child it started.
@@ -598,7 +611,7 @@ impl Live {
                     detail: String::new(),
                     input: Value::Null,
                 };
-                let change = Change::Put(open.entry(ToolStatus::Streaming, None, &[], &[]));
+                let change = Change::Put(open.entry(ToolStatus::Streaming, None, &[], &[], None));
                 self.tools.insert(call_id.clone(), open);
                 vec![change]
             }
@@ -606,13 +619,20 @@ impl Live {
                 Some(open) => {
                     open.detail = shorten(&tool_detail(&open.name, input));
                     open.input = input.clone();
-                    vec![Change::Put(open.entry(ToolStatus::Running, None, &[], &[]))]
+                    vec![Change::Put(open.entry(
+                        ToolStatus::Running,
+                        None,
+                        &[],
+                        &[],
+                        None,
+                    ))]
                 }
                 None => vec![Change::Reload],
             },
             EventKind::ToolEnded {
                 call_id,
                 failed,
+                error,
                 files,
                 child,
                 pictures,
@@ -633,7 +653,13 @@ impl Live {
                         ))];
                     }
                     let took = millis(time - open.started);
-                    vec![Change::Put(open.entry(status, Some(took), files, pictures))]
+                    vec![Change::Put(open.entry(
+                        status,
+                        Some(took),
+                        files,
+                        pictures,
+                        error.as_deref(),
+                    ))]
                 }
                 None => vec![Change::Reload],
             },
@@ -697,6 +723,7 @@ impl OpenTool {
         took: Option<Duration>,
         files: &[FileDiff],
         pictures: &[Picture],
+        error: Option<&str>,
     ) -> Entry {
         if self.name == SUBAGENT {
             return subagent(self.key.clone(), &self.input, None, status);
@@ -711,6 +738,7 @@ impl OpenTool {
             files: changes(&self.name, status, &self.input, files),
             todos: todo_list(&self.name, &self.input),
             pictures: pictures.to_vec(),
+            error: reason(error),
         }
     }
 }

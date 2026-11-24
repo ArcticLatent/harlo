@@ -216,6 +216,20 @@ component ThemeHeading inherits Text {
 component RowBody inherits VerticalLayout {
     in property <SheetRow> entry;
     in property <bool> first;
+    // A field just saved says so for a moment.
+    property <bool> saved;
+
+    /// Takes the field's `text` as its setting, and says so for a moment.
+    function save(text: string) {
+        Logic.settings-text(root.entry.setting, text);
+        root.saved = true;
+    }
+
+    Timer {
+        interval: 1.6s;
+        running: root.saved;
+        triggered => { root.saved = false; }
+    }
 
     if root.entry.kind == 0: Text {
         // Room above each group after the first.
@@ -622,27 +636,59 @@ component RowBody inherits VerticalLayout {
             vertical-alignment: center;
             accessible-role: AccessibleRole.text;
         }
-        field := Field {
+        Rectangle {
             horizontal-stretch: 1;
             height: 32px;
-            text-size: Size.small;
-            placeholder: root.entry.hint;
-            label: root.entry.label != "" ? root.entry.label : root.entry.name;
-            text: root.entry.value;
-            secret: root.entry.on;
-            accepted => { Logic.settings-text(root.entry.setting, self.text); }
-            // Without a button, what's typed is taken as it's typed.
-            edited(text) => {
-                if root.entry.action == "" {
-                    Logic.settings-text(root.entry.setting, text);
+            field := Field {
+                width: parent.width;
+                height: parent.height;
+                text-size: Size.small;
+                placeholder: root.entry.hint;
+                label: root.entry.label != "" ? root.entry.label : root.entry.name;
+                text: root.entry.value;
+                secret: root.entry.on;
+                accepted => {
+                    if root.entry.saves && root.entry.action == "" {
+                        root.save(self.text);
+                    } else {
+                        Logic.settings-text(root.entry.setting, self.text);
+                    }
+                }
+                // Without a button, what's typed is taken as it's typed,
+                // or when the field is left.
+                edited(text) => {
+                    if root.entry.action == "" && !root.entry.saves {
+                        Logic.settings-text(root.entry.setting, text);
+                    }
+                }
+                changed has-focus => {
+                    if !self.has-focus && root.entry.saves && root.entry.action == ""
+                        && self.text != root.entry.value {
+                        root.save(self.text);
+                    }
+                }
+            }
+            // Over the field's end, on its own fill, so it reads over text.
+            if root.saved: Rectangle {
+                x: parent.width - self.width - 1px;
+                y: 1px;
+                width: saved-text.preferred-width + 20px;
+                height: parent.height - 2px;
+                border-radius: Size.radius;
+                background: Theme.field-fill;
+                saved-text := Text {
+                    text: "Saved";
+                    font-size: Size.small;
+                    color: Theme.text-weak;
+                    vertical-alignment: center;
+                    accessible-role: AccessibleRole.text;
                 }
             }
         }
         if root.entry.action != "": VerticalLayout {
             alignment: center;
             ActionButton {
-                // It says so while the field holds what's saved.
-                text: field.text != "" && field.text == root.entry.value ? "Saved" : root.entry.action;
+                text: root.entry.action;
                 label: root.entry.action + " " + root.entry.name;
                 clicked => { Logic.settings-text(root.entry.setting, field.text); }
             }

@@ -29,9 +29,10 @@ pub(super) fn schedule_rows(app: &App) -> Vec<SheetRow> {
 /// What schedules are, the switch that allows them, and every schedule.
 fn list_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.schedules;
-    let mut rows = vec![note(
-        "The server sends each prompt on time, even with Harlo closed.",
-    )];
+    let mut rows = vec![
+        heading("Prompts on a timer"),
+        note("The server sends each prompt on time, even with Harlo closed."),
+    ];
     match &page.allowed {
         Load::Loaded(on) => rows.push(switch(
             Setting::Automations,
@@ -51,8 +52,14 @@ fn list_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("Not changed", why, 2));
     }
 
-    rows.push(heading("Schedules"));
+    rows.push(heading("Your schedules"));
     match &page.list {
+        // While they're off, the way to one is the switch above.
+        Load::Loaded(list) if list.is_empty() && page.allowed == Load::Loaded(false) => {
+            rows.push(note(
+                "No schedules yet. Turn on Allow schedules to add one.",
+            ));
+        }
         Load::Loaded(list) if list.is_empty() => rows.push(note("No schedules yet.")),
         Load::Loaded(list) => {
             for (index, automation) in list.iter().enumerate() {

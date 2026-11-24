@@ -382,6 +382,7 @@ fn asked(id: &str) -> Permission {
         save: vec!["cargo *".into()],
         message: None,
         files: Vec::new(),
+        call: None,
     }
 }
 
@@ -400,8 +401,14 @@ fn requests_waiting_for_approval_follow_events_and_end_with_the_run() {
     ws.resync(snapshot());
     // One was asked before Harlo attached; loading the session finds it.
     let _ = ws.fetched(Fetched::Permissions("s1".into(), vec![asked("per_1")]));
-    let _ = ws.apply(&EventKind::PermissionAsked(asked("per_2")), NOW_MS);
-    let _ = ws.apply(&EventKind::PermissionAsked(asked("per_2")), NOW_MS);
+    let _ = ws.apply(
+        &EventKind::PermissionAsked(Box::new(asked("per_2"))),
+        NOW_MS,
+    );
+    let _ = ws.apply(
+        &EventKind::PermissionAsked(Box::new(asked("per_2"))),
+        NOW_MS,
+    );
     let ids = |ws: &Workspace| -> Vec<String> {
         ws.permissions("s1").iter().map(|p| p.id.clone()).collect()
     };
@@ -474,7 +481,10 @@ fn a_reconnect_replaces_what_waits_for_the_user() {
     let mut ws = Workspace::new(Vec::new());
     ws.resync(snapshot());
     // Asked before the connection dropped, then answered elsewhere.
-    let _ = ws.apply(&EventKind::PermissionAsked(asked("per_old")), NOW_MS);
+    let _ = ws.apply(
+        &EventKind::PermissionAsked(Box::new(asked("per_old"))),
+        NOW_MS,
+    );
     let _ = ws.apply(&EventKind::FormCreated(question("frm_old", "s1")), NOW_MS);
     // While away, s3 asked for approval and s4 asked a question.
     let away = Snapshot {
@@ -549,7 +559,7 @@ fn children_load_with_their_parent_and_flag_it_when_they_ask() {
     // A child asking for approval makes its parent's row ask too.
     let mut waiting = asked("per_child");
     waiting.session_id = "later".into();
-    let _ = ws.apply(&EventKind::PermissionAsked(waiting), NOW_MS);
+    let _ = ws.apply(&EventKind::PermissionAsked(Box::new(waiting)), NOW_MS);
     let app = ws
         .sidebar(now())
         .into_iter()

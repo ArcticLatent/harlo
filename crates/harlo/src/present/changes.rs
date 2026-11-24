@@ -267,7 +267,6 @@ impl<'a> Builder<'a> {
             } else {
                 icon.glyph.to_string().into()
             };
-            row.icon_color = icon.slint_color();
             row.added = count(file.additions);
             row.removed = count(file.deletions);
             row.counts = !deleted;

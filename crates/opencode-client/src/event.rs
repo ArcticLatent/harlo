@@ -161,8 +161,8 @@ pub enum Kind {
         /// Every token so far.
         tokens: Tokens,
     },
-    /// An action needs approval.
-    PermissionAsked(Permission),
+    /// An action needs approval; boxed, as it's the largest kind.
+    PermissionAsked(Box<Permission>),
     /// An approval was answered, here or by another client.
     PermissionReplied {
         session_id: String,
@@ -545,7 +545,9 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
                 tokens: d.tokens.into(),
             }
         }
-        "permission.asked" => Kind::PermissionAsked(from::<g::PermissionAskedData>(data)?.into()),
+        "permission.asked" => {
+            Kind::PermissionAsked(Box::new(from::<g::PermissionAskedData>(data)?.into()))
+        }
         "permission.replied" => {
             let d: g::PermissionRepliedData = from(data)?;
             Kind::PermissionReplied {

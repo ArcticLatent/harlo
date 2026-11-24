@@ -602,6 +602,16 @@ component RowView inherits Rectangle {
             font-size: Size.label;
             color: Theme.text-weak;
         }
+        // Under the call's name, past its marker, and wrapped in full.
+        if root.item.shape == Shape.reason: HorizontalLayout {
+            padding-left: 23px;
+            Text {
+                text: root.item.label;
+                wrap: word-wrap;
+                font-size: Size.small;
+                color: Theme.text-weak;
+            }
+        }
         if root.item.shape == Shape.prompt: PromptRow {
             item: root.item;
         }

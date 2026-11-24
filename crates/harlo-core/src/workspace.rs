@@ -264,7 +264,7 @@ impl Workspace {
             EventKind::PermissionAsked(asked) => add(
                 &mut self.permissions,
                 asked.session_id.clone(),
-                asked.clone(),
+                Permission::clone(asked),
                 |p| &p.id,
             ),
             EventKind::PermissionReplied {

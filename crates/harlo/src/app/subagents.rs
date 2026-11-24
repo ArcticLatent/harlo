@@ -36,6 +36,13 @@ impl App {
                 .and_then(|s| s.agent.clone()),
             ..Crew::default()
         };
+        crew.asking = self
+            .workspace
+            .permissions(session)
+            .iter()
+            .filter_map(|asked| asked.call.as_ref())
+            .map(|(message, call)| harlo_core::timeline::tool_key(message, call))
+            .collect();
         for child in self.workspace.children(session) {
             crew.children
                 .insert(child.id.clone(), self.child_state(&child.id));

@@ -10,11 +10,13 @@ mod support;
 
 use harlo::app::{Message, Sheet, SheetEvent};
 use harlo::timeline::Event as TimelineEvent;
+use harlo::ui::{Shape, State};
 use harlo_core::approvals::Shield;
 use harlo_core::server::{
     Answer, Choice, Delivery, Field, FieldKind, FileDiff, PermissionReply, Update,
 };
 use harlo_core::timeline::Entry;
+use harlo_core::workspace::ToolStatus;
 use harlo_core::workspace::{Event, EventKind, Fetched, Form, InboxItem, Permission, Revert};
 use i_slint_backend_testing::AccessibleRole;
 use serde_json::json;
@@ -316,6 +318,66 @@ fn a_failed_run_says_why_beside_continue() {
     );
 }
 
+/// A `bash` call's row in "pi update", as `status`, with `error` when it failed.
+fn bash_call(call: &str, status: ToolStatus, error: Option<&str>) -> Entry {
+    Entry::Tool {
+        key: harlo_core::timeline::tool_key("msg_a", call),
+        name: "bash".into(),
+        label: "Bash".into(),
+        detail: "cargo test".into(),
+        status,
+        took: None,
+        files: Vec::new(),
+        todos: None,
+        pictures: Vec::new(),
+        error: error.map(str::to_owned),
+    }
+}
+
+/// The timeline's one-line rows, each with whether its marker turns.
+fn line_rows(ui: &Ui) -> Vec<(String, bool)> {
+    let rows = ui.window.global::<State>().get_timeline();
+    (0..rows.row_count())
+        .filter_map(|i| rows.row_data(i))
+        .filter(|row| row.shape == Shape::Line)
+        .map(|row| (row.label.to_string(), row.working))
+        .collect()
+}
+
+#[test]
+fn a_failed_call_says_why_under_it() {
+    let ui = chatting();
+    ui.send(Message::History(
+        PI_UPDATE.into(),
+        Ok(vec![bash_call(
+            "call_1",
+            ToolStatus::Failed,
+            Some("cargo: command not found"),
+        )]),
+    ));
+    assert!(ui.shows("cargo: command not found"));
+}
+
+#[test]
+fn a_call_waiting_for_approval_holds_still() {
+    let ui = chatting();
+    busy(&ui);
+    ui.send(Message::History(
+        PI_UPDATE.into(),
+        Ok(vec![bash_call("call_1", ToolStatus::Running, None)]),
+    ));
+    assert_eq!(line_rows(&ui), [("Bash".to_owned(), true)]);
+    // OpenCode asks on the call's behalf: it hasn't started, so it doesn't turn.
+    ui.send(event(
+        EventKind::PermissionAsked(Box::new(Permission {
+            call: Some(("msg_a".into(), "call_1".into())),
+            ..approval("per_1", "shell", &["cargo test"])
+        })),
+        1.0,
+    ));
+    assert_eq!(line_rows(&ui), [("Bash".to_owned(), false)]);
+}
+
 fn approval(id: &str, action: &str, resources: &[&str]) -> Permission {
     Permission {
         id: id.into(),
@@ -325,6 +387,7 @@ fn approval(id: &str, action: &str, resources: &[&str]) -> Permission {
         save: vec!["cargo *".into()],
         message: None,
         files: Vec::new(),
+        call: None,
     }
 }
 
@@ -352,7 +415,7 @@ fn alt(ui: &Ui, key: char) {
 fn alt_a_and_alt_d_answer_the_approval_on_screen() {
     let ui = chatting();
     ui.send(event(
-        EventKind::PermissionAsked(approval("per_1", "shell", &["cargo test"])),
+        EventKind::PermissionAsked(Box::new(approval("per_1", "shell", &["cargo test"]))),
         1.0,
     ));
     assert!(ui.shows("Alt+A"), "the key shows on Allow once");
@@ -369,7 +432,7 @@ fn alt_a_and_alt_d_answer_the_approval_on_screen() {
     ui.send(Message::Answered(PI_UPDATE.into(), "per_1".into(), Ok(())));
 
     ui.send(event(
-        EventKind::PermissionAsked(approval("per_2", "shell", &["rm -rf build"])),
+        EventKind::PermissionAsked(Box::new(approval("per_2", "shell", &["rm -rf build"]))),
         2.0,
     ));
     // Under Settings, the card is out of sight: the keys leave it be.
@@ -396,7 +459,7 @@ fn alt_a_and_alt_d_answer_the_approval_on_screen() {
 fn an_approval_card_allows_or_refuses_and_goes_once_answered() {
     let ui = chatting();
     ui.send(event(
-        EventKind::PermissionAsked(approval("per_1", "shell", &["cargo test"])),
+        EventKind::PermissionAsked(Box::new(approval("per_1", "shell", &["cargo test"]))),
         1.0,
     ));
     assert!(ui.shows("Allow Build to run a command?"));
@@ -484,9 +547,9 @@ fn an_edit_approval_shows_the_change_and_how_many_wait() {
         }],
         ..approval("per_1", "edit", &["e.txt"])
     };
-    ui.send(event(EventKind::PermissionAsked(edit), 1.0));
+    ui.send(event(EventKind::PermissionAsked(Box::new(edit)), 1.0));
     ui.send(event(
-        EventKind::PermissionAsked(approval("per_2", "shell", &["ls"])),
+        EventKind::PermissionAsked(Box::new(approval("per_2", "shell", &["ls"]))),
         2.0,
     ));
     assert!(ui.shows("Allow Build to edit a file?"));

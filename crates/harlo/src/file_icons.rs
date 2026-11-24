@@ -1,7 +1,8 @@
 //! File-type icons: a glyph of the bundled "Harlo File Icons" font (cut
-//! from Nerd Fonts by `tools/file-icons.py`) in the type's colour.
+//! from Nerd Fonts by `tools/file-icons.py`), with the type's colour.
 //!
-//! [`icon`] picks the glyph and colour for a file name.
+//! [`icon`] picks the glyph and colour for a file name. The app draws the
+//! glyphs in its quiet icon tone, where colour stands for state.
 
 // Rust guideline compliant 2026-10-09
 
@@ -26,15 +27,6 @@ pub struct FileIcon {
     pub glyph: char,
     /// Its colour, as `0xrrggbb`.
     pub color: u32,
-}
-
-impl FileIcon {
-    /// The colour as Slint's.
-    #[must_use]
-    pub fn slint_color(self) -> slint::Color {
-        let [_, r, g, b] = self.color.to_be_bytes();
-        slint::Color::from_rgb_u8(r, g, b)
-    }
 }
 
 fn glyph(id: &str) -> Option<FileIcon> {
@@ -139,10 +131,11 @@ fn by_extension(ext: &str) -> Option<&'static str> {
         "scss" | "sass" => "sass",
         "styl" => "stylus",
         "json" | "jsonc" | "json5" | "jsonl" | "ndjson" | "geojson" | "webmanifest" => "json",
-        "yml" | "yaml" => "yaml",
         "xsl" | "xslt" | "xsd" | "plist" | "rss" | "atom" | "csproj" | "fsproj" | "vbproj"
         | "qrc" | "ui" => "xml",
-        "ini" | "cfg" | "conf" | "config" | "properties" | "desktop" => "settings",
+        // YAML too: its own glyph is an exclamation mark, which reads as a
+        // warning.
+        "ini" | "cfg" | "conf" | "config" | "properties" | "desktop" | "yml" | "yaml" => "settings",
         "service" | "socket" | "timer" | "mount" | "target" => "systemd",
         "env" => "tune",
         "sh" | "bash" | "zsh" | "fish" | "ksh" | "bat" | "cmd" | "nu" => "console",

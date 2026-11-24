@@ -78,7 +78,7 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
     let ui = schedules(&sandbox, &mut tasks);
-    assert!(ui.shows("No schedules yet."));
+    assert!(ui.shows("No schedules yet. Turn on Allow schedules to add one."));
     assert!(ui.find("New schedule").is_empty(), "not allowed yet");
 
     ui.find("Allow schedules")

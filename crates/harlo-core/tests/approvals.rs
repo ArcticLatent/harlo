@@ -66,6 +66,7 @@ fn approvals_say_what_the_agent_wants() {
         save: Vec::new(),
         message: None,
         files: Vec::new(),
+        call: None,
     };
     let said = describe(&asked("shell", &["cargo test"]));
     assert_eq!(
@@ -90,6 +91,7 @@ fn always_allow_says_what_it_covers_in_words() {
         save: save.iter().map(|p| (*p).to_owned()).collect(),
         message: None,
         files: Vec::new(),
+        call: None,
     };
     let cases = [
         (

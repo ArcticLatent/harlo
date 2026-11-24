@@ -17,6 +17,7 @@ use harlo_core::instructions::{File, Scope};
 use harlo_core::server::{Catalog, Model, SessionContext, Tokens, Update};
 use harlo_core::timeline::{Entry, Todo, TodoStatus};
 use harlo_core::workspace::{Event, EventKind, ModelRef, ToolStatus};
+use i_slint_backend_testing::AccessibleRole;
 use serde_json::json;
 use support::{Ui, demo, ui};
 
@@ -255,6 +256,7 @@ fn written(key: &str, todos: Vec<Todo>) -> Entry {
         files: Vec::new(),
         todos: Some(todos),
         pictures: Vec::new(),
+        error: None,
     }
 }
 
@@ -311,6 +313,31 @@ fn the_open_panel_follows_the_next_list() {
     }));
     assert!(ui.shows("2 of 2 done"));
     assert!(!ui.shows("Add tests"), "the old list's items went");
+}
+
+#[test]
+fn the_strip_leads_to_the_list_only_while_it_is_closed() {
+    let buttons = |ui: &Ui| {
+        ui.find("Todos")
+            .iter()
+            .filter(|e| e.accessible_role() == Some(AccessibleRole::Button))
+            .count()
+    };
+    let ui = open(
+        vec![written(
+            "a",
+            vec![
+                todo("Read the spec", TodoStatus::Completed),
+                todo("Write the parser", TodoStatus::Pending),
+            ],
+        )],
+        todo_tool(true),
+    );
+    // The rail's button and the strip's link.
+    assert_eq!(buttons(&ui), 2);
+    ui.open("Todos");
+    assert!(ui.shows("1 of 2 done"));
+    assert_eq!(buttons(&ui), 1, "the list is already beside the strip");
 }
 
 #[test]

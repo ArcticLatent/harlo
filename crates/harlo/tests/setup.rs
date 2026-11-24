@@ -97,8 +97,12 @@ fn the_name_and_email_on_commits_are_saved() {
     assert!(ui.shows("2.47.1"));
     assert!(ui.shows("Your name on commits"));
 
-    ui.fill("Name", "Ada Lovelace");
-    ui.press("Save Name");
+    ui.enter("Name", "Ada Lovelace");
+    // No button: the field says it saved, for a moment.
+    assert!(ui.find("Save Name").is_empty());
+    assert!(ui.shows("Saved"));
+    ui.wait(2_000);
+    assert!(!ui.shows("Saved"));
     let asked = ui.messages();
     assert!(
         asked.iter().any(|m| matches!(
@@ -127,6 +131,20 @@ fn the_name_and_email_on_commits_are_saved() {
         " Ada Lovelace ".to_owned(),
     )));
     assert!(ui.driver.take_tasks().is_empty(), "nothing to save");
+
+    // Leaving a field saves it too.
+    ui.focus("Email");
+    ui.fill("Email", "ada@example.invalid");
+    ui.focus("Name");
+    assert!(
+        ui.messages().iter().any(|m| matches!(
+            m,
+            Message::Sheet(SheetEvent::Text(Field::Identity(Identity::Email), email))
+                if email == "ada@example.invalid"
+        )),
+        "saved on leaving"
+    );
+    assert_eq!(ui.driver.take_tasks().len(), 1, "one save");
 
     // A failed save says why.
     ui.send(Message::Sheet(SheetEvent::IdentitySet(

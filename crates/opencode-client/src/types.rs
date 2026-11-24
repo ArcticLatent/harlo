@@ -702,6 +702,7 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
             g::SessionMessageAssistantContentItem::Reasoning(r) => Self::Reasoning(r.text),
             g::SessionMessageAssistantContentItem::Tool(t) => {
                 let mut pictures = Vec::new();
+                let mut error = None;
                 let (status, input, files, child) = match t.state {
                     g::SessionMessageAssistantToolState::Streaming(_) => {
                         (ToolStatus::Streaming, Value::Null, Vec::new(), None)
@@ -720,6 +721,7 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
                     }
                     g::SessionMessageAssistantToolState::Error(s) => {
                         pictures = Picture::from_tool(&s.content);
+                        error = Some(s.error.message);
                         (ToolStatus::Failed, Value::Object(s.input), Vec::new(), None)
                     }
                 };
@@ -733,6 +735,7 @@ impl From<g::SessionMessageAssistantContentItem> for Part {
                     files,
                     child,
                     pictures,
+                    error,
                 })
             }
         }
@@ -758,6 +761,8 @@ pub struct ToolCall {
     pub child: Option<String>,
     /// The pictures it returned, such as a picture it read.
     pub pictures: Vec<Picture>,
+    /// Why it failed, in the tool's words, when it did.
+    pub error: Option<String>,
 }
 
 /// Where a tool call is.
@@ -790,6 +795,13 @@ pub struct Permission {
     pub message: Option<String>,
     /// The changes an edit would make, one per file.
     pub files: Vec<FileDiff>,
+    /// The tool call that asks, as its message ID and call ID, when OpenCode says.
+    pub call: Option<(String, String)>,
+}
+
+/// The tool call a permission request came from, as message ID and call ID.
+fn asking_call(source: Option<g::PermissionSource>) -> Option<(String, String)> {
+    source.map(|g::PermissionSource::Tool { id, message_id }| (message_id, id))
 }
 
 /// The child session a finished `subagent` call started, from its metadata.
@@ -830,6 +842,7 @@ impl From<g::PermissionRequest> for Permission {
             resources: v.resources,
             save: v.save,
             message: v.message,
+            call: asking_call(v.source),
         }
     }
 }
@@ -844,6 +857,7 @@ impl From<g::PermissionAskedData> for Permission {
             resources: v.resources,
             save: v.save,
             message: v.message,
+            call: asking_call(v.source),
         }
     }
 }

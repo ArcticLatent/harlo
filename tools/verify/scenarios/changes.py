@@ -46,10 +46,11 @@ def run(h, s):
 
     s.step("the name set in Settings → Git")
     settings(h, "Git")
+    # Enter saves a field; leaving it would too.
     h.fill("Name", "Verify Person", where=lambda e: e.role == "TextInput")
-    h.click("Save Name")
+    h.key("Return")
     h.fill("Email", "verify@example.invalid", where=lambda e: e.role == "TextInput")
-    h.click("Save Email")
+    h.key("Return")
     h.until("the scratch git config", lambda: "Verify Person" in git(h, "config", "--global", "user.name"),
             timeout=10)
     h.shot("named")

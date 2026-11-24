@@ -9,7 +9,7 @@ use lucide_icons::Icon;
 use slint::SharedString;
 
 use super::glyph;
-use crate::app::App;
+use crate::app::{App, Panel};
 use crate::model::ChildState;
 use crate::theme::color;
 use crate::timeline::Activity;
@@ -97,7 +97,12 @@ pub fn inbox(app: &App, id: &str) -> Vec<InboxRow> {
             glyph_color: color(t.icon_base),
             strong: format!("{done} of {total}").into(),
             text: current.into(),
-            action: "Todos".into(),
+            // A way to the list, unless it's already open beside.
+            action: if app.panel_shown(Panel::Todos) {
+                SharedString::new()
+            } else {
+                "Todos".into()
+            },
             done: number(done),
             total: number(total),
             ..InboxRow::default()

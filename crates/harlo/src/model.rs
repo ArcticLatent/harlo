@@ -4,7 +4,7 @@
 
 // Rust guideline compliant 2026-10-09
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::app::SettingChoice;
 use std::fmt;
@@ -561,7 +561,8 @@ pub struct CrewAgent {
     pub color: Option<Rgba>,
 }
 
-/// What the timeline knows of a session's subagents.
+/// What the timeline knows of a session's agents: its subagents, and the
+/// calls waiting for the user.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Crew {
     /// How each child session stands, by its ID.
@@ -574,6 +575,8 @@ pub struct Crew {
     /// For a subagent's session, the name of the agent that handed it its
     /// work, which its first prompt is from.
     pub asked_by: Option<String>,
+    /// The tool calls waiting for the user's approval, by row key.
+    pub asking: HashSet<String>,
 }
 
 impl Crew {

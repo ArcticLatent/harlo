@@ -425,6 +425,7 @@ fn an_edit_opens_its_turn_on_the_hunk_it_changed() {
             files: vec![edit],
             todos: None,
             pictures: Vec::new(),
+            error: None,
         },
     ];
     ui.send(Message::History(PI_UPDATE.into(), Ok(history)));

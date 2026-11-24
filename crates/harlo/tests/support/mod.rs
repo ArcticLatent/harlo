@@ -128,6 +128,44 @@ impl Ui {
         field.set_accessible_value(text);
     }
 
+    /// Clicks into the field labelled `label`, giving it the focus.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there's no such field.
+    pub fn focus(&self, label: &str) {
+        let field = self
+            .find(label)
+            .into_iter()
+            .find(|e| e.accessible_role() == Some(AccessibleRole::TextInput))
+            .unwrap_or_else(|| panic!("no field labelled {label:?}"));
+        let at = field.absolute_position();
+        let size = field.size();
+        let position = LogicalPosition::new(at.x + size.width / 2.0, at.y + size.height / 2.0);
+        let window = self.window.window();
+        let button = PointerEventButton::Left;
+        window.dispatch_event(WindowEvent::PointerPressed { position, button });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button });
+    }
+
+    /// Types `text` into the field labelled `label`, replacing what's there,
+    /// then presses Enter in it, as a person saving it would.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there's no such field.
+    pub fn enter(&self, label: &str, text: &str) {
+        // A click into it gives it the focus that Enter goes to.
+        self.focus(label);
+        self.fill(label, text);
+        let window = self.window.window();
+        let enter = slint::SharedString::from(slint::platform::Key::Return);
+        window.dispatch_event(WindowEvent::KeyPressed {
+            text: enter.clone(),
+        });
+        window.dispatch_event(WindowEvent::KeyReleased { text: enter });
+    }
+
     /// Drags the element labelled `label` by `by` with the left button, from
     /// its middle, and lets go.
     ///

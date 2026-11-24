@@ -43,7 +43,8 @@ component Entry inherits Press {
         }
         if !root.entry.directory && root.entry.icon != "": FileIcon {
             text: root.entry.icon;
-            color: root.entry.icon-color;
+            // The type's shape in the quiet tone: colour means state here.
+            color: Theme.icon-quiet;
             opacity: root.entry.ignored ? 0.5 : 1;
         }
         Text {

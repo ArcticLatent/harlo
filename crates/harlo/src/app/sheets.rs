@@ -528,6 +528,8 @@ pub enum Event {
     SystemFonts(harlo_core::fonts::SystemFonts),
     /// Show the colour themes' licence on About, or hide it.
     ThemeLicence,
+    /// Show the names a notification template fills in, or hide them.
+    TemplateWords,
     /// Use this font family for the interface, or for code when `code`;
     /// empty for Harlo's own.
     Font {
@@ -631,6 +633,8 @@ pub struct Sheets {
     pub plugins: super::Plugins,
     /// Whether About shows the colour themes' licence.
     pub theme_licence: bool,
+    /// Whether Notifications lists the names its templates fill in.
+    pub template_words: bool,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -723,7 +727,10 @@ impl App {
             },
             Event::Theme(id) => return self.pick_theme(id),
             Event::DefaultModel(model) => return self.set_default_model(&model),
-            event @ (Event::SystemFonts(_) | Event::Font { .. } | Event::ThemeLicence) => {
+            event @ (Event::SystemFonts(_)
+            | Event::Font { .. }
+            | Event::ThemeLicence
+            | Event::TemplateWords) => {
                 return self.look_event(event);
             }
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
@@ -785,11 +792,15 @@ impl App {
     }
 
     /// Keeps the computer's font families once read, takes a chosen font,
-    /// or shows or hides the colour themes' licence.
+    /// or shows or hides the colour themes' licence or the template names.
     fn look_event(&mut self, event: Event) -> Task<Message> {
         match event {
             Event::ThemeLicence => {
                 self.sheets.theme_licence = !self.sheets.theme_licence;
+                Task::none()
+            }
+            Event::TemplateWords => {
+                self.sheets.template_words = !self.sheets.template_words;
                 Task::none()
             }
             Event::SystemFonts(fonts) => {

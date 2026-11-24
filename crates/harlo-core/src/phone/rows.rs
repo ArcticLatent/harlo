@@ -165,6 +165,7 @@ pub fn row(entry: &Entry) -> Value {
             status,
             took,
             files,
+            error,
             ..
         } => {
             let diff: String = files
@@ -175,7 +176,9 @@ pub fn row(entry: &Entry) -> Value {
             let (added, removed) = files
                 .iter()
                 .fold((0, 0), |(a, r), f| (a + f.additions, r + f.deletions));
-            let result = if files.is_empty() {
+            let result = if let Some(why) = error {
+                why.clone()
+            } else if files.is_empty() {
                 String::new()
             } else {
                 format!("+{added} −{removed}")
