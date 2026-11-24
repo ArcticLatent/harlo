@@ -34,6 +34,10 @@ pub struct ShellRun {
     pub exit: Option<i32>,
     /// What it printed.
     pub output: ShellOutput,
+    /// More about it: `background` for a person's command, run outside
+    /// any turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// When a command started and ended.

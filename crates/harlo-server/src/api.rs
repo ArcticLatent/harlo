@@ -477,7 +477,15 @@ async fn sessions(State(server): Shared, Query(q): Params) -> Answer {
 
 #[derive(Deserialize)]
 struct NewSession {
-    location: NewLocation,
+    /// Where; without it, the folder the request names, else the server's.
+    #[serde(default)]
+    location: Option<NewLocation>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    model: Option<harlo_engine::ModelRef>,
 }
 
 #[derive(Deserialize)]
@@ -485,9 +493,32 @@ struct NewLocation {
     directory: String,
 }
 
-async fn create_session(State(server): Shared, axum::Json(body): axum::Json<NewSession>) -> Answer {
-    let session = server.create_session(&body.location.directory).await?;
-    ok(json!({ "data": session }))
+async fn create_session(
+    State(server): Shared,
+    Query(q): Params,
+    axum::Json(body): axum::Json<NewSession>,
+) -> Answer {
+    let directory = match body.location {
+        Some(l) => l.directory,
+        None => match q.get("location[directory]").or_else(|| q.get("directory")) {
+            Some(d) => d.clone(),
+            None => std::env::current_dir()
+                .map_err(|e| Refusal::Bad(format!("No folder for the session: {e}")))?
+                .to_string_lossy()
+                .into_owned(),
+        },
+    };
+    let session = server.create_session(&directory).await?;
+    if body.title.is_some() {
+        server.update_session(&session.id, None, body.title)?;
+    }
+    if let Some(agent) = body.agent {
+        server.set_agent(&session.id, &agent)?;
+    }
+    if let Some(model) = body.model {
+        server.set_model(&session.id, model)?;
+    }
+    ok(json!({ "data": server.session(&session.id)? }))
 }
 
 async fn active(State(server): Shared) -> Answer {

@@ -185,3 +185,26 @@ async fn a_reconnecting_client_gets_the_events_it_missed_once_and_in_order() {
     let rest = replay(&sandbox, seqs[2]).await;
     assert_eq!(rest, all[3..]);
 }
+
+#[tokio::test]
+async fn a_session_made_without_a_location_takes_the_requests_folder() {
+    let sandbox = Sandbox::start().await;
+    let project = sandbox.project();
+    let folder = project.to_str().expect("utf-8");
+    let made: serde_json::Value = reqwest::Client::new()
+        .post(format!("{}/api/session", sandbox.url()))
+        .query(&[("directory", folder)])
+        .basic_auth("opencode", Some(&sandbox.password))
+        .json(&serde_json::json!({ "title": "Named", "agent": "plan" }))
+        .send()
+        .await
+        .expect("made")
+        .json()
+        .await
+        .expect("JSON");
+    let id = made["data"]["id"].as_str().expect("an ID");
+    let session = sandbox.client().session(id).await.expect("the session");
+    assert_eq!(session.directory, folder);
+    assert_eq!(session.title.as_deref(), Some("Named"));
+    assert_eq!(session.agent.as_deref(), Some("plan"));
+}

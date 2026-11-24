@@ -73,6 +73,33 @@ async fn a_shell_command_runs_with_no_model_and_joins_the_conversation() {
     // Its output waits for the agent's next turn; it starts none itself.
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     assert_eq!(sandbox.model_requests(), 0);
+
+    // The next prompt brings it: in the same request, just before it.
+    client
+        .prompt(id, &Prompt::new("say seen it", Delivery::Queue))
+        .await
+        .expect("prompt");
+    support::wait_idle(&client, id).await;
+    let log = std::fs::read_to_string(sandbox.root().join("model.jsonl")).expect("the log");
+    let turn = log
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|r| r["body"].to_string().contains("say seen it") && r["body"]["tools"].is_array())
+        .expect("the turn's request");
+    let users: Vec<String> = turn["body"]["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| m["role"] == "user")
+        .map(|m| m["content"].to_string())
+        .collect();
+    assert_eq!(users.len(), 2, "{users:#?}");
+    assert!(
+        users[0].contains("executed by the user") && users[0].contains("hello"),
+        "{}",
+        users[0]
+    );
+    assert!(users[1].contains("say seen it"), "{}", users[1]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

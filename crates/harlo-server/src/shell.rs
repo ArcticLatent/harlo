@@ -241,6 +241,7 @@ impl Server {
             status: status.to_owned(),
             exit,
             output: output.clone(),
+            metadata: Some(json!({ "background": true })),
         };
         self.store.put_message(id, &Message::Shell(Box::new(run)))?;
         let text = format!(
