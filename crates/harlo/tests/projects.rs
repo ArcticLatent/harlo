@@ -226,3 +226,32 @@ fn an_icon_image_is_kept_small() {
     let refused = harlo::app::icon_url(&text).expect_err("not a picture");
     assert!(refused.starts_with("That isn't an image"), "{refused}");
 }
+
+#[test]
+fn sessions_without_a_project_are_other_sessions_not_a_project() {
+    // The mockup's sessions run in the home folder, as one started without
+    // a project does.
+    let mut app = demo::new_app();
+    demo::HOME.clone_into(&mut app.home);
+    let _ = app.update(Message::Tick(demo::now()));
+    let _ = app.update(demo::connected(demo::snapshot()));
+    let ui = ui(app);
+    assert!(ui.shows("Other sessions"));
+    assert!(ui.shows("hi how are you"), "its newest session");
+    assert!(
+        !ui.shows("Settings for Other sessions"),
+        "it has no settings"
+    );
+
+    // Its + starts a session there, without a project.
+    ui.press("New session without a project");
+    assert_eq!(ui.app().new_folder.as_deref(), Some(demo::HOME));
+
+    // Settings → Projects lists only real projects; the sidebar behind it
+    // still has the group.
+    let in_sidebar = ui.find("Other sessions").len();
+    ui.press("Settings for harlo");
+    ui.press("All projects");
+    assert!(ui.shows("Choose a project to change its settings."));
+    assert_eq!(ui.find("Other sessions").len(), in_sidebar);
+}

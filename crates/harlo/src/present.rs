@@ -626,6 +626,7 @@ fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
                 .unwrap_or_default(),
             colored: project.color.is_some(),
             picture: marks.image(project.icon.as_deref()),
+            other: project.other,
             ..SidebarRow::default()
         });
         let mut listed: Vec<Listed<'_>> = project

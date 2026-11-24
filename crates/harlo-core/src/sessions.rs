@@ -22,6 +22,9 @@ pub struct Project {
     pub sessions: Vec<SessionSummary>,
     /// The project's worktrees, each with its sessions.
     pub worktrees: Vec<Worktree>,
+    /// Whether it's the group of sessions started without a project rather
+    /// than a project: it has no settings and can't be hidden.
+    pub other: bool,
 }
 
 /// A worktree: another checkout of a project, in a folder of its own.

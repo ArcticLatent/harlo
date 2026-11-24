@@ -638,3 +638,35 @@ fn a_hidden_project_stays_hidden_until_added_again() {
     assert!(ws.hidden().is_empty());
     assert!(ws.order().iter().any(|d| d == "/code/web"));
 }
+
+#[test]
+fn sessions_started_without_a_project_are_listed_last_as_other_sessions() {
+    let mut data = snapshot();
+    data.projects.push(Project {
+        git: false,
+        ..project("p_home", "/home/me")
+    });
+    data.sessions
+        .push(session("loose", "p_home", "/home/me", 0.2));
+    data.sessions
+        .push(session("older", "p_home", "/home/me", 3.0));
+    // A layout from before lists and hides the home folder as a project.
+    let mut ws = Workspace::new(vec!["/home/me".into(), "/code/idle".into()]);
+    ws.set_hidden(vec!["/home/me".into()]);
+    ws.resync(data);
+    ws.set_other_folder(Some("/home/me".into()));
+    let sidebar = ws.sidebar(now());
+
+    let names: Vec<&str> = sidebar.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["idle", "web", "app", "Other sessions"]);
+    let other = sidebar.last().expect("the group");
+    assert!(other.other && !sidebar[..3].iter().any(|p| p.other));
+    assert_eq!(other.directory, "/home/me");
+    assert_eq!(ids(&other.sessions), ["loose", "older"], "newest first");
+
+    // Without such sessions there's no group.
+    let mut ws = Workspace::new(Vec::new());
+    ws.resync(snapshot());
+    ws.set_other_folder(Some("/home/me".into()));
+    assert!(ws.sidebar(now()).iter().all(|p| !p.other));
+}

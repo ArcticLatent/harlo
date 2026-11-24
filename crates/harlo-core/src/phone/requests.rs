@@ -29,7 +29,12 @@ pub fn permission(p: &Permission) -> Value {
         title.push('\n');
         title.push_str(resource);
     }
-    let message = p.message.clone().unwrap_or_else(|| p.resources.join("\n"));
+    // What it acts on (the command, the files) first; why it asks under it.
+    let message = match (p.resources.join("\n"), &p.message) {
+        (acts_on, Some(why)) if !acts_on.is_empty() => format!("{acts_on}\n\n{why}"),
+        (_, Some(why)) => why.clone(),
+        (acts_on, None) => acts_on,
+    };
     let mut options = vec![ALLOW_ONCE];
     if !p.save.is_empty() {
         options.push(ALLOW_ALWAYS);
@@ -215,4 +220,35 @@ pub fn form_answers(form: &Form, answer: &Value) -> Option<Vec<(String, Answer)>
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn asking(resources: &[&str], message: Option<&str>) -> Permission {
+        Permission {
+            id: "per_1".into(),
+            session_id: "ses_1".into(),
+            action: "shell".into(),
+            resources: resources.iter().map(|&r| r.to_owned()).collect(),
+            save: vec!["git *".into()],
+            message: message.map(str::to_owned),
+            files: Vec::new(),
+            call: None,
+        }
+    }
+
+    #[test]
+    fn an_approval_shows_what_it_runs_before_why_it_asks() {
+        let why = "Asks because the session rule \"shell *\" says ask.";
+        let request = permission(&asking(&["git clean -fdx"], Some(why)));
+        assert_eq!(request["message"], format!("git clean -fdx\n\n{why}"));
+        assert_eq!(request["options"], json!([ALLOW_ONCE, ALLOW_ALWAYS, DENY]));
+
+        let request = permission(&asking(&["git clean -fdx"], None));
+        assert_eq!(request["message"], "git clean -fdx");
+        let request = permission(&asking(&[], Some(why)));
+        assert_eq!(request["message"], why);
+    }
 }

@@ -210,7 +210,8 @@ fn hunk_start(header: &str) -> (u64, u64) {
     (number('-'), number('+'))
 }
 
-/// The session folder's files matching `query`, best first.
+/// The session folder's files matching `query`, best first; folders are left
+/// out, as the phone mentions and opens files.
 async fn files(server: &Server, key: &str, query: &str) -> Value {
     let directory = match folder(server, key) {
         Ok(d) => d,
@@ -218,7 +219,11 @@ async fn files(server: &Server, key: &str, query: &str) -> Value {
     };
     match server.client.find_files(&directory, query, MAX_FILES).await {
         Ok(found) => {
-            let paths: Vec<String> = found.into_iter().map(|f| f.path).collect();
+            let paths: Vec<String> = found
+                .into_iter()
+                .filter(|f| !f.directory)
+                .map(|f| f.path)
+                .collect();
             json!({ "files": paths })
         }
         Err(e) => error(e.to_string()),

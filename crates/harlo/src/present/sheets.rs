@@ -1590,7 +1590,7 @@ fn project_list(app: &App, marks: &Marks) -> Vec<SheetRow> {
     let removed = note(&format!(
         "{hidden} removed from the sidebar; + Project with its folder brings one back."
     ));
-    if app.projects.is_empty() {
+    if app.projects.iter().all(|p| p.other) {
         let mut rows = vec![note(
             "No projects yet. Add a folder with + Project in the sidebar.",
         )];
@@ -1600,7 +1600,9 @@ fn project_list(app: &App, marks: &Marks) -> Vec<SheetRow> {
         return rows;
     }
     let mut rows = vec![note("Choose a project to change its settings.")];
-    for (index, project) in app.projects.iter().enumerate() {
+    // The group of sessions without a project isn't one; indexes stay
+    // those of the sidebar's list.
+    for (index, project) in app.projects.iter().enumerate().filter(|(_, p)| !p.other) {
         rows.push(SheetRow {
             kind: PROJECT,
             name: project.name.as_str().into(),

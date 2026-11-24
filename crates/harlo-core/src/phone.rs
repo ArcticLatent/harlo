@@ -591,6 +591,9 @@ async fn follow(hub: Arc<Hub>, location: Location) {
             Update::Connected(connected) => {
                 let mut workspace = Workspace::new(Vec::new());
                 workspace.set_hidden(hub.hidden().to_vec());
+                // As on the desktop: sessions started without a project.
+                workspace
+                    .set_other_folder(dirs::home_dir().map(|h| h.to_string_lossy().into_owned()));
                 workspace.resync(connected.snapshot.clone());
                 hub.server.send_replace(Some(Arc::new(Server {
                     client: connected.client.clone(),

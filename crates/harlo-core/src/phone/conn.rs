@@ -262,6 +262,15 @@ fn projects(server: &Server) -> Vec<crate::sessions::Project> {
     lock(&server.workspace).sidebar(SystemTime::now())
 }
 
+/// The projects a new session can start in: the sidebar's, without the
+/// group of sessions started without one (the phone offers the home
+/// folder for that).
+fn real_projects(server: &Server) -> Vec<crate::sessions::Project> {
+    let mut projects = projects(server);
+    projects.retain(|p| !p.other);
+    projects
+}
+
 /// Every session as the phone's list shows it (the phone's `SessionSummary`).
 fn summaries(hub: &Hub, server: &Server) -> Vec<Value> {
     let projects = projects(server);
@@ -836,7 +845,7 @@ async fn send(server: &Server, key: &str, m: &Value) -> Result<(), String> {
 async fn start(server: &Server, m: &Value) -> Result<String, String> {
     let index = m["project"].as_i64().unwrap_or(-1);
     let directory = match usize::try_from(index) {
-        Ok(i) => projects(server)
+        Ok(i) => real_projects(server)
             .get(i)
             .map(|p| p.directory.clone())
             .ok_or_else(|| "That project is gone.".to_owned())?,
@@ -881,7 +890,7 @@ fn folder_of(server: &Server, key: &str) -> Option<String> {
 
 /// What a new session can be: the projects, agents and models.
 async fn choices(server: &Server) -> Value {
-    let projects = projects(server);
+    let projects = real_projects(server);
     let first = projects.first().map(|p| p.directory.clone()).or_else(|| {
         server
             .local

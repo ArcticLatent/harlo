@@ -162,6 +162,9 @@ pub fn layout() -> Layout {
 /// test's server. Their own test turns them on with a scratch home.
 pub fn new_app() -> App {
     let mut app = App::new(Location::Local, vec![Location::Local], layout());
+    // Not the mockup's home folder, whatever `HOME` the test runs with:
+    // its sessions stay a project.
+    "/home/demo".clone_into(&mut app.home);
     app.preferences.own_tools = false;
     // Never the real speech models' folder.
     app.voice.models = None;

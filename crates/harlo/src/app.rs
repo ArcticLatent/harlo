@@ -1456,6 +1456,8 @@ impl App {
 
     /// Rebuilds the sidebar from the workspace.
     fn refresh(&mut self) {
+        // A session started without a project runs in the home folder.
+        self.workspace.set_other_folder(Some(self.home.clone()));
         self.projects = self.workspace.sidebar(self.now);
     }
 
@@ -2284,7 +2286,7 @@ impl App {
             directory: None,
             label: "Home folder".to_owned(),
         }];
-        for project in &self.projects {
+        for project in self.projects.iter().filter(|p| !p.other) {
             list.push(Folder {
                 directory: Some(project.directory.clone()),
                 label: project.name.clone(),

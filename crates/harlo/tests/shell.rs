@@ -15,7 +15,6 @@ use harlo_core::approvals::Shield;
 use harlo_core::layout::Layout;
 use harlo_core::server::{Location, Update};
 use harlo_core::workspace::{Event as ServerEvent, EventKind, Snapshot};
-use slint::Model as _;
 use support::{demo, ui};
 
 #[test]
@@ -242,82 +241,6 @@ fn clicking_a_session_opens_it() {
             .iter()
             .any(|e| e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Tab))
     );
-}
-
-#[test]
-fn worktree_sessions_sit_with_the_projects_marked_with_the_worktree() {
-    let mut snapshot = demo::snapshot();
-    let worktree = "/home/burce/.worktrees/feature-x";
-    snapshot
-        .worktrees
-        .insert("p_home".into(), vec![demo::HOME.into(), worktree.into()]);
-    snapshot.sessions[0].directory = worktree.into();
-    snapshot.sessions[0].title = Some("Working in the worktree".into());
-    let id = snapshot.sessions[0].id.clone();
-    let app = App::new(Location::Local, vec![Location::Local], demo::layout());
-    let ui = ui(app);
-    ui.send(Message::Tick(demo::now()));
-    ui.send(demo::connected(snapshot));
-    assert!(ui.shows("Working in the worktree"));
-
-    // No heading row for the worktree: its session is among the project's,
-    // with a mark naming the worktree, and its branch once read.
-    let state = slint::ComponentHandle::global::<harlo::ui::State>(&ui.window);
-    let marked = || {
-        let rows = state.get_sidebar_rows();
-        (0..rows.row_count())
-            .filter_map(|i| rows.row_data(i))
-            .filter(|row| !row.worktree.is_empty())
-            .map(|row| {
-                (
-                    row.title.to_string(),
-                    row.worktree.to_string(),
-                    row.branch.to_string(),
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        marked(),
-        [(
-            "Working in the worktree".into(),
-            "feature-x".into(),
-            String::new()
-        )]
-    );
-    assert!(ui.shows("Worktree feature-x"), "the mark's name");
-    ui.send(Message::Branch(
-        worktree.into(),
-        Some("helper-temperature".into()),
-    ));
-    assert_eq!(marked()[0].2, "helper-temperature");
-    assert!(ui.shows("Worktree feature-x · branch helper-temperature"));
-    // The server says when the branch there changes.
-    ui.send(Message::Server(Update::Event(ServerEvent {
-        id: "evt".into(),
-        seq: None,
-        time: 1.0,
-        kind: EventKind::BranchChanged {
-            directory: worktree.into(),
-            branch: Some("helper-humidity".into()),
-        },
-    })));
-    assert_eq!(marked()[0].2, "helper-humidity");
-    ui.send(Message::Branch(
-        worktree.into(),
-        Some("helper-temperature".into()),
-    ));
-
-    // The header says where it runs.
-    ui.send(Message::OpenSession(id));
-    assert_eq!(state.get_session_worktree(), "feature-x");
-    assert!(ui.shows("In worktree feature-x"));
-    assert!(ui.shows("On branch helper-temperature"));
-
-    // The filter finds it like any other.
-    ui.send(Message::Filter("worktree".into()));
-    assert!(ui.shows("Working in the worktree"));
-    assert!(!ui.shows("hi how are you"));
 }
 
 #[test]

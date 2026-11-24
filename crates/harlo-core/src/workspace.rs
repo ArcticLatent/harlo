@@ -19,6 +19,9 @@ pub use harlo_client::{
 
 use crate::sessions::{Project, SessionSummary, Worktree, folder_name};
 
+/// The name of the sidebar's group of sessions started without a project.
+pub const OTHER_SESSIONS: &str = "Other sessions";
+
 /// Everything the sidebar needs, loaded in one go after connecting.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
@@ -91,6 +94,9 @@ pub struct Workspace {
     order: Vec<String>,
     /// Project folders removed from the sidebar, which stay away.
     hidden: Vec<String>,
+    /// The folder sessions started without a project run in, usually the
+    /// home folder: its sessions are listed apart, as Other sessions.
+    other: Option<String>,
 }
 
 impl Workspace {
@@ -386,6 +392,19 @@ impl Workspace {
         }
     }
 
+    /// Sets the folder sessions started without a project run in: they're
+    /// listed last as Other sessions, never as a project or hidden.
+    pub fn set_other_folder(&mut self, folder: Option<String>) {
+        if self.other == folder {
+            return;
+        }
+        if let Some(folder) = &folder {
+            self.order.retain(|d| d != folder);
+        }
+        self.other = folder;
+        self.adopt_projects();
+    }
+
     /// Sets the project folders kept out of the sidebar, as saved.
     pub fn set_hidden(&mut self, hidden: Vec<String>) {
         self.order.retain(|d| !hidden.contains(d));
@@ -525,62 +544,87 @@ impl Workspace {
             .collect();
         sessions.sort_by(|a, b| b.updated.total_cmp(&a.updated).then(a.id.cmp(&b.id)));
 
-        self.order
-            .iter()
-            .map(|directory| {
-                let server = by_directory.get(directory.as_str()).copied();
-                let mut project = Project {
-                    directory: directory.clone(),
-                    name: server
-                        .and_then(|p| p.name.clone())
-                        .unwrap_or_else(|| folder_name(directory).to_owned()),
-                    color: server.and_then(|p| p.color.clone()),
-                    icon: server.and_then(|p| p.icon.clone()),
-                    sessions: Vec::new(),
-                    worktrees: Vec::new(),
-                };
-                let Some(server) = server else {
-                    return project;
-                };
-                let folders = self.worktrees.get(&server.id);
-                for folder in folders.into_iter().flatten() {
-                    if folder != directory {
-                        project.worktrees.push(Worktree {
-                            directory: folder.clone(),
-                            name: folder_name(folder).to_owned(),
-                            sessions: Vec::new(),
-                        });
-                    }
-                }
-                for session in sessions.iter().filter(|s| s.project_id == server.id) {
-                    let row = self.summary(session, now_ms);
-                    let dir = session.directory.as_str();
-                    // Worktrees first: one may sit inside the main folder.
-                    let worktree = project
-                        .worktrees
-                        .iter()
-                        .position(|w| dir == w.directory || inside(dir, &w.directory));
-                    let index = match worktree {
-                        Some(index) => index,
-                        None if dir == directory || inside(dir, directory) => {
-                            project.sessions.push(row);
-                            continue;
-                        }
-                        None => {
-                            // A worktree the server no longer lists: still show its sessions.
+        let other = self.other.as_deref();
+        let mut projects: Vec<Project> =
+            self.order
+                .iter()
+                .filter(|directory| Some(directory.as_str()) != other)
+                .map(|directory| {
+                    let server = by_directory.get(directory.as_str()).copied();
+                    let mut project = Project {
+                        directory: directory.clone(),
+                        name: server
+                            .and_then(|p| p.name.clone())
+                            .unwrap_or_else(|| folder_name(directory).to_owned()),
+                        color: server.and_then(|p| p.color.clone()),
+                        icon: server.and_then(|p| p.icon.clone()),
+                        sessions: Vec::new(),
+                        worktrees: Vec::new(),
+                        other: false,
+                    };
+                    let Some(server) = server else {
+                        return project;
+                    };
+                    let folders = self.worktrees.get(&server.id);
+                    for folder in folders.into_iter().flatten() {
+                        if folder != directory {
                             project.worktrees.push(Worktree {
-                                directory: dir.to_owned(),
-                                name: folder_name(dir).to_owned(),
+                                directory: folder.clone(),
+                                name: folder_name(folder).to_owned(),
                                 sessions: Vec::new(),
                             });
-                            project.worktrees.len() - 1
                         }
-                    };
-                    project.worktrees[index].sessions.push(row);
-                }
-                project
-            })
-            .collect()
+                    }
+                    for session in sessions.iter().filter(|s| {
+                        s.project_id == server.id && Some(s.directory.as_str()) != other
+                    }) {
+                        let row = self.summary(session, now_ms);
+                        let dir = session.directory.as_str();
+                        // Worktrees first: one may sit inside the main folder.
+                        let worktree = project
+                            .worktrees
+                            .iter()
+                            .position(|w| dir == w.directory || inside(dir, &w.directory));
+                        let index = match worktree {
+                            Some(index) => index,
+                            None if dir == directory || inside(dir, directory) => {
+                                project.sessions.push(row);
+                                continue;
+                            }
+                            None => {
+                                // A worktree the server no longer lists: still show its sessions.
+                                project.worktrees.push(Worktree {
+                                    directory: dir.to_owned(),
+                                    name: folder_name(dir).to_owned(),
+                                    sessions: Vec::new(),
+                                });
+                                project.worktrees.len() - 1
+                            }
+                        };
+                        project.worktrees[index].sessions.push(row);
+                    }
+                    project
+                })
+                .collect();
+        if let Some(folder) = other {
+            let loose: Vec<SessionSummary> = sessions
+                .iter()
+                .filter(|s| s.directory == folder)
+                .map(|s| self.summary(s, now_ms))
+                .collect();
+            if !loose.is_empty() {
+                projects.push(Project {
+                    directory: folder.to_owned(),
+                    name: OTHER_SESSIONS.to_owned(),
+                    color: None,
+                    icon: None,
+                    sessions: loose,
+                    worktrees: Vec::new(),
+                    other: true,
+                });
+            }
+        }
+        projects
     }
 
     fn summary(&self, session: &Session, now_ms: f64) -> SessionSummary {
@@ -623,6 +667,7 @@ impl Workspace {
         }
         let mut missing: Vec<(&str, f64)> = newest
             .into_iter()
+            .filter(|(dir, _)| Some(*dir) != self.other.as_deref())
             .filter(|(dir, _)| !self.order.iter().chain(&self.hidden).any(|d| d == dir))
             .collect();
         missing.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));

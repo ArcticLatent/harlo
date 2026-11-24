@@ -105,10 +105,18 @@ component Item inherits Rectangle {
                 spacing: 9px;
                 VerticalLayout {
                     alignment: center;
-                    ProjectMark {
+                    if !entry.other: ProjectMark {
                         picture: entry.picture;
                         colored: entry.colored;
                         tint: entry.tone;
+                    }
+                    // Sessions started without a project: not a folder.
+                    if entry.other: Icon {
+                        width: 16px;
+                        height: 16px;
+                        text: Icons.message-square;
+                        font-size: 14px;
+                        color: Theme.brand-ink;
                     }
                 }
                 Text {
@@ -127,8 +135,9 @@ component Item inherits Rectangle {
                     font-size: Size.small;
                     color: Theme.text-weaker;
                 }
-                // Shown while the pointer is over the row.
-                Press {
+                // Shown while the pointer is over the row; the group of
+                // sessions without a project has no settings.
+                if !entry.other: Press {
                     width: 22px;
                     label: "Settings for " + entry.title;
                     opacity: project-hover.has-hover ? 1 : 0;
@@ -141,7 +150,7 @@ component Item inherits Rectangle {
                 }
                 Press {
                     width: 22px;
-                    label: "New session in " + entry.title;
+                    label: entry.other ? "New session without a project" : "New session in " + entry.title;
                     clicked => { Logic.new-session(entry.id); }
                     Icon {
                         text: Icons.plus;
