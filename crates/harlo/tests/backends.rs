@@ -82,3 +82,20 @@ fn an_import_says_what_it_did() {
         "Not imported: OpenCode isn't running"
     );
 }
+
+#[test]
+fn settings_name_the_server_harlo_is_on() {
+    let mut app = demo::new_app();
+    app.location = Location::Engine;
+    app.status = harlo::app::Status::Connected {
+        server: "Harlo".into(),
+        version: "0.1.0".into(),
+    };
+    let ui = ui(app);
+    ui.send(Message::Sheet(SheetEvent::Open(Section::General)));
+    assert!(!ui.shows("Chosen by OpenCode"));
+    assert!(
+        ui.shows("Chosen by Harlo's server"),
+        "a model left to the server is the server's choice"
+    );
+}
