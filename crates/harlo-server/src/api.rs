@@ -1196,7 +1196,7 @@ async fn connect_key(
     Path(id): Path<String>,
     axum::Json(body): axum::Json<crate::credentials::KeySignIn>,
 ) -> Answer {
-    server.connect_key(&id, body)?;
+    server.connect_key(&id, body).await?;
     done()
 }
 

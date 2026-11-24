@@ -55,6 +55,9 @@ pub enum ProviderEvent {
     Status(AttemptStatus),
     /// Open the browser sign-in's page.
     OpenPage,
+    /// Open one of the provider's own pages: where keys are made, or its
+    /// prices.
+    OpenLink(&'static str),
     /// Finish the browser sign-in with the code typed.
     Finish,
     /// Stop the sign-in that started.
@@ -246,6 +249,7 @@ impl App {
             | ProviderEvent::OpenPage
             | ProviderEvent::Finish
             | ProviderEvent::Cancel) => return self.attempt_event(event),
+            ProviderEvent::OpenLink(url) => return self.open_page(url.to_owned()),
             ProviderEvent::Remove(credential) => {
                 if page.removing.as_deref() != Some(credential.as_str()) {
                     page.removing = Some(credential);

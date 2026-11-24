@@ -658,6 +658,8 @@ export struct SheetRow {
     /// For a text field (kind 6), `on` hides what's typed.
     color: color,
     picture: image,
+    /// Whether `picture` is a one-colour logo, drawn in the icon colour.
+    logo: bool,
     /// For a name and value with a button (kind 1): text the button copies
     /// before its step.
     copy: string,

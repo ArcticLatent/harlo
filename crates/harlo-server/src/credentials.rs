@@ -2,13 +2,17 @@
 //! each signs in, and the keys and sign-ins the server keeps for every
 //! client. A provider with a credential, or with its key in the server's
 //! environment, can be used like one in the config.
+//!
+//! A key is checked before it's kept: the provider lists its models with
+//! it. One the provider refuses isn't kept; one that can't be checked (the
+//! provider is unreachable, or lists no models) is.
 
 // Rust guideline compliant 2026-10-09
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use harlo_engine::catalog::{Catalog, Entry};
+use harlo_engine::catalog::{Catalog, Entry, Wire};
 use harlo_engine::{ProviderSpec, ascending_id, now};
 use serde_json::{Map, Value, json};
 
@@ -20,6 +24,80 @@ pub(crate) const CLAUDE_AGENT: &str = "claude-agent";
 
 /// How often the catalog is fetched again.
 const REFRESH: Duration = Duration::from_hours(24);
+
+/// How long a key check waits for the provider. Listing models answers in
+/// well under a second; a provider slower than this is taken as
+/// unreachable, and the key is kept unchecked.
+const CHECK_WAIT: Duration = Duration::from_secs(15);
+
+/// What a provider said of a key.
+#[derive(Debug, PartialEq, Eq)]
+enum KeyCheck {
+    /// It listed its models with it.
+    Works,
+    /// It refused it, saying why.
+    Refused(String),
+    /// It couldn't be asked, or its answer says nothing of the key.
+    Unchecked,
+}
+
+/// Where `spec`'s key is checked: its API's model list, or the stand-in
+/// `HARLO_KEY_CHECK_BASE` names (`<base>/<provider>`), for tests.
+fn check_url(spec: &ProviderSpec) -> String {
+    let base = std::env::var("HARLO_KEY_CHECK_BASE")
+        .ok()
+        .filter(|b| !b.trim().is_empty())
+        .map_or_else(
+            || spec.base_url.clone(),
+            |b| format!("{}/{}", b.trim_end_matches('/'), spec.id),
+        );
+    format!("{base}/models")
+}
+
+/// Asks `spec`'s provider whether its key works, by listing its models
+/// with it, sent the way the provider's API takes keys.
+async fn check_key(spec: &ProviderSpec) -> KeyCheck {
+    let Some(key) = &spec.api_key else {
+        return KeyCheck::Unchecked;
+    };
+    let Ok(client) = reqwest::Client::builder().timeout(CHECK_WAIT).build() else {
+        return KeyCheck::Unchecked;
+    };
+    let request = client.get(check_url(spec));
+    let request = match spec.wire {
+        Wire::Messages => request
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01"),
+        Wire::Chat | Wire::Responses => request.bearer_auth(key),
+        Wire::Unsupported(_) => return KeyCheck::Unchecked,
+    };
+    let response = match request.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(name: "credential.check.unreachable", provider = %spec.id, error = %e, "couldn't check a key with {{provider}}");
+            return KeyCheck::Unchecked;
+        }
+    };
+    let status = response.status();
+    if status.is_success() {
+        return KeyCheck::Works;
+    }
+    if status != reqwest::StatusCode::UNAUTHORIZED && status != reqwest::StatusCode::FORBIDDEN {
+        tracing::warn!(name: "credential.check.unanswered", provider = %spec.id, status = status.as_u16(), "{{provider}} answered a key check with {{status}}");
+        return KeyCheck::Unchecked;
+    }
+    let body: Value = response.json().await.unwrap_or(Value::Null);
+    let said = [
+        &body["error"]["message"],
+        &body["error"],
+        &body["message"],
+        &body["detail"],
+    ]
+    .into_iter()
+    .find_map(|v| v.as_str().map(str::trim).filter(|s| !s.is_empty()))
+    .map_or_else(|| format!("it answered {status}"), str::to_owned);
+    KeyCheck::Refused(said)
+}
 
 /// A credential as stored.
 fn credential(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
@@ -262,6 +340,12 @@ impl Server {
                         "label": crate::oauth::CHATGPT_LABEL,
                     }));
                 }
+                if e.id == "openrouter" {
+                    methods.push(json!({
+                        "id": crate::oauth::OPENROUTER, "type": "oauth",
+                        "label": crate::oauth::OPENROUTER_LABEL,
+                    }));
+                }
                 json!({
                     "id": e.id, "name": e.name, "methods": methods,
                     "connections": connections(&e.id, &e.env),
@@ -303,13 +387,14 @@ impl Server {
         Ok(list)
     }
 
-    /// Signs integration `id` in with a key and the answers its form needs.
+    /// Signs integration `id` in with a key and the answers its form needs,
+    /// once the provider hasn't refused the key.
     ///
     /// # Errors
     ///
-    /// When there's no such integration, a required answer is missing, or
-    /// the store fails.
-    pub(crate) fn connect_key(&self, id: &str, sign_in: KeySignIn) -> Result<(), Refusal> {
+    /// When there's no such integration, a required answer is missing, the
+    /// provider refuses the key, or the store fails.
+    pub(crate) async fn connect_key(&self, id: &str, sign_in: KeySignIn) -> Result<(), Refusal> {
         let catalog = self.catalog();
         let Some(entry) = catalog.get(id) else {
             // A provider the config adds, or a search service, keeps its
@@ -343,6 +428,14 @@ impl Server {
                     question.key
                 )));
             }
+        }
+        if let Some(spec) = entry.provider(Some(sign_in.key.clone()), &answers)
+            && let KeyCheck::Refused(why) = check_key(&spec).await
+        {
+            return Err(Refusal::Bad(format!(
+                "{} refused this key: {why}",
+                entry.name
+            )));
         }
         let value = json!({ "type": "key", "key": sign_in.key, "metadata": answers });
         let label = sign_in.label.unwrap_or_else(|| entry.name.clone());

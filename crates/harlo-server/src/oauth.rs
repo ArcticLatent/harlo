@@ -1,6 +1,7 @@
 //! Browser sign-ins: "Sign in with `ChatGPT`", `OpenAI`'s sign-in for
 //! open-source apps, whose tokens let a `ChatGPT` plan pay for requests to
-//! the Responses API.
+//! the Responses API; and "Sign in with `OpenRouter`", whose sign-in hands
+//! back an ordinary `OpenRouter` key, kept as a key credential.
 //!
 //! The server listens on loopback for the browser's return; when the
 //! browser is on another computer, the address it ended on is pasted
@@ -30,6 +31,27 @@ pub(crate) const CHATGPT: &str = "chatgpt-token-sharing";
 
 /// What clients show for it.
 pub(crate) const CHATGPT_LABEL: &str = "Sign in with ChatGPT";
+
+/// The `OpenRouter` sign-in's method ID.
+pub(crate) const OPENROUTER: &str = "openrouter-sign-in";
+
+/// What clients show for it.
+pub(crate) const OPENROUTER_LABEL: &str = "Sign in with OpenRouter";
+
+/// The path `OpenRouter`'s sign-in comes back to.
+const OPENROUTER_CALLBACK: &str = "/callback";
+
+/// `OpenRouter`'s site, which signs in and trades the code for a key
+/// (`HARLO_OPENROUTER_AUTH` names a stand-in, for tests).
+fn openrouter() -> String {
+    std::env::var("HARLO_OPENROUTER_AUTH")
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+        .map_or_else(
+            || "https://openrouter.ai".to_owned(),
+            |u| u.trim_end_matches('/').to_owned(),
+        )
+}
 
 /// `OpenAI`'s sign-in server (`HARLO_OPENAI_AUTH` names a stand-in, for
 /// tests).
@@ -267,6 +289,9 @@ impl Server {
         if id.starts_with(crate::mcp_auth::PREFIX) {
             return self.begin_mcp_oauth(id).await;
         }
+        if id == "openrouter" && method == OPENROUTER {
+            return self.begin_openrouter().await;
+        }
         if id != "openai" || method != CHATGPT {
             return Err(Refusal::NotFound(format!(
                 "Integration method not found: {method}"
@@ -319,6 +344,63 @@ impl Server {
         let (attempt, created) = self.track(move |taken| async move {
             let (code, issued) = wait(&listener, taken, &flow.state, &back).await?;
             server.finish_sign_in(&flow, &code, issued).await
+        });
+        Ok(json!({
+            "attemptID": attempt, "url": url.as_str(), "mode": "auto", "paste": true,
+            "instructions": "Sign in in the browser. If it's on another computer, paste the \
+                             address its last page ended on.",
+            "time": { "created": created, "expires": created + 600_000 },
+        }))
+    }
+
+    /// Starts the `OpenRouter` sign-in: the browser comes back to a free
+    /// loopback port with a code, which `OpenRouter` trades for a key.
+    ///
+    /// # Errors
+    ///
+    /// When no loopback port can be opened.
+    async fn begin_openrouter(self: &Arc<Self>) -> Result<Value, Refusal> {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .map_err(|e| Refusal::Bad(format!("Couldn't wait for the browser: {e}")))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| Refusal::Bad(format!("Couldn't wait for the browser: {e}")))?
+            .port();
+        let verifier = random_token();
+        let state = random_token();
+        let challenge = URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
+        // OpenRouter takes localhost callbacks on any port.
+        let callback = format!("http://localhost:{port}{OPENROUTER_CALLBACK}");
+        let url = reqwest::Url::parse_with_params(
+            &format!("{}/auth", openrouter()),
+            &[
+                ("callback_url", callback.as_str()),
+                ("code_challenge", &challenge),
+                ("code_challenge_method", "S256"),
+                ("key_label", "Harlo"),
+                ("state", &state),
+            ],
+        )
+        .map_err(|e| Refusal::Bad(e.to_string()))?;
+        let back = Return {
+            path: OPENROUTER_CALLBACK.to_owned(),
+            what: "OpenRouter".to_owned(),
+        };
+        let server = Arc::clone(self);
+        let (attempt, created) = self.track(move |taken| async move {
+            let (code, _) = wait(&listener, taken, &state, &back).await?;
+            let key = openrouter_key(&code, &verifier).await?;
+            server
+                .store
+                .put_credential(
+                    "openrouter",
+                    "OpenRouter",
+                    &json!({ "type": "key", "key": key }),
+                )
+                .map_err(|e| e.to_string())?;
+            server.integrations_changed();
+            Ok(())
         });
         Ok(json!({
             "attemptID": attempt, "url": url.as_str(), "mode": "auto", "paste": true,
@@ -522,6 +604,32 @@ impl Server {
             }
         });
     }
+}
+
+/// Trades the code `OpenRouter`'s sign-in came back with for a key.
+async fn openrouter_key(code: &str, verifier: &str) -> Result<String, String> {
+    let response = reqwest::Client::new()
+        .post(format!("{}/api/v1/auth/keys", openrouter()))
+        .json(&json!({
+            "code": code, "code_verifier": verifier, "code_challenge_method": "S256",
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach OpenRouter: {e}"))?;
+    let status = response.status();
+    let body: Value = response.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        let said = body["error"]["message"]
+            .as_str()
+            .or_else(|| body["error"].as_str())
+            .map_or_else(|| status.to_string(), str::to_owned);
+        return Err(format!("OpenRouter didn't hand over a key: {said}"));
+    }
+    body["key"]
+        .as_str()
+        .filter(|k| !k.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "OpenRouter's answer had no key.".to_owned())
 }
 
 /// Waits for the browser's return to `back` on `listener`, or a pasted

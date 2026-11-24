@@ -95,12 +95,29 @@ fn a_provider_signs_in_with_a_key_and_is_removed() {
 
     // The best-known ones not yet connected, to connect in one press.
     assert!(ui.shows("Popular"));
-    assert!(ui.shows("Recommended"), "OpenCode's own");
+    assert!(ui.shows("Recommended"), "OpenCode Go");
+    for name in ["OpenAI", "Anthropic", "OpenCode Go", "OpenRouter", "Google"] {
+        assert!(
+            !ui.find(&format!("Connect: {name}")).is_empty(),
+            "{name} is popular"
+        );
+    }
+    assert!(
+        ui.find("Connect: GitHub Copilot").is_empty(),
+        "no sign-in for it"
+    );
     ui.press("Connect: Anthropic");
     assert_eq!(
         ui.app().sheets.providers.shown.as_deref(),
         Some("anthropic")
     );
+    // Its own pages: where keys are made, and its prices.
+    assert!(
+        ui.shows("Claude models, with an API key. A Claude plan connects through Claude Code.")
+    );
+    assert!(ui.shows("platform.claude.com"));
+    assert!(!ui.find("Get a key ↗").is_empty());
+    assert!(!ui.find("Prices ↗").is_empty());
     ui.press("All providers");
 
     add(&ui, "302", "302.AI");
@@ -161,6 +178,30 @@ fn a_form_is_answered_before_signing_in() {
         "signed in: {:?}",
         ui.app().sheets.providers.error
     );
+}
+
+#[test]
+fn openrouter_signs_in_in_the_browser_or_with_a_key() {
+    let mut tasks = Tasks::new();
+    let sandbox = tasks.block_on(Sandbox::start());
+    let ui = models(&sandbox, &mut tasks);
+    ui.press("Connect: OpenRouter");
+    assert!(ui.shows("Ways to sign in"));
+    assert!(ui.shows("Sign in with OpenRouter"));
+    assert!(!ui.find("API key").is_empty(), "a key first");
+    assert!(ui.shows("openrouter.ai"), "its key page");
+}
+
+#[test]
+fn opencode_go_says_where_its_key_comes_from() {
+    let mut tasks = Tasks::new();
+    let sandbox = tasks.block_on(Sandbox::start());
+    let ui = models(&sandbox, &mut tasks);
+    ui.press("Connect: OpenCode Go");
+    assert!(ui.shows(
+        "A key from an OpenCode Go subscription, made in the OpenCode Console. Each model \
+         has its own limits, by the 5 hours, the week and the month."
+    ));
 }
 
 #[test]

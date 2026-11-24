@@ -163,7 +163,8 @@ fn ask_export(name: &str) -> Task<Message> {
     })
 }
 
-/// Saves session `id`'s transcript to `path`.
+/// Saves session `id`'s transcript to `path`, whole: it's written beside
+/// it first, then moved into place, so `path` never holds part of it.
 fn export(client: Client, id: String, path: PathBuf) -> Task<Message> {
     Task::perform(
         async move {
@@ -171,9 +172,18 @@ fn export(client: Client, id: String, path: PathBuf) -> Task<Message> {
                 .export_session(&id)
                 .await
                 .map_err(|e| e.to_string())?;
-            tokio::fs::write(&path, transcript)
+            let mut part = path.clone().into_os_string();
+            part.push(".part");
+            let part = PathBuf::from(part);
+            tokio::fs::write(&part, transcript)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            if let Err(e) = tokio::fs::rename(&part, &path).await {
+                // The partial copy goes; the error says why.
+                let _ = tokio::fs::remove_file(&part).await;
+                return Err(e.to_string());
+            }
+            Ok(())
         },
         |done: Result<(), String>| {
             Message::Acted(done.map_err(|e| format!("Couldn't export: {e}")))

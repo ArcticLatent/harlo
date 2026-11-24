@@ -309,14 +309,22 @@ component RowBody inherits VerticalLayout {
         padding-top: 3px;
         padding-bottom: 3px;
         spacing: 12px;
-        if root.entry.glyph != "": VerticalLayout {
+        if root.entry.glyph != "" || root.entry.logo: VerticalLayout {
             alignment: center;
             Rectangle {
                 width: 28px;
                 height: 28px;
                 border-radius: 6px;
                 background: Theme.control-fill;
-                Icon {
+                if root.entry.logo: Image {
+                    width: 16px;
+                    height: 16px;
+                    source: root.entry.picture;
+                    image-fit: contain;
+                    colorize: Theme.icon-base;
+                    accessible-role: none;
+                }
+                if !root.entry.logo: Icon {
                     text: root.entry.glyph;
                     font-size: 14px;
                     color: Theme.icon-base;
@@ -572,6 +580,7 @@ component RowBody inherits VerticalLayout {
                 if root.entry.glyph == "": ProjectMark {
                     size: 18px;
                     picture: root.entry.picture;
+                    logo: root.entry.logo;
                     colored: root.entry.on;
                     tint: root.entry.color;
                 }

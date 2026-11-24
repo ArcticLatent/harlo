@@ -627,6 +627,10 @@ pub const REMOVE_CREDENTIAL: i32 = 45;
 /// The Settings button that picks a provider to sign in to.
 pub const ADD_PROVIDER: i32 = 46;
 
+/// The Settings button that opens the shown provider's page numbered by
+/// its item: 0 where keys are made, 1 its prices.
+pub const OPEN_PROVIDER_LINK: i32 = 87;
+
 /// The Settings button that removes the saved approval numbered by its item.
 pub const REMOVE_APPROVAL: i32 = 47;
 
@@ -877,6 +881,10 @@ fn provider_action(app: &App, number: i32, item: i32) -> Option<Message> {
             ProviderEvent::Remove(connection.credential.clone()?)
         }
         ADD_PROVIDER => ProviderEvent::Pick,
+        OPEN_PROVIDER_LINK => ProviderEvent::OpenLink(crate::known_providers::link(
+            &app.sheets.providers.shown.clone()?,
+            item,
+        )?),
         _ => return None,
     };
     Some(Message::Sheet(SheetEvent::Provider(event)))
@@ -967,7 +975,8 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         | FINISH_SIGN_IN
         | CANCEL_PROVIDER_SIGN_IN
         | REMOVE_CREDENTIAL
-        | ADD_PROVIDER => provider_action(app, number, item),
+        | ADD_PROVIDER
+        | OPEN_PROVIDER_LINK => provider_action(app, number, item),
         REMOVE_APPROVAL => Some(Message::Sheet(SheetEvent::Approval(
             app::ApprovalEvent::Remove(usize::try_from(item).ok()?),
         ))),

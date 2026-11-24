@@ -14,6 +14,7 @@ pub mod ids;
 #[cfg(unix)]
 pub mod instance;
 pub mod keys;
+pub mod known_providers;
 pub mod markdown;
 pub mod model;
 pub mod options;

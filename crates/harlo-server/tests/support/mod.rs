@@ -186,6 +186,9 @@ pub fn spawn_server(root: &Path, port: u16, password: &str, env: &[(String, Stri
         .env("XDG_STATE_HOME", root.join("state"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         .env("HARLO_SERVER_PASSWORD", password)
+        // Key checks go to an address nothing answers at, never a real
+        // provider; a test that checks keys sets its own stand-in.
+        .env("HARLO_KEY_CHECK_BASE", "http://127.0.0.1:9")
         .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .env(
             "DBUS_SESSION_BUS_ADDRESS",

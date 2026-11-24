@@ -5,50 +5,13 @@
 
 use harlo_core::server::{Connection, FieldKind, Integration, SignInMethod};
 use lucide_icons::Icon;
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Image, ModelRc, SharedString, VecModel};
 
 use super::{LINK, PROJECT, glyph, heading, int, live_field, note, pair};
 use crate::app::{App, Field, Load, SettingChoice, SignInAttempt};
+use crate::known_providers::{KNOWN, host, known};
 use crate::ui::SheetRow;
 use crate::window;
-
-/// The best-known providers, by the server's id, in the order Popular lists
-/// the ones not yet connected, each with a line on what it offers and
-/// whether it's recommended.
-const POPULAR: [(&str, &str, bool); 8] = [
-    (
-        "opencode-go",
-        "A low-cost subscription to open coding models.",
-        true,
-    ),
-    (
-        "opencode",
-        "Hand-picked models, Claude, GPT and Gemini among them.",
-        true,
-    ),
-    ("anthropic", "Claude models, with an API key.", false),
-    (
-        "github-copilot",
-        "The models of a GitHub Copilot plan.",
-        false,
-    ),
-    (
-        "openai",
-        "GPT models, with a ChatGPT plan or an API key.",
-        false,
-    ),
-    ("google", "Gemini models, quick and structured.", false),
-    (
-        "openrouter",
-        "Most providers' models, through one account.",
-        false,
-    ),
-    (
-        "vercel",
-        "Many providers' models through one gateway.",
-        false,
-    ),
-];
 
 /// The providers the server uses and how each is signed in, then
 /// `after_connected`, the best-known ones not yet connected, and a button
@@ -97,12 +60,19 @@ pub(super) fn provider_rows(app: &App, after_connected: Vec<SheetRow>) -> Vec<Sh
         } else {
             Icon::KeyRound
         };
+        let logo = logo(id);
         rows.push(match found {
             Some(at) => SheetRow {
                 kind: PROJECT,
                 name: name.as_str().into(),
                 value: value.into(),
-                glyph: glyph(icon),
+                glyph: if logo.is_some() {
+                    SharedString::new()
+                } else {
+                    glyph(icon)
+                },
+                logo: logo.is_some(),
+                picture: logo.unwrap_or_default(),
                 setting: window::OPEN_PROVIDER,
                 choice: int(at),
                 ..SheetRow::default()
@@ -117,16 +87,18 @@ pub(super) fn provider_rows(app: &App, after_connected: Vec<SheetRow>) -> Vec<Sh
         _ => {}
     }
     rows.extend(after_connected);
-    let popular: Vec<SheetRow> = POPULAR
+    let popular: Vec<SheetRow> = KNOWN
         .iter()
-        .filter(|(id, ..)| !shown.iter().any(|(shown, ..)| shown == id))
-        .filter_map(|&(id, what, recommended)| {
-            let at = integrations.iter().position(|i| i.id == id)?;
+        .filter(|k| k.popular && !shown.iter().any(|(shown, ..)| shown == k.id))
+        .filter_map(|k| {
+            let at = integrations.iter().position(|i| i.id == k.id)?;
             Some(SheetRow {
                 kind: LINK,
                 name: integrations[at].name.as_str().into(),
-                value: what.into(),
-                hint: if recommended { "Recommended" } else { "" }.into(),
+                value: k.about.into(),
+                hint: if k.recommended { "Recommended" } else { "" }.into(),
+                logo: true,
+                picture: logo(k.id).unwrap_or_default(),
                 action: "Connect".into(),
                 setting: window::OPEN_PROVIDER,
                 choice: int(at),
@@ -145,6 +117,35 @@ pub(super) fn provider_rows(app: &App, after_connected: Vec<SheetRow>) -> Vec<Sh
         rows.push(more);
     }
     rows
+}
+
+/// Provider `id`'s logo, a one-colour picture, if Harlo has one. The
+/// logos' licences sit beside them in `ui/images/providers`.
+fn logo(id: &str) -> Option<Image> {
+    let svg: &[u8] = match id {
+        "openai" => include_bytes!("../../../ui/images/providers/openai.svg"),
+        "anthropic" => include_bytes!("../../../ui/images/providers/anthropic.svg"),
+        "opencode" | "opencode-go" => {
+            include_bytes!("../../../ui/images/providers/opencode.svg")
+        }
+        "openrouter" => include_bytes!("../../../ui/images/providers/openrouter.svg"),
+        "google" => include_bytes!("../../../ui/images/providers/google.svg"),
+        "xai" => include_bytes!("../../../ui/images/providers/xai.svg"),
+        "deepseek" => include_bytes!("../../../ui/images/providers/deepseek.svg"),
+        "mistral" => include_bytes!("../../../ui/images/providers/mistral.svg"),
+        "minimax" => include_bytes!("../../../ui/images/providers/minimax-coding-plan.svg"),
+        "zai" => include_bytes!("../../../ui/images/providers/zai-coding-plan.svg"),
+        "moonshotai" => include_bytes!("../../../ui/images/providers/kimi-for-coding.svg"),
+        "groq" => include_bytes!("../../../ui/images/providers/groq.svg"),
+        "cerebras" => include_bytes!("../../../ui/images/providers/cerebras.svg"),
+        "togetherai" => include_bytes!("../../../ui/images/providers/together.svg"),
+        "fireworks-ai" => include_bytes!("../../../ui/images/providers/fireworks.svg"),
+        harlo_core::claude::INTEGRATION => {
+            include_bytes!("../../../ui/images/providers/claude-code.svg")
+        }
+        _ => return None,
+    };
+    Image::load_from_svg_data(svg).ok()
 }
 
 /// How a provider is signed in, in words, from its connections.
@@ -191,6 +192,22 @@ pub(super) fn sign_in_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("That didn't work", why, 2));
     }
     connection_rows(app, integration, &mut rows);
+    if let Some(k) = known(&integration.id) {
+        rows.push(note(k.about));
+        for (which, (name, page, button)) in [
+            ("API keys", k.key_page, "Get a key ↗"),
+            ("Prices", k.prices, "Prices ↗"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut row = pair(name, host(page), 3);
+            row.action = button.into();
+            row.setting = window::OPEN_PROVIDER_LINK;
+            row.choice = int(which);
+            rows.push(row);
+        }
+    }
 
     let methods = page.methods();
     if methods.len() > 1 {
@@ -290,6 +307,11 @@ fn method_rows(app: &App, method: &SignInMethod, rows: &mut Vec<SheetRow>) {
             );
             key.on = true;
             rows.push(key);
+            if let Some(k) = page.integration().and_then(|i| known(&i.id))
+                && !k.note.is_empty()
+            {
+                rows.push(note(k.note));
+            }
         }
         SignInMethod::Command { command, .. } => {
             rows.push(pair("Runs", &command.join(" "), 3));

@@ -71,17 +71,27 @@ export component Icon inherits Text {
 /// colour when it has one.
 export component ProjectMark inherits Rectangle {
     in property <image> picture;
+    /// Whether `picture` is a one-colour logo, drawn in the icon colour.
+    in property <bool> logo;
     in property <bool> colored;
     in property <color> tint;
     in property <length> size: 16px;
     width: root.size;
     height: root.size;
 
-    if root.picture.width > 0: Image {
+    if root.picture.width > 0 && !root.logo: Image {
         width: root.size;
         height: root.size;
         source: root.picture;
         image-fit: contain;
+        accessible-role: none;
+    }
+    if root.picture.width > 0 && root.logo: Image {
+        width: root.size;
+        height: root.size;
+        source: root.picture;
+        image-fit: contain;
+        colorize: Theme.icon-base;
         accessible-role: none;
     }
     if root.picture.width == 0: Icon {
