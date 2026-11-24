@@ -20,6 +20,7 @@ htmd = { workspace = true }
 markup5ever_rcdom = { workspace = true }
 futures-util = { workspace = true }
 getrandom = { workspace = true, features = ["std"] }
+httpdate = { workspace = true }
 jsonc-parser = { workspace = true, features = ["serde"] }
 libc = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream", "native-tls"] }

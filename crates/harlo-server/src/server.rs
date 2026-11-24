@@ -91,6 +91,8 @@ pub(crate) struct Live {
     pub(crate) shells: HashMap<String, CancellationToken>,
     /// The terminals the server runs, by ID.
     pub(crate) ptys: HashMap<String, Arc<crate::pty::Terminal>>,
+    /// Where random web searches stand.
+    pub(crate) searches: crate::search::Searches,
 }
 
 /// The global config file as last read.
@@ -1016,7 +1018,7 @@ impl Server {
                 session: session.id.clone(),
             })),
             subagent_agents: folder.subagents(),
-            search: self.search_for(&folder),
+            search: self.searcher(&session.id, &session.location.directory),
             code: Some(Arc::new(crate::code::ServerCatalog {
                 server: Arc::clone(self),
                 session: Some(session.id.clone()),

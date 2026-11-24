@@ -184,9 +184,10 @@ pub struct Config {
     pub automations: bool,
     /// MCP servers (`mcp.servers`), by name, as the file has them.
     pub mcp: Value,
-    /// The web search service it names (`websearch.provider`): an ID or
-    /// `random`.
-    pub websearch: Option<String>,
+    /// What it says of web search: the service it names
+    /// (`websearch.provider`), an ID or `random`, or `false` when it turns
+    /// web search off (`"websearch": false`).
+    pub websearch: Option<Value>,
 }
 
 impl Config {
@@ -262,7 +263,11 @@ impl Config {
                 .or_else(|| value["experimental"]["automations"].as_bool())
                 .unwrap_or(true),
             mcp: value["mcp"]["servers"].clone(),
-            websearch: value["websearch"]["provider"].as_str().map(str::to_owned),
+            websearch: if value["websearch"] == false {
+                Some(Value::Bool(false))
+            } else {
+                Some(value["websearch"]["provider"].clone()).filter(|v| !v.is_null())
+            },
         }
     }
 

@@ -61,8 +61,8 @@ pub struct Turn {
     pub jobs: Option<std::sync::Arc<dyn crate::jobs::Jobs>>,
     /// The tools Code Mode scripts can call; none leaves `execute` out.
     pub code: Option<std::sync::Arc<dyn crate::codemode::Catalog>>,
-    /// The web search service; none leaves `websearch` out.
-    pub search: Option<crate::web::Search>,
+    /// Where web searches go; none leaves `websearch` out.
+    pub search: Option<std::sync::Arc<dyn crate::web::Searcher>>,
     /// Where subagents start; none offers no subagent tool.
     pub subagents: Option<std::sync::Arc<dyn crate::subagent::Subagents>>,
     /// The agents a subagent may run as: `(id, what for)`.
@@ -1177,7 +1177,7 @@ async fn run_plan(
         (Plan::WebSearch { query }, _) if turn.search.is_some() => {
             let search = turn.search.as_ref().ok_or_else(String::new)?;
             tokio::select! {
-                found = crate::web::search(search, &query) => found,
+                found = search.search(&query) => found,
                 () = stop.cancelled() => Err("Stopped.".to_owned()),
             }
         }

@@ -1906,21 +1906,23 @@ fn skill_rows(app: &App, rows: &mut Vec<SheetRow>) {
     rows.push(add);
 }
 
-/// The web search services: which one is used, and whether each has its key.
+/// The web search services: which one is used, and whether each has its
+/// key, with a button to add or change it.
 fn search_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
     let choice = setup.search_choice.as_deref();
-    // OpenCode lists each service as an integration, with the keys it has.
+    // The server lists each service as an integration, with the keys it has.
     let services = match &app.sheets.providers.list {
         Load::Loaded(list) => Some(list.as_slice()),
         _ => None,
     };
     section(rows, "Web search", &setup.search, |s| {
+        let found = services.and_then(|list| list.iter().position(|i| i.id == s.id));
         let (key, tone) = match s.id.as_str() {
             "claude-agent" => ("Through Claude Agent", 0),
-            id => match services.map(|list| list.iter().find(|i| i.id == id)) {
-                Some(Some(service)) if !service.connections.is_empty() => ("Key set", 0),
-                Some(_) => ("No key", 3),
-                None => ("", 3),
+            _ => match (services, found) {
+                (Some(list), Some(at)) if !list[at].connections.is_empty() => ("Key set", 0),
+                (Some(_), _) => ("No key", 3),
+                (None, _) => ("", 3),
             },
         };
         let value = match (choice == Some(s.id.as_str()), key) {
@@ -1928,12 +1930,28 @@ fn search_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
             (true, key) => format!("In use · {key}"),
             (false, key) => key.to_owned(),
         };
-        pair(&s.name, &value, tone)
+        match found.filter(|_| s.id != "claude-agent") {
+            Some(at) => SheetRow {
+                kind: LINK,
+                name: s.name.as_str().into(),
+                value: value.into(),
+                glyph: glyph(Icon::Globe),
+                action: if key == "Key set" {
+                    "Change key"
+                } else {
+                    "Add key"
+                }
+                .into(),
+                setting: crate::window::OPEN_PROVIDER,
+                choice: i32::try_from(at).unwrap_or(-1),
+                ..SheetRow::default()
+            },
+            None => pair(&s.name, &value, tone),
+        }
     });
     if matches!(setup.search, Ok(ref list) if !list.is_empty()) {
         rows.push(note(
-            "Add a key with /\u{2060}connect in OpenCode, or in the service's environment \
-             variable on the server's computer.",
+            "Each one searches without a key, within its free limits; a key lifts them.",
         ));
     }
 }

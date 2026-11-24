@@ -104,21 +104,29 @@ impl Server {
         directory: &str,
         asked: &Asked,
     ) -> Option<oneshot::Receiver<Option<Vec<Vec<String>>>>> {
+        self.ask_form(session, directory, &asked.id, form_of(asked, session))
+    }
+
+    /// Registers form `data`, with ID `id`, with session `session`'s run
+    /// and announces it; the receiver gets the answers, one list per
+    /// field. `None` when the run has ended.
+    pub(crate) fn ask_form(
+        &self,
+        session: &str,
+        directory: &str,
+        id: &str,
+        data: Value,
+    ) -> Option<oneshot::Receiver<Option<Vec<Vec<String>>>>> {
         let (tx, rx) = oneshot::channel();
-        let data = form_of(asked, session);
+        let announced = json!({ "form": data.clone() });
         let mut live = lock(&self.live);
         live.runs.get_mut(session)?.forms.push(PendingForm {
-            id: asked.id.clone(),
-            data: data.clone(),
+            id: id.to_owned(),
+            data,
             answer: tx,
         });
         drop(live);
-        self.emit(
-            "form.created",
-            json!({ "form": data }),
-            Some(directory),
-            Some(session),
-        );
+        self.emit("form.created", announced, Some(directory), Some(session));
         Some(rx)
     }
 

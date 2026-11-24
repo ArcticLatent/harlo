@@ -335,10 +335,8 @@ fn settings_show_the_servers_set_up_and_about() {
         Ok(vec![exa(Vec::new())]),
     ))));
     assert!(ui.shows("No key"));
-    assert!(ui.shows(
-        "Add a key with /\u{2060}connect in OpenCode, or in the service's environment variable \
-         on the server's computer."
-    ));
+    assert!(ui.shows("Each one searches without a key, within its free limits; a key lifts them."));
+    assert_eq!(ui.find("Add key: Exa").len(), 1);
     ui.send(Message::Sheet(SheetEvent::Provider(ProviderEvent::Loaded(
         Ok(vec![exa(vec![Connection {
             credential: None,
@@ -353,6 +351,9 @@ fn settings_show_the_servers_set_up_and_about() {
     };
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(chosen))));
     assert!(ui.shows("In use · Key set"), "the one config chooses");
+    // Its button opens its sign-in page, where the key is changed.
+    ui.press("Change key: Exa");
+    assert_eq!(ui.app().sheets.providers.shown.as_deref(), Some("exa"));
     // Extensions: a server's row opens its page, and says how it stands.
     ui.press("Extensions");
     let docs = ui

@@ -2496,6 +2496,7 @@ dependencies = [
  "globset",
  "gray_matter",
  "htmd",
+ "httpdate",
  "ignore",
  "jsonc-parser",
  "libc",

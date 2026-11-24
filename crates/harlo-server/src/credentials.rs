@@ -157,7 +157,7 @@ fn connection(credential: &Value) -> Value {
 }
 
 /// The first of `names` set in the server's environment, with its value.
-fn from_env(names: &[String]) -> Option<(String, String)> {
+pub(crate) fn from_env(names: &[String]) -> Option<(String, String)> {
     names.iter().find_map(|n| {
         std::env::var(n)
             .ok()
@@ -427,39 +427,6 @@ impl Server {
 
     /// The catalog providers signed in with a credential or a key in the
     /// environment, that `configured` doesn't already have.
-    /// The web search service `folder` uses: the one its config names
-    /// (`websearch.provider`) when it has a key, otherwise the first with
-    /// one.
-    pub(crate) fn search_for(
-        &self,
-        folder: &crate::folder::Folder,
-    ) -> Option<harlo_engine::web::Search> {
-        let credentials = self.store.credentials().unwrap_or_default();
-        let key = |id: &str, env: &str| {
-            credentials
-                .iter()
-                .find(|c| c["integrationID"] == id && c["value"]["type"] == "key")
-                .and_then(|c| c["value"]["key"].as_str().map(str::to_owned))
-                .or_else(|| from_env(&[env.to_owned()]).map(|(_, v)| v))
-        };
-        let keyed: Vec<(&str, String)> = harlo_engine::web::SERVICES
-            .iter()
-            .filter_map(|(id, _, env)| key(id, env).map(|k| (*id, k)))
-            .collect();
-        let chosen = folder.config.websearch.as_deref();
-        let (service, key) = keyed
-            .iter()
-            .find(|(id, _)| Some(*id) == chosen)
-            .or_else(|| keyed.first())?;
-        Some(harlo_engine::web::Search {
-            service: (*service).to_owned(),
-            key: key.clone(),
-            base: std::env::var("HARLO_WEBSEARCH_BASE")
-                .ok()
-                .filter(|b| !b.is_empty()),
-        })
-    }
-
     pub(crate) fn signed_in(&self, configured: &[ProviderSpec]) -> Vec<ProviderSpec> {
         let catalog = self.catalog();
         let credentials = self.store.credentials().unwrap_or_default();

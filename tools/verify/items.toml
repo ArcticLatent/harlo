@@ -45,6 +45,11 @@ title = "Questions: the agent asks, the card takes the answer"
 checks = ["window:questions", "unit:harlo:session", "real:question"]
 
 [[item]]
+id = "web_search"
+title = "Web search: the first search asks which service, or none; searches need no key"
+checks = ["window:web_search", "engine:web_search", "unit:harlo-server:web", "unit:harlo:sheets"]
+
+[[item]]
 id = "queue"
 title = "A busy session: queue, steer, cancel, Stop"
 checks = ["window:queue", "unit:harlo:session", "unit:opencode-client:m3", "real:stop"]
