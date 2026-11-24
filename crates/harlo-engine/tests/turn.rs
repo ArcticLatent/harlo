@@ -125,6 +125,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         skills: Vec::new(),
         todo: false,
         files: None,
+        jobs: None,
         subagents: None,
         subagent_agents: Vec::new(),
         history: vec![Message::User {

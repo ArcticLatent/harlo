@@ -15,6 +15,50 @@ use serde_json::{Map, Value};
 
 use crate::config::ModelRef;
 
+/// A command a person ran in a session, as its message keeps it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellRun {
+    /// The message's ID.
+    pub id: String,
+    /// When it started and ended.
+    pub time: ShellTime,
+    /// The command's own ID (`sh_…`).
+    #[serde(rename = "shellID")]
+    pub shell_id: String,
+    /// The command.
+    pub command: String,
+    /// `running`, `exited`, `timeout` or `killed`.
+    pub status: String,
+    /// Its exit code, once it exited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit: Option<i32>,
+    /// What it printed.
+    pub output: ShellOutput,
+}
+
+/// When a command started and ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellTime {
+    /// When it started.
+    pub created: i64,
+    /// When it ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed: Option<i64>,
+}
+
+/// What a command printed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellOutput {
+    /// The text.
+    pub output: String,
+    /// Bytes read so far.
+    pub cursor: usize,
+    /// Bytes in all.
+    pub size: usize,
+    /// Whether some was left out.
+    pub truncated: bool,
+}
+
 /// One message in a session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -54,6 +98,8 @@ pub enum Message {
     Assistant(Box<Assistant>),
     /// A summary of the session so far, which later steps start from.
     Compaction(Box<crate::compaction::Compaction>),
+    /// A command a person ran in the session's folder, with no model.
+    Shell(Box<ShellRun>),
     /// The end of a run.
     Idle {
         /// Its ID.
@@ -76,6 +122,7 @@ impl Message {
             Self::User { id, .. } | Self::Synthetic { id, .. } | Self::Idle { id, .. } => id,
             Self::Assistant(a) => &a.id,
             Self::Compaction(c) => &c.id,
+            Self::Shell(s) => &s.id,
         }
     }
 }

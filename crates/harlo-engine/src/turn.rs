@@ -56,6 +56,9 @@ pub struct Turn {
     /// What the session knows of the files it read and wrote; none, and
     /// edits aren't checked for changes made since.
     pub files: Option<std::sync::Arc<dyn crate::stale::Ledger>>,
+    /// Where background jobs start; none runs background commands in the
+    /// foreground.
+    pub jobs: Option<std::sync::Arc<dyn crate::jobs::Jobs>>,
     /// Where subagents start; none offers no subagent tool.
     pub subagents: Option<std::sync::Arc<dyn crate::subagent::Subagents>>,
     /// The agents a subagent may run as: `(id, what for)`.
@@ -1076,6 +1079,26 @@ async fn run_plan(
                 }),
             None => Err("There is no tool called `subagent`.".to_owned()),
         },
+        (
+            Plan::Shell {
+                command,
+                background: true,
+                ..
+            },
+            _,
+        ) if turn.jobs.is_some() => {
+            let jobs = turn.jobs.as_ref().ok_or_else(String::new)?;
+            jobs.shell(message, call, &command, &turn.cwd)
+                .map(|id| tools::Output {
+                    text: crate::jobs::started(&id),
+                    metadata: json!({ "shellID": id, "background": true, "truncated": false })
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default(),
+                    changed: Vec::new(),
+                    pictures: Vec::new(),
+                })
+        }
         (Plan::Skill { id }, _) => turn
             .skills
             .iter()

@@ -187,7 +187,9 @@ fn chat_messages(history: &[Message]) -> Vec<Value> {
                     out.push(json!({ "role": "user", "content": content }));
                 }
             }
-            Message::Idle { .. } => {}
+            // (A person's command reaches the model as the synthetic
+            // message that follows it.)
+            Message::Idle { .. } | Message::Shell(_) => {}
         }
     }
     out

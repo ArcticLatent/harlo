@@ -9,7 +9,7 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use harlo_engine::subagent::{self, Request, Subagents};
 use harlo_engine::{Created, Message, ascending_id, now};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::server::{Server, lock};
 use crate::store::Session;
@@ -186,10 +186,5 @@ impl Server {
             Some(&parent),
         );
         self.enqueue(&parent, message, "queue");
-    }
-
-    /// The background jobs going, or ended since the server started.
-    pub(crate) fn jobs(&self) -> Vec<Value> {
-        lock(&self.live).jobs.values().cloned().collect()
     }
 }

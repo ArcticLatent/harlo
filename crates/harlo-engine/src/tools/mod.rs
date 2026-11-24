@@ -11,7 +11,7 @@
 
 mod edit_match;
 mod search;
-mod shell;
+pub mod shell;
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -74,7 +74,8 @@ pub fn definitions() -> Vec<Value> {
             "parameters": { "type": "object", "properties": {
                 "command": { "type": "string" },
                 "description": { "type": "string", "description": "What the command does, in a few words." },
-                "timeout": { "type": "integer", "description": "Milliseconds before it's stopped (default 120000)." }
+                "timeout": { "type": "integer", "description": "Milliseconds before it's stopped (default 120000)." },
+                "background": { "type": "boolean", "description": "Run it in the background and carry on, for servers and long builds: its output comes to you as a message when it ends." }
             }, "required": ["command"] }
         }),
     ]
@@ -194,7 +195,29 @@ pub enum Plan {
         command: String,
         /// Milliseconds before it's stopped.
         timeout_ms: u64,
+        /// Whether it runs in the background.
+        background: bool,
     },
+}
+
+/// A `shell` call's plan.
+fn shell_call(input: &Map<String, Value>) -> Result<Plan, String> {
+    let command = input
+        .get("command")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "shell needs `command`, as text.".to_owned())?;
+    Ok(Plan::Shell {
+        command: command.to_owned(),
+        timeout_ms: input
+            .get("timeout")
+            .and_then(Value::as_u64)
+            .filter(|t| *t > 0)
+            .unwrap_or(SHELL_TIMEOUT_MS),
+        background: input
+            .get("background")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
 }
 
 /// Reads `path` (shown as `shown`): a picture whole, text as numbered
@@ -344,12 +367,7 @@ impl Plan {
             "search_sessions" => Ok(Self::SearchSessions {
                 query: text("query")?,
             }),
-            "shell" => Ok(Self::Shell {
-                command: text("command")?,
-                timeout_ms: number("timeout")
-                    .filter(|t| *t > 0)
-                    .unwrap_or(SHELL_TIMEOUT_MS),
-            }),
+            "shell" => shell_call(input),
             other => Err(format!(
                 "There is no tool called `{other}`. The tools are read, write, edit, glob, grep and shell."
             )),
@@ -521,6 +539,7 @@ impl Plan {
             Self::Shell {
                 command,
                 timeout_ms,
+                ..
             } => Ok(shell::run(&command, cwd, timeout_ms, stop).await),
         }
     }

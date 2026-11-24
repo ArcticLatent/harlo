@@ -23,6 +23,7 @@ mod error;
 pub mod generate;
 mod id;
 pub mod instructions;
+pub mod jobs;
 pub mod memory;
 mod message;
 pub mod question;
@@ -42,8 +43,8 @@ pub use config::{
 pub use error::Error;
 pub use id::{ascending_id, descending_id, just_before};
 pub use message::{
-    Assistant, Cache, Created, ErrorInfo, Message, Part, Snapshot, StepTime, Tokens, ToolState,
-    ToolTime,
+    Assistant, Cache, Created, ErrorInfo, Message, Part, ShellOutput, ShellRun, ShellTime,
+    Snapshot, StepTime, Tokens, ToolState, ToolTime,
 };
 pub use rules::{Decision, Effect, Rule, agent_rules, decide};
 pub use turn::{Answer, Ask, Event, Gate, Outcome, Sink, Steering, Turn, now, run};

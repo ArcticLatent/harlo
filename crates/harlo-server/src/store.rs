@@ -186,6 +186,7 @@ impl Store {
     fn index(&self, session: &str, message: &Message) -> Result<(), Error> {
         let text = match message {
             Message::User { text, .. } => text.clone(),
+            Message::Shell(run) => run.command.clone(),
             Message::Assistant(step) => step
                 .content
                 .iter()

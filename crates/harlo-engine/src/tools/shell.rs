@@ -25,14 +25,37 @@ const MAX_BYTES: usize = 16 * 1024;
 /// How long a stopped command gets to end before it's killed.
 const GRACE: Duration = Duration::from_secs(2);
 
-/// Runs `command` in `cwd`; never fails, since what went wrong is output
-/// the model should read.
-pub(super) async fn run(
+/// How a command ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ended {
+    /// It exited by itself, with its code (none when a signal ended it).
+    Exited(Option<i32>),
+    /// It ran past its time and was stopped.
+    TimedOut,
+    /// It was stopped.
+    Stopped,
+    /// It couldn't be started, with why.
+    NotStarted(String),
+}
+
+/// A command's run: what it printed, standard error after standard output,
+/// and how it ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ran {
+    /// Everything it printed.
+    pub output: String,
+    /// How it ended.
+    pub ended: Ended,
+}
+
+/// Runs `command` with `bash` in `cwd` until it ends, `timeout` passes or
+/// `stop` is cancelled; a stopped command's process group is ended.
+pub async fn execute(
     command: &str,
     cwd: &Path,
-    timeout_ms: u64,
+    timeout: Option<Duration>,
     stop: &CancellationToken,
-) -> Output {
+) -> Ran {
     let mut cmd = Command::new("bash");
     cmd.arg("-c")
         .arg(command)
@@ -56,7 +79,12 @@ pub(super) async fn run(
     }
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(e) => return said(format!("Couldn't start bash: {e}"), None),
+        Err(e) => {
+            return Ran {
+                output: String::new(),
+                ended: Ended::NotStarted(format!("Couldn't start bash: {e}")),
+            };
+        }
     };
     let group = child.id().and_then(|id| i32::try_from(id).ok());
     let (out, err) = (child.stdout.take(), child.stderr.take());
@@ -66,22 +94,53 @@ pub(super) async fn run(
         (child.wait().await, out, err)
     };
     tokio::pin!(waiting);
+    let limit = async {
+        match timeout {
+            Some(t) => tokio::time::sleep(t).await,
+            None => std::future::pending().await,
+        }
+    };
     let ended = tokio::select! {
         r = &mut waiting => Ok(r),
-        () = tokio::time::sleep(Duration::from_millis(timeout_ms)) => Err(format!("Stopped after {} s: it took too long.", timeout_ms / 1000)),
-        () = stop.cancelled() => Err("Stopped.".to_owned()),
+        () = limit => Err(Ended::TimedOut),
+        () = stop.cancelled() => Err(Ended::Stopped),
     };
     match ended {
         Ok((status, stdout, stderr)) => {
-            let code = status.ok().and_then(|s| s.code());
-            let mut text = stdout;
+            let mut output = stdout;
             if !stderr.is_empty() {
-                if !text.is_empty() && !text.ends_with('\n') {
-                    text.push('\n');
+                if !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
                 }
-                text.push_str(&stderr);
+                output.push_str(&stderr);
             }
-            let mut shown = capped(&text);
+            Ran {
+                output,
+                ended: Ended::Exited(status.ok().and_then(|s| s.code())),
+            }
+        }
+        Err(ended) => {
+            end_group(group).await;
+            Ran {
+                output: String::new(),
+                ended,
+            }
+        }
+    }
+}
+
+/// Runs `command` in `cwd` for the model; never fails, since what went
+/// wrong is output the model should read.
+pub(super) async fn run(
+    command: &str,
+    cwd: &Path,
+    timeout_ms: u64,
+    stop: &CancellationToken,
+) -> Output {
+    let ran = execute(command, cwd, Some(Duration::from_millis(timeout_ms)), stop).await;
+    match ran.ended {
+        Ended::Exited(code) => {
+            let mut shown = capped(&ran.output);
             if shown.is_empty() {
                 shown.push_str("(no output)");
             }
@@ -90,10 +149,12 @@ pub(super) async fn run(
             }
             said(shown, code)
         }
-        Err(why) => {
-            end_group(group).await;
-            said(why, None)
-        }
+        Ended::TimedOut => said(
+            format!("Stopped after {} s: it took too long.", timeout_ms / 1000),
+            None,
+        ),
+        Ended::Stopped => said("Stopped.".to_owned(), None),
+        Ended::NotStarted(why) => said(why, None),
     }
 }
 

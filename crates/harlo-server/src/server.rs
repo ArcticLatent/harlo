@@ -29,7 +29,12 @@ use crate::store::{Location, Session, SessionTime, Store, StoredEvent};
 fn wakes(message: &Message) -> bool {
     match message {
         Message::User { .. } => true,
-        Message::Synthetic { metadata, .. } => metadata.is_some(),
+        // A person's own command waits for the next turn; a background
+        // job's result starts one.
+        Message::Synthetic {
+            metadata: Some(meta),
+            ..
+        } => !(meta["source"] == "shell" && meta.get("jobID").is_none()),
         _ => false,
     }
 }
@@ -82,6 +87,8 @@ pub(crate) struct Live {
     pub(crate) watches: crate::watch::Watches,
     /// The files sessions read and wrote.
     pub(crate) known: crate::stale::Known,
+    /// Background commands going, by job ID, to stop them.
+    pub(crate) shells: HashMap<String, CancellationToken>,
 }
 
 /// The server.
@@ -902,6 +909,10 @@ impl Server {
             history,
             shadow: folder.config.snapshots.then(|| self.shadow(&directory)),
             memory: self.memory_for(session),
+            jobs: Some(Arc::new(crate::shell::SessionJobs {
+                server: Arc::clone(self),
+                session: session.id.clone(),
+            })),
             files: Some(Arc::new(crate::stale::SessionFiles {
                 server: Arc::clone(self),
                 session: session.id.clone(),

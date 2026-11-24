@@ -76,6 +76,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/config", get(config))
         .route("/api/mcp/resource", get(mcp_resources))
         .route("/api/experimental/job", get(jobs))
+        .route("/api/experimental/job/{id}/cancel", post(cancel_job))
+        .route("/api/session/{id}/shell", post(user_shell))
         .route("/api/vcs", get(vcs))
         .route("/api/vcs/diff", get(vcs_diff))
         .route("/api/session/{id}/generate", post(aside))
@@ -743,8 +745,29 @@ async fn located_empty(Query(q): Params) -> Answer {
     ok(json!({ "location": location(&q), "data": [] }))
 }
 
-async fn jobs(State(server): Shared) -> Answer {
-    ok(json!({ "data": server.jobs() }))
+async fn jobs(State(server): Shared, Query(q): Params) -> Answer {
+    let session = q.get("sessionID").map(String::as_str);
+    ok(json!({ "data": server.jobs_of(session) }))
+}
+
+async fn cancel_job(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.cancel_job(&id)?;
+    done()
+}
+
+/// A person's command.
+#[derive(Deserialize)]
+struct UserShell {
+    command: String,
+}
+
+async fn user_shell(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<UserShell>,
+) -> Answer {
+    server.run_user_shell(&id, &body.command).await?;
+    done()
 }
 
 /// Client tools aren't taken yet: a plain "unavailable", so a client stops
