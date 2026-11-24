@@ -117,7 +117,6 @@ fn setup() -> SetUp {
             status: McpStatus::Failed("no such command".into()),
             integration: None,
         }]),
-        plugins: Err("server went away".into()),
     }
 }
 
@@ -363,8 +362,7 @@ fn settings_show_the_servers_set_up_and_about() {
         Some("Failed: no such command"),
         "an MCP server's failure"
     );
-    ui.press("Plugins");
-    assert!(ui.shows("Couldn't list them: server went away"));
+    assert!(!ui.shows("Plugins"), "no plugins tab");
     // The last section, at the end of the list.
     ui.wheel("Providers", -10);
     ui.press("About");

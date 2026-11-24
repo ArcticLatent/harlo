@@ -145,11 +145,6 @@ title = "Harlo's own tools for agents, over MCP"
 checks = ["unit:harlo:own_tools", "unit:harlo-core:own_tools"]
 
 [[item]]
-id = "plugins"
-title = "Plugins: check and update"
-checks = ["unit:harlo:plugins"]
-
-[[item]]
 id = "claude"
 title = "Claude Code through the server: found, signed in, used as a model"
 checks = ["unit:harlo:claude", "unit:harlo:server_claude", "unit:harlo-core:claude", "real:reply"]

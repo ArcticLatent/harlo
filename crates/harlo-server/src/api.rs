@@ -164,9 +164,6 @@ pub fn router(server: Arc<Server>) -> Router {
             "/api/experimental/mcp/{server}/disconnect",
             post(mcp_disconnect),
         )
-        .route("/api/plugin", get(plugin_list))
-        .route("/api/plugin/check", post(plugin_check))
-        .route("/api/plugin/update", post(plugin_update))
         .route("/api/experimental/session/stats", get(stats))
         .route("/api/provider", get(providers))
         .route("/api/pty", get(pty_list).post(create_pty))
@@ -1005,56 +1002,6 @@ async fn mcp_add(
 async fn mcp_remove(State(server): Shared, Path(name): Path<String>) -> Answer {
     server.mcp_remove(&name);
     done()
-}
-
-/// The engine's own parts, as built-in plugins: it loads no others.
-fn plugins() -> Vec<Value> {
-    let parts = [
-        "harlo.agent",
-        "harlo.command",
-        "harlo.skill",
-        "harlo.memory",
-        "harlo.goal",
-        "harlo.codemode",
-        "harlo.automation",
-        "harlo.mcp",
-        "harlo.vcs.git",
-    ];
-    parts
-        .iter()
-        .map(|id| {
-            json!({
-                "id": id, "source": { "type": "builtin" }, "features": { "server": true },
-                "state": { "status": "active" },
-            })
-        })
-        .collect()
-}
-
-async fn plugin_list(Query(q): Params) -> Answer {
-    ok(json!({ "location": location(&q), "data": plugins() }))
-}
-
-/// Nothing to check: the engine has no package plugins.
-async fn plugin_check(Query(q): Params) -> Answer {
-    ok(json!({ "location": location(&q), "data": plugins() }))
-}
-
-/// What's to update.
-#[derive(Deserialize)]
-struct PluginTargets {
-    #[serde(default)]
-    targets: Vec<String>,
-}
-
-/// Nothing to update; a named package isn't one the engine has.
-async fn plugin_update(axum::Json(body): axum::Json<PluginTargets>) -> Answer {
-    match body.targets.first() {
-        Some(target) => Err(Refusal::NotFound(format!(
-            "There's no package plugin {target}."
-        ))),
-        None => done(),
-    }
 }
 
 /// A client's MCP server, hosted over a WebSocket, whose tools agents get

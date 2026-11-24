@@ -4,7 +4,7 @@
 //! setup guide opens on the first start and walks through what Harlo needs.
 //!
 //! Harlo's own settings are saved with the layout. The server's set-up
-//! (providers, web search, MCP servers, plugins) belongs to the shared
+//! (providers, web search, MCP servers) belongs to the shared
 //! server, which other clients use too; it changes only when the user asks.
 
 // Rust guideline compliant 2026-10-09
@@ -17,7 +17,7 @@ use harlo_core::notifications::{self as notify, Kind};
 use harlo_core::{autostart, config};
 
 use harlo_core::layout::Appearance;
-use harlo_core::server::{Location, McpServer, Plugin, Provider, Stats, WebSearch};
+use harlo_core::server::{Location, McpServer, Provider, Stats, WebSearch};
 use harlo_core::theme::Mode;
 
 use super::projects::{ProjectEvent, Projects};
@@ -121,7 +121,7 @@ pub enum Section {
     LocalModels,
     /// The server's agents and the approvals it saved.
     Agents,
-    /// MCP servers, plugins and skills, each on a tab.
+    /// MCP servers and skills, each on a tab.
     Extensions,
     /// Web search and Harlo's own tools.
     Tools,
@@ -417,7 +417,7 @@ pub enum SettingChoice {
     VoiceLanguage,
     /// [`Preferences::local_engine`].
     LocalEngine,
-    /// Which of Extensions' tabs shows: MCP servers, plugins or skills.
+    /// Which of Extensions' tabs shows: MCP servers or skills.
     ExtensionsTab,
     /// What a new schedule does: a prompt, a shell command or code.
     ScheduleDoes,
@@ -476,7 +476,7 @@ impl SettingChoice {
             Self::VoiceModel => &["Base", "Small"],
             Self::VoiceLanguage => &harlo_core::voice::LANGUAGE_NAMES,
             Self::LocalEngine => &["Ollama", "llama.cpp"],
-            Self::ExtensionsTab => &["MCP servers", "Plugins", "Skills"],
+            Self::ExtensionsTab => &["MCP servers", "Skills"],
             Self::ScheduleDoes => &["A prompt", "A shell command", "Code"],
         }
     }
@@ -533,8 +533,6 @@ pub struct SetUp {
     pub search_choice: Option<String>,
     /// The MCP servers.
     pub mcp: Result<Vec<McpServer>, String>,
-    /// The plugins.
-    pub plugins: Result<Vec<Plugin>, String>,
 }
 
 /// Something that happened to the pages.
@@ -595,8 +593,6 @@ pub enum Event {
     Approval(super::ApprovalEvent),
     /// Something about the MCP servers.
     Mcp(super::McpEvent),
-    /// Something about the plugins.
-    Plugin(super::PluginEvent),
     /// Something happened to the other computers Harlo follows.
     Computer(super::ComputerEvent),
     /// Starting at login was turned on (`true`) or off, or why it couldn't be.
@@ -675,8 +671,6 @@ pub struct Sheets {
     pub approvals: super::Approvals,
     /// The MCP servers' pages.
     pub mcp: super::McpServers,
-    /// Checking and updating plugins.
-    pub plugins: super::Plugins,
     /// Whether About shows the colour themes' licence.
     pub theme_licence: bool,
     /// Whether Notifications lists the names its templates fill in.
@@ -770,7 +764,6 @@ impl App {
             Event::Provider(event) => return self.provider_event(event),
             Event::Approval(event) => return self.approval_event(event),
             Event::Mcp(event) => return self.mcp_event(event),
-            Event::Plugin(event) => return self.plugin_event(event),
             Event::Computer(event) => return self.computer_event(event),
             Event::AutostartSet(result) => match (result, self.autostart.as_mut()) {
                 (Ok(on), Some(autostart)) => {
@@ -846,7 +839,6 @@ impl App {
             Section::Phone => self.phone_event(super::PhoneEvent::Changed),
             Section::Extensions => {
                 self.sheets.mcp.view = super::McpView::List;
-                self.sheets.plugins.checked = None;
                 Task::batch([self.load_mcp(), self.load_setup()])
             }
             Section::Tools => Task::batch([self.load_mcp(), self.load_setup()]),
@@ -1163,7 +1155,7 @@ impl App {
                 Task::none()
             }
             SettingChoice::ExtensionsTab => {
-                self.sheets.extensions_tab = option.min(2);
+                self.sheets.extensions_tab = option.min(1);
                 // A server's page closes with its tab.
                 self.sheets.mcp.view = super::McpView::List;
                 Task::none()
@@ -1297,19 +1289,17 @@ impl App {
         let folder = self.folder();
         let setup = Task::future(async move {
             let text = |e: harlo_core::server::Error| e.to_string();
-            let (providers, search, choice, mcp, plugins) = futures_util::join!(
+            let (providers, search, choice, mcp) = futures_util::join!(
                 client.providers(&folder),
                 client.web_search(&folder),
                 client.web_search_choice(&folder),
                 client.mcp_servers(&folder),
-                client.plugins(&folder),
             );
             let setup = SetUp {
                 providers: providers.map_err(text),
                 search: search.map_err(text),
                 search_choice: choice.ok().flatten(),
                 mcp: mcp.map_err(text),
-                plugins: plugins.map_err(text),
             };
             Message::Sheet(Event::SetUp(serial, Box::new(setup)))
         });

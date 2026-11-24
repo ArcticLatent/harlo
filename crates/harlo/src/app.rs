@@ -48,7 +48,6 @@ mod notices;
 mod own_tools;
 mod phone;
 mod pictures;
-mod plugins;
 mod projects;
 mod providers;
 mod schedules;
@@ -87,7 +86,6 @@ pub use notices::Notice;
 pub use own_tools::OwnToolsEvent;
 pub use phone::{Host as PhoneHost, Paired, PhoneEvent, PhoneState, Shown};
 pub use pictures::{PictureEvent, PicturesState, Pixels, Sent, Thumb, Viewing};
-pub use plugins::{PluginEvent, Plugins, is_outdated};
 pub use projects::{ProjectEvent, Projects, icon_url};
 pub use providers::{Attempt as SignInAttempt, FORM_FIELDS, ProviderEvent, Providers};
 pub use schedules::{

@@ -516,10 +516,9 @@ def scene_settings(g):
     g.cap("about-licence", "Settings → About with the colour themes' licence shown")
     h.click("Hide licence: Colour themes")
     settings(h, "Extensions")
-    for tab in ("Plugins", "Skills"):
-        h.click(tab)
-        h.settle(0.8)
-        g.cap(f"extensions-{tab.lower()}", f"Settings → Extensions: the {tab} tab")
+    h.click("Skills")
+    h.settle(0.8)
+    g.cap("extensions-skills", "Settings → Extensions: the Skills tab")
     h.click("MCP servers")
     settings(h, "Notifications")
     h.click("Change")

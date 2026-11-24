@@ -12,7 +12,7 @@ use sse_stream::SseByteStream;
 
 use crate::catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 use crate::prompt::Prompt;
-use crate::settings::{Integration, McpServer, Plugin, Provider, Stats, WebSearch};
+use crate::settings::{Integration, McpServer, Provider, Stats, WebSearch};
 use crate::setup::Setup;
 use crate::types::{
     Answer, Delivery, FileDiff, Form, Goal, InboxItem, Message, ModelRef, Permission,
@@ -462,31 +462,19 @@ impl Client {
     /// Session `session_id`'s goal, set with the `/goal` command, if it has
     /// one.
     ///
-    /// The goal plugin serves it over its RPC in the session's folder,
-    /// `directory`, once the folder's plugins have loaded; this waits a
-    /// little for them.
+    /// `directory` is the session's folder.
     ///
     /// # Errors
     ///
-    /// Fails when the server can't be reached or doesn't run the plugin.
+    /// Fails when the server can't be reached.
     pub async fn goal(&self, session_id: &str, directory: &str) -> Result<Option<Goal>, Error> {
-        let started = std::time::Instant::now();
-        loop {
-            let read = Self::json(
-                self.request(Method::POST, "/api/rpc/goal/get")
-                    .query(&[("location[directory]", directory)])
-                    .json(&json!({ "input": { "sessionID": session_id } })),
-            )
-            .await;
-            match read {
-                // A folder's plugins load on first use; until then their
-                // RPC is unavailable.
-                Err(e) if e.tag() == Some("RpcError") && started.elapsed() < CATALOG_WAIT => {
-                    tokio::time::sleep(CATALOG_POLL).await;
-                }
-                read => return Ok(Goal::from_json(&read?["output"])),
-            }
-        }
+        let read = Self::json(
+            self.request(Method::POST, "/api/rpc/goal/get")
+                .query(&[("location[directory]", directory)])
+                .json(&json!({ "input": { "sessionID": session_id } })),
+        )
+        .await?;
+        Ok(Goal::from_json(&read["output"]))
     }
 
     /// A model as the API's requests name it.
@@ -699,46 +687,6 @@ impl Client {
         let req = self
             .request(Method::POST, &path)
             .query(&[("location[directory]", directory)]);
-        Self::send(req).await?;
-        Ok(())
-    }
-
-    /// Lists the plugins loaded for `directory`.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the server can't be reached.
-    pub async fn plugins(&self, directory: &str) -> Result<Vec<Plugin>, Error> {
-        let v = self.list("/api/plugin", directory, &[]).await?;
-        Ok(each(&v, Plugin::from_json))
-    }
-
-    /// Asks the package registries whether the package plugins have newer
-    /// versions, and returns them with `outdated` set on those that do.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the server can't be reached or can't check.
-    pub async fn check_plugins(&self, directory: &str) -> Result<Vec<Plugin>, Error> {
-        let req = self
-            .request(Method::POST, "/api/plugin/check")
-            .query(&[("location[directory]", directory)])
-            .json(&json!({}));
-        let mut v = Self::json(req).await?;
-        Ok(each(&v["data"].take(), Plugin::from_json))
-    }
-
-    /// Updates the package plugins configured as `targets`, and has the
-    /// server reload them everywhere; returns once all are done.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the server can't be reached or any update fails.
-    pub async fn update_plugins(&self, directory: &str, targets: &[String]) -> Result<(), Error> {
-        let req = self
-            .request(Method::POST, "/api/plugin/update")
-            .query(&[("location[directory]", directory)])
-            .json(&json!({ "targets": targets }));
         Self::send(req).await?;
         Ok(())
     }

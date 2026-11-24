@@ -19,7 +19,6 @@ mod local_models;
 mod mcp;
 mod memory;
 mod phone;
-mod plugins;
 mod providers;
 mod schedules;
 mod voice;
@@ -1951,7 +1950,7 @@ const ABOUT: i32 = 12;
 /// The kind of row with an icon, a name, a line under it and a button.
 pub(super) const LINK: i32 = 13;
 
-/// The server's web search, MCP servers and plugins, for Tools.
+/// The server's web search and MCP servers, for Tools.
 fn tool_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     let mut rows = Vec::new();
     search_rows(app, setup, &mut rows);
@@ -1959,13 +1958,12 @@ fn tool_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     rows
 }
 
-/// Extensions: a tab each for MCP servers, plugins and skills, and the
-/// chosen one's rows.
+/// Extensions: a tab each for MCP servers and skills, and the chosen
+/// one's rows.
 fn extension_rows(app: &App, setup: Option<&SetUp>) -> Vec<SheetRow> {
     let mut rows = vec![choice(app, SettingChoice::ExtensionsTab, "", "")];
     match (app.sheets.extensions_tab, setup) {
-        (2, _) => skill_rows(app, &mut rows),
-        (1, Some(setup)) => plugins::plugin_rows(app, &setup.plugins, &mut rows),
+        (1, _) => skill_rows(app, &mut rows),
         (_, Some(setup)) => mcp::list_rows(app, setup, &mut rows),
         (_, None) => {}
     }

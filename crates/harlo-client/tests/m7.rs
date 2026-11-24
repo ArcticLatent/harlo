@@ -81,7 +81,7 @@ async fn a_shell_on_the_server_answers_and_ends() {
 /// The server's set-up reads as names and states, never a provider's
 /// settings.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_set_up_lists_providers_search_mcp_and_plugins() {
+async fn the_set_up_lists_providers_search_and_mcp() {
     let sandbox = Sandbox::start().await;
     let client = sandbox.client();
     let project = sandbox.project_str();
@@ -121,14 +121,6 @@ async fn the_set_up_lists_providers_search_mcp_and_plugins() {
 
     let mcp = client.mcp_servers(&project).await.expect("MCP servers");
     assert!(mcp.is_empty(), "none configured in the sandbox");
-
-    let plugins = client.plugins(&project).await.expect("plugins");
-    assert!(
-        plugins
-            .iter()
-            .any(|p| p.source == harlo_client::PluginSource::Builtin && p.failed.is_none()),
-        "the server's own plugins load"
-    );
 }
 
 /// Stats count nothing on a new server, and take a start.

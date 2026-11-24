@@ -1,4 +1,4 @@
-//! Settings → Extensions: MCP servers, plugins and skills, a tab each.
+//! Settings → Extensions: MCP servers and skills, a tab each.
 
 // Rust guideline compliant 2026-10-09
 

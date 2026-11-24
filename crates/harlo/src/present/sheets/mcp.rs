@@ -125,7 +125,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         }
         Some(McpRun::Remote { url, .. }) => rows.push(pair("Address", url, 3)),
         None => rows.push(note(
-            "It's set up in a project's harlo.json or by a plugin; change it there.",
+            "It's set up in a project's harlo.json; change it there.",
         )),
     }
     if let Some(server) = server {

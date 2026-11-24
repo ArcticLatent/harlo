@@ -92,7 +92,7 @@ impl App {
     pub(super) fn goal_event(&mut self, event: GoalEvent) -> Task<Message> {
         match event {
             GoalEvent::Loaded { session, result } => {
-                // A server without the goal plugin has none to show.
+                // A goal that can't be read isn't shown.
                 if let Ok(goal) = result {
                     self.set_goal(session, goal);
                 }

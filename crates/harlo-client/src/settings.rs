@@ -1,5 +1,5 @@
 //! What the server is set up with: providers, web search, MCP servers,
-//! plugins and integrations (the services it signs in to); and the usage
+//! integrations (the services it signs in to); and the usage
 //! statistics across sessions.
 //!
 //! Only names and states are read. A provider's settings and a credential's
@@ -118,64 +118,6 @@ impl McpServer {
             name,
             status,
         })
-    }
-}
-
-/// Where a plugin comes from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PluginSource {
-    /// Part of the server.
-    Builtin,
-    /// An installed package.
-    Package {
-        /// The package, as configured.
-        target: String,
-        /// The installed version, if known.
-        version: Option<String>,
-        /// Whether a newer version is out.
-        outdated: bool,
-        /// Whether it's being updated now.
-        updating: bool,
-    },
-    /// A file on the server's computer.
-    Local(String),
-    /// Added by a program through the API.
-    Sdk,
-    /// A source this client doesn't know, by name.
-    Other(String),
-}
-
-/// A plugin the server loaded.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Plugin {
-    /// Its ID.
-    pub id: String,
-    /// Where it comes from.
-    pub source: PluginSource,
-    /// Why it failed to load, if it did.
-    pub failed: Option<String>,
-}
-
-impl Plugin {
-    pub(crate) fn from_json(value: &Value) -> Option<Self> {
-        let id = text(value, "id");
-        let source = &value["source"];
-        let source = match source["type"].as_str().unwrap_or_default() {
-            "builtin" => PluginSource::Builtin,
-            "package" => PluginSource::Package {
-                target: text(source, "target"),
-                version: optional(source, "version"),
-                outdated: source["outdated"].as_bool().unwrap_or(false),
-                updating: source["updating"].as_bool().unwrap_or(false),
-            },
-            "local" => PluginSource::Local(text(source, "path")),
-            "sdk" => PluginSource::Sdk,
-            other => PluginSource::Other(other.to_owned()),
-        };
-        let state = &value["state"];
-        let failed = (state["status"].as_str() == Some("failed"))
-            .then(|| optional(state, "error").unwrap_or_else(|| "failed".to_owned()));
-        (!id.is_empty()).then_some(Self { id, source, failed })
     }
 }
 
