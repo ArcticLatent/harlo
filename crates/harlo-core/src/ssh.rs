@@ -11,10 +11,49 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use opencode_client::{SharedService, parse_registration};
+
+/// Returns the SSH config Harlo offers hosts from: `~/.ssh/config`.
+#[must_use]
+pub fn config_file() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".ssh").join("config"))
+}
+
+/// Returns the hosts the SSH config at `path` names, in order, each once.
+///
+/// Patterns with wildcards (`*`, `?`) and negated ones name no single
+/// computer and are left out. `Include` lines are followed, relative to
+/// the folder `path` sits in. A missing or unreadable file names none.
+#[must_use]
+pub fn config_hosts(path: &Path) -> Vec<String> {
+    let Ok(file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let mut config = ssh2_config::SshConfig::default();
+    // Includes resolve against the home holding `.ssh`.
+    if let Some(home) = path.parent().and_then(Path::parent) {
+        config = config.home_dir(home);
+    }
+    let rules = ssh2_config::ParseRule::ALLOW_UNKNOWN_FIELDS
+        | ssh2_config::ParseRule::ALLOW_UNSUPPORTED_FIELDS;
+    let Ok(config) = config.parse(&mut BufReader::new(file), rules) else {
+        return Vec::new();
+    };
+    let mut hosts: Vec<String> = Vec::new();
+    for clause in config.get_hosts().iter().flat_map(|h| &h.pattern) {
+        let name = &clause.pattern;
+        if clause.negated || name.contains(['*', '?']) || hosts.contains(name) {
+            continue;
+        }
+        hosts.push(name.clone());
+    }
+    hosts
+}
 
 /// How long the tunnel may take to open.
 const TUNNEL_WAIT: Duration = Duration::from_secs(20);

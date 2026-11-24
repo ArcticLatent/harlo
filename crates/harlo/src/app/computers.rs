@@ -11,10 +11,14 @@ use super::{App, Message};
 use crate::task::Task;
 
 /// Something that happened to the other computers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComputerEvent {
     /// Forget computer `n`, and stop following it.
     Remove(usize),
+    /// The hosts the SSH config names, read.
+    Found(Vec<String>),
+    /// Add the SSH config's host `n`, and follow it.
+    Follow(usize),
 }
 
 impl App {
@@ -39,9 +43,33 @@ impl App {
         Task::batch([self.save_preferences(), self.pick_location(location)])
     }
 
+    /// Reads the hosts the SSH config names, for Settings → Server to
+    /// offer.
+    pub(super) fn load_ssh_hosts(&self) -> Task<Message> {
+        let Some(path) = self.ssh_config.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || ssh::config_hosts(&path))
+                    .await
+                    .unwrap_or_default()
+            },
+            |hosts| Message::Sheet(super::SheetEvent::Computer(ComputerEvent::Found(hosts))),
+        )
+    }
+
     /// Handles `event` on the other computers.
     pub(super) fn computer_event(&mut self, event: ComputerEvent) -> Task<Message> {
         match event {
+            ComputerEvent::Found(hosts) => {
+                self.sheets.ssh_hosts = hosts;
+                Task::none()
+            }
+            ComputerEvent::Follow(index) => match self.sheets.ssh_hosts.get(index).cloned() {
+                Some(host) => self.add_computer(&host),
+                None => Task::none(),
+            },
             ComputerEvent::Remove(index) => {
                 if index >= self.preferences.computers.len() {
                     return Task::none();

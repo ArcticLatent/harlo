@@ -634,6 +634,8 @@ pub struct Sheets {
     pub autostart_error: Option<String>,
     /// Why a computer couldn't be added, if it couldn't.
     pub computer_error: Option<String>,
+    /// The hosts the SSH config names, offered to follow.
+    pub ssh_hosts: Vec<String>,
     /// The setup guide's step.
     pub step: Step,
     /// Git on this computer, for the guide.
@@ -821,6 +823,7 @@ impl App {
                 self.load_setup()
             }
             Section::Agents => self.load_approvals(),
+            Section::Server => self.load_ssh_hosts(),
             Section::LocalModels => self.look(),
             Section::Phone => self.phone_event(super::PhoneEvent::Changed),
             Section::Extensions => {

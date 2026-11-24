@@ -932,6 +932,28 @@ fn computer_rows(app: &App, rows: &mut Vec<SheetRow>) {
         row.choice = int(index);
         rows.push(row);
     }
+    // The SSH config's hosts not added yet, one click from following.
+    let offered: Vec<(usize, &String)> = app
+        .sheets
+        .ssh_hosts
+        .iter()
+        .enumerate()
+        .filter(|(_, host)| !app.preferences.computers.contains(host))
+        .collect();
+    if !offered.is_empty() {
+        rows.push(note("From ~/.ssh/config:"));
+    }
+    for (index, host) in offered {
+        rows.push(SheetRow {
+            kind: LINK,
+            name: host.as_str().into(),
+            glyph: glyph(Icon::Server),
+            action: "Follow".into(),
+            setting: crate::window::FOLLOW_SSH_HOST,
+            choice: int(index),
+            ..SheetRow::default()
+        });
+    }
     let mut add = field(
         Field::Computer,
         "Computer",

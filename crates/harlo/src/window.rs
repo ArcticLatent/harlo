@@ -235,6 +235,7 @@ fn boot(options: &Options) -> App {
         .with_preferences(preferences)
         .notifying();
     app.opencode_folder = harlo_core::config::folder();
+    app.ssh_config = harlo_core::ssh::config_file();
     app.git_config = harlo_core::git::Global::new();
     app.hosting = Some(harlo_core::hosting::Hosting::new());
     app.opens_pages = true;
@@ -738,6 +739,10 @@ pub const CHOOSE_SOUND: i32 = 78;
 /// The About button that shows or hides the event sounds' licence.
 pub const SOUND_LICENCE: i32 = 79;
 
+/// The Server button that adds and follows the SSH config's host numbered
+/// by its item.
+pub const FOLLOW_SSH_HOST: i32 = 80;
+
 /// The first number of Settings → Models' switches: the one for the model
 /// at place `n` of [`App::models`] is numbered this plus `n`.
 pub const MODEL_SWITCHES: i32 = 10_000;
@@ -770,6 +775,11 @@ fn local_action(number: i32, item: i32) -> Option<Message> {
         REMOVE_COMPUTER => {
             return Some(Message::Sheet(SheetEvent::Computer(
                 app::ComputerEvent::Remove(index?),
+            )));
+        }
+        FOLLOW_SSH_HOST => {
+            return Some(Message::Sheet(SheetEvent::Computer(
+                app::ComputerEvent::Follow(index?),
             )));
         }
         PAIR_PHONE => return Some(Message::Phone(app::PhoneEvent::Pair)),
@@ -960,7 +970,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
-        INSTALL_ENGINE..=TEST_PHONE => local_action(number, item),
+        INSTALL_ENGINE..=TEST_PHONE | FOLLOW_SSH_HOST => local_action(number, item),
         CHECK_PLUGINS => Some(Message::Sheet(SheetEvent::Plugin(app::PluginEvent::Check))),
         UPDATE_PLUGIN => Some(Message::Sheet(SheetEvent::Plugin(
             app::PluginEvent::Update(usize::try_from(item).ok()),

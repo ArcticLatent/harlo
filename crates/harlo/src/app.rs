@@ -580,6 +580,9 @@ pub struct App {
     /// change for the background service. Only the running app sets it;
     /// tests give a scratch folder or none.
     pub opencode_folder: Option<std::path::PathBuf>,
+    /// The SSH config whose hosts Settings → Server offers; none in tests
+    /// unless they give one.
+    pub ssh_config: Option<std::path::PathBuf>,
     /// Starting Harlo at login. Only the running app sets it; tests give a
     /// scratch folder or none.
     pub autostart: Option<Autostart>,
@@ -747,6 +750,7 @@ impl App {
             new_folder: None,
             home: home_folder(),
             opencode_folder: None,
+            ssh_config: None,
             autostart: None,
             git_config: harlo_core::git::Global::new()
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")

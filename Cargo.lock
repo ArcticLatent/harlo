@@ -2426,6 +2426,7 @@ dependencies = [
  "sha2",
  "shell-words",
  "similar",
+ "ssh2-config",
  "tar",
  "tempfile",
  "tokio",
@@ -6249,6 +6250,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ssh2-config"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f8aade2961db6d07192035b809806be8fc32ca8875f9395e9e97239eeb2ed10"
+dependencies = [
+ "bitflags 2.13.2",
+ "dirs",
+ "glob",
+ "log",
+ "thiserror 2.0.21",
+ "wildmatch",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7847,6 +7862,12 @@ dependencies = [
  "fs_extra",
  "semver",
 ]
+
+[[package]]
+name = "wildmatch"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f18219fbd41a807dec044965d4106bb4fdb1d3a4b70aac4e5510aacc80a9f140"
 
 [[package]]
 name = "winapi"

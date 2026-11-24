@@ -81,3 +81,39 @@ fn a_computer_is_added_followed_over_ssh_and_removed() {
     assert!(ui.app().preferences.computers.is_empty());
     assert!(!ui.app().locations.contains(&there));
 }
+
+#[test]
+fn the_ssh_configs_hosts_are_offered_and_one_click_follows() {
+    let scratch = tempfile::tempdir().expect("a scratch home");
+    let ssh = scratch.path().join(".ssh");
+    std::fs::create_dir_all(&ssh).expect("the folder");
+    std::fs::write(
+        ssh.join("config"),
+        "Host buildbox\n    User me\nHost nano\nHost *\n    ServerAliveInterval 30\n",
+    )
+    .expect("a scratch config");
+    let mut app = demo::new_app();
+    app.ssh_config = Some(ssh.join("config"));
+    app.preferences.computers = vec!["buildbox".into()];
+    let ui = ui(app);
+    let mut tasks = Tasks::new();
+    ui.send(Message::Sheet(SheetEvent::Open(Section::Server)));
+    assert!(
+        tasks.until(&ui, Duration::from_secs(5), |ui| ui.shows("nano")),
+        "the config's hosts"
+    );
+    assert!(!ui.shows("Follow: buildbox"), "added already");
+    assert!(!ui.shows("*"), "patterns name no computer");
+
+    ui.press("Follow: nano");
+    // Following would run `ssh`; the test stops short of it.
+    drop(ui.driver.take_tasks());
+    assert_eq!(ui.app().preferences.computers, ["buildbox", "nano"]);
+    assert_eq!(
+        ui.app().location,
+        Location::Ssh {
+            target: "nano".into()
+        }
+    );
+    assert!(!ui.shows("Follow: nano"));
+}
