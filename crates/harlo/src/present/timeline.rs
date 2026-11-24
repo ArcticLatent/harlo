@@ -644,7 +644,11 @@ fn entry_rows(
             ..
         } => {
             let mut row = blank(Shape::Prompt, key, gap);
-            row.label = text.as_str().into();
+            let (text, from) = prompt_from(text, crew);
+            if let Some(agent) = from {
+                row.detail = agent.into();
+            }
+            row.label = text.into();
             row.text = styled(&markdown::escaped(text));
             row.undo = view.undo;
             row.sending = view.sending;
@@ -1125,6 +1129,22 @@ fn standing(
     }
 }
 
+/// The line OpenCode puts before the work it hands a subagent.
+const SUBAGENT_PREAMBLE: &str = "You are a subagent spawned by another session.";
+
+/// A prompt's words and who it's from when that isn't the user: the work a
+/// parent's agent handed a subagent, without the line OpenCode puts before
+/// it.
+fn prompt_from<'a>(text: &'a str, crew: &'a Crew) -> (&'a str, Option<&'a str>) {
+    match text
+        .strip_prefix(SUBAGENT_PREAMBLE)
+        .zip(crew.asked_by.as_deref())
+    {
+        Some((task, agent)) => (task.trim_start(), Some(agent)),
+        None => (text, None),
+    }
+}
+
 /// The row for a subagent's report, with its first lines below.
 fn report_row(t: &Tokens, key: &str, gap: f32, crew: &Crew, report: &Report) -> TimelineRow {
     let agent = crew.name(&report.agent);
@@ -1140,7 +1160,13 @@ fn report_row(t: &Tokens, key: &str, gap: f32, crew: &Crew, report: &Report) -> 
     }
     row.detail = report.task.as_str().into();
     row.child = report.child.as_str().into();
-    let gist = gist(&report.text);
+    // The words of its first lines, without Markdown's marks.
+    let words: Vec<String> = report
+        .text
+        .lines()
+        .map(|line| markdown::plain(line).trim().to_owned())
+        .collect();
+    let gist = gist(&words.join("\n"));
     if !gist.is_empty() {
         row.text = styled(&markdown::escaped(&gist));
         row.note = gist.into();
@@ -1162,6 +1188,46 @@ mod tests {
         let mut row = blank(Shape::Line, label, 0.0);
         row.label = label.into();
         built(row)
+    }
+
+    #[test]
+    fn a_subagents_task_is_from_the_agent_that_asked_without_opencodes_line() {
+        let crew = Crew {
+            asked_by: Some("Build".to_owned()),
+            ..Crew::default()
+        };
+        let task = format!("{SUBAGENT_PREAMBLE}\nFind the tests.");
+        assert_eq!(
+            prompt_from(&task, &crew),
+            ("Find the tests.", Some("Build"))
+        );
+        assert_eq!(
+            prompt_from("Find the tests.", &crew),
+            ("Find the tests.", None),
+            "what the user types stays theirs"
+        );
+        assert_eq!(
+            prompt_from(&task, &Crew::default()).1,
+            None,
+            "outside a subagent's session"
+        );
+    }
+
+    #[test]
+    fn a_reports_preview_drops_markdowns_marks() {
+        let t = harlo_core::theme::harlo(harlo_core::theme::Mode::Dark).tokens();
+        let report = Report {
+            child: "child".to_owned(),
+            agent: "explore".to_owned(),
+            task: "Find the tests".to_owned(),
+            state: "completed".to_owned(),
+            text: "## Found\n**a.txt** is covered, `b.txt` too.\n- nothing else".to_owned(),
+        };
+        let row = report_row(&t, "k", 0.0, &Crew::default(), &report);
+        assert_eq!(
+            row.note.as_str(),
+            "Found\na.txt is covered, b.txt too.\nnothing else"
+        );
     }
 
     #[test]

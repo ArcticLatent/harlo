@@ -8,7 +8,8 @@ Each mode and size gets its own Harlo, in its own sandbox (the scripted
 model, a scratch HOME, attached as to the shared server), which walks
 through the scenes below: the start screen and setup guide, a session with
 every kind of card, the menus, each panel, the terminal and editor, every
-Settings section, the pages, phone pairing and schedules.
+Settings section, the pages, phone pairing and schedules, subagents and
+worktrees.
 
 The pictures go to .impeccable/critique/shots/<date>-<label>/<mode>-<size>/
 (local-only), with INDEX.md listing each picture and what it shows, and
@@ -612,9 +613,96 @@ def scene_window(g):
     g.cap("reopened", "After a restart: the tabs and panels that were open")
 
 
+def scene_worktrees(g):
+    """A worktree made from Settings → Projects, its row in the sidebar,
+    and a session in it."""
+    h = g.h
+    settings(h, "Projects")
+    h.settle(0.6)
+    h.press("project", where=lambda e: e.x > h.size[0] / 3)
+    h.wait("Worktrees", role=None, timeout=10)
+    h.fill("New", "fix-tabs", where=lambda e: e.x > h.size[0] / 3)
+    h.press("Make New")
+    h.wait("fix-tabs", role=None, where=lambda e: e.x > h.size[0] / 3 and e.role != "TextInput",
+           timeout=90)
+    h.settle(1)
+    for _ in range(3):
+        h.scroll("Worktrees", -300)
+    h.settle(0.6)
+    g.cap("settings", "Settings → Projects: the project's worktree, Make for another, and its setup command")
+    h.press("Close")
+    h.wait_gone("Search settings", role="TextInput")
+    h.wait("New session in fix-tabs", role="Button", timeout=30)
+    h.settle(0.8)
+    g.cap("sidebar", "The sidebar: the worktree under its project, with its sessions' count")
+    h.press("New session in fix-tabs")
+    h.wait(None, role="TextInput", where=composer, timeout=15)
+    ask(h, "Fix the tab order in the settings dialog.",
+        [[("tool", 'glob {"pattern":"*.txt"}')],
+         [("say", "Fixed the tab order on the **fix-tabs** branch; the main checkout is untouched.")]])
+    h.wait_says("main checkout is untouched", timeout=40)
+    # A title, as the other scenes give theirs: the scripted model has none.
+    listed = h.api("GET", "/api/session?limit=50")["data"]
+    listed = listed.get("items", listed) if isinstance(listed, dict) else listed
+    for session in listed:
+        if session.get("location", {}).get("directory", session.get("directory", "")).endswith("fix-tabs"):
+            h.api("PATCH", f"/api/session/{session['id']}", {"title": "Tab order"})
+    h.wait("Tab order", role=None, where=lambda e: e.x < 340, timeout=15)
+    h.settle(1)
+    g.cap("session", "A session working in the worktree, listed under it in the sidebar")
+
+
+# What the explorer is asked, and what it does: a search, a read, then a
+# slow report, so it can be seen at work.
+SUBAGENT_TASK = "Find where the tests live and what they cover."
+SUBAGENT_REPORT = (
+    "The tests live next to the code they cover. **a.txt** is checked by the first "
+    "group and **b.txt** by the second; nothing covers the release script yet, so "
+    "that is the gap to fill before tagging."
+)
+
+
+def scene_subagents(g):
+    """Work handed to a subagent: its card while it works, its report, its
+    own session and the way back."""
+    h = g.h
+    open_project_session(h, title="Test coverage")
+    path = os.path.join(h.info["sandbox"], "scripts.json")
+    try:
+        with open(path) as f:
+            scripts = json.load(f)
+    except (OSError, ValueError):
+        scripts = {}
+    scripts[SUBAGENT_TASK] = [[["tool", 'glob {"pattern":"*.txt"}']],
+                              [["tool", 'read {"path":"a.txt"}']],
+                              [["pace", "120"], ["say", SUBAGENT_REPORT]]]
+    with open(path, "w") as f:
+        json.dump(scripts, f)
+    task = json.dumps({"description": "Find the tests", "prompt": SUBAGENT_TASK,
+                       "agent": "explore"})
+    ask(h, "Check what the tests cover before we tag the release.",
+        [[("think", "An explorer can look through the project while I keep the release open."),
+          ("tool", "subagent " + task)],
+         [("say", "The explorer found the tests: both text files are covered, the release "
+                  "script isn't. I'll add a test for it next.")]])
+    h.wait("Open", role=None, where=lambda e: e.x > 340, timeout=40)
+    h.settle(1.2)
+    g.cap("working", "A subagent at work: its agent, its task, and Open to follow it")
+    h.wait_says("add a test for it next", timeout=60)
+    h.settle(1)
+    g.cap("done", "The subagent's report back, and the answer that uses it")
+    h.click("Open", role=None, where=lambda e: e.x > 340)
+    h.wait("Subagent of Test coverage", role=None, timeout=15)
+    h.settle(1)
+    g.cap("child", "The subagent's own session: its task, its tool calls and report, and the way back")
+    h.click("Subagent of Test coverage", role=None)
+    h.settle(0.8)
+
+
 SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approval),
           ("question", scene_question), ("busy", scene_busy), ("menus", scene_menus),
-          ("panels", scene_panels), ("terminal", scene_terminal), ("editor", scene_editor),
+          ("panels", scene_panels), ("subagents", scene_subagents), ("worktrees", scene_worktrees),
+          ("terminal", scene_terminal), ("editor", scene_editor),
           ("settings", scene_settings), ("fonts", scene_fonts), ("pages", scene_pages), ("phone", scene_phone),
           ("pictures", scene_pictures), ("schedules", scene_schedules), ("long-list", scene_long_list),
           ("window", scene_window)]

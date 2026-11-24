@@ -59,6 +59,14 @@ impl App {
                     },
                 );
             }
+            // A subagent's first prompt comes from the parent's agent.
+            if let Some(parent) = self.parent_of(session) {
+                let agent = parent
+                    .agent
+                    .clone()
+                    .or_else(|| catalog.primary_agents().next().map(|a| a.id.clone()));
+                crew.asked_by = agent.map(|agent| crew.name(&agent));
+            }
         }
         crew
     }

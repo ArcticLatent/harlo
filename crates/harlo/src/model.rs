@@ -571,6 +571,9 @@ pub struct Crew {
     /// The agent the session runs now, which answers a prompt still
     /// streaming.
     pub current: Option<String>,
+    /// For a subagent's session, the name of the agent that handed it its
+    /// work, which its first prompt is from.
+    pub asked_by: Option<String>,
 }
 
 impl Crew {

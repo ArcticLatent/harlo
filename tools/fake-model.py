@@ -17,7 +17,7 @@ by " | " and run in order:
     pace <ms>             delay between streamed chunks from here on
 
 A subagent's prompt starts with OpenCode's line telling it it's one; the
-script is what follows.
+script, or the plain words kept in scripts.json, is what follows.
 
 A prompt can also be plain words, with its script in scripts.json beside
 the log: {"<prompt>": <script>}, the script either a string as above or a
@@ -106,6 +106,8 @@ def plan(messages):
     if last_user < 0:
         return [("say", "ok.")]
     script = text_of(messages[last_user].get("content")).strip()
+    if script.startswith(SUBAGENT_PREAMBLE):
+        script = script[len(SUBAGENT_PREAMBLE) :].strip()
     known_scripts = stored_scripts()
     if script in known_scripts:
         script = known_scripts[script]
@@ -114,8 +116,6 @@ def plan(messages):
             if done >= len(script):
                 return [("say", "done.")]
             return [(word, text) for word, text in script[done]]
-    if script.startswith(SUBAGENT_PREAMBLE):
-        script = script[len(SUBAGENT_PREAMBLE) :].strip()
     if script.startswith("You MUST summarize the conversation") or script.startswith(
         "The previous response did not fill in the required summary template"
     ):

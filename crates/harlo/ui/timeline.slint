@@ -177,13 +177,14 @@ component PromptRow inherits Rectangle {
                     // Who said it, set apart from what was said.
                     VerticalLayout {
                         alignment: start;
+                        // "You", or the agent that handed a subagent its work.
                         Text {
                             height: Size.answer * 1.4;
-                            text: "You";
+                            text: root.item.detail != "" ? root.item.detail : "You";
                             vertical-alignment: center;
                             font-size: Size.small;
                             font-weight: 500;
-                            color: Theme.accent-ink;
+                            color: root.item.detail != "" ? Theme.agent-ink : Theme.accent-ink;
                             accessible-role: none;
                         }
                     }
