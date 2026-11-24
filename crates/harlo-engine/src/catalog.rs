@@ -37,9 +37,7 @@ impl Wire {
     #[must_use]
     pub fn of_package(package: &str) -> Self {
         match package {
-            "" | "@ai-sdk/openai-compatible" | "@opencode/ai/providers/openai-compatible" => {
-                Self::Chat
-            }
+            "" | "@ai-sdk/openai-compatible" => Self::Chat,
             p if p.ends_with("/anthropic") && !p.contains("vertex") => Self::Messages,
             "@ai-sdk/openai" | "@ai-sdk/azure" => Self::Responses,
             // These packages wrap an OpenAI-compatible endpoint.

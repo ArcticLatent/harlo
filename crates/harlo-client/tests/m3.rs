@@ -461,9 +461,7 @@ async fn a_prompt_can_load_a_project_skill() {
     let sandbox = Sandbox::start().await;
     let client = sandbox.client();
     let folder = sandbox.project_str();
-    let skill_dir = sandbox
-        .root()
-        .join("project/.opencode/skills/release-notes");
+    let skill_dir = sandbox.root().join("project/.harlo/skills/release-notes");
     std::fs::create_dir_all(&skill_dir).expect("skill folder");
     std::fs::write(
         skill_dir.join("SKILL.md"),

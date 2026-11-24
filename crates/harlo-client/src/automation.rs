@@ -1,7 +1,7 @@
-//! OpenCode's automations: prompts the server sends to a session at a time,
+//! Automations: prompts the server sends to a session at a time,
 //! every so often, or on a cron schedule, whether or not a client is open.
 //!
-//! They're experimental in OpenCode: creating one needs
+//! They're experimental: creating one needs
 //! `experimental.automations` in the config of its folder, and the API may
 //! change between releases.
 

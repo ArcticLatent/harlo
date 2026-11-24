@@ -11,7 +11,7 @@ mod support;
 use harlo_client::{Delivery, EventKind, Message, Part, Prompt, ToolStatus};
 use support::{Sandbox, wait_idle};
 
-/// A script that calls one tool from OpenCode's Code Mode catalog.
+/// A script that calls one tool from the Code Mode catalog.
 const SCRIPT: &str =
     "// List the schedules\nconst all = await tools.automation.list({});\nreturn all;";
 

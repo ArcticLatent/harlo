@@ -154,7 +154,7 @@ fn usage_follows_the_sessions_events() {
 fn instruction_files_show_where_they_apply() {
     let files = vec![
         File {
-            path: "/home/demo/.config/opencode/AGENTS.md".into(),
+            path: "/home/demo/.config/harlo/AGENTS.md".into(),
             scope: Scope::Global,
         },
         File {
@@ -163,7 +163,7 @@ fn instruction_files_show_where_they_apply() {
         },
     ];
     let ui = context(loaded(seen(), Some(files)));
-    assert!(ui.shows("~/.config/opencode/AGENTS.md"));
+    assert!(ui.shows("~/.config/harlo/AGENTS.md"));
     assert!(ui.shows("everywhere"));
     assert!(ui.shows("AGENTS.md"), "from the project's root");
     assert!(ui.shows("project"));

@@ -5,13 +5,13 @@
 use std::backtrace::Backtrace;
 use std::fmt::{self, Display, Formatter};
 
-/// HTTP status OpenCode uses when the target no longer exists.
+/// HTTP status the server uses when the target no longer exists.
 ///
 /// Returned, for example, when replying to a permission request that another
 /// client already answered (`PermissionNotFoundError`).
 const NOT_FOUND: u16 = 404;
 
-/// HTTP status OpenCode uses when the target was already settled.
+/// HTTP status the server uses when the target was already settled.
 ///
 /// Returned, for example, when answering a form another client already
 /// answered (`FormAlreadySettledError`).
@@ -48,7 +48,7 @@ enum Kind {
     Other(String),
 }
 
-/// A failed call to an OpenCode server.
+/// A failed call to a server.
 ///
 /// Use the `is_*` helpers to react to specific outcomes: a request that was
 /// already answered elsewhere ([`Error::is_settled`]), a wrong password
@@ -117,7 +117,7 @@ impl Error {
         }
     }
 
-    /// Returns OpenCode's error tag, such as `PermissionNotFoundError`.
+    /// Returns the server's error tag, such as `PermissionNotFoundError`.
     #[must_use]
     pub fn tag(&self) -> Option<&str> {
         match &self.kind {
@@ -176,21 +176,21 @@ impl Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            Kind::Transport(e) => write!(f, "could not reach the OpenCode server: {e}")?,
+            Kind::Transport(e) => write!(f, "could not reach the server: {e}")?,
             Kind::Status {
                 status,
                 tag,
                 message,
                 ..
             } => {
-                write!(f, "the OpenCode server answered {status}")?;
+                write!(f, "the server answered {status}")?;
                 if let Some(tag) = tag {
                     write!(f, " ({tag})")?;
                 }
                 write!(f, ": {message}")?;
             }
-            Kind::Decode(e) => write!(f, "unexpected answer from the OpenCode server: {e}")?,
-            Kind::Io(e) => write!(f, "could not read an OpenCode file: {e}")?,
+            Kind::Decode(e) => write!(f, "unexpected answer from the server: {e}")?,
+            Kind::Io(e) => write!(f, "could not read a file: {e}")?,
             Kind::Other(message) => write!(f, "{message}")?,
         }
         Ok(())

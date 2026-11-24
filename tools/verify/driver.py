@@ -444,7 +444,7 @@ class Harlo:
         """Calls the sandbox's server."""
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(self.info["url"] + path, data, method=method)
-        token = base64.b64encode(f"opencode:{self.info['password']}".encode()).decode()
+        token = base64.b64encode(f"harlo:{self.info['password']}".encode()).decode()
         request.add_header("Authorization", f"Basic {token}")
         if data is not None:
             request.add_header("Content-Type", "application/json")

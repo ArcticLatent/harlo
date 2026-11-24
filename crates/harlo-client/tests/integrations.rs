@@ -31,7 +31,7 @@ async fn claude_agent(client: &Client) -> Integration {
         }
     })
     .await
-    .expect("OpenCode has Claude Agent")
+    .expect("the server has Claude Agent")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -91,7 +91,7 @@ async fn integrations(client: &Client) -> Vec<Integration> {
         }
     })
     .await
-    .expect("OpenCode lists its integrations")
+    .expect("the server lists its integrations")
 }
 
 #[tokio::test(flavor = "multi_thread")]

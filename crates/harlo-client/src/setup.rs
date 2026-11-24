@@ -1,11 +1,11 @@
-//! What a folder's OpenCode configuration sets up beyond what the API lists:
+//! What a folder's configuration sets up beyond what the API lists:
 //! which agent each command runs, and whether the todo tool is on.
 //!
 //! `/api/command` names commands but not how they run. The configuration
 //! does: a `commands` map in each configuration file, and a Markdown file
 //! with front matter per command in each configuration folder's `command/`
 //! or `commands/`. `/api/config` lists those files and folders in the order
-//! OpenCode merges them, later ones winning.
+//! The server merges them, later ones winning.
 
 // Rust guideline compliant 2026-10-09
 
@@ -66,8 +66,8 @@ impl Setup {
     /// Builds the setup from `/api/config`'s entries, reading command files
     /// from the folders it lists.
     ///
-    /// Files that can't be read or parsed are left out: OpenCode reports
-    /// those itself, and the command still runs as OpenCode decides.
+    /// Files that can't be read or parsed are left out: the server reports
+    /// those itself, and the command still runs as the server decides.
     pub(crate) fn from_entries(entries: &Value) -> Self {
         let mut setup = Self::default();
         for entry in entries.as_array().into_iter().flatten() {

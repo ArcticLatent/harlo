@@ -41,7 +41,7 @@ pub async fn is_repo(directory: &str) -> bool {
 }
 
 /// The uncommitted changes in `directory`, one entry per file, as
-/// OpenCode reports them: `{ file, patch, additions, deletions, status }`.
+/// clients read them: `{ file, patch, additions, deletions, status }`.
 /// With `only`, just those files.
 pub async fn changes(directory: &str, only: Option<&[String]>) -> Vec<Value> {
     let mut args = vec!["diff", "--no-color", "--no-ext-diff", "HEAD", "--"];

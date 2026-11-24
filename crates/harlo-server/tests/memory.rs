@@ -49,7 +49,7 @@ async fn call(
 ) -> Value {
     let mut request = reqwest::Client::new()
         .request(method, format!("{}{path}", sandbox.url()))
-        .basic_auth("opencode", Some(&sandbox.password));
+        .basic_auth("harlo", Some(&sandbox.password));
     if let Some(body) = body {
         request = request.json(&body);
     }

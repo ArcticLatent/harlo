@@ -133,7 +133,7 @@ async fn models_carry_their_context_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn agents_say_how_they_can_be_used() {
     let sandbox = Sandbox::start().await;
-    let agents_dir = sandbox.project().join(".opencode/agents");
+    let agents_dir = sandbox.project().join(".harlo/agents");
     std::fs::create_dir_all(&agents_dir).expect("agents folder");
     std::fs::write(
         agents_dir.join("reviewer.md"),
@@ -180,7 +180,7 @@ async fn agents_say_how_they_can_be_used() {
 #[tokio::test]
 async fn commands_say_how_they_run() {
     let sandbox = Sandbox::start().await;
-    let dot = sandbox.project().join(".opencode");
+    let dot = sandbox.project().join(".harlo");
     std::fs::create_dir_all(dot.join("commands/group")).expect("commands folder");
     std::fs::create_dir_all(dot.join("command")).expect("command folder");
     std::fs::write(
@@ -195,7 +195,7 @@ async fn commands_say_how_they_run() {
     .expect("nested command file");
     std::fs::write(dot.join("command/plain.md"), "No front matter.\n").expect("plain file");
     std::fs::write(
-        dot.join("opencode.json"),
+        dot.join("harlo.json"),
         r#"{"experimental":{"todo":true},"commands":{"tidy":{"template":"Tidy up.","agent":"explore"}}}"#,
     )
     .expect("config file");

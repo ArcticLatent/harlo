@@ -183,19 +183,19 @@ fn provider_rows(app: &App, rows: &mut Vec<SheetRow>) {
     if app.global_config().is_none() || app.served().is_none() {
         return;
     }
-    let mut row = if local.in_opencode {
+    let mut row = if local.in_config {
         pair("In the model menu", "Added", 1)
     } else {
         pair("In the model menu", "Not added", 3)
     };
-    row.action = if local.in_opencode {
+    row.action = if local.in_config {
         "Take out"
     } else {
         "Add to the model menu"
     }
     .into();
     row.setting = window::LOCAL_PROVIDER;
-    row.choice = i32::from(!local.in_opencode);
+    row.choice = i32::from(!local.in_config);
     rows.push(row);
     if let Some(done) = &local.done {
         rows.push(pair("", done, 1));

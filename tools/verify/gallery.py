@@ -1053,7 +1053,7 @@ def write_index(root, label, sittings):
 
 def main():
     # The Todos panel has a list to show only with the todo tool on.
-    os.environ["OC_SANDBOX_TODO"] = "1"
+    os.environ["HARLO_SANDBOX_TODO"] = "1"
     args = sys.argv[1:]
     opts = {"--modes": ",".join(MODES), "--sizes": ",".join(SIZES), "--only": ""}
     label = "app"

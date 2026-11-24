@@ -1,5 +1,5 @@
-//! `glob` and `grep`: finding files by name and lines by pattern, as
-//! OpenCode's tools of those names do. Both walk the project the way git
+//! `glob` and `grep`: finding files by name and lines by pattern. Both
+//! walk the project the way git
 //! sees it: `.gitignore`d files, hidden folders and `.git` are left out.
 
 // Rust guideline compliant 2026-10-09

@@ -38,7 +38,7 @@ fn a_remote_server_signs_in_from_its_page() {
         "guarded": { "type": "remote", "url": format!("{base}/mcp"),
                      "oauth": { "callbackPort": callback } },
     } } });
-    std::fs::write(sandbox.project().join("opencode.json"), config.to_string()).expect("config");
+    std::fs::write(sandbox.project().join("harlo.json"), config.to_string()).expect("config");
     let client = sandbox.client();
     let folder = sandbox.project_str();
     let waited = tasks.block_on(async {

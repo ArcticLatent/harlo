@@ -10,7 +10,7 @@ from _common import open_project_session, send
 
 def run(h, s):
     # The agent's commands run without asking, so the job starts at once.
-    path = os.path.join(h.info["sandbox"], "config", "opencode", "opencode.json")
+    path = os.path.join(h.info["sandbox"], "config", "harlo", "harlo.json")
     with open(path) as f:
         config = json.load(f)
     config.setdefault("permissions", []).append(

@@ -55,14 +55,7 @@ impl Sandbox {
             .tempdir()
             .expect("scratch");
         let root = dir.path();
-        for sub in [
-            "home",
-            "config/opencode",
-            "data",
-            "state",
-            "cache",
-            "project",
-        ] {
+        for sub in ["home", "config/harlo", "data", "state", "cache", "project"] {
             std::fs::create_dir_all(root.join(sub)).expect("folder");
         }
         let model_port = free_port();
@@ -77,7 +70,7 @@ impl Sandbox {
   }} }}
 }}"#
         );
-        std::fs::write(root.join("config/opencode/opencode.json"), config).expect("config");
+        std::fs::write(root.join("config/harlo/harlo.json"), config).expect("config");
         let project = root.join("project");
         run(&project, &["init", "-q"]);
         std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
@@ -225,7 +218,7 @@ pub async fn until<T>(events: &mut Events, mut pick: impl FnMut(EventKind) -> Op
 pub async fn replay(sandbox: &Sandbox, after: u64) -> Vec<(u64, String)> {
     let response = reqwest::Client::new()
         .get(format!("{}/api/event", sandbox.url()))
-        .basic_auth("opencode", Some(&sandbox.password))
+        .basic_auth("harlo", Some(&sandbox.password))
         .header("Last-Event-ID", after.to_string())
         .send()
         .await

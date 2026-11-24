@@ -1,16 +1,16 @@
 //! Project instructions: the AGENTS.md files a session's model reads,
-//! found the way OpenCode finds them.
+//! and where Harlo finds them.
 //!
-//! In order: the global `AGENTS.md` in OpenCode's config folder (or, without
+//! In order: the global `AGENTS.md` in Harlo's config folder (or, without
 //! one, `~/.claude/CLAUDE.md`); then every `AGENTS.md` from the session's
 //! folder upwards, toward the home folder for a folder inside it, else up to
 //! the project's root (in a folder without an `AGENTS.md`, its `CLAUDE.md`);
 //! then the files the config's `instructions` list names. Each keeps the
 //! path it came from, so the prompt and the UI can say where a rule is from.
 //!
-//! `OPENCODE_DISABLE_PROJECT_CONFIG` skips the project's files and
-//! `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` (or `OPENCODE_DISABLE_CLAUDE_CODE`)
-//! every `CLAUDE.md`, as in OpenCode. Not yet: URLs in `instructions`, and
+//! `HARLO_DISABLE_PROJECT_CONFIG` skips the project's files and
+//! `HARLO_DISABLE_CLAUDE_MD` every `CLAUDE.md`. Not yet: URLs in
+//! `instructions`, and
 //! nested `AGENTS.md` files loaded when a file below them is read.
 
 // Rust guideline compliant 2026-10-09
@@ -35,13 +35,13 @@ pub struct Search<'a> {
     pub project_root: Option<&'a Path>,
     /// The home folder.
     pub home: &'a Path,
-    /// OpenCode's config folder (`$XDG_CONFIG_HOME/opencode`).
+    /// Harlo's config folder (`$XDG_CONFIG_HOME/harlo`).
     pub config_dir: &'a Path,
     /// The config's `instructions` entries.
     pub configured: &'a [String],
-    /// Skip the project's files (`OPENCODE_DISABLE_PROJECT_CONFIG`).
+    /// Skip the project's files (`HARLO_DISABLE_PROJECT_CONFIG`).
     pub no_project: bool,
-    /// Skip every `CLAUDE.md` (`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`).
+    /// Skip every `CLAUDE.md` (`HARLO_DISABLE_CLAUDE_MD`).
     pub no_claude: bool,
 }
 
@@ -61,14 +61,14 @@ impl Default for Search<'_> {
 }
 
 impl Search<'_> {
-    /// Reads the switches from the environment, as OpenCode's do.
+    /// Reads the switches from the environment: set to anything but empty,
+    /// `0` or `false`, a switch is on.
     #[must_use]
     pub fn with_env(mut self) -> Self {
         let on =
             |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty() && v != "0" && v != "false");
-        self.no_project |= on("OPENCODE_DISABLE_PROJECT_CONFIG");
-        self.no_claude |=
-            on("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT") || on("OPENCODE_DISABLE_CLAUDE_CODE");
+        self.no_project |= on("HARLO_DISABLE_PROJECT_CONFIG");
+        self.no_claude |= on("HARLO_DISABLE_CLAUDE_MD");
         self
     }
 }
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn global_then_upward_then_configured_with_claude_md_as_fallback() {
         let t = tempfile::tempdir().expect("dir");
-        let (home, config) = (t.path().join("home"), t.path().join("config/opencode"));
+        let (home, config) = (t.path().join("home"), t.path().join("config/harlo"));
         let root = t.path().join("work/repo");
         let web = root.join("packages/web");
         write(&config.join("AGENTS.md"), "global");
@@ -325,7 +325,7 @@ mod tests {
         write(&home.join(".claude/CLAUDE.md"), "claude global");
         write(&home.join("code/AGENTS.md"), "code");
         write(&home.join("AGENTS.md"), "home itself: unused");
-        let config = t.path().join("config/opencode");
+        let config = t.path().join("config/harlo");
         let search = Search {
             workspace: &project,
             project_root: Some(&project),

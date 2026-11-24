@@ -19,7 +19,7 @@ pub(crate) struct Folder {
     pub config: Config,
     /// The config documents it was merged from, global first.
     pub documents: Vec<(PathBuf, Value)>,
-    /// The config folders: the global one, then the project's `.opencode`
+    /// The config folders: the global one, then the project's `.harlo`
     /// folders from its root down.
     pub dirs: Vec<PathBuf>,
     /// The agents, built-in and configured.
@@ -46,7 +46,7 @@ impl Folder {
             .collect()
     }
 
-    /// The agents, as OpenCode lists them.
+    /// The agents, as the server lists them.
     pub fn agents_json(&self) -> Vec<Value> {
         self.agents
             .iter()
@@ -70,7 +70,7 @@ impl Folder {
             .collect()
     }
 
-    /// The config entries as OpenCode lists them: the global document
+    /// The config entries: the global document
     /// and folder, then the project's documents and folders.
     pub fn entries(&self) -> Vec<Value> {
         let document = |(path, info): &(PathBuf, Value)| json!({ "type": "document", "path": path, "info": info });
@@ -139,7 +139,7 @@ impl Server {
         let mut project: Vec<PathBuf> = workspace
             .ancestors()
             .take_while(|d| root.as_deref().is_some_and(|r| d.starts_with(r)) || *d == workspace)
-            .map(|d| d.join(".opencode"))
+            .map(|d| d.join(harlo_engine::PROJECT_FOLDER))
             .filter(|d| d.is_dir())
             .collect();
         project.reverse();

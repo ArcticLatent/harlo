@@ -16,7 +16,8 @@ use crate::wire as g;
 /// The server's version and addresses, from `GET /api/info`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerInfo {
-    /// What the server is: `OpenCode`, or `Harlo` for Harlo's own server.
+    /// What the server is: `Harlo`, or `OpenCode` for an OpenCode setup's
+    /// server, which sessions are imported from.
     pub name: String,
     /// Its version, such as `2.3.2`.
     pub version: String,
@@ -34,7 +35,7 @@ impl From<g::ServerInfo> for ServerInfo {
     }
 }
 
-/// A project: a folder OpenCode works in, usually a git repository.
+/// A project: a folder the server works in, usually a git repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     /// Project ID.
@@ -53,7 +54,7 @@ pub struct Project {
     pub start: Option<String>,
 }
 
-/// The colours a project's mark can take, as OpenCode names them.
+/// The colours a project's mark can take, by their names.
 pub const PROJECT_COLORS: [&str; 9] = [
     "orange", "yellow", "cyan", "green", "red", "pink", "blue", "purple", "gray",
 ];
@@ -133,7 +134,7 @@ impl From<g::ModelRef> for ModelRef {
         Self {
             provider_id: v.provider_id.to_string(),
             id: v.id,
-            // OpenCode reports "default" when no reasoning level was chosen.
+            // The server reports "default" when no reasoning level was chosen.
             variant: v.variant.filter(|s| !s.is_empty() && s != "default"),
         }
     }
@@ -201,7 +202,7 @@ pub struct SessionContext {
     pub model: Option<ModelRef>,
     /// The agent the latest step ran as.
     pub agent: Option<String>,
-    /// Instruction files OpenCode loaded during the session, such as a
+    /// Instruction files the server loaded during the session, such as a
     /// subfolder's `AGENTS.md` once the agent worked there. Absolute paths.
     pub loaded: Vec<String>,
 }
@@ -432,7 +433,7 @@ pub enum Message {
         /// What it said.
         report: Report,
     },
-    /// A note OpenCode added that it describes for people, such as a
+    /// A note the server added that it describes for people, such as a
     /// goal's start; the note itself is for the agent.
     Note {
         /// Message ID (`msg_…`).
@@ -451,7 +452,7 @@ pub enum Message {
     Other {
         /// Message ID (`msg_…`).
         id: String,
-        /// OpenCode's message type.
+        /// The note's message type.
         kind: String,
     },
 }
@@ -625,7 +626,7 @@ impl ShellRun {
     }
 }
 
-/// A session's goal: an objective OpenCode's `/goal` command keeps the
+/// A session's goal: an objective the `/goal` command keeps the
 /// agent working toward, round after round, until a reviewer finds it met.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Goal {
@@ -655,7 +656,7 @@ pub enum GoalStatus {
 }
 
 impl Goal {
-    /// Reads a goal as OpenCode's goal plugin sends it; `None` for `null`.
+    /// Reads a goal as the server sends it; `None` for `null`.
     pub(crate) fn from_json(value: &Value) -> Option<Self> {
         let status = match value["status"].as_str()? {
             "active" => GoalStatus::Active,
@@ -685,7 +686,7 @@ impl Goal {
 
 /// What a subagent said when it went idle, as the session that started it heard.
 ///
-/// OpenCode sends one each time the child session goes idle, so a child
+/// The server sends one each time the child session goes idle, so a child
 /// given more work reports again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
@@ -695,16 +696,16 @@ pub struct Report {
     pub agent: String,
     /// The task's short label.
     pub task: String,
-    /// How its work ended, as OpenCode says: `completed`, `failed`, …
+    /// How its work ended, as the server says: `completed`, `failed`, …
     pub state: String,
-    /// What it said, without OpenCode's wrapping.
+    /// What it said, without the server's wrapping.
     pub text: String,
 }
 
 impl Report {
     /// Reads a synthetic message, or a live one's data, that a subagent sent.
     ///
-    /// Returns `None` for OpenCode's other notes to the agent.
+    /// Returns `None` for the server's other notes to the agent.
     pub(crate) fn from_json(value: &Value) -> Option<Self> {
         let metadata = &value["metadata"];
         if metadata["source"] != "subagent" {
@@ -722,7 +723,7 @@ impl Report {
     }
 }
 
-/// The text inside OpenCode's `<subagent …>…</subagent>` wrapping, trimmed.
+/// The text inside the server's `<subagent …>…</subagent>` wrapping, trimmed.
 fn unwrap_report(text: &str) -> &str {
     let text = text.trim();
     let Some(rest) = text.strip_prefix("<subagent") else {
@@ -946,7 +947,7 @@ pub struct ScriptCall {
     /// [`ToolStatus::Running`], [`ToolStatus::Completed`] or
     /// [`ToolStatus::Failed`].
     pub status: ToolStatus,
-    /// Its arguments as OpenCode shows them, shortened; `Null` when it
+    /// Its arguments as the server shows them, shortened; `Null` when it
     /// didn't say.
     pub input: Value,
 }
@@ -981,7 +982,7 @@ pub struct Permission {
     pub message: Option<String>,
     /// The changes an edit would make, one per file.
     pub files: Vec<FileDiff>,
-    /// The tool call that asks, as its message ID and call ID, when OpenCode says.
+    /// The tool call that asks, as its message ID and call ID, when the server says.
     pub call: Option<(String, String)>,
 }
 

@@ -1,4 +1,4 @@
-//! The tools a model can call, named and shaped as OpenCode's: `read`,
+//! The tools a model can call: `read`,
 //! `write`, `edit`, `glob`, `grep` and `shell`.
 //!
 //! A call is first made into a [`Plan`]: its arguments are checked and,
@@ -689,7 +689,7 @@ fn edited(before: &str, old: &str, new: &str, all: bool) -> Result<(String, usiz
     edit_match::apply(before, &[edit]).map(|(after, _)| (after, 1))
 }
 
-/// The diff of one file, as OpenCode reports it in `metadata.files`.
+/// The diff of one file, as a tool reports it in `metadata.files`.
 fn files_metadata(shown: &str, before: Option<&str>, after: &str) -> Map<String, Value> {
     let old = before.unwrap_or_default();
     let diff = TextDiff::from_lines(old, after);

@@ -239,7 +239,7 @@ fn boot(options: &Options) -> App {
     let mut app = App::new(location, locations, layout)
         .with_preferences(preferences)
         .notifying();
-    app.opencode_folder = harlo_core::config::folder();
+    app.config_folder = harlo_core::config::folder();
     app.ssh_config = harlo_core::ssh::config_file();
     app.git_config = harlo_core::git::Global::new();
     app.hosting = Some(harlo_core::hosting::Hosting::new());
@@ -791,12 +791,12 @@ pub const RESTART_SERVER: i32 = 91;
 pub const MODEL_SWITCHES: i32 = 10_000;
 
 /// The pages Settings links to: About's source, releases and new issue,
-/// then the server's page on adding skills.
+/// then the README's part on adding skills.
 pub const ABOUT_LINKS: [&str; 4] = [
     env!("CARGO_PKG_REPOSITORY"),
     concat!(env!("CARGO_PKG_REPOSITORY"), "/releases"),
     concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"),
-    "https://opencode.ai/docs/skills/",
+    concat!(env!("CARGO_PKG_REPOSITORY"), "#skills"),
 ];
 
 /// [`ABOUT_LINKS`]' page on adding skills.

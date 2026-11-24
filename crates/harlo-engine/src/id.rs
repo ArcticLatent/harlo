@@ -1,4 +1,4 @@
-//! IDs in OpenCode's form: a prefix, twelve hex digits of time and a
+//! IDs: a prefix, twelve hex digits of time and a
 //! counter, then random letters.
 //!
 //! Ascending IDs (messages, parts, permissions) sort oldest first;

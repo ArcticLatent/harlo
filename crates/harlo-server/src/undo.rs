@@ -1,4 +1,4 @@
-//! Undo, as OpenCode's API shapes it: stage an undo back to before a prompt
+//! Undo: stage an undo back to before a prompt
 //! (restoring the files the agent changed since), then keep it (the
 //! messages go) or cancel it (the files come back).
 //!
@@ -214,7 +214,7 @@ impl Server {
     }
 }
 
-/// The staged undo as OpenCode's clients read it.
+/// The staged undo as clients read it.
 fn public(revert: &Value) -> Value {
     json!({
         "messageID": revert["messageID"],

@@ -31,7 +31,7 @@ if [[ ${1:-} == restart ]]; then
   # shellcheck disable=SC1091
   source "$dir/server.env"
   for _ in $(seq 1 100); do
-    if curl -s -o /dev/null -u "opencode:$password" "http://127.0.0.1:$port/api/info"; then break; fi
+    if curl -s -o /dev/null -u "harlo:$password" "http://127.0.0.1:$port/api/info"; then break; fi
     sleep 0.1
   done
   echo "restarted"
@@ -49,27 +49,26 @@ if [[ ${1:-} == stop ]]; then
 fi
 
 dir=${1:-$(mktemp -d /tmp/harlo-sandbox.XXXXXX)}
-mkdir -p "$dir"/{home,config/opencode,data,state,cache,project}
+mkdir -p "$dir"/{home,config/harlo,data,state,cache,project}
 free_port() { python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 model_port=$(free_port)
 port=$(free_port)
 password=$(python3 -I -c 'import secrets; print(secrets.token_hex(16))')
 
-# OC_SANDBOX_TODO=1 turns on the todo tool (experimental.todo).
+# HARLO_SANDBOX_TODO=1 turns on the todo tool (experimental.todo).
 experimental=""
-if [ "${OC_SANDBOX_TODO:-}" = 1 ]; then
+if [ "${HARLO_SANDBOX_TODO:-}" = 1 ]; then
   experimental='"experimental": { "todo": true },'
 fi
 
-cat > "$dir/config/opencode/opencode.json" <<EOF
+cat > "$dir/config/harlo/harlo.json" <<EOF
 {
-  "\$schema": "https://opencode.ai/config.json",
   "model": "fake/fake-coder",
   $experimental
   "providers": {
     "fake": {
       "name": "Fake",
-      "package": "@opencode/ai/providers/openai-compatible",
+      "package": "@ai-sdk/openai-compatible",
       "settings": { "baseURL": "http://127.0.0.1:$model_port/v1", "apiKey": "fake-key" },
       "models": { "fake-coder": { "name": "Fake Coder", "limit": { "context": 128000, "output": 8192 } } }
     }
@@ -107,7 +106,7 @@ EOF
 bash "$dir/server.sh"
 
 for _ in $(seq 1 100); do
-  if curl -s -o /dev/null -u "opencode:$password" "http://127.0.0.1:$port/api/info"; then break; fi
+  if curl -s -o /dev/null -u "harlo:$password" "http://127.0.0.1:$port/api/info"; then break; fi
   sleep 0.1
 done
 

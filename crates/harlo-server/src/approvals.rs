@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use crate::server::{Refusal, Server};
 use crate::store::{Error, Store};
 
-/// A saved approval's row, in OpenCode's shape.
+/// A saved approval's row, as clients read it.
 fn approval(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     Ok(json!({
         "id": row.get::<_, String>(0)?,

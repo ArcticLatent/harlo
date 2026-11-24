@@ -52,7 +52,7 @@ pub struct Places {
     pub project: PathBuf,
     /// The user's home folder.
     pub home: PathBuf,
-    /// OpenCode's config folder, such as `~/.config/opencode`.
+    /// Harlo's config folder, such as `~/.config/harlo`.
     pub config: PathBuf,
 }
 
@@ -69,7 +69,7 @@ impl Places {
             folder: PathBuf::from(folder),
             project: PathBuf::from(project),
             home,
-            config: config.join("opencode"),
+            config: config.join("harlo"),
         })
     }
 }

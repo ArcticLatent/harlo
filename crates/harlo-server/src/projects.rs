@@ -66,7 +66,7 @@ impl Server {
         Ok(out)
     }
 
-    /// Project `id`, in OpenCode's shape.
+    /// Project `id`, as clients read it.
     ///
     /// # Errors
     ///

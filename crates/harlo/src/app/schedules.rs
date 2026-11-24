@@ -315,7 +315,7 @@ impl App {
             schedule_message(ScheduleEvent::AllowedSet(
                 result
                     .map(|()| on)
-                    .map_err(|e| format!("Couldn't change opencode.json: {e}")),
+                    .map_err(|e| format!("Couldn't change harlo.json: {e}")),
             ))
         })
     }

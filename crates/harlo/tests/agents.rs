@@ -62,7 +62,7 @@ async fn allow_always(sandbox: &Sandbox) {
 fn agents_and_saved_approvals_are_shown_and_an_approval_removed() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
-    let agents = sandbox.project().join(".opencode/agents");
+    let agents = sandbox.project().join(".harlo/agents");
     std::fs::create_dir_all(&agents).expect("agents folder");
     std::fs::write(agents.join("reviewer.md"), REVIEWER).expect("reviewer.md");
     tasks.block_on(allow_always(&sandbox));

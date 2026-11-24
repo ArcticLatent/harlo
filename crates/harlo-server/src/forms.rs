@@ -1,4 +1,4 @@
-//! The agent's questions, as OpenCode's forms: one form per `question`
+//! The agent's questions, as forms: one form per `question`
 //! call, a field per question, waiting in the session's run until a person
 //! answers or dismisses it.
 
@@ -20,7 +20,7 @@ pub(crate) struct PendingForm {
     pub answer: oneshot::Sender<Option<Vec<Vec<String>>>>,
 }
 
-/// The form for `asked`, in OpenCode's shape: title "Questions", a field
+/// The form for `asked`: title "Questions", a field
 /// `q0`, `q1`, … per question, own answers allowed.
 pub(crate) fn form_of(asked: &Asked, session: &str) -> Value {
     let fields: Vec<Value> = asked
@@ -241,7 +241,7 @@ impl Server {
         let settled = self.form(session, form)?;
         let same = match answer {
             Some(a) => settled["state"]["answer"] == Value::Object(a.clone()),
-            // (A dismissal is refused the second time, as OpenCode does.)
+            // (A dismissal is refused the second time.)
             None => false,
         };
         if same {

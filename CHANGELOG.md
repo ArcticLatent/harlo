@@ -7,8 +7,9 @@ and its text becomes the release's notes.
 ## 2.0.0
 
 Harlo is rebuilt from the ground up: a native Rust app drawn with Slint, on
-Harlo's own agent server. Your old sessions stay on disk; Settings → Server
-imports OpenCode sessions.
+Harlo's own agent server. Your old sessions stay on disk. If you used
+OpenCode, its setup is copied to `~/.config/harlo` on the first start, and
+Settings → Server imports its sessions.
 
 - Harlo's server runs your agents in the background, so sessions, schedules
   and phone access keep going while the window is closed. It talks to

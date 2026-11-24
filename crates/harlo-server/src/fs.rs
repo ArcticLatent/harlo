@@ -1,4 +1,4 @@
-//! The project's files, as OpenCode's `/api/fs` routes serve them: finding
+//! The project's files, as the `/api/fs` routes serve them: finding
 //! by fuzzy path (the composer's `@` menu), listing a folder (the Files
 //! panel), reading and writing a file. Paths are relative to the session's
 //! folder, and none may lead outside it.
@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 /// The most entries a find walks, so a huge folder stays quick.
 const WALK_LIMIT: usize = 50_000;
 
-/// One entry, in OpenCode's shape: its path relative to the folder, and
+/// One entry: its path relative to the folder, and
 /// whether it's a file or a folder.
 fn entry(path: &str, folder: bool) -> Value {
     json!({ "path": path, "type": if folder { "directory" } else { "file" } })

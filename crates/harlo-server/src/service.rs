@@ -104,7 +104,7 @@ async fn answers(registration: &Registration) -> bool {
     };
     client
         .get(format!("{}/api/info", registration.url))
-        .basic_auth("opencode", registration.password.as_deref())
+        .basic_auth("harlo", registration.password.as_deref())
         .send()
         .await
         .is_ok_and(|r| r.status().is_success())

@@ -72,7 +72,7 @@ async fn client_tools_reach_agents_with_the_calling_session() {
 
     let info = reqwest::Client::new()
         .get(format!("{}/api/info", sandbox.url()))
-        .basic_auth("opencode", Some(&sandbox.password))
+        .basic_auth("harlo", Some(&sandbox.password))
         .send()
         .await
         .expect("info")

@@ -1,8 +1,8 @@
 //! Skills: instructions kept in Markdown files that a model loads when a
 //! task calls for them, or that a person attaches to a prompt.
 //!
-//! They are found where OpenCode looks: `.claude/skills`,
-//! `.agents/skills` and `.opencode/skills` in the project's folders, the
+//! They are found in `.claude/skills`, `.agents/skills` and
+//! `.harlo/skills` in the project's folders, the
 //! same in the home folder, the config folder's `skills`, and the folders
 //! the config's `skills` entries name. A folder holding a `SKILL.md` is one
 //! skill named after the folder; a Markdown file at a source's top is one
@@ -37,7 +37,7 @@ pub struct Skill {
 }
 
 impl Skill {
-    /// As OpenCode lists it.
+    /// As the server lists it.
     #[must_use]
     pub fn to_json(&self) -> Value {
         json!({
@@ -127,7 +127,7 @@ pub struct Search<'a> {
     pub project_root: Option<&'a Path>,
     /// The home folder.
     pub home: &'a Path,
-    /// OpenCode's config folder (`$XDG_CONFIG_HOME/opencode`).
+    /// Harlo's config folder (`$XDG_CONFIG_HOME/harlo`).
     pub config_dir: &'a Path,
     /// The config's `skills` entries: folders, relative to the workspace,
     /// from the home folder (`~/`) or absolute.
@@ -158,7 +158,11 @@ pub fn discover(search: &Search<'_>) -> Vec<Skill> {
         sources.extend(folders.iter().map(|f| f.join(kind).join("skills")));
     }
     sources.push(search.config_dir.join("skills"));
-    sources.extend(folders.iter().map(|f| f.join(".opencode/skills")));
+    sources.extend(
+        folders
+            .iter()
+            .map(|f| f.join(crate::config::PROJECT_FOLDER).join("skills")),
+    );
     for entry in search.configured {
         let path = if let Some(rest) = entry.strip_prefix("~/") {
             search.home.join(rest)
@@ -247,7 +251,7 @@ fn read(file: &Path) -> Option<Skill> {
     };
     let autoinvoke = front
         .metadata
-        .get("opencode/autoinvoke")
+        .get("harlo/autoinvoke")
         .and_then(Value::as_bool)
         .or(front.disable_model_invocation.map(|off| !off))
         .unwrap_or(true);
@@ -302,14 +306,14 @@ mod tests {
             "---\ndescription: From home.\n---\nHome notes.\n",
         );
         write(
-            root.join(".opencode/skills/notes/SKILL.md"),
+            root.join(".harlo/skills/notes/SKILL.md"),
             "---\nname: Notes\ndescription: From the project.\n---\nProject notes.\n",
         );
         write(
             root.join(".agents/skills/quiet.md"),
             "---\ndescription: Hidden.\ndisable-model-invocation: true\n---\nShh.\n",
         );
-        write(root.join(".opencode/skills/.hidden/x/SKILL.md"), "no\n");
+        write(root.join(".harlo/skills/.hidden/x/SKILL.md"), "no\n");
         let config = dir.path().join("config");
         let skills = discover(&Search {
             workspace: &root,

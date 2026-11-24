@@ -1250,7 +1250,7 @@ fn failed(input: Map<String, Value>, kind: &str, message: String) -> ToolState {
     }
 }
 
-/// OpenCode's name for a chat completions finish reason.
+/// The stored name for a chat completions finish reason.
 fn finish_name(raw: Option<&str>) -> &'static str {
     match raw {
         Some("stop") => "stop",

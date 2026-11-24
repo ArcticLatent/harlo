@@ -38,7 +38,7 @@ const STARTUP: Duration = Duration::from_secs(30);
 const EXECUTION: Duration = Duration::from_mins(5);
 
 /// The `_meta` key a client-hosted server reads the calling session from.
-const SESSION_KEY: &str = "ai.opencode/sessionID";
+const SESSION_KEY: &str = "harlo/sessionID";
 
 /// How a server stands.
 #[derive(Debug, Clone, PartialEq, Eq)]

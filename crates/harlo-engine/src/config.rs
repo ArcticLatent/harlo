@@ -1,9 +1,9 @@
-//! The configuration the engine reads in place: OpenCode's own files.
+//! The configuration the engine reads in place: Harlo's config file.
 //!
-//! People who used OpenCode keep their setup: `opencode.json` (or
-//! `.jsonc`) in OpenCode's config folder names the providers, their
-//! models, the default model and permission rules, in OpenCode 2's keys.
-//! The engine reads what it supports and leaves the file as it is.
+//! `harlo.jsonc` (or `harlo.json`) in Harlo's config folder names the
+//! providers, their models, the default model and permission rules; a
+//! project adds its own (see [`project_config_files`]). The engine reads
+//! what it supports and leaves the file as it is.
 
 // Rust guideline compliant 2026-10-09
 
@@ -14,6 +14,24 @@ use serde_json::{Map, Value};
 
 use crate::Error;
 use crate::rules::Rule;
+
+/// The name of Harlo's config folder in `$XDG_CONFIG_HOME`.
+pub const CONFIG_FOLDER: &str = "harlo";
+
+/// The config file's names, the one with comments first: in the config
+/// folder, and in a project's folders.
+pub const CONFIG_FILES: [&str; 2] = ["harlo.jsonc", "harlo.json"];
+
+/// The folder in a project that holds its own config, skills, commands and
+/// agents.
+pub const PROJECT_FOLDER: &str = ".harlo";
+
+/// Returns Harlo's config folder under `config_home` (usually
+/// `$XDG_CONFIG_HOME`).
+#[must_use]
+pub fn config_folder(config_home: &Path) -> PathBuf {
+    config_home.join(CONFIG_FOLDER)
+}
 
 /// A model, named by its provider and its own ID.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,15 +209,15 @@ pub struct Config {
 }
 
 impl Config {
-    /// Reads OpenCode's configuration from its folder under `config_home`
+    /// Reads Harlo's configuration from its folder under `config_home`
     /// (usually `$XDG_CONFIG_HOME`), or an empty one when there is none.
     ///
     /// # Errors
     ///
     /// Fails when the file exists but can't be read or parsed.
     pub fn load(config_home: &Path) -> Result<Self, Error> {
-        let folder = config_home.join("opencode");
-        for name in ["opencode.json", "opencode.jsonc"] {
+        let folder = config_folder(config_home);
+        for name in CONFIG_FILES {
             let path = folder.join(name);
             match std::fs::read_to_string(&path) {
                 Ok(text) => return Self::parse(&text, Some(path)),
@@ -215,7 +233,7 @@ impl Config {
         Ok(Self::default())
     }
 
-    /// Reads a configuration from the text of an OpenCode config file.
+    /// Reads a configuration from the text of a config file.
     ///
     /// # Errors
     ///
@@ -231,7 +249,7 @@ impl Config {
         Ok(Self::from_value(&value, source))
     }
 
-    /// Reads a configuration from an OpenCode config document, or several
+    /// Reads a configuration from a config document, or several
     /// [`merge_config`]d into one.
     #[must_use]
     pub fn from_value(value: &Value, source: Option<PathBuf>) -> Self {
@@ -304,7 +322,8 @@ impl Config {
 /// The config files a project adds over the global one, in order.
 ///
 /// In each folder from the project's root down to `workspace` they are its
-/// `opencode.json` (or `.jsonc`), then its `.opencode/opencode.json`.
+/// `harlo.jsonc` (or `harlo.json`), then its `.harlo/harlo.jsonc` (or
+/// `.json`).
 #[must_use]
 pub fn project_config_files(workspace: &Path, root: Option<&Path>) -> Vec<PathBuf> {
     let mut folders = vec![workspace.to_path_buf()];
@@ -318,8 +337,8 @@ pub fn project_config_files(workspace: &Path, root: Option<&Path>) -> Vec<PathBu
     folders.reverse();
     let mut files = Vec::new();
     for folder in folders {
-        for dir in [folder.clone(), folder.join(".opencode")] {
-            let file = ["opencode.json", "opencode.jsonc"]
+        for dir in [folder.clone(), folder.join(PROJECT_FOLDER)] {
+            let file = CONFIG_FILES
                 .iter()
                 .map(|n| dir.join(n))
                 .find(|p| p.is_file());
@@ -339,6 +358,101 @@ pub fn read_config_document(file: &Path) -> Result<Value, Error> {
         .map_err(|e| Error::config(format!("Couldn't read {}: {e}", file.display())))?;
     jsonc_parser::parse_to_serde_value(&text, &jsonc_parser::ParseOptions::default())
         .map_err(|e| Error::config(format!("Couldn't parse {}: {e}", file.display())))
+}
+
+/// The config folder an earlier OpenCode setup kept, in `$XDG_CONFIG_HOME`.
+const OPENCODE_FOLDER: &str = "opencode";
+
+/// That setup's config file names, the one with comments first.
+const OPENCODE_FILES: [&str; 2] = ["opencode.jsonc", "opencode.json"];
+
+/// What else of that setup's folder is copied: the global instructions and
+/// the folders of commands, agents and skills.
+const OPENCODE_EXTRAS: [&str; 6] = [
+    "AGENTS.md",
+    "command",
+    "commands",
+    "agent",
+    "agents",
+    "skills",
+];
+
+/// The package name that setup wrote for an OpenAI-compatible server, and
+/// the one the engine reads.
+const OLD_COMPATIBLE: (&str, &str) = (
+    "@opencode/ai/providers/openai-compatible",
+    "@ai-sdk/openai-compatible",
+);
+
+/// Starts Harlo's config from an earlier OpenCode setup, when Harlo has no
+/// config file yet.
+///
+/// Copies `opencode.jsonc` (or `.json`) from OpenCode's config folder under
+/// `config_home` as `harlo.jsonc` (or `.json`), with its providers, models,
+/// default model and rules, and copies the folder's `AGENTS.md` and its
+/// commands, agents and skills beside it. The file's `$schema` line is left
+/// out and the old package name for OpenAI-compatible servers is updated;
+/// the original folder stays as it is. Returns the file written, or `None`
+/// when Harlo already has a config file or there's none to copy.
+///
+/// # Errors
+///
+/// When a file can't be read or written.
+pub fn copy_from_opencode(config_home: &Path) -> Result<Option<PathBuf>, Error> {
+    let folder = config_folder(config_home);
+    if CONFIG_FILES.iter().any(|n| folder.join(n).exists()) {
+        return Ok(None);
+    }
+    let old = config_home.join(OPENCODE_FOLDER);
+    let Some((index, source)) = OPENCODE_FILES
+        .iter()
+        .map(|n| old.join(n))
+        .enumerate()
+        .find(|(_, p)| p.is_file())
+    else {
+        return Ok(None);
+    };
+    let failed = |path: &Path, e: std::io::Error| {
+        Error::config(format!("Couldn't copy {}: {e}", path.display()))
+    };
+    let text = std::fs::read_to_string(&source).map_err(|e| failed(&source, e))?;
+    let mut copy = String::with_capacity(text.len());
+    for line in text.lines() {
+        if !(line.trim_start().starts_with("\"$schema\"") && line.contains("opencode.ai")) {
+            copy.push_str(&line.replace(OLD_COMPATIBLE.0, OLD_COMPATIBLE.1));
+            copy.push('\n');
+        }
+    }
+    std::fs::create_dir_all(&folder).map_err(|e| failed(&folder, e))?;
+    let target = folder.join(CONFIG_FILES[index]);
+    std::fs::write(&target, copy).map_err(|e| failed(&target, e))?;
+    for extra in OPENCODE_EXTRAS {
+        let (from, to) = (old.join(extra), folder.join(extra));
+        if !to.exists() {
+            copy_tree(&from, &to).map_err(|e| failed(&from, e))?;
+        }
+    }
+    Ok(Some(target))
+}
+
+/// Copies the file or folder `from` to `to`, folders whole; symbolic links
+/// and anything missing are skipped.
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    let Ok(kind) = std::fs::symlink_metadata(from).map(|m| m.file_type()) else {
+        return Ok(());
+    };
+    if kind.is_file() {
+        std::fs::copy(from, to).map(drop)
+    } else if kind.is_dir() {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            copy_tree(&entry.path(), &to.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        Ok(())
+    }
 }
 
 /// Lays config document `over` on `base`: objects merge key by key, the
@@ -482,7 +596,7 @@ mod tests {
     use crate::rules::Effect;
 
     #[test]
-    fn reads_opencode_2_keys_with_comments() {
+    fn reads_its_keys_with_comments() {
         let text = r#"{
             // The sandbox's.
             "model": { "providerID": "fake", "model": "fake-coder" },
@@ -562,5 +676,40 @@ mod tests {
             Config::load(empty.path()).expect("loaded"),
             Config::default()
         );
+    }
+
+    #[test]
+    fn an_opencode_setup_is_copied_once() {
+        let home = tempfile::tempdir().expect("dir");
+        let old = home.path().join("opencode");
+        std::fs::create_dir_all(old.join("commands/team")).expect("folders");
+        std::fs::write(
+            old.join("opencode.jsonc"),
+            "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  // Mine.\n  \"model\": \"local/coder\",\n  \"providers\": { \"local\": { \"package\": \"@opencode/ai/providers/openai-compatible\",\n    \"settings\": { \"baseURL\": \"http://127.0.0.1:9/v1/\" }, \"models\": { \"coder\": {} } } }\n}\n",
+        )
+        .expect("config");
+        std::fs::write(old.join("AGENTS.md"), "Be brief.\n").expect("rules");
+        std::fs::write(old.join("commands/team/review.md"), "Review.\n").expect("command");
+
+        let copied = copy_from_opencode(home.path()).expect("copied");
+        let target = home.path().join("harlo/harlo.jsonc");
+        assert_eq!(copied.as_deref(), Some(target.as_path()));
+        let text = std::fs::read_to_string(&target).expect("read");
+        assert!(
+            text.contains("// Mine.") && !text.contains("$schema"),
+            "{text}"
+        );
+        let config = Config::load(home.path()).expect("loaded");
+        assert_eq!(config.model.map(|m| m.model), Some("coder".to_owned()));
+        assert!(text.contains("\"@ai-sdk/openai-compatible\""), "{text}");
+        assert_eq!(config.providers[0].wire, crate::catalog::Wire::Chat);
+        let harlo = home.path().join("harlo");
+        assert!(harlo.join("AGENTS.md").is_file());
+        assert!(harlo.join("commands/team/review.md").is_file());
+
+        // Harlo's own file is never replaced.
+        std::fs::write(&target, "{}\n").expect("edited");
+        assert_eq!(copy_from_opencode(home.path()).expect("checked"), None);
+        assert_eq!(std::fs::read_to_string(&target).expect("read"), "{}\n");
     }
 }

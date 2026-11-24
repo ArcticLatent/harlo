@@ -116,10 +116,10 @@ fn tiny() -> Suggestion {
 }
 
 /// The app with engines and models in `scratch`, from fake GitHub and
-/// Hugging Face servers, and OpenCode's config in `scratch/opencode`.
+/// Hugging Face servers, and Harlo's config in `scratch/harlo`.
 fn app(scratch: &Path, github: &str, hub: &str, ports: [u16; 2]) -> App {
     let mut app = demo::app();
-    app.opencode_folder = Some(scratch.join("opencode"));
+    app.config_folder = Some(scratch.join("harlo"));
     app.local.engines = Some(Engines::new(scratch.join("engines"), github));
     app.local.files = Some(ModelFiles::new(scratch.join("models"), hub));
     app.local.ports = ports;
@@ -180,7 +180,7 @@ fn open(ui: &Ui) {
 }
 
 #[test]
-fn llama_cpp_installs_serves_a_model_and_joins_opencode() {
+fn llama_cpp_installs_serves_a_model_and_joins_the_config() {
     let mut tasks = Tasks::new();
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let llama_port = free_port();
@@ -250,8 +250,8 @@ fn llama_cpp_installs_serves_a_model_and_joins_opencode() {
         ui.app().local.error
     );
     assert!(ui.shows("Tiny-Coder is in the model menu."));
-    let file = harlo_core::config::file(&scratch.path().join("opencode"));
-    let text = std::fs::read_to_string(file).expect("OpenCode's config");
+    let file = harlo_core::config::file(&scratch.path().join("harlo"));
+    let text = std::fs::read_to_string(file).expect("Harlo's config");
     let config: Value = serde_json::from_str(&text).expect("JSON");
     let provider = &config["providers"]["llamacpp"];
     assert_eq!(

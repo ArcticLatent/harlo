@@ -325,15 +325,13 @@ fn a_failed_push_says_what_git_said() {
 fn a_failed_load_says_why_on_one_line() {
     let loaded = ChangesLoaded::new(
         None,
-        Some(Err(
-            "the OpenCode server answered 500:\nno such session".into()
-        )),
+        Some(Err("the server answered 500:\nno such session".into())),
         Ok(Vec::new()),
         None,
     );
     let ui = panel(loaded);
     assert!(
-        ui.shows("Couldn't load them: the OpenCode server answered 500: no such session"),
+        ui.shows("Couldn't load them: the server answered 500: no such session"),
         "a message's lines are joined, so none spills over the rows below"
     );
 }

@@ -15,7 +15,7 @@ use support::Sandbox;
 async fn get(sandbox: &Sandbox, path: &str) -> Value {
     reqwest::Client::new()
         .get(format!("{}{path}", sandbox.url()))
-        .basic_auth("opencode", Some(&sandbox.password))
+        .basic_auth("harlo", Some(&sandbox.password))
         .send()
         .await
         .expect("request")
@@ -28,7 +28,7 @@ async fn get(sandbox: &Sandbox, path: &str) -> Value {
 async fn post(sandbox: &Sandbox, path: &str, body: &Value) {
     let response = reqwest::Client::new()
         .post(format!("{}{path}", sandbox.url()))
-        .basic_auth("opencode", Some(&sandbox.password))
+        .basic_auth("harlo", Some(&sandbox.password))
         .json(body)
         .send()
         .await

@@ -6,9 +6,9 @@ from _common import composer, open_project_session, send
 
 
 def run(h, s):
-    h.file(".opencode/commands/greet.md",
+    h.file(".harlo/commands/greet.md",
            "---\ndescription: Says a greeting\n---\nsay Hello $1 from the command\n")
-    h.file(".opencode/skills/release-notes/SKILL.md",
+    h.file(".harlo/skills/release-notes/SKILL.md",
            "---\nname: release-notes\ndescription: Writes release notes.\n---\n\nKeep them short.\n")
     open_project_session(h, title="Commands")
 

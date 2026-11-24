@@ -26,7 +26,7 @@ use support::{Ui, demo, ui};
 /// Settings → Schedules, connected to `sandbox` and writing its config.
 fn schedules(sandbox: &Sandbox, tasks: &mut Tasks) -> Ui {
     let mut app = demo::new_app();
-    app.opencode_folder = Some(sandbox.root().join("config/opencode"));
+    app.config_folder = Some(sandbox.root().join("config/harlo"));
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
@@ -88,7 +88,7 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
             .expect("the switch")
             .invoke_accessible_default_action();
     };
-    let folder = sandbox.root().join("config/opencode");
+    let folder = sandbox.root().join("config/harlo");
     switch();
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.app().sheets.schedules.allowed
@@ -176,7 +176,7 @@ fn a_schedule_is_allowed_made_paused_resumed_and_deleted() {
 fn a_time_the_server_cant_read_says_why_and_leaves_no_session() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
-    harlo_core::config::set_automations(&sandbox.root().join("config/opencode"), true)
+    harlo_core::config::set_automations(&sandbox.root().join("config/harlo"), true)
         .expect("allowed");
     let ui = schedules(&sandbox, &mut tasks);
     assert_eq!(ui.app().sheets.schedules.allowed, Load::Loaded(true));

@@ -40,10 +40,10 @@ fn list_rows(app: &App) -> Vec<SheetRow> {
             "For every project on this server.",
             *on,
         )),
-        Load::Failed(why) => rows.push(pair("opencode.json", why, 2)),
+        Load::Failed(why) => rows.push(pair("harlo.json", why, 2)),
         // Another computer's server reads its own config.
         Load::Idle => rows.push(note(
-            "Schedules run unless automations is set to false in opencode.json on the \
+            "Schedules run unless automations is set to false in harlo.json on the \
              server's computer.",
         )),
         Load::Loading => {}

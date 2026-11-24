@@ -17,7 +17,7 @@ use support::{Sandbox, wait_for};
 /// Turns automations on or off in the sandbox's global config; the server
 /// reads the change without restarting.
 fn allow_automations(sandbox: &Sandbox, on: bool) {
-    let config = sandbox.root().join("config/opencode/opencode.json");
+    let config = sandbox.root().join("config/harlo/harlo.json");
     let mut settings: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).expect("config")).expect("JSON");
     settings["automations"] = serde_json::json!(on);

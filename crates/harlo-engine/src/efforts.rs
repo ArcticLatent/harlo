@@ -39,9 +39,7 @@ impl Dialect {
     /// The dialect of models.dev or config package `package`.
     fn of(package: &str) -> Self {
         match package {
-            "" | "@ai-sdk/openai-compatible" | "@opencode/ai/providers/openai-compatible" => {
-                Self::Compatible
-            }
+            "" | "@ai-sdk/openai-compatible" => Self::Compatible,
             p if p.ends_with("/anthropic") => Self::Anthropic,
             "@ai-sdk/openai" | "@ai-sdk/azure" => Self::Responses,
             p if p.contains("openrouter") => Self::OpenRouter,
@@ -237,7 +235,7 @@ mod tests {
     #[test]
     fn models_without_reasoning_offer_none_and_configured_ones_three() {
         assert!(catalog("@ai-sdk/openai", &json!({ "reasoning": false })).is_empty());
-        let v = configured("@opencode/ai/providers/openai-compatible");
+        let v = configured("@ai-sdk/openai-compatible");
         assert_eq!(ids(&v), ["low", "medium", "high"]);
         assert_eq!(v[2].body["reasoning_effort"], "high");
         assert!(configured("@ai-sdk/anthropic").is_empty());

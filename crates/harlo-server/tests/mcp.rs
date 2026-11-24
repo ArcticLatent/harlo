@@ -76,7 +76,7 @@ async fn a_projects_servers_connect_and_their_tools_answer() {
         "plain": { "type": "local", "command": command, "codemode": false },
         "off": { "type": "local", "command": command, "disabled": true },
     } } });
-    std::fs::write(project.join("opencode.json"), config.to_string()).expect("config");
+    std::fs::write(project.join("harlo.json"), config.to_string()).expect("config");
 
     let mut listed = Vec::new();
     for _ in 0..200 {

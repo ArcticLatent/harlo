@@ -52,11 +52,11 @@ fn packages_show_their_updates_and_built_in_ones_are_counted() {
         search_choice: None,
         mcp: Ok(Vec::new()),
         plugins: Ok(vec![
-            plugin("opencode.agent", PluginSource::Builtin),
-            plugin("opencode.plan", PluginSource::Builtin),
-            package("opencode-acme", "1.2.0", true),
-            package("opencode-wakatime", "0.4.1", true),
-            package("opencode-notes", "2.0.0", false),
+            plugin("harlo.agent", PluginSource::Builtin),
+            plugin("harlo.plan", PluginSource::Builtin),
+            package("acme-tools", "1.2.0", true),
+            package("wakatime-hooks", "0.4.1", true),
+            package("team-notes", "2.0.0", false),
             Plugin {
                 failed: Some("syntax error".to_owned()),
                 ..plugin("mine", PluginSource::Local("/home/u/mine".to_owned()))
@@ -64,12 +64,12 @@ fn packages_show_their_updates_and_built_in_ones_are_counted() {
         ]),
     };
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(setup))));
-    assert!(ui.shows("opencode-acme"));
+    assert!(ui.shows("acme-tools"));
     assert!(ui.shows("1.2.0 · update available"));
     assert!(ui.shows("2.0.0"));
     assert!(ui.shows("Failed: syntax error"));
     assert!(ui.shows("2 plugins that come with the server"));
-    assert!(!ui.shows("opencode.agent"), "built-in ones aren't listed");
+    assert!(!ui.shows("harlo.agent"), "built-in ones aren't listed");
     assert!(ui.shows("Update all 2"));
     assert_eq!(ui.find("Update").len(), 2, "one per outdated package");
 }
@@ -104,7 +104,7 @@ fn checking_and_updating_ask_the_server() {
 
     // A package the server doesn't have can't be updated; it says why.
     ui.send(Message::Sheet(SheetEvent::Plugin(PluginEvent::Checked(
-        Ok(vec![package("opencode-not-installed", "1.0.0", true)]),
+        Ok(vec![package("not-installed", "1.0.0", true)]),
     ))));
     ui.press("Update");
     assert!(

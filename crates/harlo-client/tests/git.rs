@@ -44,7 +44,7 @@ async fn text_is_written_with_no_session() {
 async fn snapshots_off_leaves_files_as_they_are_on_undo() {
     for snapshots in [false, true] {
         let mut sandbox = Sandbox::start().await;
-        let config = sandbox.root().join("config/opencode/opencode.json");
+        let config = sandbox.root().join("config/harlo/harlo.json");
         let mut settings: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&config).expect("config")).expect("JSON");
         settings["snapshots"] = snapshots.into();

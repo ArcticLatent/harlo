@@ -651,7 +651,7 @@ impl Assembler {
     }
 }
 
-/// Usage as chat completions report it, as OpenCode counts it: input
+/// Usage as chat completions report it, counted as Harlo counts it: input
 /// without the cached part, output with reasoning.
 fn tokens(u: &Value) -> Tokens {
     let prompt = u["prompt_tokens"].as_u64().unwrap_or(0);

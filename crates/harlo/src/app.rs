@@ -627,7 +627,7 @@ pub struct App {
     /// The server's global config folder on this computer, which Settings may
     /// change for the background service. Only the running app sets it;
     /// tests give a scratch folder or none.
-    pub opencode_folder: Option<std::path::PathBuf>,
+    pub config_folder: Option<std::path::PathBuf>,
     /// The SSH config whose hosts Settings → Server offers; none in tests
     /// unless they give one.
     pub ssh_config: Option<std::path::PathBuf>,
@@ -796,7 +796,7 @@ impl App {
             timelines: HashMap::new(),
             new_folder: None,
             home: home_folder(),
-            opencode_folder: None,
+            config_folder: None,
             ssh_config: None,
             autostart: None,
             git_config: harlo_core::git::Global::new()

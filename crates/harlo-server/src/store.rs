@@ -39,7 +39,7 @@ fn owner_only(path: &Path) {
     let _ = path;
 }
 
-/// A session, in OpenCode 2's shape.
+/// A session, as the store keeps it and clients read it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     /// Its ID.
@@ -61,7 +61,7 @@ pub struct Session {
     /// How its last run ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
-    /// The undo staged in it, as OpenCode shapes it: `messageID`, the
+    /// The undo staged in it: `messageID`, the
     /// `files` restoring changed, and Harlo's `snapshot` and `report`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revert: Option<serde_json::Value>,

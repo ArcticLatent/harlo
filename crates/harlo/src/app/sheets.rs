@@ -976,12 +976,12 @@ impl App {
         }
     }
 
-    /// The global config folder (`~/.config/opencode`), when Harlo may
+    /// The global config folder (`~/.config/harlo`), when Harlo may
     /// change it: only for the server on this computer, which reads it.
     #[must_use]
     pub fn global_config(&self) -> Option<&Path> {
         matches!(self.location, Location::Local)
-            .then_some(self.opencode_folder.as_deref())
+            .then_some(self.config_folder.as_deref())
             .flatten()
     }
 
@@ -996,7 +996,7 @@ impl App {
         let id = format!("{}/{}", model.provider_id, model.id);
         Task::perform(config::set_model_later(folder, Some(id)), |result| {
             Message::Sheet(Event::DefaultModelSet(
-                result.map_err(|e| format!("Couldn't change opencode.json: {e}")),
+                result.map_err(|e| format!("Couldn't change harlo.json: {e}")),
             ))
         })
     }

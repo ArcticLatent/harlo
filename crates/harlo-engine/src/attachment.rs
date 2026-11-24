@@ -1,4 +1,4 @@
-//! Files and pictures sent with a prompt, kept with it as OpenCode keeps
+//! Files and pictures sent with a prompt, kept with it as the server keeps
 //! them: their bytes, type, name and where they came from.
 
 // Rust guideline compliant 2026-10-09

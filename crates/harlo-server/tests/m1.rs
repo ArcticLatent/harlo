@@ -194,7 +194,7 @@ async fn a_session_made_without_a_location_takes_the_requests_folder() {
     let made: serde_json::Value = reqwest::Client::new()
         .post(format!("{}/api/session", sandbox.url()))
         .query(&[("directory", folder)])
-        .basic_auth("opencode", Some(&sandbox.password))
+        .basic_auth("harlo", Some(&sandbox.password))
         .json(&serde_json::json!({ "title": "Named", "agent": "plan" }))
         .send()
         .await

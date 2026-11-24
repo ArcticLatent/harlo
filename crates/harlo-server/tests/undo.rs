@@ -68,7 +68,7 @@ async fn stage(sandbox: &Sandbox, session: &str, message: &str) -> Value {
             "{}/api/session/{session}/revert/stage",
             sandbox.url()
         ))
-        .basic_auth("opencode", Some(&sandbox.password))
+        .basic_auth("harlo", Some(&sandbox.password))
         .json(&json!({ "messageID": message, "files": true }))
         .send()
         .await

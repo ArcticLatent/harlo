@@ -120,18 +120,11 @@ impl Sandbox {
     pub async fn start_program(program: &Path) -> Self {
         assert!(program.exists(), "no server at {}", program.display());
         let dir = tempfile::Builder::new()
-            .prefix("harlo-oc.")
+            .prefix("harlo-sandbox.")
             .tempdir()
             .expect("scratch folder");
         let root = dir.path();
-        for sub in [
-            "home",
-            "config/opencode",
-            "data",
-            "state",
-            "cache",
-            "project",
-        ] {
+        for sub in ["home", "config/harlo", "data", "state", "cache", "project"] {
             std::fs::create_dir_all(root.join(sub)).expect("scratch subfolder");
         }
         let model_port = free_port();
@@ -248,7 +241,7 @@ fn prepare(root: &Path, model_port: u16) {
         "model": "fake/fake-coder",
         "providers": { "fake": {
             "name": "Fake",
-            "package": "@opencode/ai/providers/openai-compatible",
+            "package": "@ai-sdk/openai-compatible",
             "settings": { "baseURL": format!("http://127.0.0.1:{model_port}/v1"), "apiKey": "fake-key" },
             "models": {
                 "fake-coder": { "name": "Fake Coder", "limit": { "context": 128_000, "output": 8_192 } },
@@ -257,11 +250,12 @@ fn prepare(root: &Path, model_port: u16) {
         }},
         "permissions": [ { "action": "shell", "resource": "*", "effect": "ask" } ]
     });
-    std::fs::write(
-        root.join("config/opencode/opencode.json"),
-        config.to_string(),
-    )
-    .expect("config");
+    std::fs::write(root.join("config/harlo/harlo.json"), config.to_string()).expect("config");
+    // OpenCode, run only to import from, reads the same config from its own
+    // folder.
+    let opencode = root.join("config/opencode");
+    std::fs::create_dir_all(&opencode).expect("OpenCode's config folder");
+    std::fs::write(opencode.join("opencode.json"), config.to_string()).expect("config");
 
     let project = root.join("project");
     std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");

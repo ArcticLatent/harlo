@@ -140,8 +140,8 @@ fn is_hex_colour(colour: &str) -> bool {
 
 /// Whether an agent's permission rules deny editing files everywhere.
 ///
-/// The last rule for editing that covers every file decides, as in OpenCode,
-/// where the last matching rule wins. Rules for some files only (such as the
+/// The last rule for editing that covers every file decides, as
+/// the last matching rule wins. Rules for some files only (such as the
 /// plan agent's own plan files) are exceptions, not its general stance. An
 /// action matches when it's `edit` or `*`.
 fn edits_denied(rules: &Value) -> bool {

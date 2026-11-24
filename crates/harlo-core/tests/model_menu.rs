@@ -82,7 +82,7 @@ fn the_newest_of_each_recent_family_shows_unless_chosen_otherwise() {
     assert!(offered("dated-never", "openai"), "undated");
     assert!(
         offered("big-pickle", "opencode"),
-        "OpenCode's free, however old"
+        "OpenCode Zen's free, however old"
     );
     assert!(!offered("paid", "opencode"), "old and paid");
     assert!(offered("gpt-5.1", "anthropic"), "families are per provider");

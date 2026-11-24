@@ -2,7 +2,7 @@
 //!
 //! Each model can be shown or hidden in Settings → Models. One nobody chose
 //! for shows when it's the newest of its family from the last six months,
-//! one of OpenCode's free models, or undated; older and superseded models
+//! one of OpenCode Zen's free models, or undated; older and superseded models
 //! wait in Settings until they're wanted.
 
 // Rust guideline compliant 2026-10-09
@@ -28,8 +28,8 @@ pub fn key(provider_id: &str, id: &str) -> String {
 /// Returns the keys of the models that show until someone chooses.
 ///
 /// Out of `models`, at `now`: per provider, the newest of each family
-/// released within [`RECENT`] (free and paid ones apart), OpenCode's free
-/// models, and those without a release date.
+/// released within [`RECENT`] (free and paid ones apart), OpenCode Zen's
+/// free models, and those without a release date.
 #[must_use]
 pub fn shown_by_default(models: &[Model], now: SystemTime) -> HashSet<String> {
     let now_ms = now

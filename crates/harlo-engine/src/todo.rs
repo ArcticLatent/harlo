@@ -1,7 +1,7 @@
 //! The todo list: the agent's working plan for a session, which it
 //! rewrites whole with the `todowrite` tool and the person sees.
 //!
-//! As in OpenCode, it's offered only when the configuration's
+//! It's offered only when the configuration's
 //! `experimental.todo` turns it on.
 
 // Rust guideline compliant 2026-10-09

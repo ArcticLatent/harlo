@@ -1,4 +1,4 @@
-//! Saved approvals: what "Allow always" saved for a project, so OpenCode
+//! Saved approvals: what "Allow always" saved for a project, so the server
 //! allows it there without asking. A configured `deny` still wins.
 
 // Rust guideline compliant 2026-10-09
@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::client::Client;
 use crate::error::Error;
 
-/// An approval OpenCode saved when someone chose "Allow always".
+/// An approval the server saved when someone chose "Allow always".
 #[derive(Debug, Clone, PartialEq)]
 pub struct SavedApproval {
     /// Its ID, for removing it.
@@ -54,7 +54,7 @@ impl Client {
             .collect())
     }
 
-    /// Removes saved approval `id`, so OpenCode asks again, for every client
+    /// Removes saved approval `id`, so the server asks again, for every client
     /// of the server.
     ///
     /// # Errors

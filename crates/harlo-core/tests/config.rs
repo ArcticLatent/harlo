@@ -11,14 +11,14 @@ use harlo_core::config;
 #[test]
 fn a_missing_file_is_created_with_the_model() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
-    let folder = scratch.path().join("opencode");
+    let folder = scratch.path().join("harlo");
     assert_eq!(config::model(&folder).expect("no file yet"), None);
 
     config::set_model(&folder, Some("anthropic/opus")).expect("set");
-    let text = fs::read_to_string(folder.join("opencode.json")).expect("written");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("written");
     let json: serde_json::Value = serde_json::from_str(&text).expect("plain JSON");
     assert_eq!(json["model"], "anthropic/opus");
-    assert_eq!(json["$schema"], "https://opencode.ai/config.json");
+    assert!(json.get("$schema").is_none(), "{text}");
     assert_eq!(
         config::model(&folder).expect("read").as_deref(),
         Some("anthropic/opus")
@@ -31,20 +31,20 @@ fn a_change_keeps_comments_and_the_other_settings() {
     let folder = scratch.path();
     let before =
         "{\n  // my default\n  \"model\": \"a/one\",\n  \"theme\": \"dracula\", // dark\n}\n";
-    fs::write(folder.join("opencode.json"), before).expect("a file");
+    fs::write(folder.join("harlo.json"), before).expect("a file");
 
     config::set_model(folder, Some("b/two")).expect("set");
-    let after = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let after = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert_eq!(after, before.replace("a/one", "b/two"));
 
     // Taking it away leaves the rest.
     config::set_model(folder, None).expect("removed");
-    let after = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let after = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(!after.contains("model"), "{after}");
     assert!(after.contains("// dark") && after.contains("\"theme\": \"dracula\""));
     assert_eq!(config::model(folder).expect("read"), None);
     assert!(
-        !folder.join(".opencode.json.harlo").exists(),
+        !folder.join(".harlo.json.pending").exists(),
         "nothing left beside it"
     );
 }
@@ -53,9 +53,9 @@ fn a_change_keeps_comments_and_the_other_settings() {
 fn the_jsonc_file_is_used_when_there_is_one() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let folder = scratch.path();
-    fs::write(folder.join("opencode.json"), "{\"model\": \"a/json\"}").expect("json");
+    fs::write(folder.join("harlo.json"), "{\"model\": \"a/json\"}").expect("json");
     fs::write(
-        folder.join("opencode.jsonc"),
+        folder.join("harlo.jsonc"),
         "{\n  // wins\n  \"model\": \"a/jsonc\"\n}",
     )
     .expect("jsonc");
@@ -65,12 +65,12 @@ fn the_jsonc_file_is_used_when_there_is_one() {
     );
 
     config::set_model(folder, Some("b/new")).expect("set");
-    let jsonc = fs::read_to_string(folder.join("opencode.jsonc")).expect("read");
+    let jsonc = fs::read_to_string(folder.join("harlo.jsonc")).expect("read");
     assert!(
         jsonc.contains("// wins") && jsonc.contains("b/new"),
         "{jsonc}"
     );
-    let json = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let json = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(json.contains("a/json"), "the other file stays");
 }
 
@@ -78,7 +78,7 @@ fn the_jsonc_file_is_used_when_there_is_one() {
 fn an_empty_file_gets_the_model_added() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let folder = scratch.path();
-    fs::write(folder.join("opencode.json"), "{}").expect("empty");
+    fs::write(folder.join("harlo.json"), "{}").expect("empty");
     config::set_model(folder, Some("a/b")).expect("set");
     assert_eq!(config::model(folder).expect("read").as_deref(), Some("a/b"));
 }
@@ -88,15 +88,15 @@ fn a_broken_file_is_left_alone() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let folder = scratch.path();
     let broken = "{ \"model\": ";
-    fs::write(folder.join("opencode.json"), broken).expect("broken");
+    fs::write(folder.join("harlo.json"), broken).expect("broken");
     let error = config::set_model(folder, Some("a/b")).expect_err("can't edit it");
     assert!(error.to_string().contains("isn't valid JSON"), "{error}");
     assert_eq!(
-        fs::read_to_string(folder.join("opencode.json")).expect("read"),
+        fs::read_to_string(folder.join("harlo.json")).expect("read"),
         broken
     );
 
-    fs::write(folder.join("opencode.json"), "[1, 2]").expect("a list");
+    fs::write(folder.join("harlo.json"), "[1, 2]").expect("a list");
     let error = config::set_model(folder, Some("a/b")).expect_err("not an object");
     assert!(error.to_string().contains("settings object"), "{error}");
 }
@@ -107,11 +107,11 @@ fn snapshots_are_on_unless_turned_off() {
     let folder = scratch.path();
     assert!(config::snapshots(folder).expect("no file yet"));
     let before = "{\n  // mine\n  \"model\": \"a/one\"\n}\n";
-    fs::write(folder.join("opencode.json"), before).expect("a file");
+    fs::write(folder.join("harlo.json"), before).expect("a file");
     assert!(config::snapshots(folder).expect("not set"));
 
     config::set_snapshots(folder, false).expect("off");
-    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(
         text.contains("\"snapshots\": false") && text.contains("// mine"),
         "{text}"
@@ -120,7 +120,7 @@ fn snapshots_are_on_unless_turned_off() {
 
     // On again takes the setting away: on is the server's default.
     config::set_snapshots(folder, true).expect("on");
-    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(!text.contains("snapshots"), "{text}");
     assert!(text.contains("\"model\": \"a/one\""));
     assert!(config::snapshots(folder).expect("read"));
@@ -132,11 +132,11 @@ fn automations_are_on_until_turned_off_at_the_top() {
     let folder = scratch.path();
     assert!(config::automations(folder).expect("no file yet"));
     let before = "{\n  // mine\n  \"model\": \"a/one\"\n}\n";
-    fs::write(folder.join("opencode.json"), before).expect("a file");
+    fs::write(folder.join("harlo.json"), before).expect("a file");
     assert!(config::automations(folder).expect("not set"));
 
     config::set_automations(folder, false).expect("off");
-    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(text.contains("// mine"), "{text}");
     let json: serde_json::Value = serde_json::from_str(&text.replace("// mine", "")).expect("JSON");
     assert_eq!(json["automations"], false);
@@ -144,17 +144,17 @@ fn automations_are_on_until_turned_off_at_the_top() {
 
     // On takes the setting away again.
     config::set_automations(folder, true).expect("on");
-    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(!text.contains("automations"), "{text}");
     assert!(text.contains("\"model\": \"a/one\""), "{text}");
     assert!(config::automations(folder).expect("read"));
 
     // The old experimental switch goes; other experimental switches stay.
     let other = "{\n  \"experimental\": { \"todo\": true, \"automations\": true }\n}\n";
-    fs::write(folder.join("opencode.json"), other).expect("a file");
+    fs::write(folder.join("harlo.json"), other).expect("a file");
     config::set_automations(folder, true).expect("on");
     let json: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(folder.join("opencode.json")).expect("read"))
+        serde_json::from_str(&fs::read_to_string(folder.join("harlo.json")).expect("read"))
             .expect("JSON");
     assert_eq!(json["experimental"], serde_json::json!({ "todo": true }));
     assert!(json.get("automations").is_none());
@@ -166,7 +166,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     let folder = scratch.path();
     let before = "{\n  // mine\n  \"theme\": \"dracula\"\n}\n";
-    fs::write(folder.join("opencode.json"), before).expect("a file");
+    fs::write(folder.join("harlo.json"), before).expect("a file");
     assert!(config::mcp_servers(folder).expect("read").is_empty());
 
     let remote = McpEntry {
@@ -189,7 +189,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
     };
     config::set_mcp_server(folder, &remote).expect("add");
     config::set_mcp_server(folder, &local).expect("add");
-    let text = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(text.contains("// mine"), "comments stay: {text}");
     let json: serde_json::Value = serde_json::from_str(&text.replace("// mine", "")).expect("JSON");
     assert_eq!(json["mcp"]["servers"]["docs"]["type"], "remote");
@@ -209,7 +209,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
     config::set_mcp_disabled(folder, "docs", false).expect("on");
     assert!(!config::mcp_servers(folder).expect("read")[0].disabled);
     assert!(
-        !fs::read_to_string(folder.join("opencode.json"))
+        !fs::read_to_string(folder.join("harlo.json"))
             .expect("read")
             .contains("disabled")
     );
@@ -218,7 +218,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
     // Code Mode is the server's default; off lists the tools one by one.
     config::set_mcp_codemode(folder, "browser", false).expect("listed");
     let json: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(folder.join("opencode.json"))
+        &fs::read_to_string(folder.join("harlo.json"))
             .expect("read")
             .replace("// mine", ""),
     )
@@ -228,7 +228,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
     config::set_mcp_codemode(folder, "browser", true).expect("scripts");
     assert!(config::mcp_servers(folder).expect("read")[1].codemode);
     assert!(
-        !fs::read_to_string(folder.join("opencode.json"))
+        !fs::read_to_string(folder.join("harlo.json"))
             .expect("read")
             .contains("codemode")
     );
@@ -236,7 +236,7 @@ fn mcp_servers_are_added_turned_off_and_removed_under_mcp_servers() {
 
     config::remove_mcp_server(folder, "docs").expect("removed");
     config::remove_mcp_server(folder, "browser").expect("removed");
-    let after = fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let after = fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(!after.contains("mcp"), "nothing left: {after}");
     assert!(after.contains("dracula"));
 }

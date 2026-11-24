@@ -67,13 +67,13 @@ fn settings_and_stats_load_from_the_server() {
 }
 
 #[test]
-fn the_model_for_new_sessions_is_set_in_opencodes_config() {
+fn the_model_for_new_sessions_is_set_in_harlos_config() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
-    let folder = sandbox.root().join("config/opencode");
+    let folder = sandbox.root().join("config/harlo");
     let mut app = demo::new_app();
     // The sandbox's own config folder, never the real one.
-    app.opencode_folder = Some(folder.clone());
+    app.config_folder = Some(folder.clone());
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
@@ -119,7 +119,7 @@ fn the_model_for_new_sessions_is_set_in_opencodes_config() {
         harlo_core::config::model(&folder).expect("read").as_deref(),
         Some("fake/fake-writer")
     );
-    let text = std::fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let text = std::fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(text.contains("\"fake\""), "the rest of the config stays");
     assert_eq!(ui.app().sheets.model_error, None);
 }
@@ -134,15 +134,15 @@ fn another_servers_default_model_is_only_shown() {
 }
 
 #[test]
-fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_opencodes_config() {
+fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_harlos_config() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
-    let folder = sandbox.root().join("config/opencode");
+    let folder = sandbox.root().join("config/harlo");
     let gitconfig = sandbox.root().join("home/.gitconfig");
     std::fs::write(&gitconfig, "[user]\n\tname = Scratch Person\n").expect("a git config");
     let mut app = demo::new_app();
     // The sandbox's own configs, never the real ones.
-    app.opencode_folder = Some(folder.clone());
+    app.config_folder = Some(folder.clone());
     app.git_config = harlo_core::git::Global::new()
         .env("GIT_CONFIG_GLOBAL", gitconfig.to_string_lossy())
         .env("GIT_CONFIG_NOSYSTEM", "1");
@@ -185,7 +185,7 @@ fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_opencodes_config() 
         "turned off"
     );
     assert!(!harlo_core::config::snapshots(&folder).expect("read"));
-    let text = std::fs::read_to_string(folder.join("opencode.json")).expect("read");
+    let text = std::fs::read_to_string(folder.join("harlo.json")).expect("read");
     assert!(text.contains("\"fake\""), "the rest of the config stays");
 
     // The commit-message model is Harlo's own.

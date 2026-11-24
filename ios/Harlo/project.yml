@@ -18,20 +18,20 @@ targets:
       # The Live Activity's attributes (the widget extension has them too).
       - path: Shared
       # JetBrains Mono, as on the desktop (OFL; the desktop's copies).
-      - path: ../../crates/harlo-app/fonts/JetBrainsMono-Regular.ttf
+      - path: ../../crates/harlo/ui/fonts/JetBrainsMono-Regular.ttf
         buildPhase: resources
-      - path: ../../crates/harlo-app/fonts/JetBrainsMono-Medium.ttf
+      - path: Fonts/JetBrainsMono-Medium.ttf
         buildPhase: resources
-      - path: ../../crates/harlo-app/fonts/JetBrainsMono-SemiBold.ttf
+      - path: Fonts/JetBrainsMono-SemiBold.ttf
         buildPhase: resources
-      - path: ../../crates/harlo-app/fonts/JetBrainsMono-Bold.ttf
+      - path: ../../crates/harlo/ui/fonts/JetBrainsMono-Bold.ttf
         buildPhase: resources
       # The model makers' logos' licences (MIT), with them (Maker-* assets).
-      - path: ../../crates/harlo-app/icons/providers/LOBEHUB-LICENSE
+      - path: ../../crates/harlo/ui/images/providers/LOBEHUB-LICENSE
         buildPhase: resources
-      - path: ../../crates/harlo-app/icons/providers/OPENCHAMBER-LICENSE
+      - path: ../../crates/harlo/ui/images/providers/OPENCHAMBER-LICENSE
         buildPhase: resources
-      - path: ../../crates/harlo-app/icons/providers/OPENCODE-LICENSE
+      - path: ../../crates/harlo/ui/images/providers/OPENCODE-LICENSE
         buildPhase: resources
     dependencies:
       - package: HarloKit

@@ -1,11 +1,11 @@
-//! Client-made identifiers in OpenCode's format.
+//! Client-made identifiers in the server's format.
 
 // Rust guideline compliant 2026-10-09
 
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Characters of the random suffix, as OpenCode uses them.
+/// Characters of the random suffix.
 const ALPHABET: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 /// Length of the part after the prefix: 12 hex digits of time, then random characters.
@@ -19,9 +19,9 @@ static LAST: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
 /// Creates a new message ID (`msg_…`) that sorts after earlier ones.
 ///
-/// OpenCode IDs are `<prefix>_`, then 12 hex digits of `millis * 0x1000 + counter`,
+/// IDs are `<prefix>_`, then 12 hex digits of `millis * 0x1000 + counter`,
 /// then 14 random characters, so IDs made later sort later. Sending a prompt
-/// with an ID made here lets a retry reuse it: OpenCode stores the message once.
+/// with an ID made here lets a retry reuse it: the server stores the message once.
 #[must_use]
 pub fn message_id() -> String {
     ascending("msg")

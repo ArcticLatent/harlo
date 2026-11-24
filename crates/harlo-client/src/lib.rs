@@ -49,7 +49,7 @@ pub use daemon::{
 };
 #[doc(inline)]
 pub use endpoint::{
-    Endpoint, SharedService, parse_registration, read_registration, registration_path,
+    Endpoint, SharedService, opencode_registration_path, parse_registration, read_registration,
 };
 #[doc(inline)]
 pub use error::Error;

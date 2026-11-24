@@ -1,7 +1,7 @@
 //! Signing the server in to integrations, such as model providers: with a
 //! key, through a browser (OAuth), by running a program, or with
-//! credentials already on the server's computer. OpenCode keeps what it
-//! gets as a credential, for every client of the server.
+//! credentials already on the server's computer. The server keeps what
+//! it gets as a credential, for every client of the server.
 
 // Rust guideline compliant 2026-10-09
 

@@ -21,7 +21,7 @@ PROBE=$(cd "$ROOT/ios/HarloKit" && swift build --show-bin-path)/harlo-probe
 
 eval "$("$TOOLS/sandbox.sh")"
 trap '"$TOOLS/sandbox.sh" stop "$DIR"' EXIT
-api() { curl -sf -u "opencode:$PASSWORD" -H 'content-type: application/json' "$@"; }
+api() { curl -sf -u "harlo:$PASSWORD" -H 'content-type: application/json' "$@"; }
 
 # The tour's project, as a repository with a second branch.
 repo=$DIR/harlo
@@ -33,7 +33,7 @@ git -C "$repo" branch relay-limits
 
 # The tour's models, answering from its scripts (beside the model's log).
 cp "$TOUR/scripts.json" "$DIR/scripts.json"
-python3 -I - "$DIR/config/opencode/opencode.json" <<'PY'
+python3 -I - "$DIR/config/harlo/harlo.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 config = json.load(open(path))

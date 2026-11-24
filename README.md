@@ -91,6 +91,20 @@ On Arch, `cd packaging/aur/harlo-git && makepkg -si` builds the latest commit. A
 
 </details>
 
+## Configuration
+
+Settings covers most of it. Underneath, the server reads `~/.config/harlo/harlo.jsonc` (or `harlo.json`): the providers and their models, the default `model`, permission rules, `instructions`, `skills`, `commands`, `agents`, `mcp.servers` and `websearch`. A project adds its own `harlo.jsonc`, or one in its `.harlo/` folder, and the nearer file wins. Changes apply as soon as the file is saved.
+
+The first time the server starts, it looks for an earlier OpenCode setup. If there is one, it copies `~/.config/opencode/opencode.json`, `AGENTS.md`, commands, agents and skills into `~/.config/harlo`, once, and leaves the original untouched. Sessions made on OpenCode come over from Settings → Server.
+
+- **Instructions.** A session reads `~/.config/harlo/AGENTS.md` (or `~/.claude/CLAUDE.md`), then each `AGENTS.md` from its folder up to the project's root; in a folder without an `AGENTS.md`, its `CLAUDE.md`. `HARLO_DISABLE_PROJECT_CONFIG=1` skips the project's files; `HARLO_DISABLE_CLAUDE_MD=1` skips every `CLAUDE.md`.
+- **Commands.** Markdown files in `~/.config/harlo/commands/` and a project's `.harlo/commands/`. `/name` runs one; its front matter sets the description, agent and model.
+- **Agents.** Markdown files in the `agents/` folders beside them: the front matter holds the agent's settings, the body its instructions.
+
+### Skills
+
+A skill is a folder with a `SKILL.md`: instructions the agent loads when a task calls for them. Harlo finds them in `.claude/skills/`, `.agents/skills/` and `.harlo/skills/`, in your home folder and in the project's folders, and in `~/.config/harlo/skills/`. `/` lists them, to attach one to a prompt; `disable-model-invocation: true` in a skill's front matter leaves it to you.
+
 ## Running your own relay
 
 `harlo-relay` (`crates/harlo-relay`) lets phones reach Harlo from anywhere and sends the iPhone app's notifications. It forwards end-to-end encrypted messages it can't read and stores nothing. Harlo uses Harlo's relay (`relay.harlo.run`) unless `HARLO_RELAY=https://…` names another where Harlo and its server start.

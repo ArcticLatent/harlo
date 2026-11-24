@@ -1,6 +1,5 @@
-// Tool calls named as the desktop names them (crates/harlo-app/qml/Theme.qml
-// `toolLabel`, TranscriptView's `toolName`): pi's tools and its extensions',
-// an MCP server's and harlo's own.
+// Tool calls named for people: Harlo's tools, an MCP server's, and older
+// sessions' tool names.
 
 import Foundation
 

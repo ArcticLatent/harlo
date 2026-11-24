@@ -59,7 +59,7 @@ async fn a_remote_server_signs_in_in_the_browser_and_connects() {
         "guarded": { "type": "remote", "url": format!("{base}/mcp"),
                      "oauth": { "callbackPort": callback } },
     } } });
-    std::fs::write(project.join("opencode.json"), config.to_string()).expect("config");
+    std::fs::write(project.join("harlo.json"), config.to_string()).expect("config");
 
     let server = status_until(&client, &folder, "guarded", |s| {
         matches!(s, McpStatus::NeedsAuth(_))
@@ -157,7 +157,7 @@ async fn a_server_with_sign_in_turned_off_has_no_integration() {
     let config = json!({ "mcp": { "servers": {
         "keyed": { "type": "remote", "url": format!("{base}/mcp"), "oauth": false },
     } } });
-    std::fs::write(project.join("opencode.json"), config.to_string()).expect("config");
+    std::fs::write(project.join("harlo.json"), config.to_string()).expect("config");
     let server = status_until(&client, &folder, "keyed", |s| *s != McpStatus::Pending).await;
     assert_eq!(server.integration, None);
     assert!(

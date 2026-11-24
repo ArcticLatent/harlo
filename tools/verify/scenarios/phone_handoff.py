@@ -65,7 +65,7 @@ def replay(h):
     """The server's durable events from the start, as (id, type), read the
     way a reconnecting client asks for them."""
     request = urllib.request.Request(h.info["url"] + "/api/event")
-    token = base64.b64encode(f"opencode:{h.info['password']}".encode()).decode()
+    token = base64.b64encode(f"harlo:{h.info['password']}".encode()).decode()
     request.add_header("Authorization", f"Basic {token}")
     request.add_header("Last-Event-ID", "0")
     events, block = [], {}

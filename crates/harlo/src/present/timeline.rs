@@ -1373,7 +1373,7 @@ mod tests {
     }
 
     #[test]
-    fn a_subagents_task_is_from_the_agent_that_asked_without_opencodes_line() {
+    fn a_subagents_task_is_from_the_agent_that_asked_without_the_servers_line() {
         let crew = Crew {
             asked_by: Some("Build".to_owned()),
             ..Crew::default()

@@ -2,8 +2,9 @@
 //! server, so phones keep working while no desktop is open, and notes kept
 //! between sessions.
 //!
-//! OpenCode doesn't have these routes; [`Client::hosts_phone`] and
-//! [`Client::keeps_notes`] say whether the server does.
+//! A server from before 2.0 doesn't have these routes;
+//! [`Client::hosts_phone`] and [`Client::keeps_notes`] say whether the
+//! server does.
 
 // Rust guideline compliant 2026-10-09
 

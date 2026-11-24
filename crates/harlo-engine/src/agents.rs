@@ -30,7 +30,7 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// OpenCode's word for it.
+    /// Its word in agent files.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -40,7 +40,7 @@ impl Mode {
         }
     }
 
-    /// The mode OpenCode's word names.
+    /// The mode an agent file's word names.
     #[must_use]
     pub fn parse(word: &str) -> Option<Self> {
         match word {
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn the_configuration_adds_and_changes_agents() {
         let dir = tempfile::tempdir().expect("dir");
-        let folder = dir.path().join(".opencode");
+        let folder = dir.path().join(".harlo");
         std::fs::create_dir_all(folder.join("agents")).expect("mkdir");
         std::fs::write(
             folder.join("agents/reviewer.md"),

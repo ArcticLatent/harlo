@@ -1,4 +1,4 @@
-//! Terminals that run on the server: OpenCode's PTY sessions.
+//! Terminals that run on the server: its PTY sessions.
 //!
 //! A PTY is a shell the server runs in a folder. Its output streams over a
 //! WebSocket, which also takes the user's input; its size is set with a

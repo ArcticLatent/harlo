@@ -18,7 +18,7 @@ PROBE=$(cd "$ROOT/ios/HarloKit" && swift build --show-bin-path)/harlo-probe
 
 eval "$("$TOOLS/sandbox.sh")"
 trap '"$TOOLS/sandbox.sh" stop "$DIR"' EXIT
-api() { curl -sf -u "opencode:$PASSWORD" -H 'content-type: application/json' "$@"; }
+api() { curl -sf -u "harlo:$PASSWORD" -H 'content-type: application/json' "$@"; }
 
 # A branch to switch to, and a session so the project is listed.
 git -C "$PROJECT" branch feature

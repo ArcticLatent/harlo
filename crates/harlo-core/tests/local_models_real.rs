@@ -33,7 +33,7 @@ fn free_port() -> u16 {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "downloads llama.cpp and a model; HARLO_TEST_LOCAL_MODELS names a scratch folder"]
-async fn a_real_llama_server_answers_through_opencode() {
+async fn a_real_llama_server_answers_through_harlos_server() {
     let scratch =
         PathBuf::from(std::env::var("HARLO_TEST_LOCAL_MODELS").expect("HARLO_TEST_LOCAL_MODELS"));
     let computer = tokio::task::spawn_blocking(Computer::detect)
@@ -111,10 +111,10 @@ async fn a_real_llama_server_answers_through_opencode() {
         base_url: format!("{}/v1", base_url(port)),
         models: vec![(small.id(), small.title.clone(), small.context)],
     };
-    config::set_provider(&sandbox.root().join("config/opencode"), &provider).expect("added");
+    config::set_provider(&sandbox.root().join("config/harlo"), &provider).expect("added");
     let client = sandbox.client();
     let project = sandbox.project_str();
-    wait_for("OpenCode lists the model", || {
+    wait_for("the server lists the model", || {
         let client = client.clone();
         let project = project.clone();
         async move {
@@ -143,7 +143,7 @@ async fn a_real_llama_server_answers_through_opencode() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs Ollama's port, 11434, free on this computer"]
-async fn opencode_finds_a_server_on_ollamas_port_by_itself() {
+async fn a_server_on_ollamas_port_is_found_by_itself() {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:11434").expect("Ollama's port is free");
     let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));

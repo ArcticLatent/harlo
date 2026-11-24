@@ -305,7 +305,7 @@ async fn web_search_turned_off_leaves_the_tool_out() {
     // A config can turn it off.
     let docs = sandbox.project().join("docs");
     std::fs::create_dir_all(&docs).expect("folder");
-    std::fs::write(docs.join("opencode.json"), r#"{ "websearch": false }"#).expect("config");
+    std::fs::write(docs.join("harlo.json"), r#"{ "websearch": false }"#).expect("config");
     let other = client
         .create_session(docs.to_str().expect("utf-8"))
         .await

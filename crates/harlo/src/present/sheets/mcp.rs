@@ -54,7 +54,7 @@ pub(super) fn list_rows(app: &App, setup: &SetUp, rows: &mut Vec<SheetRow>) {
         rows.push(add);
     } else {
         rows.push(note(
-            "Add MCP servers in opencode.json on the server's computer.",
+            "Add MCP servers in harlo.json on the server's computer.",
         ));
     }
 }
@@ -125,7 +125,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         }
         Some(McpRun::Remote { url, .. }) => rows.push(pair("Address", url, 3)),
         None => rows.push(note(
-            "It's set up in a project's opencode.json or by a plugin; change it there.",
+            "It's set up in a project's harlo.json or by a plugin; change it there.",
         )),
     }
     if let Some(server) = server {
@@ -137,7 +137,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
     ));
 
     if let Some(entry) = page.saved(name) {
-        rows.push(heading("In opencode.json"));
+        rows.push(heading("In harlo.json"));
         let mut starts = if entry.disabled {
             pair("Starts with the server", "Turned off", 3)
         } else {
@@ -171,7 +171,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         let mut remove = if page.removing {
             pair("Remove", "Remove it from the server?", 4)
         } else {
-            pair("Remove", "Takes it out of opencode.json", 3)
+            pair("Remove", "Takes it out of harlo.json", 3)
         };
         remove.action = if page.removing {
             "Remove for good"
@@ -182,7 +182,7 @@ fn server_rows(app: &App, setup: Option<&SetUp>, name: &str) -> Vec<SheetRow> {
         remove.risky = true;
         remove.setting = window::REMOVE_MCP;
         rows.push(remove);
-        rows.push(note("These change opencode.json, which the server reads."));
+        rows.push(note("These change harlo.json, which the server reads."));
     }
     rows
 }
@@ -225,7 +225,7 @@ fn add_rows(app: &App) -> Vec<SheetRow> {
     let page = &app.sheets.mcp;
     let mut back = pair(
         "Add an MCP server",
-        "Saved in opencode.json, which the server reads",
+        "Saved in harlo.json, which the server reads",
         3,
     );
     back.action = "All servers".into();
@@ -285,7 +285,7 @@ fn add_rows(app: &App) -> Vec<SheetRow> {
     }
     if matches!(page.saved, Load::Failed(_)) {
         rows.push(note(
-            "opencode.json couldn't be read, so nothing can be added.",
+            "harlo.json couldn't be read, so nothing can be added.",
         ));
     }
     rows

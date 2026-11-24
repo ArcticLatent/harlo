@@ -13,7 +13,7 @@ TODOS = {"todos": [
 
 
 def run(h, s):
-    path = os.path.join(h.info["sandbox"], "config", "opencode", "opencode.json")
+    path = os.path.join(h.info["sandbox"], "config", "harlo", "harlo.json")
     with open(path) as f:
         config = json.load(f)
     config.setdefault("experimental", {})["todo"] = True

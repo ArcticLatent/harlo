@@ -24,14 +24,14 @@ async fn commands_and_skills_reach_the_model() {
     let client = sandbox.client();
     let project = sandbox.project();
     let folder = project.to_str().expect("utf-8").to_owned();
-    let skill_dir = project.join(".opencode/skills/release-notes");
+    let skill_dir = project.join(".harlo/skills/release-notes");
     std::fs::create_dir_all(&skill_dir).expect("skill folder");
     std::fs::write(
         skill_dir.join("SKILL.md"),
         "---\nname: release-notes\ndescription: Writes release notes.\n---\n\nKeep them short.\n",
     )
     .expect("skill file");
-    let commands_dir = project.join(".opencode/commands");
+    let commands_dir = project.join(".harlo/commands");
     std::fs::create_dir_all(&commands_dir).expect("commands folder");
     std::fs::write(
         commands_dir.join("greet.md"),

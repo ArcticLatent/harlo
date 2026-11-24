@@ -1,7 +1,7 @@
 //! The server's state: the store, the event stream, and the sessions'
 //! runs, inboxes and pending approvals.
 //!
-//! Every change is announced as an event in OpenCode 2's shape. Durable
+//! Every change is announced as an event. Durable
 //! events are stored first and numbered, so a client that reconnects gets
 //! the ones it missed, once and in order.
 
@@ -110,9 +110,10 @@ struct Global {
 
 /// When the global config file in `home` was last changed.
 fn stamp(home: &std::path::Path) -> Option<std::time::SystemTime> {
-    ["opencode.json", "opencode.jsonc"]
+    let folder = harlo_engine::config_folder(home);
+    harlo_engine::CONFIG_FILES
         .iter()
-        .find_map(|n| std::fs::metadata(home.join("opencode").join(n)).ok())
+        .find_map(|n| std::fs::metadata(folder.join(n)).ok())
         .and_then(|m| m.modified().ok())
 }
 
@@ -234,7 +235,7 @@ impl Server {
             attempts: Mutex::default(),
             mcp: crate::mcp::Mcp::default(),
             claude_models: Mutex::default(),
-            config_dir: config_home.join("opencode"),
+            config_dir: harlo_engine::config_folder(config_home),
             password,
             phone,
             snapshots,
@@ -944,7 +945,7 @@ impl Server {
     }
 
     /// One turn of the engine over the session's history; returns how it
-    /// ended, in OpenCode's word, and why it failed.
+    /// ended, as a stored word, and why it failed.
     async fn run_once(
         self: &Arc<Self>,
         session: &Session,
@@ -960,9 +961,7 @@ impl Server {
         else {
             return (
                 "failed",
-                Some(
-                    "No model is set up. Add a provider and model to OpenCode's config.".to_owned(),
-                ),
+                Some("No model is set up. Add a provider in Settings → Providers.".to_owned()),
             );
         };
         let Some((provider, spec)) = folder.config.resolve(&model) else {
@@ -1135,8 +1134,7 @@ impl Server {
         .map_err(|e| Refusal::Bad(e.to_string()))
     }
 
-    /// The system prompt for a session in `directory`, as OpenCode orders
-    /// it: the agent's prompt, the project's instructions, then the date
+    /// The system prompt for a session in `directory`: the agent's prompt, the project's instructions, then the date
     /// and environment.
     async fn system_prompt(&self, directory: &str, folder: &crate::folder::Folder) -> String {
         let root = git::toplevel(directory).await;

@@ -120,7 +120,7 @@ impl Does {
                  allows exactly this command. Its output shows on the schedule's page."
             }
             Self::Code => {
-                "JavaScript that OpenCode's Code Mode runs with no model, in a session of its \
+                "JavaScript that Code Mode runs with no model, in a session of its \
                  own that allows it. Returning { send: { prompt } } prompts that session; \
                  { done: true } ends the schedule. Tools it calls must already be allowed."
             }

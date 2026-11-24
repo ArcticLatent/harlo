@@ -1,4 +1,4 @@
-//! The HTTP client for one OpenCode server.
+//! The HTTP client for one server.
 
 // Rust guideline compliant 2026-10-09
 
@@ -21,27 +21,28 @@ use crate::types::{
 use crate::wire as g;
 use crate::{Endpoint, Error, Event};
 
-/// The user name OpenCode 2 expects with the server password.
-const USER: &str = "opencode";
+/// The user name sent with the server password. The server checks only
+/// the password.
+const USER: &str = "harlo";
 
 /// Messages asked for per page when loading a whole session.
 ///
-/// Large enough that most sessions load in one or two requests; OpenCode caps
+/// Large enough that most sessions load in one or two requests; the server caps
 /// the page size on its side anyway.
 const PAGE: &str = "200";
 
-/// How long a read waits for OpenCode to load a folder's models.
+/// How long a read waits for the server to load a folder's models.
 ///
-/// OpenCode loads a folder's providers and models in the background the
+/// The server loads a folder's providers and models in the background the
 /// first time it's asked about the folder, and answers with empty lists
 /// until they're in; that takes a second or two. A server with really no
 /// models waits this long on each read, so it stays short.
 const CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(6);
 
-/// The pause between reads while OpenCode loads a folder's models.
+/// The pause between reads while the server loads a folder's models.
 const CATALOG_POLL: std::time::Duration = std::time::Duration::from_millis(150);
 
-/// A client for one OpenCode server.
+/// A client for one server.
 ///
 /// Cheap to clone: clones share one connection pool. It never starts, stops or
 /// reconfigures the server; dropping it only closes connections.
@@ -210,7 +211,7 @@ impl Client {
         })
     }
 
-    /// Lists the projects OpenCode knows, archived ones left out.
+    /// Lists the projects the server knows, archived ones left out.
     ///
     /// # Errors
     ///
@@ -387,7 +388,7 @@ impl Client {
             .await
     }
 
-    /// Asks OpenCode to compact the session: summarize it to free up context.
+    /// Asks the server to compact the session: summarize it to free up context.
     ///
     /// # Errors
     ///
@@ -400,7 +401,7 @@ impl Client {
     /// Writes text from `prompt` alone with `model`, or the server's
     /// default model: one generation, with no tools and no session.
     ///
-    /// OpenCode marks this call experimental.
+    /// The API marks this call experimental.
     ///
     /// # Errors
     ///
@@ -414,7 +415,7 @@ impl Client {
         if let Some(model) = model {
             body["model"] = Self::model_reference(model);
         }
-        // A model OpenCode hasn't loaded yet isn't found; it's in soon.
+        // A model the server hasn't loaded yet isn't found; it's in soon.
         let started = std::time::Instant::now();
         loop {
             let sent = Self::json(
@@ -442,7 +443,7 @@ impl Client {
     /// Answers `prompt` from session `session_id`'s context, leaving its
     /// history as it was.
     ///
-    /// OpenCode counts the tokens and cost toward the session's totals.
+    /// The server counts the tokens and cost toward the session's totals.
     ///
     /// # Errors
     ///
@@ -472,7 +473,7 @@ impl Client {
         let started = std::time::Instant::now();
         loop {
             let read = Self::json(
-                self.request(Method::POST, "/api/rpc/opencode.goal/get")
+                self.request(Method::POST, "/api/rpc/goal/get")
                     .query(&[("location[directory]", directory)])
                     .json(&json!({ "input": { "sessionID": session_id } })),
             )
@@ -488,7 +489,7 @@ impl Client {
         }
     }
 
-    /// A model as OpenCode's requests name it.
+    /// A model as the API's requests name it.
     fn model_reference(model: &ModelRef) -> Value {
         let mut reference = json!({ "id": model.id, "providerID": model.provider_id });
         if let Some(variant) = &model.variant {
@@ -556,7 +557,7 @@ impl Client {
     }
 
     /// Reads the list at `path` in `directory`, waiting up to
-    /// [`CATALOG_WAIT`] while OpenCode is still loading the folder's models
+    /// [`CATALOG_WAIT`] while the server is still loading the folder's models
     /// and answers with nothing.
     async fn loaded(&self, path: &str, directory: &str) -> Result<Value, Error> {
         let started = std::time::Instant::now();
@@ -638,7 +639,7 @@ impl Client {
         Ok(each(&v, WebSearch::from_json))
     }
 
-    /// Returns the web search service OpenCode's config names for `directory`
+    /// Returns the web search service the config names for `directory`
     /// (`websearch.provider`): an ID, `random`, or `None` when no config sets
     /// one and the first search asks.
     ///
@@ -758,7 +759,7 @@ impl Client {
     }
 
     /// Connects the server to integration `id` with credentials kept
-    /// outside OpenCode, such as a program's own sign-in, by the method
+    /// outside the server, such as a program's own sign-in, by the method
     /// `method` the integration lists.
     ///
     /// The connection applies to every client of the server.
@@ -856,7 +857,7 @@ impl Client {
             &[("path", path)]
         };
         let v = self.list("/api/fs/list", directory, query).await?;
-        // OpenCode ends folder paths with "/"; the entry says it's a folder.
+        // The server ends folder paths with "/"; the entry says it's a folder.
         Ok(each(&v, FileMatch::from_json)
             .into_iter()
             .map(|mut entry| {
@@ -1351,7 +1352,7 @@ impl Client {
     /// Opens the live event stream.
     ///
     /// The stream ends when the connection drops. Read it promptly, on a task
-    /// of its own: OpenCode fails the stream for a slow reader. After it ends,
+    /// of its own: the server fails the stream for a slow reader. After it ends,
     /// open a new one and reload state, since events in between are lost.
     ///
     /// # Errors

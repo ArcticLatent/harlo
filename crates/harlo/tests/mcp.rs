@@ -79,10 +79,10 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     let sandbox = tasks.block_on(Sandbox::start());
     let probe = sandbox.root().join("probe.py");
     std::fs::write(&probe, PROBE).expect("probe.py");
-    let folder = sandbox.root().join("config/opencode");
+    let folder = sandbox.root().join("config/harlo");
 
     let mut app = demo::new_app();
-    app.opencode_folder = Some(folder.clone());
+    app.config_folder = Some(folder.clone());
     let _ = app.update(Message::Tick(demo::now()));
     let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
         client: sandbox.client(),
@@ -129,7 +129,7 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
         status(&ui),
         ui.app().sheets.setup,
         tasks.block_on(sandbox.client().mcp_servers(&sandbox.project_str())),
-        std::fs::read_to_string(folder.join("opencode.json")).unwrap_or_default()
+        std::fs::read_to_string(folder.join("harlo.json")).unwrap_or_default()
     );
     ui.press("probe");
     assert!(ui.shows("Connected"));
@@ -185,9 +185,9 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
 fn a_catalog_server_is_added_to_the_config() {
     let mut tasks = Tasks::new();
     let scratch = tempfile::tempdir().expect("a scratch folder");
-    let folder = scratch.path().join("opencode");
+    let folder = scratch.path().join("harlo");
     let mut app = demo::new_app();
-    app.opencode_folder = Some(folder.clone());
+    app.config_folder = Some(folder.clone());
     let ui = ui(app);
     ui.press("Settings");
     ui.press("Extensions");

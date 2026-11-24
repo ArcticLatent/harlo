@@ -5,7 +5,7 @@
 //! Opens Harlo's window on the desktop with a 5,000-entry session (answers
 //! of prose, answers with a highlighted code block, and edits with 12-line
 //! diffs) and streams a reply into it every 10 ms, through the same events,
-//! reducer and presenter the app uses. No OpenCode server is involved. After
+//! reducer and presenter the app uses. No server is involved. After
 //! a warm-up it runs three phases of 10 s: scrolling, typing into the
 //! composer, then both. Scrolling sends a wheel event after every frame;
 //! typing sends a key every 60 ms. It records the time between frames, how

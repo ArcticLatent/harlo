@@ -792,9 +792,9 @@ fn model_rows(app: &App) -> Vec<SheetRow> {
         rows.push(pair("Not changed", why, 2));
     }
     rows.push(note(if app.global_config().is_none() {
-        "Set in opencode.json on the server's computer."
+        "Set in harlo.json on the server's computer."
     } else {
-        "The default for new sessions, kept in opencode.json."
+        "The default for new sessions, kept in harlo.json."
     }));
     rows
 }
@@ -1195,7 +1195,7 @@ fn git_settings_rows(app: &App) -> Vec<SheetRow> {
     rows.push(heading("Undo a turn"));
     let shared = app.global_config().is_some();
     match &app.sheets.git_settings.snapshots {
-        _ if !shared => rows.push(note("Set in opencode.json on the server's computer.")),
+        _ if !shared => rows.push(note("Set in harlo.json on the server's computer.")),
         Load::Loaded(on) => rows.push(switch(
             Setting::Snapshots,
             "Keep snapshots",

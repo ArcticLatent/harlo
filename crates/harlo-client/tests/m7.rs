@@ -95,7 +95,7 @@ async fn the_set_up_lists_providers_search_mcp_and_plugins() {
     assert!(fake.enabled);
 
     let search = client.web_search(&project).await.expect("web search");
-    assert!(!search.is_empty(), "OpenCode offers search services");
+    assert!(!search.is_empty(), "the server offers search services");
     assert!(search.iter().all(|s| !s.name.is_empty()));
     assert_eq!(
         client.web_search_choice(&project).await.expect("config"),
@@ -107,7 +107,7 @@ async fn the_set_up_lists_providers_search_mcp_and_plugins() {
     let folder = sandbox.project().join("docs");
     std::fs::create_dir_all(&folder).expect("folder");
     std::fs::write(
-        folder.join("opencode.json"),
+        folder.join("harlo.json"),
         r#"{ "websearch": { "provider": "tavily" } }"#,
     )
     .expect("folder config");
@@ -127,7 +127,7 @@ async fn the_set_up_lists_providers_search_mcp_and_plugins() {
         plugins
             .iter()
             .any(|p| p.source == harlo_client::PluginSource::Builtin && p.failed.is_none()),
-        "OpenCode's own plugins load"
+        "the server's own plugins load"
     );
 }
 

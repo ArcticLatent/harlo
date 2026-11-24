@@ -50,7 +50,7 @@ impl ToolHost for OwnTools {
         vec![
             ToolSpec {
                 name: "past_sessions".to_owned(),
-                description: "Find earlier sessions on this OpenCode server by words in their \
+                description: "Find earlier sessions on this server by words in their \
                               titles, newest first. Use it to pick up earlier work or decisions; \
                               then read one with read_session."
                     .to_owned(),

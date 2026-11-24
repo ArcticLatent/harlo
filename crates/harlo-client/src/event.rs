@@ -1,6 +1,6 @@
 //! Live events from `GET /api/event`, decoded into the ones Harlo reacts to.
 //!
-//! The stream is volatile by OpenCode's contract: a slow reader overflows and
+//! The stream is volatile: a slow reader overflows and
 //! the stream fails, and events sent while disconnected are lost. Read it on a
 //! task of its own (see [`crate::Client::events`]) and, after every
 //! (re)connection, reload what the user can act on before applying events.
@@ -280,12 +280,12 @@ pub enum Kind {
     CatalogChanged,
     /// A file in a folder was added, changed or removed.
     ///
-    /// OpenCode reports files it watches: ones an agent touched, and ones
+    /// The server reports files it watches: ones an agent touched, and ones
     /// a client asked it to watch with [`Client::watch_file`](crate::Client::watch_file).
     FileChanged {
         /// The folder the file was reported in.
         directory: String,
-        /// The file's path, as OpenCode reported it.
+        /// The file's path, as the server reported it.
         file: String,
         /// What happened to it.
         change: FileChange,
@@ -303,7 +303,7 @@ pub enum Kind {
     RevertCommitted {
         session_id: String,
     },
-    /// Any other event, by its OpenCode type name.
+    /// Any other event, by its type name.
     /// The user's shell command started in a session.
     ShellStarted {
         session_id: String,
@@ -697,7 +697,7 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
             session_id: data["sessionID"].as_str().unwrap_or_default().to_owned(),
             form_id: data["id"].as_str().unwrap_or_default().to_owned(),
         },
-        "rpc.opencode.goal.changed" => Kind::GoalChanged {
+        "goal.changed" => Kind::GoalChanged {
             session_id: session_of(&data),
             goal: crate::types::Goal::from_json(&data["goal"]),
         },

@@ -1,12 +1,12 @@
-//! OpenCode's background jobs and the user's own shell commands.
+//! The server's background jobs and the user's own shell commands.
 //!
 //! A job is work a session started that runs on without blocking it: a
 //! shell command or a subagent sent to the background, a Code Mode script,
-//! a picture or a video being made. They're experimental in OpenCode, and
-//! the API may change between releases.
+//! a picture or a video being made. They're experimental, and the API
+//! may change between releases.
 //!
-//! A shell command the user runs in a session (`!command` in OpenCode's
-//! own clients) runs in the session's folder with no model; its output
+//! A shell command the user runs in a session (`!command` in the
+//! composer) runs in the session's folder with no model; its output
 //! joins the conversation for the agent to read on its next turn.
 
 // Rust guideline compliant 2026-10-09
@@ -81,7 +81,7 @@ pub enum JobStatus {
 }
 
 impl Job {
-    /// Reads a job from OpenCode's JSON; `None` for a kind or status this
+    /// Reads a job from the server's JSON; `None` for a kind or status this
     /// version doesn't know.
     pub(crate) fn from_json(v: &Value) -> Option<Self> {
         let text = |key: &str| v[key].as_str().unwrap_or_default().to_owned();

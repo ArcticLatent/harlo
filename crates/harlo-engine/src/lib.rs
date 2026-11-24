@@ -7,9 +7,8 @@
 //! [`Gate`] before any tool that needs permission, and stops when its
 //! [`CancellationToken`](tokio_util::sync::CancellationToken) is cancelled.
 //!
-//! Messages follow OpenCode 2's shape (one assistant message per model
-//! step, tool results inside their tool part), so a server can store them
-//! as they are and clients that read OpenCode's sessions read these too.
+//! Messages have one assistant message per model step, with tool results
+//! inside their tool part, so a server can store them as they are.
 
 // Rust guideline compliant 2026-10-09
 
@@ -44,8 +43,8 @@ mod turn;
 pub mod web;
 
 pub use config::{
-    Config, ModelRef, ModelSpec, Price, ProviderSpec, VariantSpec, merge_config,
-    project_config_files, read_config_document,
+    CONFIG_FILES, Config, ModelRef, ModelSpec, PROJECT_FOLDER, Price, ProviderSpec, VariantSpec,
+    config_folder, copy_from_opencode, merge_config, project_config_files, read_config_document,
 };
 pub use error::Error;
 pub use id::{ascending_id, descending_id, just_before};

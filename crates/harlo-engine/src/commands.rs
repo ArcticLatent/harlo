@@ -2,7 +2,7 @@
 //!
 //! They come from the built-ins, the config's `commands`, and Markdown
 //! files in `commands` folders: the config folder's, then the project's
-//! `.opencode/commands` from its root down to the session's folder. A file's
+//! `.harlo/commands` from its root down to the session's folder. A file's
 //! front matter sets its description, agent and model, its body the
 //! template; `group/name.md` is the command `group/name`. A later source
 //! replaces an earlier command of the same name.
@@ -37,7 +37,7 @@ pub struct Command {
 }
 
 impl Command {
-    /// As OpenCode lists it.
+    /// As the server lists it.
     #[must_use]
     pub fn to_json(&self) -> Value {
         let mut out = json!({ "name": self.name });
@@ -91,7 +91,7 @@ pub struct Search<'a> {
     pub workspace: &'a Path,
     /// The project's root, if known.
     pub project_root: Option<&'a Path>,
-    /// OpenCode's config folder.
+    /// Harlo's config folder.
     pub config_dir: &'a Path,
     /// The config's `commands` object.
     pub configured: &'a Value,
@@ -128,7 +128,12 @@ pub fn discover(search: &Search<'_>) -> Vec<Command> {
             at = up;
         }
     }
-    folders.extend(project.into_iter().rev().map(|f| f.join(".opencode")));
+    folders.extend(
+        project
+            .into_iter()
+            .rev()
+            .map(|f| f.join(crate::config::PROJECT_FOLDER)),
+    );
     for folder in folders {
         // The singular folder is the older name.
         for kind in ["command", "commands"] {
@@ -300,7 +305,7 @@ mod tests {
     fn files_and_config_add_commands() {
         let dir = tempfile::tempdir().expect("dir");
         let project = dir.path().join("p");
-        let folder = project.join(".opencode/commands/team");
+        let folder = project.join(".harlo/commands/team");
         std::fs::create_dir_all(&folder).expect("mkdir");
         std::fs::write(
             folder.join("ship.md"),

@@ -139,7 +139,7 @@ pub struct LocalModels {
     /// Why the last download or pull failed.
     pub get_error: Option<String>,
     /// Whether the server's config has llama.cpp's server.
-    pub in_opencode: bool,
+    pub in_config: bool,
     /// What the last change to the server's config did.
     pub done: Option<String>,
     /// Why it failed.
@@ -160,7 +160,7 @@ impl Default for LocalModels {
             getting: None,
             get: None,
             get_error: None,
-            in_opencode: false,
+            in_config: false,
             done: None,
             error: None,
         }
@@ -356,7 +356,7 @@ impl App {
                         self.local.error = Some(why);
                     }
                 }
-                self.local.in_opencode = self.global_config().is_some_and(|folder| {
+                self.local.in_config = self.global_config().is_some_and(|folder| {
                     config::has_provider(folder, LLAMACPP_PROVIDER).unwrap_or(false)
                 });
                 Task::none()
@@ -381,7 +381,7 @@ impl App {
         } else {
             tasks.push(self.fetch_latest());
         }
-        self.local.in_opencode = self
+        self.local.in_config = self
             .global_config()
             .is_some_and(|folder| config::has_provider(folder, LLAMACPP_PROVIDER).unwrap_or(false));
         if let Some(files) = &self.local.files {
@@ -677,7 +677,7 @@ impl App {
         state.running = None;
         state.server = ServerState::Stopped;
         tasks.push(self.start_server(Engine::LlamaCpp));
-        if self.local.in_opencode {
+        if self.local.in_config {
             tasks.push(self.change_provider(true));
         }
         Task::batch(tasks)

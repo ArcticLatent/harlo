@@ -4,7 +4,7 @@
 //! A rule names an action (`edit`, `shell`, `read`, … or `*`), a resource
 //! pattern (a path or command; `*` matches anything) and an effect. Rules
 //! come in layers: the agent's own, then the configuration's, then the
-//! session's. The last rule that matches decides, as in OpenCode, and the
+//! session's. The last rule that matches decides, and the
 //! decision says which rule and layer it was, so a client can show why.
 
 // Rust guideline compliant 2026-10-09
@@ -62,7 +62,7 @@ pub fn save_patterns(action: &str, resources: &[String]) -> Vec<String> {
     out
 }
 
-/// One permission rule, in OpenCode 2's shape.
+/// One permission rule, as the config writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
     /// The action it covers, or `*` for every action.
@@ -105,8 +105,8 @@ pub struct Decision {
     pub because: Option<(String, Rule)>,
 }
 
-/// The rules every session's default agent starts from, as OpenCode's
-/// build agent has them: everything runs, except reading secrets and
+/// The rules every session's default agent starts from: everything runs,
+/// except reading secrets and
 /// shell commands, which ask.
 #[must_use]
 pub fn agent_rules() -> Vec<Rule> {
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn patterns_match_like_opencodes() {
+    fn patterns_match_like_globs() {
         assert!(glob("*", "anything at/all"));
         assert!(glob("*", "*.txt") && glob("src/*", "src/**/*.rs"));
         assert!(glob("*.env", "secrets/.env") && glob("*.env", "a.env"));

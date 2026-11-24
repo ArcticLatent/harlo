@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use harlo_client::{Client, read_registration, registration_path};
+use harlo_client::{Client, opencode_registration_path, read_registration};
 
 /// What an import did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -87,7 +87,7 @@ async fn opencode() -> Result<Client, String> {
 async fn registered() -> Result<Option<Client>, String> {
     let state = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
     let home = std::env::var_os("HOME").map_or_else(PathBuf::new, PathBuf::from);
-    let path = registration_path(state.as_deref(), &home);
+    let path = opencode_registration_path(state.as_deref(), &home);
     let service =
         read_registration(&path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
     let Some(service) = service else {

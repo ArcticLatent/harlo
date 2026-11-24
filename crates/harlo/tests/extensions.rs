@@ -40,9 +40,9 @@ fn the_skills_tab_lists_the_folders_skills_and_how_to_add_more() {
     assert!(ui.shows("Write the release notes from the changelog."));
     ui.press("How to add skills");
     assert!(
-        ui.messages().iter().any(
-            |m| matches!(m, Message::OpenLink(url) if url.contains("opencode.ai/docs/skills"))
-        ),
-        "OpenCode's page on skills"
+        ui.messages()
+            .iter()
+            .any(|m| matches!(m, Message::OpenLink(url) if url.ends_with("#skills"))),
+        "the README's part on skills"
     );
 }

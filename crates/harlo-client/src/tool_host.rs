@@ -1,8 +1,8 @@
-//! Tools a client offers OpenCode's agents: an MCP server the client hosts
-//! over a WebSocket the OpenCode server opens to it, with the tools
+//! Tools a client offers the server's agents: an MCP server the client hosts
+//! over a WebSocket the server opens to it, with the tools
 //! available to every session on the server while the socket stays open.
 //!
-//! OpenCode shows them to agents in its Code Mode catalog, under the name
+//! The server shows them to agents in its Code Mode catalog, under the name
 //! the client attaches with, such as `tools.harlo.past_sessions`.
 
 // Rust guideline compliant 2026-10-09
@@ -24,8 +24,8 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use crate::Error;
 use crate::client::Client;
 
-/// The `_meta` key OpenCode sends the calling session's ID under.
-const SESSION_KEY: &str = "ai.opencode/sessionID";
+/// The `_meta` key the server sends the calling session's ID under.
+const SESSION_KEY: &str = "harlo/sessionID";
 
 /// One tool a client offers.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,13 +50,13 @@ pub trait ToolHost: Send + Sync + 'static {
     fn tools(&self) -> Vec<ToolSpec>;
 
     /// Runs the tool named `name` with `input`, for the session with ID
-    /// `session` when OpenCode says which one called.
+    /// `session` when the server says which one called.
     fn call(&self, name: String, input: Value, session: Option<String>) -> ToolRun;
 }
 
 /// The MCP side of a [`ToolHost`].
 struct Handler {
-    /// The name the tools are offered under: OpenCode names them after the
+    /// The name the tools are offered under: the server names them after the
     /// server's name, so it's the same.
     name: String,
     /// The tools.
@@ -114,7 +114,7 @@ impl ServerHandler for Handler {
 }
 
 impl Client {
-    /// Offers `host`'s tools to OpenCode's agents under `name` until the
+    /// Offers `host`'s tools to the server's agents under `name` until the
     /// connection ends.
     ///
     /// The tools are available to every session on the server while this

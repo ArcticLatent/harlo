@@ -1,4 +1,4 @@
-//! Where an OpenCode server lives and how to find the shared one.
+//! Where a server lives and how to find the shared one.
 
 // Rust guideline compliant 2026-10-09
 
@@ -9,9 +9,9 @@ use serde::Deserialize;
 
 use crate::Error;
 
-/// An OpenCode server's address and password.
+/// A server's address and password.
 ///
-/// The password is sent as HTTP Basic auth with the fixed user `opencode`.
+/// The password is sent as HTTP Basic auth with the user `harlo`.
 /// `Debug` never shows it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Endpoint {
@@ -79,11 +79,12 @@ pub struct SharedService {
 
 /// Returns the path of the shared service's registration file.
 ///
-/// OpenCode records the running background service in
+/// Where an OpenCode setup records its running background service, for
+/// importing its sessions:
 /// `$XDG_STATE_HOME/opencode/service.json`, falling back to
 /// `~/.local/state/opencode/service.json`.
 #[must_use]
-pub fn registration_path(xdg_state_home: Option<&Path>, home: &Path) -> PathBuf {
+pub fn opencode_registration_path(xdg_state_home: Option<&Path>, home: &Path) -> PathBuf {
     xdg_state_home
         .map_or_else(|| home.join(".local").join("state"), Path::to_path_buf)
         .join("opencode")

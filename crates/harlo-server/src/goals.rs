@@ -2,8 +2,7 @@
 //! turns. After each run a reviewer reads the conversation and decides
 //! whether the goal is met, needs another round, or waits for the person.
 //!
-//! A goal is kept per session, in OpenCode's shape, and its changes go out
-//! as `rpc.opencode.goal.changed`.
+//! A goal is kept per session, and its changes go out as `goal.changed`.
 
 // Rust guideline compliant 2026-10-09
 
@@ -107,7 +106,7 @@ impl Server {
         self.store
             .put_setting(&format!("goal/{}", session.id), &text)?;
         self.emit(
-            "rpc.opencode.goal.changed",
+            "goal.changed",
             json!({ "sessionID": session.id, "goal": goal }),
             Some(&session.location.directory),
             None,

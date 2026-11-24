@@ -3234,8 +3234,6 @@ pub struct ConfigInfoEncodedExperimental {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub model_speeds: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub opencode_api: ::std::option::Option<bool>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub part_rows: ::std::option::Option<bool>,
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
     pub policies: ::std::vec::Vec<ConfigInfoEncodedExperimentalPoliciesItem>,
@@ -22889,7 +22887,7 @@ impl ::std::convert::TryFrom<::std::string::String> for SessionInstructionsUpdat
 ///`SessionInterruptResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
 pub struct SessionInterruptResponse {
-    ///Whether an active execution owned by this OpenCode process was interrupted.
+    ///Whether an active execution owned by this server was interrupted.
     pub interrupted: bool,
 }
 ///`SessionLogItem`

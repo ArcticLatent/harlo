@@ -26,7 +26,7 @@ const BACKLOG: usize = 1024;
 
 /// A terminal the server runs.
 pub(crate) struct Terminal {
-    /// What clients see of it, in OpenCode's shape.
+    /// What clients see of it.
     info: Mutex<Value>,
     /// What's typed, for the thread writing it to the shell.
     input: mpsc::Sender<Vec<u8>>,

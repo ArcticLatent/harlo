@@ -1,4 +1,4 @@
-//! A session's messages, in OpenCode 2's shape.
+//! A session's messages, as the server stores and sends them.
 //!
 //! A user message holds what was typed. Each model step is an assistant
 //! message of its own, with its text, reasoning and tool calls in order;
@@ -6,7 +6,7 @@
 //! message saying how it went. Times are Unix milliseconds.
 //!
 //! The JSON these types make is what a client reads back, so field names
-//! follow OpenCode's schema exactly.
+//! stay as they are: changing one breaks stored sessions and clients.
 
 // Rust guideline compliant 2026-10-09
 
@@ -138,7 +138,7 @@ pub struct Created {
     pub created: i64,
 }
 
-/// A failure, as OpenCode reports one.
+/// A failure, as a message reports one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorInfo {
     /// A short kind, such as `provider` or `tool`.
@@ -195,7 +195,7 @@ pub struct StepTime {
     pub completed: Option<i64>,
 }
 
-/// Token counts, as OpenCode reports them.
+/// Token counts, as a message reports them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tokens {
     /// Input tokens not read from the cache.
@@ -363,7 +363,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn messages_round_trip_in_opencodes_shape() {
+    fn messages_round_trip_in_their_stored_shape() {
         let step = Message::Assistant(Box::new(Assistant {
             id: "msg_1".into(),
             time: StepTime {

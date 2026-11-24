@@ -6,17 +6,17 @@
 
 use std::path::Path;
 
-use harlo_client::{Endpoint, read_registration, registration_path};
+use harlo_client::{Endpoint, opencode_registration_path, read_registration};
 
 #[test]
 fn registration_path_prefers_xdg_state_home() {
-    let path = registration_path(Some(Path::new("/x/state")), Path::new("/home/u"));
+    let path = opencode_registration_path(Some(Path::new("/x/state")), Path::new("/home/u"));
     assert_eq!(path, Path::new("/x/state/opencode/service.json"));
 }
 
 #[test]
 fn registration_path_falls_back_to_home() {
-    let path = registration_path(None, Path::new("/home/u"));
+    let path = opencode_registration_path(None, Path::new("/home/u"));
     assert_eq!(
         path,
         Path::new("/home/u/.local/state/opencode/service.json")

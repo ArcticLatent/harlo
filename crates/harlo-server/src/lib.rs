@@ -1,10 +1,9 @@
 //! Harlo's background server: it runs sessions on `harlo-engine` and
 //! serves them over HTTP and server-sent events.
 //!
-//! For now it answers the part of OpenCode 2's API that Harlo uses for a
-//! turn, in OpenCode's shapes, so Harlo can attach to either server. It
-//! reads OpenCode's config in place and keeps its own sessions in one
-//! SQLite file.
+//! It reads Harlo's config in place (`$XDG_CONFIG_HOME/harlo/harlo.jsonc`,
+//! started once from an earlier OpenCode setup when there is one) and keeps
+//! its sessions in one SQLite file.
 
 // Rust guideline compliant 2026-10-09
 
@@ -51,7 +50,7 @@ pub use store::Store;
 /// Where the server reads its configuration and keeps its data.
 #[derive(Debug, Clone)]
 pub struct Places {
-    /// The folder OpenCode's config folder is in (`$XDG_CONFIG_HOME`).
+    /// The folder Harlo's config folder is in (`$XDG_CONFIG_HOME`).
     pub config_home: PathBuf,
     /// The SQLite file.
     pub database: PathBuf,
@@ -82,6 +81,31 @@ impl Places {
     }
 }
 
+/// The store setting that says an earlier OpenCode setup was looked for.
+const COPIED: &str = "config/copied-from-opencode";
+
+/// Starts Harlo's config from an earlier OpenCode setup, the first time the
+/// server starts. A failure is logged and tried again next start.
+fn copy_old_config(store: &Store, config_home: &std::path::Path) {
+    if store.setting(COPIED).ok().flatten().is_some() {
+        return;
+    }
+    match harlo_engine::copy_from_opencode(config_home) {
+        Ok(copied) => {
+            if let Some(file) = &copied {
+                tracing::info!(name: "config.copied", file = %file.display(), "config copied from an OpenCode setup");
+            }
+            let done = copied.map_or_else(String::new, |f| f.display().to_string());
+            if let Err(e) = store.put_setting(COPIED, &done) {
+                tracing::warn!(name: "config.copy.unnoted", error = %e, "couldn't note the config copy");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(name: "config.copy.failed", error = %e, "couldn't copy an OpenCode setup's config");
+        }
+    }
+}
+
 /// Opens the store and reads the configuration.
 ///
 /// # Errors
@@ -95,6 +119,7 @@ pub fn open(places: &Places, password: Option<String>) -> Result<Arc<Server>, St
     }
     let store = Store::open(&places.database)
         .map_err(|e| format!("Couldn't open {}: {e}", places.database.display()))?;
+    copy_old_config(&store, &places.config_home);
     let config = harlo_engine::Config::load(&places.config_home).map_err(|e| e.to_string())?;
     let phone = PhoneHost::new(places.phone.clone(), places.phone_wanted.clone());
     Ok(Arc::new(Server::new(

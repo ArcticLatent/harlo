@@ -1,5 +1,5 @@
-//! OpenCode's global config file on this computer, edited as OpenCode's docs
-//! describe: `opencode.jsonc` or `opencode.json` in its config folder.
+//! Harlo's global config file on this computer: `harlo.jsonc` or
+//! `harlo.json` in `~/.config/harlo`.
 //!
 //! The running server watches the file and reloads it, so a change applies
 //! to every client of the server at once. Edits keep the rest of the file,
@@ -16,7 +16,7 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 
 /// The names of the global file, the one the server prefers first.
-const NAMES: [&str; 2] = ["opencode.jsonc", "opencode.json"];
+const NAMES: [&str; 2] = ["harlo.jsonc", "harlo.json"];
 
 /// The key naming the model new sessions use, as `provider/model`.
 const MODEL: &str = "model";
@@ -36,13 +36,13 @@ const MCP: &str = "mcp";
 const SERVERS: &str = "servers";
 /// The object of providers the server adds to its catalog, by ID.
 const PROVIDERS: &str = "providers";
-/// The package OpenCode's docs give for a server with the `OpenAI` API.
-pub const OPENAI_COMPATIBLE: &str = "@opencode/ai/providers/openai-compatible";
-/// What a new global file starts with: the schema OpenCode's docs give.
-const NEW_FILE: &str = "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n";
+/// The package name for a server with the `OpenAI` API.
+pub const OPENAI_COMPATIBLE: &str = "@ai-sdk/openai-compatible";
+/// What a new global file starts with.
+const NEW_FILE: &str = "{\n}\n";
 
 /// The name of the file a change is written to before it replaces the real one.
-const PENDING: &str = ".opencode.json.harlo";
+const PENDING: &str = ".harlo.json.pending";
 
 /// Why the global config couldn't be read or changed.
 #[derive(Debug)]
@@ -85,18 +85,18 @@ impl std::error::Error for Error {
 }
 
 /// The server's global config folder on this computer, such as
-/// `~/.config/opencode`.
+/// `~/.config/harlo`.
 ///
 /// Returns `None` when neither the config folder nor the home folder can be
 /// found.
 #[must_use]
 pub fn folder() -> Option<PathBuf> {
     let config = dirs::config_dir().or_else(|| Some(dirs::home_dir()?.join(".config")))?;
-    Some(config.join("opencode"))
+    Some(config.join("harlo"))
 }
 
-/// The global file in `folder`: `opencode.jsonc` when there is one, since
-/// OpenCode prefers it, otherwise `opencode.json`, which may not exist yet.
+/// The global file in `folder`: `harlo.jsonc` when there is one, since the
+/// server prefers it, otherwise `harlo.json`, which may not exist yet.
 #[must_use]
 pub fn file(folder: &Path) -> PathBuf {
     NAMES

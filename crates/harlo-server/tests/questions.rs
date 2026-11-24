@@ -1,6 +1,6 @@
 //! The agent's questions, as forms: a `question` call creates a form a
 //! person answers, once, and the agent reads the answers; a dismissed
-//! form stops the turn, as OpenCode does.
+//! form stops the turn.
 
 // Rust guideline compliant 2026-10-09
 
@@ -16,7 +16,7 @@ const ASK: &str = r#"tool question {"questions":[{"question":"Which colour?","he
 async fn parts(sandbox: &Sandbox, session: &str) -> Vec<Value> {
     let messages: Value = reqwest::Client::new()
         .get(format!("{}/api/session/{session}/message", sandbox.url()))
-        .basic_auth("opencode", Some(&sandbox.password))
+        .basic_auth("harlo", Some(&sandbox.password))
         .send()
         .await
         .expect("messages")

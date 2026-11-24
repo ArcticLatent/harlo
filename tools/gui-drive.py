@@ -482,7 +482,7 @@ def cmd_api(args):
     method, path = args[0], args[1]
     body = args[2].encode() if len(args) > 2 else None
     request = urllib.request.Request(state["url"] + path, data=body, method=method)
-    token = base64.b64encode(f"opencode:{state['password']}".encode()).decode()
+    token = base64.b64encode(f"harlo:{state['password']}".encode()).decode()
     request.add_header("Authorization", f"Basic {token}")
     if body:
         request.add_header("Content-Type", "application/json")

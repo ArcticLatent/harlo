@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 
 use crate::types::Delivery;
 
-/// Where some text sits in the prompt, so OpenCode can tie an attachment to it.
+/// Where some text sits in the prompt, so the server can tie an attachment to it.
 ///
-/// Offsets count UTF-16 code units, as OpenCode's own clients do.
+/// Offsets count UTF-16 code units.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mention {
     /// Offset of the mention's first unit.
@@ -40,7 +40,7 @@ impl Mention {
 /// A file, image or resource sent with a prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
-    /// Where OpenCode reads it: `file:///…`, an MCP URI, or `data:` with the bytes inline.
+    /// Where the server reads it: `file:///…`, an MCP URI, or `data:` with the bytes inline.
     pub uri: String,
     /// The name shown for it.
     pub name: Option<String>,

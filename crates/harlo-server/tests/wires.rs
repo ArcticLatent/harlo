@@ -13,7 +13,7 @@ use support::{Sandbox, until};
 /// Adds providers `fake-messages` and `fake-responses`, the scripted model
 /// behind the two APIs, to the sandbox's config.
 fn add_wires(root: &std::path::Path) {
-    let file = root.join("config/opencode/opencode.json");
+    let file = root.join("config/harlo/harlo.json");
     let mut config: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&file).expect("config")).expect("JSON");
     let fake = config["providers"]["fake"].clone();

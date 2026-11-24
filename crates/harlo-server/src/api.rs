@@ -1,6 +1,4 @@
-//! The HTTP API: the part of OpenCode 2's API Harlo uses for a session's
-//! turn, in OpenCode's paths and JSON, so `harlo-client` works against
-//! this server unchanged.
+//! The HTTP API: the paths and JSON `harlo-client` reads and writes.
 //!
 //! The event stream adds what reconnecting needs: each durable event goes
 //! out with its sequence number as the SSE `id`, and a client that sends
@@ -189,7 +187,7 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/vcs/diff", get(vcs_diff))
         .route("/api/session/{id}/generate", post(aside))
         .route("/api/experimental/generate/text", post(write_text))
-        .route("/api/rpc/opencode.goal/get", post(read_goal))
+        .route("/api/rpc/goal/get", post(read_goal))
         .route("/api/experimental/client-mcp", get(host_tools))
         .route("/api/websearch/provider", get(search_services))
         .fallback(not_here)
@@ -203,15 +201,11 @@ pub fn router(server: Arc<Server>) -> Router {
 /// Lets a request through when the server has no password or it carries it.
 async fn password(State(server): Shared, request: Request, next: Next) -> Response {
     if let Some(password) = &server.password {
-        let want = format!(
-            "Basic {}",
-            base64::engine::general_purpose::STANDARD.encode(format!("opencode:{password}"))
-        );
         let given = request
             .headers()
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok());
-        if given != Some(want.as_str()) {
+        if !given.is_some_and(|g| carries(g, password)) {
             return (
                 StatusCode::UNAUTHORIZED,
                 [(header::WWW_AUTHENTICATE, "Basic")],
@@ -220,6 +214,23 @@ async fn password(State(server): Shared, request: Request, next: Next) -> Respon
         }
     }
     next.run(request).await
+}
+
+/// Whether the `Authorization` header `given` is Basic auth with `password`.
+///
+/// The user name isn't checked: clients send `harlo`, and scripts may send
+/// any.
+fn carries(given: &str, password: &str) -> bool {
+    let Some(encoded) = given.strip_prefix("Basic ") else {
+        return false;
+    };
+    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) else {
+        return false;
+    };
+    std::str::from_utf8(&decoded)
+        .ok()
+        .and_then(|pair| pair.split_once(':'))
+        .is_some_and(|(_, given)| given == password)
 }
 
 impl IntoResponse for Refusal {

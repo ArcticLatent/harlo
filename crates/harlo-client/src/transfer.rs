@@ -1,6 +1,6 @@
 //! Copying, moving, deleting and carrying sessions: forks, moves to another
 //! folder of the project (such as a worktree), deletion, and export to a
-//! file that another OpenCode server can import.
+//! file that another server can import.
 
 // Rust guideline compliant 2026-10-09
 
@@ -57,7 +57,7 @@ impl Client {
         Ok(())
     }
 
-    /// Exports session `session_id` whole, as OpenCode's transcript in JSON: its
+    /// Exports session `session_id` whole, as a transcript in JSON: its
     /// details and every finished message, ready for [`import_session`].
     ///
     /// [`import_session`]: Client::import_session

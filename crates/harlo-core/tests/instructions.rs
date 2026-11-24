@@ -23,7 +23,7 @@ fn file(path: &Path, scope: Scope) -> File {
 fn global_files_then_each_folder_up_to_home() {
     let root = tempfile::tempdir().expect("scratch");
     let home = root.path().join("home");
-    let config = home.join(".config/opencode");
+    let config = home.join(".config/harlo");
     let project = home.join("code/app");
     let folder = project.join("crates/core");
     std::fs::create_dir_all(&folder).expect("folders");
@@ -69,7 +69,7 @@ fn outside_home_the_walk_stops_at_the_project() {
         folder,
         project: project.clone(),
         home: home.clone(),
-        config: home.join(".config/opencode"),
+        config: home.join(".config/harlo"),
     });
     assert_eq!(
         found,
@@ -88,7 +88,7 @@ fn a_folder_outside_its_project_gets_only_global_files() {
         folder,
         project: home.join("code/app"),
         home: home.clone(),
-        config: home.join(".config/opencode"),
+        config: home.join(".config/harlo"),
     });
     assert!(found.is_empty(), "{found:?}");
 }

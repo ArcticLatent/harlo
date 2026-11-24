@@ -462,10 +462,10 @@ fn suggestions_fit_the_memory_there_is() {
 }
 
 #[test]
-fn a_local_provider_is_written_to_opencodes_config() {
+fn a_local_provider_is_written_to_harlos_config() {
     let scratch = tempfile::tempdir().expect("a scratch folder");
     std::fs::write(
-        scratch.path().join("opencode.jsonc"),
+        scratch.path().join("harlo.jsonc"),
         "{\n  // mine\n  \"model\": \"x/y\"\n}\n",
     )
     .expect("a config");
@@ -478,7 +478,7 @@ fn a_local_provider_is_written_to_opencodes_config() {
     };
     config::set_provider(scratch.path(), &provider).expect("written");
     assert!(config::has_provider(scratch.path(), "llamacpp").expect("read"));
-    let text = std::fs::read_to_string(scratch.path().join("opencode.jsonc")).expect("the file");
+    let text = std::fs::read_to_string(scratch.path().join("harlo.jsonc")).expect("the file");
     assert!(text.contains("// mine"), "comments stay: {text}");
     let plain: String = text
         .lines()

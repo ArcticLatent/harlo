@@ -1,7 +1,7 @@
 import Foundation
 
-/// harlo's own theme (the desktop's default; crates/harlo-app/themes/
-/// harlo-*.json), until harlo sends the one chosen there.
+/// Harlo's own theme (the desktop's default, crates/harlo/src/theme.rs),
+/// until Harlo sends the one chosen there.
 extension Theme {
     public static let standard: Theme = {
         do {

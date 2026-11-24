@@ -95,7 +95,7 @@ pub struct McpServer {
     /// How it stands.
     pub status: McpStatus,
     /// The integration that signs it in, when it signs in through
-    /// OpenCode, as a remote server with OAuth does.
+    /// the server, as a remote server with OAuth does.
     pub integration: Option<String>,
 }
 
@@ -124,7 +124,7 @@ impl McpServer {
 /// Where a plugin comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginSource {
-    /// Part of OpenCode.
+    /// Part of the server.
     Builtin,
     /// An installed package.
     Package {
@@ -139,7 +139,7 @@ pub enum PluginSource {
     },
     /// A file on the server's computer.
     Local(String),
-    /// Added by a program using OpenCode's SDK.
+    /// Added by a program through the API.
     Sdk,
     /// A source this client doesn't know, by name.
     Other(String),

@@ -59,7 +59,7 @@ impl App {
                     git_message(GitEvent::SnapshotsSet(
                         result
                             .map(|()| on)
-                            .map_err(|e| format!("Couldn't change opencode.json: {e}")),
+                            .map_err(|e| format!("Couldn't change harlo.json: {e}")),
                     ))
                 });
             }

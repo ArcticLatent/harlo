@@ -37,7 +37,7 @@ slint = { version = "=1.19.0", default-features = false }
 slint-build = { version = "=1.19.0", default-features = false }
 i-slint-backend-testing = { version = "=1.19.0", default-features = false }
 
-# OpenCode client.
+# The server's client.
 reqwest = { version = "0.13.5", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_json = { version = "1.0.150", default-features = false }
@@ -50,7 +50,7 @@ getrandom = { version = "0.4.3", default-features = false }
 httpdate = "1.0.3"
 base64 = { version = "0.23.1", default-features = false }
 mime_guess = { version = "2.0.5", default-features = false }
-# Reads the front matter of OpenCode's command files (MIT); YAML, as OpenCode writes it.
+# Reads the YAML front matter of command, agent and skill files (MIT).
 gray_matter = { version = "0.3.2", default-features = false, features = ["yaml"] }
 # Checks that the bundled file-icon font has every glyph the icon table uses (MIT/Apache).
 ttf-parser = "0.25.1"
@@ -116,11 +116,11 @@ ksni = { version = "0.3.7", default-features = false }
 zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 # Draws Harlo's logo for the tray icon; Slint builds it already (MIT/Apache).
 resvg = { version = "0.49.0", default-features = false }
-# Edits OpenCode's config file and keeps its comments (MIT).
+# Edits Harlo's config file and keeps its comments (MIT).
 jsonc-parser = { version = "0.34.0", default-features = false }
 # Encoding names, such as an MCP server's, into request paths (MIT/Apache).
 percent-encoding = { version = "2.3.2", default-features = false, features = ["std"] }
-# Serving Harlo's own tools to OpenCode's agents as an MCP server: the official SDK (Apache-2.0).
+# Serving the desktop's own tools to the server's agents as an MCP server: the official SDK (Apache-2.0).
 rmcp = { version = "3.11.0", default-features = false, features = ["server"] }
 # Splitting a typed command line, quotes included, as a shell would (MIT/Apache).
 shell-words = { version = "1.1.1", default-features = false, features = ["std"] }
