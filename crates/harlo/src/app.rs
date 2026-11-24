@@ -623,6 +623,9 @@ pub struct App {
     new_model: Option<ModelRef>,
     /// The model picker's options, for the folder in `models_for`.
     pub models: Vec<ModelChoice>,
+    /// The keys of the models in `models` that show unless hidden, by
+    /// [`harlo_core::model_menu::shown_by_default`].
+    model_defaults: std::collections::HashSet<String>,
     models_for: Option<String>,
     /// The picker whose menu is open.
     pub picker: Option<Picker>,
@@ -766,6 +769,7 @@ impl App {
             new_agent: None,
             new_model: None,
             models: Vec::new(),
+            model_defaults: std::collections::HashSet::new(),
             models_for: None,
             picker: None,
             picker_filter: String::new(),
@@ -2019,10 +2023,14 @@ impl App {
     }
 
     fn rebuild_models(&mut self) {
-        let models = self
+        let catalog = self
             .models_for
             .as_ref()
-            .and_then(|folder| self.catalogs.get(folder))
+            .and_then(|folder| self.catalogs.get(folder));
+        self.model_defaults = catalog
+            .map(|c| harlo_core::model_menu::shown_by_default(&c.models, self.now))
+            .unwrap_or_default();
+        let models = catalog
             .map(|catalog| {
                 catalog
                     .models
@@ -2036,6 +2044,17 @@ impl App {
             })
             .unwrap_or_default();
         self.models = models;
+    }
+
+    /// Returns whether the model menus offer the model `id` of `provider`:
+    /// as chosen in Settings → Models, else when it's recent.
+    #[must_use]
+    pub fn model_shown(&self, provider: &str, id: &str) -> bool {
+        harlo_core::model_menu::shown(
+            &self.preferences.models,
+            &self.model_defaults,
+            &harlo_core::model_menu::key(provider, id),
+        )
     }
 
     /// Returns what the current folder offers, once loaded.

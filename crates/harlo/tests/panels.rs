@@ -72,6 +72,9 @@ fn deep() -> Catalog {
             variants: Vec::new(),
             images: false,
             context: Some(200_000),
+            family: None,
+            released: None,
+            free: false,
         }],
         ..Catalog::default()
     }

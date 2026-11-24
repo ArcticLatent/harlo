@@ -118,6 +118,8 @@ pub enum Section {
     Git,
     /// The server's model providers.
     Providers,
+    /// Which models the model menus offer.
+    Models,
     /// Engines and models on this computer.
     LocalModels,
     /// OpenCode's agents and the approvals it saved.
@@ -136,7 +138,7 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -145,6 +147,7 @@ impl Section {
         Self::Projects,
         Self::Git,
         Self::Providers,
+        Self::Models,
         Self::LocalModels,
         Self::Agents,
         Self::Tools,
@@ -166,6 +169,7 @@ impl Section {
             Self::Projects => "Projects",
             Self::Git => "Git",
             Self::Providers => "Providers",
+            Self::Models => "Models",
             Self::LocalModels => "Local models",
             Self::Agents => "Agents",
             Self::Tools => "Tools for agents",
@@ -187,7 +191,7 @@ impl Section {
             | Self::Voice
             | Self::About => None,
             Self::Projects | Self::Git => Some("Your projects"),
-            Self::Providers | Self::LocalModels | Self::Agents | Self::Tools => {
+            Self::Providers | Self::Models | Self::LocalModels | Self::Agents | Self::Tools => {
                 Some("Agents and models")
             }
             Self::Schedules => Some("Automation"),
@@ -295,6 +299,8 @@ pub enum Field {
     SignInCode,
     /// The answer to a sign-in form's field, by its place.
     SignInAnswer(u8),
+    /// What Settings → Models is narrowed to.
+    ModelFilter,
     /// A new MCP server's name.
     McpName,
     /// The program a new MCP server runs, with its arguments.
@@ -307,7 +313,7 @@ pub enum Field {
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -339,6 +345,7 @@ impl Field {
         Self::SignInAnswer(5),
         Self::SignInAnswer(6),
         Self::SignInAnswer(7),
+        Self::ModelFilter,
         Self::McpName,
         Self::McpCommand,
         Self::McpUrl,
@@ -532,6 +539,9 @@ pub enum Event {
     TemplateWords,
     /// Show the event sounds' licence on About, or hide it.
     SoundLicence,
+    /// Show the model with this provider and id in the model menus, or
+    /// hide it.
+    ToggleModel(String, String),
     /// Have an event play this sound, from
     /// [`harlo_core::notifications::SOUNDS`], or none; it plays once as
     /// it's chosen.
@@ -643,6 +653,8 @@ pub struct Sheets {
     pub template_words: bool,
     /// Whether About shows the event sounds' licence.
     pub sound_licence: bool,
+    /// What Settings → Models is narrowed to.
+    pub model_filter: String,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -740,7 +752,8 @@ impl App {
             | Event::ThemeLicence
             | Event::TemplateWords
             | Event::SoundLicence
-            | Event::Sound(..)) => {
+            | Event::Sound(..)
+            | Event::ToggleModel(..)) => {
                 return self.look_event(event);
             }
             Event::DefaultModelSet(result) => self.sheets.model_error = result.err(),
@@ -789,6 +802,10 @@ impl App {
         // The server keeps them: they may have changed since.
         match section {
             Section::Schedules => self.load_schedules(),
+            Section::Models => {
+                self.sheets.model_filter.clear();
+                self.load_setup()
+            }
             Section::Agents => self.load_approvals(),
             Section::LocalModels => self.look(),
             Section::Phone => self.phone_event(super::PhoneEvent::Changed),
@@ -812,6 +829,13 @@ impl App {
             Event::TemplateWords => {
                 self.sheets.template_words = !self.sheets.template_words;
                 Task::none()
+            }
+            Event::ToggleModel(provider, id) => {
+                let shown = self.model_shown(&provider, &id);
+                self.preferences
+                    .models
+                    .insert(harlo_core::model_menu::key(&provider, &id), !shown);
+                self.save_preferences()
             }
             Event::SoundLicence => {
                 self.sheets.sound_licence = !self.sheets.sound_licence;
@@ -896,6 +920,10 @@ impl App {
             }
             Field::McpName | Field::McpCommand | Field::McpUrl => self.mcp_text(field, value),
             Field::Computer => self.add_computer(value),
+            Field::ModelFilter => {
+                value.clone_into(&mut self.sheets.model_filter);
+                Task::none()
+            }
             Field::QuietFrom | Field::QuietTo | Field::Title(_) | Field::Message(_) => {
                 self.set_notice_text(field, value)
             }
@@ -993,6 +1021,7 @@ impl App {
             | Field::McpName
             | Field::McpCommand
             | Field::McpUrl
+            | Field::ModelFilter
             | Field::Computer => {
                 return Task::none();
             }

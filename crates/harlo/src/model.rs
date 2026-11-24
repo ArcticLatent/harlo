@@ -339,8 +339,15 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                 Picker::CommitModel => app.commit_model_choice(),
                 _ => app.current_model_choice(),
             };
+            let chosen = |model: &ModelChoice| {
+                current
+                    .as_ref()
+                    .is_some_and(|c| c.provider_id == model.provider_id && c.id == model.id)
+            };
             app.models
                 .iter()
+                // Those Settings → Models hides stay out, unless in use.
+                .filter(|model| chosen(model) || app.model_shown(&model.provider_id, &model.id))
                 .filter(|model| {
                     matches(
                         &format!("{} {}", model.name, model.provider_id),
@@ -348,9 +355,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
                     )
                 })
                 .map(|model| Item {
-                    selected: current
-                        .as_ref()
-                        .is_some_and(|c| c.provider_id == model.provider_id && c.id == model.id),
+                    selected: chosen(model),
                     label: model.name.clone(),
                     detail: Some(model.provider_id.clone()),
                     below: None,

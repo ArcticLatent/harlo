@@ -308,6 +308,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Projects => Icon::FolderGit2,
         Section::Git => Icon::GitBranch,
         Section::Providers => Icon::Plug,
+        Section::Models => Icon::Bot,
         Section::LocalModels => Icon::Cpu,
         Section::Agents => Icon::UsersRound,
         Section::Tools => Icon::Plug,
@@ -339,6 +340,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
             rows.extend(claude_rows(app));
             rows
         }
+        Section::Models => menu_model_rows(app),
         Section::Tools => {
             let setup = match &app.sheets.setup {
                 Load::Loaded(setup) => Some(setup.as_ref()),
@@ -1534,6 +1536,61 @@ fn notification_rows(app: &App) -> Vec<SheetRow> {
     }
     if notices.enabled {
         rows.extend(template_rows(app));
+    }
+    rows
+}
+
+/// Settings → Models: a search, then each provider's models with a switch
+/// that shows or hides it in the model menus.
+fn menu_model_rows(app: &App) -> Vec<SheetRow> {
+    let mut rows = vec![
+        note("Choose which models the model menus offer. Recent ones show until you choose."),
+        live_field(
+            Field::ModelFilter,
+            "Search models",
+            &app.sheets.model_filter,
+            "Search models",
+        ),
+    ];
+    if app.models.is_empty() {
+        rows.push(note("The server's models show here once it lists them."));
+        return rows;
+    }
+    let names: std::collections::HashMap<&str, &str> = match &app.sheets.setup {
+        Load::Loaded(setup) => setup
+            .providers
+            .iter()
+            .flatten()
+            .map(|p| (p.id.as_str(), p.name.as_str()))
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    };
+    let mut provider = None;
+    for (index, model) in app.models.iter().enumerate() {
+        let name = names
+            .get(model.provider_id.as_str())
+            .copied()
+            .unwrap_or(&model.provider_id);
+        if !crate::model::matches(
+            &format!("{} {} {name}", model.name, model.id),
+            &app.sheets.model_filter,
+        ) {
+            continue;
+        }
+        if provider != Some(model.provider_id.as_str()) {
+            provider = Some(model.provider_id.as_str());
+            rows.push(heading(name));
+        }
+        rows.push(SheetRow {
+            kind: 3,
+            name: model.name.as_str().into(),
+            on: app.model_shown(&model.provider_id, &model.id),
+            setting: crate::window::MODEL_SWITCHES + int(index),
+            ..SheetRow::default()
+        });
+    }
+    if provider.is_none() {
+        rows.push(note("No model matches."));
     }
     rows
 }

@@ -20,6 +20,7 @@ pub mod instructions;
 pub mod layout;
 pub mod local_models;
 pub mod mcp_catalog;
+pub mod model_menu;
 pub mod notes;
 pub mod notifications;
 pub mod own_tools;

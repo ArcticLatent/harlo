@@ -738,6 +738,10 @@ pub const CHOOSE_SOUND: i32 = 78;
 /// The About button that shows or hides the event sounds' licence.
 pub const SOUND_LICENCE: i32 = 79;
 
+/// The first number of Settings → Models' switches: the one for the model
+/// at place `n` of [`App::models`] is numbered this plus `n`.
+pub const MODEL_SWITCHES: i32 = 10_000;
+
 /// The pages About links to: the source, its releases and a new issue.
 pub const ABOUT_LINKS: [&str; 3] = [
     env!("CARGO_PKG_REPOSITORY"),
@@ -1114,8 +1118,18 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_settings_search, |text| Message::Sheet(
         SheetEvent::Query(text.to_string())
     ));
-    send_with!(on_switch_setting, |_app, number| setting_of(number)
-        .map(|setting| Message::Sheet(SheetEvent::Switch(setting))));
+    send_with!(on_switch_setting, |app, number| match number
+        .checked_sub(MODEL_SWITCHES)
+        .and_then(|n| usize::try_from(n).ok())
+    {
+        Some(n) => app.models.get(n).map(|model| {
+            Message::Sheet(SheetEvent::ToggleModel(
+                model.provider_id.clone(),
+                model.id.clone(),
+            ))
+        }),
+        None => setting_of(number).map(|setting| Message::Sheet(SheetEvent::Switch(setting))),
+    });
     send_with!(on_settings_action, |app, number, item| settings_action(
         app, number, item
     ));

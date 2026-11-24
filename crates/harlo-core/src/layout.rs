@@ -77,6 +77,10 @@ pub struct Preferences {
     /// `provider/model`, by the project's folder; kept here, not on the
     /// server.
     pub project_models: BTreeMap<String, String>,
+    /// Models shown in (true) or hidden from (false) the model menus, by
+    /// [`crate::model_menu::key`]; others follow
+    /// [`crate::model_menu::shown_by_default`].
+    pub models: BTreeMap<String, bool>,
     /// The model that writes commit messages, as `provider/model`; `None`
     /// leaves it to the server's default model.
     pub commit_model: Option<String>,
@@ -136,6 +140,7 @@ impl Default for Preferences {
             interface_font: String::new(),
             code_font: String::new(),
             project_models: BTreeMap::new(),
+            models: BTreeMap::new(),
             commit_model: None,
             gitlab_host: String::new(),
             forgejo_host: String::new(),

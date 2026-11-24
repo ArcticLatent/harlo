@@ -30,6 +30,12 @@ pub struct Model {
     pub images: bool,
     /// How many tokens its context window holds, if known.
     pub context: Option<u64>,
+    /// The family it belongs to, such as `claude-opus`, if known.
+    pub family: Option<String>,
+    /// When it was released, in milliseconds since the Unix epoch, if known.
+    pub released: Option<i64>,
+    /// Whether it costs nothing to use: no price, or a zero one.
+    pub free: bool,
 }
 
 impl Model {
@@ -57,6 +63,20 @@ impl Model {
                 .as_array()
                 .is_some_and(|input| input.iter().any(|i| i == "image")),
             context: value["limit"]["context"].as_u64().filter(|n| *n > 0),
+            family: optional(value, "family"),
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "a date in milliseconds fits an i64 many times over"
+            )]
+            released: value["time"]["released"]
+                .as_f64()
+                .filter(|ms| ms.is_finite() && *ms > 0.0)
+                .map(|ms| ms as i64),
+            free: value["cost"].as_array().is_none_or(|costs| {
+                costs
+                    .iter()
+                    .all(|c| c["input"].as_f64().is_none_or(|n| n == 0.0))
+            }),
             provider_id,
             id,
         })
