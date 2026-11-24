@@ -1,9 +1,9 @@
 //! Harlo's server.
 //!
 //! - `harlo-server serve [--hostname H] [--port P] [--register]` runs it until it's
-//!   stopped. The password, when set, comes from `HARLO_SERVER_PASSWORD`; clients
-//!   send it as basic auth. `--register` records it as the
-//!   background service.
+//!   stopped. The password, when set, comes from `HARLO_SERVER_PASSWORD`, or with
+//!   `--password-stdin` from the first line of standard input; clients send it as
+//!   basic auth. `--register` records it as the background service.
 //! - `harlo-server service start` starts the background service unless one answers, and
 //!   prints where it is; `service status` only says.
 //! - `harlo-server --version` prints its version.
@@ -13,8 +13,41 @@
 use std::future::IntoFuture as _;
 use std::process::ExitCode;
 
-#[tokio::main]
-async fn main() -> ExitCode {
+/// The environment variable a password comes in.
+const PASSWORD_VAR: &str = "HARLO_SERVER_PASSWORD";
+
+fn main() -> ExitCode {
+    let password = take_password();
+    match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime.block_on(run(password)),
+        Err(e) => fail(&format!("Couldn't start: {e}")),
+    }
+}
+
+/// The password from the environment, taken out of it: the commands, MCP
+/// servers and terminals the server starts for an agent inherit its
+/// environment, and the password lets its holder run anything.
+fn take_password() -> Option<String> {
+    let password = std::env::var(PASSWORD_VAR).ok().filter(|v| !v.is_empty());
+    // SAFETY: this is the first thing `main` does, before the runtime or
+    // any other thread exists, so nothing else reads or writes the
+    // environment at the same time.
+    unsafe { std::env::remove_var(PASSWORD_VAR) };
+    password
+}
+
+/// The password on the first line of standard input.
+fn read_password() -> Option<String> {
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line).ok()?;
+    let line = line.trim_end_matches(['\r', '\n']);
+    (!line.is_empty()).then(|| line.to_owned())
+}
+
+async fn run(mut password: Option<String>) -> ExitCode {
     let mut hostname = "127.0.0.1".to_owned();
     let mut port = 4096_u16;
     let mut register = false;
@@ -30,6 +63,7 @@ async fn main() -> ExitCode {
         match arg.as_str() {
             "serve" => {}
             "--register" => register = true,
+            "--password-stdin" => password = read_password(),
             "--hostname" => hostname = args.next().unwrap_or(hostname),
             "--port" => match args.next().map(|p| p.parse()) {
                 Some(Ok(p)) => port = p,
@@ -37,14 +71,11 @@ async fn main() -> ExitCode {
             },
             other => {
                 return fail(&format!(
-                    "Unknown argument {other}. Usage: harlo-server serve [--hostname H] [--port P] [--register] | service start|status"
+                    "Unknown argument {other}. Usage: harlo-server serve [--hostname H] [--port P] [--register] [--password-stdin] | service start|status"
                 ));
             }
         }
     }
-    let password = std::env::var("HARLO_SERVER_PASSWORD")
-        .ok()
-        .filter(|v| !v.is_empty());
     let server = match harlo_server::open(&harlo_server::Places::from_env(), password) {
         Ok(s) => s,
         Err(e) => return fail(&e),

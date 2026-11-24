@@ -77,6 +77,18 @@ fn approvals_say_what_the_agent_wants() {
     );
     assert_eq!(describe(&asked("edit", &["a.rs"])).detail, "a.rs");
     assert_eq!(describe(&asked("lsp_rename", &[])).wants, "use lsp rename");
+    assert_eq!(
+        describe(&asked("remember_user", &["Use tabs."])).wants,
+        "keep a note for every project"
+    );
+    assert_eq!(
+        describe(&asked(
+            "project_config",
+            &["Start the MCP server “x”: npx x"]
+        ))
+        .wants,
+        "use this project's own settings"
+    );
 }
 
 #[test]
@@ -114,6 +126,18 @@ fn always_allow_says_what_it_covers_in_words() {
         (
             asked("webfetch", &["https://docs.rs/*"]),
             "fetches of everything in “https://docs.rs/”",
+        ),
+        (
+            asked("shell", &["echo *", "> out.txt"]),
+            "commands starting with “echo”, or commands writing to “out.txt”",
+        ),
+        (
+            asked("external_directory", &["/etc/*"]),
+            "work in everything in “/etc/”",
+        ),
+        (
+            asked("project_config", &["/home/me/app @ 0123456789abcdef"]),
+            "these settings, until the project's config files change,",
         ),
     ];
     for (permission, words) in cases {

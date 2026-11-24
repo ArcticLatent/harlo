@@ -49,6 +49,21 @@ async fn a_compacted_session_carries_on_from_its_summary() {
     });
     assert_eq!(kept, Some(("completed".to_owned(), Some(summary))));
 
+    // The request for the summary is the step's, with one message more:
+    // the same system prompt and tools, so the provider reads the
+    // conversation from its cache.
+    let sent = support::turn_requests(sandbox.dir.path());
+    let (step, asked) = (&sent[0], &sent[1]);
+    let request = asked["messages"]
+        .as_array()
+        .and_then(|m| m.last())
+        .map(|m| m["content"].to_string())
+        .unwrap_or_default();
+    assert!(request.contains("Summarize the conversation"), "{request}");
+    assert!(step["tools"].as_array().is_some_and(|t| !t.is_empty()));
+    assert_eq!(asked["tools"], step["tools"]);
+    assert_eq!(asked["messages"][0], step["messages"][0]);
+
     client
         .prompt(
             &session.id,

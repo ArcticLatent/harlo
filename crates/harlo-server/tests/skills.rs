@@ -49,6 +49,8 @@ async fn commands_and_skills_reach_the_model() {
         ["release-notes"]
     );
 
+    // The command's shell line runs once the person allowed it.
+    support::allow_project_settings(&client, &folder).await;
     let mut events = client.events().await.expect("events");
     let session = client.create_session(&folder).await.expect("session");
     client
@@ -95,7 +97,8 @@ async fn commands_and_skills_reach_the_model() {
     assert_eq!(attached, Some(vec!["release-notes".to_owned()]));
 
     let requests = support::turn_requests(sandbox.dir.path());
-    let attached_request = requests[1]["messages"].to_string();
+    // (The first request is the run that allowed the project's settings.)
+    let attached_request = requests[2]["messages"].to_string();
     assert!(
         attached_request.contains("Keep them short."),
         "{attached_request}"

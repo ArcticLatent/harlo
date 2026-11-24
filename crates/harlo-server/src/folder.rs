@@ -24,6 +24,9 @@ pub(crate) struct Folder {
     pub dirs: Vec<PathBuf>,
     /// The agents, built-in and configured.
     pub agents: Vec<Agent>,
+    /// What the project's own config asks for that the person hasn't
+    /// allowed, and so isn't in any of the above.
+    pub withheld: Option<crate::trust::Withheld>,
 }
 
 impl Folder {
@@ -113,16 +116,39 @@ impl Server {
         if let (Some(path), Some(info)) = (&global.source, &global_text) {
             documents.push((path.clone(), info.clone()));
         }
+        let mut project: Vec<PathBuf> = workspace
+            .ancestors()
+            .take_while(|d| root.as_deref().is_some_and(|r| d.starts_with(r)) || *d == workspace)
+            .map(|d| d.join(harlo_engine::PROJECT_FOLDER))
+            .filter(|d| d.is_dir())
+            .collect();
+        project.reverse();
+        // The project's documents as written, and with what waits for the
+        // person taken out.
+        let mut own: Vec<(PathBuf, Value, Value)> = Vec::new();
+        let mut held = crate::trust::Held::default();
         for file in project_config_files(workspace, root.as_deref()) {
             match read_config_document(&file) {
-                Ok(info) => {
-                    merge_config(&mut merged, &info);
-                    documents.push((file, info));
+                Ok(mut info) => {
+                    crate::trust::drop_providers(&mut info, &file);
+                    let mut plain = info.clone();
+                    held.take_from(&mut plain);
+                    own.push((file, info, plain));
                 }
                 Err(e) => {
                     tracing::warn!(name: "config.project.unreadable", error = %e, "skipping a project config file");
                 }
             }
+        }
+        for dir in &project {
+            held.take_folder(dir);
+        }
+        let withheld = held
+            .finish(root.as_deref().unwrap_or(workspace))
+            .filter(|held| !self.trusted(&held.key));
+        for (file, info, plain) in own {
+            merge_config(&mut merged, if withheld.is_some() { &plain } else { &info });
+            documents.push((file, info));
         }
         let mut config = if documents.len() > usize::from(global.source.is_some()) {
             Config::from_value(&merged, global.source.clone())
@@ -135,21 +161,34 @@ impl Server {
         }
         let signed_in = self.signed_in(&config.providers);
         config.providers.extend(signed_in);
-        let mut dirs = vec![self.config_dir.clone()];
-        let mut project: Vec<PathBuf> = workspace
-            .ancestors()
-            .take_while(|d| root.as_deref().is_some_and(|r| d.starts_with(r)) || *d == workspace)
-            .map(|d| d.join(harlo_engine::PROJECT_FOLDER))
-            .filter(|d| d.is_dir())
+        // The agents: the merged config's, then each config folder's. A
+        // project's agents keep their instructions; the rules that let
+        // them act unasked wait with the rest of what it asks for.
+        let mut found: Vec<(String, Value)> = config
+            .agents
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(id, entry)| (id.clone(), entry.clone()))
             .collect();
-        project.reverse();
+        found.extend(agents::in_folder(&self.config_dir));
+        for dir in &project {
+            for (id, mut entry) in agents::in_folder(dir) {
+                if withheld.is_some() {
+                    crate::trust::Held::default().take_agent(&id, &mut entry);
+                }
+                found.push((id, entry));
+            }
+        }
+        let agents = agents::with_entries(self.agents.clone(), found);
+        let mut dirs = vec![self.config_dir.clone()];
         dirs.extend(project);
-        let agents = agents::configured(self.agents.clone(), &config.agents, &dirs);
         Folder {
             config,
             documents,
             dirs,
             agents,
+            withheld,
         }
     }
 }

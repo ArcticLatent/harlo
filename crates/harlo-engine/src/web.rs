@@ -115,15 +115,100 @@ pub fn definitions(search: bool) -> Vec<Value> {
     out
 }
 
+/// How many redirects within a site a fetch follows.
+const MAX_REDIRECTS: usize = 10;
+
 /// The HTTP client the tools share.
+///
+/// It follows a redirect only within the site that was asked for. A fetch
+/// is permitted site by site, so a page that sends it elsewhere, to a
+/// service on this computer or network for one, doesn't take the
+/// permission along: [`fetch`] says where it leads instead.
 fn client() -> reqwest::Client {
+    let within_the_site = reqwest::redirect::Policy::custom(|attempt| {
+        let from = attempt.previous().first().and_then(|u| u.host_str());
+        if attempt.previous().len() > MAX_REDIRECTS {
+            attempt.error("too many redirects")
+        } else if same_site(from, attempt.url().host_str()) {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    });
     reqwest::Client::builder()
         .user_agent(concat!("harlo/", env!("CARGO_PKG_VERSION")))
         .timeout(TIMEOUT)
         .connect_timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(within_the_site)
         .build()
         .unwrap_or_default()
+}
+
+/// Whether hosts `a` and `b` are one site: the same name, with or without
+/// a leading `www.`.
+fn same_site(a: Option<&str>, b: Option<&str>) -> bool {
+    let bare = |host: &str| {
+        host.strip_prefix("www.")
+            .unwrap_or(host)
+            .to_ascii_lowercase()
+    };
+    match (a, b) {
+        (Some(a), Some(b)) => bare(a) == bare(b),
+        _ => false,
+    }
+}
+
+/// Whether `address` is one only this computer's own network link reaches
+/// (`169.254.0.0/16`, `fe80::/10`): where cloud machines serve their
+/// credentials, and nothing a page to read lives.
+fn is_link_local(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(v4) => v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => v4.is_link_local(),
+            None => v6.is_unicast_link_local(),
+        },
+    }
+}
+
+/// Refuses `url` when its host is, or is the name of, a link-local address.
+async fn refuse_link_local(url: &reqwest::Url) -> Result<(), String> {
+    let refusal = |address: std::net::IpAddr| {
+        format!(
+            "{url} isn't fetched: {address} is a link-local address, which serves this \
+             machine's own settings and credentials, not pages."
+        )
+    };
+    let Some(host) = url.host_str() else {
+        return Ok(());
+    };
+    // (An IPv6 address is written in brackets.)
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(address) = bare.parse::<std::net::IpAddr>() {
+        return if is_link_local(address) {
+            Err(refusal(address))
+        } else {
+            Ok(())
+        };
+    }
+    let named = host.to_owned();
+    let port = url.port_or_known_default().unwrap_or(443);
+    // (A name that can't be looked up fails in the fetch, with its reason.)
+    let found = tokio::task::spawn_blocking(move || {
+        std::net::ToSocketAddrs::to_socket_addrs(&(named.as_str(), port))
+            .map(Iterator::collect::<Vec<_>>)
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+    match found
+        .iter()
+        .map(std::net::SocketAddr::ip)
+        .find(|a| is_link_local(*a))
+    {
+        Some(address) => Err(refusal(address)),
+        None => Ok(()),
+    }
 }
 
 /// `url` as one to fetch: http or https; a bare host gets https.
@@ -172,6 +257,12 @@ fn output(text: String) -> Output {
     }
 }
 
+/// Where long pages are saved for the agent to read the rest of.
+#[must_use]
+pub fn saved_pages() -> PathBuf {
+    std::env::temp_dir().join("harlo-web")
+}
+
 /// Fetches `url`; long pages are saved under `spill`.
 ///
 /// # Errors
@@ -179,6 +270,7 @@ fn output(text: String) -> Output {
 /// When the address is wrong, can't be reached, or answers with an error.
 pub async fn fetch(url: &str, spill: &Path) -> Result<Output, String> {
     let url = parse(url)?;
+    refuse_link_local(&url).await?;
     let response = client()
         .get(url.clone())
         .header(
@@ -190,6 +282,19 @@ pub async fn fetch(url: &str, spill: &Path) -> Result<Output, String> {
         .map_err(|e| format!("Can't fetch {url}: {e}"))?;
     let status = response.status();
     let at = response.url().clone();
+    if status.is_redirection() {
+        let to = response
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|to| at.join(to).ok());
+        return Err(match to {
+            Some(to) => format!(
+                "{at} leads to another site: {to}\nFetch that address if it is the page you want."
+            ),
+            None => format!("{at} answered {status} without saying where it leads."),
+        });
+    }
     let mime = response
         .headers()
         .get("content-type")
@@ -917,6 +1022,85 @@ mod tests {
             "Wed, 21 Oct 2015 07:28:00 GMT".parse().expect("header"),
         );
         assert_eq!(retry_after(&headers), Duration::ZERO, "a date gone by");
+    }
+
+    #[test]
+    fn a_redirect_is_followed_within_its_site_only() {
+        assert!(same_site(Some("example.com"), Some("www.example.com")));
+        assert!(same_site(Some("Docs.rs"), Some("docs.rs")));
+        assert!(!same_site(Some("example.com"), Some("example.org")));
+        assert!(!same_site(Some("example.com"), Some("127.0.0.1")));
+        assert!(!same_site(Some("example.com"), None));
+    }
+
+    /// Serves, on this computer: `/page`, a page; `/moved`, a redirect to
+    /// it; `/away`, a redirect to the same server by its other name, as
+    /// another site would be. Returns its port.
+    async fn redirecting_site() -> u16 {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port");
+        let port = listener.local_addr().expect("address").port();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = vec![0; 2048];
+                let read = stream.read(&mut request).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..read]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or("/");
+                let answer = match path {
+                    "/moved" => "HTTP/1.1 302 Found\r\nLocation: /page\r\n".to_owned(),
+                    "/away" => {
+                        format!("HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/page\r\n")
+                    }
+                    _ => "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n".to_owned(),
+                };
+                let body = if answer.contains("200") {
+                    "served text"
+                } else {
+                    ""
+                };
+                let whole = format!(
+                    "{answer}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(whole.as_bytes()).await;
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn a_fetch_sent_to_another_site_says_where_and_stops() {
+        let port = redirecting_site().await;
+        let spill = tempfile::tempdir().expect("scratch");
+        let fetch_path =
+            async |path: &str| fetch(&format!("http://127.0.0.1:{port}{path}"), spill.path()).await;
+        let page = fetch_path("/moved").await.expect("followed");
+        assert!(page.text.contains("served text"), "{}", page.text);
+        let why = fetch_path("/away").await.expect_err("not followed");
+        assert!(
+            why.contains(&format!(
+                "leads to another site: http://localhost:{port}/page"
+            )),
+            "{why}"
+        );
+        assert!(!why.contains("served text"), "{why}");
+    }
+
+    #[tokio::test]
+    async fn link_local_addresses_are_never_fetched() {
+        for url in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[fe80::1]/",
+            "http://[::ffff:169.254.169.254]/",
+        ] {
+            let why = fetch(url, Path::new("/nonexistent")).await.expect_err(url);
+            assert!(why.contains("link-local"), "{why}");
+        }
+        // This computer's own services are the person's to allow.
+        let local = reqwest::Url::parse("http://127.0.0.1:9/").expect("URL");
+        refuse_link_local(&local).await.expect("not refused here");
     }
 
     #[test]

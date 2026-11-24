@@ -200,6 +200,9 @@ pub struct Config {
     /// Whether automations may be made (`automations`, on unless turned
     /// off).
     pub automations: bool,
+    /// The context size, in tokens, at which a session is summarized
+    /// (`compaction.limit`); none leaves it to the engine.
+    pub compact_at: Option<u64>,
     /// MCP servers (`mcp.servers`), by name, as the file has them.
     pub mcp: Value,
     /// What it says of web search: the service it names
@@ -280,6 +283,9 @@ impl Config {
                 .as_bool()
                 .or_else(|| value["experimental"]["automations"].as_bool())
                 .unwrap_or(true),
+            compact_at: value["compaction"]["limit"]
+                .as_u64()
+                .filter(|limit| *limit > 0),
             mcp: value["mcp"]["servers"].clone(),
             websearch: if value["websearch"] == false {
                 Some(Value::Bool(false))

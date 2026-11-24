@@ -18,6 +18,7 @@ pub mod catalog;
 mod chat;
 pub mod claude;
 pub mod codemode;
+mod command;
 pub mod commands;
 pub mod compaction;
 mod config;
@@ -52,5 +53,7 @@ pub use message::{
     Assistant, Cache, Created, ErrorInfo, Message, Part, ShellOutput, ShellRun, ShellTime,
     Snapshot, StepTime, Tokens, ToolState, ToolTime,
 };
-pub use rules::{Decision, Effect, Rule, agent_rules, decide};
+pub use rules::{
+    AGENT, Decision, Effect, OUTSIDE, REMEMBER_USER, Rule, agent_rules, decide, outside_rules,
+};
 pub use turn::{Answer, Ask, Event, Gate, Outcome, Sink, Steering, Turn, now, run};

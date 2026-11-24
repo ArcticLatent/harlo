@@ -41,6 +41,8 @@ fn a_remote_server_signs_in_from_its_page() {
     std::fs::write(sandbox.project().join("harlo.json"), config.to_string()).expect("config");
     let client = sandbox.client();
     let folder = sandbox.project_str();
+    // A project's servers connect once the person allowed them.
+    tasks.block_on(server::allow_project_settings(&client, &folder));
     let waited = tasks.block_on(async {
         tokio::time::timeout(WAIT, async {
             while !client.mcp_servers(&folder).await.is_ok_and(|l| {

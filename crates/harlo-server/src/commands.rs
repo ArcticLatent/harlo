@@ -102,8 +102,15 @@ impl Server {
         if let Some(model) = &command.model {
             self.set_model(id, model.clone())?;
         }
-        let text = commands::fill(&command.template, arguments);
-        let text = commands::run_shell_blocks(&text, Path::new(&directory)).await;
+        let mut text = commands::fill(&command.template, arguments);
+        // A project's command runs its shell lines once the person allowed them.
+        let waits = self
+            .folder(&directory)
+            .withheld
+            .is_some_and(|held| held.commands.contains(&command.name));
+        if !waits {
+            text = commands::run_shell_blocks(&text, Path::new(&directory)).await;
+        }
         let attached = self.attach(&directory, skills).await?;
         self.prompt(id, None, &text, delivery, attached, Vec::new())
     }

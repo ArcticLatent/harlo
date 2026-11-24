@@ -135,17 +135,31 @@ pub fn discover(search: &Search<'_>) -> Vec<Command> {
             .map(|f| f.join(crate::config::PROJECT_FOLDER)),
     );
     for folder in folders {
-        // The singular folder is the older name.
-        for kind in ["command", "commands"] {
-            let root = folder.join(kind);
-            for file in markdown_files(&root) {
-                if let Some(command) = read(&root, &file) {
-                    found.insert(command.name.clone(), command);
-                }
-            }
+        for command in in_folder(&folder) {
+            found.insert(command.name.clone(), command);
         }
     }
     found.into_values().collect()
+}
+
+/// The commands config folder `folder`'s Markdown files define, in the
+/// order they're read; a later one of the same name replaces an earlier.
+#[must_use]
+pub fn in_folder(folder: &Path) -> Vec<Command> {
+    let mut found = Vec::new();
+    // The singular folder is the older name.
+    for kind in ["command", "commands"] {
+        let root = folder.join(kind);
+        if !root.is_dir() {
+            continue;
+        }
+        found.extend(
+            markdown_files(&root)
+                .iter()
+                .filter_map(|file| read(&root, file)),
+        );
+    }
+    found
 }
 
 /// The Markdown files under `root`, sorted.
@@ -234,6 +248,21 @@ pub fn fill(template: &str, arguments: &str) -> String {
 
 /// How long a template's command may run.
 const SHELL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The commands `text` runs when it's used: what each `` !`command` `` holds.
+#[must_use]
+pub fn shell_blocks(text: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("!`") {
+        let Some(len) = rest[at + 2..].find('`') else {
+            break;
+        };
+        found.push(&rest[at + 2..at + 2 + len]);
+        rest = &rest[at + 2 + len + 1..];
+    }
+    found
+}
 
 /// `text` with each `` !`command` `` replaced by what the command printed,
 /// run in `cwd`.

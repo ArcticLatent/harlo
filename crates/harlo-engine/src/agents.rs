@@ -16,7 +16,7 @@ use gray_matter::engine::YAML;
 use serde_json::Value;
 
 use crate::config::{ModelRef, model_ref};
-use crate::rules::{Effect, Rule, agent_rules};
+use crate::rules::{Effect, OUTSIDE, Rule, agent_rules, outside_rules};
 
 /// Whom an agent talks to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +106,9 @@ fn rule(action: &str, resource: &str, effect: Effect) -> Rule {
 #[must_use]
 pub fn builtins(plans: &Path) -> Vec<Agent> {
     let base = agent_rules();
+    // The plans folder sits outside the project: Plan may work in it.
+    let real_plans = crate::tools::real_path(plans);
+    let real_plans = real_plans.to_string_lossy();
     let plans = plans.to_string_lossy();
     let with = |extra: Vec<Rule>| {
         let mut rules = base.clone();
@@ -135,6 +138,7 @@ pub fn builtins(plans: &Path) -> Vec<Agent> {
                 rule("question", "*", Effect::Allow),
                 rule("edit", "*", Effect::Deny),
                 rule("edit", &format!("{plans}/*"), Effect::Allow),
+                rule(OUTSIDE, &format!("{real_plans}/*"), Effect::Allow),
                 rule("subagent", "*", Effect::Deny),
             ]),
             system: None,
@@ -180,16 +184,23 @@ pub fn builtins(plans: &Path) -> Vec<Agent> {
                           thorough."
                 .into(),
             mode: Mode::Subagent,
-            rules: with(vec![
-                rule("*", "*", Effect::Deny),
-                rule("read", "*", Effect::Allow),
-                rule("glob", "*", Effect::Allow),
-                rule("grep", "*", Effect::Allow),
-                rule("read", "*.env", Effect::Ask),
-                rule("read", "*.env.*", Effect::Ask),
-                rule("read", "*.env.example", Effect::Allow),
-                rule("shell", "*", Effect::Ask),
-            ]),
+            rules: with(
+                [
+                    vec![
+                        rule("*", "*", Effect::Deny),
+                        rule("read", "*", Effect::Allow),
+                        rule("glob", "*", Effect::Allow),
+                        rule("grep", "*", Effect::Allow),
+                        rule("read", "*.env", Effect::Ask),
+                        rule("read", "*.env.*", Effect::Ask),
+                        rule("read", "*.env.example", Effect::Allow),
+                        rule("shell", "*", Effect::Ask),
+                    ],
+                    // Reading outside the project asks, as for any agent.
+                    outside_rules(),
+                ]
+                .concat(),
+            ),
             system: Some(
                 "You search and explain code; you never change it. Create, edit, move or delete \
                  no files, temporary ones included, and run only commands that change nothing. \
@@ -213,7 +224,7 @@ pub fn builtins(plans: &Path) -> Vec<Agent> {
 /// winning. An entry for a known agent changes the settings it names;
 /// `disabled: true` removes it.
 #[must_use]
-pub fn configured(mut agents: Vec<Agent>, entries: &Value, folders: &[PathBuf]) -> Vec<Agent> {
+pub fn configured(agents: Vec<Agent>, entries: &Value, folders: &[PathBuf]) -> Vec<Agent> {
     let mut found: Vec<(String, Value)> = entries
         .as_object()
         .into_iter()
@@ -221,19 +232,37 @@ pub fn configured(mut agents: Vec<Agent>, entries: &Value, folders: &[PathBuf]) 
         .map(|(id, entry)| (id.clone(), entry.clone()))
         .collect();
     for folder in folders {
-        for kind in ["agent", "agents"] {
-            let Ok(dir) = std::fs::read_dir(folder.join(kind)) else {
-                continue;
-            };
-            let mut files: Vec<PathBuf> = dir
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|e| e == "md"))
-                .collect();
-            files.sort();
-            found.extend(files.iter().filter_map(|f| from_file(f)));
-        }
+        found.extend(in_folder(folder));
     }
+    with_entries(agents, found)
+}
+
+/// The agent entries the Markdown files in config folder `folder`'s
+/// `agents` (or `agent`) folder make, by agent ID, in the order read.
+#[must_use]
+pub fn in_folder(folder: &Path) -> Vec<(String, Value)> {
+    let mut found = Vec::new();
+    for kind in ["agent", "agents"] {
+        let Ok(dir) = std::fs::read_dir(folder.join(kind)) else {
+            continue;
+        };
+        let mut files: Vec<PathBuf> = dir
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "md"))
+            .collect();
+        files.sort();
+        found.extend(files.iter().filter_map(|f| from_file(f)));
+    }
+    found
+}
+
+/// `agents` with the entries `found` applied in order, later ones winning.
+///
+/// An entry for a known agent changes the settings it names, one for a
+/// new ID adds an agent, and `disabled: true` removes one.
+#[must_use]
+pub fn with_entries(mut agents: Vec<Agent>, found: Vec<(String, Value)>) -> Vec<Agent> {
     for (id, entry) in found {
         if entry["disabled"] == true {
             agents.retain(|a| a.id != id);
@@ -334,6 +363,22 @@ mod tests {
         assert_eq!(effect("explore", "grep", "fn main"), Effect::Allow);
         assert_eq!(effect("explore", "read", ".env"), Effect::Ask);
         assert_eq!(effect("general", "question", "Which?"), Effect::Deny);
+        // Outside the project: Plan works in its plans folder, the rest ask.
+        assert_eq!(
+            effect("plan", OUTSIDE, "/data/plans/next.md"),
+            Effect::Allow
+        );
+        assert_eq!(effect("plan", OUTSIDE, "/etc/hosts"), Effect::Ask);
+        assert_eq!(effect("build", OUTSIDE, "/etc/hosts"), Effect::Ask);
+        assert_eq!(effect("explore", OUTSIDE, "/etc/hosts"), Effect::Ask);
+        assert_eq!(
+            effect("build", "webfetch", "https://example.com/"),
+            Effect::Ask
+        );
+        assert_eq!(
+            effect("explore", "webfetch", "https://example.com/"),
+            Effect::Deny
+        );
     }
 
     #[test]

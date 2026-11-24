@@ -36,6 +36,7 @@ mod stats;
 mod store;
 mod subagents;
 mod transfer;
+mod trust;
 mod undo;
 mod watch;
 
@@ -122,6 +123,24 @@ pub fn open(places: &Places, password: Option<String>) -> Result<Arc<Server>, St
     copy_old_config(&store, &places.config_home);
     let config = harlo_engine::Config::load(&places.config_home).map_err(|e| e.to_string())?;
     let phone = PhoneHost::new(places.phone.clone(), places.phone_wanted.clone());
+    // What holds the server's password, the keys it keeps and its approvals.
+    let beside = |suffix: &str| {
+        let mut name = places.database.clone().into_os_string();
+        name.push(suffix);
+        PathBuf::from(name)
+    };
+    let sealed: Vec<PathBuf> = [
+        Some(service::registration_path()),
+        Some(places.database.clone()),
+        Some(beside("-wal")),
+        Some(beside("-shm")),
+        places.phone.clone(),
+        Some(places.phone_wanted.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|path| harlo_engine::tools::real_path(&path))
+    .collect();
     Ok(Arc::new(Server::new(
         store,
         config,
@@ -132,5 +151,6 @@ pub fn open(places: &Places, password: Option<String>) -> Result<Arc<Server>, St
             .database
             .parent()
             .map_or_else(|| PathBuf::from("snapshot"), |d| d.join("snapshot")),
+        sealed,
     )))
 }

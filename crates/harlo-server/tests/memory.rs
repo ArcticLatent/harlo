@@ -10,7 +10,7 @@ mod support;
 
 use std::time::Duration;
 
-use harlo_client::{Client, Delivery, Message, Prompt};
+use harlo_client::{Client, Delivery, Message, PermissionReply, Prompt};
 use serde_json::{Value, json};
 use support::Sandbox;
 
@@ -24,6 +24,33 @@ async fn turn(client: &Client, session: &str, script: &str) {
     for _ in 0..400 {
         if idles(client, session).await > before {
             return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the turn never ended");
+}
+
+/// Sends `script`, allows once the one thing it asks about (which must be
+/// `action`), and waits until the session is idle again.
+async fn turn_allowing(client: &Client, session: &str, script: &str, action: &str) {
+    let before = idles(client, session).await;
+    client
+        .prompt(session, &Prompt::new(script, Delivery::Queue))
+        .await
+        .expect("prompt");
+    let mut allowed = false;
+    for _ in 0..400 {
+        if idles(client, session).await > before {
+            assert!(allowed, "the turn ended without asking");
+            return;
+        }
+        for asked in client.permissions(session).await.expect("permissions") {
+            assert_eq!(asked.action, action, "{asked:?}");
+            client
+                .reply_permission(session, &asked.id, PermissionReply::Once, None)
+                .await
+                .expect("allow");
+            allowed = true;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -228,10 +255,12 @@ async fn people_correct_and_forget_notes_and_off_means_none() {
         .create_session(a_dir.to_str().expect("utf-8"))
         .await
         .expect("A");
-    turn(
+    // A note for the project is kept unasked; one for every project asks.
+    turn_allowing(
         &client,
         &a.id,
         r#"tool remember {"text":"Cache in SQLite."} | tool remember {"text":"Cache in Postgres.","scope":"user"} ;; say Kept."#,
+        "remember_user",
     )
     .await;
     let kept = notes(&sandbox, &a.project_id).await;

@@ -94,10 +94,13 @@ pub fn describe(asked: &Permission) -> Described {
         "edit" => "edit a file".to_owned(),
         "read" => "read a file".to_owned(),
         "external_directory" => "work outside the project".to_owned(),
+        "project_config" => "use this project's own settings".to_owned(),
         "webfetch" => "fetch a web page".to_owned(),
         "websearch" => "search the web".to_owned(),
         "subagent" => "start a subagent".to_owned(),
         "skill" => "load a skill".to_owned(),
+        "remember" => "keep a note for this project".to_owned(),
+        "remember_user" => "keep a note for every project".to_owned(),
         other => format!("use {}", other.replace('_', " ")),
     };
     Described {
@@ -113,9 +116,14 @@ pub fn describe(asked: &Permission) -> Described {
 /// anything. A pattern ending in `*` covers what starts with the rest, one
 /// ending in a folder covers everything in it, and one without a `*`
 /// covers just itself; any other is quoted as written. No patterns, or
-/// only `*`, cover every request of the kind.
+/// only `*`, cover every request of the kind. A shell pattern `> file` is
+/// a file commands may redirect their output to. An approval of a
+/// project's own settings covers them as they are now.
 #[must_use]
 pub fn always_scope(asked: &Permission) -> String {
+    if asked.action == "project_config" {
+        return "these settings, until the project's config files change,".to_owned();
+    }
     let shell = asked.action == "shell";
     let patterns: Vec<Pattern<'_>> = asked
         .save
@@ -137,6 +145,10 @@ pub fn always_scope(asked: &Permission) -> String {
         .map(|pattern| {
             if shell {
                 match pattern {
+                    // A file a command redirects its output to.
+                    Pattern::Exactly(x) if x.starts_with("> ") => {
+                        format!("commands writing to “{}”", &x[2..])
+                    }
                     Pattern::Starts(x) => format!("commands starting with “{x}”"),
                     Pattern::In(x) => format!("commands in “{x}”"),
                     Pattern::Like(x) => format!("commands like “{x}”"),

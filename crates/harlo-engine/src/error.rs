@@ -21,6 +21,23 @@ pub struct Error {
     wait: Option<Duration>,
 }
 
+/// How model servers word a request longer than the model's context,
+/// in lower case.
+const OVERFLOW: &[&str] = &[
+    "context length",
+    "context window",
+    "context_length_exceeded",
+    "context limit",
+    "context size",
+    "maximum context",
+    "prompt is too long",
+    "input is too long",
+    "too many tokens",
+    "too many input tokens",
+    "request too large",
+    "reduce the length",
+];
+
 /// What sort of failure an [`Error`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -92,6 +109,20 @@ impl Error {
         self.wait
     }
 
+    /// Whether the model's server refused the request for being longer
+    /// than the model's context.
+    ///
+    /// Servers say so in words, each its own; this knows the common ones.
+    #[must_use]
+    pub fn is_overflow(&self) -> bool {
+        // (A wrong key or a rate limit can mention tokens too.)
+        if self.kind != Kind::Provider || matches!(self.status, Some(401 | 403 | 429)) {
+            return false;
+        }
+        let said = self.message.to_lowercase();
+        OVERFLOW.iter().any(|words| said.contains(words))
+    }
+
     /// Whether the turn ended because it was stopped, not because it failed.
     #[must_use]
     pub fn is_stopped(&self) -> bool {
@@ -118,3 +149,23 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_longer_than_the_context_is_told_from_other_refusals() {
+        let too_long = [
+            "prompt is too long: 215000 tokens > 200000 maximum",
+            "This model's maximum context length is 128000 tokens.",
+            "the request exceeds the available context size",
+        ];
+        for said in too_long {
+            assert!(Error::refused(400, said, None).is_overflow(), "{said}");
+        }
+        assert!(!Error::refused(400, "Unknown parameter: tools", None).is_overflow());
+        assert!(!Error::refused(429, "too many tokens per minute", None).is_overflow());
+        assert!(!Error::config("no context length is set").is_overflow());
+    }
+}

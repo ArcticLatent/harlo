@@ -77,6 +77,15 @@ async fn a_projects_servers_connect_and_their_tools_answer() {
         "off": { "type": "local", "command": command, "disabled": true },
     } } });
     std::fs::write(project.join("harlo.json"), config.to_string()).expect("config");
+    // A project's servers start once the person allowed them.
+    assert!(
+        client
+            .mcp_servers(&folder)
+            .await
+            .expect("listed")
+            .is_empty()
+    );
+    support::allow_project_settings(&client, &folder).await;
 
     let mut listed = Vec::new();
     for _ in 0..200 {

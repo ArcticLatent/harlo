@@ -53,6 +53,14 @@ fn the_service_starts_once_and_unregisters_when_stopped() {
             .permissions(),
     );
     assert_eq!(mode & 0o777, 0o600, "only its owner reads the password");
+    // The password isn't in the service's environment, where every program
+    // of this user could read it and every command it starts would get it.
+    #[cfg(target_os = "linux")]
+    assert!(
+        !String::from_utf8_lossy(&std::fs::read(format!("/proc/{pid}/environ")).expect("environ"))
+            .contains(password),
+        "the password went down a pipe"
+    );
 
     let again = service(home, "start");
     assert!(again.status.success());

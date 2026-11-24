@@ -217,11 +217,35 @@ async fn pages_are_fetched_and_the_first_search_asks_which_service() {
     let folder = sandbox.project().to_str().expect("utf-8").to_owned();
     let session = client.create_session(&folder).await.expect("session");
 
+    // A page is fetched once the person allowed its site.
     let fetch = serde_json::json!({ "url": format!("{at}/page") });
-    run_until(
+    let mut events = client.events().await.expect("events");
+    send(
         &sandbox,
         &session.id,
         &format!("tool webfetch {fetch} ;; say read"),
+    )
+    .await;
+    let asked = support::until(&mut events, |kind| match kind {
+        harlo_client::EventKind::PermissionAsked(p) => Some(*p),
+        _ => None,
+    })
+    .await;
+    assert_eq!(asked.action, "webfetch");
+    assert_eq!(asked.save, [format!("{at}/*")]);
+    client
+        .reply_permission(
+            &session.id,
+            &asked.id,
+            harlo_client::PermissionReply::Always,
+            None,
+        )
+        .await
+        .expect("allowed");
+    run_until(
+        &sandbox,
+        &session.id,
+        "say and then",
         "Version 9 ships on Friday.",
     )
     .await;

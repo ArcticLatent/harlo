@@ -74,6 +74,9 @@ pub struct Turn {
     /// The context size, in tokens, from which the next step starts from a
     /// summary; none never compacts by itself.
     pub compact_at: Option<u64>,
+    /// Files no tool reads or changes, whatever the rules say, such as
+    /// where the server keeps its password; with their links followed.
+    pub sealed: Vec<PathBuf>,
 }
 
 /// Something that happened during a turn.
@@ -305,7 +308,7 @@ pub fn now() -> i64 {
 /// The tools offered to the model this turn: the built-in ones, and those
 /// the turn's skills, memory, todos, Code Mode and subagents add, less what
 /// a rule denies.
-fn offered(turn: &Turn) -> Vec<Value> {
+pub(crate) fn offered(turn: &Turn) -> Vec<Value> {
     let mut definitions = tools::definitions();
     definitions.push(crate::question::definition());
     // Skills a rule denies aren't offered.
@@ -372,6 +375,8 @@ pub async fn run(
 ) -> Outcome {
     let definitions = offered(&turn);
     let mut compacted = false;
+    // Whether the model's server refused the last step as too long.
+    let mut overflowed = false;
     for _ in 0..MAX_STEPS {
         if stop.is_cancelled() {
             return Outcome::Interrupted;
@@ -380,20 +385,18 @@ pub async fn run(
         if let Some(steering) = &turn.steering {
             turn.history.extend(steering.take());
         }
-        if !compacted
-            && turn
-                .compact_at
-                .is_some_and(|limit| crate::compaction::is_full(&turn.history, limit))
-        {
+        let full = turn
+            .compact_at
+            .is_some_and(|limit| crate::compaction::is_full(&turn.history, limit));
+        if !compacted && (full || overflowed) {
             // Tried once a turn: a failed summary isn't asked for again each step.
             compacted = true;
             let pending = crate::compaction::Compaction::pending(id::ascending_id("msg"), "auto");
-            let done = crate::compaction::compact(
+            let done = crate::compaction::compact_with(
                 pending,
-                &turn.provider,
-                &turn.model,
-                &turn.system,
-                &turn.history,
+                &turn,
+                &definitions,
+                overflowed,
                 sink,
                 stop,
             )
@@ -413,6 +416,11 @@ pub async fn run(
         let (assistant, go_on) = match step(&mut turn, &definitions, sink, gate, stop).await {
             Ok(done) => done,
             Err(e) if e.is_stopped() => return Outcome::Interrupted,
+            // Too long for the model: the next round summarizes, then asks again.
+            Err(e) if e.is_overflow() && !compacted => {
+                overflowed = true;
+                continue;
+            }
             Err(e) => return Outcome::Failed(e),
         };
         let found = instructions_met(&turn, &assistant);
@@ -937,84 +945,29 @@ async fn call_tool(
         Ok(plan) => plan,
         Err(why) => return Called::Ran(failed(input, "tool", why), Vec::new()),
     };
+    let plan = match plan.sealing(&turn.sealed) {
+        Ok(plan) => plan.guarded(&turn.rules),
+        Err(why) => return Called::Refused(failed(input, "denied", why)),
+    };
     if let (Some(ledger), Some((path, shown, now))) = (&turn.files, changing(&plan))
         && let Err(why) = crate::stale::check(ledger.as_ref(), path, shown, now.as_bytes())
     {
         return Called::Ran(failed(input, "stale", why), Vec::new());
     }
-    let permission = plan.permission();
-    let layers: Vec<(&str, &[Rule])> = turn
-        .rules
-        .iter()
-        .map(|(n, r)| (n.as_str(), r.as_slice()))
-        .collect();
-    let decisions: Vec<_> = permission
-        .resources
-        .iter()
-        .map(|r| (r, decide(&layers, &permission.action, r)))
-        .collect();
-    let worst = decisions.iter().max_by_key(|(_, d)| match d.effect {
-        Effect::Allow => 0,
-        Effect::Ask => 1,
-        Effect::Deny => 2,
-    });
-    if let Some((resource, decision)) = worst {
-        let why = decision.because.as_ref().map_or_else(
-            || "no rule covers it".to_owned(),
-            |(layer, rule)| {
-                format!(
-                    "the {layer} rule \"{} {}\" says {:?}",
-                    rule.action, rule.resource, rule.effect
-                )
-                .to_lowercase()
-            },
-        );
-        match decision.effect {
-            Effect::Allow => {}
-            Effect::Deny => {
-                let text = format!(
-                    "Refused: {} on {resource} isn't allowed ({why}).",
-                    permission.action
-                );
-                return Called::Refused(failed(input, "denied", text));
-            }
-            Effect::Ask => {
-                let ask = Ask {
-                    id: id::ascending_id("per"),
-                    message: message.to_owned(),
-                    call: call.to_owned(),
-                    action: permission.action.to_string(),
-                    resources: permission.resources.clone(),
-                    save: crate::rules::save_patterns(&permission.action, &permission.resources),
-                    metadata: permission.metadata.clone(),
-                    why: format!("Asks because {why}."),
-                };
-                let answer = tokio::select! {
-                    a = gate.ask(ask) => a,
-                    () = stop.cancelled() => return Called::Refused(failed(input, "aborted", "Stopped while waiting for permission.".to_owned())),
-                };
-                match answer {
-                    Answer::Once => {}
-                    Answer::Always => turn.rules.push((
-                        "session".to_owned(),
-                        always(&permission.action, &permission.resources),
-                    )),
-                    Answer::Reject(Some(said)) => {
-                        return Called::Refused(failed(
-                            input,
-                            "rejected",
-                            format!("The person declined this call and said: {said}"),
-                        ));
-                    }
-                    Answer::Reject(None) => {
-                        return Called::Halted(failed(
-                            input,
-                            "rejected",
-                            "The person declined this call.".to_owned(),
-                        ));
-                    }
-                }
-            }
+    // Reaching outside the project is decided first, then the call itself.
+    let outside = {
+        let skills: Vec<&std::path::Path> =
+            turn.skills.iter().filter_map(|s| s.path.parent()).collect();
+        plan.outside(&turn.cwd, &skills)
+    };
+    // (Searching one file's contents is reading it.)
+    let asked = outside
+        .into_iter()
+        .chain(plan.reads(&turn.cwd))
+        .chain([plan.permission()]);
+    for permission in asked {
+        if let Err(refused) = permit(turn, &permission, &input, message, call, gate, stop).await {
+            return refused;
         }
     }
     time.ran = Some(now());
@@ -1022,6 +975,95 @@ async fn call_tool(
         return ask_questions(input, questions, message, call, gate, stop).await;
     }
     ran(input, run_noted(turn, plan, message, call, stop).await)
+}
+
+/// Decides `permission` by the turn's rules, asking the person where they
+/// say to; the error is how the call ends when it may not run.
+async fn permit(
+    turn: &mut Turn,
+    permission: &tools::Permission,
+    input: &Map<String, Value>,
+    message: &str,
+    call: &str,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Result<(), Called> {
+    let layers: Vec<(&str, &[Rule])> = turn
+        .rules
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.as_slice()))
+        .collect();
+    let worst = permission
+        .resources
+        .iter()
+        .map(|r| (r, decide(&layers, &permission.action, r)))
+        .max_by_key(|(_, d)| match d.effect {
+            Effect::Allow => 0,
+            Effect::Ask => 1,
+            Effect::Deny => 2,
+        });
+    let Some((resource, decision)) = worst else {
+        return Ok(());
+    };
+    let why = decision.because.as_ref().map_or_else(
+        || "no rule covers it".to_owned(),
+        |(layer, rule)| {
+            format!(
+                "the {layer} rule \"{} {}\" says {:?}",
+                rule.action, rule.resource, rule.effect
+            )
+            .to_lowercase()
+        },
+    );
+    match decision.effect {
+        Effect::Allow => Ok(()),
+        Effect::Deny => {
+            let text = format!(
+                "Refused: {} on {resource} isn't allowed ({why}).",
+                permission.action
+            );
+            Err(Called::Refused(failed(input.clone(), "denied", text)))
+        }
+        Effect::Ask => {
+            let ask = Ask {
+                id: id::ascending_id("per"),
+                message: message.to_owned(),
+                call: call.to_owned(),
+                action: permission.action.to_string(),
+                resources: permission.resources.clone(),
+                save: crate::rules::save_patterns(&permission.action, &permission.resources),
+                metadata: permission.metadata.clone(),
+                why: format!("Asks because {why}."),
+            };
+            let answer = tokio::select! {
+                a = gate.ask(ask) => a,
+                () = stop.cancelled() => {
+                    let why = "Stopped while waiting for permission.".to_owned();
+                    return Err(Called::Refused(failed(input.clone(), "aborted", why)));
+                }
+            };
+            match answer {
+                Answer::Once => Ok(()),
+                Answer::Always => {
+                    turn.rules.push((
+                        "session".to_owned(),
+                        always(&permission.action, &permission.resources),
+                    ));
+                    Ok(())
+                }
+                Answer::Reject(Some(said)) => Err(Called::Refused(failed(
+                    input.clone(),
+                    "rejected",
+                    format!("The person declined this call and said: {said}"),
+                ))),
+                Answer::Reject(None) => Err(Called::Halted(failed(
+                    input.clone(),
+                    "rejected",
+                    "The person declined this call.".to_owned(),
+                ))),
+            }
+        }
+    }
 }
 
 /// Runs a checked call, noting what a read saw or a write left.

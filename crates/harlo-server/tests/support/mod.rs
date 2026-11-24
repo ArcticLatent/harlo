@@ -196,6 +196,40 @@ pub fn spawn_server(root: &Path, port: u16, password: &str, env: &[(String, Stri
         .expect("start harlo-server")
 }
 
+/// Allows the settings `folder`'s own config asks for, as a person would:
+/// the first run there asks, and is answered "always".
+pub async fn allow_project_settings(client: &Client, folder: &str) {
+    let mut events = client.events().await.expect("events");
+    let session = client.create_session(folder).await.expect("session");
+    client
+        .prompt(
+            &session.id,
+            &harlo_client::Prompt::new("say settled", harlo_client::Delivery::Queue),
+        )
+        .await
+        .expect("prompt");
+    let asked = until(&mut events, |kind| match kind {
+        EventKind::PermissionAsked(p) => Some(*p),
+        _ => None,
+    })
+    .await;
+    assert_eq!(asked.action, "project_config", "{asked:?}");
+    client
+        .reply_permission(
+            &session.id,
+            &asked.id,
+            harlo_client::PermissionReply::Always,
+            None,
+        )
+        .await
+        .expect("allowed");
+    until(&mut events, |kind| match kind {
+        EventKind::Done { .. } => Some(()),
+        _ => None,
+    })
+    .await;
+}
+
 /// The first event `pick` takes, within 20 seconds.
 pub async fn until<T>(events: &mut Events, mut pick: impl FnMut(EventKind) -> Option<T>) -> T {
     tokio::time::timeout(Duration::from_secs(20), async {

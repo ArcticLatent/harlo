@@ -152,18 +152,26 @@ pub async fn start() -> Result<Registration, String> {
     let errors = log
         .try_clone()
         .map_err(|e| format!("Couldn't open the log: {e}"))?;
-    let child = {
+    let mut child = {
         use std::os::unix::process::CommandExt as _;
         std::process::Command::new(program)
-            .args(["serve", "--port", "0", "--register"])
-            .env("HARLO_SERVER_PASSWORD", password()?)
-            .stdin(std::process::Stdio::null())
+            .args(["serve", "--port", "0", "--register", "--password-stdin"])
+            .stdin(std::process::Stdio::piped())
             .stdout(log)
             .stderr(errors)
             .process_group(0)
             .spawn()
             .map_err(|e| format!("Couldn't start the service: {e}"))?
     };
+    // The password goes down a pipe, not into the service's environment,
+    // where any program of this user could read it for as long as it runs.
+    let mut input = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Couldn't reach the service to start it.".to_owned())?;
+    std::io::Write::write_all(&mut input, format!("{}\n", password()?).as_bytes())
+        .map_err(|e| format!("Couldn't start the service: {e}"))?;
+    drop(input);
     let pid = child.id();
     // Dropping the handle leaves the process running, which is the aim.
     drop(child);

@@ -123,6 +123,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         memory: None,
         steering: None,
         compact_at: None,
+        sealed: Vec::new(),
         skills: Vec::new(),
         todo: false,
         files: None,
@@ -270,6 +271,151 @@ async fn without_a_careful_rule_edits_run_unasked_and_a_refusal_stops_the_turn()
     assert_eq!(ends, 1, "no second model step after a refusal");
 }
 
+#[tokio::test]
+async fn a_file_outside_the_project_asks_and_always_covers_its_folder() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&project).expect("project");
+    std::fs::create_dir_all(&elsewhere).expect("elsewhere");
+    let model = Model::start(dir.path()).await;
+    let target = elsewhere.join("note.txt");
+    let prompt = format!(
+        r#"tool write {{"path":"{}","content":"hello\n"}} ;; say Wrote it."#,
+        target.display()
+    );
+
+    let refuses = Person {
+        answer: Answer::Reject(Some("stay in the project".into())),
+        asked: Mutex::default(),
+    };
+    let outcome = run(
+        turn(&model, &project, &prompt, false),
+        &Events::default(),
+        &refuses,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    assert!(!target.exists(), "a refused write changes nothing");
+    let asked = refuses.asked.lock().expect("asks").clone();
+    let real = std::fs::canonicalize(&elsewhere).expect("real folder");
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert_eq!(asked[0].action, harlo_engine::OUTSIDE);
+    assert_eq!(
+        asked[0].resources,
+        [real.join("note.txt").display().to_string()]
+    );
+    assert_eq!(asked[0].save, [format!("{}/*", real.display())]);
+    assert!(
+        asked[0].metadata.contains_key("files"),
+        "the person sees what would be written"
+    );
+
+    let allows = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+    let outcome = run(
+        turn(&model, &project, &prompt, false),
+        &Events::default(),
+        &allows,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    assert_eq!(std::fs::read_to_string(&target).expect("read"), "hello\n");
+}
+
+/// What the first tool call of a turn returned to the model, as text.
+fn first_result(events: &Events) -> String {
+    match tool_results(events).into_iter().next() {
+        Some(ToolState::Completed { content, .. }) => content
+            .iter()
+            .filter_map(|block| block["text"].as_str())
+            .collect(),
+        other => format!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_search_shows_no_file_that_reading_would_ask_about() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    std::fs::write(project.join("notes.txt"), "TOKEN is in prod.env\n").expect("notes");
+    std::fs::write(project.join("prod.env"), "TOKEN=secret\n").expect("env");
+    let model = Model::start(dir.path()).await;
+    let search =
+        |path: &str| format!(r#"tool grep {{"pattern":"TOKEN","path":"{path}"}} ;; say Searched."#);
+
+    // Over the folder, the file is left out, and the result says one was.
+    let (events, person) = (
+        Events::default(),
+        Person {
+            answer: Answer::Once,
+            asked: Mutex::default(),
+        },
+    );
+    let prompt = search(".");
+    let outcome = run(
+        turn(&model, &project, &prompt, false),
+        &events,
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    assert!(person.asked.lock().expect("asks").is_empty());
+    let found = first_result(&events);
+    assert!(found.contains("notes.txt:"), "{found}");
+    assert!(!found.contains("secret"), "{found}");
+    assert!(found.contains("(1 not searched"), "{found}");
+
+    // By itself, it asks as reading it does; refused, nothing is shown.
+    let (events, refuses) = (
+        Events::default(),
+        Person {
+            answer: Answer::Reject(None),
+            asked: Mutex::default(),
+        },
+    );
+    let prompt = search("prod.env");
+    let outcome = run(
+        turn(&model, &project, &prompt, false),
+        &events,
+        &refuses,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(!matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
+    let asked = refuses.asked.lock().expect("asks").clone();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert_eq!(
+        (asked[0].action.as_str(), asked[0].resources.as_slice()),
+        ("read", ["prod.env".to_owned()].as_slice())
+    );
+    assert!(!first_result(&events).contains("secret"));
+
+    // Allowed, the search runs.
+    let (events, allows) = (
+        Events::default(),
+        Person {
+            answer: Answer::Once,
+            asked: Mutex::default(),
+        },
+    );
+    let outcome = run(
+        turn(&model, &project, &prompt, false),
+        &events,
+        &allows,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    assert!(first_result(&events).contains("TOKEN=secret"));
+}
+
 /// The tool results of the steps a turn ended.
 fn tool_results(events: &Events) -> Vec<ToolState> {
     events
@@ -332,6 +478,73 @@ async fn questions_wait_for_answers_and_a_dismissal_stops_the_turn() {
         &tool_results(&dismissed)[0],
         ToolState::Error { error, .. } if error.message == "The user dismissed this question"
     ));
+}
+
+/// The bodies of the requests the scripted model got, oldest first.
+fn requests(dir: &Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(dir.join("model.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .map(|request| request["body"].clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_step_refused_as_too_long_is_summarized_and_asked_again() {
+    let dir = tempfile::tempdir().expect("dir");
+    let model = Model::start(dir.path()).await;
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).expect("project");
+    let turn = turn(
+        &model,
+        &project,
+        "flaky 1 400 prompt is too long: 215000 tokens > 200000 maximum | say Fits now.",
+        false,
+    );
+    let events = Events::default();
+    let person = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+    let outcome = run(turn, &events, &person, &CancellationToken::new()).await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    let summaries: Vec<String> = events
+        .0
+        .lock()
+        .expect("events")
+        .iter()
+        .filter_map(|e| match e {
+            Event::CompactionEnded { compaction } => Some(compaction.status.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(summaries, ["completed"], "summarized once");
+
+    // The request for the summary is the refused step's, with one message
+    // more: the same tools, so the provider reads it from its cache.
+    let sent = requests(dir.path());
+    assert_eq!(
+        sent.len(),
+        3,
+        "the refused step, the summary, the step again"
+    );
+    let last_text = |body: &serde_json::Value| {
+        let messages = body["messages"].as_array().expect("messages");
+        messages.last().expect("a message")["content"].to_string()
+    };
+    assert!(last_text(&sent[1]).contains("Summarize the conversation"));
+    assert!(sent[0]["tools"].as_array().is_some_and(|t| !t.is_empty()));
+    assert_eq!(sent[1]["tools"], sent[0]["tools"]);
+    assert_eq!(
+        sent[1]["messages"][0], sent[0]["messages"][0],
+        "the same system prompt"
+    );
+    let again = sent[2]["messages"].to_string();
+    assert!(
+        again.contains("Summary of the conversation so far"),
+        "{again}"
+    );
 }
 
 #[tokio::test]

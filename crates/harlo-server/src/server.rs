@@ -24,6 +24,18 @@ use tokio_util::sync::CancellationToken;
 use crate::git;
 use crate::store::{Location, Session, SessionTime, Store, StoredEvent};
 
+/// What a session's turn runs with, once chosen from its folder's
+/// configuration.
+struct Chosen {
+    folder: crate::folder::Folder,
+    agent: harlo_engine::agents::Agent,
+    model: harlo_engine::ModelRef,
+    provider: harlo_engine::ProviderSpec,
+    spec: harlo_engine::ModelSpec,
+    rules: Vec<(String, Vec<Rule>)>,
+    history: Vec<Message>,
+}
+
 /// Whether `message` in an inbox calls for a run: a prompt, or a
 /// subagent's answer, but not a notice alone, such as a change of agent.
 fn wakes(message: &Message) -> bool {
@@ -45,7 +57,6 @@ fn wakes(message: &Message) -> bool {
 const WRITE_SYSTEM: &str = "Write what the request asks for, and only that: no preamble, no \
     explanation, no quotes around it.";
 
-const COMPACT_PERCENT: u64 = 85;
 /// Events a slow client may fall behind by before it must reconnect.
 const BACKLOG: usize = 4096;
 
@@ -147,6 +158,11 @@ pub struct Server {
     pub(crate) snapshots: PathBuf,
     /// The shadow repositories in use, by folder.
     shadows: Mutex<HashMap<String, harlo_engine::snapshot::Shadow>>,
+    /// The server's own files, which no agent's tool reads or changes.
+    pub(crate) sealed: Vec<PathBuf>,
+    /// What the person answered about projects' own settings since the
+    /// server started, by the key they're saved under.
+    pub(crate) trust: Mutex<HashMap<String, bool>>,
     events: broadcast::Sender<Outgoing>,
     emitting: Mutex<()>,
     pub(crate) live: Mutex<Live>,
@@ -218,6 +234,7 @@ impl Server {
         password: Option<String>,
         phone: Arc<crate::PhoneHost>,
         snapshots: PathBuf,
+        sealed: Vec<PathBuf>,
     ) -> Self {
         let global = Global {
             home: config_home.to_path_buf(),
@@ -240,6 +257,8 @@ impl Server {
             phone,
             snapshots,
             shadows: Mutex::default(),
+            trust: Mutex::default(),
+            sealed,
             events,
             emitting: Mutex::new(()),
             live: Mutex::default(),
@@ -895,48 +914,15 @@ impl Server {
         pending: harlo_engine::compaction::Compaction,
         stop: &CancellationToken,
     ) -> (&'static str, Option<String>) {
-        let hooks = Hooks {
-            server: Arc::clone(self),
-            session: session.id.clone(),
-            directory: session.location.directory.clone(),
-            streaming: Mutex::default(),
+        let hooks = Hooks::new(self, &session.id, &session.location.directory);
+        let chosen = match self.choose(session, stop).await {
+            Ok(chosen) => chosen,
+            Err(failed) => return failed,
         };
-        let folder = self.folder(&session.location.directory);
-        let agent = folder.agent(session.agent.as_deref());
-        let Some(model) = agent
-            .model
-            .clone()
-            .or_else(|| session.model.clone())
-            .or_else(|| folder.config.default_model())
-        else {
-            return (
-                "failed",
-                Some("No model is set up to write the summary.".to_owned()),
-            );
-        };
-        let Some((provider, _)) = folder.config.resolve(&model) else {
-            return (
-                "failed",
-                Some(format!(
-                    "The model {}/{} isn't in the configuration.",
-                    model.provider, model.model
-                )),
-            );
-        };
-        let history = match self.store.messages(&session.id) {
-            Ok(h) => h,
-            Err(e) => return ("failed", Some(format!("Couldn't read the session: {e}"))),
-        };
-        let mut system = self
-            .system_prompt(&session.location.directory, &folder)
-            .await;
-        if let Some(own) = &agent.system {
-            system = format!("{own}\n\n{system}");
-        }
-        let done = harlo_engine::compaction::compact(
-            pending, provider, &model, &system, &history, &hooks, stop,
-        )
-        .await;
+        // The turn as a step would send it: the summary request then reads
+        // the conversation from the provider's cache.
+        let turn = self.turn_for(session, chosen).await;
+        let done = harlo_engine::compaction::compact(pending, &turn, &hooks, stop).await;
         match (done.status.as_str(), done.error) {
             ("completed", _) => ("succeeded", None),
             _ if stop.is_cancelled() => ("interrupted", None),
@@ -944,14 +930,28 @@ impl Server {
         }
     }
 
-    /// One turn of the engine over the session's history; returns how it
-    /// ended, as a stored word, and why it failed.
-    async fn run_once(
+    /// What session `session`'s next turn runs with: its folder's
+    /// configuration (after asking about the project's own settings, if
+    /// they wait), its agent, model, rules and history.
+    ///
+    /// # Errors
+    ///
+    /// How the run ends, as [`Self::run_once`] returns it, when no model is
+    /// set up or the session can't be read.
+    async fn choose(
         self: &Arc<Self>,
         session: &Session,
         stop: &CancellationToken,
-    ) -> (&'static str, Option<String>) {
-        let folder = self.folder(&session.location.directory);
+    ) -> Result<Chosen, (&'static str, Option<String>)> {
+        let mut folder = self.folder(&session.location.directory);
+        // What the project's own config asks for waits for the person.
+        if let Some(held) = folder.withheld.clone()
+            && self
+                .ask_trust(&session.id, &session.location.directory, &held, stop)
+                .await
+        {
+            folder = self.folder(&session.location.directory);
+        }
         let agent = folder.agent(session.agent.as_deref());
         let Some(model) = agent
             .model
@@ -959,46 +959,64 @@ impl Server {
             .or_else(|| session.model.clone())
             .or_else(|| folder.config.default_model())
         else {
-            return (
+            return Err((
                 "failed",
                 Some("No model is set up. Add a provider in Settings → Providers.".to_owned()),
-            );
+            ));
         };
         let Some((provider, spec)) = folder.config.resolve(&model) else {
-            return (
+            return Err((
                 "failed",
                 Some(format!(
                     "The model {}/{} isn't in the configuration.",
                     model.provider, model.model
                 )),
-            );
+            ));
         };
-        let history = match self.store.messages(&session.id) {
-            Ok(h) => h,
-            Err(e) => return ("failed", Some(format!("Couldn't read the session: {e}"))),
-        };
-        let directory = session.location.directory.clone();
+        let (provider, spec) = (provider.clone(), spec.clone());
+        let history = self
+            .store
+            .messages(&session.id)
+            .map_err(|e| ("failed", Some(format!("Couldn't read the session: {e}"))))?;
         let rules = vec![
-            ("agent".to_owned(), agent.rules.clone()),
+            (harlo_engine::AGENT.to_owned(), agent.rules.clone()),
             ("config".to_owned(), folder.config.permissions.clone()),
             ("saved".to_owned(), self.saved_rules(&session.project_id)),
             ("session".to_owned(), session.permissions.clone()),
         ];
-        if provider.id == harlo_engine::claude::PROVIDER {
-            return self
-                .run_claude(session, model, &agent.id, rules, &history, stop)
-                .await;
-        }
+        Ok(Chosen {
+            folder,
+            agent,
+            model,
+            provider,
+            spec,
+            rules,
+            history,
+        })
+    }
+
+    /// The engine's turn for session `session`, from what was `chosen`.
+    async fn turn_for(self: &Arc<Self>, session: &Session, chosen: Chosen) -> Turn {
+        let Chosen {
+            folder,
+            agent,
+            model,
+            provider,
+            spec,
+            rules,
+            history,
+        } = chosen;
+        let directory = session.location.directory.clone();
         let links = self.mcp_ready(&directory).await;
         let mut system = self.system_prompt(&directory, &folder).await;
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
         }
-        let turn = Turn {
+        Turn {
             cwd: PathBuf::from(&directory),
             agent: agent.id.clone(),
             model,
-            provider: provider.clone(),
+            provider,
             system,
             rules,
             history,
@@ -1023,17 +1041,50 @@ impl Server {
                 session: Some(session.id.clone()),
                 links,
             })),
-            // Near the model's context limit, the next step starts from a summary.
-            compact_at: spec.context.map(|c| c / 100 * COMPACT_PERCENT),
+            // With room left for the reply and a step's results, and never
+            // past the size the configuration names, the next step starts
+            // from a summary.
+            compact_at: Some(harlo_engine::compaction::threshold(
+                spec.context,
+                spec.output,
+                folder.config.compact_at,
+            )),
             skills: self.skills_for(&session.location.directory).await,
             todo: folder.config.todo,
+            sealed: self.sealed.clone(),
             steering: Some(Arc::new(crate::agents::SessionSteering {
                 server: Arc::clone(self),
                 session: session.id.clone(),
                 directory: directory.clone(),
             })),
+        }
+    }
+
+    /// One turn of the engine over the session's history; returns how it
+    /// ended, as a stored word, and why it failed.
+    async fn run_once(
+        self: &Arc<Self>,
+        session: &Session,
+        stop: &CancellationToken,
+    ) -> (&'static str, Option<String>) {
+        let chosen = match self.choose(session, stop).await {
+            Ok(chosen) => chosen,
+            Err(failed) => return failed,
         };
-        let hooks = Hooks::new(self, &session.id, &directory);
+        if chosen.provider.id == harlo_engine::claude::PROVIDER {
+            let Chosen {
+                agent,
+                model,
+                rules,
+                history,
+                ..
+            } = chosen;
+            return self
+                .run_claude(session, model, &agent.id, rules, &history, stop)
+                .await;
+        }
+        let turn = self.turn_for(session, chosen).await;
+        let hooks = Hooks::new(self, &session.id, &session.location.directory);
         match harlo_engine::run(turn, &hooks, &hooks, stop).await {
             Outcome::Succeeded => ("succeeded", None),
             Outcome::Interrupted => ("interrupted", None),
@@ -1522,12 +1573,15 @@ impl Gate for Hooks {
     fn ask(&self, ask: Ask) -> impl Future<Output = Answer> + Send {
         let (tx, rx) = oneshot::channel();
         let metadata = ask.metadata;
-        let data = json!({
+        let mut data = json!({
             "id": ask.id, "sessionID": self.session, "action": ask.action, "resources": ask.resources,
             "save": ask.save,
             "message": ask.why, "metadata": metadata,
-            "source": { "type": "tool", "messageID": ask.message, "id": ask.call },
         });
+        // (An ask about the project's own settings comes from no tool call.)
+        if !ask.call.is_empty() {
+            data["source"] = json!({ "type": "tool", "messageID": ask.message, "id": ask.call });
+        }
         let registered = {
             let mut live = lock(&self.server.live);
             live.runs.get_mut(&self.session).map(|run| {

@@ -322,6 +322,29 @@ impl Drop for Sandbox {
     }
 }
 
+/// Allows the settings `folder`'s own config asks for, as a person would:
+/// the first run there asks, and is answered "always".
+pub async fn allow_project_settings(client: &Client, folder: &str) {
+    let session = client.create_session(folder).await.expect("session");
+    let prompt = harlo_client::Prompt::new("say settled", harlo_client::Delivery::Queue);
+    client.prompt(&session.id, &prompt).await.expect("prompt");
+    let asked = wait_for("the project's settings to ask", || async {
+        let waiting = client.permissions(&session.id).await.ok()?;
+        waiting.into_iter().find(|p| p.action == "project_config")
+    })
+    .await;
+    client
+        .reply_permission(
+            &session.id,
+            &asked.id,
+            harlo_client::PermissionReply::Always,
+            None,
+        )
+        .await
+        .expect("allowed");
+    wait_idle(client, &session.id).await;
+}
+
 /// Polls `check` until it returns `Some`, or panics after [`WAIT`].
 pub async fn wait_for<T, F, Fut>(what: &str, mut check: F) -> T
 where

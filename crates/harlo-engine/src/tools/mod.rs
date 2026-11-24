@@ -14,11 +14,13 @@ mod search;
 pub mod shell;
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 use similar::TextDiff;
 use tokio_util::sync::CancellationToken;
+
+use crate::rules::{Effect, Rule};
 
 /// The tools' definitions, as a model is told about them.
 #[must_use]
@@ -176,6 +178,8 @@ pub enum Plan {
         pattern: String,
         /// The folder searched.
         base: PathBuf,
+        /// What the search leaves out, set by [`Plan::sealing`].
+        skip: Vec<PathBuf>,
     },
     /// Searches files' contents.
     Grep {
@@ -185,6 +189,11 @@ pub enum Plan {
         base: PathBuf,
         /// Only files whose name matches this glob.
         include: Option<String>,
+        /// What the search leaves out, set by [`Plan::sealing`].
+        skip: Vec<PathBuf>,
+        /// The rules that say which files it may read, set by
+        /// [`Plan::guarded`]; none reads them all.
+        rules: Option<Vec<(String, Vec<Rule>)>>,
     },
     /// Keeps a note for later sessions.
     Remember {
@@ -225,6 +234,33 @@ pub enum Plan {
         /// Whether it runs in the background.
         background: bool,
     },
+}
+
+/// A `glob` or `grep` call's plan, for `pattern`.
+fn search_call(name: &str, pattern: String, input: &Map<String, Value>, cwd: &Path) -> Plan {
+    let base = input
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+        .map_or_else(|| cwd.to_path_buf(), |p| place(p, cwd).0);
+    if name == "glob" {
+        return Plan::Glob {
+            pattern,
+            base,
+            skip: Vec::new(),
+        };
+    }
+    Plan::Grep {
+        pattern,
+        base,
+        skip: Vec::new(),
+        rules: None,
+        include: input
+            .get("include")
+            .and_then(Value::as_str)
+            .filter(|i| !i.is_empty())
+            .map(str::to_owned),
+    }
 }
 
 /// A `shell` call's plan.
@@ -359,27 +395,7 @@ impl Plan {
                     count,
                 })
             }
-            "glob" | "grep" => {
-                let pattern = text("pattern")?;
-                let base = input
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .filter(|p| !p.is_empty())
-                    .map_or_else(|| cwd.to_path_buf(), |p| place(p, cwd).0);
-                Ok(if name == "glob" {
-                    Self::Glob { pattern, base }
-                } else {
-                    Self::Grep {
-                        pattern,
-                        base,
-                        include: input
-                            .get("include")
-                            .and_then(Value::as_str)
-                            .filter(|i| !i.is_empty())
-                            .map(str::to_owned),
-                    }
-                })
-            }
+            "glob" | "grep" => Ok(search_call(name, text("pattern")?, input, cwd)),
             "remember" => remember(input),
             "question" => Ok(Self::Question {
                 questions: crate::question::parse(input)?,
@@ -446,7 +462,10 @@ impl Plan {
                 metadata: Map::new(),
             },
             Self::Remember { draft } => Permission {
-                action: "remember".into(),
+                action: match draft.scope {
+                    crate::memory::Scope::Project => "remember".into(),
+                    crate::memory::Scope::User => crate::rules::REMEMBER_USER.into(),
+                },
                 resources: vec![draft.text.clone()],
                 metadata: Map::new(),
             },
@@ -501,6 +520,118 @@ impl Plan {
                 metadata: Map::new(),
             },
         }
+    }
+
+    /// The call, kept away from the files in `sealed`: Harlo's own, such as
+    /// where its server keeps its password, given with their links followed.
+    ///
+    /// No rule opens them. A search elsewhere leaves them out. A command is
+    /// refused when it names one, which stops the plain case and no more:
+    /// a command can spell a path in ways this doesn't see.
+    ///
+    /// # Errors
+    ///
+    /// Fails, with a message for the model, when the call reads, changes
+    /// or names one of them.
+    pub fn sealing(mut self, sealed: &[PathBuf]) -> Result<Self, String> {
+        if sealed.is_empty() {
+            return Ok(self);
+        }
+        let under = |path: &Path| {
+            let real = real_path(path);
+            sealed.iter().any(|s| real.starts_with(s))
+        };
+        let refused = match &mut self {
+            Self::Read { path, .. } | Self::Write { path, .. } | Self::Edit { path, .. } => {
+                under(path)
+            }
+            Self::Glob { base, skip, .. } | Self::Grep { base, skip, .. } => {
+                *skip = sealed.to_vec();
+                under(base)
+            }
+            Self::Shell { command, .. } => sealed.iter().any(|s| names(command, s)),
+            _ => false,
+        };
+        if refused {
+            Err(
+                "Refused: that is one of Harlo's own files, which tools don't read or change."
+                    .to_owned(),
+            )
+        } else {
+            Ok(self)
+        }
+    }
+
+    /// What the call needs permission for besides its own action, because
+    /// it reaches outside project folder `cwd`; none when it stays inside.
+    ///
+    /// Symbolic links and `..` are followed first, so a link in the project
+    /// to a file elsewhere counts as outside. A call that only reads may
+    /// read in the `readable` folders without it.
+    #[must_use]
+    pub fn outside(&self, cwd: &Path, readable: &[&Path]) -> Option<Permission> {
+        let (path, reads) = match self {
+            Self::Read { path, .. } => (path, true),
+            Self::Glob { base, .. } | Self::Grep { base, .. } => (base, true),
+            Self::Write { path, .. } | Self::Edit { path, .. } => (path, false),
+            _ => return None,
+        };
+        let real = real_path(path);
+        if real.starts_with(real_path(cwd)) {
+            return None;
+        }
+        if reads
+            && readable
+                .iter()
+                .any(|open| real.starts_with(real_path(open)))
+        {
+            return None;
+        }
+        let searched = matches!(self, Self::Glob { .. } | Self::Grep { .. }) && real.is_dir();
+        let resource = if searched {
+            format!("{}/*", real.display())
+        } else {
+            real.display().to_string()
+        };
+        Some(Permission {
+            action: crate::rules::OUTSIDE.into(),
+            resources: vec![resource],
+            // The preview of what would change, for the person asked.
+            metadata: self.permission().metadata,
+        })
+    }
+
+    /// A content search that reads only the files `rules` let be read
+    /// without asking; any other call, unchanged.
+    ///
+    /// A search can't stop to ask about each file it passes, so the files
+    /// that reading would ask about, or is refused for, are left out of it.
+    #[must_use]
+    pub fn guarded(mut self, rules: &[(String, Vec<Rule>)]) -> Self {
+        if let Self::Grep { rules: guard, .. } = &mut self {
+            *guard = Some(rules.to_vec());
+        }
+        self
+    }
+
+    /// The reading a content search of one file amounts to, in project
+    /// folder `cwd`: it is decided as reading that file is.
+    #[must_use]
+    pub fn reads(&self, cwd: &Path) -> Option<Permission> {
+        let Self::Grep { base, .. } = self else {
+            return None;
+        };
+        if !base.is_file() {
+            return None;
+        }
+        let shown = base
+            .strip_prefix(cwd)
+            .map_or_else(|_| base.display().to_string(), |p| p.display().to_string());
+        Some(Permission {
+            action: "read".into(),
+            resources: vec![shown],
+            metadata: Map::new(),
+        })
     }
 
     /// Runs the call in project folder `cwd`.
@@ -579,9 +710,7 @@ impl Plan {
             Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
             Self::Execute { .. } => Err("Code Mode isn't available here.".to_owned()),
             Self::External { name, .. } => Err(format!("There is no tool called `{name}` here.")),
-            Self::WebFetch { url } => {
-                crate::web::fetch(&url, &std::env::temp_dir().join("harlo-web")).await
-            }
+            Self::WebFetch { url } => crate::web::fetch(&url, &crate::web::saved_pages()).await,
             Self::WebSearch { .. } => Err("No web search service is set up.".to_owned()),
             Self::Skill { id } => Err(format!("There's no skill {id}.")),
             Self::Subagent { .. } => Err("Subagents can't start here.".to_owned()),
@@ -608,12 +737,34 @@ impl Plan {
     async fn search(self, cwd: &Path) -> Result<Output, String> {
         let cwd = cwd.to_path_buf();
         let text = tokio::task::spawn_blocking(move || match self {
-            Self::Glob { pattern, base } => search::glob(&pattern, &base, &cwd),
+            Self::Glob {
+                pattern,
+                base,
+                skip,
+            } => search::glob(&pattern, &base, &cwd, &skip),
             Self::Grep {
                 pattern,
                 base,
                 include,
-            } => search::grep(&pattern, &base, include.as_deref(), &cwd),
+                skip,
+                rules,
+            } => {
+                let layers: Option<Vec<(&str, &[Rule])>> = rules.as_ref().map(|rules| {
+                    rules
+                        .iter()
+                        .map(|(name, rules)| (name.as_str(), rules.as_slice()))
+                        .collect()
+                });
+                let allowed = |shown: &str| {
+                    layers.as_ref().is_none_or(|layers| {
+                        crate::rules::decide(layers, "read", shown).effect == Effect::Allow
+                    })
+                };
+                let guard: Option<&dyn Fn(&str) -> bool> = layers
+                    .is_some()
+                    .then_some(&allowed as &dyn Fn(&str) -> bool);
+                search::grep(&pattern, &base, include.as_deref(), &cwd, &skip, guard)
+            }
             _ => Err("not a search".to_owned()),
         })
         .await
@@ -654,6 +805,52 @@ fn remember(input: &Map<String, Value>) -> Result<Plan, String> {
                 .map(str::to_owned),
         },
     })
+}
+
+/// Whether `command` names `path`, in full or from the home folder (`~/…`).
+fn names(command: &str, path: &Path) -> bool {
+    let full = path.display().to_string();
+    if command.contains(&full) {
+        return true;
+    }
+    std::env::var_os("HOME")
+        .and_then(|home| path.strip_prefix(home).ok().map(Path::to_path_buf))
+        .is_some_and(|rest| {
+            let rest = rest.display().to_string();
+            ["~/", "$HOME/", "${HOME}/"]
+                .iter()
+                .any(|home| command.contains(&format!("{home}{rest}")))
+        })
+}
+
+/// `path` with its symbolic links and `..` followed, as far as it exists.
+///
+/// The part that doesn't exist yet is kept as written: a file about to be
+/// created is placed by the folders that do exist.
+#[must_use]
+pub fn real_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    let mut exists = true;
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+                // What follows may exist again, and be a link.
+                exists = true;
+            }
+            other => {
+                out.push(other);
+                if exists {
+                    match out.canonicalize() {
+                        Ok(real) => out = real,
+                        Err(_) => exists = false,
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The file `named` and how to show it: relative to `cwd` when inside it.
@@ -746,6 +943,123 @@ mod tests {
             Value::Object(map) => map,
             _ => Map::new(),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_and_parent_folders_dont_hide_a_file_outside_the_project() {
+        let dir = tempfile::tempdir().expect("dir");
+        let project = dir.path().join("project");
+        let secrets = dir.path().join("secrets");
+        std::fs::create_dir_all(project.join("src")).expect("project");
+        std::fs::create_dir_all(&secrets).expect("secrets");
+        std::fs::write(secrets.join("key"), "k\n").expect("key");
+        std::fs::write(project.join("src/a.rs"), "a\n").expect("a.rs");
+        std::os::unix::fs::symlink(&secrets, project.join("link")).expect("link");
+        let real = secrets.canonicalize().expect("real");
+        let outside = |name: &str, args: Value| {
+            Plan::new(name, &input(args), &project)
+                .expect("plan")
+                .outside(&project, &[])
+                .map(|p| (p.action.to_string(), p.resources))
+        };
+        let asks = |resource: String| Some((crate::rules::OUTSIDE.to_owned(), vec![resource]));
+
+        assert_eq!(outside("read", json!({ "path": "src/a.rs" })), None);
+        assert_eq!(outside("read", json!({ "path": "src/../src/a.rs" })), None);
+        assert_eq!(
+            outside("write", json!({ "path": "new/b.rs", "content": "b" })),
+            None
+        );
+        let key = real.join("key").display().to_string();
+        assert_eq!(
+            outside("read", json!({ "path": "link/key" })),
+            asks(key.clone())
+        );
+        assert_eq!(
+            outside("read", json!({ "path": "../secrets/key" })),
+            asks(key.clone())
+        );
+        assert_eq!(
+            outside("read", json!({ "path": secrets.join("key") })),
+            asks(key)
+        );
+        // Through folders that don't exist yet, then a link.
+        assert_eq!(
+            outside(
+                "write",
+                json!({ "path": "new/../link/made", "content": "x" })
+            ),
+            asks(real.join("made").display().to_string())
+        );
+        assert_eq!(
+            outside("grep", json!({ "pattern": "k", "path": "link" })),
+            asks(format!("{}/*", real.display()))
+        );
+
+        // A call that only reads may read where it's told it may.
+        let reading =
+            Plan::new("read", &input(json!({ "path": "link/key" })), &project).expect("plan");
+        assert_eq!(reading.outside(&project, &[secrets.as_path()]), None);
+        let writing = Plan::new(
+            "write",
+            &input(json!({ "path": "link/key", "content": "x" })),
+            &project,
+        )
+        .expect("plan");
+        assert!(writing.outside(&project, &[secrets.as_path()]).is_some());
+    }
+
+    #[test]
+    fn no_call_reads_changes_or_names_a_sealed_file() {
+        let dir = tempfile::tempdir().expect("dir");
+        let project = dir.path().join("project");
+        let own = dir.path().join("own");
+        std::fs::create_dir_all(&project).expect("project");
+        std::fs::create_dir_all(&own).expect("own");
+        std::fs::write(own.join("service.json"), "password\n").expect("secret");
+        std::fs::write(own.join("server.log"), "started\n").expect("log");
+        let sealed = [real_path(&own.join("service.json"))];
+        let plan = |name: &str, args: Value| {
+            Plan::new(name, &input(args), &project)
+                .expect("plan")
+                .sealing(&sealed)
+        };
+        let secret = own.join("service.json");
+
+        plan("read", json!({ "path": secret })).expect_err("sealed");
+        plan("write", json!({ "path": secret, "content": "x" })).expect_err("sealed");
+        plan("read", json!({ "path": "../own/service.json" })).expect_err("sealed");
+        plan("read", json!({ "path": own.join("server.log") })).expect("not sealed");
+        let cat = format!("cat {}", secret.display());
+        plan("shell", json!({ "command": cat })).expect_err("names it");
+        plan("shell", json!({ "command": "ls" })).expect("names nothing");
+
+        // A search around it leaves it out.
+        let found = |name: &str, pattern: &str| {
+            let plan = plan(name, json!({ "pattern": pattern, "path": own })).expect("allowed");
+            match &plan {
+                Plan::Glob {
+                    pattern,
+                    base,
+                    skip,
+                } => search::glob(pattern, base, &project, skip),
+                Plan::Grep {
+                    pattern,
+                    base,
+                    skip,
+                    ..
+                } => search::grep(pattern, base, None, &project, skip, None),
+                other => panic!("{other:?} isn't a search"),
+            }
+            .expect("search")
+        };
+        let files = found("glob", "*");
+        assert!(
+            files.contains("server.log") && !files.contains("service.json"),
+            "{files}"
+        );
+        assert_eq!(found("grep", "password"), "No matches.");
     }
 
     #[tokio::test]

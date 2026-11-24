@@ -23,6 +23,11 @@ frizbee = { version = "0.13.0", default-features = false }
 regex = { version = "1.13.2", default-features = false }
 ignore = { version = "0.4.35", default-features = false }
 globset = { version = "0.4.22", default-features = false }
+# Reads a shell command into the commands it runs, so permission rules are
+# checked against each of them (MIT). A hand-written splitter can't follow
+# quoting, substitutions and redirections; this is the grammar editors use.
+tree-sitter = "0.27.2"
+tree-sitter-bash = "0.25.1"
 # Our crates.
 harlo-client = { path = "crates/harlo-client" }
 harlo-core = { path = "crates/harlo-core" }
