@@ -10,6 +10,7 @@
 
 mod agents;
 mod api;
+mod approvals;
 mod commands;
 mod folder;
 mod forms;

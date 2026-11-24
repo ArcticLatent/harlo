@@ -163,6 +163,7 @@ impl Store {
              CREATE VIRTUAL TABLE IF NOT EXISTS message_text
                  USING fts5(text, session UNINDEXED, message UNINDEXED);",
         )?;
+        Self::make_approvals(&conn)?;
         let store = Self {
             conn: Mutex::new(conn),
         };
@@ -339,7 +340,7 @@ impl Store {
         Ok(())
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 

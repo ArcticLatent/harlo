@@ -811,6 +811,18 @@ enum Called {
     Halted(ToolState),
 }
 
+/// The rules "always" adds for `action` on `resources`.
+fn always(action: &str, resources: &[String]) -> Vec<Rule> {
+    crate::rules::save_patterns(action, resources)
+        .into_iter()
+        .map(|resource| Rule {
+            action: action.to_owned(),
+            resource,
+            effect: Effect::Allow,
+        })
+        .collect()
+}
+
 /// Checks, asks for and runs one call.
 #[expect(
     clippy::too_many_arguments,
@@ -886,7 +898,7 @@ async fn call_tool(
                     call: call.to_owned(),
                     action: permission.action.to_owned(),
                     resources: permission.resources.clone(),
-                    save: vec!["*".to_owned()],
+                    save: crate::rules::save_patterns(permission.action, &permission.resources),
                     metadata: permission.metadata.clone(),
                     why: format!("Asks because {why}."),
                 };
@@ -898,7 +910,7 @@ async fn call_tool(
                     Answer::Once => {}
                     Answer::Always => turn.rules.push((
                         "session".to_owned(),
-                        vec![Rule::any(permission.action, Effect::Allow)],
+                        always(permission.action, &permission.resources),
                     )),
                     Answer::Reject(Some(said)) => {
                         return Called::Refused(failed(

@@ -709,6 +709,9 @@ impl Server {
             directory.as_deref(),
             Some(id),
         );
+        if answer == Answer::Always {
+            self.save_approvals(id, &pending.data)?;
+        }
         // (The run may have been stopped meanwhile.)
         let _ = pending.answer.send(answer);
         Ok(())
@@ -921,6 +924,7 @@ impl Server {
             rules: vec![
                 ("agent".to_owned(), agent.rules.clone()),
                 ("config".to_owned(), folder.config.permissions.clone()),
+                ("saved".to_owned(), self.saved_rules(&session.project_id)),
                 ("session".to_owned(), session.permissions.clone()),
             ],
             history,

@@ -86,6 +86,11 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/model/default", get(default_model))
         .route("/api/config", get(config))
         .route("/api/mcp/resource", get(mcp_resources))
+        .route("/api/permission/saved", get(saved_approvals))
+        .route(
+            "/api/permission/saved/{id}",
+            patch(change_approval).delete(remove_approval),
+        )
         .route("/api/experimental/job", get(jobs))
         .route("/api/experimental/job/{id}/cancel", post(cancel_job))
         .route("/api/session/{id}/shell", post(user_shell))
@@ -847,6 +852,35 @@ async fn located_empty(Query(q): Params) -> Answer {
 async fn jobs(State(server): Shared, Query(q): Params) -> Answer {
     let session = q.get("sessionID").map(String::as_str);
     ok(json!({ "data": server.jobs_of(session) }))
+}
+
+async fn saved_approvals(State(server): Shared, Query(q): Params) -> Answer {
+    let project = q.get("projectID").map(String::as_str);
+    ok(json!({ "data": server.store.approvals(project)? }))
+}
+
+/// A change to a saved approval.
+#[derive(Deserialize)]
+struct ApprovalChange {
+    action: Option<String>,
+    resource: Option<String>,
+}
+
+async fn change_approval(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<ApprovalChange>,
+) -> Answer {
+    let changed = server
+        .store
+        .change_approval(&id, body.action.as_deref(), body.resource.as_deref())?
+        .ok_or_else(|| Refusal::NotFound(format!("There's no saved approval {id}.")))?;
+    ok(json!({ "data": changed }))
+}
+
+async fn remove_approval(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.store.delete_approval(&id)?;
+    done()
 }
 
 async fn cancel_job(State(server): Shared, Path(id): Path<String>) -> Answer {

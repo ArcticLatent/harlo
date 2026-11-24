@@ -23,6 +23,45 @@ pub enum Effect {
     Deny,
 }
 
+/// Programs whose second word names what they do (`git status`), so an
+/// approval of one of their commands covers that subcommand only.
+const SUBCOMMANDS: &[&str] = &[
+    "bun", "cargo", "docker", "gh", "git", "go", "kubectl", "npm", "pip", "pnpm", "uv", "yarn",
+];
+
+/// The patterns "always" would allow for `action` on `resources`: for a
+/// shell command, its program (and subcommand) with any arguments, such
+/// as `git status *`; for anything else, every resource.
+#[must_use]
+pub fn save_patterns(action: &str, resources: &[String]) -> Vec<String> {
+    if action != "shell" {
+        return vec!["*".to_owned()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    for command in resources {
+        let mut words = command.split_whitespace();
+        let Some(program) = words.next() else {
+            continue;
+        };
+        let mut lead = program.to_owned();
+        if SUBCOMMANDS.contains(&program)
+            && let Some(sub) = words.next().filter(|w| {
+                w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !w.starts_with('-')
+            })
+        {
+            lead = format!("{lead} {sub}");
+        }
+        let pattern = format!("{lead} *");
+        if !out.contains(&pattern) {
+            out.push(pattern);
+        }
+    }
+    if out.is_empty() {
+        out.push("*".to_owned());
+    }
+    out
+}
+
 /// One permission rule, in OpenCode 2's shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
@@ -46,7 +85,13 @@ impl Rule {
     }
 
     fn matches(&self, action: &str, resource: &str) -> bool {
-        glob(&self.action, action) && glob(&self.resource, resource)
+        // A pattern ending in " *" also covers the command with no
+        // arguments: `git status *` covers `git status`.
+        let bare = self
+            .resource
+            .strip_suffix(" *")
+            .is_some_and(|lead| glob(lead, resource));
+        glob(&self.action, action) && (bare || glob(&self.resource, resource))
     }
 }
 
@@ -132,6 +177,28 @@ pub(crate) fn glob(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_trailing_star_covers_the_bare_command() {
+        let rule = Rule {
+            action: "shell".to_owned(),
+            resource: "git status *".to_owned(),
+            effect: Effect::Allow,
+        };
+        assert!(rule.matches("shell", "git status"));
+        assert!(rule.matches("shell", "git status --short"));
+        assert!(!rule.matches("shell", "git statuses"));
+    }
+
+    #[test]
+    fn always_saves_a_commands_program_and_subcommand() {
+        let saved = save_patterns(
+            "shell",
+            &["git status --short".to_owned(), "ls -la".to_owned()],
+        );
+        assert_eq!(saved, ["git status *", "ls *"]);
+        assert_eq!(save_patterns("edit", &["a.txt".to_owned()]), ["*"]);
+    }
 
     #[test]
     fn patterns_match_like_opencodes() {
