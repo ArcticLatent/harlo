@@ -268,6 +268,20 @@ impl Server {
                 })
             })
             .collect();
+        // Providers the config adds, outside the catalog, sign in with a key.
+        let catalog = self.catalog();
+        let (global, _) = self.global();
+        for p in global
+            .providers
+            .iter()
+            .filter(|p| catalog.get(&p.id).is_none())
+        {
+            list.push(json!({
+                "id": p.id, "name": p.name,
+                "methods": [{ "type": "key", "label": "Manually enter API Key" }],
+                "connections": connections(&p.id, &[]),
+            }));
+        }
         list.push(json!({
             "id": CLAUDE_AGENT, "name": "Claude Agent",
             "methods": [{
@@ -288,9 +302,18 @@ impl Server {
     /// the store fails.
     pub(crate) fn connect_key(&self, id: &str, sign_in: KeySignIn) -> Result<(), Refusal> {
         let catalog = self.catalog();
-        let entry = catalog
-            .get(id)
-            .ok_or_else(|| Refusal::NotFound(format!("Integration not found: {id}")))?;
+        let Some(entry) = catalog.get(id) else {
+            // A provider the config adds keeps its key as typed.
+            let (global, _) = self.global();
+            let provider = global
+                .provider(id)
+                .ok_or_else(|| Refusal::NotFound(format!("Integration not found: {id}")))?;
+            let value = json!({ "type": "key", "key": sign_in.key });
+            let label = sign_in.label.unwrap_or_else(|| provider.name.clone());
+            self.store.put_credential(id, &label, &value)?;
+            self.integrations_changed();
+            return Ok(());
+        };
         let answers = sign_in.answer.unwrap_or_default();
         for question in entry.questions().1 {
             if answers
