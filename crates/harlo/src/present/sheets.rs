@@ -311,7 +311,8 @@ fn section_icon(section: Section) -> Icon {
         Section::Models => Icon::Bot,
         Section::LocalModels => Icon::Cpu,
         Section::Agents => Icon::UsersRound,
-        Section::Tools => Icon::Plug,
+        Section::Extensions => Icon::Blocks,
+        Section::Tools => Icon::Wrench,
         Section::Schedules => Icon::CalendarClock,
         Section::Server => Icon::Server,
         Section::Phone => Icon::Smartphone,
@@ -341,15 +342,17 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
             rows
         }
         Section::Models => menu_model_rows(app),
-        Section::Tools => {
+        Section::Extensions => {
             let setup = match &app.sheets.setup {
                 Load::Loaded(setup) => Some(setup.as_ref()),
                 Load::Idle | Load::Loading | Load::Failed(_) => None,
             };
-            mcp::page_rows(app, setup)
-                .or_else(|| setup.map(|setup| setup_rows(app, setup)))
-                .unwrap_or_default()
+            mcp::page_rows(app, setup).unwrap_or_else(|| extension_rows(app, setup))
         }
+        Section::Tools => match &app.sheets.setup {
+            Load::Loaded(setup) => tool_rows(app, setup),
+            Load::Idle | Load::Loading | Load::Failed(_) => Vec::new(),
+        },
         Section::Agents => agents::agent_rows(app),
         Section::Schedules => schedules::schedule_rows(app),
         Section::Server => server_rows(app),
@@ -360,7 +363,10 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
 
 /// How loading the server's set-up stands, for the sections that show it.
 fn setup_note(app: &App, section: Section) -> String {
-    if !matches!(section, Section::Providers | Section::Tools) {
+    if !matches!(
+        section,
+        Section::Providers | Section::Extensions | Section::Tools
+    ) {
         return String::new();
     }
     match &app.sheets.setup {
@@ -1777,13 +1783,54 @@ const ABOUT: i32 = 12;
 pub(super) const LINK: i32 = 13;
 
 /// The server's web search, MCP servers and plugins, for Tools.
-fn setup_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
+fn tool_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     let mut rows = Vec::new();
     search_rows(app, setup, &mut rows);
-    mcp::list_rows(app, setup, &mut rows);
     mcp::own_tools_rows(app, &mut rows);
-    plugins::plugin_rows(app, &setup.plugins, &mut rows);
     rows
+}
+
+/// Extensions: a tab each for MCP servers, plugins and skills, and the
+/// chosen one's rows.
+fn extension_rows(app: &App, setup: Option<&SetUp>) -> Vec<SheetRow> {
+    let mut rows = vec![choice(app, SettingChoice::ExtensionsTab, "", "")];
+    match (app.sheets.extensions_tab, setup) {
+        (2, _) => skill_rows(app, &mut rows),
+        (1, Some(setup)) => plugins::plugin_rows(app, &setup.plugins, &mut rows),
+        (_, Some(setup)) => mcp::list_rows(app, setup, &mut rows),
+        (_, None) => {}
+    }
+    rows
+}
+
+/// The skills agents can load in the current folder, and how to add more.
+fn skill_rows(app: &App, rows: &mut Vec<SheetRow>) {
+    rows.push(heading("Skills"));
+    rows.push(note(
+        "Instructions an agent loads when a task calls for them, from SKILL.md files.",
+    ));
+    match app.catalog() {
+        None => rows.push(note("Loading…")),
+        Some(catalog) if catalog.skills.is_empty() => rows.push(note("None yet.")),
+        Some(catalog) => rows.extend(catalog.skills.iter().map(|skill| {
+            SheetRow {
+                kind: LINK,
+                name: skill.name.as_str().into(),
+                value: skill
+                    .description
+                    .as_deref()
+                    .map(|d| crate::model::gist(d))
+                    .unwrap_or_default()
+                    .into(),
+                ..SheetRow::default()
+            }
+        })),
+    }
+    let mut add = pair("", "", 3);
+    add.action = "How to add skills".into();
+    add.setting = crate::window::OPEN_ABOUT_LINK;
+    add.choice = crate::window::SKILLS_DOCS;
+    rows.push(add);
 }
 
 /// The web search services: which one is used, and whether each has its key.

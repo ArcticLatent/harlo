@@ -39,8 +39,8 @@ SIZES = {"wide": (1588, 947), "narrow": (1000, 760)}
 MODES = ("dark", "light")
 
 SECTIONS = ["General", "Appearance", "Notifications", "Shortcuts", "Voice", "Projects", "Git",
-            "Models", "Local models", "Agents", "Tools for agents", "Schedules", "Server", "Phone",
-            "About"]
+            "Providers", "Models", "Local models", "Agents", "Extensions", "Tools for agents",
+            "Schedules", "Server", "Phone", "About"]
 
 # A reply with every kind of Markdown block the transcript draws.
 MARKDOWN = (
@@ -514,6 +514,18 @@ def scene_settings(g):
     h.settle(0.6)
     g.cap("about-licence", "Settings → About with the colour themes' licence shown")
     h.click("Hide licence: Colour themes")
+    settings(h, "Extensions")
+    for tab in ("Plugins", "Skills"):
+        h.click(tab)
+        h.settle(0.8)
+        g.cap(f"extensions-{tab.lower()}", f"Settings → Extensions: the {tab} tab")
+    h.click("MCP servers")
+    settings(h, "Notifications")
+    h.click("Change")
+    h.settle(0.8)
+    g.cap("sound-menu", "Settings → Notifications: an event's sound menu")
+    h.key("Escape")
+    h.settle(0.4)
     settings(h, "Appearance")
     h.fill("Search settings", "theme")
     h.settle(0.6)
@@ -785,7 +797,7 @@ SCENES = [("home", scene_home), ("chat", scene_chat), ("approval", scene_approva
           ("window", scene_window)]
 
 # A sitting of its own: the guide shows only before setup is done.
-GUIDE = ["OpenCode", "Models", "Git", "Theme"]
+GUIDE = ["OpenCode", "Providers", "Git", "Theme"]
 
 
 def guide_sitting(folder, mode, size):

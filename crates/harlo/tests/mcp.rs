@@ -1,4 +1,4 @@
-//! Tools for agents' MCP servers: one's own server added to a private
+//! Extensions' MCP servers: one's own server added to a private
 //! `opencode serve` (scratch `HOME`/`XDG_*` folders, never the shared
 //! service), connected, disconnected, turned off and removed; and a catalog
 //! server added to a scratch config without a server, so nothing reaches
@@ -74,9 +74,9 @@ fn ones_own_server_is_added_connected_turned_off_and_removed() {
     app.new_folder = Some(sandbox.project_str());
     let ui = ui(app);
     ui.press("Settings");
-    ui.press("Tools for agents");
+    ui.press("Extensions");
     assert!(
-        tasks.until(&ui, WAIT, |ui| ui.shows("MCP servers")),
+        tasks.until(&ui, WAIT, |ui| ui.shows("Add an MCP server")),
         "the section"
     );
     assert!(ui.shows("None yet."));
@@ -169,7 +169,7 @@ fn a_catalog_server_is_added_to_the_config() {
     app.opencode_folder = Some(folder.clone());
     let ui = ui(app);
     ui.press("Settings");
-    ui.press("Tools for agents");
+    ui.press("Extensions");
     // Without a server the list can't load; the catalog still adds to the
     // config, which a server reads when it starts.
     ui.send(Message::Sheet(harlo::app::SheetEvent::Mcp(

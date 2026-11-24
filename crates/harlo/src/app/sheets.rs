@@ -124,7 +124,9 @@ pub enum Section {
     LocalModels,
     /// OpenCode's agents and the approvals it saved.
     Agents,
-    /// Web search, MCP servers and plugins.
+    /// MCP servers, plugins and skills, each on a tab.
+    Extensions,
+    /// Web search and Harlo's own tools.
     Tools,
     /// Prompts the server sends on a schedule.
     Schedules,
@@ -138,7 +140,7 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -150,6 +152,7 @@ impl Section {
         Self::Models,
         Self::LocalModels,
         Self::Agents,
+        Self::Extensions,
         Self::Tools,
         Self::Schedules,
         Self::Server,
@@ -172,6 +175,7 @@ impl Section {
             Self::Models => "Models",
             Self::LocalModels => "Local models",
             Self::Agents => "Agents",
+            Self::Extensions => "Extensions",
             Self::Tools => "Tools for agents",
             Self::Schedules => "Schedules",
             Self::Server => "Server",
@@ -191,9 +195,12 @@ impl Section {
             | Self::Voice
             | Self::About => None,
             Self::Projects | Self::Git => Some("Your projects"),
-            Self::Providers | Self::Models | Self::LocalModels | Self::Agents | Self::Tools => {
-                Some("Agents and models")
-            }
+            Self::Providers
+            | Self::Models
+            | Self::LocalModels
+            | Self::Agents
+            | Self::Extensions
+            | Self::Tools => Some("Agents and models"),
             Self::Schedules => Some("Automation"),
             Self::Server | Self::Phone => Some("Connections"),
         }
@@ -398,11 +405,13 @@ pub enum SettingChoice {
     VoiceLanguage,
     /// [`Preferences::local_engine`].
     LocalEngine,
+    /// Which of Extensions' tabs shows: MCP servers, plugins or skills.
+    ExtensionsTab,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -425,6 +434,7 @@ impl SettingChoice {
         Self::VoiceModel,
         Self::VoiceLanguage,
         Self::LocalEngine,
+        Self::ExtensionsTab,
     ];
 
     /// The options, as Settings names them, in order.
@@ -451,6 +461,7 @@ impl SettingChoice {
             Self::VoiceModel => &["Base", "Small"],
             Self::VoiceLanguage => &harlo_core::voice::LANGUAGE_NAMES,
             Self::LocalEngine => &["Ollama", "llama.cpp"],
+            Self::ExtensionsTab => &["MCP servers", "Plugins", "Skills"],
         }
     }
 }
@@ -655,6 +666,9 @@ pub struct Sheets {
     pub sound_licence: bool,
     /// What Settings → Models is narrowed to.
     pub model_filter: String,
+    /// Which of Extensions' tabs shows, by its place in
+    /// [`SettingChoice::ExtensionsTab`]'s options.
+    pub extensions_tab: usize,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -809,11 +823,12 @@ impl App {
             Section::Agents => self.load_approvals(),
             Section::LocalModels => self.look(),
             Section::Phone => self.phone_event(super::PhoneEvent::Changed),
-            Section::Tools => {
+            Section::Extensions => {
                 self.sheets.mcp.view = super::McpView::List;
                 self.sheets.plugins.checked = None;
                 Task::batch([self.load_mcp(), self.load_setup()])
             }
+            Section::Tools => Task::batch([self.load_mcp(), self.load_setup()]),
             _ => Task::none(),
         }
     }
@@ -1103,6 +1118,12 @@ impl App {
             }
             SettingChoice::McpKind => {
                 self.sheets.mcp.local = option == 0;
+                Task::none()
+            }
+            SettingChoice::ExtensionsTab => {
+                self.sheets.extensions_tab = option.min(2);
+                // A server's page closes with its tab.
+                self.sheets.mcp.view = super::McpView::List;
                 Task::none()
             }
             SettingChoice::ScheduleWhen => {

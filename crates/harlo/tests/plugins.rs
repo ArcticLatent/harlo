@@ -1,4 +1,4 @@
-//! Tools for agents' plugins: package plugins listed one by one with their
+//! Extensions' plugins: package plugins listed one by one with their
 //! updates, built-in ones in a line, and Check for updates and Update asked
 //! of a private `opencode serve` (scratch `HOME`/`XDG_*`, never the shared
 //! service), which has no package plugins and no network to reach.
@@ -43,7 +43,8 @@ fn package(target: &str, version: &str, outdated: bool) -> Plugin {
 fn packages_show_their_updates_and_built_in_ones_are_counted() {
     let ui = ui(demo::app());
     ui.press("Settings");
-    ui.press("Tools for agents");
+    ui.press("Extensions");
+    ui.press("Plugins");
     let serial = ui.app().sheets.serial();
     let setup = SetUp {
         providers: Ok(Vec::new()),
@@ -86,7 +87,8 @@ fn checking_and_updating_ask_the_server() {
         snapshot: demo::snapshot(),
     }))));
     ui.press("Settings");
-    ui.press("Tools for agents");
+    ui.press("Extensions");
+    ui.press("Plugins");
     assert!(
         tasks.until(&ui, WAIT, |ui| ui.shows("Check for updates")),
         "the plugins"

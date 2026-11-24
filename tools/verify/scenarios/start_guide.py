@@ -11,7 +11,7 @@ def run(h, s):
     s.expect(h.says("Connected"), "the server's status", h.texts()[:20])
     h.shot("opencode")
 
-    for step in ("Models", "Git", "Theme"):
+    for step in ("Providers", "Git", "Theme"):
         s.step(f"the {step} step")
         h.click("Next")
         h.settle(0.6)

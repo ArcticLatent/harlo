@@ -4,8 +4,8 @@ setting; Escape closes. Each section is kept as a screenshot."""
 from _common import close_sheet, settings
 
 SECTIONS = ["General", "Appearance", "Notifications", "Shortcuts", "Voice", "Projects", "Git",
-            "Models", "Local models", "Agents", "Tools for agents", "Schedules", "Server", "Phone",
-            "About"]
+            "Providers", "Models", "Local models", "Agents", "Extensions", "Tools for agents",
+            "Schedules", "Server", "Phone", "About"]
 
 
 def run(h, s):

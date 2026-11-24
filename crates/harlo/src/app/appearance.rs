@@ -110,6 +110,7 @@ impl App {
             SettingChoice::ProjectSessions => usize::from(self.sheets.projects.archive),
             SettingChoice::SignInAnswer(_) => 0,
             SettingChoice::McpKind => usize::from(!self.sheets.mcp.local),
+            SettingChoice::ExtensionsTab => self.sheets.extensions_tab,
             SettingChoice::VoiceModel => Model::ALL
                 .iter()
                 .position(|m| *m == self.voice_model())
@@ -157,7 +158,8 @@ impl App {
             | SettingChoice::ProjectSessions
             | SettingChoice::ScheduleWhen
             | SettingChoice::SignInAnswer(_)
-            | SettingChoice::McpKind => false,
+            | SettingChoice::McpKind
+            | SettingChoice::ExtensionsTab => false,
         }
     }
 

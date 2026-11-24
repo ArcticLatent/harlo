@@ -163,7 +163,7 @@ impl App {
             McpEvent::Refresh => {
                 // Only while someone is looking.
                 if self.sheets.open == Some(super::Sheet::Settings)
-                    && self.sheets.section == super::Section::Tools
+                    && self.sheets.section == super::Section::Extensions
                 {
                     return self.load_setup();
                 }

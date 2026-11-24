@@ -350,7 +350,8 @@ fn settings_show_the_servers_set_up_and_about() {
     };
     ui.send(Message::Sheet(SheetEvent::SetUp(serial, Box::new(chosen))));
     assert!(ui.shows("In use · Key set"), "the one config chooses");
-    // A server's row opens its page, and says how it stands.
+    // Extensions: a server's row opens its page, and says how it stands.
+    ui.press("Extensions");
     let docs = ui
         .find("docs")
         .into_iter()
@@ -361,6 +362,7 @@ fn settings_show_the_servers_set_up_and_about() {
         Some("Failed: no such command"),
         "an MCP server's failure"
     );
+    ui.press("Plugins");
     assert!(ui.shows("Couldn't list them: server went away"));
     // The last section, at the end of the list.
     ui.wheel("Providers", -10);

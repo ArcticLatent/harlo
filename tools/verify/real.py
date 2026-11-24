@@ -119,7 +119,7 @@ class Setup:
         os.chmod(path, 0o700)
 
         from _common import close_sheet, settings
-        settings(h, "Models")
+        settings(h, "Providers")
         h.wait_says("Signed in", timeout=60)
         if not h.find("Disconnect"):
             h.click("Connect", where=lambda e: e.x > 560)

@@ -44,8 +44,10 @@ fn settings_and_stats_load_from_the_server() {
         "the scripted model's provider"
     );
     assert!(ui.shows("Providers"));
-    ui.press("Tools for agents");
-    assert!(ui.shows("Plugins"));
+    ui.press("Extensions");
+    assert!(ui.shows("MCP servers"));
+    ui.press("Skills");
+    assert!(ui.shows("How to add skills"));
 
     ui.press("Stats");
     assert!(

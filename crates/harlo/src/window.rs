@@ -742,12 +742,17 @@ pub const SOUND_LICENCE: i32 = 79;
 /// at place `n` of [`App::models`] is numbered this plus `n`.
 pub const MODEL_SWITCHES: i32 = 10_000;
 
-/// The pages About links to: the source, its releases and a new issue.
-pub const ABOUT_LINKS: [&str; 3] = [
+/// The pages Settings links to: About's source, releases and new issue,
+/// then OpenCode's page on adding skills.
+pub const ABOUT_LINKS: [&str; 4] = [
     env!("CARGO_PKG_REPOSITORY"),
     concat!(env!("CARGO_PKG_REPOSITORY"), "/releases"),
     concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"),
+    "https://opencode.ai/docs/skills/",
 ];
+
+/// [`ABOUT_LINKS`]' page on adding skills.
+pub const SKILLS_DOCS: i32 = 3;
 
 /// The step a Settings button for this computer's models or other
 /// computers, numbered `number`, takes for item `item`.
