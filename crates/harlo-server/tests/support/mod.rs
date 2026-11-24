@@ -18,6 +18,8 @@ pub struct Sandbox {
     server: Child,
     pub port: u16,
     pub password: String,
+    /// What the server's environment adds.
+    env: Vec<(String, String)>,
 }
 
 pub fn free_port() -> u16 {
@@ -39,6 +41,15 @@ pub fn run(dir: &Path, args: &[&str]) {
 
 impl Sandbox {
     pub async fn start() -> Self {
+        Self::start_with_env(&[]).await
+    }
+
+    /// A sandbox whose server also gets `env`.
+    pub async fn start_with_env(env: &[(&str, &str)]) -> Self {
+        let env: Vec<(String, String)> = env
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
         let dir = tempfile::Builder::new()
             .prefix("harlo-server-m1.")
             .tempdir()
@@ -105,13 +116,14 @@ impl Sandbox {
         }
         let port = free_port();
         let password = format!("test-{}", opencode_client::message_id());
-        let server = spawn_server(root, port, &password);
+        let server = spawn_server(root, port, &password, &env);
         let sandbox = Self {
             dir,
             model,
             server,
             port,
             password,
+            env,
         };
         sandbox.wait_until_up().await;
         sandbox
@@ -143,7 +155,7 @@ impl Sandbox {
     pub async fn restart(&mut self) {
         let _ = self.server.kill();
         let _ = self.server.wait();
-        self.server = spawn_server(self.dir.path(), self.port, &self.password);
+        self.server = spawn_server(self.dir.path(), self.port, &self.password, &self.env);
         self.wait_until_up().await;
     }
 }
@@ -157,7 +169,7 @@ impl Drop for Sandbox {
     }
 }
 
-pub fn spawn_server(root: &Path, port: u16, password: &str) -> Child {
+pub fn spawn_server(root: &Path, port: u16, password: &str, env: &[(String, String)]) -> Child {
     Command::new(env!("CARGO_BIN_EXE_harlo-server"))
         .args([
             "serve",
@@ -174,6 +186,7 @@ pub fn spawn_server(root: &Path, port: u16, password: &str) -> Child {
         .env("XDG_STATE_HOME", root.join("state"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         .env("OPENCODE_PASSWORD", password)
+        .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .env(
             "DBUS_SESSION_BUS_ADDRESS",
             format!("unix:path={}", root.join("no-bus").display()),

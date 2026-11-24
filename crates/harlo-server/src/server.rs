@@ -130,6 +130,8 @@ pub struct Server {
     global: Mutex<Global>,
     /// The model catalog: the bundled one, or the last fetched.
     pub(crate) catalog: Mutex<Arc<harlo_engine::catalog::Catalog>>,
+    /// Browser sign-ins under way.
+    pub(crate) attempts: crate::oauth::Attempts,
     pub(crate) config_dir: PathBuf,
     pub(crate) password: Option<String>,
     /// Phone access, hosted here.
@@ -223,6 +225,7 @@ impl Server {
             store,
             global: Mutex::new(global),
             catalog: Mutex::new(Arc::new(harlo_engine::catalog::Catalog::bundled())),
+            attempts: Mutex::default(),
             config_dir: config_home.join("opencode"),
             password,
             phone,

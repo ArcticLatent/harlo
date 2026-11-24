@@ -255,8 +255,15 @@ impl Server {
             .entries
             .iter()
             .map(|e| {
+                let mut methods = methods(e);
+                if e.id == "openai" {
+                    methods.push(json!({
+                        "id": crate::oauth::CHATGPT, "type": "oauth",
+                        "label": crate::oauth::CHATGPT_LABEL,
+                    }));
+                }
                 json!({
-                    "id": e.id, "name": e.name, "methods": methods(e),
+                    "id": e.id, "name": e.name, "methods": methods,
                     "connections": connections(&e.id, &e.env),
                 })
             })
@@ -358,7 +365,7 @@ impl Server {
     }
 
     /// Tells clients the integrations and providers changed.
-    fn integrations_changed(&self) {
+    pub(crate) fn integrations_changed(&self) {
         self.emit("integration.updated", json!({}), None, None);
         self.emit("provider.updated", json!({}), None, None);
     }
@@ -373,13 +380,16 @@ impl Server {
             .iter()
             .filter(|e| !configured.iter().any(|p| p.id == e.id))
             .filter_map(|e| {
-                let kept = credentials
-                    .iter()
-                    .find(|c| c["integrationID"] == e.id && c["value"]["type"] == "key");
+                let kept = credentials.iter().find(|c| {
+                    c["integrationID"] == e.id
+                        && matches!(c["value"]["type"].as_str(), Some("key" | "oauth"))
+                });
                 if let Some(c) = kept {
+                    let value = &c["value"];
+                    let key = value["key"].as_str().or_else(|| value["access"].as_str());
                     e.provider(
-                        c["value"]["key"].as_str().map(str::to_owned),
-                        c["value"]["metadata"].as_object().unwrap_or(&Map::new()),
+                        key.map(str::to_owned),
+                        value["metadata"].as_object().unwrap_or(&Map::new()),
                     )
                 } else {
                     let (_, key) = from_env(&e.env)?;

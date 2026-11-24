@@ -83,6 +83,15 @@ fn integration_routes() -> Router<Arc<Server>> {
             "/api/integration/{id}/connect/external",
             post(connect_external),
         )
+        .route("/api/integration/{id}/connect/oauth", post(begin_oauth))
+        .route(
+            "/api/integration/{id}/connect/oauth/{attempt}",
+            get(oauth_status).delete(cancel_oauth),
+        )
+        .route(
+            "/api/integration/{id}/connect/oauth/{attempt}/complete",
+            post(complete_oauth),
+        )
         .route("/api/credential", get(credential_list))
         .route(
             "/api/credential/{id}",
@@ -1037,6 +1046,45 @@ async fn connect_external(
     axum::Json(body): axum::Json<crate::credentials::ExternalSignIn>,
 ) -> Answer {
     server.connect_external(&id, body)?;
+    done()
+}
+
+/// A browser sign-in to start.
+#[derive(Deserialize)]
+struct OAuthStart {
+    #[serde(rename = "methodID")]
+    method: String,
+}
+
+async fn begin_oauth(
+    State(server): Shared,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<OAuthStart>,
+) -> Answer {
+    ok(json!({ "data": server.begin_oauth(&id, &body.method).await? }))
+}
+
+async fn oauth_status(State(server): Shared, Path((_, attempt)): Path<(String, String)>) -> Answer {
+    ok(json!({ "data": server.oauth_status(&attempt)? }))
+}
+
+async fn cancel_oauth(State(server): Shared, Path((_, attempt)): Path<(String, String)>) -> Answer {
+    server.cancel_oauth(&attempt);
+    done()
+}
+
+/// The address the browser ended on, or its code.
+#[derive(Deserialize)]
+struct OAuthCode {
+    code: String,
+}
+
+async fn complete_oauth(
+    State(server): Shared,
+    Path((_, attempt)): Path<(String, String)>,
+    axum::Json(body): axum::Json<OAuthCode>,
+) -> Answer {
+    server.complete_oauth(&attempt, &body.code)?;
     done()
 }
 

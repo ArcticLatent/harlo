@@ -21,6 +21,7 @@ mod fs;
 mod git;
 mod goals;
 mod memory;
+mod oauth;
 mod phone;
 mod projects;
 mod pty;
